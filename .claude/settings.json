@@ -47,7 +47,9 @@
       "Bash(curl -sS -X GET https://api.github.com/repos/objectstack-ai/objectstack/commits/*/check-runs* *)",
       "Bash(curl -sS -X GET https://api.github.com/repos/objectstack-ai/objectui/commits/*/check-runs* *)",
       "Bash(curl -sS -X PATCH https://api.github.com/repos/objectstack-ai/objectstack/pulls/* *)",
-      "Bash(curl -sS -X PATCH https://api.github.com/repos/objectstack-ai/objectui/pulls/* *)"
+      "Bash(curl -sS -X PATCH https://api.github.com/repos/objectstack-ai/objectui/pulls/* *)",
+      "Bash(curl -sS -X POST https://api.github.com/repos/objectstack-ai/objectstack/pulls/*/ccr/ready_for_review *)",
+      "Bash(curl -sS -X PUT https://api.github.com/repos/objectstack-ai/objectstack/pulls/*/ccr/auto_merge *)"
     ],
     "deny": [
       "mcp__github__issue_write",

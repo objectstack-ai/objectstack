@@ -14,19 +14,27 @@
 // line and not a probe that sees nothing. The same probe against THIS config,
 // on that same tree, names 10 of 10 (981 program files -> 990).
 //
-// ⚠️ ROUTE (b) WAS AVAILABLE HERE AND WAS NOT TAKEN, which is worth recording
-// because `check-type-check-coverage.mjs` tells the next reader to assume it is
-// not: dropping `**/*.test.ts` from `tsconfig.json`'s `exclude` leaves
-// `pnpm check:type-source-resolution` GREEN for this package (measured under a
-// trap-restored mutation at 1d67130585 -- exit 0, 124 programs across 78
-// packages), unlike the 14 of 18 entries that gate reports as red. It was
-// declined on module semantics, not on availability: vitest executes these
+// ⚠️ THE OTHER EDIT -- dropping `**/*.test.ts` from `tsconfig.json`'s
+// `exclude` -- WAS AVAILABLE HERE AND WAS NOT TAKEN, and the reason is worth
+// recording because it is not the reason the gate's prescription now gives. It
+// was declined on module semantics, not on availability: vitest executes these
 // files through vite, which resolves extension-less relative specifiers, while
 // `tsconfig.json` inherits `NodeNext` from the repo root and demands `.js` on
-// every one of them. Route (b) would hold the test layer to a resolver that
+// every one of them. That edit would hold the test layer to a resolver that
 // never runs it -- the same config-tier noise the shared gate's header
 // attributes 108 of spec's 842 raw errors to. Matching vitest is fidelity, not
 // laxity, and it is why 28 of the 30 sibling configs override these two keys.
+//
+// ⛔ Availability was never the question here, and it is nobody's question any
+// more: measured under a trap-restored mutation at 1d67130585, dropping that
+// exclusion left `pnpm check:type-source-resolution` GREEN for this package
+// (exit 0, 124 programs across 78 packages), unlike the 14 of 18 entries that
+// gate reported as red. That gate was retired (2026-09-18, #18373), and
+// `check-type-check-coverage.mjs` no longer offers the exclusion edit as a
+// route at all -- withdrawn under the maintainer ruling of 2026-09-18 on
+// #18953, so the sibling config is the only route it prescribes. ⛔ Read the
+// green above as a reading taken on one tree, never as a standing clearance,
+// and ⛔ read the gate's silence as neither.
 //
 // ⛔ STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`, `noUnusedParameters`,
 // `noImplicitReturns`, `esModuleInterop` and the rest are inherited from

@@ -830,6 +830,25 @@ const TransportCountValueSchema = lazySchema(() => z.union([z.boolean(), z.enum(
  * its `string[]` form. They fail the parse at the member that carries them
  * rather than reaching the AST as a string the engine would have to re-read.
  *
+ * ⚠️ [#18977] `$orderby` is declared a SECOND time, and the other declaration
+ * accepts exactly the two shapes this one refuses: `ODataQuerySchema.$orderby`
+ * (`../api/odata.zod.ts`) is `string | string[]` and refuses this one's record
+ * maps and `SortNode[]`. It cannot contradict this schema at a DOOR — measured
+ * on this tree, nothing parses through it: its only consumers are its own
+ * `OData.buildUrl` helper and its own unit test. It contradicts it in a READER,
+ * which is the cost already paid: objectui#9554 was filed, triaged and
+ * dispatched against a shipped producer that had been sending the canonical
+ * shape all along, because a competent seat read the OTHER declaration, quoted
+ * it correctly, and had no signal that this one exists. The two accept sets are
+ * disjoint and pinned as such in
+ * `../api/odata-orderby-dual-declaration.test.ts`.
+ *
+ * ⛔ Closing that gap by widening either side is a decision, not a tidy-up —
+ * and widening THIS one is precisely the second parser the paragraph above
+ * refuses. What serves the string forms is `normalizeSortNodes` at the
+ * `@objectstack/metadata-protocol` ingress (the GET querystring path, the
+ * export route and in-process `findData`), not a schema.
+ *
  * ⛔ Declaring the narrower structured form ALONE would have turned live
  * traffic into a `400` — measured: the body-form AST array on
  * `POST /data/:object/query`, pinned by `#7390 §3` in
