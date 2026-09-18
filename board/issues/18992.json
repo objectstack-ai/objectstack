@@ -1,0 +1,33 @@
+{
+  "number": 18992,
+  "kind": "issue",
+  "title": "[Decision] #18612 的退休要不要配一条 D2 strip 转换 —— 持久化产物在启动门被拒、D3 语义条目永不 replay,而裁决那句「no conversion is owed」推的是源码生产者这条轴(at-tier 复核 FAIL 的阻塞项)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-18T10:07:16Z",
+  "updated_at": "2026-09-18T11:22:10Z",
+  "closed_at": "2026-09-18T11:22:10Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18992",
+  "body": "⏱️ 本卡所有读数取自同一动作:2026-09-18T10:07Z,树为 `origin/main` = `d8b12fca97`。由 `domain:spec` seat 2(座位贴 #18549,`session_01JbZnqu8bt6YqfJsr9vaFb3`)立。⛔ 未定级、未指派。\n\n⭐ **这是执行 #18612 的裁决(决裁批 #154 item 4 · letter 2)时冒出的残留问题**,⛔ 不是那张卡被派发时问的那个问题。按半状态巡检 **H52** 的处方 ——「if it is a RESIDUAL raised while EXECUTING a ruling this card already carries, ⛔ **never re-hang the label there** — file a NEW card carrying the question and linking the ruled one」—— 另立本卡。\n\n⚠️ **本席先前把 `needs-user-decision` 挂回了 #18612,那是错的**:一来违反上面那条(⛔ 不在已裁卡上重挂),二来会与它的 `pm:dispatched` 构成 H29 的双状态。本席的 label 写入当时也**没有读回**,事后现读发现根本没生效 —— 两个错叠在一起,结果是**这个岔口一度不在任何收件箱里**。本卡是它的正式载体。\n\n## 要裁的一句话\n\n⏱️ 2026-09-18T10:07Z 取。裁决写了「zero producers, so **no conversion is owed**」。at-tier 契约复核(记录在 PR #18938 的评论 `5727110010`,**FAIL**,所判 head `6ac13a9120`,档位 181/181)量到:**欠的是一条 D2 转换,而那句话推的是另一条轴。** 到底补不补?\n\n## 实测(本席自己跑的,带对照)\n\n⏱️ 2026-09-18T10:07Z,同一把探针喂**启动门**用的 `ObjectStackDefinitionSchema`(`packages/metadata/src/plugin.ts:915` 正是用它 parse;链路 `EnvironmentArtifactSchema.metadata` → `ObjectStackDefinitionSchema` → `packages/spec/src/stack.zod.ts:676` `analyticsCubes: z.array(CubeSchema)`):\n\n```\n                                                  BASE 16cb493d56   HEAD 6ac13a9120\n⭐ 持久化形状 { name, relationship:'many_to_one', sql }   ACCEPTED       REFUSED  unrecognized_keys at analyticsCubes.0.joins.p\n   DARK  只有 { name }                                   REFUSED        ACCEPTED\n   LIT   控制:一个垃圾键                                REFUSED        REFUSED    ← 两侧都拒 ⇒ 上面那次翻转是读数\n```\n\n⇒ ⭐ **一份由旧 schema 自己的 parse 输出写成的 cube 产物,今天过得了启动门,那个 PR 之后过不了。** 被退休的两个键是**必填的 `sql`** 与**带默认值的 `relationship`**,所以**每一份**曾经 parse 过的带 join 的 cube 都带着它们。\n\n⚠️ 本席第一次跑这个探针时夹具写错(`measures: []`,实为 record),三条腿全在 `measures` 上被拒 —— **LIT 控制与主体拒得一模一样**,当场说明仪器没有鉴别力。那一次作废,⛔ 不作依据。\n\n## 复核给出的两条,本席只转述不选\n\n- **A** —— 在那个 PR 里补一条 **D2 strip 转换**(`toMajor: 18`、`retiredFromLoadPath: true`,从每个 `analyticsCubes[].joins.*` 剥掉两键),挂进 step 18 的 `conversionIds`。⭐ 同文件一格外的 `metric-filters-removed` 对**同一类**(从未被读过的键)走的正是 D2。⚠️ 与裁决那句字面相抵。\n- **B** —— 照裁决字面落地。⚠️ **D3 语义条目永不被 replay**(唯一自愈通道 `applyArtifactForwardConversions` 只 replay D2)⇒ 静止产物无自愈通道;仓内已有同形事故记录 **#12772**(「no operator remedy short of hand-editing the JSON」)。\n\n⛔ 本席不选。复核自己的话:「**it must not ship silently either way**」。\n\n## 顺带一条与裁决相关的读数\n\n裁决的普查写「objectstack examples —— **0 files**」。⏱️ 2026-09-18T10:07Z 在 PR 的 base 上直读:`examples/app-showcase/src/data/analytics/showcase.cube.ts` 有一个作者写的 `joins` 条目,`relationship` 与 `sql` **两个键都带**。⇒ 那句普查**在本仓是错的**(该处已在 PR #18938 里修掉)。\n\n## ⛔ 本席**未**做的\n\n- ⛔ 没有量**仓外**的产物(hotcrm / cloud 是别的仓,本会话够不到)。⇒ 「有多少已构建产物会被拒」本席**无法测**,只测到「这一类产物会被拒」。\n- ⛔ 没有独立重跑复核报告里的其余读数(112/112 门禁等),本卡只带上面这一组本席自己跑的。\n\n<!-- os-decision-facets -->\nos-decision-facets\n\n- **① 项目长远合理性** —— 退休一个**必填键**与一个**带默认值的键**,而该形状以 **parse 后的样子**被持久化并在启动时**重新严格 parse**。仓内已有策略(ADR-0087 附录、Prime Directive #12:「every rehydration seam replays the full conversion chain … a row at rest has no author for a tombstone to teach」),本卡问的是这一次该不该照它办。\n- **② 实际业务拉动** —— 旧工具链构建的产物在新运行时**启动门被拒**,而 D3 语义条目不被 replay ⇒ **无自愈通道**。同形事故 #12772 的原话是「no operator remedy short of hand-editing the JSON」。⚠️ 影响面本席**测不到**(仓外产物够不到),这正是要人裁的原因之一。\n- **③ 防 AI 犯错** —— 裁决那句「zero producers」推的是**源码生产者**,而拒绝发生在**静止的产物**上。⭐ 两条轴长得很像,一个 agent(以及本席)很容易把前者当成后者的答案 —— 本席写栅栏时就这么错过一次。\n- **④ 创业阶段不扩散** —— A 是**一条转换条目 + 一个 id 挂进 step 18**,面很小且有同文件先例;B 是**零改动**但把风险留在启动门。⛔ 两者都不扩大公开面。\n\n**Prior rulings read:** cube.joins,cube,joins,name,required,documented,clause,runtime,reads,authored,join,condition (+4 more) → 141 hits; ADR-0021 D1, ADR-0058 D3, ADR-0029 D9.7, ADR-0056 D4, ADR-0056 D5, ADR-0125 D2, ADR-0125 D3, ADR-0127 D9, ADR-0131 D13\n\n⚠️ 上列决策本席逐条看过题名,**没有一条预先回答「这次退休该不该配一条 D2」**。真正贴题的是 **ADR-0087 的附录**与 **Prime Directive #12**(复核记录逐字引了它们),⭐ 而它们指向 **A**;与之相抵的是**本卡所承接那次裁决的一句括号内推理**。⇒ 这正是需要人来裁的地方,⛔ 本席不代裁。\n\n**The question, in one line:** #18612 的退休要不要配一条 **D2 strip 转换**,以便旧产物在启动门自愈 —— 还是照裁决字面「no conversion is owed」落地?\n\n## 查重词\n\n`cube join retirement D2 conversion at rest` · `analyticsCubes joins persisted parsed refused boot door` · `no conversion is owed artifact at rest` · `applyArtifactForwardConversions replays D2 only` · `metric-filters-removed precedent`\n\n相关:**#18612**(承接的那张已裁卡)· **PR #18938**(实现 + at-tier 复核记录 `5727110010`)· **#12772**(同形事故)· `packages/spec/src/conversions/registry.ts` 的 `metric-filters-removed`(同类的 D2 先例)\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

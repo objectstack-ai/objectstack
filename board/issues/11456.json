@@ -1,0 +1,34 @@
+{
+  "number": 11456,
+  "kind": "issue",
+  "title": "[finding] sql-driver-aggregation-conformance.test.ts hard-codes better-sqlite3, so the aggregate-vocabulary standard never runs on Postgres — its pagination sibling already uses the live-dialect cells",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-23T20:22:36Z",
+  "updated_at": "2026-08-25T07:17:42Z",
+  "closed_at": "2026-08-25T07:12:03Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11456",
+  "body": "Observed while taking the #11152 readings. Filed unassigned as an observation — it is a reach question about an existing harness, not a defect with a settled fix.\n\n## What was observed\n\n`packages/drivers/driver-sql/src/sql-driver-aggregation-conformance.test.ts` constructs its driver with a literal:\n\n```ts\ndriver = new SqlDriver({\n  client: 'better-sqlite3',\n  connection: { filename: ':memory:' },\n  useNullAsDefault: true,\n});\n```\n\nIts sibling `sql-driver-pagination-conformance.test.ts` — the same family, the same package — goes through `live-dialect-matrix.testkit.ts` and so runs on Postgres and MySQL whenever `OS_TEST_POSTGRES_URL` / `OS_TEST_MYSQL_URL` are provisioned.\n\nSo the shared aggregate-vocabulary standard, which exists so that two faces of one platform cannot answer one aggregation two ways, is measured on exactly one dialect of the driver that speaks three.\n\n## Why it matters, concretely\n\nThis is not hypothetical reach. Measured on a live PostgreSQL 16.13 (recorded on #11455): `sum`, `avg`, `min` and `max` over a boolean column all **throw** `42883` on Postgres while answering normally on SQLite. The aggregation conformance suite is green throughout, on `main`, on every PR — because no cell of it has ever executed against Postgres.\n\nThat is the same shape the testkit's own head note was written about, quoted from it:\n\n> a hard-coded client is invisible. `sql-driver-temporal-conformance.test.ts` carried four of them while its own head note claimed it ran \"against real Postgres and MySQL too\" — declared != enforced, and the ADR's `Postgres at minimum` never executed for the matrix at all.\n\nADR-0053 D-A3 states the matrix is `driver {SQLite, Postgres at minimum}`.\n\n## What it would take, and the reason this is filed rather than done\n\nConverting the suite is more than swapping the constructor: the fixture is seeded per cell, the `count`/`count_distinct` answers come back as **strings** on `pg` (measured: `count(flag) => [{\"n\":\"6\"}]`, `types=[\"string\"]`) where SQLite hands back numbers, so `actualFor`'s `Number(r.n)` coercion and the readback assertions need a per-dialect reading rather than a mechanical port. And on today's `main` the converted suite would be **red** on Postgres for any boolean case, and red for the reason #11455 records rather than for a reason this conversion introduces.\n\nSo the order matters: #11455 (or whatever settles the boolean-aggregand contract) first, this conversion after. Doing it in the other order lands a red.\n\nRelated: #11152, #11455, #11249, #11065."
+}

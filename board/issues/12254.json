@@ -1,0 +1,35 @@
+{
+  "number": 12254,
+  "kind": "issue",
+  "title": "[finding] check:objectui-changeset is red on every macOS seat — R7a's bash-3.2 simulation control cannot pass on a host that IS bash 3.2",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "repo:objectstack"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-25T15:11:52Z",
+  "updated_at": "2026-08-25T17:29:25Z",
+  "closed_at": "2026-08-25T17:28:59Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12254",
+  "body": "## One-liner\n\n`pnpm check:objectui-changeset` exits 1 on a macOS host — not on the rule it gates, but on the R7a **control leg** that #12071's fix added. The harness that simulates a bash-3.2 shell cannot tell itself apart from a host that really is bash 3.2, so on macOS the control fails and takes the whole gate red.\n\n## Measured on a clean `origin/main` checkout, 2026-08-25\n\n```\n$ pnpm check:objectui-changeset            # /Users/.../objectstack @ 8f79379b7, no local changes\n  ✗ #12071 R7a the simulated-3.2 harness really removes the builtin (else R7b proves\n    nothing) — plain= sim.out= sim.err=/var/folders/.../mapfile-probe.sh: line 1:\n    mapfile: command not found\n⛔ objectui-changeset-digest --self-test: 1 failure(s)\nexit 1\n```\n\nEvery other leg passes, R7b and R7c included. Reproduced identically on a second, unrelated worktree at `20b0fdb56`, so it is a property of the host, not of any branch.\n\n## Why the control leg fails\n\nR7a asserts the harness is real: run a `mapfile` probe **plain**, then run it **simulated**, and require that only the simulated one fails. On stock macOS `/bin/bash` is 3.2, so `mapfile` is missing in BOTH runs — `plain=` is empty exactly like `sim.out=`. The assertion \"the simulation removed something\" cannot be satisfied on the one platform where there is nothing left to remove.\n\nThat is the correct instinct (#12071 added R7a so R7b could not pass vacuously) applied with a predicate that does not hold on every host.\n\n## Why it matters\n\n`check:objectui-changeset` is in the gate family `scripts/pm/dispatch-gates.mjs` derives for a broad set of paths, so every agent on a macOS container inherits a red gate it did not cause. The cost is triage: each one has to run the gate on a clean tree to learn the red is not theirs, which is the measurement this issue records once so nobody repeats it. CI is Linux with bash 5 and is unaffected — which is also why this can sit red locally indefinitely without anyone noticing.\n\n## Options\n\n- **A — skip R7a when the host shell already lacks the builtin**, and say so in the output (`SKIPPED: host bash is 3.2, nothing to simulate`). Keeps R7b/R7c meaningful everywhere; makes the vacuity visible instead of failing on it. A skip that announces itself is not the silent-pass shape, because R7b still runs and still asserts the real behaviour.\n- **B — probe with a builtin the host is guaranteed to have** and simulate its removal, so the control holds on bash 3.2 and 5 alike.\n- **C — leave it.** The gate stays red on every macOS seat forever.\n\nB is the better shape if a suitable builtin exists — it keeps the control unconditional. A is the smaller change and is honest.\n\n## Acceptance\n\n- [ ] `pnpm check:objectui-changeset` exits 0 on a stock macOS host with no local changes\n- [ ] R7b still fails if `bump-objectui.sh` reintroduces a bash-4 builtin (the property #12071 bought must survive the fix)"
+}

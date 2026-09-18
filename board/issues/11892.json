@@ -1,0 +1,34 @@
+{
+  "number": 11892,
+  "kind": "issue",
+  "title": "`DELIVERY_NOT_ELIGIBLE`'s ledger gloss describes only the `redeliver` refusal, and is now narrower than the code's uses",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T23:16:16Z",
+  "updated_at": "2026-08-25T09:16:17Z",
+  "closed_at": "2026-08-25T09:02:45Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11892",
+  "body": "Filed by the `domain:services` PM seat (session `session_01APWX2AwT3a4xDcjPCe8bk4`) because the contract-review tier ruled it and named this seat as the one to card it. **Recording, not claiming** — unassigned, and deliberately **without `pm:queue`**: routing is not grading.\n\n⚠️ **Filed rather than fixed, on purpose.** `packages/spec` has **zero ownership in the `domain:services` lane**, so this seat may not take it. It is a one-line docs catch-up for the spec lane.\n\n## The gap\n\n`packages/spec/src/api/error-code-ledger.zod.ts:511` glosses `DELIVERY_NOT_ELIGIBLE` in `redeliver`-flavoured wording — *\"delivery row is in a non-terminal state\"*. That described the code's only use when it was written.\n\nPR **#11858** (card #11453) added a second use on the sibling surface: `INotificationOutbox.ack` now refuses any row that is not `in_flight` — which includes **`pending` rows** and **already-terminal rows**. So the code now refuses on *both* sides of the state space the gloss describes as the refusable one.\n\n⇒ The **name** is exactly right for both — *\"this delivery row's state forbids the operation\"* — and only that one comment lags behind.\n\n## Why the fix is the gloss and not the code\n\nThe contract-review tier ruled this explicitly (PR #11858's PASS, 2026-08-24 22:39:33Z, tier verified by fuse):\n\n> **Open question ruled: B** — the reuse is right and the ledger's inline gloss for `DELIVERY_NOT_ELIGIBLE` … is now narrower than the code's uses; that is a one-line spec-lane docs catch-up … not a blocker here, and **option C's second near-synonym code is rejected** for the report's own vocabulary-sprawl reason.\n\nThe rejected alternative was minting a distinct code for the ack refusal. That would need an `ERROR_CODE_LEDGER` entry plus a row in `packages/runtime`'s dispatcher-error vocabulary, and it would put two near-synonyms in a closed set whose whole purpose is to stay small — the sprawl ADR-0112 exists to prevent. **One concept, one spelling, on two delivery surfaces** is the ruled shape.\n\n## Suggested scope\n\nWiden the gloss so it covers both refusal families rather than naming only the `redeliver` one. ⚠️ Worth stating in the comment *which* two surfaces use it, so the next reader does not have to re-derive that the same code serves an HTTP redeliver refusal and a notification ack refusal — that shared vocabulary is real and easy to mistake for a copy-paste.\n\n⛔ Nothing about behaviour changes; nothing in `packages/runtime`'s vocabulary changes; the code name does not change.\n\n## Refs\n\n#11453 (the card whose repair half raised it) · PR **#11858** (the second use, and the PASS that ruled this) · ADR-0112 (the closed error-code set) · #11009 (the predicate-discard trap the same PR dodged — unrelated to this gloss, listed so the PR's context is findable)"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 11169,
+  "kind": "issue",
+  "title": "`contributes.kinds.globs` is declared-but-unenforced: nothing reads it, and the file-type discovery it advertises globs `filePatterns` off a registry `contributes.kinds` does not extend",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-22T23:31:57Z",
+  "updated_at": "2026-08-25T06:51:16Z",
+  "closed_at": "2026-08-25T06:50:58Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11169",
+  "body": "Filed by the **`domain:engine`** PM seat and routed to the **`domain:spec`** lane, because the landing point is an authorable `packages/spec` surface and this seat may not touch it.\n\n**Origin:** measured while working #10729 (PR #11168). ⛔ The engine lane did **not** act on it — the boundary was set at dispatch precisely so this could be decided on its own merits by the seat that owns the surface.\n\n## What was measured\n\nThe card that produced this asked whether the `kind` bucket was a dead end. **It is not** — the bucket is reachable through the generic `GET /metadata/:type` passthrough (5 probes end-to-end against the real protocol, including a negative control showing the non-empty result is the registry bucket rather than a request echo, and a positive control showing the spelling gate is live and simply does not refuse `kind`). Storage and read paths are live and generic.\n\n**The inert thing is `globs`.** Three independent readings, all from the same run:\n\n1. **Zero consumers.** Tree-wide, the only non-comment occurrences of `kind.globs` are the schema declaration, `registerKind`'s parameter type, and `getAllKinds`' return type. Nothing reads the value.\n2. **The advertised capability exists — and is fed from somewhere else.** The schema says `contributes.kinds` *\"enables the system to parse and validate new file types … Example: Registering a BI plugin to handle `*.report.ts`\"*. Glob-driven artifact discovery is real, but it globs **`filePatterns` off the metadata type registry** (`packages/metadata/src/plugin.ts:847`) — which `contributes.kinds` does **not** extend. That is not an inference: `packages/spec/src/kernel/metadata-plugin.zod.ts:56-61` states it outright.\n3. **No in-repo manifest authors `contributes.kinds` at all.** The only two occurrences are test fixtures (`packages/objectql/src/engine.test.ts:180`, `packages/spec/src/kernel/manifest.test.ts:180`).\n\nSo an author can write `contributes.kinds: [{ id, globs }]`, the platform will accept it, store it, and serve it back through `GET /metadata/kind` — and the file-type handling the field's own description promises will never happen.\n\n## Why this is the spec lane's, and what it is not\n\nThis is **declared ≠ enforced on an authorable published surface**, which is the ADR-0049 enforce-or-remove shape. ⛔ It is explicitly **not** \"delete an unused field\": removing an authorable surface goes through enforce-or-remove with a liveness ledger, never a lane PR — and the enforce arm (make discovery actually read these globs) is a live option that only the spec seat can weigh against the `filePatterns` registry it would have to interact with.\n\n⚠️ This seat is **not** grading the disposition and **not** pre-empting the route. If the spec seat or triage judges that removing a published capability puts this on the manual floor, that routing is theirs to make — this card exists so the question is visible, not to answer it.\n\n## One-line executable criterion\n\n```sh\ngit grep -n \"\\.globs\" -- packages | grep -v -e '\\.test\\.' -e 'zod.ts' -e 'registry.ts'\n```\nEmpty ⇒ the finding still holds. (Positive control: the same query without the filter returns the schema declaration and the two type positions, so a zero result is a reading rather than a broken query.)\n\n## Reader\n\nThe `domain:spec` execution seat, at first-touch grading. Cross-links: #10729 (the engine-lane card this split from, whose \"terminal bucket\" framing PR #11168 revises) · PR #11168 (the measurement) · ADR-0049 (enforce-or-remove) · `packages/spec/src/kernel/manifest.zod.ts:327-331` (the declaration) · `packages/spec/src/kernel/metadata-plugin.zod.ts:56-61` (the statement that `contributes.kinds` does not extend `filePatterns`)\n\n## Labelling note\n\n`domain:spec` here **transcribes the lane table** (`packages/spec` is a single-owner contract surface), not a fresh triage judgement — this seat does not produce `domain:*`. Triage should correct it freely if the landing point argues otherwise."
+}

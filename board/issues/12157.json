@@ -1,0 +1,35 @@
+{
+  "number": 12157,
+  "kind": "issue",
+  "title": "L2: packaged-flow disable/enable write path — operator gate + subflow guard (ADR-0126 §5, §7.3)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T11:27:00Z",
+  "updated_at": "2026-08-25T17:45:45Z",
+  "closed_at": "2026-08-25T17:45:45Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12157",
+  "body": "Part of #12150 (Epic: ADR-0126 implementation, v17 line — 17.x minor, maintainer-ruled).\nBlocked-by: #12155\nDispatch: coordinated under the #12150 program — ⛔ not from the general queue; the program dispatches on unlock (maintainer anti-preemption instruction, 2026-08-25, PM session `session_01KWRU3s15AJz7PGW7a7wdCh`). Contract: **ADR-0126 §5 + §7.3** (merged `28b47a93`).\n\n## Deliverable\n\nThe **flip action** for packaged flows — writing/updating the `sys_metadata_activation` row (`active` bit), install-level (`organization_id NULL`):\n\n- **Write authority (§5)**: in `single` posture, org admin suffices; in `group`/`isolated` postures the write requires the platform-operator capability — ⛔ a tenant org admin must never flip an install-wide switch (#10243 made durable in the correct direction).\n- **Subflow guard (§7.3)**: disabling flow B is **refused while any packaged flow references B as a subflow, and the refusal names the callers** (definition scan at disable time — no reference index exists, ADR §9; ⛔ do not build one).\n- Loud-refusal shape throughout: the refusal message names the sanctioned path. Clause-② note: this leg adds refusal behavior on a public write surface — carry the contract-review declaration on its PR.\n\n## Acceptance\n\n- Posture-matrix tests: single-posture admin allowed; group/isolated tenant-admin refused, operator allowed.\n- Subflow-guard test: packaged caller present → disable refused, caller named in the message; caller absent → disable lands.\n- Enable path symmetric; absence-of-row = active untouched.\n\nRefs: ADR-0126 §5, §7.3, §9 · #10243 · `tenancy-posture.ts`"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 12116,
+  "kind": "pull_request",
+  "title": "docs(qa): re-quote enable.files citation, add update-verb FILES_DISABLED probe",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T09:47:50Z",
+  "updated_at": "2026-08-25T10:17:54Z",
+  "closed_at": "2026-08-25T10:17:53Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": "2026-08-25T10:17:52Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12116",
+  "body": "Fixes #10735\n\n## What changed\n\n`docs/qa/platform-checklist/areas/attachments-storage.json`:\n\n1. **Re-quoted the step-4 fixture citation** (`fixtures.qa-scratch-authz.sequence[3].source`) against the live `enable.files` describe string at `packages/spec/src/data/object.zod.ts:281`. The old citation ended at *\"otherwise creation is rejected\"* — the pre-#10170 wording PR #10733 rewrote post-#10336. The live string now reads *\"otherwise any write that makes an attachment target it is rejected (403 FILES_DISABLED) — a create and an update that re-points an existing attachment alike\"*, which names the exact case the checklist was not probing.\n\n2. **Added the update-verb probe** to `attachments-storage.attach-requires-parent-edit` (revision 4 → 5): a new step + acceptance clause 5 that re-points an existing `sys_attachment`'s `parent_object` onto the `qa_nofiles` fixture (already provisioned by the area's `qa-scratch-authz` recipe, #7670 — one throwaway record inserted into it, no new fixture) and expects 403 `FILES_DISABLED`. `#10170` registered the `enforceFilesCapability` gate (`packages/plugins/plugin-audit/src/audit-writers.ts:1483-1503`) on `beforeUpdate` as well as `beforeInsert`, because the flag gates the **target object**, not the verb — a create-only probe (clause 4) keeps passing while this half regresses. The new step runs as admin (who can edit both the original and target parents) to isolate the refusal from `ATTACHMENT_PARENT_ACCESS`. `knownGaps`/`negative`/`source`/`automated` updated to match, citing the engine-level `#10170` pin (`packages/plugins/plugin-audit/src/capability-gate-update-verb.test.ts`) that grounds the isolation claim.\n\n## Investigation: the `parent_object` hits triage flagged\n\nTriage's premise re-verification measured 3 hits for `parent_object` in the area file and flagged them for inspection (one could already be an update in disguise). Re-measured case-sensitively there are only 2 literal `parent_object` hits; the third is case-insensitive-only (`parent_OBJECT`, inside prose describing an *unreachable* fail-closed branch in `read-inherits-parent-rls`'s `automated` field — not a probe at all). All three sites are: a scoped **list** (read, not a probe of the write gate), a **create** (`POST`), and that unreachable-branch prose. None is an update-verb probe in disguise — the gap triage flagged is real and unnarrowed.\n\n## Feeds side (`records-forms.json`) — investigated, not built\n\nPer triage's clause (\"include the feeds-side look... if it needs new fixtures, report rather than widen\"):\n\n- `FEEDS_DISABLED` appears in `records-forms.record-discussion-mentions`, but **only inside a `negative` entry** — there is no step or acceptance clause that actually drives a feeds-disabled write, on either the create or update side.\n- No fixture provides a feeds-disabled parent: `records-forms.json` has no area-level `fixtures` block, no stock showcase object declares `enable.feeds: false` (feeds defaults to `true`, opt-out), and there is no scratch-object recipe analogous to `qa_nofiles` for this area.\n- So closing **either** half (create or the `thread_id` re-thread) needs a new feeds-disabled fixture the area does not currently land. Per triage's clause, this PR does not widen to add one — reported here and in the final report instead.\n- For context: the underlying update-verb mechanism for feeds is already engine-pinned (`packages/plugins/plugin-audit/src/capability-gate-update-verb.test.ts`, describe `[#10170] enable.files is asked on the UPDATE verb too` / the feeds sibling `describe` in the same file) — what's missing is the platform-checklist's own driven coverage of it, not the runtime enforcement.\n\n## Verification\n\n- `pnpm check:platform-checklist` — OK (structural validator; revision/history, oracle presence, provisioning resolution all pass).\n- `pnpm check:doc-authoring` — pass.\n- `pnpm --filter @objectstack/lint run check:doc-formula-expressions` — pass (after building `@objectstack/formula` and `@objectstack/lint`, which the gate requires pre-built).\n- `pnpm check:nul-bytes` — pass.\n\nGate list derived via `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` from this checkout at merge-base commit `a933ed720`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01UjM2ia8Av1v5NqfqQEQmC6)_"
+}

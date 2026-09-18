@@ -1,0 +1,32 @@
+{
+  "number": 11681,
+  "kind": "issue",
+  "title": "[finding] `check:slot-lookup` enforces that a service lookup is TYPED, never that the named type is COMPLETE — a whole defect class is mechanically invisible",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T11:58:42Z",
+  "updated_at": "2026-08-25T08:47:19Z",
+  "closed_at": "2026-08-25T08:47:19Z",
+  "closed_by": {
+    "login": "yinlianghui-tw",
+    "id": 314596056,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11681",
+  "body": "Filed unassigned as a `finding` — recording only, not graded. Surfaced while implementing #11222 (PR #11677) from the `domain:engine` seat. ⛔ Nothing here blocks that PR, and the specific instance #11222 recorded is fixed by it. What survives is the general gap, which #11222's card named in passing and which nothing now tracks once that card closes.\n\n## The gap\n\n`check:slot-lookup` (the #4251 ratchet, `scripts/check-slot-lookup-ratchet.mjs`) is the only gate covering the service-lookup slot. It bans **erasing a service lookup to `any`** — `ctx.getService('settings')` with no type argument, or one typed `any`. It says nothing about whether the type you do name describes the object you actually call.\n\nBoth halves of the erasure are already gone in the case just fixed, and the gate was green throughout:\n\n- `packages/rest/src/rest-api-plugin.ts` names `SettingsReadSurface` — a real, hand-written interface — so the lookup is typed and the file is not in `scripts/slot-lookup-baseline.json`, i.e. already swept.\n- That interface declared exactly one method, `get`. The platform had been calling `getMany` through it since #10826.\n\nGreen gate, swept file, and a declaration that under-stated its consumer by a whole method for the entire interval.\n\n## Why nothing else catches it either\n\nThe type is erased three times between the declaration and the call, so no `tsc` program ever compares them:\n\n1. `ctx.getService<SettingsReadSurface>('settings')` is a **cast**, not a structural check — nothing in the repo `implements` the interface.\n2. `rest-server.ts` widens the provider's return to a bare promise.\n3. `resolveLocalizationContext` receives `settings?: any`.\n\nAnd TS erasure means a narrow declaration cannot strip the method off the real object, so the runtime feature-detect finds `getMany` regardless. The declaration is inert in both directions: it cannot break anything, and nothing can notice it is wrong.\n\nThe blast radius is correspondingly bounded, which is what keeps this a finding: a host author reading the interface to decide what their occupant must implement is told a method is not consumed. Believing it is **safe** — the consumer feature-detects and degrades. The cost is a false declaration plus an unrealized optimization, never a wrong answer.\n\n## Scope, honestly\n\nThis shape exists wherever a `SettingsReadSurface`-style per-consumer interface names a slot occupant. Known instances today: `packages/rest/src/rest-api-plugin.ts` (fixed in #11677), `packages/plugins/plugin-auth/src/auth-plugin.ts:77`, and a reference in `packages/plugins/plugin-email/src/email-plugin.ts:159`. The latter two were checked during #11677 and are **accurate** — neither calls `getMany` (grep: zero hits) — so there is no second live instance right now. The gap is that this was established by hand, and there is no way to establish it mechanically.\n\n## Not obviously fixable, which is part of the finding\n\nA completeness check has no obvious ground truth: these interfaces are deliberately per-consumer and deliberately narrow (that is the #4251 B4 decision for an OPTIONAL slot — the REST layer must not acquire a runtime dependency on `service-settings`, and `SettingsService` declares no `implements`). \"Complete\" cannot mean \"matches the service's full API\"; it would have to mean \"covers every member the consuming package actually calls on this value\" — a reachability question across three erasure boundaries.\n\nPossible angles, none costed:\n- Compare members called on the lookup result **within the consuming package** against the named interface's members. Defeated by boundary 2 above (the value leaves the package as a bare promise), which may itself be the more tractable thing to fix.\n- Require slot interfaces to be declared once and imported, rather than re-declared per consumer — a bigger architectural change that trades away the B4 property on purpose.\n- Accept it as uncoverable and rely on the pattern that caught it here: a card that changes what a consumer calls also re-reads the declarations.\n\n⛔ Not graded, no `domain:*` set, no `pm:queue` — triage's to route, including \"won't fix, recorded\".\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01VK8rFDtg8eREaxBGX99Csn)_"
+}

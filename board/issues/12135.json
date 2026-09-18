@@ -1,0 +1,34 @@
+{
+  "number": 12135,
+  "kind": "issue",
+  "title": "check-driver-conformance counts a comment-only mention as coverage — a driver's own source file is scored as a conformance suite",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-25T10:29:29Z",
+  "updated_at": "2026-08-25T18:35:39Z",
+  "closed_at": "2026-08-25T18:35:19Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12135",
+  "body": "Found while adding the dialect axis to the census (#12014 / PR #12134). Filed unassigned, and deliberately **not** fixed there: the remedy changes what `CONSUMED` counts, which is a different blast radius from adding an axis.\n\n## What was measured\n\n`consumes()` decides a `(driver × case-set)` cell is covered when a file under the package's `src/` both imports the case-set marker from `@objectstack/spec/data` and references it outside the import. The import half is this regex:\n\n```js\nnew RegExp(`import[\\\\s\\\\S]*?\\\\b${marker}\\\\b[\\\\s\\\\S]*?from\\\\s+['\"]@objectstack/spec/data['\"]`)\n```\n\n`[\\s\\S]*?` is unbounded on both sides, so it does not have to match one import **statement**. It matches any `import` keyword anywhere in the file, any later mention of the marker, and any later `from '@objectstack/spec/data'` — across thousands of lines, and through comments.\n\nMeasured on `origin/main` at `e7480a8067`:\n\n```\npackages/drivers/driver-sql/src/sql-driver.ts\n  FILTER_LOGIC_CASES  importedRegex=true  refOutsideImports=true\n```\n\n`sql-driver.ts` is the driver implementation, not a suite. It names `FILTER_LOGIC_CASES` exactly twice, and both are prose:\n\n```\nline   28: // `FILTER_LOGIC_CASES` table this driver's conformance suite runs; this file\nline 3233:  * `FILTER_LOGIC_CASES` table this driver's conformance suite runs.\n```\n\nThe match is assembled from the real imports at the top of the file (lines 10–62), the comment at line 28, and a `from '@objectstack/spec/data'` further down the import block. The reference-outside-imports half is satisfied by the comment at line 3233.\n\n## Why it matters\n\nToday it changes no verdict: `driver-sql` genuinely covers `FILTER_LOGIC_CASES` via a real suite, so the cell is green for the right reason as well as the wrong one. The defect is that the wrong reason is **sufficient on its own**:\n\n- Delete a driver's only suite for a case-set while leaving a comment that names the marker, and the cell stays green. That is the exact \"declared ≠ enforced\" shape this gate exists to close — a coverage claim satisfied by prose.\n- `consumes()` returns the *first* matching file in walk order, so the file the gate names as the evidence for a cell can be a source file that never runs the case-set. The `RECONCILED` message quotes that path back to the author.\n- The existing self-test pins \"an unused import must not count\" and \"a local re-declaration must not count\", but has no case for \"a comment must not count\", so the hole is not visible from a green run.\n\n## Possible remedies (not settled — this is why it is filed, not fixed)\n\n1. **Bound the import scan to one statement.** Match `import { … } from '…'` as a unit rather than letting `[\\s\\S]*?` roam. Most correct, and the direction that could turn a currently-green cell red if any driver's coverage is only detected by the loose form — that needs measuring before it is chosen.\n2. **Mask comments first.** `scripts/js-comment-mask.mjs` is the repo's one answer to \"comment or code\", is validated against `@typescript-eslint/parser` over 5098 files by `check-comment-mask-corpus.mjs`, and the dialect axis in PR #12134 already routes through it for exactly this reason. Cheapest correct step, and it composes with (1).\n3. **Restrict the coverage population to test files.** A case-set is driven by something that executes; a `.ts` that is not a test cannot drive it. This is what the dialect axis does for its own scoring. Narrower than (1) and (2), and it would need checking against drivers whose case-set consumption lives in a non-`.test.ts` helper.\n\nWhichever is chosen, the self-test wants a case pinning that a comment-only mention is **not** coverage — otherwise the fix is unfalsifiable from a green run.\n\n## Dedup note\n\n⚠️ The duplicate scan could not be completed. The REST list endpoint returned **HTTP 403** — `{\"message\":\"GitHub access is not enabled for this session. An org admin must connect the Claude GitHub App for this organization.\"}` — the known per-session outage. **An empty search result here is not evidence that no duplicate exists**, and none is claimed. The local half was done: no `.changeset/` entry, doc, or comment in `scripts/check-driver-conformance.mjs` records this behaviour. Worth a re-check at triage.\n\nRelated: #12014 (the dialect axis, which surfaced this), PR #12134.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01W6HFzyH98W1YaQXhJUJt6o)_\n"
+}

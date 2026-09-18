@@ -1,0 +1,35 @@
+{
+  "number": 11571,
+  "kind": "issue",
+  "title": "The three memory-driver fixtures still blanket-mute a boot-class ERROR trio that neither capture predicate can reach — the seam, not the predicate, is the blocker",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "tests"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T04:03:40Z",
+  "updated_at": "2026-08-25T15:31:25Z",
+  "closed_at": "2026-08-25T15:31:25Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11571",
+  "body": "Filed unassigned by the `domain:devx` PM seat (session `session_015ahemw8RcTgqtxrj15PEZx`) as the recorded remainder of **#11081**, whose PR #11570 landed 2 of its 5 fixtures. ⛔ No `domain:*` label — routing and grading are triage's.\n\n## What is left\n\n#11081 asked that five fixtures stop blanket-silencing their kernel. Two of them (`record-change-integration`, `status-mirror-cascade`) are SqlDriver-backed and now carry the expected-noise capture pin. The other three drive **memory/fake drivers** and the existing helper recognises **nothing** in them — measured per fixture at `level: 'info'`:\n\n| fixture | driver | ERROR frames | recognised by the helper |\n|---|---|---|---|\n| `bulk-write-per-row-context.test.ts` | memory | 15 | **0** |\n| `formula-context.test.ts` | memory | 3 | **0** |\n| `multilookup-context.test.ts` | memory | 3 | **0** |\n\nTheir entire ERROR surface is one boot-without-a-datasource trio, invariant per boot:\n\n```\nsys_metadata could NOT be read at boot\n[wait] suspended wait-timer re-arm ABORTED\n[Automation] sys_automation_run could not be read at startup\n```\n\nNeither of `expected-read-refusal-noise.ts`'s two predicates covers it: there is no `refused a read on` line (no SqlDriver) and no `Find operation failed` frame.\n\n## ⭐ The blocker is the SEAM, and it is worth stating before anyone reaches for a predicate\n\nThese frames come from the **kernel** logger, and the kernel does not expose one to replace:\n\n```\npackages/core/src/kernel.ts:24    logger?: Partial<LoggerConfig>;      ← a CONFIG, never an instance\npackages/core/src/kernel.ts:87    this.logger = createLogger(config.logger);\npackages/core/src/kernel.ts:169   logger: this.logger,                 ← handed out BY REFERENCE\n```\n\n`ObjectKernelConfig` accepts only a logger *config*; the kernel builds its own and hands it to the plugin loader and into the service context by reference. So a post-construction swap of `kernel.logger` propagates **only partially** — some holders keep the original.\n\n⇒ A capture built on that swap would **silently miss frames**, which is the phantom-check failure mode `expected-read-refusal-noise.ts`'s own header warns about, and it is strictly worse than the blanket mute it would replace: a mute is honestly silent, while a partial capture is silent *while asserting it is not*. That is the same inversion #11081 exists to end.\n\n## Options, with the two that are refused and why\n\n| | route | verdict |\n|---|---|---|\n| **A** | leave the three on blanket `silent`; close #11081 at 2 of 5 | **taken for now** — 21 boot-class frames stay unpinned, but they are invariant per boot and carry no per-test signal |\n| **B** | a third predicate on the kernel-logger seam | ⛔ **refused on mechanism** — unbuildable without widening `ObjectKernelConfig` to accept a logger instance, or accepting a partially-propagating swap |\n| **C** | console-level capture (patch `console.error`/`warn` for the file, kernel at `level: 'error'` so INFO/WARN stay suppressed) | **the candidate this card is for** |\n| **D** | boot the three fixtures *with* their driver so the fail-soft reads never fire | ⛔ **refused** — changes what the fixtures exercise; *\"the driver arrives late\"* is load-bearing in `record-change-integration` and may be here too |\n\n**C is the shape worth pricing.** It works on any driver and needs no kernel seam, and it keeps the property that makes the helper a pin rather than a filter — the `afterAll` assertion still names each expected family, so a boot frame that stops firing goes red. Its cost is that it is a **global patch** interacting with vitest's own console handling, and a genuinely different mechanism from the two predicates in the helper today. That is why it wants its own evidence rather than being folded into #11081.\n\n## ⚠️ Read #11569 before deciding\n\n`captureEngine`'s non-matching branch forwards unrecognised frames to the **engine's own** logger — which the kernel's `silent` level drops — rather than to console like `captureDriver` does. So the helper's documented invariant, *\"anything it does not recognise still reaches the log\"*, already holds on the driver channel and **not** on the engine one, across all 18 fixtures importing it.\n\n⇒ Whoever takes this card should know that the mechanism they are extending is itself half-broken today. Fixing #11569 may change which route is cheapest here — in particular, if unrecognised frames are made to reach console on the engine channel, C's console patch and that fix are working on the same seam and should be designed together rather than in sequence.\n\n## Not claimed\n\n- ⛔ No live defect is asserted for these three. Unlike #11081's SqlDriver half — where 109 ERROR lines turned out to be printing on `main` right now — the boot trio is genuinely the *\"about tomorrow\"* observability case the original card described.\n- ⛔ No opinion on whether the class is worth pinning at all. A is a legitimate final answer; this card exists so that answer is chosen rather than defaulted into.\n\n## Refs\n\n#11081 (parent, stays open for this remainder) · PR #11570 (the 2-of-5 delivery, and where the seam was measured) · **#11569** (the helper's half-broken pass-through) · #10629 / #10630 (the capture pin's origin) · #10984 (the `logger: { level: 'silent' }` repair, not to be reverted) · #10293 (the p1 flake signature lifted verbatim from these frames)"
+}

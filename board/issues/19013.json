@@ -1,0 +1,34 @@
+{
+  "number": 19013,
+  "kind": "pull_request",
+  "title": "docs(ci): redirect the changeset step's prescription for a corrected changeset",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-18T11:43:16Z",
+  "updated_at": "2026-09-18T12:59:56Z",
+  "closed_at": "2026-09-18T12:59:54Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": "2026-09-18T12:59:54Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/19013",
+  "body": "Part of #18375 — ruling ① D's workflow-text edit only; the `.claude/**` half is serialised behind five open PRs\n\nClause-②: no\n\n## Scope\n\nOne file, one step, message text only: `.github/workflows/pr-automation.yml`, the\n`Require a changeset (or the skip-changeset label)` step. No `if:` expression, no status\nfunction, no new or removed step, no job or step renamed (the `changeset-check` job still\npublishes the check-run name `Check Changeset`, and all 14 step names are byte-identical —\n`git diff` reports zero `- name:` lines on either side). Ruling ① D is explicitly \"no\nworkflow mechanics change\", so the mechanics are untouched on purpose, including the three\nsuppression layers the card records.\n\n## Why this step carries the text\n\nA PR whose only `.changeset` rows are ones it CHANGED rather than added adds none of its\nown, so `ADDED` counts 0 and **this** step fails first. Every later step of the job\ninherits the implicit `success()`, so the step that hosts the two-class refusal\n(`check-empty-changeset.mjs`, COLLISION vs DELIBERATE CORRECTION) is skipped and its\nremedy text has never printed for the class it was written for. Until the fenced-out\n`.claude/**` half lands, this message is the only place that class reads anything.\n\nToday that message prescribed the `skip-changeset` label for it, carrying the message's own PREFERRED marker.\n\n## The edit\n\n- A leading **route 0 discriminator** in the job-log body: run\n  `git diff --name-status` over `.changeset/*.md` against the merge base; every row `M` or\n  `D` and none `A` means this PR is correcting somebody else's pending release note.\n  Prescription for that class: **do not apply `skip-changeset`; write the confirmation on\n  the PR, naming the note and what changed under it; leave this check red.** It states why\n  the red costs nothing (`Check Changeset` is not one of the seven required contexts, so\n  the approver merges over it), why the label is refused twice over (a false declaration,\n  and it exempts the whole job), and that a PR which also releases something of its own\n  still takes route 1 for that half.\n- The `::error::` annotation (the Checks-tab one-liner) leads with the same discriminator\n  before the label sentence, because a trailing caveat is the one shape that does not\n  reach an author or an agent skimming the annotation.\n- Route 2 keeps its PREFERRED marker for the ordinary releases-nothing case and gains the\n  caveat that closes the read-alike trap: a correcting PR also releases nothing of its\n  own, so route 2 reads as if it fitted.\n- The unsure tie-breaker is scoped to routes 1 and 2, so it cannot overrule route 0.\n- One comment sentence above the block (\"Both lead with the label.\") was updated to stay\n  true of the two renderings it describes — declared here rather than done quietly, since\n  a comment that describes the message falsely is the same declared-vs-actual defect this\n  card is about. Nothing in the repo pins that sentence (`git grep` hit: 1, this file).\n\n## Verification\n\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` at\n  `c602393c` derived 36 commands for this one path; each was run with its exit code\n  captured before any pipe. Results are in the report comment on #18375; the run was still\n  in flight for the tail of the list when this PR was opened and is reported there.\n- `check-empty-changeset.mjs`'s consumer battery pins this step from outside: it requires\n  `exit 1` within **900** characters of the `::error::This PR adds no changeset` anchor.\n  Measured before and after: the gap was 428, it is now **698** (headroom 202), and the\n  battery's regex still matches. The other pins it holds over this job are untouched —\n  five failable steps, both live label reads on every one of them, two\n  `grep -qxF 'skip-changeset'` reads, no `continue-on-error`.\n- The advisory claim in the new text is measured, not recalled:\n  `scripts/check-required-contexts.mjs` mentions `Check Changeset` **0** times, with\n  controls lit in the same file (`Lint & Repo Gates` 24, `TypeScript Type Check` 18,\n  `Test Core` 15, `Governed Surface Queue Guard` 6).\n- The YAML parses, the job still has 14 steps with unchanged names, and the rendered\n  `run:` script passes `bash -n`.\n\n## Changeset\n\nNone, and the `skip-changeset` label is route 2 for this PR: measured, no package manifest\nlists `.github` or a workflow path in its `files[]` (positive control: the `files[]` arrays\nof `packages/spec` and `packages/cli` read back non-empty). This PR is not the route-0\nclass either — it adds no changeset and changes none (`git diff --name-status` over\n`.changeset/*.md` against the merge base returns zero rows).\n\n## Acceptance notes\n\n- The other half of ruling ① D (`.claude/agents/os-dev.md` and the pm-dispatch text\n  carrying the one-line rule) is deliberately **not** here: those are governed paths with\n  five open PRs already editing them, and the dispatch fenced them out for a later round.\n  #18375 therefore stays open, which is why this body says `Part of` and not a closing\n  keyword.\n- The L3 step-order finding (zero status functions in `changeset-check`, so the refusal\n  step never runs for this class) stays recorded on #18375 and is **not** fixed here — the\n  ruling rules mechanics out. The new text states the consequence instead of routing\n  around it.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01AmH9bKvGoLjiY86Q4Z3og2)_"
+}

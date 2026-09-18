@@ -1,0 +1,34 @@
+{
+  "number": 12221,
+  "kind": "issue",
+  "title": "A repo-wide `check:` for bash-4-only constructs in tracked *.sh — measured 4-for-4, but it needs a new gate file plus wiring",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T14:13:34Z",
+  "updated_at": "2026-08-25T18:23:07Z",
+  "closed_at": "2026-08-25T18:22:42Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12221",
+  "body": "Filed by the `domain:devx @ objectstack` seat (#6023, session `af22b339-91b5-5814-8b9b-2453fc5b3f68`) as the follow-up PR #12219 was told to **report rather than build**. ⛔ Not graded, no `pm:queue` — triage's to route, including \"won't fix, recorded\".\n\n## Why this is filed rather than folded in\n\n#12141's dispatch ruled that generalising the static scan was in scope **but** that if it needed a new gate file plus its own self-test and wiring, the dev must report before building. It does, and they did. This card carries the measurement so it is not re-derived.\n\n## The measurement, from PR #12219 at `b9438a425d`\n\n| reading | value |\n|---|---|\n| tracked `*.sh` in the repo | **18** |\n| carried a bash-4-only construct before #12219 | **3** |\n| after #12219 | **0** |\n| total sites across #12071 and #12141 | **4** |\n| cost of a repo-wide regex scan over 18 files | well under a second |\n\nThe only file still naming those tokens is `scripts/pm/os-verify-lock.sh`, where every occurrence is either a guarded `${EPOCH*:-}` read or lives inside its own self-test that hunts them — clean by construction.\n\n## The case for\n\n**A 4-for-4 hit rate on a class that stayed invisible until it bit twice**, over a population that **gained a member the same day** (`.claude/hooks/guard-main-checkout.selftest.sh`, which pushed the census from the 17 #12141 recorded to 18). The class is undetectable by CI by construction: CI runs bash 5, where every one of these constructs works, so the defect and its repair are both invisible to a normal green run. Today's coverage is two file-scoped scans living inside two unrelated gates' self-tests — which is exactly the arrangement that let the class survive.\n\n## The cost, stated\n\nNot a mechanical edit. It needs:\n\n- a new `scripts/check-*.mjs`\n- its own `--self-test` (with a known-bad fixture, so the gate can be *shown* to fail rather than asserted to work)\n- a `package.json` alias\n- two `lint.yml` steps\n\nand it then joins `check-self-test-wired.mjs`'s population, so it inherits that gate's obligations too.\n\n## Open questions for whoever takes it\n\n1. **What is the construct set?** #12219 swept a wider set than #12141's card: `mapfile`, `readarray`, `declare -A`/`local -A`/`typeset -A`, `${x^^}`/`${x,,}`, `&>>`, `EPOCHSECONDS`/`EPOCHREALTIME`, plus `coproc`, `globstar`, `;;&`, `wait -n`, `[[ -v`, `declare -n`/`-g`, `printf %(…)T`, `${x@Q}`, `lastpipe`, `${arr[-1]}`, `exec {fd}`. Which of those are in scope is a decision, not a given.\n2. **How are legitimate mentions exempted?** `os-verify-lock.sh` names the tokens *in order to hunt them*, and any new gate would name them too. A scan that cannot tell a hunter from a user reddens itself on day one. #12219's file-scoped scan handles this by dropping comment lines; a repo-wide one needs a defensible answer.\n3. **Is `.sh` the right population?** The bash-3.2 floor applies to anything `/usr/bin/env bash` runs. Hooks under `.claude/hooks/**` are in the census; `package.json` script bodies and heredocs inside `.mjs` are not.\n\n## Refs\n\n#12141 / PR #12219 (this measurement, three sites) · #12071 / PR #12142 (the sibling repair and the read-loop idiom) · #5960 (why `sdui:manifest` is off PR CI) · `scripts/pm/os-verify-lock.sh` (the repo's existing bash-3.2-floor doctrine)"
+}

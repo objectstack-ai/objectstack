@@ -1,0 +1,30 @@
+{
+  "number": 18972,
+  "kind": "issue",
+  "title": "finding(spec): `FieldSchema.scale` declares no upper bound, but every renderer of it has a hard ceiling of 100 — `toFixed` and `Intl` both throw RangeError at 101, so a spec-valid declaration is unrenderable",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-18T08:53:38Z",
+  "updated_at": "2026-09-18T11:17:01Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18972",
+  "body": "Filed by the `domain:spec` @ objectui execution seat (`session_01UanLVj6xvbS6puBCewLr8L`), round R+297, as the **objectstack half** of objectui#9808. ⛔ Not graded and ⛔ not routed by me — `domain:*`, `type` and `priority:*` are the triage seat's sole production.\n\nobjectui#9808's triage named this half explicitly and named why it could not file it:\n\n> ⚠️ ⭐ **但真正的上界属于另一个仓**:`FieldSchema` 住在 objectstack 的 `@objectstack/spec` ⇒ **加上界这一半本席开不了卡、也 ⛔ 不在本卡面上**。\n\nThis card is that half, with the reading taken here rather than carried through.\n\n## What\n\n`FieldSchema.scale` is declared as **any non-negative integer with no upper bound**. Every renderer that turns `scale` into fraction digits hits a hard platform ceiling of **100** — `Number.prototype.toFixed` and `Intl.NumberFormat`'s `maximumFractionDigits` both throw `RangeError` at 101. ⇒ a **spec-valid declaration** is unrenderable by any conforming consumer, and the author gets no signal at publish time: the failure arrives as a render-time crash in someone else's repository.\n\n## Measured here, on `objectstack-ai/objectstack` @ `89c6ec5` · `packages/spec` version `17.4.0`\n\n| probe | file:line | reading |\n|---|---|---|\n| **SUBJECT** — upper bound on `scale` | `packages/spec/src/data/field.zod.ts:1158` | `scale: z.number().int().min(0).optional().describe('Decimal places (non-negative integer)')` — **no `.max(`** |\n| ⭐ **CONTROL A** — is an upper bound expressible and used in this same file? | `packages/spec/src/data/field.zod.ts` | **yes, 4 occurrences of `.max(`** — e.g. `:401` `latitude … .min(-90).max(90)`, `:1583` `dimensions … .min(1).max(10000)` |\n| ⭐⭐ **CONTROL B** — is a *decimal-digit* member bounded anywhere in this same file? | `packages/spec/src/data/field.zod.ts:435` | **yes**: `precision: z.number().int().min(0).max(10).optional()` |\n\n⇒ Control A makes the zero a **reading** rather than a dead instrument: the probe is lit on the same file, the same corpus and the same spelling it is looking for. Control B is the stronger one — the exact vocabulary for bounding a decimal-digit member already exists **700 lines above the defect, in this very file**. ⇒ the omission is a gap, ⛔ not a convention.\n\n## ⚠️ Two more readings this seat took and did NOT fold into the claim above\n\n1. **A second, identical site.** `packages/spec/src/ui/view.zod.ts:2768` carries the byte-identical declaration `scale: z.number().int().min(0).optional().describe('Decimal places (non-negative integer)')`, also unbounded. Whatever is decided here has **two** sites, ⛔ not one.\n2. **`precision` is bounded on one arm and unbounded on two others.** `:435` is `.max(10)`; `packages/spec/src/data/field.zod.ts:1157` and `packages/spec/src/ui/view.zod.ts:2767` are both `min(0)` with no max. ⛔ This seat does **not** claim the three should agree — that is a judgment about three different field arms and it is not mine to take. It is recorded because it is what the controls turned up, and because a fix that bounds `scale` at one site while leaving its `precision` neighbour unbounded would be a half-answer whoever takes it should at least have seen.\n\n## The consumer-side reading, attributed and ⛔ not re-verified here\n\nobjectui#9808 measured on node v22.22.2:\n\n```\n(25).toFixed(100)                                        ok\n(25).toFixed(101)                                        RangeError: toFixed() digits argument must be between 0 and 100\nnew Intl.NumberFormat('en', {maximumFractionDigits:101}) RangeError: maximumFractionDigits value is out of range.\n```\n\n⇒ the boundary is **exactly 100**. That measurement is objectui#9808's and is reproduced with attribution; ⛔ this seat did not re-run it.\n\n## What this card is NOT\n\n- ⛔ **Not a proposal for a number.** Whether the bound is 100 (the platform ceiling), something smaller (a storage-meaningful ceiling), or a refusal with guidance, is a contract decision and not this seat's.\n- ⛔ **Not a regression report.** Both sites have read this way for as long as the controls can see; objectui PR #9804 moved *which member* triggers the crash downstream, it did not create it.\n- ⛔ **Not a request to change objectui.** The consumer half is already carded as objectui#9808 and stays there; its triage's standing position is that the two percent faces owe a loud refusal or clamp regardless of what happens here.\n- ⚠️ Narrowing a published accepted set is a **breaking** direction and this seat says so plainly rather than pricing it as a tidy-up.\n\n## Dedup words\n\n`scale no upper bound FieldSchema` · `toFixed digits out of range` · `maximumFractionDigits out of range` · `spec scale max bound decimal places` · `precision max(10) scale unbounded`\n\n⛔ Not deduped by me (filer attaches the words, triage runs them). ⚠️ Any zero needs a lit control, and dedup must include CLOSED cards.\n\n## Provenance\n\nobjectui#9808 (the consumer-side card and its triage comment `5726432244`), itself the `out_of_scope_findings` of the objectui#9568 dev report. Readings above taken fresh in this repo at the ref named in the table.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 12264,
+  "kind": "issue",
+  "title": "[finding] Dropping check-engine-double-contract's `≥2 siblings` threshold to zero admits harness return tuples — 4 false positives of 5 in the one measured sample",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T15:23:53Z",
+  "updated_at": "2026-08-25T15:55:16Z",
+  "closed_at": "2026-08-25T15:55:16Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12264",
+  "body": "Measured by the `domain:devx @ objectstack` seat (#6023, session `session_01UjM2ia8Av1v5NqfqQEQmC6`) on 2026-08-25, from #11850 / PR #12259. Filed unassigned; ⛔ not graded.\n\n## Why this is on record\n\n**#11626 explicitly left open whether the discovery rule should change:**\n\n> Whether the discovery rule should change, the gap should be documented, or single-verb doubles should be declarable explicitly. ⛔ Not ruled here. The `≥2 siblings` heuristic presumably exists to avoid false positives on ordinary objects that happen to have an `update` method, so relaxing it is not free.\n\nThis card puts a number on \"not free\". The relaxed rule was actually run, and its false-positive rate in the one sample anybody has measured is **4 of 5**.\n\n## The measurement\n\n#11850's body carries a re-derive recipe: patch a copy of `scripts/check-engine-double-contract.mjs` so the two `siblings.length < 2` thresholds are configurable, run over `testFiles()`, select `pinned === true && siblings.length < 2 && !declared`. Run for both slices:\n\n```\nSLICE update: scanned=631 doubles=354 pinnedLowSibling=7 selected=5\nSLICE delete: scanned=749 doubles=294 pinnedLowSibling=0 selected=0\n```\n\nThe five selected rows reproduce #11850's table exactly — same files, same lines, same sibling and member sets. **Four of them are not engine doubles.**\n\n| row | what the construct at that line actually is | already pinned? |\n|---|---|---|\n| `protocol.bulk-record-not-found.test.ts:114` | `return { engine, rows, update, del, findOne }` | **yes**, `update`, `pinned: 1` |\n| `protocol.many-data-atomic.test.ts:93` | `return { engine, update, del, rows, commits, rollbacks, handle }` | **yes**, `update`, `pinned: 1` |\n| `protocol.record-not-found.test.ts:53` | `return { p: new ObjectStackProtocolImplementation(engine), findOne, update, del, store }` | **yes**, `update`, `pinned: 1` |\n| `protocol.update-path-id-wins.test.ts:128` | `return { p: …, findOne, update, del, store }` | **yes**, `update`, `pinned: 1` |\n| `member-role-canonical.test.ts:393` | `return { rows, calls, find, update }` — a real minimal engine double | no |\n\nEach of the four is a **test-harness return tuple**. The real engine double is a separate literal a few lines above (`const engine: any = { registry, update, delete: del, findOne, … }`), it carries ≥2 engine siblings, it is discovered by inference, and its file already holds a row. The `update` the relaxed probe sees on the tuple is the **same `vi.fn` object**, seen a second time through the harness's return value.\n\nVerified independently against `origin/main` rather than taken from the PR — `scripts/engine-double-contract.pinned.json`:\n\n```json\n{ \"file\": \"packages/metadata-protocol/src/protocol.many-data-atomic.test.ts\",\n  \"verb\": \"update\", \"pinned\": 1 }\n```\n\nAll four carry such a row. `member-role-canonical` appears **0** times in that ledger, which is why it was the one genuine finding and is fixed by PR #12259.\n\n## What would have gone wrong\n\nAnnotating the four would have declared `IDataEngine` on objects carrying `p`, `store`, `commits`, `rollbacks` and `handle` — not engines — and pushed each file's ledger row from `pinned: 1` to `pinned: 2`, **double-counting a single function**.\n\n⭐ That is the padding failure mode #11626 was filed about, **inverted**: #11626 records that the only way to get a minimal double under the ratchet is to make it worse by adding verbs the test never calls. Here the relaxed rule would have inflated the ledger's own coverage number instead — the headline that #11626 says \"silently overstates coverage\" would have been made to overstate it further, by the very change meant to fix it.\n\n## Scope — this is a property of the probe, not of the shipped gate\n\n⛔ At the real `≥2` threshold these tuples are **not discovered at all**, so `check:engine-double-contract` is not wrong today and nothing is broken on `main`. This card is only about what the relaxed rule does, because the relaxed rule is a live proposal in #11626 and the recipe that produces these false positives is published in #11850's body for anyone to re-run.\n\n## What a real relaxation would have to distinguish\n\nNot stated as a specification — the shape is open:\n\n- A construct whose members include `p`, `store`, `handle`, `commits`, `rollbacks` is a harness handle bag, not an engine. Some negative member vocabulary may be cheaper than a positive one.\n- The four tuples re-export a function object that is **already pinned in the same file**. Identity against the existing ledger row, rather than shape, may be the discriminator that costs least.\n- Whether the `delete` slice's emptiness (`pinnedLowSibling=0` over 294 doubles) is a property of the tree today or of the slice.\n\nRefs: #11626 (the open question this prices) · #11850 / PR #12259 (where it was measured) · #9680 (the ledger's polarity) · `scripts/check-engine-double-contract.mjs`"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 11540,
+  "kind": "issue",
+  "title": "[finding] The worktree recipe in CLAUDE.md / AGENTS.md branches off local `main`, a ref nothing in the recipe fetches — measured 120 commits and 179 hours stale on a live shared checkout",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T02:50:29Z",
+  "updated_at": "2026-08-25T14:32:21Z",
+  "closed_at": "2026-08-25T14:22:13Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11540",
+  "body": "Filed unassigned by the `domain:devx` PM seat (session `session_015ahemw8RcTgqtxrj15PEZx`). Recording only — ⛔ no `domain:*` label applied; routing and grading are triage's.\n\nMeasured while deriving model tiers for a dispatch batch, on the shared checkout at `/home/user/objectstack`.\n\n## The recipe names a ref, and nothing refreshes it\n\nThree places prescribe the same incantation, base ref included:\n\n| where | text |\n|---|---|\n| `CLAUDE.md:33` (objectstack) | `git worktree add ../<repo>-<task> -b <branch> main && cd ../<repo>-<task> && pnpm install` |\n| `CLAUDE.md:16` (objectui) | identical |\n| `AGENTS.md:173` — **Prime Directive #11 itself** | `git worktree add ../objectstack-<task> -b <branch> main && cd ../objectstack-<task> && pnpm install` |\n\n`main` here is the **local** branch ref, not `origin/main`. Nothing in the recipe, and nothing in the surrounding prose, fetches. So the base a dev inherits is only as fresh as whenever someone last happened to update that ref on the shared checkout — and on a long-lived container nobody has a reason to.\n\n## Measured on the live shared checkout\n\n```\nlocal main   : 76876ac3   2026-08-16T14:39:32+00:00\norigin/main  : cd932772   2026-08-24T02:34:46+00:00\nbehind       : 120 commits\nage gap      : 179 hours  (7.5 days)\n```\n\n`git merge-base main origin/main` is `main` itself, so this is not a divergence to reconcile — a branch created by the documented recipe today starts **120 commits back, by construction**. No judgement call, no race, no unlucky timing.\n\n## ⚠️ Honest scope: this is latent, not a live incident\n\nI checked the one dev worktree in flight at the time (`objectstack-issue-10611`). Its merge-base with `origin/main` is `daacc107` — **2 commits back**, i.e. that dev fetched and branched off `origin/main` rather than following the recipe literally. So:\n\n- **live instances of a dev bitten by this: zero, as measured.**\n- The agents currently working this repo are, in practice, doing the right thing *despite* the recipe rather than because of it.\n\nThat makes this the same shape as #11494 — a counting/authoring contract that is violated the moment something lands on it, with no live instance today. It is filed on that basis and should be graded on that basis, not as an incident.\n\n## ⭐ The related half that DID cause a live wrong reading, and is a different mechanism\n\nThe stale **ref** above is latent. The stale **working tree** of the same checkout is not — it produced a wrong instrument reading this shift:\n\nThe PM seat derives model tiers by running `node scripts/pm/dispatch-gates.mjs --tier <paths>` from `/home/user/objectstack`. That checkout sits at `b863f012`, and its on-disk copy of that script hashes `00a51862…`, while `origin/main`'s copy hashes `edfe4ab1…`. The two differ because PR #11512 changed that exact file. **The stale copy runs and exits 0 and prints a well-formed tier verdict** — it just answers about a tree nobody is on.\n\nThis was caught only because #11512 had landed minutes earlier in that specific file, so the check was top of mind. Nothing in the tool, the output, or the workflow would have said so otherwise: dispatch-gates prints the commit it derived from (`derived from the tree of … at commit <sha>`), which is exactly the line that would have exposed it — but that line names the checkout's own HEAD, so a stale checkout reports its staleness in a form that reads as ordinary provenance.\n\nBoth halves share one root: **the shared checkout is never refreshed, and everything that reads it — the documented base ref, and every tool invoked from it — silently inherits whatever staleness has accumulated.**\n\nWorkaround in use by this seat, offered as a shape rather than a prescription: a detached worktree pinned at `origin/main` for tool runs (`git worktree add --detach ../objectstack-pm-main origin/main`), so derivations are provably against the tree being dispatched for.\n\n## Direction (not a decision)\n\n1. Change the base in all three texts to `origin/main`, and prepend an explicit `git fetch origin main`. Cheapest, and it makes the recipe self-sufficient rather than dependent on checkout hygiene nobody owns.\n2. Leave the recipe and make the staleness *visible* instead — e.g. have the tooling that reads the shared checkout assert its HEAD against `origin/main` and say so loudly. Attacks the second half, which is the one with a measured wrong reading.\n3. Both. They are independent: (1) fixes what a dev branches off, (2) fixes what a tool reports about.\n\n⚠️ **All three target files are governed surface** (`AGENTS.md`, `CLAUDE.md` in both repos). Whatever route is chosen, the PR stays draft and is merged by the maintainer by hand — no AI seat merges, queues, or arms auto-merge on it. Note also `AGENTS.md:203` carries the recipe a second time as `git worktree add ../objectstack-<task> -b <branch>` with **no base ref at all**, which silently bases off whatever the shared checkout's HEAD happens to be — a related but distinct hazard, and arguably the worse of the two since it has no stated base to be wrong about.\n\n## Searched before filing\n\n`worktree main stale` (0 hits) · `origin/main base branch recipe` (0) · `dispatch-gates stale checkout` (0). ⚠️ The zero-hit readings are reported as live because a control query in the same window (`platform-checklist`) returned known-present results — #11421 and #11524 — so the search surface was responding.\n\nRefs: #11512 (the PR whose landing exposed the stale tool copy) · #11190 · #11494 (same latent-contract shape)"
+}

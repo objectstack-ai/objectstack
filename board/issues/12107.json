@@ -1,0 +1,34 @@
+{
+  "number": 12107,
+  "kind": "issue",
+  "title": "`resolveCheckToFiles` matches only `.mjs|.cjs|.js|.sh`, so all 23 TypeScript-authored gates resolve to ZERO gate files and contribute ZERO watch hints",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-25T09:05:30Z",
+  "updated_at": "2026-08-25T16:16:26Z",
+  "closed_at": "2026-08-25T16:14:22Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12107",
+  "body": "Found while wiring the new `check:exported-any-returns` gate for #11927 — the new gate landed\ninvisible, and checking why turned up 22 existing families in the same state.\n\nMeasured at `0e0bf8049` plus that card's branch.\n\n## The rule\n\n`scripts/pm/dispatch-gates.mjs`:\n\n```js\nexport function resolveCheckToFiles(checkName, scriptsMap) {\n  const cmd = scriptsMap[checkName];\n  if (!cmd) return [];\n  return [...new Set([...cmd.matchAll(/(scripts\\/[\\w./-]+\\.(?:mjs|cjs|js|sh))/g)].map((m) => m[1]))];\n}\n```\n\nA gate whose npm script names a `.ts` / `.mts` / `.cts` file matches nothing. `entry.files` stays\nempty, so `discoverFamilies` never opens the source — and everything downstream of opening it is\ntherefore also empty: **no watch hints**, no first-party import following, no `no-population`\nmarker read, and no entry in the `gateFiles` set.\n\n## The consequence, in the derivation's own terms\n\nSuch a family can never be `matched` for any card. It scores `undetermined` (\"its sources name no\npath at all\") for every PR in the tree — but the reason is not that its author declined to declare\na population. It is that the declaration was never read. The two are indistinguishable in the\noutput, which is the same conflation `scripts/pm/bare-root-worklist.mjs` was built to report on one\nlevel down.\n\nIt also silently voids the bare-root sweep for these files: that sweep walks the gate sources\n`discoverFamilies` resolves, so a TypeScript gate is never swept, and `--self-test` reporting\n\"none missing\" says nothing about it either way.\n\n## The 23\n\nVerified by resolving each zero-file family's command back to its script:\n\n| gate | source it names |\n|---|---|\n| `check:generated` | `scripts/check-generated.ts` |\n| `check:api-surface` | `scripts/build-api-surface.ts` |\n| `check:exported-any` | `packages/spec/scripts/check-exported-any.ts` |\n| `check:dual-source-exports` | `packages/spec/scripts/check-dual-source-exports.ts` |\n| `check:browser-reachable-entries` | `packages/spec/scripts/check-browser-reachable-entries.ts` |\n| `check:skill-examples` | `packages/spec/scripts/check-skill-examples.ts` |\n| `check:authorable-surface` | `scripts/build-schemas.ts` |\n| `check:docs` | `scripts/build-docs.ts` |\n| `check:skill-docs` | `scripts/build-skill-docs.ts` |\n| `check:skill-refs` | `scripts/build-skill-references.ts` |\n| `check:meta-url-spelling` | `scripts/build-meta-url-spelling.ts` |\n| `check:spec-changes` | `scripts/build-spec-changes.ts` |\n| `check:upgrade-guide` | `scripts/build-upgrade-guide.ts` |\n| `check:export-origins` | `scripts/build-export-origins.ts` |\n| `check:react-blocks` | `scripts/build-react-blocks-contract.ts` |\n| `check:template-manifests` | `scripts/check-template-manifests.ts` |\n| `check:objectui-pin-citations` | `scripts/check-objectui-pin-citations.ts` |\n| `check:llms-txt` | `scripts/check-llms-txt.ts` |\n| `check:liveness` | `scripts/liveness/check-liveness.mts` |\n| `check:empty-state` | `scripts/liveness/check-empty-state.mts` |\n| `check:variant-docs` | `scripts/check-variant-docs.mts` |\n| `check:strictness-ledger` | `scripts/check-strictness-ledger.mts` |\n| `check:exported-any-returns` | `scripts/check-exported-any-returns.mts` (#11927, this card's trigger) |\n\nReproducer:\n\n```js\nimport { discoverFamilies } from './scripts/pm/dispatch-gates.mjs';\nconst { byCheck } = discoverFamilies();\nconsole.log([...byCheck].filter(([, e]) => !e.files.length).length, 'of', byCheck.size);\n// → 24 of 166   (23 above + one family whose script is a `pnpm -r` composite)\n```\n\n## Two further wrinkles the fix has to decide, not just the extension list\n\n1. **The path is relative to the PACKAGE, not the repo.** `packages/client`'s alias reads\n   `tsx ../../scripts/check-exported-any-returns.mts …`, and the package-filter branch of\n   `discoverFamilies` prepends the package's own directory prefix to whatever\n   `resolveCheckToFiles` returns — which would produce `packages/client/../../scripts/…`. That\n   resolves on disk but is not a tracked-path spelling, so it would match nothing in `hintCovers`\n   without a normalisation step. The existing `.mjs` callers never hit this because they all live\n   in the package they serve.\n2. **It is a widening, and this repo prices widenings.** `firstPartyImportTargets`' docblock\n   measures its own at +893 pairs and states the zero-loss property explicitly. Admitting 23 gate\n   sources adds hints AND adds them to `gateFiles` (which suppresses import-following into those\n   files) — a subtraction direction that has to be measured, not argued, the way that docblock\n   does it.\n\n⛔ Deliberately not fixed inside #11927: the hint sets are fleet-wide, so re-attributing 23\nfamilies' matched lists is a change every open dispatch brief reads, not a rider on a card about\none package's return types.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01UjM2ia8Av1v5NqfqQEQmC6)_\n"
+}

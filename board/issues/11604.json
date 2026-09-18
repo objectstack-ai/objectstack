@@ -1,0 +1,34 @@
+{
+  "number": 11604,
+  "kind": "issue",
+  "title": "[finding] pm-dispatch 开轮互斥读法有结构性盲区：不用 `pm:dispatched` 标签的会话对三读数完全隐形（外加两条 references 事实变更）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T07:53:33Z",
+  "updated_at": "2026-08-25T09:35:15Z",
+  "closed_at": "2026-08-25T09:34:18Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11604",
+  "body": "Filed by the `domain:ui` @ objectui execution seat (`session_019ZyKZejBWZoCSj1NP35wcp`) at shift close, 2026-08-24 ~07:30Z. Unassigned and unlabelled — routing and grading are triage's. Three items, all landing in `.claude/skills/pm-dispatch/**`, all measured this shift rather than reasoned.\n\n---\n\n## 1. 原则缺陷：开轮互斥三读数会对活跃会话读出「清」\n\n**`SKILL.md` 的「开轮互斥读法」要求三个读数，任一未满一个轮次即自退：**\n\n> 最近收班简报；晚于它的最新「开轮」标记；本车道 `pm:dispatched` 卡最新非本 session 的 `Claim:` 评论\n\n**实测：三个读数同时读作「清」，而当时有另一个会话正在本车道落 PR。**\n\n2026-08-24 ~02:55Z 接手 objectui `domain:ui` 席时的读数：\n\n| 读数 | 值 | 结论 |\n|---|---|---|\n| 最近收班简报 | 2026-08-23T17:57Z（~9 小时前） | 清 |\n| 最新开轮标记 | 同一条 17:57Z 的 R33 行 | 清 |\n| 本车道 `pm:dispatched` 卡的非本席 `Claim:` | **车道内零张 `pm:dispatched` 卡** | 清 |\n\n而事实是：会话 `68ad4d1a-c111-591c-9633-f2fb64fa1803` 从 19:00Z 一直干到 02:51Z，关闭约 14 张卡，并在 **02:50:2x–02:50:38Z 一趟队列合并了五个 PR**——距我开始读只有 16 分钟。\n\n**根因：读数 ③ 的谓词挂在 `pm:dispatched` 标签上，而该会话不用这个标签**——它的卡是 `pm:queue` → closed。于是「零张 `pm:dispatched`」这个读数，在语义上等同于「没人在座」，实际含义却是「这个会话不用这个标签」。两者在证据上不可区分。\n\n叠加第二个条件就成了陷阱：**过期的座位贴 + 未被使用的状态标签 = 与空席完全同形**。座位贴还停在「R33 刚派发」，读起来像一个死了九小时的席位。\n\n**真正定案的是协议没要求的一个读数**：本车道**最近关闭卡**上的认领评论。#4919 的 claim 写着 `dispatched by PM session 68ad4d1a-…`（02:09:40Z），其 dev 终报 02:41:26Z，PR #5941 合并 02:50:38Z。一次 `issue_read` 就够。\n\n### 建议的修法（供 skills 席裁量，非本席决定）\n\n在三读数后**追加第四读**：本车道 `state=CLOSED` 按 `updated_at` 降序取最新一张，读其 `Claim:` 评论的 session ID。理由：\n\n- 它对「用不用 `pm:dispatched`」免疫——任何会话干完活都会关卡；\n- 成本是一次 list + 一次 issue_read，与既有探针同量级；\n- 与既有第三读同向:**只会增加自退，永不清座位**，所以不引入新的并发风险。\n\n⚠️ 顺带：若认为「所有座位必须使用 `pm:dispatched`」才是根因，那属于对执行席协议的收紧，成本更高且无法对既有 dark session 追溯——本席倾向于修读数而非修写侧，但这是 skills 席的判断。\n\n---\n\n## 2. 平台事实变更 · REST 通道在部分会话中不可用\n\n`references/platform-readings.md` 与本仓多处座位贴都指示「用 REST `GET /repos/{o}/{r}/issues?labels=a,b` 做车道盘点」，理由是 MCP `list_issues` 的 `labels` 是 OR。\n\n**实测（2026-08-24，objectui 席容器）**：环境里 `GH_TOKEN` 存在，但直连返回 **403**：\n\n```\n{\"message\":\"GitHub access is not enabled for this session.\n  An org admin must connect the Claude GitHub App for this organization.\"}\n```\n\n拒绝点是 agent proxy，不是 GitHub。**该会话内一切 GitHub 操作只能走 MCP。**\n\n⚠️ 这条之所以要紧，是因为它让那条 REST 指令在这类会话里成为**必然失败且原因不显然**的一步——照做的人会先花一轮去查 403。\n\n**同时复验并确认：MCP `list_issues` 的 `labels` 确实是 OR 不是 AND**——请求 `domain:ui` ∩ `pm:dispatched` 返回 **135** 条，而车道自身只有 **132** 条。*结果比任一输入都宽*，就是判据。\n\n**无 REST 时的可行读法**（本轮全程使用，成本两次调用）：只请求**一个**标签，`fields` 带上 `labels`/`assignees`，用 `after` 游标翻页，**本地求交**。这正是协议本来写的「整车道一次读全，本地求交」。\n\n---\n\n## 3. 平台事实变更 · `<!-- os-dev-report -->` 标记过不了 sanitizer\n\n`SKILL.md`「收集」节规定 dev 终报首行为 `<!-- os-dev-report -->`，并以「标记评论在 = 报告完整」作为收集判据。\n\n**实测**：objectui 上该 HTML 注释被 GitHub 的 body sanitizer 吃掉。#5721 的 dev 第一份报告因此丢失标记，改用**纯文本**标记重发（评论 5390746283 取代前一条）。\n\n**后果是判据反向失效**：被清洗的报告与**从未送达**的报告在证据上不可区分，PM 会把一份完整终报读成缺席，进而误入探活/判死流程。\n\n建议：收集判据接受纯文本 `os-dev-report` 首行，并明写 ⛔ 不得仅凭 HTML 注释形式缺失就判定「报告未达」。\n\n---\n\n## 附：一条可机械化项（低优先，供裁量）\n\n本轮接手时修了**五张同形半状态**卡：`pm:queue` + 有 assignee + 其 PR 已合并 + 远端无分支。这个形状对候选查询（要 `pm:queue` **且**无 assignee）与死认领回收（要活认领）**同时不可见**，只能靠人接手时逐张发现。\n\nobjectstack 侧 `check-half-states.mjs` 已覆盖 label/assignee 半状态；这一形状（**assignee 存在但其闭卡 PR 已合并**）是否已在其判据内，本席未核。若否，值得加一条；若是，则说明 objectui 没有对应巡查（本仓无 `scripts/pm/`），那是另一回事。\n\n---\n\n**出处三件**：本卡全部读数来自 objectui `domain:ui` 席 R34 轮（2026-08-24 04:08Z–07:23Z）的实际操作，座位贴 objectui#5560 的 §2/§5 有同源记录。⛔ 本席不自评级、不认领——这是 skills 车道的卡。"
+}

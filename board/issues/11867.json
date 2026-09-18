@@ -1,0 +1,35 @@
+{
+  "number": 11867,
+  "kind": "issue",
+  "title": "[finding] The docs-drift PR comment still renders all unreachable bridge rows as one cause — the advisory path passes no ceiling, so `causes` reads `unmeasured` there",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T22:02:39Z",
+  "updated_at": "2026-08-25T14:03:36Z",
+  "closed_at": "2026-08-25T14:03:10Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11867",
+  "body": "Observed while implementing #11178 (PR #11865). Filed unassigned and unlabelled for grading. ⛔ Not a claim on anyone's time.\n\n## The reading\n\nPR #11865 splits `--bridge-coverage`'s unreachable rows into three derived causes (`discovery-gap` / `no-in-repo-registrar` / `undecided`) so that the auth ledger's `56 of 56` stops reading like the rest ledger's `46 of 87`. That split is computed against a **ceiling** — every `path:` any `packages/**` file declares — and `bridgeCoverageFrom` takes that ceiling as an **optional** argument.\n\nOnly the `--bridge-coverage` CLI arm passes one. The advisory path does not:\n\n```js\n// affected-docs.mjs, the PHASE 2 advisory run\nbridgeCoverage = bridgeCoverageFrom(ledgers, registrarByTail.keys());\n```\n\nso on that path every ledger's cause is `unmeasured` and the three counts are `null` — honest, by design, but it means the **PR-comment renderer never sees the split**. `.github/workflows/docs-drift-check.yml:262` still says:\n\n> the other **177** have no registrar `path:` tail to select them\n\nThat sentence is *accurate* about the mechanism and does not claim remediability — this is not a wrong number. But it is the surface a human actually reads on a PR, and it presents one population where there are measurably three: on `589758d22`, **14** remediable by discovery, **56** with no in-repo registrar anywhere on the surface, **107** undecided.\n\n## Why it was left out of PR #11865\n\nScope: that card's ruled deliverable was what `--bridge-coverage` reports. Wiring the advisory path is a separate decision with a real cost — the ceiling masks ~1093 files (~1.4s measured), and the advisory run happens per-PR whenever a change carries a bridgeable symbol, whereas `--bridge-coverage` is a single diff-free gate step.\n\n## The shape, if taken\n\nTwo hops, both small:\n\n1. pass a ceiling on the advisory path (or decide the cost is not worth paying and leave `unmeasured` — a legitimate answer);\n2. give `data.bridgeCoverage.causes` a render branch in `docs-drift-check.yml`. #9433 measured that a JSON key with no render branch is **half-wired** — published while no reader sees it — and `affected-docs.mjs --self-test` already pins the `bridgeCoverage` key at both ends for exactly that reason. A `causes` render branch would deserve the same pin.\n\n## Not claimed\n\n- **No opinion on whether the advisory should pay the ceiling cost.** The measurement is offered so the call is made on numbers.\n- Whether the drift comment's readers actually want the breakdown, versus a single \"and N of these are structural\" clause, was not investigated.\n\n## Refs\n\n#11178 · PR #11865 (where the split landed) · #9433 (the half-wired-key rule) · #9747"
+}

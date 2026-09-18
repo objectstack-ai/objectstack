@@ -1,0 +1,32 @@
+{
+  "number": 12291,
+  "kind": "issue",
+  "title": "[finding] check-optional-error-sink-contract.mjs's own header says \"both narrowings\" while it documents and pins three",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T16:36:32Z",
+  "updated_at": "2026-08-25T18:39:32Z",
+  "closed_at": "2026-08-25T18:37:51Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12291",
+  "body": "Observation filed while landing #11551 (PR #12290), which de-numbered the *workflow comment* describing this gate. Not a claim on anyone's time; unassigned, no `pm:queue`.\n\nNot repaired in that PR: #11551's declared file surface is `.github/workflows/lint.yml` and its dispatch ruled the gate script explicitly out of scope. So this is recorded rather than fixed.\n\n## What is stale\n\n`scripts/check-optional-error-sink-contract.mjs` documents **three** narrowings and pins all three, but two lines of its own prose still say there are two.\n\n`:60` — in the paragraph introducing the population:\n\n> Structural costs false positives instead, so **both narrowings below** are measured and their cost is printed on every run rather than argued in prose.\n\n`:789` — the self-test docblock:\n\n> Every limb observed FAILING and observed SILENT, plus **the two narrowings** pinned as positive counts.\n\nAgainst that, the file itself carries three narrowing sections — `:90` *\"Narrowing 1: a shape narrowed by an `as` CAST\"*, `:102` *\"Narrowing 2: purity\"*, and `:114` *\"Narrowing 3: a member type this SYNTACTIC matcher cannot resolve\"*, added by #11069 as the reject side of reading bare `Function` as a channel.\n\nAll three are pinned, not merely documented: `expectUnreadable` cases at `:915`, `:923` and `:934`, asserted at `:968`.\n\nAnd the gate says so out loud on every run:\n\n```\n✓ optional-error-sink-contract self-test: 19 case(s), both directions, all three narrowings pinned as counts, prefilter pinned over 9 channel(s) × 4 spellings plus its reject side.\n```\n\n```\n  narrowings: 3 shape(s) skipped as `as`-cast narrowings … ; 2 skipped as not-a-pure-sink … ; 3 skipped as UNREADABLE …\n```\n\nSo the runtime string was updated to \"all three\" when #11069 landed narrowing 3, and these two prose lines were not.\n\n## Why it is worth a line rather than nothing\n\nLow severity — no behaviour depends on it, and the printed census is correct. What makes it worth recording is that the header is the stated authority for this gate (AGENTS.md: *\"the script's own header is the authority on detail\"*), and a reader auditing whether the narrowings are all accounted for is told by the authority that there are two of them. `:60`'s sentence is specifically a *promise that the cost of every narrowing is measured and printed*, so undercounting the narrowings undercuts the one claim that paragraph exists to make.\n\n⚠️ **One deliberate non-instance**, so a repair does not over-reach: `:985` also says \"both narrowings\", but in the past tense about #11069's own history — *\"an unsound prefilter survived a self-test that pinned both narrowings as counts (#11069)\"*. That one is a correct statement about the state of the world before narrowing 3 existed and should be **left alone**.\n\n## Same family as the card that surfaced it\n\nThis is #11551's shape one level down — prose asserting a count with nothing that re-checks it, next to a runtime that prints the true number. #11551 was the workflow-comment instance; this is the gate-script instance of the same defect, in the same gate.\n\nThat is a data point for the open question #11551 raises (whether this shape wants a gate rather than repeated repairs): the drifted count and the correct count are both present in the same repository, one in a comment and one in a string literal a few hundred lines away.\n\n## Suggested shape, if triage takes it\n\nTwo words at `:60` and `:789` (\"both\"/\"the two\" → \"all three\", or better, a spelling with no integer in it at all, as PR #12290 did for the workflow comment). Leave `:985`.\n\n## Refs\n\n#9754 (the gate) · #11069 (added narrowing 3 and the \"all three\" runtime string) · #11551 / PR #12290 (the workflow-comment instance, where this was measured)"
+}

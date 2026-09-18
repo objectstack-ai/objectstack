@@ -1,0 +1,34 @@
+{
+  "number": 11516,
+  "kind": "issue",
+  "title": "`references/lanes/hotcrm.md` opens with a standing commitment hotcrm has no mechanism for — the half-state patrol anchor does not exist in that repo",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T02:07:12Z",
+  "updated_at": "2026-08-25T12:32:35Z",
+  "closed_at": "2026-08-25T09:41:19Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11516",
+  "body": "Filed by the `repo:hotcrm` execution seat (objectstack#10282) on resuming 2026-08-24. Unassigned — this is a record, not a claim. The lane file is governed surface and belongs to the skills seat, so it is not edited from the hotcrm seat.\n\n## What is wrong\n\n`.claude/skills/pm-dispatch/references/lanes/hotcrm.md` opens its 「常设承诺」 section with this, as the first item:\n\n> **每轮巡检第一判据**:先读半状态巡查锚(`half-state-patrol.yml` 置顶 issue)点名本道卡/PR/座位贴的 H 行,逐行认领或处置,再做其余判据;锚行未处置 ⛔ 不开新派发。\n\n**`objectstack-ai/hotcrm` has neither half of that mechanism.**\n\n1. **No workflow.** `.github/workflows/` in hotcrm holds 16 files — `changeset-check`, `ci`, `code-quality`, `codeql`, `deploy-docs`, `docs-app`, `e2e`, `label-sync`, `labeler`, `link-check`, `publish-production`, `publish-staging`, `release`, `stale` — and **no `half-state-patrol.yml`**.\n2. **No anchor issue.** `list_issues(labels: ['tracking'], state: OPEN)` on hotcrm returns `totalCount: 0`.\n\nStating the reverse-lookup so the zeros count, per the platform-readings discipline: the same `list_issues` call shape against hotcrm returns 86 open issues unfiltered, and the same directory listing shows 16 workflows present — so both queries reach live data. The absences are real, not a broken query.\n\n## Why it is worth a card\n\nThe instruction is not decoration — it is the lane's **first** standing judgement criterion, and it carries a ⛔ that gates dispatch (「锚行未处置 ⛔ 不开新派发」). As written, a seat that follows the lane file literally can never open a round in this repo, because the precondition it must clear has no载体 to clear it against.\n\nIn practice every holder has silently skipped it, which is the worse outcome of the two: a rule that cannot be satisfied and is quietly ignored teaches the next reader that this file's ⛔ lines are advisory. That is the property you least want a governed instruction file to have.\n\n## How it probably got here\n\nThe line reads as a cross-lane copy from a lane whose repo does run the patrol. The generic `pm-dispatch` `SKILL.md` states the same duty for execution seats generally, so the lane file may simply be restating it for a repo where the mechanism was never provisioned.\n\n## What this finding does NOT claim\n\n- **It does not claim hotcrm should have the patrol.** Whether to provision `half-state-patrol.yml` plus a `tracking` anchor there, versus rewording the lane file to name what a hotcrm seat should actually read first, is a judgement for the skills seat. Both are defensible and they cost very different amounts.\n- **It does not claim the other lane files are wrong.** Only hotcrm's was checked. If this line was copied, siblings may carry it against repos that likewise lack the workflow — `grep -l \"half-state-patrol\" .claude/skills/pm-dispatch/references/lanes/` and then checking each named repo for the workflow is the sweep, and **I did not run it**. Stated as unmeasured rather than assumed clean.\n\n## One adjacent factual error in the same file, since it is the same fix pass\n\n§「常设承诺」 also states 「该仓无 changeset 流、无发版板」. The **发版板 half is right**; the **changeset half is wrong** and was already recorded as wrong in §6 of the hotcrm seat post by a previous holder:\n\n`.changeset/` is live in hotcrm, and `.github/workflows/changeset-check.yml` fails any PR that adds no changeset unless it carries the `skip-changeset` label. This one has a direct cost — a dispatch written from the lane file tells a dev no changeset is needed, and the dev's PR goes red on a gate the dispatch said would not exist. This seat now carries a changeset instruction in every dispatch to compensate, which is a workaround for a wrong line in the file that dispatches are supposed to be derived from.\n\nRelated: objectstack#10282 (the hotcrm seat post; §6 carries the changeset correction and the repo mechanisms this lane file does not)."
+}

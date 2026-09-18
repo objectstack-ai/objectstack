@@ -1,0 +1,33 @@
+{
+  "number": 12087,
+  "kind": "pull_request",
+  "title": "fix(devx): reject an interpolating template literal in check-cross-package-test-inputs' PATH_LITERAL",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T08:19:06Z",
+  "updated_at": "2026-08-25T08:56:36Z",
+  "closed_at": "2026-08-25T08:56:35Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": "2026-08-25T08:56:35Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12087",
+  "body": "Fixes #11487\n\n## What\n\n`scripts/check-cross-package-test-inputs.mjs` states, twice, that an argument the scan cannot read leaves the DEPTH walk unchanged and only drops the NAME — the escape verdict is a lower bound. `PATH_LITERAL`'s character class (`[^'\"`]*`) excludes only quote characters, so a backtick-delimited argument holding no quotes matched it even when it was an **interpolating template**: `` `${someVar}` `` read as the literal segment text `${someVar}` and `walkLiteral()` counted it as ONE ordinary descent — the exact inverse of the stated trade. An unreadable argument was safe; a template read as readable was **less** safe than unreadable.\n\nFix: `PATH_LITERAL` has exactly **one** call site in this file (inside `pathExpression()`'s `resolve`/`join` argument walk — verified by grep before touching it), so narrowing it moves no other consumer's verdict. That call is now routed through a small `readablePathLiteral()` wrapper that rejects a backtick literal containing `${` and falls back to the existing unreadable-argument branch (name dropped, depth preserved). A single/double-quoted literal is unaffected — `${` inside one of those is ordinary text, never interpolation.\n\n**Resolver vs. filter (issue's Zone 2.3 question):** before this fix, \"never a wrong name\" held only because `findEscapingPackages()`'s downstream `statSync(...).isFile()` filter happened to drop the fabricated roster entry. After this fix, the resolver itself (`pathExpression()`) never produces a name for an interpolating template in the first place — the invariant is now true at the point the file's own comment makes the claim, not merely downstream of it.\n\n## Tests\n\n`--self-test` gains four cases at the site of the existing \"unreadable join() argument\" pair, using the issue's own fixture:\n\n- a control repeating the existing unreadable-argument case (still flags, depth -1)\n- the interpolating-template case (`` join(HERE, `${someVar}`, '../../other-pkg/src/y.ts') ``) — **now flags**, depth -1\n- the same template case yields **no name** for the path it builds (never a wrong name)\n- a **non-interpolating** backtick literal (`` `../../other-pkg/src/y.ts` ``) is unaffected — still flags AND is still correctly named `packages/other-pkg/src/y.ts`, proving the narrowing does not overshoot\n\nReverse-verified: reverting the call site to the raw `a.match(PATH_LITERAL)` (with the fix commit intact, so a real restore point exists) fails exactly the two new cases that assert the fix and none of the others — `2/113 self-test case(s) failed`. Restored and confirmed `git diff HEAD` clean before re-running.\n\n```\n$ node scripts/check-cross-package-test-inputs.mjs --self-test\n...\nAll 113 self-test cases passed.\n```\n\nDerived gate list (`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack scripts/check-cross-package-test-inputs.mjs`, re-run against HEAD `3a73f5644`) — all pass:\n\n```\ncheck:agent-test-spelling            exit=0\ncheck:cross-package-test-inputs      exit=0  (self-test 113/113 + OK: 16 package(s) read outside themselves, all declared)\ncheck:entry-guard                    exit=0\ncheck:parse-guard                    exit=0\ncheck:pnpm-filter-targets            exit=0\nnode scripts/check-ci-filter-parity.mjs  exit=0\n```\n\n`node scripts/pm/bare-root-worklist.mjs --self-test` — unaffected: no new scan-root population declared by this change (`none stale, none missing`).\n\n## Scope\n\n`NEW_URL_LITERAL` (three lines above `PATH_LITERAL`) has the identical character-class shape and the identical blind spot in a structurally different call path (`new URL(rel, import.meta.url)` seeds, not `resolve`/`join` arguments) — confirmed by direct regex test. Left untouched here per the issue's disposition and filed separately as #12085 for its own triage read, since an unmatched `NEW_URL_LITERAL` doesn't fall into the same \"cannot read, keep depth\" branch (the whole seed goes unrecognised instead), so the fix consequence isn't identical.\n\n## Changeset\n\nNone — `skip-changeset`: this PR touches only `scripts/check-cross-package-test-inputs.mjs`, a repo gate script under `scripts/**`, nothing published.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01UjM2ia8Av1v5NqfqQEQmC6)_"
+}

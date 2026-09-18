@@ -1,0 +1,35 @@
+{
+  "number": 12327,
+  "kind": "pull_request",
+  "title": "feat(spec): make `BaseValidationRuleShape` and `FilterCondition` nameable from the root entry",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T18:20:35Z",
+  "updated_at": "2026-08-25T19:03:39Z",
+  "closed_at": "2026-08-25T19:03:38Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": "2026-08-25T19:03:38Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12327",
+  "body": "Fixes #11709\n\n## What\n\nThe root entry of `@objectstack/spec` had two more structurally-mentioned but unnameable types beyond the three #11350 repaired: a **minimal one-file consumer program** — `export default defineStack({ objects: [] })` with no `@objectstack/spec/data` import anywhere in its program — still failed declaration emit with exactly two TS2883 diagnostics (`BaseValidationRuleShape` via the `object.zod-*` dist chunk, `FilterCondition` via `filter.zod-*`).\n\nPer the maintainer decision on #11709 (2026-08-25, option A′ — same invariant as #11350: a type that appears structurally in an entry's public declarations must be nameable from that same entry), the root entry now re-exports both types from their declaring `/data` modules:\n\n- `packages/spec/src/index.ts` — `export type { BaseValidationRuleShape } from './data/validation.zod'` and `export type { FilterCondition } from './data/filter.zod'` (+ a comment recording the ruling; note the declaring module of `BaseValidationRuleShape` is `data/validation.zod.ts`, not `data/object.zod.ts` — `object.zod-*` is the name of the dist *chunk* that carries its declaration)\n- `packages/spec/api-surface/root.json` — +2 rows via `gen:api-surface` (not hand-edited)\n- `packages/spec/export-origins/root.json` — +2 rows via `gen:export-origins` (not hand-edited)\n- `packages/spec/scripts/root-entry-type-nameability.pin.test.ts` — docblock program-scoping note extended to record the #11709 ruling and measurement; no mechanics changed\n- `.changeset/root-entry-nameability-data-delta.md` — additive, `@objectstack/spec` minor (same tier as the #11350 precedent)\n\nScope fence, as ruled: only these two names. The follow-up gate holding the invariant closed for every entry is #11986 — #11986 is not addressed here and remains open. The post-fix minimal-program probe came back with **zero** diagnostics, so no sixth/seventh unnameable name was observed.\n\n## Measurements (pin harness, `packages/spec/scripts/root-entry-type-nameability.pin.test.ts`)\n\n- **Pre-fix (dist built from the branch point, `8cdd696`):** ablating the `context.ts` fixture (mutation and restore both anchor-verified on disk) turned the pin red — vitest exit 1 with exactly the two TS2883 above, matching the card's repro criterion.\n- **Post-fix (dist rebuilt at HEAD, both names verified present in `dist/index.d.ts` before the run):** the same minimal one-file program is clean (vitest exit 0, zero TS diagnostics), and the unmutated harness passes 2/2 (consumer green + canary still red on the declaration-emit axis).\n\n## Verification (union re-run after the final commit, at `764d7bf4` — the run itself echoed `UNION_HEAD=764d7bf4`)\n\n- `pnpm --filter @objectstack/spec build` → exit 0; `check:generated` → \"✓ All 14 generated artifacts are up to date.\"\n- `pnpm --filter @objectstack/spec test` → \"Test Files  428 passed (428) / Tests  11401 passed (11401)\"; `typecheck` → exit 0 (includes `check:scripts-typecheck` + `check:test-typecheck`, which cover the pin harness file)\n- Dispatch-gate derivation re-run against the actual diff (`node scripts/pm/dispatch-gates.mjs`, no paths passed); the dispatch-named families plus the derived additions (`changeset-gate-self-tests`, `objectui-changeset`, `page-declaration-shape`, `governed-queue-guard`, and the test-file convention family: `query-options-erasure`, `type-check-coverage`, `type-check-debt`, `engine-double-contract`, `where-matcher`) all ran locally and green, with three declared exceptions that are environment shapes, not findings (details + evidence in the os-dev report on #11709): `dev-prereqs` (fresh worktree, 65 sibling dists unbuilt — spec's own dist is built and content-hash fresh; CI builds first), `governed-queue-guard` (reads `GITHUB_EVENT_PATH` only; unrunnable outside CI by construction), `type-check-debt --re-measure` (refuses loudly on an unbuilt workspace closure = NOT MEASURED; narrowing evidence: the only test-file change in this diff is docblock-comment-only — 0 non-`*`-prefixed changed lines — and spec's own `typecheck` covering that file is green).\n- `check:nul-bytes` (merged tree) → \"check-nul-bytes: OK (scanned 6824 text file(s) -- 6824 tracked, 0 untracked-not-ignored; skipped 7 binary; no raw ASCII control bytes).\"\n\nRoot-entry consumer packages (client/runtime etc.) are covered by the CI Type Check family per the dispatch's verification plan.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01NDGG54XF5gbTLdQzCtnaVV)_"
+}

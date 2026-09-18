@@ -1,0 +1,32 @@
+{
+  "number": 9652,
+  "kind": "issue",
+  "title": "Every better-auth-native /admin/ route refuses ObjectStack platform admins — the vendor gates on the legacy `user.role === 'admin'` scalar ADR-0068 D2 stopped synthesizing",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-18T14:21:47Z",
+  "updated_at": "2026-08-25T09:32:42Z",
+  "closed_at": "2026-08-25T09:32:42Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9652",
+  "body": "Measured 2026-08-18 while pinning `identity-auth.admin-lifecycle-operations` (#9482). Filed unassigned; not fixed there — the fix is a product decision, and #9482 is a tests-only card.\n\n## What happens\n\nOn a stock showcase boot with the better-auth `admin` plugin on (`OS_SCIM_ENABLED=true`, the documented ADR-0071 derivation), the **seeded platform admin** is refused by every better-auth-native `/admin/` endpoint:\n\n```\nPOST /api/v1/auth/admin/ban-user             403 {\"code\":\"YOU_ARE_NOT_ALLOWED_TO_BAN_USERS\"}\nPOST /api/v1/auth/admin/unban-user           403 {\"code\":\"YOU_ARE_NOT_ALLOWED_TO_BAN_USERS\"}\nPOST /api/v1/auth/admin/set-role             403 {\"code\":\"YOU_ARE_NOT_ALLOWED_TO_CHANGE_USERS_ROLE\"}\nPOST /api/v1/auth/admin/impersonate-user     403 {\"code\":\"YOU_ARE_NOT_ALLOWED_TO_IMPERSONATE_USERS\"}\nPOST /api/v1/auth/admin/revoke-user-sessions 403 {\"code\":\"YOU_ARE_NOT_ALLOWED_TO_REVOKE_USERS_SESSIONS\"}\nPOST /api/v1/auth/admin/list-user-sessions   403 {\"code\":\"YOU_ARE_NOT_ALLOWED_TO_LIST_USERS_SESSIONS\"}\nGET  /api/v1/auth/admin/list-users           403 {\"code\":\"YOU_ARE_NOT_ALLOWED_TO_LIST_USERS\"}\nGET  /api/v1/auth/admin/get-user             403 {\"code\":\"YOU_ARE_NOT_ALLOWED_TO_GET_USER\"}\n```\n\nThe admin identity is correct in every ObjectStack sense — `get-session` returns `positions: [\"user\",\"platform_admin\"]`, `isPlatformAdmin: true` — and `sys_user.role` is `'user'`.\n\n## Why\n\nTwo decisions that are each individually reasonable meet head-on:\n\n1. `auth-manager.ts` constructs the vendor plugin as `admin({ schema: buildAdminPluginSchema() })` — no `adminRoles`, no `adminUserIds` — so better-auth's default `adminRoles: ['admin']` applies and its `adminMiddleware` authorizes on the `user.role` scalar.\n2. **ADR-0068 D2 deliberately stopped producing that scalar.** `auth-manager.ts` says so in as many words: *\"rather than synthesizing `user.role = 'admin'`, both paths now contribute CANONICAL names to `user.positions`\"*, and *\"consumers must gate on `positions[]` / `isPlatformAdmin` … never on `user.role === 'admin'`\"*.\n\nConfirmed by construction, same boot: writing `role = 'admin'` onto that same admin row flips `ban-user`, `unban-user`, `list-users` and `impersonate-user` to **200** immediately (ban then persists `banned: true` / `ban_reason`, and the banned user's sign-in is refused `403 BANNED_USER`). So the endpoints work; only the identity predicate does not match.\n\n## Corroboration this is not a harness artifact\n\n- `admin-user-endpoints.ts` documents the same mechanism as the *reason it exists*: `/admin/create-user` and `/admin/set-user-password` are re-implemented as ObjectStack raw mounts because the stock endpoint's adminMiddleware \"would 403 a platform admin whose legacy `role` scalar was never synthesized\". Those two, plus `unlock-user`, `import-users` and `oauth2/toggle-disabled`, carry the ADR-0068 gate and work correctly (member 403 PERMISSION_DENIED, admin 2xx). The rest were never re-implemented.\n- `remove-user-atomicity.test.ts` works around it in-process: `userRow(engine, admin.userId).role = 'admin'` with the comment *\"better-auth's admin plugin authorizes by `user.role` (default `adminRoles: ['admin']`)\"*. That is why no existing test observes this — the unit tests synthesize the scalar a real deployment never gets.\n\n## User-visible impact\n\n`sys_user`'s `ban_user`, `unban_user` and `impersonate_user` actions are `type: 'api'` proxies onto exactly these routes, gated `requiresFeature: 'admin'`. On any deployment where the admin plugin is on (SCIM forces it, ADR-0071), the console renders Ban / Unban / Impersonate buttons that 403 for a platform admin.\n\nThis **fails closed** — no unauthorized access, and QA run #9401's \"no access-control hole\" verdict is unaffected. It is a broken admin capability, not an escalation. Same defect class as #4839 (an admin exemption reading a field nothing populates).\n\n## Options (a decision, not an obvious fix)\n\n1. Configure the vendor to ObjectStack's predicate — `admin({ adminRoles: [...] })` or `adminUserIds`, if better-auth can be pointed at `positions[]`. Smallest change; depends on what the vendor's option surface allows.\n2. Re-implement the remaining routes as ObjectStack raw mounts with the ADR-0068 gate, as `create-user` / `set-user-password` already are. Consistent with the established pattern; the most code.\n3. Synthesize `role = 'admin'` for platform admins again. Directly contradicts ADR-0068 D2 and would need that ADR revisited, not just an edit.\n\nOption 1 or 2 keeps ADR-0068 intact; 3 reopens it. Recommending 1 if the vendor supports a custom predicate, otherwise 2.\n\n## Repro\n\n`packages/qa/dogfood/test/admin-route-nonadmin-refusal.dogfood.test.ts` (landing on #9482) derives the whole `/admin/` surface and records this bucket; it deliberately asserts **neither** side of the admin's answer, so it stays green before and after a fix."
+}

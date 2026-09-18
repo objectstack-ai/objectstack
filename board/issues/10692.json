@@ -1,0 +1,34 @@
+{
+  "number": 10692,
+  "kind": "issue",
+  "title": "plugin-sharing declares six separate `MinimalLogger` types, now divergent after #10556",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-21T08:59:04Z",
+  "updated_at": "2026-08-25T17:13:02Z",
+  "closed_at": "2026-08-25T17:06:23Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 18,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10692",
+  "body": "Observation filed while landing PR #10691 (the #10556 sink paydown). Not a claim; unassigned. Not fixed there — out of that card's scope.\n\n`packages/plugins/plugin-sharing/src` declares **six** separate local types all named `MinimalLogger`, one per module:\n\n| file | shape (after #10691) |\n|---|---|\n| `bulk-recompute.ts` | `{ info?, warn, error? }` |\n| `rule-hooks.ts` | `{ info?, warn }` |\n| `record-share-cascade.ts` | `{ info?, warn }` |\n| `sharing-rule-provenance.ts` | `{ info?, warn? }` |\n| `record-orphan-cleanup.ts` | `{ info?: Function, warn?: Function }` |\n| `bu-tree-recompute.ts` | `{ info?, warn? }` |\n| `primary-bu-projection.ts` | `{ info?, warn? }` |\n\n(Seven rows, six of which spell the same name — `primary-bu-projection.ts` and `bu-tree-recompute.ts` are byte-identical to each other.)\n\n## Why this is worth recording rather than shrugging at\n\nThe duplication is not itself the defect; the **divergence** is. `#10556` made `bulk-recompute.ts`'s `warn` non-optional, and `tsc` immediately reported two call sites — `rule-hooks.ts:240` and `record-share-cascade.ts:328` — with the confusing form:\n\n```\nArgument of type 'MinimalLogger | undefined' is not assignable to parameter of type 'MinimalLogger | undefined'.\n  Type 'MinimalLogger' is not assignable to type 'MinimalLogger'. Two different types with this name exist, but they are unrelated.\n```\n\nBoth were repaired in #10691 (their `warn` is now required too, because they forward into the guaranteed sink). What is left is that **three of the seven still declare `warn?`** while three declare `warn`, under one name, in one package — so the next forwarding edge added between any of them re-opens the same seam, and the diagnostic that reports it names the same type on both sides.\n\n`record-orphan-cleanup.ts`'s `{ info?: Function, warn?: Function }` is a further wrinkle: bare `Function` accepts any callable, so it neither documents the call shape nor catches an arity mistake.\n\n## Note for whoever picks this up\n\n⚠️ Not simply \"extract one shared type\". Four of the seven declare **no `error` member at all**, which deliberately keeps them out of the `check:optional-error-sink` population (#9754) — collapsing them onto one shape that declares `error?` would pull four modules into that gate's scope and is a contract decision, not a refactor. The cheap and clearly-correct subset is the three already-identical `{ info?, warn? }` shapes; the rest wants a judgement about what this package's logger contract actually is.\n"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 11739,
+  "kind": "issue",
+  "title": "feat(spec,auth)!: one declared audience posture for who may self-register into an app — invite_only|email_domain|open, default invite_only",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "security"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T14:36:33Z",
+  "updated_at": "2026-08-25T06:44:23Z",
+  "closed_at": "2026-08-25T06:44:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11739",
+  "body": "Part of objectstack-ai/objectstack#11723 (epic — the ruling, the four-axis record, and the public correction of the migration shape all live there; read it first).\n\n## Why this exists (measured, 2026-08-24)\n\n\"Who may become a user of an app built on ObjectStack\" is not declarable today. It is an emergent property of `emailAndPassword.disableSignUp` + `emailVerification` + `ssoOnlyMode` (spec `AuthConfig`) + plugin-auth's `membershipPolicy` + an implicit fallback permission set. Nobody chose that combination, and its default is **open self-registration with no email verification**, with `reconcileMembership` (policy default `auto`) auto-binding each registrant into the env's org. There is **no email-domain allowlist anywhere in the repo** (zero hits; neighbouring-term counter-check passes — `disableSignUp` hits in the same files). The AI build agent's blueprint has **no auth surface at all**, so every AI-generated app inherits that default and the AI is structurally unable to declare otherwise.\n\n## Deliverable — ONE declared audience posture, enforced in ONE place\n\n**Vocabulary (ruled, closed):** `invite_only` | `email_domain` | `open`. Default when undeclared: **`invite_only`**. Follow the existing `MembershipPolicy` precedent in this package for the shape: a runtime value list, `isX()` entry validation, and a **loud refusal** of off-vocabulary values (never coerce to a permissive branch — that exact fail-open is why that precedent exists).\n\n**Invariants to enforce (this is the contract-tightening half — declared = enforced):**\n1. Posture `!== invite_only` ⇒ **email verification is forced on**. A configuration that opens self-registration while disabling verification must be refused loudly at parse/boot, not silently accepted: an unverified allowlisted-domain signup is impersonation of a colleague, and it makes the domain gate decorative.\n2. Posture `email_domain` ⇒ a non-empty domain list is required (completeness predicate; ADR-0078 family — \"declared but inert\" is the defect class this whole card is closing).\n3. Any posture that permits self-registration ⇒ the permission set a self-registrant receives must be **explicitly declared**, not left to the implicit `member_default` fallback. Refuse at the same predicate if it is missing or names a non-existent set.\n4. Enforcement lives at **one** point on the signup path, with distinct, registered error codes for: self-registration closed, email domain not allowed. Do not spread the check across call sites.\n\n**Placement judgement (yours, argue it in the report):** whether the posture belongs on `AuthConfig` in `packages/spec/src/system/auth-config.zod.ts` as one object (posture + domains + permission set) or as a sibling declaration. It must be authorable (it will need entries in the authorable-surface manifests) and readable by plugin-auth through a single accessor — the `getMembershipPolicy()` pattern in `auth-manager.ts` is the precedent for \"one source both paths read\", and it exists because a captured constructor option went stale against a live setting.\n\n**Breaking change posture (ruled):** ship as a **`minor`** changeset with a loud release note — the repo is inside its launch window and `scripts/check-changeset-no-major.mjs` refuses any new `major` (all publishable packages are in the Changesets `fixed` group). ⛔ Do not introduce a major; if you believe one is unavoidable, STOP and report `needs_decision`.\n\n**Tests:** the posture matrix (each vocabulary value × email signup / SSO JIT / admin-create); off-vocabulary value refused loudly; verification-forced invariant; empty-domain-list refusal; missing/dangling permission-set refusal; domain matching (case-insensitivity, subdomains, `+tag` addresses — state the ruling you implement and pin it); undeclared config resolves to `invite_only`; error codes distinct and registered.\n\n## Non-goals (ruled on the epic)\nToken join links, approval queues, per-app (as opposed to per-environment) postures, SCIM interplay, custom onboarding flows, and — explicitly dropped in the epic's public correction — any \"undeclared = legacy open\" limbo or warning-banner remediation surface.\n\n## Consumer to unblock\ncloud sub-issue (new-env provisioning + backfill of existing envs + posture switch) carries `Blocked-by:` pointing here. Your PR body MUST publish, in a dedicated section: the final field shape/name, the vocabulary values, the error codes, and the accessor cloud should read/write — that card consumes them verbatim.\n"
+}

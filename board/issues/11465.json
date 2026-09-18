@@ -1,0 +1,35 @@
+{
+  "number": 11465,
+  "kind": "issue",
+  "title": "[finding] packages/cli: four more documented `os …` invocations that do not resolve — two stale, two deliberate, and no gate over the class",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-23T20:59:44Z",
+  "updated_at": "2026-08-25T15:26:19Z",
+  "closed_at": "2026-08-25T15:26:19Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11465",
+  "body": "Found while implementing #11313, whose own \"worth checking in the same pass\" paragraph asked for this sweep and whose dispatch fenced the result to a finding rather than edits. Recording the measurement so the gate question can be decided on numbers instead of on the impression that this class is everywhere. No assignee.\n\n## What was measured\n\nEvery `` `os …` `` span (backticked, plus single/double-quoted spans starting `os ` or `$ os `) in the 107 non-test TypeScript sources under `packages/cli/src/**`, checked against the ids the built CLI actually registers. The id set is not transcribed: it is read from the built oclif `Config` (`packages/cli/bin/run.js`'s package, after building the package and its dependency closure), whose canonical ids use `:` and are converted to the user-typed form with `oclif.topicSeparator`.\n\n```\nscanned files: 107 | invocations found: 536 | unresolved: 6\n```\n\nTwo of the six were in #11313's own declared file surface and are fixed by its PR (`utils/auth-config.ts:36` and `:60`). The other four are listed below, and they do **not** all want the same treatment — which is the useful part of this finding.\n\n## The four remaining, triaged\n\n**Genuinely stale — a real, mechanical spelling defect:**\n\n1. `src/utils/api-client.ts:20` — `` `~/.objectstack/credentials.json` (written by `os projects switch`) `` . `projects` became `environments` in v5.0 with no aliases (ADR-0006); the registered id is `environments switch`, and the enumeration shows no `projects` topic and no id containing `project`. This is the exact twin of the line fixed in `auth-config.ts` under #11313 — same defect, one file over, left alone only because it is outside that card's surface.\n2. `src/commands/environments/create.ts:39` — \"Starter content is installed from the App Marketplace instead (`os packages install`, …)\". Registered ids under that topic are `package install` and `package publish`, singular. A plural typo, never a rename.\n\n**True negatives for a naive gate — the reason this is not just \"N spelling swaps\":**\n\n3. `src/commands/package/publish.ts:16` — \"(The legacy direct-to-environment `os publish` / `os rollback` commands, which wrote `sys_environment_revision`, have been removed.)\" The sentence is *about* commands that no longer exist. A gate that flags it is asking an author to delete accurate history.\n4. `src/utils/response-envelope.ts:14` — \"The three `os datasource` subcommands each carried their own transcription of …\". `datasource` is a real **topic** (`datasource introspect` / `list-tables` / `validate`), just not a runnable id on its own. The prose names the topic, correctly.\n\n## The gate question\n\n**There is no gate over this class today.** #11221's pin (`src/commands/environments/environments.test.ts`, `#10967 pin: examples resolve to a real command id`) reads `static override examples` via the TypeScript AST — it structurally cannot see a thrown-error string or a doc comment, and it only walks `src/commands/**`, so `src/utils/**` is outside its population entirely. #11313's new pin (`src/utils/auth-config.test.ts`) scans one file. Between them, four of the six findings above sit in no pin's population.\n\nWhat the numbers argue, though, is that the **error-path guidance** class — the one #11313 was graded on, where a user is already stuck and the recovery instruction also fails — has exactly **one** instance repo-wide, and it is fixed. Everything else the sweep found is a doc comment: an IDE-hover and code-reading concern, not a \"the tool is broken\" concern. So the honest options are not \"gate or N swaps\":\n\n- **A.** Fix items 1 and 2 as a small card, no gate. Cheapest; leaves the class ungated, so it returns.\n- **B.** Fix 1 and 2, and widen the existing `#10967` pin's population from `examples` arrays to *all* backticked invocations across `packages/cli/src/**`, with the self-retiring `EXCLUDED` map it already implements carrying items 3 and 4. That map is already built for exactly this — an exemption that asserts its own cause still holds — so the two true negatives would be declared rather than silently skipped, and an author who later deletes the legacy sentence is told to drop the exclusion.\n- **C.** As B, but teach the predicate to accept a bare topic name (item 4) and to recognise a prose-about-a-retired-command shape (item 3). Item 4 is mechanical (the topic list is right there in the `Config`); item 3 is not — \"have been removed\" is not a machine-readable marker, and inventing one is worse than an exclusion entry.\n\nRecommendation: **B**. It reuses a mechanism this package already has, already documents, and has already retired once, and it declares the two true negatives instead of narrowing the population until they disappear.\n\n## Reproducing\n\nThe sweep is ~40 lines: load `Config` from `packages/cli`, walk `src/**` skipping `*.test.ts` variants, regex `` `(?:\\\\?\\$ )?(os [^`\\n]*)` `` plus the quoted forms, drop a trailing backslash (an escaped closing backtick inside a template literal), and accept an invocation when the remainder equals a registered id or starts with one plus a space. Requires the CLI and its dependency closure built, since oclif's pattern strategy scans `dist/commands`.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

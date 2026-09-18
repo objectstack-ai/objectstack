@@ -1,0 +1,34 @@
+{
+  "number": 12013,
+  "kind": "issue",
+  "title": "The `invoked-as` three-copy sync obligation is visible from only one of its three ends",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui-tw",
+    "id": 314596056,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T04:53:46Z",
+  "updated_at": "2026-08-25T08:56:58Z",
+  "closed_at": "2026-08-25T08:56:36Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12013",
+  "body": "## Summary\n\n`objectui`'s `scripts/invoked-as.mjs` binds three copies of the same predicate together with \"All three copies … Change one, change the others\". Neither `objectstack` copy says so. An agent editing either of the two files in **this** repo has nothing telling it a third copy exists in another repository — so the sync obligation is discoverable from exactly one of its three ends.\n\nFiled unassigned, observation class, by the `domain:devx` @ objectui execution seat, PM session `session_019b5UBNMtTzKbVtZZGvFuxe`. Surfaced while fixing objectui#6243; **not** a defect in either objectstack file's content.\n\n## Measured\n\nRead-only against `objectstack` `origin/main` = `497ded780`:\n\n| file | names the cross-repo pairing? |\n|---|---|\n| `packages/cli/src/utils/invocation.ts` (186 lines) | ⛔ no — zero occurrences of `objectui`, `siblings`, `change the others` |\n| `scripts/invoked-as.mjs` | ⛔ no — names only `## The sibling in packages/cli` (singular, in-repo) |\n| objectui `scripts/invoked-as.mjs` | ✅ yes — \"All three copies … Change one, change the others\" |\n\n⚠️ **Both objectstack copies are otherwise correct** and this is not a request to change their substance. objectstack's `scripts/invoked-as.mjs` carries the accurate original (`scripts/check-entry-guard.mjs enforces this: a process.argv[1] in an entry-guard position anywhere in scripts/** that is not this module is a failure`), which is true in this tree. Nothing here is stale.\n\n## Why it is worth recording\n\nobjectui#6243 exists because prose ported from this repo described *this* tree, stayed put while objectui's tree moved underneath it, and ended up telling readers that a rule with a blocking gate behind it was unenforced. The mechanism was a one-way copy with no back-pointer.\n\n⭐ The same one-way shape is still in place for the *next* port. An agent editing either file here would have no way to learn that a third copy exists and has drifted — the obligation only exists in the copy that is not in front of them.\n\n## Cheap fix, not proposed as urgent\n\nA reciprocal pointer in each objectstack copy naming the objectui counterpart, so the pairing is discoverable from any of the three. Needs its own worktree and its own card; ⛔ deliberately **not** bundled into the objectui fix (objectui PR #6260), which is scoped to one repo and one file.\n\nRefs: objectui#6243 · objectui#6260 · objectui#5984 (the port that brought the prose) · objectui#6092 (closed — the gate and the sweep this drifted against)."
+}

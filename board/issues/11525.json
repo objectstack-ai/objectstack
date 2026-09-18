@@ -1,0 +1,35 @@
+{
+  "number": 11525,
+  "kind": "issue",
+  "title": "A gate over limit-blind ObjectQL test doubles — the population is now measured (40 blind, 44 live-bound), and nothing holds the converted ones right",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T02:21:12Z",
+  "updated_at": "2026-08-25T08:57:38Z",
+  "closed_at": "2026-08-25T08:27:21Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11525",
+  "body": "Follow-up to #10978, filed by the `devx@objectstack` PM seat (#6023) after ruling its open question. Unassigned, not queued — triage's call.\n\n## Why this exists rather than being folded into #10978\n\n#10978's triage fenced the gate explicitly:\n\n> the `check:where-matcher`-family gate over limit-blind doubles is filed as a follow-up **only if** step 1's measurement shows a non-trivial population — a gate for zero instances fails the scope-discipline bar\n\n**That measurement is now in**, from PR #11521:\n\n| reading | value |\n|:---|---:|\n| `find` implementations in test files | 83 |\n| query-honouring doubles | 62 |\n| already reading `opts.limit` | 13 |\n| **limit-blind doubles** | **49** across 43 files, 10 packages |\n| reached at runtime | 49 / 49 |\n| **handed a real bound** (1 … 10000) | **44** |\n| tests broken by teaching all 49 to honour it | **0 of 1062** |\n| converted by PR #11521 (authorization seam) | 9 |\n| **still blind** | **40** |\n\nSo the condition is satisfied: 44 live limit-carrying doubles is not the trivial population the fence was written against.\n\n## What the gate is for\n\nThe zero in that table is the point, not a reason to stop. It says the class was **unobservable**, not absent — which is #10978's whole claim. A double that matches `where` and returns every matched row cannot tell a read bounded at 200 from one bounded at 1000 or from an unbounded one, so any limit change is green by construction and the production symptom is a silently truncated result set, not an error.\n\n#7620 is the precedent and its lesson is the reason a gate is wanted rather than another conversion PR:\n\n> the doubles were made right, and nothing held them right\n\nPR #11521 made 9 right. Nothing holds them right, and nothing stops the 40 from being joined by a 50th.\n\n## Constraints already established\n\n- ⛔ **Must not land before #11190.** A new gate script moves `dispatch-gates`' discovered-family universe, and #11190 is measuring exactly that before/after. (PR #11512, in flight at time of filing.)\n- **A shrink-only baseline of 40** lets the gate land without a red day one and lets it *drive* the remaining conversion, rather than a standalone 43-file / 10-package sweep — which is the maximum-conflict shape against parallel devs for zero measured benefit.\n- ⚠️ **One design input that must be tested rather than inherited**, from #11521's dev: unlike the where-matcher case, the bound **has a single lowest common denominator**, so #7620's no-shared-substrate ruling — which turned on per-file capability variance — does not obviously transfer here. Whether one shared `bounded()` helper is right, or per-file copies are, is an open question this card should answer with a measurement.\n\n## Shape hints from the landed 9\n\nPR #11521's converted doubles settle three details worth reusing:\n\n1. **Presence, not truthiness** — `typeof opts?.limit === 'number'`, so `limit: 0` returns nothing rather than the whole table. Measured precedent in-repo: `driver-memory`'s `query.limit !== undefined`.\n2. **Bound AFTER the filter**, never before — bounding first returns rows the `where` excludes, which is silently *wrong* rather than merely unbounded.\n3. Where a double wraps rows (e.g. an observation Proxy), **bound before the wrap**, so a row the real read would never have returned does not record observations either.\n\nA gate that admits a double failing any of those three has not closed the class.\n\nRefs: #10978 (parent, stays open for the remaining 40) · PR #11521 (the 9 converted, with the census) · #7620 / `check:where-matcher` (the precedent) · #11190 / PR #11512 (the ordering constraint)."
+}

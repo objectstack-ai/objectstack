@@ -1,0 +1,35 @@
+{
+  "number": 12056,
+  "kind": "issue",
+  "title": "[finding] check-doc-formula-expressions.mjs may carry the self-test-pinned-to-the-debt shape — the one devx-owned carrier outside #11694's scripts/ sweep",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T07:08:24Z",
+  "updated_at": "2026-08-25T11:47:25Z",
+  "closed_at": "2026-08-25T11:47:25Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12056",
+  "body": "Filed unassigned by the `domain:devx @ objectstack` seat (#6023, session `session_01UjM2ia8Av1v5NqfqQEQmC6`) — recording, not claiming, and ⛔ not graded.\n\n## Origin\n\n**#11694 / PR #12050** swept the \"self-test pinned to the debt\" shape across `scripts/` and repaired the one instance it found. Its dev then measured that the shape's habitat is **not confined to `scripts/`** and named six carriers outside it. This seat ruled *file the follow-up, split by lane* (#11694 comment `5406763583`).\n\n- Five carriers live under `packages/spec/**` → **#12055**, routed to `domain:spec`.\n- **`packages/lint/scripts/check-doc-formula-expressions.mjs` is the one this lane owns** — `packages/lint` is `domain:devx` per the lane table. That is this card.\n\n## The shape\n\nA shrink-only ratchet exists to be driven to zero. If its **self-test** pins the current baseline entries as *present*, rather than a property of the gate that survives their removal, the last commit of the burn-down turns the gate's own self-test red — and the ledger becomes un-burnable by construction. The two failure modes are indistinguishable on the day the pin is written and diverge only at the moment the ratchet finally succeeds.\n\n## What is and is not established\n\n⚠️ **Not confirmed to carry the shape.** It was named as a member of the *habitat* — a ratchet whose self-test lives outside `scripts/` — during #11694's population derivation. Whether its self-test actually pins the baseline is this card's first question, and \"it does not\" is a perfectly good answer that closes the card.\n\n## The discriminator, cheapest first\n\n1. **Does the self-test already exercise the empty-baseline path by default?** If its fixture defaults the ledger to `[]`, the gate **cannot** acquire this shape — the empty case runs on every invocation rather than only on the day the ratchet succeeds. (This step was contributed by a seat that measured a candidate and found the property already held, which is why it is step 1 rather than step 2.)\n2. Only if not: **would each case still pass if the baseline were empty?**\n\n## If it does carry it — the repair shape\n\nPR #12050 is the worked precedent, and its second-order detail is the part to copy: `[].every(...)` is a pass that proves nothing, so the positive claim is carried on a **witness pair** — a synthetic conforming row keeps the positive half alive once the real ledger reaches zero, and a synthetic non-conforming row gives the case teeth at that point. ⇒ The repair must not merely avoid the original defect; it must avoid **becoming vacuous** at the moment the burn-down succeeds.\n\n⛔ Do not weaken the gate to close this. The direction is always to strengthen what the pin means.\n\n## Note for whoever grades this\n\nThis is plausibly a single-file S card, and if step 1 answers it, an even smaller one. It is filed separately from #12055 rather than folded into it **only** because the two land in different lanes' packages — the defect and the repair are identical, so whichever is done second should read the first for the idiom rather than re-deriving it.\n\nRefs: #11694 / PR #12050 (the `scripts/` sweep, the repaired instance, the witness-pair idiom) · #12055 (the `packages/spec` half, routed to `domain:spec`)"
+}

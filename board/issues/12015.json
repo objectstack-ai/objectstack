@@ -1,0 +1,34 @@
+{
+  "number": 12015,
+  "kind": "issue",
+  "title": "driver-sql: a declared field named `id` / `created_at` / `updated_at` is silently discarded by initObjects — declared type, length and constraints all ignored with no diagnostic",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-25T04:57:46Z",
+  "updated_at": "2026-08-25T15:31:16Z",
+  "closed_at": "2026-08-25T15:06:04Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12015",
+  "body": "Observed while converting `sql-driver-aggregation-conformance.test.ts` to the live-dialect matrix (#11456), where the fixture object declares `id: { type: 'text', name: 'id' }` and I needed to know what that produced on MySQL before trusting the conversion. Filed unassigned.\n\n## What was observed\n\n`SqlDriver.initObjects` emits the three builtin columns itself, then skips any declared field that collides with one — `packages/drivers/driver-sql/src/sql-driver.ts` @ `1958979fc6`:\n\n```ts\nconst builtinColumns = new Set(['id', 'created_at', 'updated_at']);\n// ...\nawait this.knex.schema.createTable(tableName, (table) => {\n  table.string('id').primary();\n  this.createAuditTimestampColumn(table, 'created_at');\n  this.createAuditTimestampColumn(table, 'updated_at');\n  if (obj.fields) {\n    for (const [name, field] of Object.entries(obj.fields)) {\n      if (builtinColumns.has(name)) continue;   // <- silent\n      this.createColumn(table, name, field, keyedColumns.get(name));\n    }\n  }\n});\n```\n\n`continue`, with no warning, no throw, and no record anywhere that the author's declaration was discarded. The same `builtinColumns` skip appears on the shard path (line ~8643) and governs the ADD COLUMN diff (line ~9125), so the declaration is inert on create, on alter and on shards alike.\n\nMeasured on live PostgreSQL 16.13: an object declaring `id: { type: 'text' }` gets `id varchar(255) PRIMARY KEY` — `table.string('id')`, not TEXT. The declared type is not what lands and nothing says so.\n\n## Why it matters\n\nThe driver is *right* to own its primary key; the defect is that it disagrees with the author in silence. An author who writes `id: { type: 'number' }` expecting a numeric key gets a varchar key and a green boot. That is the declared-≠-enforced shape this repo treats as a first-class hazard, and it is squarely in the family of #11431 (the string family ignores `maxLength`), #11875 (`signature`/`qrcode` bounds bind nothing) and #11374 — declared field metadata that the emitter quietly does not honour.\n\nIt bites hardest on the surface the platform most wants hard to get wrong: metadata objects authored by an AI, where a silently-dropped declaration produces a schema nobody inspects and a mismatch that only shows up as data behaving oddly much later.\n\n## The shape of a fix, and why this is filed rather than done\n\nTwo candidates, and choosing between them is a contract decision rather than an edit:\n\n- **Refuse** — `initObjects` throws on a declared field colliding with a builtin, naming the field and that the platform owns it. Loudest, matches \"declared = enforced\", but it is a new rejection door on an existing accept path, so it can break objects that boot today (the #11456 fixture is one, and it is presumably not alone).\n- **Warn at load time** — the shape #11674 just landed for a seed deferring a required column. Cheaper and non-breaking, and it leaves the door where it is.\n\nThere is also a prior question worth settling first: whether declaring `id` should be *meaningful* for the type of the key rather than merely refused, which is a bigger surface than either option above.\n\n⛔ No source change was made under #11456 — that card is a test-harness conversion and this is a driver-behaviour question, so it is recorded here instead.\n\nRelated: #11456 (where it was observed), #11431, #11875, #11374, #11674.\n"
+}

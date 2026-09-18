@@ -1,0 +1,32 @@
+{
+  "number": 12261,
+  "kind": "issue",
+  "title": "[finding] `pnpm lint` aborts with a V8 heap OOM (exit 134) at the default old-space limit — the script pins --stack-size but not --max-old-space-size",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T15:21:27Z",
+  "updated_at": "2026-08-25T17:47:45Z",
+  "closed_at": "2026-08-25T17:47:45Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12261",
+  "body": "## Observation\n\n`pnpm lint` — `node --stack-size=4000 node_modules/eslint/bin/eslint.js . --no-inline-config` — aborts on a developer machine with a V8 heap OOM, not with a lint result:\n\n```\n<--- Last few GCs --->\n[92947]  20367 ms: Scavenge (during sweeping) 4050.7 (4061.6) -> 4045.3 (4062.9) MB ... allocation failure;\n[92947]  22018 ms: Incremental Mark-Compact (reduce) 4078.6 (4089.6) -> 4055.4 (4059.4) MB ...\nFATAL ERROR: Ineffective mark-compacts near heap limit Allocation failed - JavaScript heap out of memory\n----- Native stack trace -----\n 1: 0x104576578 node::OOMErrorHandler(...)\n ...\n ELIFECYCLE  Command failed.\n```\n\nExit code **134** (SIGABRT), after ~22s. Measured 2026-08-25 on macOS 15 (darwin 25.5.0), Node v26.7.0, at `20b0fdb56`.\n\nRe-running the identical sweep with a larger heap is **green with zero findings**:\n\n```\nnode --stack-size=4000 --max-old-space-size=8192 node_modules/eslint/bin/eslint.js . --no-inline-config\n→ exit 0, no findings\n```\n\nSo there is no lint defect here. The sweep has simply grown to sit at the default V8 old-space limit: it died at ~4055 MB against a default ceiling of ~4096 MB, i.e. within about 1% of it.\n\n## Why it is worth recording\n\n1. **The script pins one memory knob and not the other.** `lint` already carries `--stack-size=4000`, so the memory profile of this sweep was considered once; `--max-old-space-size` was not set alongside it. Several other heavy commands in the repo do set it (`apps/docs`'s `build` uses `NODE_OPTIONS='--max-old-space-size=4096'`, and `next.config.mjs` caps `experimental.cpus` for the same class of reason).\n\n2. **The failure does not read as a lint failure.** A 60-line native stack trace and `ELIFECYCLE` is easy to mistake for a broken toolchain or a bad checkout. It is also a shape that a `cmd 2>&1 | tail -n` pipeline reports as *green*, since the crash text scrolls past and the pipe's exit code replaces the abort.\n\n3. **`.github/workflows/lint.yml` runs `pnpm lint` with no `NODE_OPTIONS`**, so CI depends on the runner's default heap having headroom the sweep is measurably close to exhausting. CI is green today; the margin is the point, not a current outage.\n\n## Not verified here\n\n- Whether the same sweep OOMs on the CI runner (it does not today — `Lint & Repo Gates` is green on `main`).\n- Whether the growth is one pathological rule/plugin or the file count. The measurement above does not separate those, and picking a fix (raise the ceiling vs. find the allocator) should probably start there.\n\n## Source\n\nFound while running the repo-wide lint as part of the verification for #12233. Not related to that change: the OOM reproduces on `20b0fdb56` with a clean tree.\n"
+}

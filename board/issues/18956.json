@@ -2,7 +2,7 @@
   "number": 18956,
   "kind": "pull_request",
   "title": "docs(sdui): three passages name the PIN as the generator version default, not the record",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -19,10 +19,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-18T07:38:18Z",
-  "updated_at": "2026-09-18T07:47:09Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-09-18T08:53:18Z",
+  "closed_at": "2026-09-18T08:53:17Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "merged_at": "2026-09-18T08:53:17Z",
   "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/18956",

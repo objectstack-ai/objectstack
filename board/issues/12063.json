@@ -1,0 +1,34 @@
+{
+  "number": 12063,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0126 — the platform customization model for packaged metadata (three regimes, one activation ledger)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T07:24:34Z",
+  "updated_at": "2026-08-25T11:12:13Z",
+  "closed_at": "2026-08-25T11:12:11Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": "2026-08-25T11:12:11Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12063",
+  "body": "Part of #12049 — the ADR half of the card; the survey half is [issue comment 5406807988](https://github.com/objectstack-ai/objectstack/issues/12049#issuecomment-5406807988). #12049 stays open until this ADR is merged and verified on origin/main.\n\n**Amended 2026-08-25 (commit `07f4e024`)** then **amended again (commit `a09d035a`)** — three maintainer rulings issued after the first draft, all, recorded verbatim and untranslated in the ADR's Deciders block: 「hook 也算代码类吧，我觉得也不需要修改。」 (hook reclassified out of the model — package code, no ledger row, no disable switch, sibling authoring open as today) and 「行为类 能否搞一个启用停用的功能，我不想要可以停用，然后克隆一个。」 (Regime C simplified to two independent primitives — enable/disable + clone-as-sibling — with **no designation linkage**: `replaced_by` and `cloned_from` dropped from the ledger; the base-moved notice withdrawn; the subflow guard attaches to disable); and 「动作 可能是需要开关的，因为有的 action 我不想启用。」 (action stays Regime C — the disable half has first-party maintainer pull on record and follows the flow legs when the post-merge implementation cards are cut; the clone half stays pre-charted; PM ruling record: [#12049 comment 5408117664](https://github.com/objectstack-ai/objectstack/issues/12049#issuecomment-5408117664)).\n\n## What this PR is\n\nOne new file: `docs/adr/0126-packaged-metadata-customization-model.md` — the platform customization model for packaged metadata, chartered by the maintainer on 2026-08-25 (verbatim in the ADR header). It records:\n\n- **D1** — three regimes assigned by what the artifact does: presentational → org overlay (the existing five types, unchanged); behavioral → locked base + enable/disable + clone-as-sibling, never silent override; structural → extend (`objectExtensions` / ADR-0029 D7 nav contributions). Code-only types stay outside the model, `hook` joins them by amendment ruling 1, and `action` stays in Regime C by amendment ruling 3 (internal package plumbing → code-only; customer-facing business behavior → disable + clone). Per-type assignment table from the measured survey.\n- **D2** — one generic data-plane activation ledger for the disable+clone family, proposed name `sys_metadata_activation`: (metadata_type, name, package_id, organization_id nullable-reserved) → active. That is the whole schema — no clone linkage is recorded, matching the landed #11513 posture. `sys_metadata` remains the sole definition ledger; consult points stay per-runtime.\n- **D3** — write authority: install-level rows now; operator-gated in multi-org postures (#10243 made durable in the correct direction); org column reserved; per-org pre-charted for record-change-triggered flows only, loud refusal for the other trigger types.\n- **D4** — the walls: the #6190 phantom-overlay wall (an `allowOrgOverride` flip on a behavioral type is a stop-and-report), sole-definition-ledger, upgrade-vs-choice separation (base version history and the ledger never meet), and the #12057 paper-protocol disposition.\n- **§7** — the packaged-flow worked example under the amended model: C1 whole-definition clone with a mandatory new name and no recorded ancestry · enable/disable as a single deliberate act at the `execute()` seam beside `FLOW_DISABLED`, retiring the #10243 `flowEnabled` map · disable refused while packaged subflow callers reference the target, callers named · Fork D leaning D2 Setup surface showing on/off only — no drift or ancestry surface. **Each direction is marked as settled only by this ADR's acceptance — the maintainer's merge is the ruling.**\n- **D5** — convergence: flows first (#11665 is Blocked-by the card this PR serves); the action-disable leg follows the flow legs (same ledger, same write authority; the action-clone half is not chartered); permission sets converge in a later card — with ruling 2 their landed semantics are already identical, so that card decides projection-vs-migration of `sys_permission_set.active` only; the five overlay types untouched.\n\n## Governed surface\n\n`docs/adr/**` — ⛔ this PR stays **DRAFT**: never ready, never queued, never auto-merged; the maintainer's hand-merge is the review record and the model's acceptance (Prime Directive #14).\n\n## Evidence\n\nThe survey (same card, comment above) is the measured base: 27-type census with the write-door tier partition, the four real mechanisms plus the paper one, per-type table, doc-promise measurements, and spot-checks of #11665's F1/F3/F4/F5 on `origin/main` `0b048393`. Out-of-scope finding filed unassigned: #12057 (`finding`) — #12057 remains open and is not addressed here.\n\n## Verification (docs-only diff; all local gates re-run at `a09d035a`, after the latest amendment commit)\n\nGate list re-derived by `node scripts/pm/dispatch-gates.mjs` (no paths — the script took the changed set from merge-base itself; stderr header named `objectstack-ai/objectstack` at `a09d035a`; same 5 families as the first draft):\n\n| Gate | Verdict line |\n|:--|:--|\n| `pnpm check:adr-anchors` | exit 0 (self-test + scan) |\n| `pnpm check:doc-authoring` | \"✓ doc authoring guard: … files clean — no bare metadata literals.\" |\n| `pnpm --filter @objectstack/lint run check:doc-formula-expressions` | \"✓ … 22 record-scoped formula example(s) across 422 files / 1449 TS blocks judged clean\" |\n| `pnpm check:pm-governed-merges` | \"✓ check-governed-merges --self-test: 129 assertions …\" |\n| `node scripts/check-adr-links.mjs` | \"✅ check-adr-links: 554 relative link destination(s) under docs/adr/ resolve\" |\n| `pnpm check:nul-bytes` | \"check-nul-bytes: OK (scanned 6696 text file(s) …)\" |\n\nPushed-file read-back: the remote blob for the ADR on this branch hashes `6ca6dd1d` — byte-identical to the local commit.\n\nNo changeset: docs-only ADR PR, `skip-changeset` per the ADR-0124 precedent (PR #9856); label applied via the additive endpoint and read back.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01KWRU3s15AJz7PGW7a7wdCh)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 12061,
+  "kind": "pull_request",
+  "title": "fix(scripts): declare check-ratchet-remedy-authority's scan surface — BLOCKED on a recorded verdict, do not merge unreviewed",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T07:18:32Z",
+  "updated_at": "2026-08-25T12:10:22Z",
+  "closed_at": "2026-08-25T12:10:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12061",
+  "body": "Part of #11935 — **implements one half, and must not be merged on that basis alone.** See the blocker below. The other half (`scripts/pm/bare-root-worklist.mjs`) is deliberately untouched and is outside this card's declared file surface.\n\n## ⛔ BLOCKER — this reverses a recorded, adjudicated verdict\n\nThe card asks for a watch-hint declaration on this gate. Implementing it works (evidence below), but the tree already carries a live verdict refusing exactly this, in `scripts/pm/bare-root-worklist.mjs`:\n\n```js\n['check:ratchet-remedy-authority SCRIPTS_DIR scripts', {\n  verdict: 'REFUSE-UNSPELLABLE',\n  why: 'reads the TOP LEVEL of the root only, and only two extensions — 115 of 226 (51%). The '\n    + 'idiom has no non-recursive spelling: a subtree hint claims every nested directory too',\n}],\n```\n\nThat verdict was upheld by a PM adjudication on **2026-08-23** closing #11155 — a prior filing of this *same* defect on this *same* gate — which declined the declaration option **outright**. #11935 appears to be an independent rediscovery filed two days later; nothing in it cites #11155.\n\n**I reproduced the refusal's measurement independently before finding it:** `corpusFiles()` is a flat `readdirSync`, 141 files, against 256 tracked under `scripts/` — 55%, the same side of the line. And the deeper claim holds as a proof, not a survey: to cover `scripts/check-x.mjs` a hint must collapse to `scripts`, and `plain === 'scripts'` necessarily also covers `scripts/pm/**` through the `startsWith(plain + '/')` branch. **No honest spelling exists.** `scripts/*` and `scripts/**` are byte-different and behaviourally identical.\n\n### Measured consequence of merging this as-is\n\nRunning the worklist on this branch, versus the unmodified tree:\n\n| | row for this gate |\n|---|---|\n| unmodified (`1e79aa4f8`) | `REFUSE-UNSPELLABLE` + matching reason — coherent |\n| this branch (`36c15e682`) | **`REACHABLE`** + the *same* refusal reason — self-contradictory |\n\n`node scripts/pm/bare-root-worklist.mjs --self-test` stays **green (EXIT=0)** across that flip. So merging this silently turns a coherent governance record into an incoherent one, and no gate catches it — exactly the outcome #11155's dev predicted and which is now measured rather than predicted.\n\n## What the branch does contain\n\nA provenance-only `ROOT_DIR_WATCH_HINTS = ['scripts/*']` plus seven self-test cases (20)–(26) run against the **real** `hintCovers` / `collapseHint` / `extractWatchHints`, every direction derived from the walked root and the live corpus rather than re-spelled. The flat glob, not the subtree form, because the gate's own header already spells its population `scripts/*.{mjs,mts}` and the sweep never recurses — 89 tracked files across nine subdirectories it never opens.\n\n**The card's assumed `scripts/**` spelling is wrong** even if the decision goes toward declaring: it would claim those 89 files outright. `scripts/*` claims 26. Neither changes what the tool matches.\n\n### The `--residue` pair, on the card's exact invocation\n\nNeither path is this gate's own file, so this is not the \"appears when I touch its own file\" false positive the card warns about.\n\n| | matched | undetermined |\n|---|---|---|\n| before | 14 | **54** (family here) |\n| after | **15** (family here) | 53 |\n\n```\n- pnpm check:ratchet-remedy-authority   [lint.yml]   matched via\n    scripts/check-doc-authoring.mjs ⇢ gate source 'scripts/*';\n    scripts/check-skills-token-ratchet.mjs ⇢ gate source 'scripts/*'\n```\n\n### The pin, shown going red\n\nA pin that only ever answers \"pass\" is not a pin. All four wrong declarations observed red, each mutation proven on disk first:\n\n| mutation | self-test | first cause named |\n|---|---|---|\n| `['scripts/**']` | **EXIT=1**, 1 case | flat sweep must use the flat glob |\n| `['scripts']` | **EXIT=1**, 5 cases | extractor sees `[]` |\n| `['packages/*']` | **EXIT=1**, 3 cases | 141 files uncovered |\n| `[]` | **EXIT=1**, 3 cases | declares no root at all |\n\nRestore leg green. Two mutations initially failed to land (a `perl -e` quoting fault) and were reported VOID rather than as passes — without the on-disk proof they would have run the unmutated file and read as a clean `EXIT=0`.\n\n### Over-reach, stated plainly\n\nA card touching only `scripts/pm/check-half-states.mjs` — which the sweep never reads — now derives this family too. That is the fabricated-lead cost the recorded verdict is about, and it is unavoidable in this vocabulary.\n\n## Gates\n\n9/9 green at `36c15e682`, derived with `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack`, each exit code captured before any pipe. `skip-changeset`: root `scripts/` tooling, nothing published.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01UjM2ia8Av1v5NqfqQEQmC6)_\n"
+}

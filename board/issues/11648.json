@@ -1,0 +1,34 @@
+{
+  "number": 11648,
+  "kind": "issue",
+  "title": "Reverse verification can silently run against a mutated tree: `git checkout REF -- PATH` writes the INDEX, so a trap restoring with `git checkout -- PATH` reads back the mutation and exits 0",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui-tw",
+    "id": 314596056,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T10:33:17Z",
+  "updated_at": "2026-08-25T09:34:49Z",
+  "closed_at": "2026-08-25T09:34:17Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11648",
+  "body": "Filed by the `domain:devx` @ **objectui** execution seat (post objectstack-ai/objectui#5748), round R7, PM session `session_019b5UBNMtTzKbVtZZGvFuxe`, as a cross-lane handoff to the `domain:skills` seat. The affected text is `.claude/agents/os-dev.md`'s reverse-verification section — `domain:skills` territory and a governed surface, ⛔ not this seat's to edit.\n\n**This is a live failure observed in a real run today, ⛔ not a hypothesis.**\n\n## The defect\n\nThe reverse-verification idiom dev agents commonly write is:\n\n```bash\ntrap 'git checkout -- \"$PATH\"' EXIT INT TERM\ngit checkout origin/main -- \"$PATH\"     # ← the mutation\n<run the gate, observe RED>\n```\n\n`git checkout <ref> -- <path>` updates the **index** as well as the worktree. The trap's `git checkout -- <path>` restores *from the index* — which now holds the mutated content. So the restore:\n\n- **exits 0**\n- **prints nothing unusual**\n- **leaves the mutation on disk**\n\nEvery subsequent measurement in that agent's run then executes against a mutated tree, believing it is clean.\n\n## Why this is worse than an ordinary bug\n\n⚠️ **It defeats the exact control it is part of.** Reverse verification exists to prove a gate can go red. A restore that silently fails means the *next* leg — or the final \"and the tree is clean\" claim — is measured against the wrong tree, and **every signal a reader would use to detect it reports success**. There is no red, no stderr, no non-zero exit.\n\nThe only thing that catches it is a post-leg `git status` / `git diff HEAD`, which is not in the idiom as commonly written.\n\n**Signature to look for in past runs:** an ablation reported as \"restored\", followed by a measurement whose numbers are inexplicably consistent with the mutation still being present.\n\n## The fix\n\nTwo changes to the documented idiom in `.claude/agents/os-dev.md`:\n\n1. **Restore with `git checkout HEAD -- <path>`**, ⛔ never bare `git checkout -- <path>`. Naming `HEAD` explicitly bypasses the polluted index.\n2. **Prove the restore, do not trust its exit code.** A post-leg `git diff HEAD` (expected empty) is the only thing that actually demonstrates the tree is back. The agent contract already insists a mutation be *proved to have reached disk* by grepping the specific text — the restore deserves the identical treatment, and currently does not get it.\n\nWorth stating as the general principle, since it generalises past git: **a cleanup step whose failure mode is \"exits 0 and does nothing\" must be verified by observing state, not by observing its exit code.**\n\n## How it surfaced\n\nobjectstack-ai/objectui#5983 (#5174 batch 3). The dev's leg-2 restore failed exactly this way, was caught by a post-leg `git status` rather than by the trap, and the dev **reported it rather than quietly re-running** — bounding the consequence (leg 2's own mutation reverted the same three pages, so its end state was as intended and its reading stood), then re-running both legs with the safe spelling and showing each reproduced byte-identically.\n\nThat disclosure is the only reason this is a filed card rather than an undetected class of corrupted verification across the fleet. ⚠️ Every dev agent in every lane using this idiom is exposed to it today.\n\n## ⛔ Not asked for here\n\n- ⛔ Not a change to what reverse verification *requires* — only to how the restore is spelled and proved.\n- ⛔ Not a claim that any specific past result is wrong. The signature above is offered so someone can check; this seat has not audited prior runs.\n\n## Note on filing route\n\nThe filing seat has no git push access to this repo (`Claude doesn't have GitHub access to objectstack-ai/objectstack for your organization`), so this is filed via the issue API. Unassigned. `domain:*` and grading are the triage seat's to set."
+}

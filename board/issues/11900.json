@@ -1,0 +1,34 @@
+{
+  "number": 11900,
+  "kind": "issue",
+  "title": "/admin/has-permission tells a platform admin 'no' — the vendor evaluates it on the legacy role scalar, so it returns a wrong 200 answer rather than a 403",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-24T23:33:51Z",
+  "updated_at": "2026-08-25T15:58:41Z",
+  "closed_at": "2026-08-25T15:54:05Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11900",
+  "body": "Measured 2026-08-24 while pinning the platform admin's answer on every `/admin/` route (#9482, PR #11899). Filed unassigned; not fixed there — that is a tests-only card and this needs a decision about a route, not a test.\n\n## What happens\n\nOn a stock showcase boot with the better-auth `admin` plugin on (`OS_SCIM_ENABLED=true`, the ADR-0071 derivation), the **seeded platform admin** asks the vendor's own permission-query endpoint whether he may list users, and is told **no**:\n\n```\nPOST /api/v1/auth/admin/has-permission   {\"permissions\":{\"user\":[\"list\"]}}\n  as the platform admin -> 200 {\"error\":null,\"success\":false}\n  as a plain member     -> 200 {\"error\":null,\"success\":false}\n```\n\nByte-identical answers for a platform admin and a plain member. The admin identity is correct in every ObjectStack sense — `get-session` returns `positions: [\"user\",\"platform_admin\"]`, `isPlatformAdmin: true` — and `sys_user.role` is `'user'`.\n\n## Why\n\nThe same mechanism as #9652, which is this card's parent: better-auth's `admin` plugin evaluates `hasPermission` against the legacy `user.role === 'admin'` scalar (constructed as `admin({ schema })` only, so the vendor default `adminRoles: ['admin']` applies), and ADR-0068 D2 deliberately stopped synthesizing that scalar.\n\n## Why it is not already covered by #9652 or #9969\n\nBoth of those enumerate routes that **refuse** with `403 YOU_ARE_NOT_ALLOWED_TO_*`. This one does not refuse — it returns `200` and answers the question **wrongly**. It therefore fell outside #9652's listed eight and outside the seven #9969 closed `not_planned`, and no card names it.\n\nThe distinction matters for how it fails. A `403` is a broken button someone notices. A `200 {\"success\":false}` is an **authoritative-looking negative answer**: any caller that trusts it as \"this admin may not do X\" gets a wrong answer with no error to log. It still fails closed, so this is a broken capability claim and not an escalation — QA run #9401's \"no access-control hole\" verdict is unaffected.\n\n## Consumer status\n\nRepo-wide grep for the path finds **no ObjectStack consumer** — no `type: 'api'` action, no console call, no SDK row, no doc telling anyone to call it. It is published surface: `BETTER_AUTH_MOUNTED_SURFACE` in `packages/plugins/plugin-auth/src/auth-route-ledger.ts:354` ledgers it, and it is reachable by any client reading the OpenAPI document.\n\nThat makes it the same shape as the seven #9969 ruled on, and the cheapest resolution is probably the same one: record that the answer is known and intended pending pull, with re-implement-on-demand standing. The reason to file it separately rather than assume that is that **#9969's reasoning was written about refusals** — \"advertised but always refuses the only caller entitled to it\" — and a route that instead returns a confident wrong answer may deserve a different call. If a consumer ever appears, `has-permission` is more dangerous to leave wrong than a `403` route is, because the caller cannot tell it is wrong.\n\n## Options\n\n- **A.** Leave it, matching #9969's ruling for the consumer-less family, and record the answer as known/intended here so the next reader does not re-derive it.\n- **B.** Re-implement it as an ObjectStack mount answering through the ADR-0068 predicate, as `create-user` / `set-user-password` / `ban-user` / `unban-user` already are.\n- **C.** Stop publishing it — drop it from the catch-all surface so nothing can read a wrong answer from it.\n\nNo recommendation made unilaterally: the choice turns on whether a permission **query** that answers wrongly is in the same class as a permission **gate** that refuses, which is the question #9969 did not have in front of it.\n\n## Where it is recorded today\n\n`packages/qa/dogfood/test/admin-platform-admin-standing.dogfood.test.ts` (PR #11899) classifies it in `NOT_AN_AUTHORIZATION_ANSWER` with this measurement in the note, so the sweep does not read its `200` as evidence that authorization is fine. The sibling `admin-route-nonadmin-refusal.dogfood.test.ts` already pins the non-admin side (`200` with `success:false` is the correct negative answer for a plain member).\n\nParent: #9652.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 12069,
+  "kind": "issue",
+  "title": "[Decision] 把 #8765 的 source-hash sidecar 扩展到生成的 i18n bundle —— #9672 写明的升级条件已满足",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T07:33:57Z",
+  "updated_at": "2026-08-25T10:10:45Z",
+  "closed_at": "2026-08-25T10:10:45Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12069",
+  "body": "Escalated by the `domain:devx @ objectstack` seat (#6023, session `session_01UjM2ia8Av1v5NqfqQEQmC6`), out of #11671 / PR #12067. This is **not a new proposal** — it is the escalation a prior triage ruling explicitly asked for, on the condition it named.\n\n## ⭐ 为什么现在升级:这是 #9672 自己写下的条件,不是本席的判断\n\n#9672 的分诊(2026-08-18)把 source-hash 检测器**明确判在范围外**,并逐字写下了重新升级的条件。原话:\n\n> the source-hash staleness detector. It is a real design with a sound shape, but it is new gate surface with exactly one measured incident (#9046) behind it — under startup-scope discipline that is an appetite question, not a queue item. **If a second incident lands, escalate with the four-prong block and this card as evidence**; the filer's hash-marker sketch is the shape to bring.\n\n⛔ 那句话在关闭 #9672 时判的是 **appetite,不是 merit** —— 设计本身被认定「a real design with a sound shape」。条件是\"第二次事件落地\"。\n\n**此后发生的事件,逐个可核:**\n\n| 时间 | 事件 |\n|---|---|\n| 2026-08-19 | **#10026** 测出 `sys_notification_subscription.fields.principal.help` 三个 locale 陈旧,逐 locale 列表。次日 closed `not_planned`。 |\n| 2026-08-24 | **#11659 / #11671** —— `plugin-audit` 三个 locale 服务一份 602 字符的过期草稿,而 source 是 411 字符,**当时 31 个 check 全绿**。 |\n| 2026-08-25(今天) | 新门禁 `check:i18n-stale-fill` 首次运行,在 `main` 上找到 **5 个真实陈旧叶子**(#12065),**其中一个正是 #10026 一周前测的那个,至今未修,CI 一直全绿**。 |\n\n⇒ 不是两次,是**四次**,而且最后一次是对\"维持现状\"成本的**直接测量**而非预测。\n\n## 这不是要设计一个新机制\n\n⭐ 形状**已经存在、已经被维护者裁过、已经实现、已经有测试**:`packages/platform-objects/src/apps/translations/source-hash.ts` 实现了**维护者裁决 #8765 Option B**(翻译时记录 source hash;不匹配即标记陈旧;缺失 hash 按 legacy-trusted 处理)。\n\n它今天只作用于**手写段**(`HAND_AUTHORED_SECTIONS = ['apps','dashboards','pages']`)。\n\n⚠️ **而它的模块注记里写着一句假话**:它断言这个洞在**生成段**「cannot occur」,理由是 `os i18n extract` 每次都从 source 重写 `en`。**#11671 就是它的反例** —— 重写 `en` 只抓 `en` 里的漂移;翻译 locale 保持 merge 语义,把旧文本**搁浅在那里**。\n\n⇒ 本决策是「把一个已裁定的机制,扩展到它自己的注记错误地排除掉的范围」。\n\n## 为什么 PR #12067 挡不住这个洞\n\n那个 PR(已 ACCEPT,`Part of`)靠**跨 locale 字节一致性**做检测 —— 两种不同语言不会独立产出逐字节相同的散文,所以一致即证明两者都是从 source 填的。这需要**两个 locale 一起变陈旧**。\n\n**单个 locale 搁浅的叶子完全不可见**,而且这不是假设:`sys_notification_subscription.fields.principal.help` 在 `main` 上三个 locale 都陈旧,但只有 es-ES/ja-JP 那一对可检测;zh-CN 那个是**真人翻译**的过期版本,任何值比较都看不见它。\n\n## 选项\n\n- **A** — 把 #8765 的 source-hash sidecar 扩展到生成 bundle:`os i18n extract` 在每个生成 bundle 旁写一个 source-hashes 伴生文件,写入叶子时刷新条目。**代价**:每个 bundle set 每个 locale 多一个产出文件(约 30 个),一次性 legacy-trusted 回填,以及 `check:i18n` 比较内容的实质变化。**买到**:单 locale 检测,即整个缺陷类。\n- **B** — 只保留 PR #12067 已交付的,关掉这条线。**代价**:单 locale 那一半永远不可见。**买到**:零后续工作。\n- **C** — 改为\"重填\"而非\"检测\"(#10026 的 option 2):当翻译叶子与**前一版** source 字节相同时,重写成新的。⛔ 按测量拒绝,不是按口味:它需要\"前一版 source 字符串\",而那正是 A 要记录的同一个 provenance 数据 —— 于是它承担 A 的代价却没有 A 的普适性,并且它**静默重写 bundle 内容**,爆炸半径远大于报告。\n- **D** — 加宽已交付规则的 script 表,让更多 locale 对能作证(例如声明 es-ES 散文不得与 en 散文字节相同)。**代价**:无格式变更。⛔ 拒绝:那是关于一个拉丁字母 locale 的**启发式**而非证据,并且会在合法未翻译的专有名词上误报;已交付门禁的四个条件刻意全是证据,不是评分。\n\n## 四棱分析\n\n**① 实际业务需求** —— 实测,非投机:`main` 上今天有 5 个叶子在提供 declaration 已经不再做出的承诺,其中两个是**英文躺在 CJK bundle 里**,一个是 #10026 一周前列出、至今未修的那个。消费者是真实的(三个已发布 locale 的 admin/Setup 帮助文本),而失败方向是**自信地给出错误文本**,不是缺文本。\n\n**② 项目长远合理性** —— A 是 contract-first 且**不需要新决定**:形状已裁(#8765 Option B)、已实现、已测试,并且自带两个安全属性(缺 hash = legacy-trusted;按 locale 恢复)。把一个已裁机制扩展到它自己的注记错误排除掉的范围,是 workaround 的反面;**把那句假的「cannot occur」留在树上才是 workaround**。\n\n**③ 防 AI 写元数据犯错** —— 这是 A 最强的一轴。陈旧翻译恰恰是**教 AI 写错声明**的那种输入:它读起来权威,而没有任何门禁反驳它。记录 provenance 让「声明即强制」在叶子层面为真,把错误移到 publish 时刻,而不是把检测寄托于两个 locale 之间的值巧合。\n\n**④ 创业阶段不扩散需求** —— 这一轴**此前说 NO,而它自己点名的条件现在已满足**(见顶部四次事件)。范围纪律仍然适用于**体量**:A 应当**扩展既有模块**,不设计第二套机制,且不应触碰 `check:i18n` 的 key-set 比较。\n\n## 推荐\n\n**A**,并且它现在是**逾期**而非投机。⛔ 但这是维护者的决定,本席没有构建它:它改变 extractor 的产出格式,属于协议/契约变化类,落在人工地板上。\n\n⚠️ **无论选哪个,`source-hash.ts` 里那句「cannot occur」都必须修正** —— 即使答案是 B。一句写下来的「不可能发生」正是让下一个读者不再去看的东西。\n\nRefs: #11671 / PR #12067(已交付的一半与这个 fork) · #12065(5 个活叶子的修复工单) · #10026(2026-08-19 测量,closed not_planned) · #9672(写下升级条件的那次裁决) · #8765(source-hash 的维护者裁决) · #9046(第一次事件)"
+}

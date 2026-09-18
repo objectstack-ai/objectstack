@@ -1,0 +1,35 @@
+{
+  "number": 11788,
+  "kind": "issue",
+  "title": "finding: qa/http-conformance imports `@objectstack/spec/contracts` without declaring `@objectstack/spec` — its TEST_DEBT ledger ceiling was measured against build-state-dependent resolution",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T16:30:39Z",
+  "updated_at": "2026-08-25T07:46:10Z",
+  "closed_at": "2026-08-25T07:46:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11788",
+  "body": "Filed unassigned — recording, not claiming. Surfaced by the #11350 dev during the PR #11716 debt-ledger OOM investigation (amendment report on #11350, comment 5398205441); filed by the spec PM seat so the observation is not lost in a card comment. Awaiting first-touch triage.\n\n## Observed\n\n`packages/qa/http-conformance` imports `@objectstack/spec/contracts` but does **not** declare `@objectstack/spec` in its `package.json` dependencies. Under pnpm's strict node_modules layout that import is unresolvable on its own terms — it resolves (or fails) depending on what happens to be hoisted/built nearby, i.e. on build state.\n\n## Why it matters beyond hygiene\n\n- The unresolvable import is one of the 3 recorded diagnostics in the package's TEST_DEBT ledger entry — so that entry's recorded ceiling was **measured against build-state-dependent resolution**, not against a stable program. A ledger whose baseline moves with build order can ratchet-trap a later innocent PR (its re-measure count can change with zero diff coupling), which is exactly the failure shape the #11716 investigation had to rule out this round.\n- This package's TEST_DEBT re-measure is also the program that OOMed in the #11716 investigation (root-caused there to a metadata-protocol declaration-specifier flip, fixed in that PR) — the two defects are independent, but they compound in the same measured program.\n\n## Suggested shape (dev's, unverified by this seat)\n\nDeclare `@objectstack/spec` as a dependency (or devDependency, matching how the package consumes it) in `packages/qa/http-conformance/package.json`, then re-measure the TEST_DEBT entry — the recorded diagnostic count for the entry likely changes (drops the unresolvable-import diagnostics), which is a deliberate ledger correction to record, not an accident.\n\n## Provenance\n\n- #11350 / PR #11716 rework amendment (comment 5398205441) — where the diagnostic triple and the build-state dependence were measured.\n- Dedup checked before filing: no open card records this (searches: `http-conformance spec dependency`, `undeclared dependency package.json`; the only hit, #3607, is a closed, unrelated IHttpServer-contract card)."
+}

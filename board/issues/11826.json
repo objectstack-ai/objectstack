@@ -1,0 +1,34 @@
+{
+  "number": 11826,
+  "kind": "issue",
+  "title": "[finding] objectql's consumer copy of `IntrospectedColumn.isUnique` under-specifies it after #11654 excluded PRIMARY KEYs",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T18:53:31Z",
+  "updated_at": "2026-08-25T09:25:41Z",
+  "closed_at": "2026-08-25T08:31:49Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11826",
+  "body": "Found while implementing #11654, which stops `SqlDriver.introspectUniqueConstraints` reporting a PRIMARY KEY column as unique on SQLite (the arm now skips `origin: 'pk'` index rows), bringing it in line with the PG/MySQL arms.\n\nThis is the same drift class as **#11655**, one round later and one clause over — and #11655 was filed against #11202's own landing for exactly this file and this sentence.\n\n## What\n\n`isUnique` is declared twice by design: the **producer's** declaration on `SqlDriver`'s `IntrospectedColumn` in `packages/drivers/driver-sql/src/sql-driver.ts` is the contract sentence, and `packages/objectql/src/util.ts` carries the **consumer-side copy** immediately above `introspectedSchemaToObjects`, the flag's one real consumer. That copy says so itself:\n\n> The producer's declaration — `SqlDriver`'s `IntrospectedColumn.isUnique` in `@objectstack/driver-sql` — is the contract sentence; this is the consumer-side copy of the same key and **must not drift from it**.\n\nAfter #11654 the producer's sentence states that a PRIMARY KEY is never reported through this flag, on any dialect and for any key type, and why that loses nothing (key membership is carried losslessly by `primaryKeys` / `primaryKey`). The consumer copy still reads:\n\n```text\nWhether this column ALONE carries a single-column unique constraint —\ntrue iff some unique constraint covers this column and nothing else.\n```\n\nA primary key is, in ordinary SQL reading, \"a unique constraint covering this column and nothing else\" — so the copy now reads as *including* keys, which is what the producer stopped doing. The composite half of the sentence (#11202) is still accurate; only the key half drifted.\n\n## Why it matters\n\nIt is documentation only — no behaviour depends on it, and `introspectedSchemaToObjects` is unchanged. The cost is the one #11655 already paid: the sentence a reader consults sits directly above the code that acts on the flag, and it describes semantics the producer no longer has. The consumer's own test fixture (`packages/objectql/src/util.test.ts`) already models a key column as `{ primaryKey: true }` with no `isUnique`, so the *data* agrees with the new convention while the *prose* does not.\n\n## Suggested fix\n\nOne sentence in `packages/objectql/src/util.ts`, mirroring the producer's wording: `isUnique` means a **declared** single-column UNIQUE constraint; a PRIMARY KEY is not one, and key membership is reported through `primaryKey` / `primaryKeys` instead. No code change.\n\n## Why it was not fixed in #11654's PR\n\nIt fails the bounded in-place exemption's fourth condition — same gate family, no new verification surface. `packages/objectql/src` pulls in gate families that PR's diff otherwise never matches (`check:durability-log-level` and `check-engine-split-ratio`, which PR #11657 measured explicitly when it amended this same file under a PM authorization). That is a new verification surface, not a free ride, so the default applies: filed unassigned, listed, not touched.\n\nFiled unassigned, per the finding rule.\n"
+}

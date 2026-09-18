@@ -1,0 +1,35 @@
+{
+  "number": 11598,
+  "kind": "issue",
+  "title": "`os init` scaffolds `NAME_item.ts` while the registry declares `*.object.ts` — after #11071 the same project gets both spellings",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T07:31:32Z",
+  "updated_at": "2026-08-25T09:05:24Z",
+  "closed_at": "2026-08-25T09:05:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11598",
+  "body": "**Recording only.** Found while implementing #11071 (converging `os generate` on the registry's `NAME.TYPE.ts` convention). ⛔ Not claimed, no assignee, no `domain:*` label — routing is triage's. Dedup was run at filing (two searches, no duplicate; the nearest hits #11237 and #9144 are closed and about different things).\n\n## What was measured\n\n`os init` scaffolds its starter object as `src/objects/__name___item.ts`, which materializes as `src/objects/<namespace>_item.ts` — no type infix. `packages/cli/src/commands/init.ts`, the `srcFiles` table (two entries, both spellings identical):\n\n```\n'src/objects/__name___item.ts': (_name, namespace) => `import * as Data from '@objectstack/spec/data';\n```\n\n`DEFAULT_METADATA_TYPE_REGISTRY` declares `object` as `**/*.object.ts` / `.yml` / `.json`. Measured with `node:path`'s `matchesGlob` against the registry read at runtime: `src/objects/customer.ts` matches **zero** of those three patterns; `src/objects/customer.object.ts` matches exactly one.\n\n## ⚠️ What is NOT established — this is weaker than #11071's case, deliberately\n\nThis is **not** the silent-strip shape. The project `os init` writes declares its objects in code:\n\n```ts\nimport * as objects from './src/objects';\nexport default defineStack({ manifest: { … }, objects: Object.values(objects) });\n```\n\nThat is a code-declared load path where the filename genuinely does not matter — the barrel import resolves by module specifier, not by glob. So the scaffolded app **works**, and nothing here is reported as invisible. Whoever picks this up should re-measure before treating it as a defect rather than a consistency question.\n\n## Why it is still worth recording\n\nAfter #11071 lands, `os generate` writes `NAME.TYPE.ts` for every type. An author who runs `os init` and then `os g object customer` in the same project ends up with `src/objects/acme_item.ts` beside `src/objects/customer.object.ts` — two spellings for the same metadata type, in one directory, from two commands in the same CLI. The scaffold is also the first thing a new author reads as the house convention, and it now teaches the one the rest of the toolchain moved off.\n\nThe second, cheaper question underneath is the same one #11071 asked: whether the scaffold or the registry is the thing that should move. The example apps (`examples/app-crm/src/objects/account.object.ts`) and the manifest's own glob keys already speak the registry's shape, which is what settled it for `os generate`.\n\n## Cost note\n\nNot folded into #11071 on scope grounds: that card's declared file surface is the six generators under `packages/cli/src/**` and their test twins, and `init.ts` carries its own separate test twins (`init.test.ts`, `init-scaffold-authoring-rules.test.ts`, `scaffold-workspace-consistency.test.ts`, `init-created-files-summary.e2e.test.ts` — the last one asserts the created-files summary, which a rename moves). That is a new verification surface, not a bounded in-place fix.\n\n## Provenance\n\nMeasured on `origin/main` at `2dc0a770` while implementing #11071 · related #11025 (the `skill`-only predecessor) · #10359 (the silent-strip ruling both descend from).\n"
+}

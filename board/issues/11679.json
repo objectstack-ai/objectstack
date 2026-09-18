@@ -1,0 +1,32 @@
+{
+  "number": 11679,
+  "kind": "issue",
+  "title": "`deleteMetaItem` is a declared member whose request schema declares 2 of the 8 members the REST reset door sends, so the call-site cast cannot come off",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T11:58:13Z",
+  "updated_at": "2026-08-25T09:09:12Z",
+  "closed_at": "2026-08-25T09:08:25Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11679",
+  "body": "Found while implementing #11145 (the `publishMetaItem` consumer cleanup). This is the sharper of the two siblings that turned up, because it reads as already done and is not.\n\n## Measured on `origin/main` @ `c251ef4213`\n\n`MetadataProtocol` **does** declare the member (`packages/spec/src/api/protocol.zod.ts`, in the same optional family as `getMetaItemLayered`):\n\n```ts\ndeleteMetaItem?(request: DeleteMetaItemRequest): Promise<DeleteMetaItemResponse>;\n```\n\nBut `DeleteMetaItemRequestSchema` (line 1121) declares exactly two members:\n\n```ts\nexport const DeleteMetaItemRequestSchema = lazySchema(() => z.object({\n  type: z.string().describe('Metadata type name'),\n  name: z.string().describe('Item name'),\n}));\n```\n\nThe REST reset door (`packages/rest/src/rest-server.ts:5704`) sends **eight**:\n\n```ts\nconst result = await (p as any).deleteMetaItem({\n    type: req.params.type,\n    name: req.params.name,\n    organizationId,\n    ...(environmentId ? { environmentId } : {}),\n    ...(parentVersion !== undefined ? { parentVersion } : {}),\n    ...(actor ? { actor } : {}),\n    ...(stateParam ? { state: stateParam } : {}),\n    ...(dropStorage ? { dropStorage: true } : {}),\n});\n```\n\nSix of the eight — `organizationId`, `environmentId`, `parentVersion`, `actor`, `state`, `dropStorage` — are on the wire today with no declaration behind them. The guard at `5640` (`if (!(p as any).deleteMetaItem)`) is cast for the same reason the call is.\n\n## Why the declared member is not enough here, and why that is the trap\n\n#11145 removed the `publishMetaItem` cast the moment the member was declared, because the cast there was load-bearing on **member existence** — measured as `TS2339`, not `TS2353`. This door is the opposite half: the member exists, so `TS2339` is already gone, and what remains is genuinely a **request-shape** problem. Removing the cast here would surface `TS2353` on six keys rather than compiling clean.\n\nThat difference matters for triage: a reader scanning for undeclared members finds this door declared and moves on, while its request surface is emptier than any other write door's. `organizationId` in particular is load-bearing for tenant scoping — the comment above the call site (`~5690`) records that passing no organization would reset the env-wide row for every tenant, i.e. the one member most worth having a contract is among the undeclared six.\n\n## What the decision is\n\nThe same one #11006 took for publish, on a bigger surface: declare the request members that are really part of the contract, and decide per member which are transport-level rather than protocol (`environmentId` is already ruled transport-level by #9741, 2026-08-18, and belongs in `packages/rest`'s `TransportScopedMetaRequest` envelope, not in the schema). `_skipSeedApply`-style internal coordination keys, if any exist here, stay out on the same reasoning #11426 recorded for publish.\n\n`domain:spec` decision; #11145's engine-lane PR deliberately did not touch it — the bounded in-place exemption does not apply, since the correct shape is not pinned by existing evidence. ⛔ Nothing about this door is addressed in that PR.\n\nRelated: #11006 (the ruling this mirrors) · #11426 (its spec landing) · #9741 / #9726 (the meta-**read** schemas' equivalent catch-up) · #9805 (the non-door helper literals) · ADR-0005 (reset-to-artifact-default semantics) · ADR-0076 D9\n"
+}

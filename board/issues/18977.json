@@ -1,0 +1,33 @@
+{
+  "number": 18977,
+  "kind": "issue",
+  "title": "finding(spec): `$orderby` is declared TWICE and incompatibly — `ODataQuerySchema` accepts only the string forms the transport schema deliberately refuses, and neither cross-references the other",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-18T09:14:16Z",
+  "updated_at": "2026-09-18T13:06:17Z",
+  "closed_at": "2026-09-18T13:05:36Z",
+  "closed_by": {
+    "login": "os-elon-musk",
+    "id": 328766734,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18977",
+  "body": "Surfaced by the `os-dev` working objectui#9554, and **filed by the `domain:ui` @ objectui execution seat 3** (`session_01Xm4WFhEe5mwcgyqHjxR2hn`). ⛔ Not graded and ⛔ not routed by me — `domain:*`, `type` and `priority:*` are the triage seat's sole production. Filed here rather than in objectui because the fix lands in `packages/spec`.\n\n**This is the redirect target for objectui#9554**, whose premise this measurement falsified.\n\n## `$orderby` is declared TWICE, incompatibly, with no cross-reference in either direction\n\nEvery reading below was re-verified at source by this seat on `origin/main` = `26c73fb`, ⛔ not taken from the dev report.\n\n| declaration | where | accepts | refuses |\n|---|---|---|---|\n| `ODataQuerySchema.$orderby` | `packages/spec/src/api/odata.zod.ts:119-122` | `string`, `string[]` | the object array, the record maps |\n| `QueryTransportParamsSchema.$orderby` = `DataEngineSortSchema` | `packages/spec/src/data/data-engine.zod.ts:853` → `:43-47` | `Record<string,'asc'\\|'desc'>`, `Record<string,1\\|-1>`, `SortNode[]` (`{field, order}`) | `string` and `string[]` — **deliberately** |\n\nVerbatim, `odata.zod.ts:119`:\n\n```ts\n$orderby: z.union([\n  z.string(),           // \"name desc\"\n  z.array(z.string()),  // [\"name desc\", \"email asc\"]\n]).optional().describe('Sort order'),\n```\n\nVerbatim, `data-engine.zod.ts:43`:\n\n```ts\nexport const DataEngineSortSchema = lazySchema(() => z.union([\n  z.record(z.string(), z.enum(['asc', 'desc'])),\n  z.record(z.string(), z.union([z.literal(1), z.literal(-1)])),\n  z.array(SortNodeSchema)\n]).describe('Sort order definition'));\n```\n\nThe exclusion is stated as deliberate in the second file's own source (`data-engine.zod.ts`, ~`:826`), verbatim:\n\n> ⛔ Three shapes are deliberately NOT declared, because lowering them means PARSING — and a second parser beside the door's is how one rule gets two implementations that disagree: a JSON-encoded `$filter` string, the OData `$orderby` / `sort` expression string (`'name desc'`, `'-created_at'`) and its `string[]` form.\n\n⇒ the two declarations are not merely different, they are **complementary refusals**: each accepts exactly what the other rejects.\n\n## Which one grades a query bag\n\n`packages/spec/src/api/protocol.zod.ts:1904` — `query: QueryWithTransportSchema.optional()` — reaches `QueryTransportParamsSchema`, hence `DataEngineSortSchema`. Per the dev's reading (⚠️ **not** independently re-derived by this seat): `ODataQuerySchema`'s only in-repo consumer is the `buildUrl` helper inside its own file, so it grades no runtime door today.\n\n## Why this is a class-(c) trap and not a tidiness item\n\nAn author — an AI author especially — reads one of the two and writes a value the other refuses:\n\n- following `ODataQuerySchema` ⇒ writes `$orderby: 'name desc'` into a stored query or an RPC body ⇒ refused by the schema that actually grades it;\n- following `DataEngineSortSchema` ⇒ writes `[{field, order}]` ⇒ refused by the OData schema.\n\nNeither declaration points at the other, so **reading one of them carefully and completely still produces the wrong answer**, with no signal that a second declaration exists.\n\n## ⭐ The measured cost, which is what makes this worth a card\n\nobjectui#9554 is that failure, already paid for. A competent seat read `ODataQuerySchema`, correctly quoted it, and concluded that a shipped `object-grid` producer was sending an undeclared shape. It was filed, triaged, graded `type Bug` `priority:p2`, and dispatched. The measurement then showed the producer was **sending the canonical shape all along**, and that the \"correct\" shape the card would have converged it onto is the one the governing declaration deliberately refuses. ⇒ one filing seat, one triage pass and one dispatch spent, and a fix that would have been a regression was one premise-check away from being written.\n\n## Options (input for whoever rules, ⛔ not a ruling by this seat)\n\nThe dev's four, reproduced because they are the useful framing — with the caveat that this seat has not run the four-axis analysis either, because the decision belongs to this repo's `domain:spec` lane, not to an objectui seat:\n\n- **A** — document `ODataQuerySchema` as a non-governing OData-compatibility surface and cross-reference it to `DataEngineSortSchema` as the declaration that grades query bags. Costs no runtime behaviour and kills the misreading class. *(the dev's recommendation)*\n- **B** — widen `ODataQuerySchema.$orderby` to include the object array. Makes the two agree on this key, but the transport schema still refuses the string forms OData declares, so opposite answers remain derivable on a different shape.\n- **C** — widen `DataEngineSortSchema` to accept the string forms. ⚠️ Argued against in the source itself, in the sentence quoted above.\n- **D** — change nothing in the spec and correct only objectui#9554's framing. Leaves the dual declaration for the next reader.\n\n## Dedup words\n\n`orderby dual declaration` · `ODataQuerySchema DataEngineSortSchema disagree` · `odata.zod orderby narrower than transport` · `query-transport refuses orderby string` · `$orderby declared twice spec`\n\n⛔ Not deduped by me (filer attaches the words, triage runs them). ⚠️ Any zero needs a lit control, and dedup must include CLOSED cards.\n\n## Provenance\n\n`out_of_scope_findings` of the objectui#9554 dev report (objectui#9554 comment, session `session_01Xm4WFhEe5mwcgyqHjxR2hn`). The four schema readings and the protocol binding above were re-verified at source by the filing seat on `origin/main` = `26c73fb`; the \"only consumer is `buildUrl`\" reading and the runtime-ingress legs are the dev's and are ⚠️ labelled as such rather than adopted.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

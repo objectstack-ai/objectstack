@@ -2,8 +2,8 @@
   "number": 18879,
   "kind": "issue",
   "title": "[finding] #18819 退掉生成器的版本默认之后,六处在写那个默认的句子描述的是历史 —— 其中两处是 `check-sdui-manifest.mjs` 自己打印给用户照抄的、而它今天就与自己的第三条处方矛盾",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-bill",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:spec",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -21,9 +20,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-18T03:51:45Z",
-  "updated_at": "2026-09-18T07:43:17Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-18T08:54:27Z",
+  "closed_at": "2026-09-18T08:53:18Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 4,
   "locked": false,

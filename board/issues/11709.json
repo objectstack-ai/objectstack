@@ -1,0 +1,34 @@
+{
+  "number": 11709,
+  "kind": "issue",
+  "title": "`@objectstack/spec` root entry: two MORE structurally-mentioned types are unnameable through the CHUNKED build (`BaseValidationRuleShape`, `FilterCondition`) — a minimal `defineStack` consumer still hits TS2883",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-24T13:37:45Z",
+  "updated_at": "2026-08-25T19:19:05Z",
+  "closed_at": "2026-08-25T19:03:39Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11709",
+  "body": "Measured while implementing #11350 (whose ruling scoped the repair to the three names measured there: `FormFieldInput`, `NavigationItemInput`, `StateNodeConfig` — this delta is deliberately NOT fixed in that PR, per the dispatch's instruction to report rather than silently widen a ruled surface change).\n\n## Measurement (worktree at `4ceae8ab0` + the #11350 re-exports, freshly built spec dist)\n\nA **minimal one-file program** — the smallest consumer shape there is:\n\n```ts\nimport { defineStack } from '@objectstack/spec';\n\nexport default defineStack({ objects: [] });\n```\n\ncompiled with `declaration: true` + `noEmit`, `module`/`moduleResolution` NodeNext, resolving `@objectstack/spec` through a real `node_modules` symlink (the same physical resolution a pnpm workspace consumer performs), produces — **through the ordinary CHUNKED build** — two TS2883 errors beyond the three #11350 repaired:\n\n```\nconsumer.ts(3,1): error TS2883: The inferred type of 'default' cannot be named without a reference to 'BaseValidationRuleShape' from './node_modules/@objectstack/spec/dist/object.zod-OA2khMnR'. This is likely not portable. A type annotation is necessary.\nconsumer.ts(3,1): error TS2883: The inferred type of 'default' cannot be named without a reference to 'FilterCondition' from './node_modules/@objectstack/spec/dist/filter.zod-DVwOdic1'. This is likely not portable. A type annotation is necessary.\n```\n\nBoth names are already public on `@objectstack/spec/data` (`api-surface/data.json` records `BaseValidationRuleShape (interface)`, `FilterCondition (type)`, `FilterConditionSchema (const)`).\n\n## Why #11350's measurements did not surface these two\n\n- #11350's finding 2 saw `BaseValidationRuleShape` leak only under an experimental single-entry dts build and recorded it as chunked-build-invisible. That reading was an artifact of the repro **program**, not of the build: the nine i18n-extract configs' programs all contain their object modules, which `import { ObjectSchema, Field } from '@objectstack/spec/data'` — and #11350's own control shows a program file importing a subpath entry makes that entry's names nameable program-wide. Strip the program to the single config file and both `/data` names leak through the chunked build too.\n- `FilterCondition` is new — it was masked the same way and never seen at all.\n\nSo the class the #11350 ruling's invariant names — **a type that appears structurally in an entry's public declarations must be nameable from that same entry** — is still open at the root entry: any consumer whose program does not otherwise import `@objectstack/spec/data` and lets tsc infer through a root-entry function hits it. The trigger population is real (an `objectstack.config.ts` that defines only, say, apps/flows and no objects imports nothing from `/data`).\n\n## Repro harness\n\n`packages/spec/scripts/root-entry-type-nameability.pin.test.ts` (landed with #11350's PR) is the exact harness: drop its `context.ts` fixture from the consumer program and the pin goes red with precisely the two errors above. Its docblock records this delta and points here.\n\n## Options\n\n- **A′. Re-export the two names from `src/index.ts`** — same shape as the #11350 repair (`api-surface/root.json` +2 rows via `gen:api-surface`, export-origins regen, extend the pin's program-scoping note). Small, measured, but it is again an addition to the most-imported entry's public face, so it wants the same maintainer call #11350 got — which is why this is a card and not a rider.\n- **B′. Leave it** — consumers whose programs don't reach `/data` keep paying with a per-consumer annotation.\n- **C (from #11350, restated).** A gate holding the invariant closed: fail a public entry `.d.ts` whose declarations structurally mention a type not nameable from that entry. The minimal-program compile the pin test performs is exactly the needed probe generalized per entry; it would have caught both of these names and every future one. C needs A′ (or per-hit equivalents) to go green first.\n\nRecommendation: A′ now (the surface promise is already made one subpath away, and the pull is the same class the maintainer already accepted), C as the follow-up that ends the per-name whack-a-mole.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Rxnd8cyFnoU8V5y21PaTsy)_"
+}

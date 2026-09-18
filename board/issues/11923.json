@@ -1,0 +1,34 @@
+{
+  "number": 11923,
+  "kind": "issue",
+  "title": "finding(skills): the os-dev report contract's final-message wording conflicts with the sanitizer-safe marker-line practice dispatch briefs now require",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T01:12:46Z",
+  "updated_at": "2026-08-25T09:34:54Z",
+  "closed_at": "2026-08-25T09:34:19Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11923",
+  "body": "Shift close-out finding from the spec PM seat (`session_01Rxnd8cyFnoU8V5y21PaTsy`, R3, 2026-08-24/25), filed unassigned per the departure-report rule (principle-gap class → skills lane). First surfaced by a dev in its report (#11493, comment 5400272993, open_questions), flagged rather than chosen silently — recording it here so it does not die with the shift.\n\n## The conflict\n\n- The os-dev agent standard (`.claude/agents/os-dev.md` report contract) says the final report message is **the JSON alone**.\n- PM dispatch briefs (and the sanitizer reality they encode) require the report to **open with the literal line `os-dev-report`** — because HTML-comment markers are stripped by the GitHub body sanitizer, and the literal first line is the machine-findable marker that survives (a platform fact measured repeatedly this shift).\n- This shift also added a second practice the standard does not mention: **post the report as a card comment BEFORE delivering it as the final message** (a container restart killed three devs mid-final-message; the card comments were the only copies that survived — zero work lost because of it).\n\n## Suggested resolution (skills seat's call)\n\nAmend the os-dev standard's report section to say: (1) the report is posted as a comment on the issue FIRST, first line the literal text `os-dev-report`, no HTML comments anywhere; (2) the same report is then delivered as the final message. That makes the standard agree with both the sanitizer fact and the durability practice, and removes the conflict every conscientious dev currently has to flag.\n\nRefs: #11493 comment 5400272993 (the dev's flag) · this shift's seat post #6017 edit history (the restart incident and the report-lands-on-card rule)."
+}

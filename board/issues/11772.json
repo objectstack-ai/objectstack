@@ -1,0 +1,34 @@
+{
+  "number": 11772,
+  "kind": "issue",
+  "title": "`os build --json`'s failure payloads carry no `warnings`, so the truncation notice's `--json` pointer is a dead end when a later gate fails",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-24T15:59:39Z",
+  "updated_at": "2026-08-25T11:50:25Z",
+  "closed_at": "2026-08-25T11:50:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11772",
+  "body": "Found while fixing #11642 (remainder notices for the truncating renders in `build` / `validate` / `init`). Out of that card's scope — it is a `--json` **payload shape** question, the machine-contract class that card was explicitly fenced away from — but it is the one thing that can make those notices' remedy untrue, so it is recorded rather than fixed.\n\nAdjacent to #11727 and NOT the same defect: that one is about two advisory lists computed under a `!flags.json` guard and therefore unreachable for the machine face at all. This one is about lists that **do** reach the payload — on one exit only.\n\n## Measured (read from source at `origin/main` `945ffbea8`; not executed)\n\n`packages/cli/src/commands/compile.ts` publishes its advisory lists in the **terminal success payload**:\n\n```ts\nwarnings: [...ruleAdvisories, ...unknownKeyWarnings],\n```\n\nEvery earlier `emitJson(...)` in the same command is a failure payload with its own shape, and none of them carries `warnings`:\n\n| exit | payload keys | carries `warnings`? |\n| --- | --- | --- |\n| `strict-body: missing body` | `issues` | no |\n| `author-time rules failed` | `issues`, `warnings` | **yes** |\n| `capability provider preflight failed` | `issues` | no |\n| `access matrix drift` | `changes` | no |\n| `docs validation failed` | `issues` | no |\n| `runtime bundle failed` | `error` | no |\n| success | `warnings`, `bodyExtractionWarnings`, … | **yes** |\n\nThe text face prints the advisory blocks **before** those later gates run: the author-time advisories at step 3b, the undeclared-authoring-key findings at 3d, then the access-matrix gate at 3e and the package-docs gate at 3f.\n\n## Why it matters now\n\nSince #11645 the advisory printer ends with `— re-run with --json for the full list`, and #11642 gives the undeclared-key block the same pointer (honest because #11643 put that list in the payload). Both are true **only for a run that reaches the end**. On a tree with, say, 60 undeclared authoring keys *and* a package-docs error:\n\n- `os build` prints `Undeclared authoring keys (60)`, 50 rows, and `… and 10 more undeclared authoring key(s) not shown (50 of 60) — re-run with --json for the full list`, then fails at the docs gate;\n- `os build --json` emits `{\"success\":false,\"error\":\"docs validation failed\",\"issues\":[…]}` — the 60 keys are nowhere in it.\n\nSo the remedy the notice names returns a payload that does not contain the list, which is the \"the remedy named is unreachable\" shape #11643 and #11391 were about. The author cannot see the withheld entries by any route until the unrelated later failure is fixed.\n\n## Not proposed here\n\nWhich way to close it is a real decision, not a mechanical port, and it is a machine-contract change either way:\n\n1. carry the advisory lists on every failure payload (largest change; makes every exit's `warnings` mean the same thing);\n2. carry them only where the text face has already printed them (smaller, but the payload's shape then depends on how far the run got);\n3. leave the payload alone and weaken the pointer to name the condition.\n\nOption 3 is the only one that touches no machine contract, and it is the one that makes the CLI's output worse, so it should not win by default.\n\nFiled unassigned, no labels — severity and route are triage's call."
+}

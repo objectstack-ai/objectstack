@@ -1,0 +1,34 @@
+{
+  "number": 11461,
+  "kind": "issue",
+  "title": "A cross-object per-measure `filter` reaches `engine.aggregate` unrefused on the ObjectQL path — the third producer #10861's member view does not cover",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-23T20:39:37Z",
+  "updated_at": "2026-08-25T10:27:30Z",
+  "closed_at": "2026-08-25T09:50:01Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11461",
+  "body": "Filed while implementing #10413 phase 2 (per-measure filter lowering, PR TBD). Not fixed there: fixing it means widening `planCrossObject`'s refusal set, which #10413's dispatch explicitly ruled out of scope for that card (a defect-fix card, not a contract-behaviour change).\n\n## What is measured (read from code, not yet executed against a live driver)\n\n`ObjectQLStrategy`'s cross-object envelope check (`planCrossObject`, `#3654` / `#10759` / `#10861`) judges every query by exactly one member view, built by `filterMemberView` (`packages/services/service-analytics/src/strategies/objectql-strategy.ts`). That view is documented as **\"Two producers, one inventory (#10861)\"**: the caller's own `where` (`origin: 'where'`), and the compiled dataset's definition-level `filter` (`origin: 'dataset-filter'`). Both are folded in and checked for a cross-object leaf before the query reaches `engine.aggregate`.\n\n#10413 phase 2 adds a **third** producer of a predicate that reaches `engine.aggregate`: a **measure's own `filter`** (`DatasetScope.measureFilters`, e.g. `{ won_count: { filter: { stage: 'closed_won' } } }`), now lowered into that measure's own `aggregations[].filter` entry (the #10576 contract field). `filterMemberView` was not extended to include these members, and `planCrossObject`'s `nonDim` check (the arm that inspects `query.measures`) only looks at each measure's resolved **field** (`this.resolveMeasureAggregation(cube, m).field`), never at that measure's own `filter`.\n\nSo a dataset declaring a measure like:\n\n```ts\n{ name: 'west_won_count', aggregate: 'count', filter: { 'account.region': 'West' } }\n```\n\non a cube with `include: ['account']` would have its `filter` lowered straight onto `aggregations[].filter` — `{\"account.region\":\"West\"}` — with **no refusal**, on either `execute()` or the `/analytics/sql` echo. `engine.aggregate` cannot join, so on a raw/in-memory driver the literal key `\"account.region\"` will not match any row property and the aggregation silently answers 0 (or, on a driver that treats an unrecognised filter key some other way, an equally wrong number) — never a loud `INVALID_FIELD`/400, and never the \"run this on a native-SQL driver\" guidance the four sibling refusals give.\n\nThis is the identical hazard #10759 and #10861 were opened and ruled on (maintainer, 2026-08-22, Option A — refuse at query time, folding leaves into the one member view) for the other two producers. Whether this third producer gets the same treatment, and where the line belongs (fold `measureFilters` leaves into `filterMemberView` with a new `origin: 'measure-filter'`, matching #10861's shape exactly), is the same class of decision those two cards made — not a mechanical fix bundled into #10413 phase 2, which was scoped and ruled as a pure defect-fix (no refusal-set change).\n\n## Suggested shape (not evaluated for cost/tradeoffs — that is triage's job)\n\nMirror #10861 exactly: fold each measure's `filter` leaves into `filterMemberView` under a new origin (e.g. `'measure-filter'`), extend `planCrossObject`'s refusal to cover it with a message analogous to the existing dataset-scope one (naming the measure and the cube), and pin it in `crossobject-conjunct-refusal.test.ts` alongside the existing ①–⑥ directions.\n\n## Reproduction status\n\nNot executed against a live fixture — this is a code-reading finding surfaced while extending the aggregations array in `ObjectQLStrategy.execute`/`generateSql` for #10413 phase 2. A reproduction would need a dataset with `include`, a cross-object dimension, and a measure whose own `filter` names a cross-object field, run on the ObjectQL door (`nativeSql: false`).\n\nRelated: #10413 (phase 2, where this was found), #10759, #10861 (the two prior cards on the same hazard class, different producers), #10576 (the contract this measure-filter lowering consumes).\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 12193,
+  "kind": "issue",
+  "title": "Stale `exported-any-returns` ledger entry for `ObjectStackClient.packages.update` reds the client consumer gate on main (left behind by #12062)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-25T12:23:24Z",
+  "updated_at": "2026-08-25T13:53:46Z",
+  "closed_at": "2026-08-25T13:53:46Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12193",
+  "body": "Found during #12150 program CI babysit (PR #12185, check \"Type Check · consumer gates\", job 97797649712); filed and directly dispatched by PM session `session_01KWRU3s15AJz7PGW7a7wdCh` — the red blocks every PR whose derived gate family includes the client consumer gates, including both #12150 leg PRs (#12185, #12190).\n\n## What is red, verbatim from the gate\n\n```\n❌  1 stale exported-any-returns.json entr(y/ies) — the gap is closed, delete the entry:\n    • ObjectStackClient.packages.update — no longer resolves to `any` (reason on file: #11925 …)\n```\n\n## Why it is main's red, not the PRs'\n\nThe base commit itself is the fix that closed the gap: `22c42c9b` \"fix(client): bind the three verifiable methods of the unannotated return-type erasure population (#11925) (#12062)\" bound `packages.update`'s return type, but `packages/client/exported-any-returns.json` on `origin/main` still carries the `ObjectStackClient.packages.update` entry (read back 2026-08-25). The ledger is shrink-only and judged EXACTLY — a fixed site with a lingering entry is red by design. #12062's own CI presumably did not derive the client consumer-gate family, so the red only fires on PRs that do.\n\n## Fix (one line)\n\nDelete exactly the `\"ObjectStackClient.packages.update\"` entry from `packages/client/exported-any-returns.json`. ⛔ Nothing else: no other entries, no `$comment` edits, no annotation changes — the other #11925/#12104 entries are still-open debt and must stay.\n\n## Acceptance\n\n- `pnpm --filter @objectstack/client run check:exported-any-returns` green on the fixed tree (self-test + real run, verdict lines quoted).\n- Diff is exactly one JSON entry removed. Changeset: none/skip per repo convention for repo-internal ledger files (verify with the changeset gate; the ledger is not a published file).\n\nRefs: #12062 / #11925 (the binding work) · #11927 (the ledger) · #12185 / #12190 (blocked PRs)"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 11997,
+  "kind": "issue",
+  "title": "Packaged flow silently replaced by a same-named runtime flow: listItems returns both, the engine keys flows by bare name, and Map order decides the winner",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:services"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-25T04:12:02Z",
+  "updated_at": "2026-08-25T10:27:28Z",
+  "closed_at": "2026-08-25T09:45:36Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11997",
+  "body": "## The defect\n\nA runtime-authored flow that reuses a **packaged flow's name** silently and\n**non-deterministically replaces** the packaged flow in the automation engine, with no\ndiagnostic, no receipt, and no way for an admin to tell which one is armed.\n\nThis is reachable today: the metadata registry declares `flow` with\n`allowRuntimeCreate: true` (`packages/spec/src/kernel/metadata-plugin.zod.ts:827`), so\nauthoring a runtime flow named `opportunity_approval` while a package ships one is an\nordinary, accepted write.\n\n## Mechanism — three facts that are individually correct and collide\n\n1. **The SchemaRegistry stores both, deliberately.** Items are keyed\n   `packageId:name` (`packages/objectql/src/registry.ts:1148`), and ADR-0048 section 3.4\n   coexistence is pinned in `packages/objectql/src/registry-cross-package-collision.test.ts:20-40`\n   — two packages shipping one bare name legitimately coexist, reachable via\n   package-scoped `getItem`.\n\n2. **`listItems` returns both, with no dedup and no precedence.**\n   `packages/objectql/src/registry.ts:3394-3414`:\n\n   ```\n   const items = Array.from(this.metadata.get(type)?.values() || []) as T[];\n   ```\n\n   It filters by `packageId` only when one is passed, and filters out disabled packages.\n   Nothing collapses two entries that share a bare name.\n\n3. **The automation engine keys flows by bare name.**\n   `packages/services/service-automation/src/engine.ts:1252`:\n\n   ```\n   private flows = new Map<string, FlowParsed>();\n   ```\n\n   and the boot pull (`packages/services/service-automation/src/plugin.ts:870-880`) is:\n\n   ```\n   const flows = ql?.registry?.listItems?.('flow') ?? [];\n   for (const f of flows) { ... this.engine.registerFlow(def.name, def as never); ... }\n   ```\n\n   `registerFlow` ends in `this.flows.set(name, parsed)` (`engine.ts:2527`).\n\n⇒ Both entries are pulled, both are registered under the same key, and **the last one in\nMap iteration order wins**. The survivor is decided by registration order into the\nregistry, which is boot load order — not by any declared precedence.\n\n## Why it is worth a card rather than a note\n\n- **It is silent in both directions.** Neither `registerFlow` nor the flow pull warns on a\n  name that is already present; the pull's only log is a count\n  (`plugin.ts:891` `Pulled N flow(s) from ObjectQL registry`), and N counts the\n  registrations, not the distinct names.\n- **`listFlows` / `getFlowRuntimeStates` cannot show it** — they enumerate\n  `this.flows.keys()` (`engine.ts:2600, 2638`), which by then holds one entry.\n- **The trigger binding follows the survivor**, so the observable symptom is a packaged\n  flow that \"stopped working\" or a runtime flow that \"does something it was not authored\n  to do\", depending on which won.\n- The precedent for the neighbouring type went the other way deliberately: for permission\n  sets, a save targeting a package-declared name is **refused loudly** with a message\n  naming the sanctioned path (`packages/plugins/plugin-security/src/packaged-permission-set-lock.ts`,\n  maintainer ruling 2026-08-24, \"lock the base, clone to customize\"). Flows have no\n  equivalent guard.\n\n## Not measured\n\nI did **not** run this end to end — this is a static read of the three code paths above,\nfound while measuring the trigger-dispatch path for the packaged-flow customization design\nwork. The registration-order claim in particular deserves a runtime confirmation before\nanyone prices a fix.\n\n## Possible directions (not a recommendation — this needs triage first)\n\n- refuse the runtime write when a package declares the name (the permission-set shape); or\n- make the engine's flow map package-aware, which is a much larger change; or\n- at minimum, **warn** at pull time when one bare name is registered twice, so the\n  condition stops being invisible.\n\n## Provenance\n\nFound while measuring the trigger-dispatch path for the packaged-flow clone-to-customize\ndesign (#11665, section 2.2 of the design document posted there). Filed separately because\nit is a live defect on `main` independent of whether that design is accepted, and because\nit is not in that card's scope.\n\nRead at `origin/main` `d63b01436035f0866df8c22156e26ab2a064580d`. Unassigned, not claimed.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

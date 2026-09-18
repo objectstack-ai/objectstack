@@ -1,0 +1,35 @@
+{
+  "number": 12156,
+  "kind": "issue",
+  "title": "L4: flow clone action — whole-definition copy, mandatory new name, no ancestry (ADR-0126 §7.1)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T11:25:20Z",
+  "updated_at": "2026-08-25T15:26:20Z",
+  "closed_at": "2026-08-25T15:26:20Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12156",
+  "body": "Part of #12150 (Epic: ADR-0126 implementation, v17 line — ships as a 17.x minor, maintainer-ruled). Cut on maintainer instruction 2026-08-25 by PM session `session_01KWRU3s15AJz7PGW7a7wdCh`. Contract: **ADR-0126 §7.1** (merged `28b47a93`). Independent of the ledger — cloning is authoring an ordinary sibling, no ledger involvement (amendment ruling 2).\n\n## Deliverable\n\nA **clone action for flows** on the data door, shaped on the landed permission-set clone (`sys-permission-set.object.ts:115-152`, #11513):\n\n- **New machine name mandatory** — the action demands a name that does not exist; ⛔ no same-name clone (the engine's name-keyed flow map makes same-name a silent insertion-order shadow, #11665 §2.2 / #11997).\n- **Whole-definition copy** — copy the parsed definition, mutate only `name`/`label`/`status`. ⛔ Never param-list assembly: #11703 measured an enumerated-facet clone silently dropping three of six facets, and a flow has far more facets.\n- **No ancestry recorded** — the clone is an ordinary install/org-owned flow with no linkage to its base (amendment ruling 2); ⛔ no provenance column, field, or annotation anywhere.\n- References are NOT re-pointed (no reference index exists — ADR §9); the clone calls what the original called. The action's response/UI copy states this plainly.\n\n## Acceptance\n\n- Clone of a packaged exemplar flow carries every facet (test asserts deep-equality of the definition minus `name`/`label`/`status` — the #11703 counter-example as a test).\n- Same-name attempt refused loudly with the sanctioned path in the message.\n- objectui note: carried-over definition blobs are not editable form fields (#11753 discipline) — renderer half rides L5, not this card.\n\nRefs: ADR-0126 §7.1, §9 · #11513 / #11703 / #11753 · #11997"
+}

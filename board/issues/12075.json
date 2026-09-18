@@ -1,0 +1,35 @@
+{
+  "number": 12075,
+  "kind": "issue",
+  "title": "finding: no `objectstack.config.ts` in this repo reaches `MetadataPlugin._loadFromFileSystem` — the registry `filePatterns` glob has no measured consumer, which qualifies the invisibility rationale #11071 rests on",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T07:38:28Z",
+  "updated_at": "2026-08-25T15:42:30Z",
+  "closed_at": "2026-08-25T15:42:30Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12075",
+  "body": "**Recording only — OBSERVATION class.** ⛔ Not claimed, no assignee, no `domain:*`, no type. Found while implementing #11598 (converging the `os init` scaffold on the registry's `NAME.TYPE.ts` spelling). Dedup run at filing: two searches, no duplicate.\n\nNothing here is reported as broken. This records that a rationale several landed cards lean on is **narrower than it reads**, and that the load path it names has no measured consumer in this tree.\n\n## The rationale in question\n\n`packages/cli/src/utils/metadata-file-name.ts`'s docblock — the derivation #11071 built on, and quoted again in `packages/cli/test/generate-file-name-registry-parity.test.ts`:\n\n> `MetadataPlugin._loadFromFileSystem` primes every registered type by globbing that type's `filePatterns`, and that is the default (`eager`) bootstrap whenever no compiled artifact is configured. A scaffold whose name matches none of those patterns still type-checks, still passes `os validate` and still publishes, with nothing anywhere reporting that it was skipped — the silent-strip shape ADR-0063's retirement of `os g agent` closed (#10359).\n\nEvery clause of that is true **for a project that boots eager with no artifact source**. What it does not say is how many projects this repo scaffolds, ships or dogfoods actually boot that way.\n\n## What was measured\n\n**1. Three real scaffolds, compiled with the real `os compile`** (`tsx packages/cli/bin/run-dev.js compile`), reading `dist/objectstack.json` back:\n\n| scaffold | `compile` exit | objects in the artifact |\n| --- | --- | --- |\n| old spelling `src/objects/my_app_item.ts` (matches zero `object` patterns) | 0 | `[\"my_app_item\"]` |\n| same, **plus** `src/objects/probe.object.ts` (matches the pattern) not re-exported from the barrel | 0 | `[\"my_app_item\"]` |\n| new spelling `src/objects/my_app_item.object.ts` | 0 | `[\"my_app_item\"]` |\n\nRow 1: the pattern-matching-nothing file **is** loaded. Row 2 is the discriminator — a file spelled exactly the way the registry declares, in the same directory, is **not** loaded when the barrel does not name it. So for these projects the glob is not consulted at all; the barrel's module specifier is the whole load path.\n\n**2. Why, mechanically.** `packages/runtime/src/standalone-stack.ts` hands `MetadataPlugin` an `artifactSource: { mode: 'local-file', path: artifactPath }`, which routes `_bootstrap` to `_loadFromLocalFile` and never to `_loadFromFileSystem`. Its own comment says so: *\"Source-file scanner OFF — declarative metadata is loaded from the compiled artifact, not from yaml/json files on disk.\"* `os dev` and `os serve` both boot that way, and `os init`'s generated `package.json` wires every script through them.\n\n**3. The population.** Every `objectstack.config.ts` tracked in this repo declares its objects in code rather than leaving them to the glob:\n\n```\n$ for f in $(git ls-files '*objectstack.config.ts'); do\n    grep -q \"import \\* as objects\\|from './src/objects\" \"$f\" || echo \"$f\"\n  done\npackages/drivers/driver-memory/objectstack.config.ts\npackages/plugins/plugin-auth/objectstack.config.ts\npackages/plugins/plugin-hono-server/objectstack.config.ts\npackages/plugins/plugin-security/objectstack.config.ts\npackages/services/service-i18n/objectstack.config.ts\n```\n\n— and each of those five declares `objects:` from a named import too (`plugin-auth`: `objects: authIdentityObjects`), or declares no objects at all. The barrel-importing majority (`examples/app-crm`, `create-objectstack`'s `blank` starter, everything `os init` writes) is the same shape. **Zero configs in this tree rely on `filePatterns` to find their metadata.**\n\n## Why it is worth recording\n\nTwo things follow, neither of them a defect on its own:\n\n- **The invisibility argument does not transfer to scaffolded apps.** #11598 was filed on the reading that `os init` might be generating a file the project never loads. It is not — row 1 above. The card's own *\"what is NOT established\"* section had flagged exactly this, and it was right. A future card that reasons \"filename matches no pattern ⇒ silently skipped\" from the docblock alone will over-claim the same way, because the docblock states the mechanism without stating its precondition.\n- **`filePatterns` is a declared surface with no dogfood.** The registry declares `**/*.object.ts` (and 26 other types' patterns) as the discovery contract, and this repo exercises it nowhere end-to-end: no example, no scaffold, no starter boots through `_loadFromFileSystem`. Whether that path still works on a real project is not something anything in this tree measures. The convergence #11071 and #11598 landed is still right on its own terms — one CLI teaching one spelling, and the examples and registry already agreeing on it — but it is a *consistency* property, not the *discoverability* property the docblock frames it as.\n\n## What a picker-up might do (⛔ not a prescription — routing is triage's)\n\nOptions, roughly ascending in cost: amend the `metadata-file-name.ts` docblock to state the precondition (`eager` bootstrap, no artifact source) so the rationale stops reading as universal; or decide whether the eager glob path should have a dogfood at all, which is a scope question and probably the startup-focus answer is \"no\", in which case saying so beside the registry is the cheaper close.\n\n## Provenance\n\nMeasured on `origin/main` at `c804f0ca5` while implementing #11598 (PR #12073) · the rationale quoted is from #11071 · #10359 is the silent-strip ruling both descend from.\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_019siH5jDmk5hrayvfyojUqR)_\n"
+}

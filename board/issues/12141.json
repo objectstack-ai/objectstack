@@ -1,0 +1,34 @@
+{
+  "number": 12141,
+  "kind": "issue",
+  "title": "Three more hand-run shell scripts carry bash-4 builtins — `pnpm sdui:manifest` is the next step of the same macOS pin-bump procedure",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-25T11:09:19Z",
+  "updated_at": "2026-08-25T14:53:36Z",
+  "closed_at": "2026-08-25T14:53:19Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12141",
+  "body": "Found while sweeping for #12071 (PR objectstack-ai/objectstack#12142). That card repaired `scripts/bump-objectui.sh`; the sweep its dispatch asked for turned up three more scripts in the same class. Filed rather than fixed — the remaining three are outside that card's declared file surface, and their verification surfaces are not the one that card's gate covers.\n\n## Measurement\n\nSwept all 17 tracked `*.sh` files in the repo for the bash-4/5 construct set (`mapfile`, `readarray`, `declare -A`/`local -A`/`typeset -A`, `${x^^}`/`${x,,}`, `&>>`, `EPOCHSECONDS`/`EPOCHREALTIME`). Three carry one, all the same builtin pair:\n\n```\nscripts/gen-sdui-manifest.sh:585   readarray -t DUMP_DEV_ARGV < <(sdui_dev_server_cmd \"$DUMP_PORT\")\nscripts/pm/os-regen-merge.sh:68    mapfile -t regen_paths < <(grep 'merge=os-regen' .gitattributes | awk '{print $1}')\nscripts/publish-smoke.sh:674       mapfile -t DEV_ARGV < <(smoke_dev_server_argv)\n```\n\n`mapfile`/`readarray` are bash 4 builtins. `/usr/bin/env bash` is bash 3.2.57 on macOS, so on a Mac each line is `command not found`, status 127. All three files run `set -e` or equivalent, so this aborts the run rather than degrading it.\n\nThe other 12 `.sh` files are clean, as is `scripts/bump-objectui.selftest.sh`. `scripts/pm/os-verify-lock.sh` mentions the constructs only in its portability docblock and in the self-test that hunts them — it is the repo's existing authority on this floor and is clean by construction.\n\n## Why `gen-sdui-manifest.sh` is the sharp one\n\nIt is not an incidental sibling: it is **the next step of the very procedure #12071 was about**. `bump-objectui.sh` ends by printing\n\n```\n→ NEXT STEP — run the declaration-parity ratchet (ADR-0082 D4):\n      pnpm sdui:manifest\n```\n\nand `pnpm sdui:manifest` is `scripts/gen-sdui-manifest.sh`. Per that script's own comment the ratchet \"is an on-demand gate by decision (#5960), never a CI job\" — i.e. it has no CI path at all and is only ever run by hand, on an operator's laptop. So a maintainer bumping the pin from a Mac now gets past the bump (that half is repaired) and hits `readarray: command not found` at the step the bump just told them to run. Neither line is reachable from any CI run: CI is Linux with bash 5, where both builtins exist.\n\n`os-regen-merge.sh` is the agent-facing merge-regen helper; `publish-smoke.sh` is release publish smoke. Both are also hand-run rather than CI-scheduled, but neither sits inside the documented macOS operator procedure the way `gen-sdui-manifest.sh` does.\n\n## Not verified here\n\nI did not run any of the three on a shell without the builtins, and I did not check whether each surrounding function has other bash-4 dependencies. The grep above is a construct census, not a proof that a bash-3.2 run of each script otherwise succeeds. Sizing this card should start by running each under a `BASH_ENV` file containing `enable -n mapfile readarray` — that reproduces the macOS symptom exactly on Linux (measured on #12071: byte-identical `mapfile: command not found` / status 127).\n\n## Shape of the remedy, if it is wanted\n\n#12071 landed the pattern: the bash-3.2 read loop already idiomatic in `scripts/pm/os-verify-lock.sh`, plus a static scan asserting the script names no bash-4-only construct. The static scan is the part worth generalizing — #12071's version is scoped to one file inside one gate's self-test. A single repo-wide `check:` over all tracked `*.sh` would cover this class permanently and would have caught all four sites at once, but that is a gate-shaped decision rather than a mechanical edit, which is the other reason this is filed rather than folded into that PR.\n"
+}

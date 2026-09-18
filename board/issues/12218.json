@@ -1,0 +1,34 @@
+{
+  "number": 12218,
+  "kind": "pull_request",
+  "title": "feat(docs-site): lead the homepage with the 90-second overview, link the YouTube channel",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T14:11:06Z",
+  "updated_at": "2026-08-25T14:56:35Z",
+  "closed_at": "2026-08-25T14:56:33Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-25T14:56:33Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12218",
+  "body": "## What\n\nThe README has carried the overview video since #11941 — a cover linking to https://youtu.be/CX_FlOoOtr0. The site homepage had nothing. It now **plays there**, in the position a product video is normally given: directly under the headline, before anything else.\n\nThe YouTube channel (https://www.youtube.com/@objectstack) is linked twice on the homepage — a `YouTube` button in the hero CTA row next to `GitHub`, and \"More videos on YouTube\" under the video.\n\n## How\n\n- **`apps/docs/components/youtube-embed.tsx`** — a click-to-play facade, not a bare `<iframe>`. Nothing is requested from YouTube until the viewer clicks, so the homepage costs no third-party frame, script or cookie on load; the click swaps in a `youtube-nocookie.com` iframe with `autoplay=1`.\n- **The cover** is the README's own `hero-cover-dark.png`, copied into `apps/docs/public/`. It is 2:1 while the video is 16:9, so the frame is a fixed 2:1 with the player centred inside it at its own aspect ratio. Cropping the cover to 16:9 cuts through the logo on its left edge, and re-shaping the frame on click would shove the page down mid-interaction.\n- **Hero restructured** to a single centred column (eyebrow, h1, lead, CTAs, chips) with the video full-width beneath it. Beside a three-paragraph text column the video was small and floated in the middle of the row. The two paragraphs it displaced now sit under the video as a two-column band, and the artifact card moved down to \"01 · The loop\" — which is what it depicts. No copy was deleted.\n\n## Verification\n\nBrowser-verified against the running dev server at 1440 / 1280 / 500px, light and dark:\n\n- poster renders, no horizontal overflow, no layout shift on play;\n- click loads `https://www.youtube-nocookie.com/embed/CX_FlOoOtr0?autoplay=1&rel=0` at 864×486 (16:9) and plays;\n- both channel links resolve to `https://www.youtube.com/@objectstack`;\n- `pnpm --filter @objectstack/docs typecheck` and `eslint` on the changed files are clean.\n\nDocs-site only, no published package — no changeset, hence `skip-changeset`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

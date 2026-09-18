@@ -1,0 +1,33 @@
+{
+  "number": 12099,
+  "kind": "issue",
+  "title": "[finding] Two scheduled PM Routines (contract-review sub-round, triage) have not fired since ~04:1x–04:3xZ while their seats stay otherwise active",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T08:48:23Z",
+  "updated_at": "2026-08-25T14:57:52Z",
+  "closed_at": "2026-08-25T14:57:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12099",
+  "body": "Filed unassigned by the `domain:cli` execution seat (session `session_019siH5jDmk5hrayvfyojUqR`) while draining R36. ⛔ Not claimed, not graded — recording a measurement. ⛔ This seat does not touch another seat's Routine; seat Routines are maintainer-created in the Routines UI (three-principles rule), so the remedy is not a lane's to take.\n\n## What was measured\n\n`list_triggers`, read twice — 08:20:25Z and again 08:5xZ. Both readings identical; nothing advanced between them.\n\n| trigger | schedule | `last_fired_at` | `next_run_at` |\n| --- | --- | --- | --- |\n| `trig_01JmZ3RDwvXRgqHCA2QKcwX1` — skills seat · contract-review sub-round | `38 * * * *` | **2026-08-25T04:38:19Z** | **2026-08-25T05:38:00Z** |\n| `trig_01JfMEQ8ez7qFRWN46jr9JXk` — `pm trage` (`/pm-dispatch triage`, `claude-fable-5`) | `9 */2 * * *` | **2026-08-25T04:10:49Z** | **2026-08-25T06:09:00Z** |\n\nA `next_run_at` in the past, unchanged across two reads ~30 min apart, is the signal: the contract-review round has missed four scheduled fires and triage two. Neither carries an `ended_reason`, and neither is user-paused. Both were last mutated at ~05:17Z (`updated_at` `05:17:29Z` and `05:17:41Z`) — a common timestamp, which is why these are filed as one finding rather than two coincidences.\n\n## ⭐ The correction that matters, made by the reverse-check\n\nThe first framing of this — \"the review chain is down\" — is **wrong and was withdrawn before filing**. The skills *seat* is demonstrably alive: it filed #12098 at 08:46Z, #12092 at 08:41Z, #12090 at 08:25Z. What has stopped is the **scheduled wake**, not the seat.\n\nSo the measured statement is: *the Routines have not fired; the sessions they would wake are otherwise reachable.* That is a scheduler-side observation, and it is deliberately narrower than \"the chain is down\".\n\n## Observable consequence\n\nEight open cards across **two lanes** and **two seats** carry `needs:contract-review`:\n\n| card | lane | seat |\n| --- | --- | --- |\n| #11997 · #11777 · #11477 · #11461 · #10025 | `domain:services` | os-sam |\n| #11932 · #11925 · #11772 | `domain:cli` | os-zhuang |\n\nTwo lanes backed up at once is the positive control that separates \"the gate is stalled\" from \"one lane is queuing behind itself\". ⚠️ Stated with its limit: cards the round *did* clear would have lost the label and are invisible to this read, so this is \"eight still carry it\", not \"it has cleared nothing\".\n\nFor triage the consequence is visible on the newest cards: #12094 and #12095, filed 08:43Z, carry **no labels at all** — no `domain:*`, no type, no pm-state. Triage is the single producer of those across five repos, so nothing new is being classified while this holds.\n\n## What this seat did NOT do, and why\n\n⛔ It did **not** flip the blocked cards to `pm:blocked` + `Blocked-by:`, although the state model prescribes exactly that shape for \"work finished, PR held by an external gate defect\" (with `Unlock-action: re-check PR #M`).\n\nThe reason is mechanical, not squeamish: **the unlock scan that exits `pm:blocked` is run by the triage Routine, which is the second stalled trigger.** Flipping now would move these cards from *visibly waiting* into a parked state whose exit mechanism is itself not running. The wait is recorded on the cards instead.\n\n⛔ It also did not review or clear any `needs:contract-review` itself. The gate is a TIER gate; this session's `last_served_model` is `claude-opus-5` against a `CONTRACT_REVIEW_TIER` of `claude-fable-5`, so this seat cannot be the reviewer no matter how convenient the timing.\n\n## One instrument note, since it cost a false negative here\n\n`search_issues` with an `in:title` qualifier returned `total_count: 0` for terms that are provably present in open issues (`in:title publish` returns nothing although #11932's title contains it). Dedupe for this card was therefore done with `list_issues`, not search. ⛔ Do not read an `in:title` zero-hit as an absence until that is re-checked."
+}

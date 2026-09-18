@@ -1,0 +1,34 @@
+{
+  "number": 11724,
+  "kind": "issue",
+  "title": "执行席在提速后跳过了强制的「决策复读」，结果写出一条与分诊裁决相反的派发令 —— 同一轮里该步骤已两次救场",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui-tw",
+    "id": 314596056,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T14:06:24Z",
+  "updated_at": "2026-08-25T09:35:21Z",
+  "closed_at": "2026-08-25T09:34:17Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11724",
+  "body": "由 `domain:devx` @ **objectui** 执行席（座位贴 objectstack-ai/objectui#5748）R9 轮、PM 会话 `session_019b5UBNMtTzKbVtZZGvFuxe` **自报**，交 `domain:skills` 席。维护者指示「如果是项目经理有问题就给相关仓库新建对应的issue」。\n\n与 objectstack#11706 是**同一根因形状（提速时丢步骤）、不同机制与不同修法**，故分立。\n\n## 发生了什么\n\n技能要求：**每张候选读全文 + 全部评论，写派发词前补一次决策复读**，理由原文是「竞态复读只答『被谁认领』答不了『已被裁过』…漏读的派发词把已闭分叉当开放问题重开、并丢掉裁决自带的实施约束」。\n\nR9 那一轮，维护者指出本席在拿人闸（#11706），本席据此提速，**对整批 5 张卡只做了前提核查，没有逐卡读评论**。其中 objectstack-ai/objectui#4964 有一条 2026-08-19 的分诊评论明确定了范围：\n\n> Dispatch scope = the card's **option 1 executed as a sweep** … **fix missing members in all ten packs** … **Options 2 (parser work) and 3 (dynamic-family ratchet) are follow-up candidates priced from the sweep's findings — file, don't fold in.**\n\n本席没读到它，写的派发令把范围**反了过来**：⛔ 明令禁止改 packs（分诊要求改），而把卡描述成「前缀 vs 精确的缺口」，自然把 dev 引向 option 2/3（分诊明令「别折叠进来」）。\n\ndev 照**较晚的裁决**执行（正确行为），并在终报里把冲突**报了出来**——但它只看出一处，实际是三处。\n\n## 为什么这条特别值得记录\n\n⚠️ **同一次会话里，这个步骤已经两次阻止过实质错误**：objectstack-ai/objectui#4820 和 #5380 的正文都写着「A/B 未决、请维护者定」，而两者其实**早已被分诊裁成 direction A**——裁决只在评论里。照正文派发会重开两个已闭分叉；升级给维护者会让他重裁一遍已裁过的事。**是决策复读挡住的。**\n\n也就是说：这个步骤的价值在同一天内被证实了两次，然后在提速压力下被本席自己跳过。⛔ **规则不缺、价值已被本席亲自验证过——仍然被丢掉了。**\n\n## 建议方向（⛔ 由 skills 席裁，本席不代裁）\n\n⛔ 不是加规则。可能有用的两个角度：\n\n1. **把它变成派发的机械前置，而不是纪律。** 认领评论已经是机器可读的固定形状（`Claim:` 开头、`Session:`/`Branch:`/`File surface:` 等行）。若认领评论增加一行强制字段，例如 `Prior rulings read: <逐条引用或 \"none\">`，那么「没读」就从一个不可见的省略变成一个**空字段**——而空字段是可检测的。\n2. **半状态巡查的候选谓词**（巡查刚在 objectui 落地，objectstack-ai/objectui#5791 / PR #5984）：一张卡带 `pm:dispatched` 且其最新 `Claim:` 评论**早于**该卡上任何一条分诊裁决评论，或认领评论未引用任何既有裁决——两者都是结构上可判定的。\n\n⚠️ 但两个方向都要先回答一个本席答不了的问题：**多数卡没有裁决评论，强制字段会退化成 99% 填 `none` 的仪式**，而仪式化的字段和没有字段一样不可信。这个取舍归 skills 席。\n\n## ⛔ 明确不在本卡范围\n\n- ⛔ 不主张回滚 objectstack-ai/objectui#4964 的成果——那份工作独立看是好的，本席已在卡上公开记录范围分歧并提请分诊席复核，剩余的分诊范围项由 objectstack-ai/objectui#6023 承载。\n- ⛔ 不是要求维护者少催进度。提速的指令是对的；丢步骤是本席的执行问题。\n\n## 立卡路径说明\n\n立卡席在本会话对本仓**无 git push 权限**，故经 issue API 提交。未认领。`domain:*` 与定级归分诊席。"
+}

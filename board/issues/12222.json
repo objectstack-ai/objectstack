@@ -1,0 +1,35 @@
+{
+  "number": 12222,
+  "kind": "issue",
+  "title": "`bump-objectui.sh`'s bash-3.2 note states the wrong mechanism for the trailing-`&&` trap — measured, and the wrong reason invites the next author to dismiss the whole warning",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T14:15:57Z",
+  "updated_at": "2026-08-25T17:51:41Z",
+  "closed_at": "2026-08-25T17:51:41Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12222",
+  "body": "Filed by the `domain:devx @ objectstack` seat (#6023, session `af22b339-91b5-5814-8b9b-2453fc5b3f68`) from PR #12219's measurement. ⛔ Not graded, no `pm:queue` — triage's to route.\n\n## The defect\n\n`scripts/bump-objectui.sh` (landed by PR #12142 for #12071) carries an in-place comment explaining why the bash-3.2 read loop uses `if [[ -n \"$x\" ]]; then …; fi` rather than a trailing `[[ … ]] && …`. It attributes the trap to the **empty-list** case:\n\n> under this script's `set -euo pipefail`, a false `&&`-list as the last command of the loop body makes the whole `while` return 1 and kills the run on an empty ref list — which is the common case for the \"never pushed\" branch.\n\n**Measured on bash 5.2.21 (PR #12219), that does not reproduce.** An all-empty read leaves the loop body **unexecuted**, so the `while` exits at status 0. What actually bites is:\n\n- a **non-empty** read whose **last** line fails the test, and\n- only once such a loop is the **last command of a function** — then the function returns 1 and `set -e` kills the caller.\n\n**The landed code is correct.** The `if` form is the right one. Only the stated reason is wrong.\n\n## Why this is worth a card rather than a shrug\n\nThe comment exists *specifically* to stop the next author reverting to the shorter `&&` form. PR #12219's dev put the cost precisely:\n\n> A wrong mechanism in a comment that exists specifically to stop the next author reintroducing the bug is worse than no comment: it invites someone who measures the empty case, finds it clean, and concludes the whole warning is folklore.\n\nThat is the failure mode. A future author who tests the *stated* claim will find it false, reasonably conclude the guidance is cargo-cult, and switch back to `&&` — reintroducing a real bug that the comment was right about for a reason it did not give.\n\n## ⚠️ The wrong mechanism has already propagated — three places, at least\n\n1. `scripts/bump-objectui.sh` — the original comment.\n2. **PR #12142's body**, where it is stated as a verified finding.\n3. **This seat's ACCEPT on #12071** (comment `5409531670`), where I quoted it approvingly — and then **again in #12141's dispatch brief** (comment `5411492201`), where I handed it to a second dev as established fact. Recorded as seat error (14) on #12141; the sharpened rule is that a mechanism quoted in an ACCEPT is a claim the reviewer is vouching for, and must be measured or explicitly attributed as unverified.\n\nPR #12219's own comments state the **measured** mechanism, so the corrected version already exists in the tree to copy from.\n\n## Scope\n\nOne comment in `scripts/bump-objectui.sh`. ⛔ Do not change the code — the `if` form stays. ⛔ Do not touch the loop's `local x=''` note, which is a separate and correct `set -u` point.\n\nPR bodies (#12142) are immutable history and are **not** in scope; the correction belongs in the tree and on the cards.\n\nLeft uncorrected by PR #12219 because `bump-objectui.sh` was outside that card's declared file surface — the right call, and the reason this is a card rather than a rider.\n\n## Refs\n\n#12071 / PR #12142 (where the comment landed) · #12141 / PR #12219 (where it was measured and disproven) · #12221 (the other follow-up from the same measurement)"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 12208,
+  "kind": "pull_request",
+  "title": "feat(spec): declare `editMode?: 'modal' | 'page'` on the object document",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "protocol:data",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T12:57:31Z",
+  "updated_at": "2026-08-25T14:32:41Z",
+  "closed_at": "2026-08-25T14:32:39Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": "2026-08-25T14:32:39Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12208",
+  "body": "Fixes #11408\n\n## What\n\nDeclares `editMode?: 'modal' | 'page'` as an optional authored key on the spec's object document, per the maintainer ruling recorded on the issue (2026-08-24, **declare** — the #10144 declare-or-rule-out family; ruling comment quotes 「接受你的建议。」 on the aligned four-facet analysis).\n\n- `packages/spec/src/data/object.zod.ts`: the key joins the Display & UI Hints block beside `nameField` / `highlightFields` / `stageField`. TSDoc + `.describe()` state the cross-renderer semantics (`'modal'` = edit form as a dialog over the current view; `'page'` = dedicated full-page edit route), the absent-key behaviour (renderer picks its own default; objectui defaults to modal), and the objectui read points (`recordFormNavigation.ts` branches on `editMode !== 'page'`; `AppContent`'s `handleEdit` dispatcher routes on it).\n- Liveness ledger: `packages/spec/liveness/object.json` classifies `object/editMode` as `live` (objectui runtime read, prose evidence per the ledger's convention for renderer-side readers); `state-counts.md` regenerated.\n- Generated artifacts, regenerated only where `check:generated` proved them stale: `authorable-surface/data.json` (+`data/Object:editMode`) and `content/docs/references/data/object.mdx` (new row in the object reference table).\n- Changeset: `minor` for `@objectstack/spec` (accept-set **widening**; nothing removed, no existing document changes meaning). `check-adr-0087-registration` verdict: \"this PR adds no declared-breaking changeset (1 non-breaking changeset(s) seen)\" — no ADR-0087 entry required, matching the dispatch's expectation for a pure widening.\n\n## Before / after (both measured on the freshly built dist, not src)\n\n- **Before** (base 577fabf): `ObjectSchema.safeParse({ name, fields, editMode: 'page' })` → `success: false`, `issues[0] = { code: 'unrecognized_keys', keys: ['editMode'], path: [] }`; positive control without the key parses green. (Matches the issue's measurement on published spec 17.2.0.)\n- **After** (this branch): `'modal'` and `'page'` accepted and carried on the parsed output; absent accepted; `editMode: 'drawer'` rejected as `{ code: 'invalid_value', values: ['modal','page'], path: ['editMode'] }` — the failure moved from key-level `unrecognized_keys` to a located **value** error, proving the key is recognised and its value contract enforced.\n\n## Tests\n\nFour new tests in `packages/spec/src/data/object.test.ts` (`ObjectSchema editMode (#11408 ...)` describe block): both enum values accepted end-to-end (full parse green, not merely \"no unrecognized_keys\"); optionality; out-of-enum values (`'drawer'`, `'inline'`, `true`, `3`) each fail with a non-`unrecognized_keys` issue at path `['editMode']`; the authoring path (`create()`) accepts it. Full `@objectstack/spec` suite green — see the union run cited below.\n\n## Scope\n\n- **Spec-side adoption only.** objectui's `ObjectSchemaClientExtensions.editMode` member retires in a follow-up the accepting seat files in objectui, **release-gated** on the `@objectstack/spec` release containing this change (per the recorded ruling) — its pinned rejection tests flip by design there. This PR touches no objectui code and no pins on sibling behaviour.\n- **No `*.form.ts` files change** — titleFormat precedent: object-level display keys carry no authoring-form row; also keeps this batch disjoint from the #11949 form-row work.\n- Clause-②: **yes** (widens the accept set) — contract-review tier; this PR stays **draft** for the PM's review chain.\n\n## Verification at the final head\n\nUnion re-run at the final commit (`git rev-parse --short HEAD` = b7be080): spec build + `check:generated` \"All 14 generated artifacts are up to date\" (includes `check:authorable-surface`, `check:api-surface`, `check:docs`, `check:liveness`, `check:strictness-ledger` — the ratchet families) · full `@objectstack/spec` vitest suite (426 files / 11352 tests passed) · `@objectstack/spec` typecheck · and the per-card gate list below, every one exit 0 with exits captured before any pipe:\n\n`check:merge-driver` · `check:published-files` · `check:slot-lookup` · `check:spec-parsed-alias` · `check:test-source-alias` · `check:type-source-resolution` · `check-adr-0087-registration` · `check-changeset-no-major` · `check-empty-changeset` · `check:nul-bytes` · `check:changeset-gate-self-tests` · `check:objectui-changeset` · `check-ci-filter-parity` · `check:cross-package-test-inputs` · `check-plugin-teardown-shape` · docs-audit `check-affected-docs` + `check-drift-comment` · `release-rehearsal-clone --self-test` · spec `check:empty-state` / `check:strictness-ledger` / `check:variant-docs` · lint `check:doc-formula-expressions` · `check:query-options-erasure` · `check:type-check-coverage` · `check:engine-double-contract` · `check:where-matcher`\n\n**Declared local narrowings** (CI runs the full farm regardless):\n\n- `check-dev-prereqs` — red locally only on its workspace-built precondition: 66 of 67 packages have no `dist/` in this fresh worktree. Not a diff finding; the one diff-coupled row (`packages/spec/dist` freshness, content-hashed) is green — spec was rebuilt at the final head with its `.build-input-hash` written.\n- `check:type-check-debt --re-measure` — refuses on an unbuilt workspace closure (its own doc: the throw means NOT MEASURED). Spec-scoped equivalents ran green at head: `@objectstack/spec` typecheck, and `check:test-typecheck --package packages/spec` \"OK — test layer compiles; 55 file(s) / 263 error(s) held\" (ledger unchanged). My diff touches only `packages/spec` + `.changeset` + generated docs, so no other ledger entry's tsc program gains an input from this diff.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01NDGG54XF5gbTLdQzCtnaVV)_"
+}

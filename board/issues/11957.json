@@ -1,0 +1,34 @@
+{
+  "number": 11957,
+  "kind": "issue",
+  "title": "[finding] engine doubles have no `assertEngineFindOnePredicate` — a fake answers a predicate-less findOne that the real engine REFUSES, and #11767 is what that costs",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T03:04:40Z",
+  "updated_at": "2026-08-25T11:49:15Z",
+  "closed_at": "2026-08-25T11:42:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11957",
+  "body": "## What\n\n`@objectstack/objectql` publishes two shared dispatch asserts that in-repo engine doubles must adopt — `assertEngineUpdateDispatch` and `assertEngineDeleteDispatch` — and `pnpm check:engine-double-contract` ratchets their adoption. There is no equivalent for the **read** side, specifically for the `findOne` predicate rule.\n\nThe real engine (`packages/objectql/src/engine.ts` → `requireFindOnePredicate`, #4419) **throws** on a `findOne` whose `where` is absent/empty and which carries no `orderBy`:\n\n```\nfindOne('sys_user') selects no particular record: 'where' is absent or empty and the query\ncarries no 'orderBy'. findOne applies limit: 1, so this would return an ARBITRARY row ...\n```\n\nEvery in-memory double in the repo instead treats an absent filter as \"match everything\" and answers happily — `null` on an empty table, an arbitrary row otherwise. So a production call site that violates #4419 reads as *working* under every unit suite and only fails on a real engine.\n\n## What it cost, measured\n\nobjectstack#11767 (audience posture, #11739). `AuthManager.isBootstrapCreation` probed the bootstrap population with `adapter.findOne({ model: 'user', where: [] })` inside a `try/catch`. On a real ObjectQL engine that call throws; the `catch { return false; }` turned the refusal into \"users exist\", so the declared first-run bypass never fired and the `invite_only` default refused the operator's own dev-admin seed. Two required gates went red across every shard (`Dogfood Regression Gate` 1–3/3, `Test Core` 1/6 + 2/6) — while a 641-line posture x creation-method matrix over the in-memory double stayed green, including a case literally named \"bootstrap: the very first signup is admitted\".\n\nInstrumented at the real seam during a dogfood boot:\n\n```\nOSPROBE adapter=true findOne=function\nOSPROBE adapter.findOne THREW: findOne('sys_user') selects no particular record ... (#4419)\n  at _ObjectQL.requireFindOnePredicate (packages/objectql/src/engine.ts:8408)\nOSPROBE engine sys_user rows=[]   <- zero users; the verdict was false\n```\n\nThe call site is fixed in #11767 and pinned by a real-engine test. The **class** is not: nothing stops the next double-backed suite from certifying the next predicate-less `findOne`.\n\n## Suggested shape\n\nPublish `assertEngineFindOnePredicate(query)` from `@objectstack/objectql` beside the two existing dispatch asserts — the producer's own predicate, not a hand-copied re-derivation (that is the hole `check:engine-double-contract` already names for the delete side) — and extend the ratchet to it. Note the sizing: the adoption wave touches every `findOne` double in the ledger, so this is its own card, not a rider.\n\n## Related\n\n- Blocked-by / context: #11767 (the fix that paid for this finding), #4419 (the engine rule), #11850 (a sibling gap in the same ratchet's population).\n"
+}

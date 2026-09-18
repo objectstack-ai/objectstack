@@ -1,0 +1,34 @@
+{
+  "number": 12045,
+  "kind": "pull_request",
+  "title": "docs(api): record the os:check decision for client-sdk.mdx, and fence its JSX as tsx",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T06:48:13Z",
+  "updated_at": "2026-08-25T07:26:18Z",
+  "closed_at": "2026-08-25T07:26:17Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": "2026-08-25T07:26:17Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12045",
+  "body": "Part of #11942\n\n## Why this is not \"13 markers\"\n\nThe card's scope was: opt the page's fences into `check:skill-examples`, compile, and repair\neach red honestly, on the premise that *\"each red is a real doc-vs-SDK divergence, not a marker\nproblem.\"*\n\n**Measured, that premise does not hold: not one of the 13 reds is a doc-vs-SDK divergence.**\nAll 13 fences were marked, the gate run, and the tree reverted. Result: **128 diagnostics, zero\ndivergences**, in two structural classes neither of which this page can fix.\n\n### Class 1 — the docs surface cannot resolve the SDK (3 fences)\n\n`check:skill-examples` compiles per **surface**. `content/docs/**` belongs to the\n`skills + docs (@objectstack/spec)` surface, whose `resolutionDir` and `paths` map derive from\n`@objectstack/spec` alone — and `@objectstack/spec` does not depend on `@objectstack/client`\n(confirmed: neither `packages/spec/node_modules/@objectstack/` nor the root\n`node_modules/@objectstack/` exists).\n\nMarking the single most self-contained fence on the page — a pure `createFilter()` builder chain\nthat is unambiguously correct SDK code — yields:\n\n```\ncontent/docs/api/client-sdk.mdx:485:30\n    error TS2307: Cannot find module '@objectstack/client' or its corresponding type declarations.\n```\n\nThat is a surface-resolution gap, not drift. The only real fix is adding `@objectstack/client` to\nthat surface's `selfPackages`, i.e. **editing the gate** — explicitly out of scope for this card.\n\nThis is not a new observation: `content/docs/kernel/runtime-services/data-service.mdx` already\nrecords the identical constraint in prose, for the identical reason, and leaves its own SDK block\ndeliberately unmarked.\n\n### Class 2 — deliberate continuation fragments (10 fences)\n\nQuick Start establishes `const client = new ObjectStackClient(...)` once; every later fence\ncontinues that implied context. Marking them reds with 93 x TS2304 `Cannot find name 'client'`,\nplus TS18004 (`conversationId`, `messages`, `userId`, `orderId`, `recordId`), TS18046 (`error` is\n`unknown` in a `catch`), TS2591 (`process`) and TS7006.\n\nMaking these compile means hand-declaring the SDK's own types or injecting casts into prose whose\nsubject *is* the real API — which pins each example to itself and teaches worse code than the page\nteaches now. The card forbids editing a correct example into something that merely compiles.\n\n## What this PR does deliver\n\n**1. It records the decision.** The issue's actual claim is that *\"nobody has decided, page by\npage, which side of that line each block is on.\"* This PR decides it for this page and writes the\nmeasurement down, as a contributor-facing MDX comment (renders to nothing), following the\n`data-service.mdx` precedent. The next agent reads the answer instead of re-deriving it.\n\n**2. It defuses a measured landmine.** The React Hooks block is JSX but was fenced as `typescript`.\nThe gate writes each block out with its **fence's own extension**, so a marker on it produced only\nTS1xxx *syntax* errors — and `tsc` stops at syntax errors and never runs the semantic pass. Measured\nconsequence, on this page:\n\n| fences marked | React Hooks fence | syntax errors | **semantic diagnostics** |\n|---:|:---|---:|---:|\n| 12 (JSX one excluded) | `typescript` | 0 | **118** |\n| 13 (all) | `typescript` | 14 | **0** |\n| 13 (all) | `tsx` | 0 | **128** |\n\nOne mis-tagged fence suppresses type-checking for **every marked block across `skills/` and\n`content/docs/`** — 227 blocks — not just this page. Retagging it `tsx` is correct on its own terms\n(the block *is* JSX) and converts a whole-surface blackout into honest per-block diagnostics.\n`check:doc-authoring`'s `FENCE_OPEN` accepts `tsx`, so the block stays visible to it.\n\nThe marker becomes available here the day the docs surface can resolve `@objectstack/client`.\n\n## Verification\n\nBaseline and final are identical and unchanged, as intended — this PR adds no markers:\n\n```\n256 marked example(s) across 99 file(s), 3 surface(s)\n256 prose examples type-check across 3 surface(s)\n```\n\nAll 20 gate families derived at the final commit `c84df2983` by\n`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` (no hand-written path list),\nplus `check:nul-bytes` and `check:skill-examples` — **22/22 green**, each exit code captured before\nany pipe. MDX parse confirmed by compiling the page with the workspace's own `@mdx-js/mdx@3.1.1`.\n\nDocs-only; no published package changes, so `skip-changeset` rather than a changeset.\n\nEvery mutation run above was performed under an `EXIT INT TERM` restore trap, with the marker count\non disk asserted before each run and the tree confirmed pristine after.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01UjM2ia8Av1v5NqfqQEQmC6)_"
+}

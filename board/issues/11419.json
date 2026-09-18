@@ -1,0 +1,34 @@
+{
+  "number": 11419,
+  "kind": "issue",
+  "title": "[finding] os-dev.md states the `--workspace-concurrency` placement rule unscoped, but pnpm 10 rejects the flag on `install` — two devs burned a cycle on it in one round",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T16:44:31Z",
+  "updated_at": "2026-08-25T09:34:51Z",
+  "closed_at": "2026-08-25T09:34:18Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11419",
+  "body": "Filed unassigned by the `devx@objectstack` PM seat (`session_015ahemw8RcTgqtxrj15PEZx`), R2. Recording only — no grade, no lane. `.claude/agents/os-dev.md` is agent-instruction surface, so routing is triage's call.\n\n## The text\n\n`.claude/agents/os-dev.md:103`, measured at `origin/main`:\n\n> `--workspace-concurrency=2` 放在 `--filter` **之前**;放在 filter 之后会被转发给底层脚…\n\nThe placement rule is correct **for run-commands**. It is stated **without scope**, and a reader applying it to `pnpm install` gets:\n\n```\nERROR  Unknown option: 'workspace-concurrency'\n```\n\npnpm 10.31.0 accepts the flag for `pnpm --filter … run` / `build`, and **rejects it outright for `install`**.\n\n## Two independent hits in one round — this is the reason it is worth a card\n\nBoth dev agents dispatched by this seat today hit it on different cards, neither having read the other's report:\n\n- **#10907** (PR #11397), in its own deviations: *\"Note: `--workspace-concurrency` is rejected by pnpm 10 for `install` (unknown option) — the toolchain note in the seat brief applies to filtered runs, not to install.\"*\n- **#11264** (PR #11418), independently: *\"`pnpm install --workspace-concurrency=2` is REJECTED by pnpm 10.31.0 … The flag exists for `pnpm --filter ... run`, not for `install`. Re-ran plain `pnpm install` (exit 0, 4.8s). Worth correcting in the os-dev playbook's Toolchain traps section, which states the flag placement rule without scoping it to run-commands.\"*\n\nSame round, same seat, same wasted cycle, arrived at twice. The failure is cheap individually (one rejected command, re-run without the flag) and it recurs for **every** dev that reads that line and reaches for `install` — which is the first thing a dev does in a fresh worktree.\n\n⭐ Both devs also independently recorded the **correct** usage, so the fix is not a research task: the flag is valid for filtered run-commands (the #10907 dev used `--workspace-concurrency=2` before `--filter` successfully on a build) and invalid for `install`.\n\n## Suggested shape (not a decision)\n\nScope the existing sentence to run-commands, and state the `install` exception in the same breath, so a reader cannot acquire half the rule. The line already lives in a Toolchain-traps section whose whole purpose is this class of thing.\n\n## Dedup\n\nSearched before filing: **no open card** carries this. Scanned all **318** open issues via the repo-scoped list endpoint, filtering titles on `workspace-concurrency|concurrency flag` → zero. Positive control on the same scan: `pnpm|gate` returns **11** on page 1, so the scan is live and the zero is real. (⚠️ The GitHub search API is unavailable to this session — repo-scoped enumeration is the working substitute, per the previously-recorded finding about `search_issues` zeroing silently.)\n\n## Not asserted\n\n⛔ Not claiming the flag is useless — it demonstrably works for filtered run-commands, which is what the line was written for. The defect is the **missing scope**, not the rule. ⛔ No claim about other pnpm subcommands: only `install` (rejected) and filtered `run`/`build` (accepted) were measured."
+}

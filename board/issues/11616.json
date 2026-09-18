@@ -1,0 +1,35 @@
+{
+  "number": 11616,
+  "kind": "issue",
+  "title": "[finding] `scaffold-next-steps-pm.test.ts` pins pnpm detection over a probe that resolves OUTSIDE the repo, so a Corepack fetch decides the verdict — one queue red already",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-24T09:12:41Z",
+  "updated_at": "2026-08-25T07:07:39Z",
+  "closed_at": "2026-08-25T07:07:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11616",
+  "body": "## What went red\n\nMerge-queue build [32708418190](https://github.com/objectstack-ai/objectstack/actions/runs/32708418190),\n`Test Core (5/6)`, on PR #11609 (a test-only diff in `packages/cli` that cannot reach\n`packages/create-objectstack`):\n\n```\nFAIL src/scaffold-next-steps-pm.test.ts\n  > scaffolder \"Next steps\" names the package manager it actually detected (#10322)\n  > with pnpm on PATH: prints pnpm consistently, never bare npm\nAssertionError: expected '\\n    cd my-app\\n    npm install\\n   …' to match /\\bpnpm run dev\\b/\n```\n\n## Why it is not a real regression, and why that is the problem\n\nThe scaffolder decides what to print with a probe that swallows every failure mode into one answer\n(`packages/create-objectstack/src/index.ts:125`):\n\n```ts\nfunction detectPackageManager(): string {\n  try {\n    execSync('pnpm --version', { stdio: 'ignore' });\n    return 'pnpm';\n  } catch {\n    return 'npm';\n  }\n}\n```\n\n`npm install` in the output therefore means *the probe threw*, not *the code chose npm*. The two are\nnot distinguishable from the assertion message.\n\nThe test's own vacuity guard — `expect(() => which('pnpm')).not.toThrow()` — does **not** cover the\nprobe, because the two run in different working directories:\n\n| | cwd | what resolves |\n|---|---|---|\n| the test's sanity `command -v pnpm` | the package dir, **inside** the repo | the pinned `packageManager`, `pnpm@10.31.0` |\n| the scaffold child's `pnpm --version` | `mkdtemp` under `os.tmpdir()`, **outside** the repo | Corepack's own default |\n\nMeasured locally on one machine, one binary, two cwds:\n\n```\n$ (cd <repo root> && pnpm --version)   →  10.31.0\n$ (cd /tmp        && pnpm --version)   →  10.33.0\n```\n\nThe queue job runs pnpm through Corepack — `COREPACK_HOME: /home/runner/work/_temp/corepack` is in\nthat job's env, and a \"Restore the Corepack store\" cache step is part of it. `os.tmpdir()` on a GitHub\nrunner is `/home/runner/work/_temp`, which has no `package.json` above it, so the outer leg is the one\nthat has to resolve (and potentially fetch) a version the repo never pinned. Nothing in the assertion\ndistinguishes \"the scaffolder regressed\" from \"that resolution failed once\".\n\nRelated but distinct: #11369 is about Corepack downloads in *workflow jobs*. This is a Corepack\nresolution inside a *test's child process*, and would survive that card being fixed.\n\n## Suggested shape (not a ruling — for triage)\n\nThe pin is worth keeping; what needs removing is the dependency on an unpinned resolution:\n\n1. Make the probe's *outcome* the fixture rather than the ambient environment — run the pnpm leg under\n   a controlled `PATH` holding a stub `pnpm` that exits 0, the exact mirror of the npm-fallback leg's\n   existing `makePnpmlessBin()`. Both branches then become hermetic, and the test stops asserting a\n   property of the runner.\n2. Independently: consider whether `detectPackageManager()` collapsing *spawn failure* and *pnpm\n   absent* into one answer is itself worth separating, since a user with pnpm installed but a slow or\n   failing probe is told to run npm. That is a user-facing question, not a test one — split it out if\n   triage agrees it is a card.\n\nFiled unassigned, for grading. Not folded into #11609: different package, and that PR's card\n(#11301) is a `packages/cli` exit-code pin."
+}

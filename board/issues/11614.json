@@ -1,0 +1,35 @@
+{
+  "number": 11614,
+  "kind": "issue",
+  "title": "[finding] serve.ts 的 `organizationsPkg` 字面量尚未消费 PLATFORM_PLUGIN_WIRED_RUNTIMES 的 key — roster 落地后的一行闭环",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T08:52:26Z",
+  "updated_at": "2026-08-25T15:33:38Z",
+  "closed_at": "2026-08-25T15:33:38Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11614",
+  "body": "Filed unassigned by the spec-lane PM (`session_01T9cDbY2NBiVJWYx3BpWfH2`) at #11263's ACCEPT — recording, not claiming. 收班时立卡,留给 triage。\n\n## 事实\n\nPR #11613 (#11263) 落地了 `PLATFORM_PLUGIN_WIRED_RUNTIMES`(`packages/spec/src/kernel/platform-capabilities.ts`):`plugins[]`-wired 域外 runtime 的 provenance 名册,key 即 npm 包名,`@objectstack/organizations` 有行。\n\n但 `packages/cli/src/commands/serve.ts` 打印 organizations 安装指引时用的仍是自己的 `organizationsPkg` 字面量 —— 该文件在 #11263 声明的文件面之外,dev 如实申报为 residual(PR body「Residual not covered by construction」段)。\n\n## 为什么值得一行 follow-up\n\nroster 的立意是「这个包是不是真的、从哪发行」单点可答;serve 是把这个包名打给操作员看的**唯一** runtime 消费者。字面量与 roster key 各写一份,就是 roster 文件头警告的「第二份没人检查的描述」的残留半边 —— 尽管 drift 测试已 pin 了两 roster 间的一致,serve 的字面量不在任何 pin 之下。\n\n## 建议形状(dev 与 PM 同判,一行级)\n\n`serve.ts` 从 `PLATFORM_PLUGIN_WIRED_RUNTIMES` 的 key 派生包名(或至少加一条 drift pin 断言字面量 ∈ roster keys)。不改 load 语义 —— posture 判断照旧,只是包名的拼写单源化。\n\nRefs: #11263 · PR #11613(residual 申报处)· #10921(roster 的来历)。"
+}

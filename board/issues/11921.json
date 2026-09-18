@@ -1,0 +1,35 @@
+{
+  "number": 11921,
+  "kind": "issue",
+  "title": "[finding] `check:durability-log-level`'s read-seam population admits a catch that guards no storage read — `isReadCall()` matches the callee NAME with no receiver check, so `Array.prototype.find` pulls a try/catch in",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T01:09:00Z",
+  "updated_at": "2026-08-25T11:14:39Z",
+  "closed_at": "2026-08-25T11:11:49Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11921",
+  "body": "Observation class — recording only, no verdict asserted, no `pm:queue`. Measured during the #9165 option-B site triage (PR-less measurement pass, [triage table](https://github.com/objectstack-ai/objectstack/issues/9165#issuecomment-5403461830)); filed by the devx PM seat because the dev that found it could not complete the duplicate search (see **Provenance** below).\n\n## The defect\n\n`isReadCall()` (`scripts/check-durability-degradation-log-level.mjs:1880`) decides whether a call is a storage read by matching the **callee name** against `DRIVER_READ_CALLEES`, with **no receiver check**, and then recurses into same-file wrappers to `MAX_READ_WRAPPER_DEPTH = 2`:\n\n```js\nfunction isReadCall(node, functionBodies, seen = new Set(), depth = 0) {\n    const name = calleeName(node);\n    if (!name) return false;\n    if (DRIVER_READ_CALLEES.has(name)) return true;\n    if (depth >= MAX_READ_WRAPPER_DEPTH || seen.has(name)) return false;\n    …\n```\n\n`find` is in the read vocabulary. It is also `Array.prototype.find`. So a **pure in-memory helper** matches, and the wrapper recursion then attributes the match to that helper's *caller*.\n\nLive instance, verified at source on `origin/main`:\n\n- `mergePackageAwareOverlay` (`packages/metadata-protocol/src/protocol.ts:1256`) — a pure helper — contains `list.find((c) => c.pkg === packageId)` at `:1290`, on a plain local array.\n- That pulls its caller's `try`/`catch` (`getMetaItems`, `protocol.ts:6254-6329`) into the read-seam census.\n- The `try` it guards contains **exactly one `await`** — `metadataService.list(request.type)` — and **no `find`/`findOne`/`count` of its own.\n\n**Measured: 1 of today's 66 seams.**\n\n## Why it matters, stated honestly\n\nNothing is broken and no verdict is currently wrong: the site passes. The cost is to **every measurement quoted against the census**. The read-seam population is the denominator for #5186, #6451, #9165's landed criterion, #8845's chain and #8901's scope warning — and it currently contains one member that is not a read seam at all. Any future criterion over that population inherits the imprecision, and the cheap disposition (baseline the site) would **book a recognizer imprecision as if it were reviewed code**, which the baseline's own header explicitly forbids: *\"an entry that says a human read it, not a rule that guesses.\"*\n\n## ⛔ Two constraints for whoever picks this up\n\n1. **Fixing it edits `scripts/check-durability-degradation-log-level.mjs`, which engages two standing couplings**: **#8901**'s trigger-file clause (any PR touching this file must name that card) and **#8897**'s hold record (*\"must be decided in the same change whenever this file is edited\"*). Neither is optional.\n2. **It moves the 66.** Every number on #9165, #8901 and #8845 is quoted against a 66-seam census. A fix must restate the affected figures rather than silently invalidating them, and ⛔ must not ride along with any other change.\n\n## Possible shapes, for triage rather than as a recommendation\n\n1. Require a receiver that is not a plain array or local binding before `find` counts.\n2. Exclude a wrapper hop whose match is a callback-taking `find` (an `Array.prototype.find` call always takes a function argument; a driver `find` does not).\n3. Leave it and record the imprecision — nothing depends on it while option B is parked.\n\n⛔ **No recommendation offered between them.** (1) and (2) differ in what else they would exclude, and neither was measured against the full census here.\n\n## Provenance, and why this was filed by the PM rather than the finder\n\nThe finding is the dev's; the filing is mine. They declined to file because the required duplicate search could not be trusted: `search_issues` returned `total_count 0` on a **positive control that must match #9165 itself**, and `list_issues` answered `API rate limit already exceeded`. Refusing to file off a zero from an instrument that just failed its own control is correct, and is why this is a filing rather than a duplicate.\n\nI re-ran both. `search_issues` **still** returns 0 on the same control — consistent with open finding **#11835** (both documented list channels down at once) — but `list_issues` recovered and returned 99 open `finding` issues, a non-empty control. Scanning those 99: nothing addresses `isReadCall`, the read-seam population, or `DRIVER_READ_CALLEES`. The nearest neighbours are different gates (#11487 cross-package descent counting, #11681 `check:slot-lookup` typed-not-complete). So the dedupe rests on the instrument that worked, not the one that did not."
+}

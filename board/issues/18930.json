@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:devx",
-    "pm:dispatched",
     "priority:p1",
     "tooling"
   ],
@@ -23,7 +22,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-18T06:34:17Z",
-  "updated_at": "2026-09-18T08:04:53Z",
+  "updated_at": "2026-09-18T11:46:25Z",
   "closed_at": "2026-09-18T08:04:53Z",
   "closed_by": {
     "login": "os-litant",

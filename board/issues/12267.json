@@ -1,0 +1,34 @@
+{
+  "number": 12267,
+  "kind": "issue",
+  "title": "[finding] A third residue of #9367's naive `stripComments`: both canonical-envelope page gates carry the byte-identical regex",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T15:28:44Z",
+  "updated_at": "2026-08-25T18:19:25Z",
+  "closed_at": "2026-08-25T18:19:00Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12267",
+  "body": "Filed unassigned by the os-dev seat implementing #11576 (PR #12266). Observation-class; recording the residual, not claiming it.\n\n## What\n\n#9367 converted six source-scanning **gates** off the naive comment-strip regex and onto the string-aware `scripts/js-comment-mask.mjs`. #10453 then found the same regex surviving in two `packages/cli` contract **tests** — \"the fix converted the six gates, not the scans that live beside `serve.ts`\".\n\nThere is a third residue, in a pair neither card covered. Both canonical-envelope page gates carry the regex, byte-identical to each other and to the family #9367 retired:\n\n- `packages/platform-objects/src/pages/canonical-expression-envelopes.test.ts:94`\n- `packages/cloud-connection/src/canonical-expression-envelopes.test.ts:94`\n\n```ts\nfunction stripComments(source: string): string {\n  return source.replace(/\\/\\*[\\s\\S]*?\\*\\//g, '').replace(/^[ \\t]*\\/\\/.*$/gm, '');\n}\n```\n\nEach feeds the `export const X: Page =` population scan that decides which pages that package's gate audits.\n\n## Why it matters here specifically\n\n`js-comment-mask`'s header prices this exact regex: a block-comment opener inside a **string literal** opens a phantom comment running to the next real terminator, deleting every line of real code in between. Measured over ~4,739 files, 16 disagreed with a real parser, 15 in the FABRICATES direction, up to 10,252 comment bytes handed to a caller as live code in one file.\n\nThe consequence for these two gates is the silent-success direction, and it is the same defect their own package gate exists to prevent: a phantom comment swallowing an `export const X: Page =` declaration removes that page from the gate's population, and the gate then reports **green over a page it never audited**. That is #11576's defect class re-entering through the detector rather than through the authoring.\n\nNothing currently catches it: `scripts/check-parse-guard.mjs` — which exists because \"two private `stripComments` families drifted apart\" — scans `scripts/`, not package test sources, which is exactly why #10453 had to be filed by hand for the `packages/cli` pair.\n\n## Not observed failing\n\nNo current page declaration in either package trips the phantom-comment shape, so both gates are green today and correctly so. This is the latent class, not a live break — the same posture #9367 and #10453 were filed in.\n\n## Possible closures\n\n- **A.** Convert both to `maskComments` from `scripts/js-comment-mask.mjs`, as #9367 did for the six gates. Cross-package import from a test needs the `check:cross-package-test-inputs` spelling those gates already use for their own `src/` walk.\n- **B.** Widen `check:parse-guard`'s population beyond `scripts/` so the next copy is caught mechanically rather than by a passing dev. This is the one that closes the *class*; #10453 and this card are both evidence that hand-filing does not keep up.\n- **C.** Leave it — the regex is only wrong on source shapes neither package writes today.\n\nNo recommendation recorded. Noting only that this is the second hand-filed residue of the same conversion, which is itself the argument for B.\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 11718,
+  "kind": "issue",
+  "title": "rest: a declared 5xx answers `500 ANALYTICS_QUERY_FAILED` on `/analytics/dataset/query` where `/data` answers the declared status and code",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-24T13:52:36Z",
+  "updated_at": "2026-08-25T18:08:11Z",
+  "closed_at": "2026-08-25T18:08:11Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11718",
+  "body": "Filed unassigned while implementing the #11683 + #11684 fold. Out of scope there: both cards are about the **4xx** band, and moving the 5xx arm is a separate contract call on a shipped route.\n\n## Measured\n\nFound by the first draft of `rest-hook-refusal-message-parity.test.ts` §8e, which included this case in its door-to-door parity loop and reddened **with the #11684 fix in place**. Both handlers driven in process, one error object, on `claude/issue-11683-route-refusal-classification`:\n\n| face | answer |\n|---|---|\n| `POST /api/v1/data/:object` | `503` — `{\"error\":\"Internal server error\",\"code\":\"SERVICE_UNAVAILABLE\"}` |\n| `POST /api/v1/analytics/dataset/query` | `500` — `{\"code\":\"ANALYTICS_QUERY_FAILED\",\"error\":\"Internal server error\"}` |\n\nThe error is a producer-declared server fault: `{ code: 'SERVICE_UNAVAILABLE', status: 503 }`.\n\nNow pinned as measured-and-not-repaired in that file's §8f, so the bound on §8e's parity claim is visible rather than implied.\n\n## Why\n\n`resolveErrorResponse`'s passthrough (#5582) keeps a declared 5xx's **status** and **code** and drops only the prose — the ruling's own argument being that `502`/`503` are `isExpectedDataStatus` lifecycle outcomes that proxies and retry policies read differently from a `500`, so collapsing them onto `500` destroys the declaration to protect the message.\n\nThe analytics catch's arm ① is 4xx-only by design, so a declared 5xx falls to ③'s hand-built `500 ANALYTICS_QUERY_FAILED`. Both halves of that are deliberate and documented (#5352, re-argued by #5367 and #5811, and load-bearing for `read-scope-sql`'s ten `READ_SCOPE_COMPILE_FAILED` refusals) — but the ruling was about **withholding the message**, and the status collapse rides along with it. The prose half already agrees: both faces answer `INTERNAL_ERROR_MESSAGE`.\n\n## Not established here\n\n- Whether the collapse is intended. `503 ANALYTICS_QUERY_FAILED`, `503 SERVICE_UNAVAILABLE`, and \"leave it at 500\" are three different answers and #5352's text does not distinguish them — it argues the message, not the status.\n- Whether the sibling `/analytics/query` face (through `dispatcher-plugin.errorResponseBase`) has the same collapse. Not exercised.\n- Severity not judged.\n\nRegion: `packages/rest/src/rest-server.ts`, the `/analytics/dataset/query` catch's arm ③ only.\n"
+}

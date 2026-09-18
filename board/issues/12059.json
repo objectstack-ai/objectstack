@@ -1,0 +1,34 @@
+{
+  "number": 12059,
+  "kind": "issue",
+  "title": "platform-objects' keyed-text-bounds pin cannot reach plugin/service packages — four keyed unbounded text columns in plugin-audit and plugin-security still break MySQL schema-sync",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-25T07:13:02Z",
+  "updated_at": "2026-08-25T15:25:32Z",
+  "closed_at": "2026-08-25T15:04:59Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12059",
+  "body": "Found while landing route A's last column for #11374 (PR #12058). Filed unassigned.\n\n## What\n\nThe #11374 route-A rule is \"a text-family column that a declared index keys on\nmust declare a `maxLength`, because a bound is what lets the column be a key at\nall\". On MySQL an unbounded keyed text column is emitted `TEXT`, the\n`ALTER TABLE ... ADD INDEX` is refused with `ER_BLOB_KEY_WITHOUT_LENGTH`, and\nthe object lands registered-but-broken with its declared index silently absent.\n\nThat rule is now enforced by a pin — but the pin lives in\n`@objectstack/platform-objects` and enumerates only the objects **that package**\nexports. Platform objects that moved out to plugins under ADR-0029 K2 are\ntherefore outside it, and four of them declare keyed text columns with no bound:\n\n| Object | Column | Declaration | Keyed by |\n|---|---|---|---|\n| `sys_activity` | `record_id` | `packages/plugins/plugin-audit/src/objects/sys-activity.object.ts:176` | `{ fields: ['object_name', 'record_id'] }` (:262) |\n| `sys_audit_log` | `record_id` | `packages/plugins/plugin-audit/src/objects/sys-audit-log.object.ts:229` | `{ fields: ['object_name', 'record_id'] }` (:334) |\n| `sys_audience_binding_suggestion` | `package_id` | `packages/plugins/plugin-security/src/objects/sys-audience-binding-suggestion.object.ts:44` | `(package_id, permission_set_name, anchor)` |\n| `sys_audience_binding_suggestion` | `permission_set_name` | same file | same composite |\n\nAll four are `Field.text({ ... })` with no `maxLength` key in the declaration.\n\n## Evidence, and what is NOT claimed\n\n**Declaration-level, measured by walking every `*.object.ts` outside\n`packages/platform-objects/` and intersecting each object's `indexes` with its\ntext-family fields.** Each row above was then read by hand to confirm it is a\nreal `Field.text` with no `maxLength` and a real index entry naming it.\n\n**The mechanism is measured live on this exact code path**, on the same driver,\nin PR #12058: `sys_import_job.created_by`, an unbounded keyed `Field.text`,\nproduced\n\n```\n[sql-driver] cannot create index 'idx_sys_import_job_created_by_created_at'\non \"sys_import_job\" — MySQL refuses a TEXT/BLOB column in a key without a key length\n```\n\nagainst live MySQL 8.0.46, with the column reading back `text` /\n`CHARACTER_MAXIMUM_LENGTH` 65535 from `information_schema` and its declared\nindex absent. Declaring the bound moved it to `varchar(255)` and the index\nappeared.\n\n⛔ **What I did not do**: run these four objects through a live `syncSchema`.\nThey are not reachable from their packages' export surface — `plugin-audit`'s\n`package.json` declares only the `.` export and its root barrel does not\nre-export `./objects`, so a probe cannot import `SysActivity` at all. Whoever\npicks this up should drive them through the plugin's own registration path\nrather than by importing the object, and should treat the counts as unverified\nuntil they do.\n\n## Why it matters (declared ≠ enforced)\n\nTwo separate failures, and the second is the one worth fixing:\n\n1. Four declared indexes cannot exist on MySQL, so those objects are\n   registered-but-broken there — `sys_audit_log` and `sys_activity` lose the\n   `(object_name, record_id)` lookup that the ActivityPointer read path\n   (ADR-0052 §5) assumes.\n2. **The pin is scoped to a package, not to the defect class.** This is the\n   second time that exact shape has bitten: route A's original pin was scoped to\n   `identity/` and that is precisely how `sys_import_job.created_by` in `audit/`\n   survived the first pass. PR #12058 widened it from `identity/` to the whole\n   of `platform-objects` (20+ objects → 45, 30+ keyed text columns → 78), but\n   the package boundary is still a boundary, and objects keep moving across it\n   under ADR-0029.\n\n## Direction (for triage — not prescribing a fix)\n\n- Declare a sourced bound on each of the four, in route A's shape (every bound\n  derived from a named producer, stated so it is vetoable in review). For the\n  two `record_id` columns the obvious source is referenced-column transitivity\n  from the record id they hold, exactly as #12058 did for `created_by`; the\n  physical `id` column `driver-sql` creates is `table.string('id').primary()`,\n  knex's `varchar(255)`.\n- And/or lift the pin so it walks every package that ships platform objects\n  rather than one package — the class-level fix, and the one that stops this\n  recurring the next time an object moves.\n\nRelated: #11374 (route A), PR #11699 (13 identity columns), PR #12058 (this\ncard's origin), #11627 (the separate >768-character key class)."
+}

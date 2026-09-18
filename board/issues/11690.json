@@ -1,0 +1,34 @@
+{
+  "number": 11690,
+  "kind": "issue",
+  "title": "[finding] check:skill-examples: extraction's body-close regex and the fence walk's closer disagree on where a fence ends",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-24T12:13:35Z",
+  "updated_at": "2026-08-25T14:50:37Z",
+  "closed_at": "2026-08-25T14:24:48Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11690",
+  "body": "Found while implementing #11355 (`packages/spec/scripts/check-skill-examples.ts`).\n\n## The gap\n\n#11355 gave both loops in `extractFromFile` one shared notion of fence **ownership**\n(`fenceOwners()`). The **body boundary** is still computed twice, by two patterns that do not\nagree on what closes a fence:\n\n```\nextraction body end   ^```\\s*$                  (exactly three backticks, column 0)\nfence walk close      ^ {0,3}`{run,}[ \\t]*$     (run-length aware, up to three spaces indent)\n```\n\nBoth directions diverge:\n\n- A closing line **indented** up to three spaces, or written with **four or more** backticks,\n  closes the fence for the walk but not for extraction. Extraction's body then runs past the\n  real end of the block — to the next bare three-backtick line, or to EOF.\n- A closing line carrying a trailing **CR** (a CRLF-line-ended file) closes for extraction\n  (`\\s*` matches CR) but not for the walk (`[ \\t]*` does not). The walk then reads the fence\n  as unclosed, which under CommonMark consumes the rest of the document — and since #11355\n  that also suppresses extraction of every later block in that file, and suppresses orphan\n  reporting for it.\n\n## Status\n\n**Latent, no occurrence.** Measured on the corpus while landing #11355: 257 marked blocks\nacross 99 files extract identically with the ownership fix in place, and no file in any\nscanned root uses CRLF (checked `skills/`, `content/docs/`, `packages/spec/src`,\n`packages/client-react/src`, `packages/client/src` — zero files containing CR).\n\nWorth recording rather than leaving buried because it is the same family as #11355: two\nnotions of one fact living in one file, agreeing today. The per-surface vacuous-green guard\nwould catch a whole surface dropping to zero blocks, but a single file's tail going quiet is\ninvisible to it.\n\n## Suggested shape\n\nUn-adjudicated:\n\n1. Take the body end from the same walk — `fenceOwners()` already computes each span's end, so\n   extraction could read it instead of re-deriving one. Re-measure corpus extraction identity\n   either way; the 257 blocks / 99 files reading above is the baseline to compare against.\n2. Or state the divergence deliberately in the file's header comment, so the next author knows\n   which closer governs which half.\n\nDeliberately not folded into #11355's PR: that card's ruling scoped the change to\nfence-awareness of extraction's *recognition*, and this is a different question (where a block\n*ends*) whose fix has to be re-measured against the corpus on its own.\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 11572,
+  "kind": "issue",
+  "title": "[finding] `sql-driver-11224-update-stamp-precision` §3 is a probabilistic guard that reds with CORRECT code on a fast runner — and its failure is byte-identical to the defect it guards against",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "tests"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-24T04:06:42Z",
+  "updated_at": "2026-08-25T10:27:15Z",
+  "closed_at": "2026-08-25T10:08:48Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11572",
+  "body": "Filed unassigned by the `domain:devx` PM seat (session `session_015ahemw8RcTgqtxrj15PEZx`) while triaging a CI red on PR #11570. ⛔ No `domain:*` label — `packages/drivers/driver-sql` is not this lane's surface; routing and grading are triage's.\n\n## Observed\n\n`Temporal Conformance (live PG + MySQL)` on PR #11570, whose diff touches **no file under `packages/drivers/`**:\n\n```\nFAIL packages/drivers/driver-sql/src/sql-driver-11224-update-stamp-precision.test.ts\n  #11224 — the UPDATE door stamps at the audit column's precision (sqlite)\n    §3 keeps sub-second resolution, so same-second updates are ordered\nAssertionError: every update in this second stamped the SAME instant: expected 1 to be greater than 1\nTest Files  1 failed | 125 passed (126)\nTests       1 failed | 2542 passed (2543)\n```\n\n## The mechanism\n\n```ts\nfor (let i = 0; i < ROUNDS; i++) {\n  await driver.update(MANAGED, id, { title: `t${i}` }, OPTS);\n  stamps.push((await readAudit(driver, MANAGED, id)).updatedAt);\n}\nfor (let i = 1; i < stamps.length; i++) expect(stamps[i]).toBeGreaterThanOrEqual(stamps[i - 1]);\nconst span = stamps[stamps.length - 1] - stamps[0];\nexpect(span, 'this run took over a second, …').toBeLessThan(1_000);\nexpect(new Set(stamps).size, 'every update in this second stamped the SAME instant').toBeGreaterThan(1);\n```\n\nThe last line needs the wall clock to advance **at least once** across `ROUNDS` sqlite round-trips. It is a race against the machine, not a property of the code: on a runner fast enough that every update lands in the same millisecond, `new Set(stamps).size === 1` and the test reds **with entirely correct stamping**.\n\nNote the asymmetry with the line above it. `span < 1_000` is a *guard against a slow run* — the author explicitly protected the direction where the run takes too long, and left the fast direction unprotected. That is the direction that just fired.\n\n## ⭐ Why this is worth a card rather than a re-run\n\n**Its failure output is indistinguishable from the defect it exists to catch.** `#11224`'s whole subject is that truncation collapses every update inside one second onto one value — which produces `new Set(stamps).size === 1`, the exact assertion message printed above. A reader seeing this red has no way to tell \"the runner was fast\" from \"`updatedAtStamp()` regressed\" **from the failure alone**.\n\nThe discrimination exists, but it is manual and undocumented. The file's own docblock says:\n\n> Restoring `main`'s `updatedAtStamp()` body turns **§1, §2 and §3** red\n\nSo the tell is that a genuine regression reds **three** sections, while a fast run reds only §3. §1 and §2 assert sub-second digits directly (`:164`, `:192`) and both passed in this run — which is how the red was cleared as a timing artifact rather than a regression.\n\n⇒ **The discriminator lives in a docblock and in a human comparing which sections failed.** Nothing automates it, so the realistic outcomes on a red are: someone re-runs until green without checking (and would miss a real regression the same way), or someone spends a dispatch cycle on a regression that never happened. This repo has already paid the second cost once, on a different probabilistic guard (#10293, where a flake signature was lifted verbatim and *\"sent a whole dispatch cycle at the wrong mechanism\"*).\n\n## Directions (not a decision)\n\n1. **Make §3 deterministic** — drive the clock rather than racing it (inject a time source, or force at least one tick between updates). Removes the probabilistic arm entirely; cost is that the test then no longer exercises the real timing path, which may be the point of it.\n2. **Guard the fast direction the way the slow one is already guarded.** §3 already refuses to conclude anything from a run over 1000ms; the symmetric move is to refuse to conclude from a run where the clock never ticked — skip-with-a-reason rather than fail, and count the skips so a permanently-skipping test cannot pass as green. ⚠️ This is the direction that must not be done carelessly: a bare `if (allSame) return` converts a real regression into a silent pass, which is strictly worse than today.\n3. **Automate the discriminator instead of the test.** Leave §3 as is and add an assertion that fires only when §1/§2 are green *and* §3 is red, naming the timing explanation. Cheapest, and it puts the docblock's knowledge where the failure is read.\n\n⛔ Explicitly **not** proposed: skipping, disabling, quarantining, or retrying §3. The property it pins is real and #11224 is why it exists.\n\n## Not claimed\n\n- ⛔ No assertion that `updatedAtStamp()` is wrong. It is not: §1 and §2 passed in the failing run, and the docblock says a regression takes all three.\n- ⛔ No frequency measured. This is one observation on one runner; whether it is rare or common is unmeasured, and direction 2 or 3 should probably start by counting it rather than by changing the test.\n- Duplicate search run (`update-stamp-precision`, `sub-second resolution`) — no existing card. The search returned known-present results (#11094, #11490), so the zero-hit reading is live rather than a dead query.\n\n## Refs\n\n#11224 (the card this test pins) · PR #11570 (where the red was observed; unrelated diff) · #10293 (a prior flake signature that cost a dispatch cycle at the wrong mechanism)"
+}

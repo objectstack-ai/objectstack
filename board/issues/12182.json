@@ -1,0 +1,35 @@
+{
+  "number": 12182,
+  "kind": "pull_request",
+  "title": "fix(devx): bound vitest's inner worker pool from the invocation layer",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T12:10:30Z",
+  "updated_at": "2026-08-25T14:46:22Z",
+  "closed_at": "2026-08-25T14:46:20Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": "2026-08-25T14:46:20Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12182",
+  "body": "Fixes #11958\n\nturbo's outer `--concurrency=50%` (#11954, for #11938) bounds how many package\n`test` tasks run at once. It does not bound vitest's own pool *inside* each of\nthem, and nothing else does either: 40 of the 41 `vitest.config.ts` files say\nnothing about pool sizing, and the single mention — in `packages/cli` — is a\ncomment recording a **rejected** lever, not live config (verified). So every\npackage takes vitest's default of `max(availableParallelism() - 1, 1)`, which\nscales with the **host**, not with the shard it was given.\n\n## Measured first, on a 4-CPU / 15GB container\n\n7-package fleet (`core`, `platform-objects`, `metadata`, `service-settings`,\n`service-storage`, `plugin-sharing`, `service-datasource` — each ≥27 test\nfiles, so each saturates its inner pool). Peak RSS is of the vitest processes\nonly, sampled at 0.4s and **scoped to the run's own process tree**. `outer` is\nturbo's `--concurrency`, `inner` is vitest's pool per task.\n\n| outer × inner | peak workers | worker RSS | total RSS | wall |\n|---|---|---|---|---|\n| 2 × default(3) | 6 | 2202 MB | 3332 / 3896 MB | 76s / 93s |\n| 2 × 2 | 4 | 1409 MB | 3323 / 3228 MB | 84s / 97s |\n| 2 × 4 | 8 | 2475 MB | 4320 MB | 95s |\n| 2 × 8 | 16 | 5700 MB | 7363 MB | 93s |\n| 4 × default(3) | 12 | 2869 / 3482 MB | 5485 / 6794 MB | 74s / 74s |\n| 4 × 2 | 8 | 2717 MB | 5817 MB | 75s |\n| 4 × 1 | 4 | 1322 MB | 4430 MB | 77s |\n\n**Peak concurrent workers is exactly `outer × inner`** in all seven\ncombinations — the compounding is measured, not reasoned. Both terms grow with\ncore count, so the product grows quadratically: a 32-core box would run\n`16 × 31 = 496` workers where this one runs 6.\n\nTwo honest notes on the table. Total RSS is noisy — two same-config repeats\ndiffered by 1.3GB and by 17s of wall — because the per-task *parent* process is\n~1GB and its peak does not coincide with the workers'. **Worker RSS is the\nlow-noise signal** and it is the one that tracks worker count. And capping from\n3 to 2 does nearly nothing (3332→3323 MB): at a pool that small, each worker\nsimply accumulates more modules, offsetting the count. The cap only pays once\nthe pool is large — 8→4 workers cuts worker RSS **5700MB → 2475MB (−57%)**.\n\n## The fix, and the two traps it is shaped around\n\nAt the invocation layer, in the root `test` script — **no `vitest.config.ts` is\ntouched**, honouring #10149's recorded reasoning (quoted in\n`packages/cli/vitest.config.ts`) that worker allocation is a property of the\n*shard*, decided by whatever invokes turbo, not of any one package's config.\n\n⚠️ **`VITEST_MAX_WORKERS` alone does nothing.** Turbo filters task\nenvironments. Measured: through turbo the variable set to `1` spawned **3**\nworkers — the unbounded default — while the same variable on a direct\n`vitest run` spawned **1**. `turbo.json`'s `globalPassThroughEnv` entry is what\nmakes the lever real; it is declared *globally* because per-task configs\n(`@objectstack/spec#test` and friends) would each need their own copy, and a\nspelling that reaches 68 of 72 packages is precisely the silent no-op this is\nsupposed to prevent. Verified against two packages that carry task-specific\nturbo overrides.\n\n⚠️ **vitest's `maxWorkers` is a PIN, not a ceiling** — `resolveMaxWorkers()`\nreturns the configured value outright rather than `min()`-ing it with the\ndefault. Measured: a flat `4` produced **8** workers at outer=2, where the\ndefault produces 6. A flat number therefore *raises* the count on small boxes.\nSo the cap is computed against the host's own cores in\n`scripts/vitest-worker-cap.mjs` and **only ever lowers**.\n\nEvery claim above was checked by **observing the worker count**, never by a\nflag being accepted without error.\n\n## Cost\n\n**None measured.** The ceiling is 4, and vitest's default is `cores - 1`, so\nthis is a **no-op on any host with ≤ 5 cores** — this container and today's CI\nrunners included (verified end-to-end through `pnpm test`: 3 workers before,\n3 after). In the regime where it binds, wall-clock was 93s → 95s, inside this\nbox's run-to-run noise. It bounds growth without taxing anyone now.\n\n## Scope note\n\nThe card's \"could OOM at a higher core count\" is a **hypothesis about larger\nboxes**, and it stays one — nothing here reproduces an OOM, and the card itself\nsays \"hypothetical\". What is measured is the `outer × inner` law and the memory\nthat follows from it.\n\nCI's four `turbo run test` sites are included because they bypass the root\n`test` script entirely; each gets the same computed cap, which is a no-op on\n4-core runners. A failed script yields an empty value, which is vitest's own\n\"use the default\" signal.\n\n## Verification\n\n`pnpm lint` (full repo, exit 0) and the 22 gate families derived by\n`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack`, all\ngreen at final commit `a3dc841400`. `check:entry-guard` caught a real defect in\nthe first draft — the script exports bindings and so must not run on import;\nfixed in the second commit.\n\nNo changeset: root `package.json` is `private: true` and no published package's\nsource changes — `skip-changeset`.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01UjM2ia8Av1v5NqfqQEQmC6)_"
+}

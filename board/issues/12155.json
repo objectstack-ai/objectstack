@@ -1,0 +1,35 @@
+{
+  "number": 12155,
+  "kind": "issue",
+  "title": "L1: `sys_metadata_activation` platform object — the activation ledger (ADR-0126 §4)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T11:25:11Z",
+  "updated_at": "2026-08-25T15:26:20Z",
+  "closed_at": "2026-08-25T15:26:20Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12155",
+  "body": "Part of #12150 (Epic: ADR-0126 implementation, v17 line — ships as a 17.x minor, maintainer-ruled). Cut on maintainer instruction 2026-08-25 「现在可以创建相关的子issue吗？」 by PM session `session_01KWRU3s15AJz7PGW7a7wdCh`. Contract: **ADR-0126 §4** (merged `28b47a93`) — consume, do not re-litigate.\n\n## Deliverable\n\nDeclare the platform object **`sys_metadata_activation`** in `packages/platform-objects`, beside its data-plane siblings (`sys_metadata_history`, `sys_automation_run`, `sys_flow_dispatch`). ⛔ Zero `packages/spec` surface — it is an ordinary platform object, not a metadata type.\n\nColumns, exactly (§4): `metadata_type` (string) · `name` (string) · `package_id` (string) · `organization_id` (string, **nullable — reserved**, always NULL in this line) · `active` (boolean). ⛔ No `replaced_by`, no `cloned_from` — amendment ruling 2 removed designation linkage; do not re-add.\n\nUniqueness: one row per `(metadata_type, name, organization_id NULL-collapsed)`. Absence of a row = packaged default = **active**.\n\n## Acceptance\n\n- Object declared with the five columns and the uniqueness rule; pin test on the schema identity (columns by name, so drift is loud).\n- **An empty ledger changes nothing anywhere** — no runtime consults it yet (consumers arrive in the sibling legs); prove no behavior change on a stock boot.\n- No `packages/spec` diff in the PR.\n\nRefs: ADR-0126 §4 · #11513 (`sys_permission_set.active` row-state precedent, #4669 carve-out) · #12049 (survey)"
+}

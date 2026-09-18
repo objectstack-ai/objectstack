@@ -1,0 +1,34 @@
+{
+  "number": 11627,
+  "kind": "issue",
+  "title": "driver-sql (MySQL): full-value UNIQUE on >768-char token columns is inexpressible on utf8mb4 — hash-shadow-key route for the four ruled cases (C half of the #11374 ruling)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T09:51:05Z",
+  "updated_at": "2026-08-25T15:31:26Z",
+  "closed_at": "2026-08-25T15:13:01Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11627",
+  "body": "Blocked-by: #11374\n\nFiled by the triage seat executing the maintainer's 2026-08-24 ruling on #11374 (batch acceptance, verbatim: 「四维分析一致的，接手你的建议。」 — adopting the aligned four-facet recommendation **A + C(hash), B rejected**). This card is the **C half**, split out and sequenced after A per that recommendation (\"a hashed shadow key on identity tables is an architectural change that should not ride a mapping fix\").\n\n## Scope (ruled)\n\nThe four cases measured past MySQL's 3072-byte key ceiling (768 utf8mb4 chars), where no declared bound can make a full-value unique index expressible:\n\n- `sys_oauth_access_token.token` (`maxLength: 1024`, UNIQUE)\n- `sys_oauth_refresh_token.token` (`maxLength: 1024`, UNIQUE)\n- `sys_oauth_resource.identifier` (`maxLength: 1024`, UNIQUE)\n- `sys_metadata` 4-column composite unique (`type, name, organization_id, package_id` — 3460 bytes fully bounded vs the 3072 ceiling; alternatively narrow its declared bounds if that is measurably safe)\n\n## Route (ruled)\n\n**Hash-shadow key**, following the in-repo precedent `_objectstack_sequences.key_hash` in `sql-driver.ts` (its docblock names the same 3072-byte limit). The ascii-charset alternative was considered and not chosen (it silently forbids non-ASCII in those columns forever). ⛔ Prefix-unique indexes are **rejected** by the same ruling — measured on live MySQL 8.0.46 as stricter-and-different than the declared constraint (refuses distinct values sharing a 191-char prefix; a legitimate new `sys_session.token` colliding on prefix reads as a duplicate sign-in).\n\nAn OAuth access token may legitimately be a multi-KB JWT — this route is the only one that keeps full-value uniqueness on utf8mb4 InnoDB.\n\n## Sequencing\n\nDispatch after #11374's A half (declared bounds on the 12 unbounded columns) lands — the A PR decides the exact remaining population this card must cover; re-verify the four cases against that ref before cutting a branch. Measurement provenance: #11374's dev report (comment 5387700440) and the seat's re-entry analysis (comment 5387903086)."
+}

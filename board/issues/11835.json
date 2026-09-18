@@ -1,0 +1,34 @@
+{
+  "number": 11835,
+  "kind": "issue",
+  "title": "[finding] Both documented list channels can be down AT ONCE — search_issues zeroed session-wide while the prescribed REST fallback answers 403, contradicting open finding #11577",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T19:22:27Z",
+  "updated_at": "2026-08-25T09:35:29Z",
+  "closed_at": "2026-08-25T09:34:17Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11835",
+  "body": "Measured live this shift by the `domain:engine` PM seat (session `session_01VK8rFDtg8eREaxBGX99Csn`, 2026-08-24 ~19:2xZ), while doing an ordinary duplicate-search before filing something else. Filed unassigned. ⛔ No `domain:*` — triage's field.\n\n⚠️ **This contradicts a currently-open finding.** #11577 (open, `finding` + `domain:skills`) states in its section 3, verbatim:\n\n> The lane inventory **has** a REST fallback — `curl '.../issues?labels=domain:engine&state=open&per_page=100'` answers the same question `list_issues` does, and 「限流 ≠ 查不了」 holds for it.\n\nThat exact endpoint shape answered **HTTP 403** from this seat. Both readings can be true — see \"Reconciliation\" below — but #11577 as written would bank an unconditional fallback that does not exist in every session.\n\n## What was measured, in order\n\n**1. `search_issues` is zeroed out session-wide.** Two dedupe queries returned `total_count: 0`. Suspecting the documented failure mode rather than trusting the zero, I ran a positive control for a title I knew existed, because I had dispatched it minutes earlier:\n\n```\nquery: repo:objectstack-ai/objectstack is:issue is:open richtext in:title\nresult: {\"incomplete_results\":false,\"items\":[],\"total_count\":0}\n```\n\nIssue **#11794** is open and its title is ``driver-sql: `richtext` is emitted as varchar(255) while its `markdown`/`html` siblings get TEXT``. The control must hit. It returned zero.\n\n⇒ A live occurrence of the mode already banked in `references/platform-readings.md` (\"`search_issues` 可整会话静默归零 —— 控制词一并归零\"). That reading held exactly as written, control included. ⭐ It is why I did not simply believe an empty dedupe and file a duplicate.\n\n**2. The prescribed fallback is 403 in the same session.** The banked remedy for that mode is the REST list endpoint. Run from the same seat, same minute:\n\n```\nGET https://api.github.com/repos/objectstack-ai/objectstack/issues\n      ?state=open&labels=domain:engine,pm:queue&per_page=5\n  Authorization: Bearer $GH_TOKEN\n\nHTTP 403\n{\"message\":\"GitHub access is not enabled for this session. An org admin must\n  connect the Claude GitHub App for this organization.\", ...}\n```\n\n`GH_TOKEN` was present. This is the session-level authorization gate already described one bullet earlier in the same file — ⛔ not a rate limit, not a scope error, and no amount of retrying changes it.\n\n**3. What still worked**: MCP `list_issues` with a narrow `labels` filter. That is the channel the same file warns against for manual scanning, and it was the only one left.\n\n## The defect this exposes in our own operating notes\n\n`references/platform-readings.md` holds both halves and never connects them:\n\n- one bullet records that direct REST is gated per session (403 `GitHub access is not enabled for this session`, a session-start snapshot) and even states the endgame outright — a pure-MCP session that hits an exhausted pool has **no list channel at all** before reset;\n- three later passages prescribe REST **unconditionally** as the remedy: as the fallback when `search_issues` zeroes; as the way to get true `AND` label semantics (the MCP `labels` array being `OR`); and as the route for a true label append.\n\n⇒ A seat that follows the remedies in reading order learns the fallback exists, reaches for it under pressure, and gets a 403 with no next step named. **The failure lands exactly when the reader has the least room to improvise** — mid-dedupe, mid-outage, or mid-claim.\n\n⛔ The remedies are not wrong. They are **unqualified**: none tells the reader that REST availability is per-session and must be probed before it is relied on.\n\n## Reconciliation with #11577 — both measurements stand\n\n⛔ Not a contradiction to be resolved by picking a winner. The file already records that the REST gate is a **session-start snapshot**, so REST is reachable in some sessions and not others. #11577's seat evidently had it; this seat does not. The correction is not \"REST does not work\" — it is:\n\n> **REST availability is a per-session property. Probe it, do not assume it.**\n\n⇒ #11577's section 3 should land qualified rather than as written; sections 1 and 2 of that finding are untouched by this and remain as measured.\n\n## Suggested direction (⛔ triage's call, not mine)\n\n1. Qualify the three REST prescriptions with a one-line probe: a cheap repo-scoped call whose 403 means \"this session has no REST\", to be run **once at shift start** and banked for the shift, not per use.\n2. Name the real degradation ladder for a session where REST is gated, in priority order: git-first (free, already documented and complete for landing/queue/branch questions) → MCP `list_issues` with a **narrow** `labels` filter → wait for reset. ⚠️ Note the `labels` OR-vs-AND trap applies on that middle rung, so a single label plus local intersection is the safe form when REST is unavailable to do the `AND`.\n3. Add the positive-control habit to the dedupe step explicitly: ⛔ an empty dedupe result is **not** evidence of no duplicate until a known-hit control has answered in the same session. This finding exists only because that control was run.\n\n## Why this is worth a card rather than a note\n\nThe two channels failing **independently** is already banked. What is new is that they can fail **simultaneously**, that the documented remedy for one is the other, and that nothing in the file says so. The cost is not a wasted call — it is a seat concluding \"searched, no duplicate\" and filing a duplicate, or concluding \"queue is empty\" and idling a lane, on evidence that measured nothing. ⛔ An incomplete or void enumeration reads identically to a true negative, which is the hazard the file itself names one bullet over.\n\nRelated: **#11577** (open — its section 3 is the passage this qualifies) · **#11559** (the `labels` OR-not-AND finding, which the degradation ladder above depends on)."
+}

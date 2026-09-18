@@ -1,0 +1,36 @@
+{
+  "number": 12108,
+  "kind": "pull_request",
+  "title": "feat(spec): enforce the documented newTabUrl / opensInNewTab co-constraint on ActionSchema",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "protocol:ui",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T09:09:59Z",
+  "updated_at": "2026-08-25T09:58:52Z",
+  "closed_at": "2026-08-25T09:58:51Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": "2026-08-25T09:58:51Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12108",
+  "body": "Fixes #11842\n\n## What\n\n`ActionSchema.newTabUrl`'s doc has always said \"Only valid together with `opensInNewTab`\", but nothing on the refine chain enforced it: an action declaring `newTabUrl` without `opensInNewTab: true` parsed clean while no renderer path ever read the key — the ADR-0078 declared-but-unenforced shape, arriving through a documented co-constraint rather than a missing key.\n\nA new `.refine` on `ActionSchema` (after the #11519 doubled-channel rule, before the `lowerRequiresFeature` transform) now rejects `newTabUrl` whenever `opensInNewTab !== true`, with a message located on `path: ['newTabUrl']` naming the pre-opened-tab contract and both remedies (add `opensInNewTab: true` if a pre-opened tab is intended; otherwise drop the inert key — behavior unchanged, the lone key was never read).\n\nDeliberate scope points, pinned in the tests:\n\n- `opensInNewTab: false` beside `newTabUrl` is **refused** — opposite of the #11519 rule's scope, deliberately: `newTabUrl` has no meaning outside the pre-opened-tab flow, so a declared-off channel leaves the key exactly as dead as an undeclared one.\n- The rule is **type-independent** (no action type reads a lone `newTabUrl`).\n- `InlineActionSchema` picks `opensInNewTab` but not `newTabUrl`, so the pair cannot occur there; no inline-side change.\n- Legal pairings are pinned **byte-identically**: `opensInNewTab: true` + `newTabUrl`, `opensInNewTab` alone, `opensInNewTab: false` alone all parse exactly as before.\n\n## Corpus sweep (re-run at claim, per triage)\n\nZero lone-`newTabUrl` producers found anywhere reachable:\n\n- **this repo** (`*.ts/tsx/json/md/mdx`, examples/, platform metadata, fixtures): the only metadata-shaped occurrence is the legal pair in `action-doubled-redirect.test.ts:101-107`; the rest is docs prose and the generated reference — all already stating the pairing.\n- **objectui** (local sibling checkout): consumer-only; the single read point (`app-shell/src/utils/consoleServerAction.ts:188`) reads `action.opensInNewTab && newTabUrl`, confirming the lone key is inert at the renderer; every test fixture declares the pair.\n- **cloud**: not present in this container; the issue's measurement of record stands (the cloud SSO producers declare the pair correctly).\n\n`skills/objectstack-ui/SKILL.md` and `content/docs/protocol/objectui/actions.mdx` already document the constraint (\"It is valid **only** alongside `opensInNewTab: true`\") — description consistency verified, no doc edits needed, no `skills/**` diff.\n\n## Verification (all at final head `a9e2a0f` unless noted)\n\n- `@objectstack/spec` full suite: **426 files / 11329 tests passed** (run at pre-merge tree `1b3c10d`; the merge of `origin/main` brought zero `packages/spec` paths, so the tree the suite judged is content-identical for spec) · targeted re-run at `a9e2a0f`: `action-newtaburl-pair` + `action-doubled-redirect` + `action.test` — **3 files / 164 tests passed**.\n- `pnpm --filter @objectstack/spec typecheck` (tsc + `check:scripts-typecheck` + `check:test-typecheck`): green — the new test file compiles under `tsconfig.test.json`, debt ledger unchanged (55 files / 263 errors).\n- `check:generated`: **all 14 artifacts up to date**. `check:api-surface` initially flagged stale purely via its mtime freshness predicate (the reverse-verification churned `action.zod.ts` timestamps); after rebuild, `gen:api-surface` reproduced the snapshot **byte-identically** (17 entries, 5165 exports; empty `git diff`) — the refine changes no exported surface.\n- **Reverse verification** (fix committed first; trap-guarded script): reverted `action.zod.ts` to base `f7b25c5` — mutation proven on disk by marker count (`grep -c '11842'`: 2 → 0); the 5 refusal tests turned **red**, the 3 legal-pair pins stayed green (5 failed | 3 passed); restored from HEAD (marker 2 again, clean porcelain) — **8/8 green**. No dist leg applies: the suite imports `./action.zod` source directly (in-package relative import, no `exports`-resolved dist path).\n- Gate families derived from the actual diff (`scripts/pm/dispatch-gates.mjs`, derivation stamped at `a9e2a0f`), all green by their own printed verdicts at the final head: changeset-gate-self-tests · objectui-changeset · changeset-no-major · empty-changeset · release-rehearsal-clone --self-test · merge-driver · published-files · slot-lookup · spec-parsed-alias · test-source-alias · type-source-resolution · query-options-erasure · engine-double-contract · where-matcher · cross-package-test-inputs · ci-filter-parity · plugin-teardown-shape · nul-bytes · doc-formula-expressions · spec empty-state / liveness / strictness-ledger / variant-docs · check-adr-0087-registration · type-check-coverage · docs-audit (affected-docs + drift-comment).\n- **Not measured locally, declared**: `check:dev-prereqs` and `check:type-check-debt --re-measure` both refuse on this worktree's unbuilt sibling packages (66/67 dists absent — a workspace-state precondition, not a finding; CI builds fresh). Compensating evidence for the ratchet: the only test-layer change compiles clean under spec's test program (`check:test-typecheck` green above), so no upward drift direction exists.\n\n## Changeset / ADR-0087\n\n`@objectstack/spec: minor`, declared **BREAKING** accept-set narrowing (launch-window convention), disposition `not-required (no-migration-prescription)` — validated green by `check-adr-0087-registration`. Mirrors the adjacent #11519 narrowing on the same schema: no key removed/renamed/re-shaped, the parse-site refusal is the channel that reaches an affected author, and the measured population of affected sources is zero in every corpus. Consequence: no migrations `registry.ts` edit, so this PR has no shared-file overlap with batch siblings.\n\nNote: #11519 is referenced above as precedent only and remains closed on its own PR; no other card is addressed here.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01NDGG54XF5gbTLdQzCtnaVV)_"
+}

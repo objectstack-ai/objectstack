@@ -1,0 +1,34 @@
+{
+  "number": 11805,
+  "kind": "issue",
+  "title": "[spec] ADR-0049 enforce-or-remove: retire `ObjectGridProps.defaultSort` (the producer half of objectui#5861)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T17:07:42Z",
+  "updated_at": "2026-08-25T16:47:42Z",
+  "closed_at": "2026-08-25T16:41:45Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11805",
+  "body": "Filed unassigned by the `domain:ui` execution seat while working objectui#5861 (session `session_01CSoz9uGhaaSgiq3hshtN7L`). For PM/maintainer triage — not claimed.\n\n## Why this is here and not in objectui\n\nThe maintainer ruling of 2026-08-22 on objectui#4869 directed an ADR-0049 enforce-or-remove retirement of `table.defaultSort` as its own card. That card is objectui#5861. Working it produced a measurement that relocates the work: **the key whose retirement is ruled is declared here, not in objectui**, and the loud refusal ADR-0049 requires can only be produced here.\n\n`ObjectGridPropsSchema` (`packages/spec/src/ui/component.zod.ts:2164`) is a `strictObject` and declares:\n\n```\ndefaultSort: z.unknown().optional()\n  .describe('Legacy single-sort fallback ({ field, order }), read only when `sort` is absent. Prefer `sort`'),\n```\n\nIt is published un-retired as `ui/ObjectGridProps:defaultSort` in `packages/spec/authorable-surface/ui.json:734` — contrast `ui/FormView:defaultSort [RETIRED]` on line 466, the sibling key already retired in the #3896 close-out.\n\n## Measured against the pin objectui consumes (`@objectstack/spec@17.2.0`)\n\nProbed through `@object-ui/test-support`'s shared tombstone judge, the same one objectui's gates use:\n\n| measurement | result |\n|---|---|\n| `object-grid` listed keys / authorable keys | 37 / 37 |\n| `object-grid` tombstoned keys | `[]` |\n| `defaultSort` listed / authorable / tombstoned | `true` / `true` / `false` |\n| `tombstoneEvidence('defaultSort')` | `{ listed: true, typedNever: false, describedRemoved: false }` |\n| authored `{ defaultSort: { field, order } }` | **accepted** by `safeParse` |\n| control: a bogus key | **refused** — the schema really is strict |\n| control: blocks in `ComponentPropsMap` that do carry tombstones | 7 blocks, 16 keys |\n\nBoth recognition channels agree the key is live, and the positive control shows the instrument detects tombstones where they exist, so the zero for `object-grid` is a real zero.\n\n## Why the consumer side cannot do it\n\nMeasured in objectui on `origin/main` @ `0c282d979`:\n\n- objectui's zod mirror of `ObjectGridSchema` (`packages/types/src/zod/objectql.zod.ts`) is a non-strict `BaseSchema.extend(...)` **consumed only by objectui's own parity tests** — nothing parses metadata through it at runtime. Tombstoning it buys zero runtime refusal.\n- The refusal machinery for an `object-grid` node is the `strictObject` above. That is the only place an authored `defaultSort` can be refused rather than silently ignored.\n- If objectui merely stopped reading the key while this schema still accepts it, declared-but-unenforced would become declared-and-silently-dropped — the ADR-0049 failure mode moved, not fixed.\n\nobjectui's `apps/console/src/__tests__/registry-inputs-spec-parity.test.ts` states the ordering itself, in the comment governing the ten ruled `object-grid` carve-outs of objectui#4648: *\"They retire only if `@objectstack/spec` retires the keys upstream.\"*\n\n## The precedent, and it is exact\n\nobjectstack#6946 retired three zero-reader UI keys the same way — `PageHeaderProps.icon`, `PageCardProps.actions`, `RecordDetailsProps.layout`. Those are three of the 16 tombstones the probe above measured. objectui#3974 then removed the corresponding reads for `form.defaultSort` once this repo had tombstoned it, and pinned the ordering explicitly in `packages/react/src/spec-bridge/__tests__/FormViewRetiredKeys.test.ts`: *\"a dormant read is only safely deletable when BOTH ends are dead: Producer — the contract still rejects the keys. This is what makes the deletion not a capability removal.\"*\n\n## Route and cost\n\nPer the `spec-property-retirement` playbook this is the **strict** route, not a `retiredKey()` tombstone: delete the key from the shape and add an entry to the block's `*_RETIRED_KEY_GUIDANCE` map, plus the ADR-0087 conversion, the exact-key `RETIRED_KEYS_BY_MAJOR` entry, the D3 chain step, the liveness ledger, the generated baselines, and pin tests.\n\n⚠️ The cost the objectui card did not anticipate: `@objectstack/spec` is at **17.2.0**, and a retirement changeset here is **`major`**. This is a release-planning call, which is why this is filed for triage rather than claimed.\n\nNo ADR edit is required — ADR-0049 and ADR-0087 already govern; no ADR enumerates this key.\n\n## Authored-occurrence measurement\n\nZero authored occurrences in either repo, re-measured today with a known-present control (`searchableFields`, found by the identical method in `examples/`):\n\n- objectstack `examples/` `apps/` `packages/qa/` — none\n- objectui `examples/` `apps/` `e2e/` — none authored; the only hits are the carve-out ledger and prose\n\nRelated: objectui#5861 (the consumer half, blocked on this), objectui#4869, objectui#4648, objectstack#6946."
+}

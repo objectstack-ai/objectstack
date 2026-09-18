@@ -1,0 +1,34 @@
+{
+  "number": 12304,
+  "kind": "issue",
+  "title": "`pnpm lint` parses every emitted `.js` under `dist/`/`build/`/`.next/` at full TS-parser cost, with zero rules enabled — measured +4.5 GB peak and +275 s on a built tree",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T17:16:08Z",
+  "updated_at": "2026-08-25T19:21:01Z",
+  "closed_at": "2026-08-25T19:19:39Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12304",
+  "body": "## Observation\n\n`eslint.config.mjs` lists `**/dist/**`, `**/build/**`, `**/.next/**`, `**/.turbo/**` in the `ignores` of **every** config object — but each of those objects also carries a `files` key. In ESLint flat config an `ignores` alongside `files` is **object-scoped**, not a global ignore: it stops *that object* from applying, it does not remove the file from the linted population. So build output stays in the sweep.\n\nMeasured on `8649b398b8`, Linux, Node 22.22.2 (the pinned toolchain: `.nvmrc` = `22`, `engines.node` = `>=22.0.0`, `lint.yml` uses `setup-node` with `node-version: '22'`):\n\n**1. Build output is in the population.** Dropping 20,000 synthetic `.js` files under `packages/<pkg>/dist/` took the linted population from **5,142 → 25,142** files. Every one of them was linted.\n\n**2. Those files can never produce a finding.** `eslint --print-config` on a `dist/*.js`:\n\n```\nrules_configured: 0   rules_ENABLED: 0   parser: custom\n```\n\nZero rules, and still the **custom** (`@typescript-eslint`) parser — so each file is parsed in full to produce a guaranteed-empty result.\n\n**3. The cost is not small.** 83 MB of emitted-bundle-shaped `.js` (25 files) placed under a `dist/` directory, against the same source tree:\n\n| tree | linted files | peak RSS | wall |\n|---|---|---|---|\n| source only | 5,142 | **676.9 MB** | 71.3 s |\n| + 83 MB of `dist/` bundles | 5,167 | **5137.1 MB** | 346.5 s |\n\n**+4.46 GB of peak RSS and +275 s of wall time, for zero reachable lint findings.**\n\n## Why it matters\n\n* **Correctness of the sweep.** Lint verdicts are being computed over generated output. Nothing can fire there today, but that is an accident of the current rule set, not a declared position — any future config object whose `ignores` omits a build dir would start reporting on emitted bundles.\n* **It makes the sweep's cost tree-state-dependent.** CI never has build output (`lint.yml` runs `pnpm install --frozen-lockfile` then `pnpm lint`, with no build step — the step comment says \"Syntactic only, so no build step needed\"), so CI lints ~5.1k source files. A developer who has run `pnpm build` lints those *plus* every emitted bundle. Local and CI are measurably not running the same sweep, which is the thing the root `lint` script otherwise exists to guarantee.\n* This is the mechanism behind the heap exhaustion recorded in #12261 — that card is about the memory symptom and its declared surface is the `lint` script, so the ignore shape was out of scope there and is filed separately here. #12261 is not addressed by this issue and remains open.\n\n## Suggested direction (not verified)\n\nPromote the build-output patterns to a **global** ignore — one config object containing only `ignores`, no `files`. That removes those paths from the population entirely rather than from each object in turn. Since the resolved config for those paths already has **0 rules enabled**, this changes no accept/reject semantics and cuts no coverage; it is measurable as a pure enumeration/parse saving.\n\n## Not verified here\n\n* Whether a real `pnpm build` tree reproduces the 83 MB figure — the number above is from synthetic bundle-shaped files, sized to a plausible built monorepo. No built tree was available in this container.\n* Whether any consumer deliberately relies on build output being in the population.\n\n## Source\n\nFound while measuring #12261 (`domain:devx` seat, session `af22b339-91b5-5814-8b9b-2453fc5b3f68`).\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 12110,
+  "kind": "pull_request",
+  "title": "fix(devx): lower plugin-approvals TEST_DEBT surplus, repoint dead #6376 advisory",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T09:20:06Z",
+  "updated_at": "2026-08-25T09:58:53Z",
+  "closed_at": "2026-08-25T09:58:51Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": "2026-08-25T09:58:51Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12110",
+  "body": "Fixes #11497\n\n## What this does\n\nRe-measured `check:type-check-debt --re-measure` on `origin/main` = `0e0bf8049` (workspace closure built first, exactly as `lint.yml` does: `pnpm exec turbo run build --filter='./packages/*' --filter='./packages/*/*'`, 70/70 tasks, ~5m34s).\n\n**Measured values — both re-derived, not taken from the card:**\n\n| entry | card said | measured here | verdict |\n|---|---:|---:|---|\n| `@objectstack/plugin-approvals` | 348 → 347 | **347** | surplus confirmed — lowered |\n| `@objectstack/runtime` | 227 → 226 | **227** (== recorded) | **surplus gone — premise-false, left alone** |\n\n`plugin-approvals` corroborates both the card's own measurement and the independent one from #11525 this morning. `runtime` does **not** — the re-measure (run twice, before and after `--lower`, both at `227`) shows no surplus at all: whatever produced the −1 three days ago is no longer present, so that row of the card is premise-false. Nothing was touched on that entry.\n\n**`plugin-auth` was correctly left alone**, per the card's own scope exclusion and the claim comment's confirmation that its −12 is already resolved (`main` records 97, note reads \"RE-TALLIED from tsc at the 97 below (#10615)\").\n\n## The lowering, and the note re-tally\n\n`--lower` wrote `errors: 348 → 347` for `plugin-approvals`. Its note uses a `TSxxxx xN`-style composition (not the `code-tier`/`config-tier`/`noise` phrasing `compositionAt` reconciliation reads), so the tool correctly did not attach a `compositionAt` field — and the note was re-tallied by hand instead, per the card's clause 4. I reproduced the exact 347-error tsc run standalone (same generated `tsconfig.debt-remeasure.json` shape `remeasureProject` builds) and diffed error-code counts against the recorded 348 composition: all seven other codes are unchanged **to the unit** (TS2339 x296, TS2550 x20, TS2345 x16, TS18048 x10, TS2554 x2, TS1470 x1, TS2352 x1, TS6133 x1); the sole `TS2353` singleton is gone. That is a fully attributable single-error retirement, not a rescale, and the note now says so.\n\n## The advisory line\n\nThe gate's `--re-measure` summary printed `(${SURPLUS_ISSUE})` — i.e. #6376 — on every surplus report, and #6376 is `closed`/`completed` (2026-08-08, PR #6510). Read #6376 itself: it was the **design discussion that produced this exact mechanism** (the surplus print + `--lower`), not a standing tracker meant to stay open for future instances — and per the claim comment, a dev on #11525 already followed that link to a dead end and filed nothing.\n\nThere is no live successor issue to repoint it to (checked the open `tooling`-labeled backlog — nothing else serves as a \"class tracker\" for ratchet surplus), and none is needed: the mechanism itself is the remedy — a surplus this line reports is closed by running `--lower`, not by reading a card. So the fix drops the dead issue reference from the printed advisory and explains why in an adjacent comment, and fixes the one design-rationale comment nearby that still called the enforcement question \"#6376's open question\" (it isn't open — #6376 closed having decided *not* to enforce, report + `--lower` only).\n\n## Gates run (this repo, `dispatch-gates.mjs --repo objectstack-ai/objectstack` at this branch's head)\n\n9 families derived, all green at the final commit (`6c80b8256`):\n`check:agent-test-spelling` · `check:cross-package-test-inputs` · `check:entry-guard` · `check:parse-guard` · `check:pnpm-filter-targets` · `check:type-check-coverage` (self-test + structural) · `check:type-check-debt` (self-test + `--re-measure`, surplus: none) · `check-ci-filter-parity.mjs` · `check-cross-package-test-inputs.mjs`. Also ran `check:nul-bytes` (any edit) and the gate's own `--self-test` (47+65+29+28+19 cases, all hold).\n\n**Bare-root obligation**: not applicable — this PR edits ledger data and prose inside an existing gate, assembling no new scan root.\n\n**Changeset**: `skip-changeset` — root is `scripts/`, nothing published changes. The additive labels REST endpoint was unreachable from this session (proxy declined direct `api.github.com` calls), so the label was applied via the documented fallback instead: read current labels (`size/s`), union with `skip-changeset`, whole-set write, then read back — confirmed present (`size/s`, `skip-changeset`) as of this PR body's last edit.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01UjM2ia8Av1v5NqfqQEQmC6)_\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 18894,
+  "kind": "issue",
+  "title": "[finding] two more nightly-only `emitJson` exit-count pins freeze 11/10/1 over `compile.ts` — green today, one honest exit from rerunning the #18848 p1",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-18T04:36:06Z",
+  "updated_at": "2026-09-18T09:23:12Z",
+  "closed_at": "2026-09-18T09:21:16Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18894",
+  "body": "## The same p1, pre-staged on `compile.ts` — green today, one honest exit from red, and only at night\n\n#18848 was a `priority:p1` with a hard cron clock: `validate.ts` gained a seventh `await emitJson(` exit (#18677 / PR #18769), two nightly-only pins asserted **6**, and `main` was red from 2026-09-17T20:44:55Z with **no run saying so** — because those files are nightly-tier by name and a `packages/cli/**` diff cannot trigger that tier.\n\n**Two more pins carry the identical frozen shape over `compile.ts`.** They are green right now, and nothing stands between them and a rerun of that p1 except the fact that nobody has added an exit to `compile.ts` yet.\n\n| file | line | assertion |\n|:--|--:|:--|\n| `packages/cli/test/build-json-failure-warnings.e2e.test.ts` | `:512` | ``expect(literals, 'the `emitJson` exit count moved — a new exit must carry `warnings` too').toHaveLength(11)`` |\n| | `:513` | `expect(literals.filter((p) => p.includes('success: false'))).toHaveLength(10)` |\n| | `:514` | `expect(literals.filter((p) => p.includes('success: true'))).toHaveLength(1)` |\n| `packages/cli/test/build-json-failure-conversions.e2e.test.ts` | `:429` | same, with `conversions` |\n| | `:430-431` | `10` / `1` |\n\nSix frozen integers across two files, all read off `packages/cli/src/commands/compile.ts`.\n\n## Measured on `origin/main`, with the tests' own extractor\n\n`payloadLiterals` lifted verbatim from those files and run against `compile.ts` as it stands:\n\n```\npayload literals          11      ⇒ the pins' 11 is correct TODAY\nsuccess: false            10      ⇒ correct today\nsuccess: true              1      ⇒ correct today\n/\\bemitJson\\s*\\(/g         11      ⇒ symmetric with the extractor today\n```\n\n⇒ ⛔ **Not a live red.** The finding is the SHAPE: an honest new exit that carries both keys — the exact thing these tests exist to enforce — turns all six integers red, and #18848 measured what that costs when it happens in this tier.\n\n## Why the cost is not \"one red test\"\n\nTaken on `packages/cli` with `vitest list --filesOnly`, independently re-run by this seat on a second tree:\n\n```\nOS_TEST_TIERS unset   (= pull request + merge queue + local default)   267 files\n  of which build-json-failure-{warnings,conversions}.e2e.test.ts        0\nOS_TEST_TIERS=nightly                                                   68 files\n  of which the same two                                                 2\n⭐ lit control: artifact-packages.test.ts present in the unset population  1\n```\n\n⇒ in every population a contributor or the merge queue can run, these files are **not collected at all**. The PR that adds the eighth exit goes green, merges, and `main` is red from that moment until a cron says so — which is precisely the ~9-hour silent window #18848 documented.\n\n## The remedy is already written and merged in its sibling\n\nPR #18880 fixed the `validate.ts` pair without re-pinning to `7`: the count is **derived** from the source (`SRC.match(/\\bemitJson\\s*\\(/g)`), with the old integer demoted to a `>= N` **floor** that rots only in the exits-are-removed direction, plus a partition assertion (`valid: true` ×1, `valid: false` = `literals.length - 1`). Its ablation battery includes the leg that decides it: an eighth call site spelled **without `await`** reddens the derived form and would have stayed **green** under a frozen integer.\n\n⇒ port that shape to these two files. ⛔ Do not simply re-pin `11 / 10 / 1`.\n\n## ⚠️ Fences the executor should know before starting\n\n- `compile.ts` is a carrier for **#18779 / PR #18878**, in flight at filing time. ⛔ This card touches `packages/cli/test/**` only — `compile.ts` itself needs no edit.\n- The `success:` key here is `success`, ⛔ not `valid:` — `compile.ts` and `validate.ts` do not share the payload's verdict key. Copying #18880's lines verbatim without re-deriving that name would produce a vacuous filter.\n- Run the two files in their own tier (`OS_TEST_TIERS=nightly`) — a default run collects neither, so a green default run says nothing.\n\n## Dedupe words\n\n`build-json-failure toHaveLength(11)` · `compile.ts emitJson exit count` · `nightly-only count pin` · `payloadLiterals integer pin` · `second instance 18848` · `derived exit count`\n\n⚠️ Dedupe was run before filing, over a **complete** enumeration (`/search/*` answers 403 for this session): `GET /issues?state=open&per_page=100&page=1..6`, **514 open cards**, scanned locally. No open card names these two files or this pin family; the nearest neighbours are named below and neither covers it.\n\n## Refs\n\n#18848 / PR #18880 (the same defect, on `validate.ts`, with the remedy shape and its ablation battery) · **#18520** (the structural card — nightly-only pins read their own `src/` raw; the collection-level measurement above is recorded there as a reading, and this card is deliberately ⛔ not a duplicate of it: #18520 is about the tier, this is about two named files that will reproduce #18848) · #18779 / PR #18878 (in flight on `compile.ts`)\n\n⛔ Not graded here — lane, kind and priority are triage's.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

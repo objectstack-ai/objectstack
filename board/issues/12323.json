@@ -1,0 +1,33 @@
+{
+  "number": 12323,
+  "kind": "pull_request",
+  "title": "fix(scripts): optional-error-sink gate header — narrowing count prose",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T18:04:35Z",
+  "updated_at": "2026-08-25T18:37:51Z",
+  "closed_at": "2026-08-25T18:37:49Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": "2026-08-25T18:37:49Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12323",
+  "body": "Fixes #12291\n\n## What\n\nTwo docblock lines in `scripts/check-optional-error-sink-contract.mjs` said the gate measures **two** narrowings; the file documents and pins **three** (Narrowing 1: `as`-cast, Narrowing 2: purity, Narrowing 3: unreadable member type — added by #11069), and the runtime string already prints `all three narrowings pinned as counts`. This repairs the two stale prose lines to match.\n\n```diff\n- * costs false positives instead, so both narrowings below are measured and\n- * their cost is printed on every run rather than argued in prose.\n+ * costs false positives instead, so every narrowing below is measured and\n+ * its cost is printed on every run rather than argued in prose.\n```\n\n```diff\n- * Every limb observed FAILING and observed SILENT, plus the two narrowings\n+ * Every limb observed FAILING and observed SILENT, plus the narrowings\n  * pinned as positive counts.\n```\n\nPer clause 2c of the dispatch, chose an **integer-free spelling** (\"every narrowing below\" / \"the narrowings\"), matching the repair PR #12290 made for the sibling workflow-comment instance of the same defect — so neither sentence can go stale again when a fourth narrowing arrives. (`:60`'s sentence is a promise that *every* narrowing's cost is measured and printed; \"every narrowing below\" states that promise at least as concretely as a number did, without re-encoding a count that has already drifted once.)\n\n`:985` is **left exactly as written** — it is a correct past-tense statement about the state of the world before narrowing 3 existed (*\"an unsound prefilter survived a self-test that pinned both narrowings as counts (#11069)\"*), not a present-tense claim. Changing it would make the file lie about its own history.\n\n## Sweep (clause 2b)\n\nSwept the whole file for every count-asserting spelling (`both`, `two`, `pair`, `either`, digit `2`) near \"narrowing\". Found two other clusters that use \"two\"/\"both\" near the word \"narrowing\" and confirmed neither is a third stale site:\n\n- `:132`–`:156`, \"**The two blind spots** #11069 measured\" — genuinely two blind spots (the bare-`Function` sink bug and the file-prefilter bug), a distinct concept from the three population-narrowing sections above. Still two, not three. Left alone.\n- `:795`, \"only … can tell **the two apart**\" — refers to the FAILING/SILENT pair of self-test observation states, not to narrowing count. Left alone.\n\nNo third stale site found. `:60` and `:789` were the only two instances; `:985` the only deliberate non-instance, exactly as the card measured.\n\n## No behaviour change\n\nDiff is exactly these two docblock lines — no count, pin, or runtime string touched (`git diff --stat`: 1 file changed, 3 insertions(+), 3 deletions(-), all inside comments).\n\n## Evidence\n\n⚠️ This is a comment-only diff — the gate never reads its own prose, so a green gate run does not verify the fix. The actual evidence of correctness is a read of the three `### Narrowing N` sections (`:90`, `:102`, `:114`) against the two repaired sentences: three sections, three pinned `expectUnreadable`/narrowing cases, and now two sentences that no longer claim two.\n\nThe gate/self-test run below only proves no *behaviour* regressed — it is not evidence the prose is right:\n\n```\n✓ optional-error-sink-contract self-test: 19 case(s), both directions, all three narrowings pinned as counts, prefilter pinned over 9 channel(s) × 4 spellings plus its reject side.\n```\n```\n✓ optional-error sink contract: every sink declaring an optional `error` guarantees a `warn` channel (1 baselined, shrink-only).\n```\n\nBoth exit 0, unchanged from `origin/main`.\n\n## Gates\n\n`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` at final commit `9097996c94` (no `STALE TREE`, same file/gate set as the pre-push derivation):\n\n- `pnpm check:agent-test-spelling` ✓\n- `pnpm check:cli-command-ids` ✓\n- `pnpm check:cross-package-test-inputs` ✓ (`OK: 16 package(s) read outside themselves, all declared, and turbo.json hashes every declared glob.`)\n- `pnpm check:entry-guard` ✓\n- `pnpm check:optional-error-sink` ✓ (verdict lines above)\n- `pnpm check:parse-guard` ✓\n- `pnpm check:pnpm-filter-targets` ✓\n- `node scripts/check-ci-filter-parity.mjs` ✓ (silent/no findings, exit 0 as part of the chained run)\n\nAll run through `os-verify-lock.sh` as one chained command; verdict `command-exit 0 · held the lock 30s · waited 0s`. Exit codes captured before any pipe/tail.\n\n## Changeset\n\nNone — `scripts/**` publishes nothing to any package, so this is a `skip-changeset` PR (tooling/gate-prose only, no user-visible surface).\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01UjM2ia8Av1v5NqfqQEQmC6)_"
+}

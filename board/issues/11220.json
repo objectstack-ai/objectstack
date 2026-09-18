@@ -1,0 +1,34 @@
+{
+  "number": 11220,
+  "kind": "issue",
+  "title": "[finding] `Blocked-by:` can only name an issue, but the two conditions cards actually wait on are \"a PR merges\" and \"a release lands and the pin covers it\" — measured on both",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T03:51:21Z",
+  "updated_at": "2026-08-25T09:35:02Z",
+  "closed_at": "2026-08-25T09:34:17Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11220",
+  "body": "**Finding — recording only, not claimed.** Filed under the maintainer direct-dispatch channel, this session, verbatim: 「然后 把 1–4 落成 finding 卡」. PM session `session_0124Qg8rLvpXnQDwCmpKUmaJ`.\n\nThe `Blocked-by: #N` contract expresses exactly one condition: *issue N closes*. Two conditions that occur routinely cannot be written in it, so they get written in prose — where no sweep can see them — or written as an issue reference that fires at the wrong moment.\n\n## Case A — blocked on a PR merging\n\n**objectui#5493.** No `Blocked-by:` in either channel; the block lives only in the prose tail of a triage comment:\n\n> Serial note: coordinate with the in-flight #5328 pin-bump branch — this card's gate reading only goes red once the 17.1.0 lockfile lands, so it **dispatches after that PR merges**.\n\nThe card also carries `pm:blocked` while that same comment's verdict line reads `Triage: → pm:queue, Bug` — label and comment disagree, which is a second symptom of having nowhere legitimate to put the condition.\n\nThere is a near-miss in the protocol already: `Unlock-action: re-check PR #M` exists, but it is scoped to the *other* situation — work finished, PR stuck behind a broken external gate. It does not cover \"I am waiting on someone else's PR before I start\".\n\n## Case B — blocked on a release, not on a merge\n\nThe sharper one, because here the machine predicate **fires and is wrong**.\n\n**objectui#5601** → `Blocked-by: objectstack-ai/objectstack#10054`. Measured 2026-08-23:\n\n| check | reading |\n|:--|:--|\n| target closed? | **yes** — 2026-08-21T17:37:56Z, PR #10910 merged |\n| in a released spec? | **no** — zero hits for `#10054` in `packages/spec/CHANGELOG.md` on `origin/main`; changeset still pending, unversioned |\n| consumer's pin | objectui `pnpm-lock.yaml` resolves `@objectstack/spec@17.1.0`, the newest released version |\n\nAny unlock scan reading the declared contract would have returned this card to `pm:queue`, where a dev would have picked it up and found the retirement absent from the package it consumes. It was held back this round only because the release state was checked by hand.\n\nThe same class, satisfied rather than violated, on four sibling cards: objectui#4676/#4664 (blockers released in spec 17.1.0) and #5233/#5210 (same). All four were genuinely unblocked — but *\"the blocker closed\"* was not what made them so; *\"the change shipped in 17.1.0 and the lockfile resolves 17.1.0\"* was. The predicate and the truth agreed by luck of timing.\n\nAnd the gap can be long: a merge sits unreleased for as long as no version is cut. #10054 is two days in and counting.\n\n## Why this is one finding and not two\n\nBoth cases are the same defect — the vocabulary has one noun (an issue) for a relation that has several kinds. Cards do not stop having the condition; they route it into prose, and prose is invisible to the candidate query, the unlock sweep and the ageing alarm alike, which is the failure mode the two-channel `Blocked-by:` rule was introduced to end.\n\n## Shape of the fix — options, not a recommendation\n\n1. **Admit a PR form** — `Blocked-by: <owner/repo>!<n>` or similar — resolved the same way, fired on merge. Smallest vocabulary change; the resolver already speaks to the API.\n2. **Admit a release form** for the cross-repo case — e.g. `Blocked-until: <pkg>@<range> pinned` — and let the sweep read the consumer's lockfile. Strictly more work, and it is the one that would have caught #5601.\n3. **Neither; make the existing line carry it** — require that a card in either situation names an issue that *does* close at the right moment (a pin-bump chore card for case B, which the protocol already tells seats to file). Zero mechanism change, more discipline, and discipline is what the whole half-state patrol exists because we do not have.\n\nOption 3 has a live precedent from this round: objectui#5601 now carries a second, comment-channel `Blocked-by:` naming **objectui#5716** — the card that actually gates the pin advancing — so both targets resolve and the block correctly holds.\n\n⛔ Which option, and whether case B is worth mechanising at all before the pin-bump flow stabilises, is a design call for the maintainer — not decided here."
+}

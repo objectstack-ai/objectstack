@@ -1,0 +1,35 @@
+{
+  "number": 11819,
+  "kind": "issue",
+  "title": "The ADR-0125 rollout left its own records stale — the ADR still says Proposed, and Prime Directive #15 still describes the pre-#11233 trigger",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T18:06:24Z",
+  "updated_at": "2026-08-25T14:32:20Z",
+  "closed_at": "2026-08-25T14:05:00Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11819",
+  "body": "Filed by the `domain:devx` lane PM (session `e2eac1a7-8000-5c95-9749-38aec2ace6fc`) on behalf of PR #11818's dev, who found both while correcting the third instance of the same drift and **flagged a conflict rather than resolving it**:\n\n> NOT FILED — the dispatch explicitly reserved filing to the PM (\"Report it; I will file it\"), which narrows my standing rule to file findings as unassigned issues. Flagging the conflict rather than silently picking a side.\n\n⭐ That was the right call and worth recording: my ⛔ overrode their standing rule, they noticed the two instructions conflicted, and they surfaced it instead of picking. Filing here as they asked.\n\n## Two records, same drift class, both governed\n\n**1. ADR-0125 declares itself unaccepted while being the authority.** `docs/adr/0125-release-approval-gate-replaces-the-typed-version.md` line 3, verified on `origin/main` @ `7e8393262`:\n\n> **Status**: Proposed (2026-08-20) — awaiting the maintainer's hand-merge, which is itself the acceptance act for a governed surface (Prime Directive #14).\n\nThe hand-merge happened and the implementation is on `main`: `.github/workflows/release.yml` references **ADR-0125 eleven times**. So the record that is *now the authority for the publish lane* still describes itself as pending — and by its own text, the act it says it is awaiting is the very act that landed it.\n\n⚠️ This matters more than a stale status usually would, because ADR-0125's status line encodes the **acceptance mechanism** for governed surfaces. A reader checking whether the new publish lane is ratified gets \"Proposed\" from the ADR and eleven citations from the workflow that implements it.\n\n**2. Prime Directive #15's warrant sentence describes the pre-#11233 trigger.** `AGENTS.md` Prime Directive #15 states the version PR is *\"regenerated on every push to `main`\"*. Since #11233 / #11238 it runs on a **6-hourly schedule** plus an on-demand `refresh_version_pr` dispatch, never on push. The rest of the directive is current — it already names ADR-0125 and the approval act — so this is one sentence, not a rewrite.\n\n## Why one card and not two\n\nSame cause (the ADR-0125 rollout updating the mechanism but not the records that describe it), same governed surface class, and PR #11818 is the third correction of this same drift — the first two being the card it closes. Splitting them would be two governed PRs for one sweep.\n\n⛔ **Governed surface** (`docs/adr/**` + `AGENTS.md`): whoever takes this ships a **draft** PR, requests review from `os-zhuang`, and never flips it ready or arms it.\n\n## What is NOT in this card\n\n⛔ **The paragraph-ordering nit in `docs/releases-maintenance.md`** (the \"Merge the version packages PR\" instruction sitting before the `**First, check #4935 is current**` paragraph #11238 appended). Cosmetic, pre-existing, and #11818's dev deliberately did not reorder it because that PR was permitted only on the condition that it carried one thing. Recording it here so it is not lost; ⛔ it does not justify a governed PR on its own.\n\n## For whoever takes it\n\n⚠️ **Establish the acceptance date from evidence, not from today.** ADR-0125's status should say when it was accepted, and the merge that landed it is findable — do not stamp it with the date you happen to edit it. And re-measure the trigger before rewriting the Prime Directive sentence: #11818 verified that `release.yml` carries `on: push: branches: [main]` for the *publish* job while the *version PR* runs on the schedule, so the two are easy to conflate and the sentence must say which it means."
+}

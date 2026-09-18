@@ -1,0 +1,34 @@
+{
+  "number": 11277,
+  "kind": "issue",
+  "title": "finding: the bare-root worklist's recorded verdict for `check-declaration-mirrors.mjs` states a measurement that is wrong in both terms (recursive `.d.mts` walk, 2 of 236 — not \"top-level-only, 115 of 226\")",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T08:30:52Z",
+  "updated_at": "2026-08-25T12:32:21Z",
+  "closed_at": "2026-08-25T09:39:37Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11277",
+  "body": "Found while measuring the `scripts/` bare-root species for #11155. Filed unassigned; not fixed there, because the landing surface is `scripts/pm/bare-root-worklist.mjs` and #11155's file surface is the gate it judges.\n\n## The shape\n\n`scripts/pm/bare-root-worklist.mjs` records a triage verdict per `(family, constant, word)` triple. Two rows share the `scripts` root, and the second one's stated reason is copied from the first:\n\n```\n['check:ratchet-remedy-authority SCRIPTS_DIR scripts', {\n  verdict: 'REFUSE-UNSPELLABLE',\n  why: 'reads the TOP LEVEL of the root only, and only two extensions -- 115 of 226 (51%). The '\n    + 'idiom has no non-recursive spelling: a subtree hint claims every nested directory too',\n}],\n['scripts/check-declaration-mirrors.mjs SCRIPTS_DIR scripts', {\n  verdict: 'REFUSE-UNSPELLABLE',\n  why: 'same top-level-only shape, 115 of 226 (51%)',\n}],\n```\n\nThe second row's `why` is wrong on both of its terms. Measured on `a2ec3770`:\n\n- **The walk is recursive, not top-level-only.** `mirrorFiles()` in `scripts/check-declaration-mirrors.mjs` descends (`if (e.isDirectory()) walk(p)`), and its own docblock says so: *\"Every `scripts/**` `/*.d.mts`, repo-relative, sorted.\"*\n- **The population is 2 files, not 115.** The filter is the `.d.mts` extension, not \"two extensions\":\n\n```\nnode -e \"import('./scripts/check-declaration-mirrors.mjs').then(m=>console.log(m.mirrorFiles()))\"\n  -> scripts/check-regen-pending.d.mts\n     scripts/js-comment-mask.d.mts\ngit ls-files scripts | wc -l   -> 236\n```\n\nSo the honest ratio is **2 of 236 (0.85%)**, not 115 of 226 (51%).\n\n## Why it matters even though the verdict is right\n\n`REFUSE-UNSPELLABLE` is the correct verdict here — more strongly correct at 0.85% than at 51%. Nothing is mis-triaged. What is wrong is the **recorded measurement**, and that file's whole design rests on those being trustworthy: its triage docblock states *\"Every percentage below was measured on the tree, not estimated: numerator is the files the gate's own walk filter admits, denominator the tracked files under the subtree a declaration would name.\"* A row that says `same … shape` about a differently-shaped gate is the copy-paste failure that makes the next reader re-derive nothing and inherit the error.\n\nIt also mis-files the row under the wrong refusal *class*. The two rows are refused for genuinely different reasons — one because the idiom has no non-recursive spelling, the other because the population is an extension filter — and the ledger currently reads as though there were one shape with two instances. That matters if the \"no non-recursive spelling\" limit is ever lifted: whoever lifts it would read this row as fixed by that change, and it is not.\n\n## Not caught by the self-test, by construction\n\n`--self-test` audits the triage keys against the live sweep in both directions (STALE / FRESH) and asserts every verdict is one of the three defined and carries a `why` longer than 20 characters. Nothing reads what the `why` *says*, which is correct — a prose assertion cannot be mechanised — so this class is only ever caught by re-measuring.\n\n## Suggested remedy (not applied here)\n\nRewrite that one `why` to its measured terms: a recursive walk under `scripts/` filtered to `.d.mts`, 2 of 236 (0.85%), refused because the subtree idiom cannot spell an extension filter — which is the same class as the `check:driver-conformance CASE_SETS_DIR packages` and `check:skills-token-ratchet SKILLS_DIR skills` rows, not the same class as the row above it.\n\nWorth re-deriving the other percentages in the same pass: this one was found by measuring a single row, not by a sweep, so the extent is unmeasured.\n\n## Refs\n\n#11155 (where it surfaced) · `scripts/pm/bare-root-worklist.mjs` `TRIAGE` · `scripts/check-declaration-mirrors.mjs` `mirrorFiles`"
+}

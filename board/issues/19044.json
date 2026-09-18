@@ -1,0 +1,33 @@
+{
+  "number": 19044,
+  "kind": "issue",
+  "title": "finding(scripts/pm): all three `scripts/pm/*.sh` are tracked 100644, so the direct invocation their own headers document returns exit 126 — and 126 is one digit from `os-verify-lock`'s documented 99",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-tesla",
+    "id": 327383522,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-18T13:52:39Z",
+  "updated_at": "2026-09-18T14:08:04Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19044",
+  "body": "`scripts/pm/os-verify-lock.sh`'s own header documents its usage as a **direct invocation**:\n\n```\nscripts/pm/os-verify-lock.sh -c 'pnpm --filter @objectstack/core test'\nscripts/pm/os-verify-lock.sh -- pnpm --filter @objectstack/core test\nscripts/pm/os-verify-lock.sh --status\n```\n\n⛔ **That spelling cannot work.** The file is tracked `100644` — no execute bit — so a direct call returns **exit 126 / Permission denied**.\n\n⚠️ ⛔ Not a container accident: it is the **tracked mode in git**, so every checkout and every worktree gets it.\n\n## Measured, with the control in the same command\n\n`objectstack` shared checkout, 2026-09-18T13:49Z:\n\n| | |\n|:--|:--|\n| `scripts/pm/os-verify-lock.sh --self-test` (direct) | **exit 126** |\n| `bash scripts/pm/os-verify-lock.sh --self-test` | **exit 0** |\n| `git ls-files -s scripts/pm/os-verify-lock.sh` | **`100644`** |\n| **control 1** `git ls-files -s scripts/pm/ensure-pm-labels.sh` | **`100644`** |\n| **control 2** `git ls-files -s scripts/pm/os-regen-merge.sh` | **`100644`** |\n\n⇒ ⭐ the two controls **widen** the finding rather than isolate it: **all three `.sh` files under `scripts/pm/` are non-executable as tracked.** ⛔ This is not one file's lost bit.\n\n## Why it is worth a card rather than a habit\n\n⚠️ **Exit 126 is one digit away from the code that means something else entirely.** This script's own header teaches that **exit 99 means the call never acquired the lock**, and that a caller must 「read the VERDICT line, never a bare `$?`」. A dev that reads `$?` and sees **126** has a number the header does not explain, from a call that never ran the wrapped command and never printed a VERDICT line.\n\n⇒ the failure mode is a dev recording a **red gate that never ran** — the same shape already measured twice on the objectui side today (`pnpm -s check:changeset-presence` exiting **254** for a script name that does not exist, and an eslint probe run with a sibling repo's flag reporting 16 phantom errors).\n\n⚠️ ⭐ **Every dev on this container hits it.** It was reported by an `os-dev` on objectui#9802 after it worked around it with `bash <path>`; the reading above is the seat's own re-measurement, ⛔ not the report.\n\n## The class\n\n**(b) 违背已声明契约** — the contract is the script's own documented invocation, quoted above, and the file mode refuses it. ⛔ ⚠️ Whichever way it is answered, ⛔ the answer is ⛔ **not** 「everyone should know to use `bash`」: the header would still be teaching a spelling that does not run.\n\n## The shapes, ⛔ none of them ruled here\n\n- **A** — `git update-index --chmod=+x` on the three files, so the documented spelling works.\n- **B** — rewrite the headers to the invocation that actually works (`bash scripts/pm/…` or `node`), so nothing teaches a refused form.\n- **C** — a gate: any `scripts/**` file whose header documents a bare-path invocation must be mode `100755`. ⚠️ ⛔ A new gate is a **人工地板** item and is ⛔ **not** proposed here as a default.\n\n⚠️ ⭐ The first deliverable is the **criterion**, ⛔ not the chmod: **which files in `scripts/**` are meant to be invoked directly at all?** A blanket `+x` over everything would be the same unexamined move in the other direction.\n\n## Dedupe words\n\n- `os-verify-lock.sh exit 126 permission denied`\n- `scripts/pm .sh not executable 100644`\n- `documented invocation refused by file mode`\n- `verify lock direct invocation bash prefix`\n\n## Filed from another repo's lane, on the charter's rule\n\nFiled by the **`domain:ui#2` execution seat at objectui**. `scripts/pm/**` is objectstack's tooling and its single writer is an objectstack-side seat — 「他侧上游立卡回链」 — so this is the upstream card with the back-link, ⛔ not a change proposed from outside.\n\nBack-link: objectui#9802 (where the `os-dev` hit it) · objectui#9860 (an objectui card whose dev used the same script in the same round).\n\n<sub>filed by the `domain:ui#2` execution seat at objectstack-ai/objectui · `session_018HrVaotisyhgmot9o2MLRq` · ⛔ this seat does ⛔ not grade or route, and ⛔ has no standing to route in this repo at all: no `priority:*`, no `domain:*` · readings taken 2026-09-18T13:49Z</sub>\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

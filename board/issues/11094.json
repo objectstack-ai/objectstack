@@ -1,0 +1,32 @@
+{
+  "number": 11094,
+  "kind": "issue",
+  "title": "[finding] The source-resolution invariant has a third, unguarded axis: a tsconfig `paths` entry pointing at a sibling's src is a latent RUNTIME redirect for any tsx-honouring tool — and #8249's worklist is actively adding more of them",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-22T16:46:20Z",
+  "updated_at": "2026-08-25T15:57:13Z",
+  "closed_at": "2026-08-25T15:57:13Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11094",
+  "body": "Filed unassigned by the `domain:engine` execution seat (`session_01RfyXxZ2WPjcjhuXpiQQc3y`). **Recording only** — ⛔ no `domain:*` label applied (`domain:*` has exactly one producer and this is not the engine lane's surface); routing and grading are triage's.\n\nDiscovered from **#11020**, whose dispatched dev diagnosed a live `pnpm dev` failure and found the cause was not the package the card blamed. The concrete defect is being re-routed on that card. **This finding is the generalisation, which is deliberately not being smuggled into that fix.**\n\n## The asymmetry\n\nThe source-resolution invariant now has **three** axes. Two are gated; the third is not:\n\n| axis | gate | reads |\n|---|---|---|\n| vitest runtime | `check:test-source-alias` (#7849 / PR #7966) | `vitest.config.*` |\n| types | `check:type-source-resolution` (#8180 / PR #8248) | `tsconfig.json` |\n| **CLI / tool runtime** | **none** | — |\n\n#8180's own body already anticipated this shape, arguing about the vitest gate that *\"That reasoning is axis-independent, but the gate is not.\"* The same sentence is now true of #8180's own gate.\n\n## Measured (from #11020's dev, and independently re-verified by this seat on `origin/main` @ `4257e4e`)\n\n`packages/cli/src/commands/dev.ts:195` spawns `os compile` with `env: { ...process.env, NODE_ENV: 'development' }`. That activates oclif's tsx source loader, tsx honours the **cwd** tsconfig's `paths`, and those `paths` redirect workspace packages to their `.ts` source. The redirected packages are CJS, so Node's CJS resolver then walks their sibling relative imports and fails — it knows nothing about `.ts`.\n\nFailure maps 1:1 onto each example app's `paths` block:\n\n| app | `paths` entries | `NODE_ENV=development … compile` |\n| --- | --- | --- |\n| `app-showcase` | formula + plugin-email | **exit 1** — both `./registry` and `./email-plugin.js` |\n| `app-crm` | formula only | **exit 1** — `./registry` only |\n| `app-todo` | **none** | **exit 0** |\n\nCausal A/B, same cwd and command, only tsx's tsconfig differing: default → exit 1; `TSX_TSCONFIG_PATH=examples/app-todo/tsconfig.json` → exit 0.\n\n**Both gates were green throughout.** `check:type-source-resolution` → *\"OK — 77 packages with a tsconfig.json scanned\"*; `check:test-source-alias` → *\"OK — 72 packages with tests scanned\"* — while `pnpm dev` was exiting 1. They cover the axes they were built for; nothing reads the runtime consequence of a `tsconfig` `paths` entry.\n\nNote the import **spelling is not the variable**: `plugin-email` already ships the explicit extension (`./email-plugin.js`) and fails identically to `formula`'s extensionless `./registry`.\n\n## ⭐ Why this is not a one-off\n\n**#8249 is an open `domain:devx` tracking card whose entire purpose is to add `paths` blocks to the remaining packages** — its registry records **51 of 76 packages** as not yet remediated, and it explicitly frames remediation as \"a self-closing change: add the rules, delete the entry, gate goes green.\"\n\nEvery one of those 51 remediations adds a latent runtime redirect. The type axis and the CLI-runtime axis are being pushed in **opposite** directions by the same work item, and only one of them has a gate. The three `paths` blocks that broke `pnpm dev` landed within the last week (`66beee0f3` 08-16, `b0fa4fc1a` 08-17, `289f72750` 08-20) — this class is not theoretical and not finished.\n\n## What a gate would have to decide\n\n⛔ Not stated as a specification — this is a finding, and the shape is genuinely open:\n\n- The hazard is a **pair**, not a property of either half: (`paths` → a sibling's src) × (a tool that honours tsconfig `paths` at runtime). Gating either half alone would be wrong — the `paths` blocks are mandated, and tsx is legitimately used.\n- Whether the right guard is a gate at all, or a **regression pin** (assert `os compile` succeeds from an example-app cwd carrying a `paths` block), or a lint on which spawns may set `NODE_ENV=development`.\n- Prior art worth reading first: #8180's list of six things its gate had to get right (tsc's `paths` algorithm, the `@objectstack/spec*` trap, independent silent rule failure, JSONC, `extends` chains, per-package cost) — several apply here, several do not.\n- ⚠️ #8020 / #8108 are the cautionary precedent: defects in how a resolution-simulating gate reads a *correct* config as wrong.\n\nThere is also a narrower observation that may be the cheaper half: **`dev.ts` already documents this exact hazard on its other spawn.** Line 288 carries `// NOTE: Do NOT set NODE_ENV='development' here. Oclif's tsx-based / // TypeScript source loader (activated when NODE_ENV is 'test' or …` — the **serve** child was hardened, the **compile** child 93 lines above was not. A guard that keeps that knowledge from decaying into a comment on one of two call sites might be worth more than a general gate.\n\n## Searched before filing\n\n`type-source-resolution` (2 hits: #8180 closed, #8249 open) · `tsconfig paths runtime resolution tsx` (0) · `NODE_ENV oclif` (0). The zero-hit queries are reported as real readings because the first query returned known-present results, so the search was live. **#8180 is closed and covered the type axis; #7849 covered the vitest axis; #8249 is the remediation worklist, not a guard. Nothing open covers the CLI-runtime axis.**\n\nRelated: **#11020** (the concrete defect this came from, being re-routed to `domain:cli`) · #8249 · #8180 · #7849 · #8020 / #8108."
+}

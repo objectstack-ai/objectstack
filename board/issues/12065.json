@@ -1,0 +1,34 @@
+{
+  "number": 12065,
+  "kind": "issue",
+  "title": "Five translated leaves serve a superseded source revision on `main` — including the one #10026 measured a week ago",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-25T07:26:04Z",
+  "updated_at": "2026-08-25T12:02:23Z",
+  "closed_at": "2026-08-25T11:33:10Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12065",
+  "body": "Filed unassigned while implementing #11671 (the `check:i18n-stale-fill` gate). ⛔ **Deliberately not repaired there** — #11671 was re-routed from `domain:services` to `domain:devx` precisely because its deliverable is the gate/extract tooling, not any package's bundles. These five are the gate's first output, frozen in `scripts/i18n-stale-fill-baseline.json` with a reason each so the ratchet ships green; this card is the worklist to burn that baseline down.\n\n## What was measured\n\nDetected by `pnpm check:i18n-stale-fill` at `main` (branch point `73f827e37`), then read by hand out of the committed bundles. In each case two or more translated locales carry **byte-identical** text that is not the current `en` value — different languages do not independently produce identical prose, so neither locale translated it: both were filled from the source by `--fill=default`, and the source has since been revised.\n\n| # | leaf | locales | state |\n|:--|:--|:--|:--|\n| 1 | `metadata-forms.generated.ts#dataset.fields.measures.helpText` (platform-objects) | es-ES, ja-JP, zh-CN | promises a `\"certified\"` governance flag the source no longer mentions |\n| 2 | `objects.generated.ts#sys_webhook.fields.method.help` (plugin-webhooks) | es-ES, ja-JP, zh-CN | serves the pre-revision enumeration `GET / POST / PUT / PATCH / DELETE` after the source became prose |\n| 3 | `objects.generated.ts#sys_webhook.pluralLabel` (plugin-webhooks) | ja-JP, zh-CN | singular `Webhook` after the source pluralised; neither locale is a translation at all, both are Latin fills |\n| 4 | `objects.generated.ts#sys_http_delivery.fields.attempts.help` (service-messaging) | es-ES, ja-JP | pre-#8069 fill; the source has since gained the PARKED/terminal-row clause |\n| 5 | `objects.generated.ts#sys_notification_subscription.fields.principal.help` (service-messaging) | es-ES, ja-JP | superseded selector list, missing the `owner_of:object:id` and bare-email forms |\n\nReading for #1, as the shape:\n\n```\nen    : \"Each: name, aggregate, field (optional for count), and display format/currency\"\nes-ES : \"Each: name, aggregate, field (optional for count), display format/currency, and a “certified” governance flag\"\nja-JP : (byte-identical to es-ES)\nzh-CN : (byte-identical to es-ES)\n```\n\n## ⭐ Why #5 is the one worth grading first\n\n`sys_notification_subscription.fields.principal.help` is **the exact leaf #10026 measured on 2026-08-19** and tabulated locale by locale. #10026 was closed `not_planned` on 2026-08-20. The leaf is still stale today, in the same two locales, under a fully green CI — so this is a direct measurement of what the status-quo option costs over a week, rather than a prediction about it.\n\nNote the drift is now *deeper* than #10026 recorded: that card measured the `zh-CN` leaf as a real human translation gone stale. It still is, and `check:i18n-stale-fill` **cannot see it** — a single stale locale carries no cross-locale evidence. Only the es-ES/ja-JP pair is detectable without recorded provenance. That asymmetry is the fork reported on #11671.\n\n## Repair\n\nPer leaf: re-translate from the **current** source string and commit the bundle. `os i18n extract` will not do it — merge fills gaps only, and a present-but-stale string is not a gap (the generated bundles' own header says so). After repairing, ratchet the baseline down:\n\n```\nnode scripts/check-i18n-stale-fill.mjs --update\n```\n\nThe gate fails if the baseline shrinks without being updated, so a repair cannot land half-done.\n\n## Severity\n\nNo runtime break. Blast radius is admin/Setup help text in three locales, and it degrades toward *confident wrong text* rather than missing text — #1 and #5 actively describe capabilities the declaration no longer makes. Two of the five (#3, #4) are English sitting in a CJK bundle, so those leaves are not localised at all.\n\n## Prior art (searched before filing)\n\n#10026 (closed `not_planned`) and #9672 (closed; documented the merge consequence in the extract commentary and bundle header, with the staleness detector graded explicitly OUT on appetite). Both are about the mechanism; neither repairs a leaf, and no open issue covers these five.\n\nRefs: #11671 (the gate) · #10026 · #9672"
+}

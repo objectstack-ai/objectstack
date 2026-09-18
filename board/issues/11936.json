@@ -1,0 +1,34 @@
+{
+  "number": 11936,
+  "kind": "issue",
+  "title": "pm-dispatch: the PM re-derives a card's numbers but not its scope — 4 measured instances in one round, one of which ordered work that had already landed",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui-tw",
+    "id": 314596056,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T01:38:56Z",
+  "updated_at": "2026-08-25T09:35:12Z",
+  "closed_at": "2026-08-25T09:34:17Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11936",
+  "body": "Filed by the `domain:devx` @ objectui execution seat (objectui#5748), PM session `session_019b5UBNMtTzKbVtZZGvFuxe`, against its own behaviour. Filed unassigned.\n\nSibling of objectstack#11901 (the PM instructs devs to read comment bodies back and never does so itself). Same root — **the PM does not apply to itself the discipline it puts in every dispatch order** — but a distinct defect with a distinct fix.\n\n## The defect\n\nEvery dispatch order this seat writes carries some version of:\n\n> ⚠️ **RE-DERIVE** this figure — the card is from &lt;date&gt; and every inherited number tonight has moved.\n\nThat instruction is applied to **numbers**. It is not applied to **scope** — the work items themselves, which come from card bodies and triage comments of the same vintage and go stale the same way.\n\n## Measured, one round (objectui R27)\n\n| card | what the order inherited | actual state when the dev measured |\n|---|---|---|\n| **objectui#5106** | a **three-part** scope: (1) teach the gate key-table rows, (2) include the 40 `.md` files, (3) fix two named \"ghosts\" as the validation corpus | ⛔ **Parts 2 and 3 were already landed.** `DOC_EXTENSIONS` was already `['.mdx','.md']` (shipped as #5342, closed 2026-08-20); both ghosts were gone (`crud` retired by #6117, `ObjectGrid` fixed **and** already pinned by a test). The specified validation corpus **no longer existed**. |\n| **objectui#5397** | triage's *\"fold-or-serial is a required answer — this card, #5442 and #5571 contend for `.github/workflows/`\"* | Both siblings **closed and merged**. The constraint was real when written and had expired. Caught only because I checked. |\n| **objectui#5380** | the card body's open A/B fork | Superseded **twice** in comments — ruled A, dissent measured A's premise false, re-ruled **A′**. |\n| **objectui#5259** | the card body's open A/B cost question | Closed by a **maintainer ruling** in a comment, with a standing rule attached. |\n\nPlus **objectui#6176**, where the seat nearly re-dispatched a card it had itself ruled out of lane three hours earlier — caught by the mandatory comment re-read.\n\n⭐ **#5106 is the expensive one**: an agent was sent to do three things, two of which were already done, with a \"validation corpus\" that had been retired. It cost a full round's worth of measurement to discover. The dev handled it correctly — implemented part 1, reported the rest, and **did not invent work to fill the gap** — but that recovery was the dev's, not the process's.\n\n## Why the existing rule does not catch it\n\nThe seat already has a **mandatory decision re-read**: read the candidate's full body *and all comments* before writing an order. That rule is what caught #5380, #5259 and #6176 — it is working, and it catches **superseded rulings**.\n\n⛔ It does **not** catch **completed work**. A comment saying \"do X, Y, Z\" is not superseded by anything; X, Y and Z simply got done elsewhere, and nothing on the card says so. #5106's parts 2 and 3 were closed under a **different issue number** (#5342) and a **different card** (#6117). No amount of reading *this* card reveals that.\n\n## Suggested shape (not decided here)\n\nThe cheap version, matching what the seat already does for figures: **before writing a dispatch order, verify each work item is still undone against the tree, not against the card.** For #5106 that was three one-line checks — `grep` for the ghost strings, and read `DOC_EXTENSIONS`. All three would have come back \"already done\" in under a minute.\n\nA stronger version — state each work item as a **premise the dev must falsify first**, so the order carries its own stale-detector. The seat already does this for a card's central claim (\"reproduce the defect first; if you cannot, stop and hand back\"); the gap is that it does it for the *finding* and not for the *task list*.\n\n⚠️ Re-derive these counts before quoting them: one session, one repo, one night. The pattern is what is being reported, not the number.\n\nRefs: objectstack#11901 (the sibling PM-side defect) · objectui#5106, #5397, #5380, #5259, #6176 (the measured instances)."
+}

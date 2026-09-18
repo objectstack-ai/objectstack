@@ -1,0 +1,34 @@
+{
+  "number": 11777,
+  "kind": "issue",
+  "title": "`AUTH_SCIM_PROVIDER_SCHEMA` is a publicly exported mapping with zero consumers — a second, inert source of truth for the SCIM column names",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T16:06:25Z",
+  "updated_at": "2026-08-25T10:27:29Z",
+  "closed_at": "2026-08-25T09:45:37Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11777",
+  "body": "Found during the consumer sweep on #11757 (leg 1a of #11632). Filed unassigned, out of that card's scope, not fixed there.\n\n## What was measured\n\n`packages/plugins/plugin-auth/src/auth-schema-config.ts:1005` declares:\n\n```ts\nexport const AUTH_SCIM_PROVIDER_SCHEMA = {\n  modelName: 'sys_scim_provider',\n  fields: {\n    providerId: 'provider_id',\n    scimToken: 'scim_token',\n    organizationId: 'organization_id',\n    userId: 'user_id',\n  },\n} as const;\n```\n\nNothing in the repository reads it. Measured on `origin/main` at `5cb62d88b8`:\n\n```\n$ git grep -n \"AUTH_SCIM_PROVIDER_SCHEMA\" origin/main -- .\norigin/main:packages/plugins/plugin-auth/src/auth-schema-config.ts:1005:export const AUTH_SCIM_PROVIDER_SCHEMA = {\n```\n\nOne hit — its own declaration. No call site, no test, no doc.\n\n## Why it is inert by construction, not merely unused yet\n\nIts own doc comment states the reason it can never be applied: `@better-auth/scim` \"hardcodes its model and exposes NO `schema` option — still true of the installed `@better-auth/scim@1.7.0-rc.1` (`SCIMOptions` declares no `schema` / `modelName` / `fields` member at all)\". There is nowhere to pass it. The mapping that actually governs those writes is the adapter layer — `AUTH_MODEL_TO_PROTOCOL` in `objectql-adapter.ts:57` plus the mechanical camelCase → snake_case resolution — which derives the same four column names independently.\n\nSo this is a declared-but-unenforced residue of the shape Prime Directive #10 names: a second declaration of one contract, where only the other one is load-bearing. Its sibling constants in the same file (`buildDeviceAuthorizationPluginSchema`, `buildOrganizationPluginSchema`, …) are all genuinely passed as `schema` options; this one is the odd member.\n\nTwo consequences worth the file:\n\n1. **It is public API.** `packages/plugins/plugin-auth/src/index.ts:69` does `export * from './auth-schema-config.js'`, so the inert mapping is exported from the published package and a downstream consumer could read it as authoritative.\n2. **It can drift silently.** If the real adapter-side names ever change, nothing fails when this copy does not follow — there is no consumer to break.\n\n## Disposition is adjacent to #11632\n\n`sys_scim_provider` itself is under a retirement ruling (#11693), and #11632 scope item 2 rewrites the `scim({...})` call for stable. Whoever moves that pin should decide this constant's fate in the same stroke rather than carrying it forward — it is either deleted with the object, or (if stable ever accepts a `schema` option) it becomes real for the first time. Recording it now so it is not carried across the migration unexamined.\n\nNot urgent, not a runtime defect: no behaviour depends on it today.\n\nRefs: #11757 (the sweep that found it) · #11632 · #11693 · #3653\n"
+}

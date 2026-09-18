@@ -1,0 +1,35 @@
+{
+  "number": 12158,
+  "kind": "issue",
+  "title": "L3: runtime consult at the execute() seam + trigger unbind + retire the #10243 flowEnabled map (ADR-0126 §7.2)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T11:27:09Z",
+  "updated_at": "2026-08-25T17:45:46Z",
+  "closed_at": "2026-08-25T17:45:45Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12158",
+  "body": "Part of #12150 (Epic: ADR-0126 implementation, v17 line — 17.x minor, maintainer-ruled).\nBlocked-by: #12155\nDispatch: coordinated under the #12150 program — ⛔ not from the general queue; the program dispatches on unlock (maintainer anti-preemption instruction, 2026-08-25, PM session `session_01KWRU3s15AJz7PGW7a7wdCh`). Contract: **ADR-0126 §7.2** (merged `28b47a93`).\n\n## Deliverable\n\nThe automation engine consumes the ledger:\n\n- **`execute()`-seam refusal** beside the existing `FLOW_DISABLED` guard (#11665 §2.3 — the one seam every entry path crosses), **reusing the `FLOW_DISABLED` code** — ⛔ no new ADR-0112 ledger entry; the distinction rides the message.\n- **Install-level row also unbinds the trigger**, preserving today's documented `toggleFlow` semantics. (Pre-charted future per-org rows cannot unbind — entry-time refusal only; not built in this line.)\n- **Retire the #10243 process-local `flowEnabled` map** — the durable ledger row replaces it as the sanctioned off-switch; remove the mechanism, don't shade it.\n- Clause-② note: refusal behavior on the execute contract — carry the contract-review declaration on the PR.\n\n## Acceptance\n\n- Disabled packaged flow refuses at `execute()` on every entry path (record-change, schedule, time-relative, api, subflow) with the `FLOW_DISABLED` code and a message that distinguishes ledger-disable.\n- Install-level disable unbinds the trigger; re-enable rebinds.\n- `flowEnabled` map gone; the #10243 leak shape (tenant flipping env-wide, in-process) is no longer reachable.\n\nRefs: ADR-0126 §7.2 · #10243 · #11665 §2.3/§6.3 · ADR-0112"
+}

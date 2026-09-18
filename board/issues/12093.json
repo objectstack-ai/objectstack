@@ -1,0 +1,34 @@
+{
+  "number": 12093,
+  "kind": "pull_request",
+  "title": "docs(skills): teach the flow value-expression function vocabulary in objectstack-automation",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T08:42:45Z",
+  "updated_at": "2026-08-25T13:57:59Z",
+  "closed_at": "2026-08-25T13:57:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-25T13:57:58Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12093",
+  "body": "Closes #11348\n\nTeaches the flow **value-expression** function vocabulary at the point the skill\ndescribes value interpolation (Common Pitfalls #6, the `{$User.Id}` / `{NOW()}`\nmacros list) — the six names, the CEL mirror, the integer-only `round` plus the\nscale idiom, and the loud unknown-function failure.\n\n## ⚠️ Merge blocker — `check:skills-token-ratchet` is RED by 132 tokens\n\nThis PR **cannot merge as-is** and needs a ruling before it can. Reporting it\nrather than working around it, because both available workarounds are owned\nabove this seat.\n\n```\n✗ check-skills-token-ratchet: skills/objectstack-automation/SKILL.md is 12643\n  tokens; the ratchet ceiling is 12511 (over by 132). … New text is paid for by\n  deleting text IN THE SAME FILE — genuine deletion, never a re-wrap … these\n  ceilings are shrink-only. ⛔ MAINTAINER-ONLY\n```\n\nThe file sits at its ceiling with **headroom 0**, so *any* net addition is over\nbudget. The two ways forward are both rulings, not implementation choices:\n\n- **Pay by deletion** — delete ~132 tokens of published text from this same\n  file. Which customer-facing guidance is worth dropping is a content-value\n  judgment for the published catalog; no deletion target was granted with this\n  card, so none was taken.\n- **Raise the ceiling** — explicitly marked `⛔ MAINTAINER-ONLY` by the gate,\n  landing only in a PR whose body quotes a maintainer ruling authorising it.\n\nThe addition was compressed to the minimum that still carries the card's\nprescription (first draft +210 tokens → **+132**). It cannot reach +0 while\nstill teaching the six names, the rounding rule and the failure mode.\n\n## Size readings (published-skills budget)\n\n| Reading | Before | After | Δ |\n|:--|--:|--:|--:|\n| `skills/objectstack-automation/SKILL.md` — lines | 985 | 992 | +7 |\n| `skills/objectstack-automation/SKILL.md` — tokens | 12511 | 12643 | **+132** |\n| Whole published package — lines (11 `SKILL.md`) | 10505 | 10512 | +7 |\n| Whole published package — tokens (bundle) | 117725 | 117851 | +126 |\n\nToken convention is the ratchet's own: `ceil(utf8 bytes / 4)`. The bundle delta\nis smaller than the file delta because `objectstack-data` currently sits 6\ntokens under its own ceiling.\n\n## Premise verification — one dispatch detail was falsified\n\nThe card's substance holds: the skill taught only the three template macros and\nnone of the function vocabulary. Verified against the landed code in\n`packages/services/service-automation`, **not** the card.\n\nConfirmed as described: the six names, mirrored 1:1 from the CEL stdlib\n(`EXPRESSION_FUNCTION_ARITY` / `KNOWN_EXPRESSION_FUNCTIONS` in\n`src/builtin/template.ts`), `round` integer-only with `round(x * 100) / 100` as\nthe scale idiom, and the named `FlowExpressionFunctionError`.\n\n**Falsified: the error does not fire \"at flow-save\".** It is a **run-time**\nfailure. `AutomationEngine.validateFlowExpressions` deliberately skips\n`flow-template` slots — only `predicate` slots are checked, because no validator\nimplements the single-brace `{var}` dialect. So a bad function name in a node\n*value* survives registration and refuses when the node interpolates. It is\nguard-marked, so a `fault` edge cannot route it.\n\nThat distinction is load-bearing for an AI author and is what the new text says:\nconditions are caught by the build, value expressions are not. Writing\n\"flow-save\" would have taught an author that a typo is caught before deployment\nwhen it is not. It also matches the docs page that landed with the feature,\nwhich says the unsupported function \"fails the **node**\".\n\n## Gates\n\nDerived from the real diff via `node scripts/pm/dispatch-gates.mjs --repo\nobjectstack-ai/objectstack` (change set taken from the merge base, not a\nhand-built list). Union re-run at final commit `3da41ede1`, clean tree:\n\n| Gate | Verdict |\n|:--|:--|\n| `check:doc-authoring` | ✓ `389 files clean` · `38 published skill files clean — no internal issue-id references` |\n| `check:skills-token-ratchet` | ✗ **over by 132** (see above) |\n| `check:doc-formula-expressions` | ✓ EXIT=0 (needed `@objectstack/formula` + `@objectstack/lint` built first) |\n| `check:role-word` | ✓ `no new occurrences of the reserved word` |\n| `check:skill-compatibility` | ✓ `11 SKILL.md file(s) reconciled against 78 workspace packages` |\n| `check:skill-frame-sync` | ✓ `4 copies of the decision frame are structurally isomorphic` |\n| `check:agent-test-spelling` | ✓ EXIT=0 |\n| `check:cross-package-test-inputs` | ✓ `All 109 self-test cases passed` |\n| `check:pm-governed-merges` | ✓ `129 assertions` |\n| `check-ci-filter-parity` | ✓ `all 96 declared cross-package glob(s) … covered` |\n| `check-cross-package-test-inputs` | ✓ `16 package(s) read outside themselves, all declared` |\n| `check-nul-bytes` | ✓ `scanned 6711 text file(s) … no raw ASCII control bytes` |\n\nNo changeset: published-skill prose only, ships no user-visible runtime change;\nlabelled `skip-changeset` per repo convention.\n\n## Scope\n\nUntouched, as dispatched: the `:937` conditions (bare-CEL) row — a different\nsurface, already correct — and `content/docs/automation/flows.mdx`, current\nsince the feature PR.\n\nFiled while working, not fixed here: **#12092** — the same file's\n\"Verify your work\" section still teaches that an unknown function in a\n*condition* fails silently at runtime, which the `:937` row and the engine both\ncontradict. Different passage, and it carries this same zero-headroom budget.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01RMTpSRF5CjMmQBFfPtPCwJ)_"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 12145,
+  "kind": "pull_request",
+  "title": "docs(tests): route A for the three memory-driver fixtures — the console-level capture captures zero, measured",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T11:14:03Z",
+  "updated_at": "2026-08-25T15:06:04Z",
+  "closed_at": "2026-08-25T15:06:02Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": "2026-08-25T15:06:02Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12145",
+  "body": "Part of #11571\n\nRoute **A** — the three memory-driver fixtures keep their blanket mute — chosen on a\nmeasurement rather than defaulted into. #11081 stays open for the maintainer's call on\nwhether to wrap it up at 2 of 5.\n\n## What was measured\n\nRe-measured rather than recalled, by floating each fixture to `level: 'info'` (the mutation\nproved on disk by anchored grep counts before any result was read, then restored and\nverified byte-identical against `HEAD`):\n\n| fixture | ERROR frames | distinct messages | recognised by the helper |\n|---|---|---|---|\n| `bulk-write-per-row-context.test.ts` | 15 (5 boots) | 3 | 0 |\n| `formula-context.test.ts` | 3 (1 boot) | 3 | 0 |\n| `multilookup-context.test.ts` | 3 (1 boot) | 3 | 0 |\n\nThe card's 15 / 3 / 3 reproduces exactly, and the entire ERROR surface is the one\nboot-without-a-datasource trio, invariant per boot.\n\n## Why route C is not buildable as specified\n\nRoute C was \"patch `console.error`/`console.warn` for the file, kernel at `level: 'error'`\".\n**It captures zero of the 21 frames.** `ObjectLogger.write` (`packages/core/src/logger.ts`)\nprefers the process streams and reaches `console` only as a fallback:\n\n```ts\nif (stream) {                 // process.stderr for error/fatal\n    stream.write(line + '\\n');\n} else if (typeof console !== 'undefined') {\n    … console.error …         // browsers / bundler shims ONLY\n}\n```\n\nUnder vitest's `environment: 'node'`, `process.stderr` always exists, so the `console` arm\nis unreachable there. A probe booting this exact plugin stack at `level: 'error'` with all\nfour sinks counted scored:\n\n```\nconsole.error: 0   console.warn: 0   process.stderr.write: 3   process.stdout.write: 0\n```\n\nThe prediction was written down before the run and matched it.\n\n## Why the one working variant is refused too\n\nThe only variant that does intercept them patches `process.stderr.write`. That is refused\nhere as **disproportionate rather than unworkable**: both predicates in the helper today\npatch an *object* seam (`driver.logger`, `engine.logger`) whose blast radius is one instance\nthe fixture itself owns, while a stream patch is process-global and sits in the path of\neverything the worker writes for as long as it is installed. Twenty-one invariant per-boot\nframes that carry no per-test signal do not buy a third capture mechanism of that reach —\nand #11569 (the helper's engine pass-through already lands in a silenced logger) means the\ntwo mechanisms already there want repairing before a third is stacked on them. That is the\n\"designed together rather than in sequence\" point from the card: this PR does neither, and\nrecords why.\n\nRoute B stays refused on the card's own mechanism, restated in the helper so the next reader\nmeets it there: the kernel takes a logger *config*, builds its own and hands it out **by\nreference**, so a post-construction swap propagates only partially — a capture that misses\nframes while asserting it does not.\n\n## What changed\n\nComments only. No behaviour, and nothing publishable: `packages/runtime` ships `dist` alone\nand this helper is not exported from `src/index.ts`, so it is not bundled.\n\n* `packages/runtime/src/expected-read-refusal-noise.ts` — a closing section recording the\n  measurement and the refused routes, at the place someone would go to add the predicate.\n* the three fixtures — a short note at each `logger: { level: 'silent' }`, the place someone\n  would go to remove the mute.\n\nNo ablation is owed: no capture was built, so there is nothing to prove can fail. The\nmeasurement is the deliverable.\n\n## Verification\n\nGate union **derived**, not recalled — `node scripts/pm/dispatch-gates.mjs --repo\nobjectstack-ai/objectstack` — and re-run at final commit `32dd522d21`. Every exit code was\ncaptured before any pipe.\n\nAll green: `check:cross-package-test-inputs`, `check:published-files`, `check:slot-lookup`,\n`check:test-source-alias`, `check:type-source-resolution`, `check-ci-filter-parity`,\n`check-plugin-teardown-shape`, `check-affected-docs`, `check-drift-comment`,\n`check:query-options-erasure`, `check:engine-double-contract`, `check:where-matcher`,\n`check:type-check-coverage`, `check:nul-bytes`, `check:type-check-debt`.\n\nRatchet verdicts quoted from their own output at that commit:\n\n* `check-type-check-coverage --re-measure: OK — 32 ledger entr(ies) re-measured in 221.5s, 1897 raw tsc error(s) total, none above its recorded number.`\n* `✓ slot-lookup ratchet holds: 107 unswept site(s) in 25 file(s), none new`\n* `✓ where-matcher conformance holds: 299 matcher(s) discovered, 299 answer the combinator battery correctly or refuse it loudly`\n* `check-nul-bytes: OK (scanned 6730 text file(s) … no raw ASCII control bytes)`\n\nFixtures re-run after the edits: `Test Files 3 passed (3) · Tests 6 passed (6)`. Package\ntypechecks green for `@objectstack/trigger-record-change` (both `tsc --noEmit` and\n`-p tsconfig.test.json`) and `@objectstack/runtime`.\n\nNo changeset — test-only surface, so the `skip-changeset` label carries the declaration.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01W6HFzyH98W1YaQXhJUJt6o)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01W6HFzyH98W1YaQXhJUJt6o)_"
+}

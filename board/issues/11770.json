@@ -1,0 +1,36 @@
+{
+  "number": 11770,
+  "kind": "issue",
+  "title": "Invitation carve-out silently stops admitting past 200 pending invitations (in-memory scan of a capped read)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-24T15:53:37Z",
+  "updated_at": "2026-08-25T08:44:03Z",
+  "closed_at": "2026-08-25T08:44:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11770",
+  "body": "Found while reviewing PR objectstack-ai/objectstack#11767 (audience posture, #11739). Fail-closed, so not a security hole — a functional ceiling in the invitation carve-out.\n\n`AuthManager.hasPendingInvitationFor(email)` (plugin-auth `auth-manager.ts`) resolves \"does this address hold a pending invitation?\" by reading **at most 200** pending rows and scanning them in memory for a case-insensitive email match:\n\n```\nconst raw = await reader.find('sys_invitation', { where: { status: 'pending' }, limit: 200 });\n```\n\nAbove 200 concurrently-pending invitations in one environment, an invitee outside the first page is not found. Under the new default posture `invite_only` that means: **an administrator sends an invitation, the invitee tries to create their account, and registration is refused** with `SELF_REGISTRATION_CLOSED` — the invitation lane silently stops working for the tail of a large rollout, with no signal to either party. A 500-employee onboarding is an ordinary way to reach that ceiling, and it is the exact flow the audience-posture epic exists to make work.\n\nThe in-memory scan appears to exist so the match can be case-insensitive. Likely fixes (implementer judges): filter on the email in the query (better-auth lowercases invitation emails on write — verify) and drop the scan; or keep the scan but page until exhausted; or add a driver-supported case-insensitive predicate. Whatever lands should be pinned by a test with more than one page of pending rows — the current suite covers expiry and case-insensitivity but not the page boundary, which is why the ceiling is invisible.\n\nNot fixed in #11767: the carve-out is the dev's own scoped addition there and the behaviour is fail-closed, so this was filed rather than sent back for a rework round.\n"
+}

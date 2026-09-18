@@ -12,8 +12,9 @@
   },
   "labels": [
     "documentation",
+    "needs:contract-review",
     "protocol:data",
-    "size/m",
+    "size/l",
     "tests",
     "tooling"
   ],
@@ -21,7 +22,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-18T06:43:54Z",
-  "updated_at": "2026-09-18T08:06:44Z",
+  "updated_at": "2026-09-18T14:09:32Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

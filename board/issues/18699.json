@@ -2,8 +2,8 @@
   "number": 18699,
   "kind": "issue",
   "title": "[finding] os-dev.md tells a dev to hang labels the moment the PR opens, and twelve lines earlier reserves `needs:contract-review` to the seat — on a card where that is the only label owed, the literal reading hangs the clause-② gate on the dev's own PR",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "huangyiirene",
@@ -12,18 +12,20 @@
   },
   "labels": [
     "domain:skills",
-    "pm:dispatched",
+    "pm:done",
     "priority:p2"
   ],
-  "assignees": [
-    "os-elon-musk"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-17T15:33:55Z",
-  "updated_at": "2026-09-18T05:16:25Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-18T11:47:05Z",
+  "closed_at": "2026-09-18T11:44:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 7,
   "locked": false,

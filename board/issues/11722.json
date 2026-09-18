@@ -1,0 +1,34 @@
+{
+  "number": 11722,
+  "kind": "issue",
+  "title": "[finding] `applyMigrationEntries` reports every SQLite entry as applied after a table rebuild, including ops the rebuild is documented to ignore",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T14:02:12Z",
+  "updated_at": "2026-08-25T11:18:47Z",
+  "closed_at": "2026-08-25T10:56:15Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11722",
+  "body": "Observation while measuring the reconciler for #11535 / #11720. **Latent, not reachable today** — filed so it is not discovered by the op that makes it reachable.\n\n## The shape\n\n`SqlDriver.applyMigrationEntries` splits by dialect. The non-SQLite arm asks per entry and believes the answer:\n\n```ts\nfor (const d of ents) {\n  const ok = await this.applyDriftOpInPlace(d.op);\n  (ok ? applied : skipped).push(d);\n}\n```\n\nThe SQLite arm does not ask at all:\n\n```ts\nif (this.isSqlite) {\n  await this.rebuildSqliteTablePatched(table, ents);\n  applied.push(...ents);        // every entry, unconditionally\n}\n```\n\nBut `rebuildSqliteTablePatched` handles four op types (`relax_not_null`, `tighten_not_null`, `drop_column`, `drop_column_default`) and silently ignores anything else — its own docstring says so for the varchar ops: *\"varchar widen/narrow are no-ops on SQLite (dynamic typing) and ignored.\"* An ignored op is still pushed into `applied`.\n\nSo on SQLite, \"applied\" means \"a rebuild ran\", not \"this op happened\". Every consumer reads it as the latter: `reconcileAndWarnDrift` logs `auto-reconciled <op> on <table>.<col>`, and the artifact boot gate prints `↪ migrated <op>`. A finding reported as migrated but still present comes back on the next boot, reports as drift again, and is \"migrated\" again — a loop with no failing signal anywhere in it.\n\n## Why it is not reachable today\n\nThe only column ops the differ emits on SQLite are the four the rebuild handles. The varchar ops are excluded by `enforcesVarcharLength` (SQLite is not in it), and #11720's new `manual_column_type_change` is excluded by `multiValueColumnTypeIsLoadBearing` for an unrelated, measured reason (SQLite does not corrupt the value). So the gap is currently unreachable by construction — from two independent directions, neither of which is aware it is holding this closed.\n\n## Why it is worth a note anyway\n\nThe next column op that is not SQLite-rebuildable opens it, and the failure mode is a false green rather than an error: nothing throws, nothing is skipped, and the log says the work was done. The asymmetry is also invisible at the call site — the two arms of the same function disagree about what `applied` means, and only one of them can be wrong.\n\nA minimal fix is for `rebuildSqliteTablePatched` to return the set of entries it actually honoured (it already partitions them into four `Set`s to do its work) and for the caller to push the remainder into `skipped`. That is `sql-driver.ts`, outside #11720's declared surface."
+}

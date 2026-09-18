@@ -1,0 +1,34 @@
+{
+  "number": 11924,
+  "kind": "issue",
+  "title": "Four client SDK routes answer a shape no published contract declares — `automation.create` / `automation.update` / `search` / `data.clone`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-25T01:18:27Z",
+  "updated_at": "2026-08-25T16:47:53Z",
+  "closed_at": "2026-08-25T16:47:53Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11924",
+  "body": "`Blocked-by: objectstack-ai/objectstack#8140`\n\nFiled out of #8140's implementation half, which bound 51 of its 55 erased return-type sites to\n`@objectstack/spec` contracts. These four could **not** be bound, and the reason is the same in\neach case: **there is no type anywhere to bind to.** They are a missing *contract*, not a missing\n*annotation*, so they need a decision about what each endpoint promises rather than a sweep.\n\n⛔ `packages/spec` was read-only on #8140 (`domain:spec`'s single-owner surface), so nothing was\nauthored there. All four keep `Promise< any >` on `main` today, each with a docblock naming this\ncard's reasoning so the next sweep does not \"finish\" them by reaching for a near neighbour.\n\nMeasured at `1f6d04703`.\n\n## The four\n\n### 1–2. `automation.create` / `automation.update` — the route promises nothing\n\nBoth echo the request body, unvalidated as to shape:\n\n- `POST /automation` ends `deps.success(body)` (`packages/runtime/src/domains/automation.ts:982`).\n- `PUT /automation/:name` ends `deps.success(definition)` (same file, `:1586`) where\n  `definition = body.definition ?? body`.\n\n`IAutomationService.registerFlow(name, definition: unknown): void`\n(`packages/spec/src/contracts/automation-service.ts:389`) **returns nothing**, so the service\ncontract has no return shape to relay. The body is checked for \"is a non-array object\" and handed\nto the engine, whose refusal becomes a 400 (#8123) — but it is never parsed through `FlowSchema`,\nso what comes back is the caller's own bytes. Declaring `Flow` here would be a claim about the\n*request* that no validation backs.\n\n**The decision this needs:** should these routes answer the *registered, parsed* flow\n(`FlowParsed` — `canonicalizeStoredFlow` already produces exactly that), or keep echoing? The\nfirst is a behaviour change with a real benefit (the caller learns what the engine actually\nstored, defaults materialised); the second stays untypeable.\n\n### 3. `search` — declared inline on the implementation, unreachable from the client\n\n`GET /api/v1/search` relays `protocol.searchAll(...)` verbatim\n(`packages/rest/src/rest-server.ts:8259-8266`). Its shape is declared as an inline return\nannotation at `packages/metadata-protocol/src/protocol.ts:9845-9863`:\n\n```\n{ query: string;\n  hits: Array< { object: string; id: string; title: string; snippet?: string; record: any } >;\n  totalObjects: number; totalHits: number; truncated: boolean }\n```\n\nNot in `@objectstack/spec`, and `@objectstack/metadata-protocol` is **not** a dependency of\n`packages/client` (its deps are `@objectstack/core` and `@objectstack/spec` only), so it is\nunreachable even by import. Note `hits[].record` is itself `any` in the implementation's own\ndeclaration — the erasure is not only at the SDK boundary here.\n\n⚠️ **Near-miss trap, verified at head.** `SearchResult`\n(`packages/spec/src/contracts/search-service.ts:53`) exists, is exported from\n`@objectstack/spec/contracts`, and is **the wrong type**: it contracts the *per-object*\n`ISearchService.search`, whose `hits` carry `score` / `document`, not this route's\n`object` / `title` / `snippet` / `record`. Binding it would typecheck and ship a false\ndeclaration. #8140 left a compile-time guard on that mismatch in\n`packages/client/src/return-type-precision.test.ts`.\n\n### 4. `data.clone` — a stable server-produced shape declared nowhere\n\n`POST /data/:object/:id/clone` answers `{ object, id, sourceId, record }`, produced at\n`packages/metadata-protocol/src/protocol.ts:9488-9493`. Stable and server-produced, but declared\nin no spec module. It is the structural sibling of the client's own `CreateDataResult< T >` plus\n`sourceId` — which is what makes it tempting and why it is being written down instead: minting\nthat equivalence inside a consumer would create an undeclared second contract.\n\n## Why this is its own card rather than a rider\n\n#3877's standing ruling (quoted in `packages/rest/src/rest-route-ledger.ts:80-102`) is that\nauthoring the missing route response schemas wholesale is **not scheduled**, because a response\nschema is a product decision about what an endpoint promises and mass-producing them is how\ndeclarations nobody validated come to exist — \"⛔ DO NOT FILL A ROW THAT HAS NO CONFORMANCE\nCOVERAGE\". #8140's 51 bound sites are outside that ruling (they relay contract types that already\nexist and are already the declared return of the service method the route calls); these four are\nsquarely inside it. Each wants its own answer plus conformance coverage, which is a different\npiece of work from a typing sweep.\n\n## Suggested shape\n\nFour decisions, not one sweep. `search` and `data.clone` are the cheap pair — both have a stable\nshape a schema can simply describe. `automation.create` / `automation.update` are the interesting\npair and should probably be answered together, since they are the same route class.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_019siH5jDmk5hrayvfyojUqR)_\n"
+}

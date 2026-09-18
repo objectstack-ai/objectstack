@@ -1,0 +1,34 @@
+{
+  "number": 11935,
+  "kind": "issue",
+  "title": "[finding] `check:ratchet-remedy-authority` sweeps `scripts/**` but declares no path, so no card that edits a gate script can derive it — the one population it exists to police",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T01:36:02Z",
+  "updated_at": "2026-08-25T12:10:12Z",
+  "closed_at": "2026-08-25T08:46:25Z",
+  "closed_by": {
+    "login": "yinlianghui-tw",
+    "id": 314596056,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11935",
+  "body": "Measured while reworking #11052 / PR #11931, where this cost a full round trip. Filed unassigned — out of that card's scope.\n\n## What\n\n`scripts/check-ratchet-remedy-authority.mjs` sweeps every `scripts/*.{mjs,mts}` for a gate whose author-facing remedy expands a shrink-only registry. It is a **required** gate (lint.yml, \"Type Check · source gates\"). But it builds its population as\n\n```js\nconst SCRIPTS_DIR = join(REPO_ROOT, 'scripts');\n```\n\n— an **assembled** path, carrying no string literal with a separator. `hintCovers` in `scripts/pm/dispatch-gates.mjs` therefore has nothing to match, and the family lands in the `Undetermined (source names no path at all — NOT known irrelevant)` bucket, 53 families deep.\n\nVerified directly:\n\n```\n$ node scripts/pm/dispatch-gates.mjs --residue scripts/check-doc-authoring.mjs \\\n    scripts/check-skills-token-ratchet.mjs skills/objectstack-ui/SKILL.md\nUndetermined (source names no path at all — NOT known irrelevant): 53 famil(ies).\n  ...\n  - pnpm check:ratchet-remedy-authority   [lint.yml]\n```\n\n## Why it bites in exactly the wrong place\n\nThe gate's population is *gate scripts*. So the card most likely to violate it — one that **adds or edits a gate's remedy text** — is precisely the card whose derived list omits it.\n\nThat is not hypothetical. PR #11931 added a new corpus rule to `check-doc-authoring.mjs` whose failure text offered `⛔ Do NOT silence this by adding an EXAMPLE_ID_ALLOWLIST entry…`. The derivation named 14 families, all of which were run green locally; this one was not among them, and CI went red on it after the report was filed. The rework was cheap, but the round trip was avoidable and the same shape will recur for the next author who touches a gate message.\n\nNote the asymmetry that hides it: the family *does* appear in the matched list once the diff touches **its own** script file (`gate script 'scripts/check-ratchet-remedy-authority.mjs'`). So a card fixing this gate sees it, and every other card does not.\n\n## The fix already has an idiom in-repo\n\n`check-doc-authoring.mjs` solved the identical problem for its own ROOTS with a provenance-only declaration read by nobody at runtime:\n\n```js\nconst ROOT_WATCH_HINTS = ['.claude/**', 'docs/**', 'skills/**', 'content/**'];\n```\n\nIts docblock argues the case at length (the `#9964` declaration pattern), including why a subtree spelling is required — `hintCovers` refuses a bare single-segment literal such as `scripts` as too generic, by design and by measurement. So the remedy here is a `scripts/**` declaration in that spelling, plus a `--self-test` case pinning it against the real extractor in both directions (declares what it sweeps; declares nothing it does not).\n\nWorth checking the rest of the 53-family `Undetermined` bucket in the same pass — this gate is unlikely to be the only sweeper that assembles its root. The bucket is honestly labelled (\"NOT known irrelevant\"), but a dispatch prompt that says \"run every matched family\" turns an honest bucket into an unrun one.\n\n## Not fixed here\n\nPR #11931 is a `skills/**` cleanup under a maintainer ruling; adding a declaration to a third gate script — and auditing a 53-family bucket — would be an unmeasured widening riding on a ruled card. `scripts/**` is not a governed surface, so this needs no special merge handling.\n"
+}

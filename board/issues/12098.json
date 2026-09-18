@@ -1,0 +1,34 @@
+{
+  "number": 12098,
+  "kind": "issue",
+  "title": "[finding] references/compile-surfaces.md is the last pm-dispatch references file with no line-ratchet ceiling row",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T08:46:29Z",
+  "updated_at": "2026-08-25T16:42:30Z",
+  "closed_at": "2026-08-25T16:41:11Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12098",
+  "body": "Filed unassigned by the skills-seat dev that landed the `scripts/pm` small-fixes pack (session `session_01RMTpSRF5CjMmQBFfPtPCwJ`, PR #12096, branch `claude/issue-11310-pm-scripts-fixes`). Recording only.\n\n## The gap\n\n`.claude/skills/pm-dispatch/references/compile-surfaces.md` has no row in the `CEILINGS` map of `scripts/pm/check-skill-line-ratchet.mjs`. After #11310 added the `true-green.md` row, it is the **only** remaining references file that is uncovered.\n\nFound by enumerating the directory against the map rather than by noticing one file — every `references/*.md` checked in the same pass, on the PR's tree:\n\n```\nUNCOVERED .claude/skills/pm-dispatch/references/compile-surfaces.md\nCOVERED   contract-review.md · decision-analysis.md · dispatch-runbook.md · landing-operations.md\nCOVERED   platform-readings.md · release-aftercare.md · rest-channel.md · review-checklist.md\nCOVERED   seat-post-protocol.md · state-machine.md · true-green.md\n```\n\n## Why this is a gap and not the header's deliberate omission\n\nThe ratchet's header frames a file's absence from the map as a fact to check, not an oversight to infer — and it names exactly one deliberate omission: the **published** `skills/` catalog, excluded because its cost curve is a customer-project read rather than the per-seat-session read the ratchet prices. `compile-surfaces.md` is on the other side of that line. It is a pm-dispatch references file, read on demand by seat sessions like every covered entry, and the reasoning #11310 recorded for `true-green.md` applies to it unchanged.\n\n## Remedy\n\nOne `CEILINGS` row at the file's landed line count, headroom 0, same convention as the sibling references entries — and per the convention #11310 followed, the count is **read from the ratchet's own run, not `wc`** (insert the row at a deliberately low ceiling, let the gate print `compile-surfaces.md is N lines`, then set N). Worth confirming in the same pass that the file carries no line over the 120-byte max-line rule; `true-green.md` did not, and a file that does needs the re-wrap before the row, not a raised ceiling.\n\nNot fixed in PR #12096: that dispatch declared a one-row scope (`true-green.md`), and the precedent in this map is that a missing row is triaged and dispatched rather than added in passing — which is how #11310, #9473, #9923 and #9965 each landed.\n\nDedup-searched over open and closed ceiling-coverage cards (`compile-surfaces`, `CEILINGS`, line-ratchet coverage): #11310 covers `true-green.md`, #9473 the other four skills, #9923 the published catalog, #9965 `CLAUDE.md`, #9792 `AGENTS.md`. None covers this file.\n\n## Re-check\n\n```\nnode -e \"import('./scripts/pm/check-skill-line-ratchet.mjs').then(m=>console.log([...m.CEILINGS.keys()].some(k=>k.endsWith('references/compile-surfaces.md'))))\"\n```\n"
+}

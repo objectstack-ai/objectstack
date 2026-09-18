@@ -1,0 +1,33 @@
+{
+  "number": 12054,
+  "kind": "issue",
+  "title": "[finding] The second walled-owner onboarding dead end recorded on #11640 is still ungraded — that thread closed with #12025",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T07:03:01Z",
+  "updated_at": "2026-08-25T07:11:56Z",
+  "closed_at": "2026-08-25T07:11:56Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12054",
+  "body": "**This card carries no new information. It is a pointer, filed to restore board visibility.**\n\nThe maintainer ruling on #11640 (2026-08-25, comment 5405067849) scoped that card to one of **two** routes to the same end state, and directed the other half to stay *\"recorded on this thread as an ungraded finding for triage\"*, with disclosure discipline on it standing.\n\n#11640 has since closed — PR #12025 merged at 2026-08-25T06:38Z (`bf8d129b56`) — so that thread is no longer on the open board, and the ruling's own stated mechanism (triage grading it *from the thread*) can no longer run. Maintainer decision 2026-08-25: file a pointer card rather than let it go dormant.\n\n**The finding itself lives here:** #11640, comment 5393847948.\n\n⛔ **This card deliberately does not restate the setup.** The finding's original author chose not to file it standalone for exactly that reason; the ruling preserved that choice; nothing here overrides it. Read the linked comment.\n\n**What it is not:** after #11343, the occupant gains nothing — this is an **onboarding/availability** problem, not a privilege one. That framing is the linked comment's own, repeated here only so this card is not mistaken for an escalation report.\n\n**What is actually open:**\n\n1. **Triage grading** — the finding has never been graded.\n2. If graded actionable: whether an operator may clear or reassign a declared owner's identity is a **security ruling** (the #11640 ruling says so in those terms), not an implementation choice.\n\n⛔ Not `pm:queue` — routing is not grading. Unassigned by design.\n\nRefs: #11640 (closed) · #11343 · #12025"
+}

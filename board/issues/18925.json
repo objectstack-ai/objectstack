@@ -2,9 +2,9 @@
   "number": 18925,
   "kind": "pull_request",
   "title": "fix(check-adr-symbol-anchors): the verdict may not claim a census wider than the vocabulary it read",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "os-steve",
     "id": 317605050,
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "needs-user-decision",
     "size/s",
     "skip-changeset"
   ],
@@ -20,10 +19,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-18T06:28:50Z",
-  "updated_at": "2026-09-18T06:55:07Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-09-18T11:53:38Z",
+  "closed_at": "2026-09-18T11:53:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-09-18T11:53:36Z",
   "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/18925",

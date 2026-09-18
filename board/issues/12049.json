@@ -1,0 +1,34 @@
+{
+  "number": 12049,
+  "kind": "issue",
+  "title": "Survey + ADR: the platform customization model for packaged metadata — regimes per type, one activation ledger (chartered on #11665)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "pm:awaiting-maintainer"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T06:55:16Z",
+  "updated_at": "2026-08-25T11:13:07Z",
+  "closed_at": "2026-08-25T11:13:07Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12049",
+  "body": "Chartered by maintainer, 2026-08-25, live PM chat (the #11665 fork discussion), verbatim: 「要整体评估除了流程还有哪些需要自定义的也有类似的问题，开始写adr」 — following 「很多所有的元数据都有类似的个性化需求，要统一考虑。」. Direct-dispatch channel (standing authorization 2026-08-10); dispatched immediately by the chartering PM session `session_01KWRU3s15AJz7PGW7a7wdCh`.\n\n## Why this card exists\n\nThe platform already runs **two and a half** customization regimes, each with its own ledger: org **overlays** for exactly five presentation types (pinned by identity in `protocol.org-scoped-write-refused.test.ts`); **clone-to-customize** for permission sets (#11513, its own row-state + projection machinery); and the #11665 flow design about to invent a third. The maintainer ruled: stop per-type invention — assess every metadata type holistically and write the model down as an ADR, so this class of decision never returns to the inbox per type.\n\n## Deliverable 1 — the survey (measured, identities not counts, positive controls)\n\nEnumerate **every** authorable/packaged metadata type (the registry in `packages/spec/src/kernel/metadata-plugin.zod.ts` is the starting census). Per type, measure:\n- packaged-deliverable today? customization mechanism today (org overlay / clone / **managed extension fields** / none)?\n- behavioral (runs with side effects — flows, permission sets, triggers/hooks, actions…) vs presentational (views, dashboards…) vs structural (objects/fields)?\n- does any published doc/capability page promise post-install customization for it (the F6 shape from #11665's design)?\n- real authoring pull in the exemplar apps (hotcrm / showcase)?\n\n⚠️ Do **not** assume the two-regime model is complete: the managed-extension-fields mechanism on packaged objects may be a distinct **third** regime (extend rather than overlay or clone) — measure and let the evidence set the regime count.\n\n## Deliverable 2 — the ADR, as a governed DRAFT PR (`docs/adr/**`)\n\nThe platform customization model:\n1. **Regimes and which types fall where** (from the survey): presentation → org overlay (the existing five, unchanged); behavioral → clone + takeover, ⛔ never silent override; structural → whatever the extension-fields measurement says.\n2. **One generic data-plane activation/customization ledger** for the clone+takeover family — a platform object (name proposed by this ADR; `sys_metadata` is ⛔ NOT it): (metadata_type, name, org nullable) → active / replaced_by / cloned_from {package, name, version} / package_id. Definitions stay in `sys_metadata` — sole definition ledger, untouched; the #6190 phantom-overlay wall stands (any design needing `allowOrgOverride` flipped on a behavioral type has drifted back into #6190).\n3. **Scope + write authority**: install-level rows now; org column reserved; in multi-org postures ledger writes are operator-gated (a tenant admin must not flip an install-wide switch — the #10243 leak made durable otherwise); per-org divergence pre-charted for record-change-triggered flows only, the other trigger types refuse loudly.\n4. **Convergence plan**: flows = first consumer (#11665); permission sets converge in a later card (their landed machinery stays valid meanwhile); overlay types untouched.\n\nTentative flow-instance directions from the 2026-08-25 maintainer discussion, to incorporate as the worked example (provenance: live chat; **final ruling = the maintainer's merge of this ADR, ⛔ none of these is settled until then**): A1 + operator-gated multi-org writes + reserved org column + A2 pre-chart · C1 + C3 (new name + provenance; whole-definition copy, never param-list assembly) · Q2(c) takeover refused while packaged callers reference the flow as a subflow, callers named · Q3 a one-line \"clone based on v3, base now v5\" notice (no diff machinery) · Q4 two deliberate steps with the half-done state shown loudly · Fork D leaning D2 (a Setup surface; automation UI is Studio-only today — survey the Setup permission-set page as the precedent shape).\n\n## Discipline\n\n⛔ Draft PR only — governed surface: never ready, never queued, never auto-merged; request review from `os-zhuang` (author-identity 422 ⇒ assign instead); human merge is the review record and the model's acceptance. ⛔ No implementation code, no `packages/spec` edits, no edits to #11665's body. #11665 carries `Blocked-by:` on this card and unblocks when the ADR lands.\n\nRefs: #11665 (design, comment 5404974967) · #11513 · #6190 · #10243 · #11753 (the sibling spec-declared-readonly ruling) · ADR-0087"
+}

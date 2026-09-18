@@ -1,0 +1,36 @@
+{
+  "number": 10855,
+  "kind": "issue",
+  "title": "AGENTS.md's RECOGNISED_PATH_SPELLINGS mirror has drifted three times — nothing checks that the published list matches the detector",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:blocked",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-21T14:04:52Z",
+  "updated_at": "2026-08-25T15:44:23Z",
+  "closed_at": "2026-08-25T15:44:23Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10855",
+  "body": "Filed by the `domain:devx` PM seat (#6023, session `session_01DdCnBGcHeufjrq7drTD3wt`) as **ruling C** on PR #10852's open question 1. Unassigned; recording the class, not claiming it.\n\nBlocked-by: #11910\n\n⚠️ **State as of 2026-08-25T06:5xZ** (devx seat, `session_01UjM2ia8Av1v5NqfqQEQmC6`): the implementation is **done and reviewed** — governed draft PR #11908, ACCEPTed 2026-08-25T00:09Z. What remains is not work: `AGENTS.md` is at its shrink-only ceiling with zero headroom (961/961) and the honest mirror repair takes it to 969, so `check:pm-skill-ratchet` is red until the ceiling is ruled on. That ruling is **#11910**, in the maintainer's decision box.\n`Restart-when:` the ceiling ruling lands on #11910.\n`Unlock-action:` apply the one-line CEILINGS edit with the ruling quoted verbatim, then PR #11908 is mergeable (still human-merge-only — governed surface).\n\n*(Label corrected from `pm:dispatched` to `pm:blocked` by the incoming seat: the blocking relationship was recorded in a comment on 2026-08-25T00:09Z but the label was never swapped, so the queue views read this as live dispatch. The `Blocked-by:` line is moved into the body here because that is the machine-greppable reverse index the unlock sweep reads — a comment is invisible to it.)*\n\n## The mirror, and that it is unchecked\n\n`scripts/check-cross-package-test-inputs.mjs` recognises a fixed set of directory-seed and path spellings. Its own header says the set is *\"printed in the failure text and mirrored in `AGENTS.md`\"* — the published copy lives in the fenced block at `AGENTS.md:96-106`.\n\n**Nothing mechanically compares the two.** The detector can grow a spelling and the published list can stay short indefinitely; the only signal is a human noticing.\n\n## Three rounds, which is what makes it a class\n\n| round | drift | outcome |\n|---|---|---|\n| 1 | #10163 — three files said the detector recognised **two** seeds; it recognised **five** (widened by #8995 / #9763) | closed by #10690 |\n| 2 | #10854 — three files still say the detector cannot resolve a `findUp` walk; after PR #10852 it can | open |\n| 3 | **this** — `AGENTS.md:96-106` is short by the two `findUp` anchor seeds PR #10852 adds | open |\n\n⭐ Rounds 1 and 2 share a nastier property, and it is the reason this is worth mechanising rather than re-fixing: **in both, the stale sentence was the stated *reason* for a prohibition.** #10163's wrong \"only two seeds\" line was the justification for \"this seed may not change\"; #10854's is the same shape. A rotting mirror does not merely misinform — it launders an obsolete rule into a live one.\n\n⚠️ Note also that one of #10854's three claims (*\"`process.cwd()` appears nowhere in that detector\"*) was **already false on `origin/main` before** PR #10852 — it occurs once, in prose at `:1346`. So the drift is not only \"the code moved and the docs lagged\"; a published claim was wrong on arrival and nothing caught it.\n\n## What a remedy looks like\n\nA gate asserting that every entry in the detector's `RECOGNISED_PATH_SPELLINGS` appears in `AGENTS.md`'s published block — the same shape as the repo's other mirror ratchets. Cheap, and it retires the class instead of its third instance.\n\n⚠️ Two things whoever takes this must weigh, neither of which I am deciding:\n\n1. **`AGENTS.md` is governed** (`scripts/pm/check-governed-merges.mjs:274-280`), human-merge-only. A gate that *reads* it is fine; a fix that *edits* it is a maintainer merge. So the gate can only ever red — it can never auto-repair — and the card should say so up front rather than discovering it at review.\n2. **The comparison must not be a phantom check.** A gate that greps for a literal that happens to appear anywhere in `AGENTS.md`, or that passes vacuously when the block cannot be located, re-creates the defect it is closing one level up. It needs a self-test with an ablation in both directions: a spelling added to the detector and not to `AGENTS.md` must red, and a mangled/renamed fenced block must **refuse** rather than pass empty.\n\n⛔ Not in scope: widening or narrowing what the detector recognises. This is about keeping the published copy honest, nothing else.\n\nRefs: PR #10852 (#10029 direction B, where this surfaced) · #10854 (round 2, open) · #10163 → #10690 (round 1) · #8995 / #9763 (the widenings that started the drift)"
+}

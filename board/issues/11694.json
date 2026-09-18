@@ -1,0 +1,34 @@
+{
+  "number": 11694,
+  "kind": "issue",
+  "title": "[finding] a shrink-only ratchet whose self-test asserts its own entries are PRESENT can never reach zero — one instance found and fixed, the class unswept",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T12:24:12Z",
+  "updated_at": "2026-08-25T07:30:57Z",
+  "closed_at": "2026-08-25T07:29:09Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11694",
+  "body": "Found while landing #11596 slice 2 (PR #11692). The instance is repaired there; **the class is not\nswept** and that is what this card is for. Filed unassigned.\n\n## The shape\n\nA shrink-only ratchet exists to be driven to zero. If its **self-test** pins the current baseline\nentries as *present* — rather than pinning a property of the gate that survives their removal — then\nthe last commit of the burn-down turns the gate's own self-test red, and the ledger becomes\nun-burnable by construction.\n\nMeasured instance, `scripts/check-cli-test-child-env.mjs`:\n\n```js\nt(`the enumerated population contains ${named.split('/').pop()}`,\n  live.refusal === null && live.findings.some((f) => f.file === named));\n```\n\n`findings` holds a file only while it still **leaks**. Two cases were written this way to pin\n#11441's measurement that the derivation really covers those files — a good intention, and the\ncomment above them says exactly that in words (*\"they are members of the population\"*). But the\nspelling asserts a **transient fact about the tree**, not a property of the gate. Repairing the two\nfiles reported `2 of 54 case(s) failed`, and the failure message read *\"the derivation lost this\nfile\"* when the file was merely clean.\n\nThe repair in #11692 re-spells it as membership of the **scanned population** — walked, and\nclassified as a spawner — which is the claim that was intended and the one that survives the repair.\nThe gate's rule is byte-identical; the case count is unchanged; and it still discriminates (narrowing\nthe population root reds it again).\n\n## Why this is worth a sweep rather than a note\n\nThe two failure modes are indistinguishable on the day the pin is written and diverge only at the\nmoment the ratchet finally succeeds — i.e. the pin is a booby trap that arms itself years before it\nfires, at the exact moment someone is trying to do the right thing. A seat hitting it mid-burn-down\nsees a red gate and the most likely reactions are both wrong: leave an entry in the ledger to keep\nthe self-test green, or weaken the gate.\n\n## What a sweep would check\n\nFor each shrink-only / ratchet gate under `scripts/`, does its `selfTest()` (or its test twin) assert\nanything that is **only true while the baseline is non-empty**? Candidates worth reading, chosen\nbecause they are the ratchets this lane has touched recently and is not an exhaustive list —\n⛔ derive the population rather than working from it:\n\n- `scripts/check-settings-bind-window.mjs` — ⚠️ **most urgent**: its `KNOWN_PRE_BIND_READS` reaches\n  **empty** when #11623 lands (#11579 removed one entry, #11580 removes the other), so if it carries\n  this shape it fires imminently. That PR's dev has been asked to verify the empty-ledger path.\n- `scripts/check-cli-test-child-env.mjs` — the instance, already repaired.\n- `scripts/check-ratchet-remedy-authority.mjs`, `check-type-check-coverage` (TEST_DEBT),\n  `check-query-options-erasure`, `check-slot-lookup`, `check-i18n-coverage`.\n\n⭐ The discriminating question for each, and it is answerable by reading the assertion alone:\n**would this case still pass if the baseline were empty?** If not, it is pinned to the debt rather\nthan to the gate.\n\n## Related\n\n- PR #11692 — the instance and its repair, with the reverse-verification.\n- #11441 — the measurement the two mis-spelled cases were pinning.\n- #11596 — the burn-down that surfaced it by actually reaching zero.\n- #11623 — the next ledger due to hit empty."
+}

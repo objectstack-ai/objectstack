@@ -1,0 +1,35 @@
+{
+  "number": 12213,
+  "kind": "pull_request",
+  "title": "fix(spec): converge root docs meta.json onto the declared page list (#11482)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T13:37:03Z",
+  "updated_at": "2026-08-25T14:46:22Z",
+  "closed_at": "2026-08-25T14:46:20Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": "2026-08-25T14:46:20Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12213",
+  "body": "Fixes #11482\n\n## What\n\n`build-docs.ts` §3 (`// 3. Update root meta.json`) built the ROOT\n`content/docs/references/meta.json` — the sidebar's top-level category list —\nby filtering on `categoryZodFiles` (the `.zod.ts` files found **on disk**), a\nthird, independent enumeration of \"the pages of this category\" alongside §2's\nown `meta.json` and §2.5's card grid (both already keyed off\n`categoryMetaPages` per #11260).\n\nA category whose published pages all come from plain `.ts` files rather than\n`.zod.ts` ones (the `misc` catch-all class — `security/misc` proves the shape\nis real) has zero `.zod.ts` files while still publishing a page, a\n`meta.json` and an `index.mdx`. The old filter would drop such a category\nfrom the root sidebar even though §2 and §2.5 both fully generated it — a\nfolder complete on disk and unreachable from the nav.\n\n§3 now reads `categoryMetaPages`, the same declared list §2.5 already reads,\nvia an extracted `rootCategoryDirs` (`scripts/lib/root-meta.ts`) — one answer\nto \"which categories exist,\" read three times, instead of three answers that\nhappened to agree today.\n\n## Measured — no live instance, byte-identical output\n\nNo category is in the latent state today (all 14 have `zodFiles.size > 0`),\nso this was a latent defect with no observable effect. Verified directly:\n\n- `pnpm --filter @objectstack/spec gen:docs` before and after the fix\n  produces a `content/docs/references/meta.json` with the **same sha256**\n  (`41bb8932b11061fbc0bd6168b4087c5528ac75d41359be72db8bfd21b3106eef`) and an\n  **empty `git diff`** across `content/docs/`.\n- `pnpm --filter @objectstack/spec check:docs` passes clean (229 generated\n  files in sync).\n\nBecause the edge this fixes has no live instance, it cannot be pinned from\ngenerated output in either direction — the same reasoning #11260's\n`category-index.test.ts` gives for the card-grid fix. The rule is pinned\ndirectly in `scripts/root-meta.test.ts` against the extracted\n`rootCategoryDirs`, with the misc-shaped fixture that has no repo instance\n(an all-`misc` category with zero `.zod.ts` files), plus the empty/sort/\nreal-14-category shapes.\n\n## Scope\n\n`packages/spec/scripts/build-docs.ts` §3 only, its extracted\n`scripts/lib/root-meta.ts`, the pin (`scripts/root-meta.test.ts`), and a\nchangeset. Not touched: #11601 (nested-item describe rendering — a different\ndefect class in the same file; that card is serialized behind this one and\nwas not addressed here).\n\n## Tests\n\nAll run scoped to `@objectstack/spec` under the shared verify lock,\nHEAD `900d16b`:\n\n- `pnpm --filter @objectstack/spec build` — clean.\n- `pnpm --filter @objectstack/spec exec vitest run scripts/root-meta.test.ts scripts/category-index.test.ts scripts/root-index.test.ts` — 3 files / 31 tests passed.\n- `pnpm --filter @objectstack/spec typecheck` (`tsc --noEmit` + `check:scripts-typecheck` + `check:test-typecheck`) — clean.\n- `pnpm --filter @objectstack/spec check:docs` — clean, byte-identical root `meta.json` (see Measured above).\n- `pnpm --filter @objectstack/spec exec vitest run` (full package suite) — **427 test files passed (427), 11352 tests passed (11352)**.\n- `pnpm --filter @objectstack/spec run check:empty-state / check:liveness / check:strictness-ledger / check:variant-docs` — all clean.\n- `npx eslint --no-inline-config --format json` scoped to exactly the 3 changed TS files — 0 errors / 0 warnings across all 3; this repo's ESLint config enables no type-aware linting for any file (`eslint.config.mjs`, documented at its `QUERY_OPTIONS_TEST_GLOBS` comment), so this 3-file scope cannot move judgment on any untouched file.\n- Repo-root gates named by `node scripts/pm/dispatch-gates.mjs` for this diff: `check:changeset-gate-self-tests`, `check:merge-driver`, `check:objectui-changeset`, `check:published-files`, `check:slot-lookup`, `check:test-source-alias`, `check:type-source-resolution`, `check-adr-0087-registration.mjs`, `check-changeset-no-major.mjs`, `check-empty-changeset.mjs`, `check-plugin-teardown-shape.mjs`, `docs-audit/check-affected-docs.mjs`, `docs-audit/check-drift-comment.mjs`, `release-rehearsal-clone.mjs --self-test` — all clean.\n- Convention-triggered (new test file added): `check:query-options-erasure`, `check:engine-double-contract`, `check:cross-package-test-inputs`, `check:where-matcher`, `check:type-check-coverage` (structural) — all clean.\n- Not run locally: `check-dev-prereqs.mjs` (full 78-package `pnpm build` precondition) and `check:type-check-debt --re-measure` (same full-workspace-build precondition) — out of scope for a single scripts-layer file per the local-verification-scope discipline; CI's own build step covers both, and the new file is fully covered by the existing `tsconfig.scripts.json` program with 0 errors, so it cannot move either ledger.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01NDGG54XF5gbTLdQzCtnaVV)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01NDGG54XF5gbTLdQzCtnaVV)_"
+}

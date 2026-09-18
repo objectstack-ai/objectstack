@@ -1,0 +1,34 @@
+{
+  "number": 11955,
+  "kind": "issue",
+  "title": "`successThreshold` stops being read the moment recovery starts, so it can never require more than 2 consecutive successes",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-25T03:03:17Z",
+  "updated_at": "2026-08-25T08:13:22Z",
+  "closed_at": "2026-08-25T07:37:07Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11955",
+  "body": "Found while implementing #11852 (routing both health-check failure routes through the same\n`autoRestart` handling). Outside that card's surface — it is fenced to restart eligibility and the\nfailure counters — so this is filed rather than fixed.\n\n## What was measured\n\n`packages/core/src/health-monitor.ts` at `f540920189`, in `performHealthCheck`'s success branch:\n\n```ts\nconst currentStatus = this.healthStatus.get(pluginName);\nif (currentStatus === 'unhealthy' || currentStatus === 'degraded') {\n  const successCount = this.successCounters.get(pluginName) || 0;\n  if (successCount >= config.successThreshold) {\n    this.healthStatus.set(pluginName, 'healthy');\n  } else {\n    this.healthStatus.set(pluginName, 'recovering');\n  }\n} else {\n  this.healthStatus.set(pluginName, 'healthy');\n}\n```\n\n`successThreshold` is consulted only when the current status is `unhealthy` or `degraded`. The first\nsuccess moves the plugin to `recovering` — which is in neither set — so the **second** success takes\nthe `else` branch and goes straight to `healthy` without reading the counter at all. `failed` is in\nneither set either, so a plugin that threw recovers on its **first** success.\n\nSo the declared value is capped in practice:\n\n| Status when the successes start | Consecutive successes actually required |\n| :--- | :--- |\n| `unhealthy` / `degraded` | 2, whatever `successThreshold` says |\n| `failed` / `recovering` | 1, whatever `successThreshold` says |\n\nA declared `successThreshold: 5` is indistinguishable from `2`.\n\n## Declared contract\n\n`packages/spec/src/kernel/plugin-lifecycle-advanced.zod.ts`:\n\n```ts\nsuccessThreshold: z.number().int().min(1).default(1)\n  .describe('Consecutive successes needed to mark healthy'),\n```\n\n`content/docs/references/kernel/plugin-lifecycle-advanced.mdx:112` repeats it. Neither says the\ncount stops being read once recovery has begun, and `content/docs/protocol/kernel/lifecycle.mdx`\ndescribes the failure side of the threshold machinery without describing this side.\n\nThe default is `1`, which is exactly the value at which the defect is invisible — every declared\nvalue above it is the one that misbehaves.\n\n## Why it is filed next to #11852\n\nThis is what makes the second asymmetry #11852 names — the `catch` path not clearing\n`successCounters` — **unobservable through the public API today**. The read site above is the only\nplace `successCounters` is consulted, and it is unreachable with a stale non-zero counter: the\nreturned-failure route always zeroes the counter before `unhealthy`/`degraded` can be entered, and\nthe throw route sets `failed`, which the branch short-circuits past. #11852's fix performs the reset\n(correct counter hygiene, and it becomes load-bearing the moment this card is addressed), but no\nbehavioural pin can distinguish it while the read site cannot be reached. That is recorded in that\nPR rather than papered over with a test that would pass for the wrong reason.\n\n## What is NOT claimed\n\nWhich behaviour is intended is not determined here. \"Consult `successThreshold` from every\nnon-healthy status\" is the reading the `describe()` text suggests, but `recovering` may have been\nmeant as a terminal-ish display state rather than a counting one, and no ADR, comment or test states\nan intent. `health-monitor.test.ts` asserts nothing about `successThreshold` on any route.\n"
+}

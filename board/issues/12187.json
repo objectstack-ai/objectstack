@@ -1,0 +1,33 @@
+{
+  "number": 12187,
+  "kind": "pull_request",
+  "title": "docs(scripts): drop the removed `GENERATED_SKILL_ARTIFACTS` from the `check-doc-authoring` control entry",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T12:17:13Z",
+  "updated_at": "2026-08-25T14:36:33Z",
+  "closed_at": "2026-08-25T14:36:31Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": "2026-08-25T14:36:31Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12187",
+  "body": "Fixes #12095\n\nThe `why` record for `check-doc-authoring.mjs` in the control corpus of\n`scripts/check-ratchet-remedy-authority.mjs` named four declarations:\n\n> Carries no ratchet at all. ROOTS, SKIP_PATHS, SKIP_FILES and GENERATED_SKILL_ARTIFACTS are declarations of what the two corpus rules read and what is generated rather than authored […]\n\n`GENERATED_SKILL_ARTIFACTS` is no longer in the tree. It was the by-path exemption for the\ngenerated `references/_index.md` / `references/react-blocks.md` artifacts, and it was dropped\n(rather than narrowed) by PR #12097 — for #11930, merged as `71f9cd1d75` — once those files\nstopped carrying issue ids projected from `packages/spec` TSDoc. The exemption then guarded a\nclean surface, so it went. This prose string was its only surviving mention anywhere in the repo.\n\n## The change\n\nOne line, one file. The name is dropped and the conjunction moves, since removing the fourth item\nof a four-item list otherwise leaves a dangling `and`:\n\n```\n- ROOTS, SKIP_PATHS, SKIP_FILES and GENERATED_SKILL_ARTIFACTS are declarations of …\n+ ROOTS, SKIP_PATHS and SKIP_FILES are declarations of …\n```\n\nNothing else in the entry moves. The closing sentence — about the per-passage allowlist, and\ncarrying a maintainer ruling of 2026-08-25 — is a different subject and is left **byte-identical**\n(267 bytes on both sides of the diff, verified by comparing the tail segment against\n`origin/main`). No other entry or `why` record in the file is touched.\n\n## Verification\n\n**The three surviving names are live.** They describe constants in `scripts/check-doc-authoring.mjs`,\nso that is where liveness was measured — not in the file carrying the prose, where a grep only ever\nre-finds the sentence itself:\n\n```\nscripts/check-doc-authoring.mjs:93:  const ROOTS = ['.claude', 'docs', 'skills', 'content'];\nscripts/check-doc-authoring.mjs:123: const SKIP_PATHS = new Set([\nscripts/check-doc-authoring.mjs:130: const SKIP_FILES = new Set(['content/docs/ai/skills-reference.mdx']);\n\noccurrences in that file:  ROOTS 26 · SKIP_PATHS 12 · SKIP_FILES 3 · GENERATED_SKILL_ARTIFACTS 0\n```\n\nSo this is a single instance of the defect, not one of several.\n\n**Nothing parses the `why` string.** `declared.why` has exactly one consumer in the gate — line 826,\nwhere it is interpolated into the `MISCLASSIFIED:` failure text (`control's reason: ${declared.why}`).\nIt is never matched, split, or compared. No file in the repo reads\n`scripts/check-ratchet-remedy-authority.mjs` as text; the four other referrers of that filename\n(`package.json`, `check-doc-authoring.mjs`, `check-auth-mount-ledger.mjs`, `check-i18n-coverage.mjs`)\nname it only in prose comments, a message string, and the npm script that invokes it. The gate's own\n`--self-test` pins no entry text. That is consistent with the gate having stayed green through #12097\nwith the string already stale.\n\n**No ablation applies.** A record string with no execution path has nothing to mutate — there is no\nleg here that could be made to fail, and constructing one would be theatre rather than evidence.\n\n**Gate union**, derived with `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack`\nin the worktree and run at the final commit `f677692327`. Exit codes captured before any pipe; the\nverdict line quoted is each gate's own:\n\n| Gate | Exit | Gate's own verdict |\n|:--|:--|:--|\n| `check:agent-test-spelling` | 0 | violating population empty; 9 separators judged and cleared on the rule |\n| `check:cross-package-test-inputs` | 0 | `OK: 16 package(s) read outside themselves, all declared…` |\n| `check:entry-guard` | 0 | `✓ check:entry-guard: 161 scripts/ file(s) — every entry guard goes through invoked-as.mjs` |\n| `check:parse-guard` | 0 | green line over `scripts/`, 31 counted and tiered |\n| `check:pnpm-filter-targets` | 0 | `✓ … 136/173 --filter occurrence(s) across 28 file(s) resolve` |\n| `check:ratchet-remedy-authority` | 0 | `OK  check-ratchet-remedy-authority: 146 scripts swept … Control corpus: 24 hand-classified scripts, set-equality audited both ways.` |\n| `node scripts/check-ci-filter-parity.mjs` | 0 | `OK: all 96 declared cross-package glob(s) (81 unique) are covered…` |\n| `node scripts/check-cross-package-test-inputs.mjs` | 0 | `OK: 16 package(s) read outside themselves, all declared…` |\n\nPlus `check:nul-bytes`, run because the PR edits a file:\n`check-nul-bytes: OK (scanned 6749 text file(s) … no raw ASCII control bytes)`.\n\nThe six changeset-triggered families the derivation lists do not apply — see below.\n\n## Changeset\n\nNone. The diff is a comment-grade string inside a repo-root `scripts/` gate; no published package\nsource changes and nothing is user-visible, so this carries the `skip-changeset` label instead.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01UjM2ia8Av1v5NqfqQEQmC6)_\n"
+}

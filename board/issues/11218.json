@@ -1,0 +1,34 @@
+{
+  "number": 11218,
+  "kind": "issue",
+  "title": "[finding] H19 cannot resolve a cross-repo `Blocked-by:` target — the exact shape contract-first dispatch produces, and its UNJUDGED row reads like a clean one",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T03:50:33Z",
+  "updated_at": "2026-08-25T09:35:22Z",
+  "closed_at": "2026-08-25T09:34:18Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11218",
+  "body": "**Finding — recording only, not claimed.** Filed under the maintainer direct-dispatch channel, this session, verbatim: 「然后 把 1–4 落成 finding 卡」. PM session `session_0124Qg8rLvpXnQDwCmpKUmaJ`.\n\n## Measured\n\nFrom anchor #9857, sweep `2026-08-23T02:11:54Z` (run 32612222532):\n\n> Blocker liveness (H19): targets resolved on **17 of 19** distinct `Blocked-by:` target(s) named by open `pm:blocked` card(s)\n\nand the row that explains the gap:\n\n> **H19** #10938 — `pm:blocked` and 1 of 1 `Blocked-by:` target(s) could NOT be resolved this sweep (`objectstack-ai/cloud#944` (**HTTP 404**)) — so whether this block has outlived its blocker is UNJUDGED, not confirmed.\n\n`objectstack-ai/cloud#944` **exists and is open** (title: *\"Five error dialects answer /api/v1, none of them the declared envelope…\"*, carrying `pm:queue`). The 404 is the patrol token's repo scope, not a missing issue.\n\n## Why this matters more than 2-of-19 suggests\n\nCross-repo blockers are not an edge case — they are **the normal output of the contract-first split**. The dispatch protocol requires that a cross-repo feature become a parent plus one sub-issue per repo, with the downstream carrying `Blocked-by: <owner/repo>#<n>`. So the single class of blocker the protocol most reliably manufactures is exactly the class H19 cannot judge.\n\nLive specimens found this round, all cross-repo, all currently un-judgeable by any patrol:\n\n- `cloud#1509` (**priority:p0 + security**) → `Blocked-by: objectstack-ai/objectstack#11184`\n- `cloud#1395` → `objectstack#10101`\n- `objectui#4676` → `objectstack#9019`, `objectui#4664` → `objectstack#8704`, `objectui#5233` → `objectstack#9933`, `objectui#5210` → `objectstack#9934`, `objectui#5601` → `objectstack#10054`\n\nThe last five were resolved by hand this round; four had been stale for 4–7 days.\n\n## The second half: UNJUDGED does not read as unjudged\n\nThe report renders one line per unresolved target inside an H19 row. In a 94-finding report a reader skims for red; a row that says *\"whether this block has outlived its blocker is UNJUDGED\"* sits in the same visual weight as a row that made a determination. This repo has ruled on this exact hazard before — *\"could not read the input\" must never look like \"input is clean\"* (#4690), which is why the script exits non-zero when the whole sweep fails. The per-target failure has no equivalent.\n\n## Shape of the fix\n\nTwo independent halves; either is useful alone.\n\n1. **Give the resolver cross-repo read.** The sibling finding on the single-repo patrol needs the same thing, so these two should probably be priced together.\n2. **Make an unresolved target loud** — a distinct count in the header line (`resolved on 17 of 19` is already there, so the datum exists; it is the *per-card* consequence that is quiet), or a dedicated section, so an operator cannot mistake \"we could not check\" for \"we checked\".\n\n⛔ Which of the two, and whether a scoped token is acceptable, is a routing/security call for triage — not decided here.\n\n## Re-check\n\n```\n# the header line and the UNJUDGED row\ngh issue view 9857 --repo objectstack-ai/objectstack --json body -q .body | grep -E 'Blocker liveness|UNJUDGED'\n```"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 11946,
+  "kind": "issue",
+  "title": "[process] Upstream twin of objectui#5700 — the shared-stash rule in AGENTS.md/CLAUDE.md stops one ref-namespace short; worktrees also share refs/remotes/*, and FETCH_HEAD is last-fetch-wins per checkout",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui-tw",
+    "id": 314596056,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T02:11:13Z",
+  "updated_at": "2026-08-25T12:32:38Z",
+  "closed_at": "2026-08-25T10:04:39Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11946",
+  "body": "Filed unassigned by the `os-dev` seat implementing objectui#5700. Recording only — the objectstack-side instruction edit is the skills lane's, and the implementing dev is explicitly out of scope for editing this repo's `AGENTS.md` / `CLAUDE.md`.\n\n## What the twin card is\n\nobjectui#5700 established that this repo family's `git stash` rule — correct and well-argued in both `AGENTS.md` §9 and `CLAUDE.md` — is stated **one ref-namespace too narrowly**. The general fact is:\n\n> A worktree isolates your **checkout** and exactly four ref namespaces — `HEAD`, `refs/bisect`, `refs/worktree`, `refs/rewritten`. It does **not** isolate the object store, the repo config, or any other ref.\n\n`refs/stash` is one *case* of that, not an isolated quirk. A reader who learns only the stash rule draws exactly the wrong general conclusion — \"worktrees isolate refs, except stash\" — and this repo's `CLAUDE.md` and `AGENTS.md` both currently teach only the stash case.\n\nThat matters here specifically because this repo's own os-dev standing rules already lean on the generalisation without stating it: the family rule about `origin/main` being a shared pointer, and the instruction to anchor `reset`/`diff`/`log`/`rebase` to a recorded `BASE`, are consequences of it.\n\n## The three instances that have cost work\n\n1. **`refs/stash`** — already documented in both files, with a hook (`guard-shared-stash.sh`).\n2. **`refs/remotes/*`** — a sibling agent's `git fetch` in *its* worktree advances **your** `origin/main`. So a path-scoped `git checkout origin/main` plus paths, inside a worktree, restores whatever that ref points at *now*, which can be newer than your branch base — another agent's freshly-merged work entering your tree under the name of a \"revert\". Measured on the objectui card: `origin/main` moved three times inside ten minutes with four agents working. A path-scoped checkout also **stages** what it restores, so the contamination arrives already in the index.\n3. **`FETCH_HEAD`** — the symptom here is an **absence**, not wrong content: a `git diff` against a moved `FETCH_HEAD` exits 0 and prints nothing, and the natural reading of that is \"the change is not there\" — a confidently wrong review conclusion about someone else's work, on evidence that looks clean.\n\n## ⚠️ One correction to make before copying instance 3 across\n\nWhile implementing the objectui edit I measured `FETCH_HEAD` rather than assuming it, and it does **not** behave like `refs/stash`. On git 2.43:\n\n```\n# in a linked worktree\ngit rev-parse --git-path FETCH_HEAD  ->  .git/worktrees/NAME/FETCH_HEAD\n# in the shared primary checkout\ngit rev-parse --git-path FETCH_HEAD  ->  .git/FETCH_HEAD\n```\n\nEmpirically: worktree B fetching a *different* branch did **not** move worktree A's `FETCH_HEAD` (A stayed at main's tip); a second fetch inside A itself **did** replace it. So the correct statement is per **checkout**, not per worktree: *the last fetch in this checkout wins*. The hazard lives in the **shared primary checkout** — where reviewing seats work all day, and where every agent's first `git fetch` lands before it creates its worktree.\n\nPlease do not copy the flat \"FETCH_HEAD lives in the common .git dir and is shared by every worktree\" wording upstream; it is measurably false for linked worktrees on git 2.43, and repeating an unverified scope claim is precisely the error the parent card exists to correct.\n\n## Suggested shape for the objectstack-side edit\n\nBeside the existing stash rule in `AGENTS.md` §9 多 agent 协作纪律 (and, if `CLAUDE.md`'s excerpt is kept in sync, there too), stating the four-namespace rule as the general case, the three instances above, and the practices — pin `BASE=$(git rev-parse HEAD)` at worktree creation and restore against that commit; if you do name a remote-tracking ref, verify the content you got by occurrence counts on disk; fetch into a ref you own (`git fetch origin BRANCH:refs/NAMESPACE/ID -f`) rather than reading `FETCH_HEAD` in a later command; diff restored paths against the recorded base before staging.\n\n⛔ **No hook** for this family. The safe forms (`git checkout`, `git fetch`) are ordinary commands and the unsafe form is legitimate elsewhere, so a mechanical block fires on correct usage. objectui#5700's own reasoning is binding on that point.\n\n## Refs\n\n- objectui#5700 — the parent card, with the measured instances\n- **objectstack-ai/objectui#6222** — the objectui-side edit (draft; governed surface, human merge). Its PR body carries the full positive-control measurement.\n- objectui#3430 — the stash instance that both files already document\n- objectui#5202 and objectui#5235 — the `refs/remotes/*` instances (the second is the worked example of the verify-what-you-got mitigation succeeding)"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 12175,
+  "kind": "pull_request",
+  "title": "fix(spec): share one fence-closer predicate between check-skill-examples's walk and extraction",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T11:54:15Z",
+  "updated_at": "2026-08-25T14:24:48Z",
+  "closed_at": "2026-08-25T14:24:46Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": "2026-08-25T14:24:46Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12175",
+  "body": "Fixes #11690\n\n## The bug\n\n`check-skill-examples.ts`'s `fenceOwners()` walk and its `extractFromFile()` extraction\nloop disagreed about where a fenced block's body ends. The walk used an\nindent/run-length-aware closer (`^ {0,3}\\`{run,}[ \\t]*$`); extraction re-derived a body end\nwith a second, looser `^```\\s*$` (exactly three backticks, column 0). The two diverged in\nboth directions:\n\n- An indented (≤3-space) or four-or-more-backtick closing line closed the walk's span but\n  not extraction's — extraction's body ran past the real close to the next bare column-0\n  fence (or to EOF), swallowing whatever followed.\n- A CR-trailing closing line (a CRLF file) closed extraction's old regex but not the\n  walk's — the walk read the fence as unclosed, which (per CommonMark) silently suppressed\n  extraction and orphan-reporting for every later block in the file.\n\nLatent, no occurrence in the real corpus (confirmed again in this PR: 0 files with a raw\nCR byte across all 878 scanned files).\n\n## The fix\n\nOne shared closer predicate, per the issue's own suggested shape and the `fenceOwners()`\nprecedent already used correctly by the sibling gate `scripts/check-role-word.mjs`.\n`fenceOwners()` now returns each opener's `closeLine` alongside `owners`, and\n`extractFromFile` reads it directly instead of re-deriving a body end with its own regex.\nThe old `FENCE_CLOSE_RE` is removed — there is exactly one closer now, not two that can\ndrift apart.\n\n## Self-tests\n\nFour new fixtures pin the divergent closing-line spellings the issue enumerates, each\nverified both ways (reverse-verified: committed the fix, temporarily reverted just the\ncloser logic while keeping these fixtures, confirmed all four fail with the expected\nmessages, then restored the fix):\n\n- **indented closer** (2-space indent) — previously merged two real blocks into one\n- **four-or-more-backtick closer** — same merge-past-the-close failure, over-long run\n- **combined indent + over-long closer** — both attributes at once, the boundary the shared\n  regex's `{0,3}` / `{run,}` quantifiers must both clear together\n- **CR-trailing closer** (CRLF) — previously the two loops silently disagreed (extraction\n  reported a short, plausible body; the walk had already decided the fence never closed);\n  now both loops agree the fence is unclosed, so extraction's reported body honestly\n  matches what the walk believes this span contains instead of masking the mismatch\n\n## Corpus before/after (mechanism assumption #2)\n\n`check:skill-examples`'s real-corpus run is identical before and after, across all 5 real\nsource roots (`skills/`, `content/docs/`, `packages/spec/src`, `packages/client-react/src`,\n`packages/client/src`):\n\n```\nBEFORE (origin/main @ 577fabf): 256 marked example(s) across 99 file(s), 3 surface(s) — all type-check\nAFTER  (this branch):           256 marked example(s) across 99 file(s), 3 surface(s) — all type-check\n```\n\n0 divergences anywhere in the real corpus; the only behavior changes are on the four\nsynthetic fixtures above.\n\n## Tests\n\n```\npnpm --filter @objectstack/spec check:skill-examples\n  ✅ self-test (14 fixtures, including the 4 new ones)\n  ✅ 256 prose examples type-check across 3 surface(s)\n\npnpm check:doc-authoring          ✅ 389 + 38 files clean\npnpm --filter @objectstack/spec check:liveness            ✅\npnpm --filter @objectstack/spec check:empty-state         ✅\npnpm --filter @objectstack/spec check:variant-docs        ✅\npnpm --filter @objectstack/spec check:strictness-ledger   ✅\npnpm --filter @objectstack/spec check:scripts-typecheck   ✅ (tsc --noEmit -p tsconfig.scripts.json)\npnpm check:merge-driver           ✅\npnpm check:published-files        ✅\npnpm check:slot-lookup            ✅\npnpm check:test-source-alias      ✅\npnpm check:type-source-resolution ✅\nnode scripts/check-dev-prereqs.mjs --self-test         ✅ (CI-required half; the real,\n  non-self-test half needs a full 67-package `pnpm build` this worktree hasn't done and\n  which is unrelated to this diff — CI's lint.yml wires only `--self-test`)\nnode scripts/check-plugin-teardown-shape.mjs           ✅\nnode scripts/docs-audit/check-affected-docs.mjs        ✅\nnode scripts/docs-audit/check-drift-comment.mjs        ✅\n```\n\nAll at `90d510d`.\n\n## Scope\n\nFile surface is exactly `packages/spec/scripts/check-skill-examples.ts` (+ its own\nself-tests), per the dispatch's serial-ordering note: #12051 and #12048 share this file on\na different defect class each and hold until this lands.\n\nNo changeset — pure internal dev-tooling/CI-script bugfix, no published-package or\nuser-facing behavior change (`packages/spec/scripts/**` is not in the package's publish\n`files` allowlist, confirmed by `check:published-files` above).\n\n_Generated by [Claude Code](https://claude.ai/code/session_01NDGG54XF5gbTLdQzCtnaVV)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01NDGG54XF5gbTLdQzCtnaVV)_"
+}

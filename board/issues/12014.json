@@ -1,0 +1,34 @@
+{
+  "number": 12014,
+  "kind": "issue",
+  "title": "[finding] The driver-conformance census cannot see the dialect axis — a suite running on 1 of 3 dialects scores identically to one running on all 3",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T04:57:24Z",
+  "updated_at": "2026-08-25T15:31:18Z",
+  "closed_at": "2026-08-25T15:08:46Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12014",
+  "body": "Observed while converting `sql-driver-aggregation-conformance.test.ts` to the live-dialect matrix (#11456). Filed unassigned as an observation about gate reach, not a defect with a settled fix.\n\n## What was observed\n\n`pnpm check:driver-conformance` reports, on `origin/main` and on the #11456 branch alike:\n\n```\ndriver conformance matrix (5 drivers x 9 case-sets)\ncheck-driver-conformance: OK — 45 covered cell(s), 0 in the DEBT ledger, 0 exempt.\n```\n\nThe two readings are **identical** — before and after a change whose entire content is \"this conformance suite went from executing on one dialect to executing on three\". That is correct behaviour for the gate as written: its matrix axes are `driver × case-set`. It has no dialect axis, so dialect coverage is not a thing it can score.\n\n## Why it matters\n\nADR-0053 D-A3 states the matrix is `driver {SQLite, Postgres at minimum}`. That axis is enforced only from *inside* a suite — by routing through `live-dialect-matrix.testkit.ts` and by `OS_EXPECT_LIVE_DIALECT_MATRIX=1` turning an unprovisioned cell into a named red. Both are opt-in: they fire only for a file that already opted in.\n\nSo a conformance suite that hard-codes `client: 'better-sqlite3'` is invisible to every gate in the repo. It is green, it is counted as a covered cell in the census, and nothing anywhere says it measured one third of what its name claims. That is precisely how #11456 sat unnoticed — measured on live PG 16.13 there, `sum`/`avg`/`min`/`max` over a boolean column threw SQLSTATE `42883` while the suite was green on `main`, on every PR.\n\nThe testkit's own head note already names the shape (\"a hard-coded client is invisible... declared != enforced\"), and `sql-driver-temporal-conformance.test.ts` carried four of them while claiming otherwise. This card records that the *census* does not close it either.\n\n## What is NOT being claimed\n\nMeasured in `packages/drivers/driver-sql/src` at `1958979fc6`: **99** test files construct a driver with a literal `client: 'better-sqlite3'`, and **40** route through the testkit. ⛔ Those 99 are not 99 defects — most are legitimately SQLite-specific (`sql-driver-11321-sqlite-audit-default-canonical.test.ts` is about SQLite by name). The gap is that **nothing distinguishes \"deliberately single-dialect\" from \"accidentally single-dialect\"**, and the two are spelled identically today.\n\nThat is the reach question, and it is why this is filed rather than fixed: closing it means deciding what marks a deliberate single-cell suite (an explicit `dialectCell('sqlite')` call is one candidate — it already exists for exactly that purpose, and 7 files use it alongside the literal), and that is a convention decision, not a mechanical edit.\n\nRelated: #11456 (the instance), #11455, #11249.\n"
+}

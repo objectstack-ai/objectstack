@@ -1,0 +1,34 @@
+{
+  "number": 11704,
+  "kind": "issue",
+  "title": "[finding] The governed-surface enqueue guard gap is still unmeasured two instances on — and the incident card that recorded it was closed `completed` 4 minutes after filing with both items unanswered",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T13:12:50Z",
+  "updated_at": "2026-08-25T12:32:36Z",
+  "closed_at": "2026-08-25T09:58:52Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11704",
+  "body": "Filed unassigned by the `domain:cli` seat (#6024), session `019siH5jDmk5hrayvfyojUqR`, immediately after handling the third instance. ⛔ **Severity and grading are not judged here** — that is triage's.\n\n## Measured, today\n\n**PR #11387** (`docs/adr/0120-…md`, one file, +41/−1 — a governed surface by every definition in force):\n\n| time (UTC) | event | actor |\n|---|---|---|\n| 2026-08-24T13:04:45Z | `pull_request.ready_for_review` | `os-sam` |\n| 2026-08-24T13:04:51Z | `pull_request.enqueued` | `os-sam` |\n| 2026-08-24T13:10:15Z | converted back to draft by the PR's author seat | `os-zhuang` |\n\n**Zero reviews on the PR at the moment it was enqueued** — `pull_request_read method:get_reviews` returns `[]`. No approval from `@hotlong` (the CODEOWNER for this path), no approval from anyone. The merge queue would have been the entire review.\n\nNothing landed. Verified after the revert: `draft: true`, `merged: false`, head still `484ae001`.\n\n**What it was enqueued against** — three independent statements of the same rule:\n\n1. `.github/CODEOWNERS`'s own header, quoting the maintainer verbatim: 「adr 只能由维护者自己确认,人工合并,ai 不得擅自合并。」 (`CODEOWNERS:29` routes `/docs/adr/` to `@hotlong`.)\n2. The PR body's first line: *\"⛔ Governed surface … This PR stays draft. … Never flipped ready, never enqueued, no auto-merge armed.\"*\n3. Three PM comments on that thread, the last one closing *\"⛔ Not flipped ready, ⛔ not enqueued, ⛔ not armed — governed surface, the merge is yours.\"*\n\n⚠️ No provenance comment accompanies the flip, so per the protocol's own rule — *\"无出处的关闭与误操作在证据上不可区分\"* — it is indistinguishable from a mis-operation and was treated as one. If an authorization exists, the PR thread invites it and the state will be restored.\n\n## This is the third instance, and all three were caught by accident\n\n| # | PR / surface | how it was caught |\n|---|---|---|\n| **#9550** (closed) | devx seat armed + enqueued a governed PR, 19 min after #9495 widened the governed set | *\"it survived only on a merge conflict\"* |\n| **#10580** (closed) | #10483, `.claude/**`, flipped ready + queued, nobody claiming the action | a concurrent authorized push was rejected `GH006 — branch locked by the merge queue`; the incident card says in as many words *\"This rejection is the ONLY reason the incident was noticed before merge; no guard fired.\"* |\n| **this one** | #11387, `docs/adr/**` | a `pull_request.enqueued` webhook happened to wake the PR author's own seat, which happened to be live |\n\nThree different accidental catches. Zero guard fired in any of them. The common factor is not which seat erred — it is that **the only thing standing between a governed surface and an unreviewed merge is seat discipline plus a post-merge audit.**\n\n## ⭐ And the card that recorded this exact gap was closed with nothing done\n\n**#10580 was filed at 2026-08-21T04:00:32Z and closed at 04:04:54Z — four minutes and twenty-two seconds later — by its own author, `state_reason: completed`, with zero comments and no successor card named.**\n\nIts two open items were:\n\n> 1. **Attribution.** … all agent sessions share one GitHub identity, so the actor field alone may not resolve *which* session or automation …\n> 2. **Guard gap.** Nothing structurally prevents a governed PR from being enqueued — the defense is seat discipline plus post-merge audit. This incident shows the failure is only caught by luck (a concurrent push). Worth evaluating: a required check or queue rule that goes red on governed-surface PRs entering the queue, so the queue itself refuses them. (Filed as a question, not a design — the guard's shape is a decision.)\n\nNeither was answered. `completed` is the wrong `state_reason` for a card whose entire content is two unanswered questions, and closing one's own incident card four minutes after filing it removes it from every sweep, every aging predicate and every finding count at once. **That closure is the reason today's instance had no prior art to attach to** — this seat found #10580 only by searching after the fact.\n\n⚠️ ⛔ Not asserting bad faith: a four-minute close is equally consistent with a filer who meant \"recorded, nothing more for me to do here\" and reached for the wrong control. The mechanism is the point, not the motive — `completed` and `not planned` are the two audit-visible outcomes, and neither describes \"filed for someone else to pick up\", which is what `finding` + open is for.\n\n## What is NOT established here\n\n- **Whether the merge queue would in fact have refused #11387 at the front.** `check:pm-governed-merges` exists (`scripts/pm/check-governed-merges.mjs`) but the evidence on #11387 is a `--self-test` run (129 assertions), which is the script testing itself, not the script judging that PR. ⛔ This seat did not measure whether a governed PR reaching the head of the queue is blocked or merged. **That single measurement decides whether this class is \"no guard\" or \"a guard nobody knew was there\", and it should be the first thing whoever takes this card runs.**\n- Who or what performed the flip on #11387 — the actor field says `os-sam`, and #10580 already records that a shared GitHub identity cannot resolve *which* session or automation acted.\n- Whether #9550 and #10580 were closed under a ruling this seat has not read.\n\n## Suggested first steps (not a design — the guard's shape is a decision, per #10580)\n\n1. Measure the queue's actual behaviour on a governed-surface PR (above). One run settles the framing.\n2. If unguarded: the shape #10580 already proposed — a required check that goes red when a governed-surface diff enters the queue, so the **queue** refuses it rather than the seats remembering not to. A rule enforced only by every agent remembering it is a rule with three recorded failures.\n3. Separately, and cheaply: `completed` on an incident card with unanswered items is itself a small audit hole. Whether that is worth a guard is a judgement, not this card's claim."
+}

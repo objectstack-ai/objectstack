@@ -1,0 +1,35 @@
+{
+  "number": 11482,
+  "kind": "issue",
+  "title": "[finding] build-docs.ts §3 builds the ROOT references meta.json from a third enumeration — a category with no `.zod.ts` would be unroutable",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-23T22:20:01Z",
+  "updated_at": "2026-08-25T14:50:42Z",
+  "closed_at": "2026-08-25T14:46:21Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11482",
+  "body": "Found while fixing #11260 (the `security` card grid omitting `misc`). Same class, different code path, **no instance in the tree today** — filing rather than folding, per that card's scope.\n\n## What #11260 fixed, and what it did not\n\n#11260's defect was that a category's `meta.json` and its `index.mdx` card grid were built from two different enumerations of \"the pages of this category\", and the `misc` catch-all — which has no `.zod.ts` behind it by definition — existed in only one of them. That is fixed: §2.5 now iterates the list §2 declared.\n\n`build-docs.ts` §3 (`// 3. Update root meta.json`, ~line 940 post-fix) builds the **root** `content/docs/references/meta.json` — the list of categories in the sidebar — from a **third** enumeration, the one #11260 just moved the grid off:\n\n```ts\nconst categoryDirs = Object.keys(CATEGORIES)\n  .filter(cat => {\n    const zodFiles = categoryZodFiles.get(cat);\n    return zodFiles && zodFiles.size > 0;\n  })\n  .sort();\n```\n\n## The latent shape\n\nA category whose published schemas **all** come from plain `.ts` files rather than `.zod.ts` ones would have `zodFiles.size === 0` while still publishing pages — everything lands in the `misc` catch-all. `security/` already proves plain-`.ts` declarations reach that bucket (it is why `security/misc` exists at all); it simply also has four `.zod.ts` files, so it never trips this.\n\nFor such a category the generator would produce:\n\n- §2 — its pages and its `meta.json` (built from the emitted page map): **written**;\n- §2.5 — its `index.mdx` (post-#11260, keyed off that same declared list): **written**;\n- §3 — its entry in the root `meta.json`: **omitted**, because it has no `.zod.ts`.\n\nResult: a category folder that is fully generated and completely absent from the sidebar. Note the direction — before #11260 this was half-hidden by §2.5 skipping the `index.mdx` too, so the folder was merely broken rather than orphaned; now §3 is the only remaining enumeration keyed off source files instead of published pages.\n\n## Measured\n\nNo category is in this state today. All 14 have `zodFiles.size > 0`, so the root `meta.json` is byte-identical whichever enumeration is used, and #11260's PR changes nothing here:\n\n```\nai 11 · api 29 · automation 13 · cloud 11 · data 30 · identity 5 · integration 1\nkernel 32 · qa 1 · security 4 · shared 13 · studio 3 · system 36 · ui 18   (.zod.ts files)\n```\n\nThis is a **latent** defect — an observation about a path that has no live instance — hence `finding` and not `pm:queue`.\n\n## Suggested shape (not a decision)\n\nSame fix as #11260's, one level up: filter on the categories that published a `meta.json` (`categoryMetaPages`, the map #11260 introduced) rather than on `.zod.ts` counts. That would leave `build-docs.ts` with **one** answer to \"which categories/pages exist\" — the pages the run emitted — instead of the three it had.\n\nWorth confirming in the same pass whether `sourcePathToDocsRoute` and the root index (§2.6, which enumerates from `categoryPageSchemas`) agree with that answer; §2.6 looks correct already.\n\n## Refs\n\n#11260 (where this was found; fixed the category-level half) · #10834 (separate open finding on the same generated index) · `packages/spec/scripts/build-docs.ts`"
+}

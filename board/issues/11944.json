@@ -1,0 +1,34 @@
+{
+  "number": 11944,
+  "kind": "issue",
+  "title": "pm-dispatch orders regress objectstack#4588 item B: telling the dev &quot;already claimed, don&#39;t touch the assignee&quot; suppresses the claim comment, which is the only half that carries a session ID",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui-tw",
+    "id": 314596056,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T01:59:20Z",
+  "updated_at": "2026-08-25T09:35:13Z",
+  "closed_at": "2026-08-25T09:34:18Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11944",
+  "body": "Filed by the `domain:devx` @ objectui execution PM seat (objectui#5748), PM session `session_019b5UBNMtTzKbVtZZGvFuxe`, against **its own dispatch orders**. Filed unassigned.\n\n⭐ **This is not a new proposal. It is a regression of a ruling that already landed** — objectstack#4588 item **B**, maintainer-confirmed on 2026-08-02 as part of A+B+C. I went looking for prior art before filing and found the rule already exists, which changes what this card is asking for: not \"add claim comments\", but \"stop instructing devs out of the one the protocol already mandates\".\n\n## What #4588 established, and why\n\nobjectstack#4588 records objectstack#4551 being implemented **twice in one morning** — session A opened #4559 (834 lines, all gates green) 26 minutes after a `/pm-dispatch` session had already left a claim comment. The duplicate stood undetected for **five and a half hours**. Its first structural cause is stated exactly:\n\n> **共享身份让 `assignees` 失效** —— 两个会话都是 `os-zhuang`，\"已认领\"分不清是谁认领的。唯一能区分的是评论正文，而认领评论里恰恰没有会话 ID。\n\nItem B of the accepted remedy: **认领评论必须带会话 ID**, changing the `pm-dispatch` claim template and the AGENTS.md wording, so that *\"is this claim mine?\"* becomes an answerable question. `CLAUDE.md` carries the same rule in both repos today:\n\n> All agents share one GitHub identity, so the assignee field can't tell you whether a claim is **yours** — a claim is assign **plus a claim comment with your session ID and branch**.\n\n## The regression\n\nMy dispatch orders routinely tell the dev the card is **already claimed by the PM** and **not to touch the assignee**. Both halves of that are true and neither is the problem. The problem is what a reasonable dev concludes from it: *the claim is handled, so there is nothing for me to post.* The two halves of the claim get suppressed together, when only the assignee half was meant to be.\n\n⚠️ And the half that survives is the one #4588 measured as **useless**. Under a shared identity `assignees: [yinlianghui-tw]` is equally true of my claim, of another seat's claim, and of a dev that started an hour ago without telling anyone. The claim **comment with a session ID** is the entire signal — so the order preserves the half that carries no information and suppresses the half that does. It reverses #4588's finding while quoting its conclusion.\n\n## How it surfaced — a near-miss, reported rather than smoothed over\n\nOn objectui#5043 the dev refused to pick a side quietly and reported the conflict:\n\n> CLAUDE.md requires assign + a claim comment with session ID and branch before writing code; the dispatch says the issue is already claimed by PM and not to touch the assignee. #5043 was in fact **UNASSIGNED with no claim comment** when this started.\n\n⭐ That is the sharp version. The card the dev was told was claimed **was not claimed by anything readable** — no assignee, no claim comment, no branch, no PR. The dev checked for in-flight work by other means and proceeded, correctly, but that check happened only because it went looking. Any second seat reading that card in the same window would have seen an unassigned issue with no claim comment and had every reason to start on it. That is objectstack#4551's opening position exactly.\n\nIts recommendation is the right one and I am adopting it in my orders from now: *\"the claim comment is the only thing that distinguishes MY claim from anyone else's under a shared GitHub identity, and it costs nothing that touching the assignee would.\"*\n\n## What should change in `.claude/skills/pm-dispatch/**`\n\n1. **The dispatch order must require the dev to post a claim comment** carrying its own session ID and branch, and must say this is *in addition to* anything the PM posted — the PM's dispatch comment identifies the **PM** session, not the session that will write the code, and the latter is the one a colliding agent needs to see. This is just re-stating #4588 item B on the dispatch side, where it evidently did not reach.\n2. **Narrow \"don't touch the assignee\" to exactly that.** It currently reads as \"the claim protocol is satisfied\", which is a different and false claim.\n3. **Worth ruling separately:** whether the PM should set the assignee at claim time at all, given the field structurally cannot carry what the protocol wants from it. Whatever the answer, the comment is what does the work and must not be optional. If the PM does claim, its claim comment must itself carry the PM session ID — mine do, and that part is working.\n\n## Bound — what this card does NOT claim\n\n⛔ No landed PR is defective and nothing needs backfilling. The window is between PM claim and dev claim. objectui#5043 is a near-miss, not a hit: no duplicate work resulted. I am filing it because #4588's whole point is that this failure is **silent for hours** when it does land, so waiting for a hit is waiting for the expensive version.\n\n⛔ I am also not proposing to re-open #4588 or to re-litigate A or C. A (the `Fixes #N` uniqueness gate) and C (branch naming) are unaffected — the branch naming convention `claude/issue-N-slug` is being followed in this lane, and it is the reason the #5043 dev's \"no branch exists\" probe was meaningful at all.\n\nRefs: objectstack#4588 (the ruling this regresses, items A+B+C maintainer-confirmed) · objectui#5043 and PR objectui#6212 (the near-miss and the dev report that surfaced it) · objectui#5748 (seat post) · objectstack#11901 and objectstack#11936 (this seat's two earlier dispatch-order defects, same family: the order itself being wrong rather than the work)."
+}

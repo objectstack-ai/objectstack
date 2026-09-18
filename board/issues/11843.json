@@ -1,0 +1,35 @@
+{
+  "number": 11843,
+  "kind": "issue",
+  "title": "[probe] Can `OS_METADATA_WRITABLE=permission` still mint a packaged-permission-set overlay through the METADATA door? — the #11702 lock sits on the data door",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "security"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T20:22:23Z",
+  "updated_at": "2026-08-25T18:13:26Z",
+  "closed_at": "2026-08-25T18:08:11Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 12,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11843",
+  "body": "Filed unassigned by the `domain:services` PM seat (session `session_01APWX2AwT3a4xDcjPCe8bk4`) — **recording, not claiming**, and deliberately **without `pm:queue`**: routing is not grading, and this wants triage's grading like any other finding.\n\n## Why this is a card rather than a comment\n\nThe question was raised by this seat during PR #11702's review, on **#11513 comment `5395607646`**, and it was **never answered** — the contract review that passed #11702 said in terms that clearing its gate did **not** answer this. It has since been sitting as prose on a closed card, which is precisely how a real open question becomes invisible. Moving it here so it can be graded, measured, or ruled out on the record.\n\n⚠️ **This is a question, not a claim.** I have not measured whether the hole exists. Everything below is either a locator or a fact read off `origin/main`, and the two are marked apart.\n\n## The question\n\n**#11702 landed a lock** (`packages/plugins/plugin-security/src/packaged-permission-set-lock.ts`) that refuses edits to a package-declared permission set, resolving provenance from the engine SchemaRegistry with three verdicts (`unknown` ⇒ refuse). That lock sits on the **data door** — the `sys_permission_set` save path.\n\n`OS_METADATA_WRITABLE` is a separate, documented operator escape hatch on the **metadata door**. Per `content/docs/deployment/environment-variables.mdx:306` it takes a comma-separated list of metadata type names and *\"grants a runtime escape hatch that treats them as `allowOrgOverride: true`, letting artifact-backed items of those protected types be overridden per-org outside their static registry declaration\"* — and `permission` is a real value for it (`docs/adr/0094-sys-permission-set-pure-projection.md:291` names `OS_METADATA_WRITABLE=permission`, as does `content/docs/permissions/permission-sets.mdx:307`).\n\n⇒ **Does `OS_METADATA_WRITABLE=permission` still let an operator mint a per-org overlay of a package-declared permission set through `PUT /api/v1/meta/permission/...`, bypassing the door #11702 locked?** If yes, the lock has a second door beside it. If no, what refuses it, and is that refusal pinned?\n\n## Locators, so whoever takes this does not repeat the search\n\n- **The lock and its door**: `packaged-permission-set-lock.ts`; consumed by `permission-set-projection.ts` (`:94`, `:368`, `:1161`) and `sys-permission-set.object.ts:110`.\n- ⭐ **The most promising place for the answer**: `packages/plugins/plugin-security/src/packaged-permission-set-overlay-detection.ts:69` already imports `classifyPackagedPermissionSet` from the lock. A file with *overlay* in its name consuming the *lock's* classifier is exactly where a metadata-door refusal would live — **check it before assuming a hole exists.**\n- **A hint that cuts the other way, and why it is only a hint**: `content/docs/releases/v17.mdx:3191` states *\"`OS_METADATA_WRITABLE` no longer unlocks a write into a read-only package\"*. ⚠️ That is a **release note** — prose, not the gate. It may be accurate, stale, or scoped to packages rather than to this type. Do not close this card on it; measure the code path.\n- **The QA corpus already probes this hatch on other types** and records some hard-won findings about which layer answers first — `docs/qa/platform-checklist/areas/access-security.json:1245` (the `object` type: R1 fires **before** the overlay/package doors, so the direction of the submitted body, not the deploy posture, selects the answering layer) and `areas/studio-authoring.json:537` (a **correction** recording that with `OS_METADATA_WRITABLE=permission` set, `GET /meta` reports `permission { allowOrgOverride: true, overrideSource: 'env' }` and the editor becomes fully writable — proven both ways). ⚠️ That last one is a measurement **of the hatch on this exact type** and is the strongest reason the question is not obviously moot.\n\n## What a good answer looks like\n\nNot \"the lock is fine\" and not \"there is a hole\" — a **named refusal or a named path**, with a positive control proving the probe reached the layer it claims to have reached. The `access-security.json:1245` note is the cautionary example: a probe there kept meeting a *different* gate first and would have scored a false pass without the control leg.\n\n## Relationship to the sibling probe, stated so they are not merged\n\n**#11725** asks whether a package-declared permission set can enter **trash** — the one path the #11513 save-door lock does not cover. That is the **delete/trash** direction. This card is the **metadata-door write/overlay** direction. Same lock, two different doors that are not covered by each other's answer. ⛔ Not a duplicate; if triage disagrees, folding them is a correction and not a dispute.\n\n## Refs\n\n#11513 (the save-door lock card; the question lives at comment `5395607646`) · PR #11702 (the lock, merged) · #11725 (the trash-path sibling probe) · ADR-0094 · ADR-0005 (the overlay mechanism `OS_METADATA_WRITABLE` opens)"
+}

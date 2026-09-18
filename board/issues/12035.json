@@ -1,0 +1,32 @@
+{
+  "number": 12035,
+  "kind": "pull_request",
+  "title": "fix(objectql): sync IntrospectedColumn.isUnique consumer docblock to the producer's PRIMARY KEY exclusion",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T06:05:30Z",
+  "updated_at": "2026-08-25T08:31:49Z",
+  "closed_at": "2026-08-25T08:31:48Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": "2026-08-25T08:31:48Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12035",
+  "body": "Fixes #11826\n\nProse-only sync of the consumer-side `IntrospectedColumn.isUnique` docblock in `packages/objectql/src/util.ts` to the producer's current contract sentence in `packages/drivers/driver-sql/src/sql-driver.ts` (`SqlDriver`'s `IntrospectedColumn.isUnique`). No behaviour change, no export change, no test change.\n\n## What the producer says now (added by #11654)\n\n```\nA PRIMARY KEY is NOT a unique constraint to this flag (#11654), on any\ndialect and for any key type. `isUnique` means a *declared* single-column\nUNIQUE constraint; key membership has a lossless face of its own\n({@link IntrospectedTable.primaryKeys} and `primaryKey` below), so\nexcluding keys keeps the two flags non-overlapping and drops no fact. Note\nthis is a statement about what KIND of constraint the flag reports, never\na claim that a key column admits duplicates. A key column that separately\ncarries its own single-column unique constraint is still flagged — the\nconstraint is what is being reported, not the column.\n```\n\n## What the consumer copy said before (drift)\n\nThe consumer copy had no PRIMARY KEY clause at all — it still read as though `isUnique` could include a PK, which is exactly the reading #11654 retired on the producer side:\n\n```\nWhether this column ALONE carries a single-column unique constraint —\ntrue iff some unique constraint covers this column and nothing else.\n\nMembership of a COMPOSITE constraint is deliberately not represented\n(#11202): `UNIQUE (a, b)` constrains the pair, and a per-column boolean\ncannot say that. The producer's declaration —\n`SqlDriver`'s `IntrospectedColumn.isUnique` in `@objectstack/driver-sql`\n— is the contract sentence; this is the consumer-side copy of the same\nkey and must not drift from it. An absent flag on a composite member\nmeans \"not single-column unique\", never \"no constraint\".\n```\n\n## The fix\n\nAppended the producer's PRIMARY KEY paragraph (transfers essentially verbatim — `{@link IntrospectedTable.primaryKeys}` resolves to this same file's own `IntrospectedTable.primaryKeys` declaration, and `primaryKey` is inherited from the same spec contract on both sides) to the consumer's `isUnique` docblock, immediately after the still-accurate composite paragraph. The composite paragraph (#11202) was left untouched — it had not drifted.\n\n**Deliberately NOT copied**: the producer's closing paragraph (\"All three dialect arms of `{@link SqlDriver.introspectUniqueConstraints}` produce it through one predicate — see `{@link singleColumnUniqueColumns}`.\"). That paragraph is producer-internal implementation provenance (its `@link`s name `SqlDriver`-only symbols that do not exist in `@objectstack/objectql`), predates #11654 entirely (confirmed via `git show` on the #11654 commit — it was not touched), and was never part of the consumer's mirrored text before. It is not \"the contract sentence.\"\n\n## Second copy in the same docblock — checked, not touched\n\n`IntrospectedForeignKey.referencedSchema` at `util.ts:70-86` carries the identical \"must not drift\" clause, mirroring `SqlDriver`'s `IntrospectedForeignKey.referencedSchema`. Compared both sides line by line: **not drifted**. Both landed together in #11906 and the producer side has had no edit since (`git log 0010797373..HEAD -- packages/drivers/driver-sql/src/sql-driver.ts` shows one unrelated commit, #11785, touching boolean aggregate casting — no `referencedSchema` lines). Negative reading, no action, no card filed.\n\n## Tests\n\nNo behaviour change — `introspectedSchemaToObjects`/`convertIntrospectedSchemaToObjects` is unmodified, only a TSDoc comment moved. No ablation is owed for a prose-only change; the package suite is the regression check:\n\n- `pnpm --filter '@objectstack/objectql^...' build` — dependency closure, exit 0.\n- `pnpm --filter @objectstack/objectql test` — `Test Files 232 passed (232)`, `Tests 4117 passed (4117)`, exit 0.\n- `pnpm --filter @objectstack/objectql typecheck` — `tsc --noEmit && tsc --noEmit -p tsconfig.scripts.json`, exit 0.\n- `node scripts/check-nul-bytes.mjs` — `OK (scanned 6665 text file(s) ... no raw ASCII control bytes)`, exit 0.\n\nGate union derived from the actual diff (`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack`), re-run at the final commit `8b58aa7304` — same single-path change set both times, same 9 matched families. All 9 run in the foreground, each `EXIT=0` captured before any pipe:\n\n`check:durability-log-level`, `check:published-files`, `check:slot-lookup`, `check:test-source-alias`, `check:type-source-resolution`, `check-engine-split-ratio.mjs` (report-only, 97.6%), `check-plugin-teardown-shape.mjs`, `docs-audit/check-affected-docs.mjs`, `docs-audit/check-drift-comment.mjs`.\n\n`skip-changeset` per triage grading — no behaviour, no export. `check:empty-changeset`'s own self-tests (GREEN 3) confirm a PR with no changeset and the `skip-changeset` label is exactly what that gate expects to see, so no changeset was written.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01W6HFzyH98W1YaQXhJUJt6o)_"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 12246,
+  "kind": "issue",
+  "title": "[finding] A mid-segment `*` collapses to a double slash, so `skills/*/references/_index.md` names 9 real files and reaches none — and the family is filed as \"THE LAYOUT MOVED\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T14:58:33Z",
+  "updated_at": "2026-08-25T17:40:56Z",
+  "closed_at": "2026-08-25T17:40:23Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12246",
+  "body": "Found while landing #12107 (the `resolveCheckToFiles` extension fix). ⛔ Not fixed there — that\ncard's declared surface is `resolveCheckToFiles` and the `discoverFamilies` package-filter branch,\nand `scripts/pm/dispatch-gates.mjs` is the head of a four-card serial queue (#12074 option 1,\n#11556, #11199). Filed unassigned, not graded.\n\nThis is only *visible* because of #12107: before it, all 23 TypeScript-authored gates resolved to\nzero files, so their sources were never opened and none of their literals reached the residue. With\nthose sources opened, the unreachable listing goes from 2 families to 12, and two independent\ndefects come with it.\n\n## 1. `collapseHint` turns a mid-segment `*` into a double slash\n\n```js\ncollapseHint('skills/*/references/_index.md')  // → 'skills//references/_index.md'\nhintCovers('skills/*/references/_index.md', 'skills/objectstack-ai/references/_index.md')  // → false\n```\n\n`skills//references/_index.md` is not a path any tree can hold, so the literal matches nothing by\nconstruction. Measured on this tree: **9 tracked files** match that glob as a shell would —\n\n```\n$ git ls-files 'skills/*/references/_index.md' | wc -l\n9\n```\n\n— and the derivation reaches none of them. This is not a declaration the gate got wrong; it is a\nreal population spelled in a glob shape the covering rule cannot expand. The trailing-`**` shape\n(`content/docs/references/**`) works, so the gap is specifically a `*` in a *middle* segment.\n\n`check:skill-refs` is the live specimen: `packages/spec/scripts/build-skill-references.ts`\ngenerates those nine `_index.md` files, and after #12107 the family resolves its source, reads the\ndeclaration, and still matches nothing in the tree.\n\n## 2. `unreachableClass` files that family under \"THE LAYOUT MOVED\"\n\n```\n1 where THE LAYOUT MOVED under a gate that still spells the old path — a real miss, worth triaging:\n  - pnpm --filter @objectstack/spec run check:skill-refs   [lint.yml]   dead: 'lib/generated-output' —\n    no tracked path under its first segment; never was a repo path · '@objectstack/spec' — … · 'data/field.zod.ts' — …\n```\n\nThe layout did **not** move. `unreachableClass` returns `'layout moved'` when any dead hint has a\n`deepest` that differs from its collapsed form, and the double-slash collapse above is what makes\nthat true. The heading then promotes the row above the \"BY CONSTRUCTION\" block as *\"a real miss,\nworth triaging\"* — and the three reasons it prints are not the glob at all, they are TypeScript\nmodule specifiers (defect 3), so a reader who follows the lead is sent to look for a moved\n`lib/generated-output` that never existed.\n\nBoth halves of the output are wrong in the same row: the classification, and the evidence shown\nfor it.\n\n## 3. TypeScript module specifiers are admitted as watch hints\n\n`extractWatchHints` was written against `.mjs` gates, whose relative imports carry a leading `./`.\nThe `packages/spec` TypeScript gates use `paths`-mapped bare specifiers that look pathy:\n\n```\nlib/dist-freshness · lib/generated-output · lib/schema-name · src/kernel/protocol-version\ndata/field.zod.ts · ui/view.zod.ts · @objectstack/spec · typescript/bin/tsc\n```\n\nMeasured across the 19 families #12107 gives coverage to: **19 hints are live** (they cover at\nleast one tracked file) and **128 are inert** (they cover zero).\n\n⭐ The inert 128 fabricate **no** MATCHED pair — that was measured for #12107 and is why it landed:\na hint covering zero files cannot put a gate in any card's matched column. The cost is confined to\nthe residue, and it is real there: they are what `unreachableReason` prints, so a family's genuine\nreason (defect 1) is displaced by three specifiers that were never repo paths.\n\n⚠️ Inert **today** is not inert by construction. `data/field.zod.ts` and `src/kernel/protocol-version`\nare one top-level `data/` or `src/` directory away from covering real files, and at that point they\nwould fabricate in the matched column rather than the residue.\n\n## Not asserted\n\nNo claim about which remedy is right, or whether the three are one fix or three. Some shapes:\n\n- teach `collapseHint`/`hintCovers` a mid-segment `*` (widest, and it is the one that recovers the\n  9 files);\n- have `unreachableClass` not read a collapsed form that contains `//` as evidence of a move\n  (narrowest, and it removes the false lead without recovering anything);\n- give `extractWatchHints` a way to tell a `paths`-mapped TS specifier from a repo path — note the\n  hint set is fleet-wide, so this one is priced the way `firstPartyImportTargets`' docblock prices\n  a widening.\n\n## Reproduce\n\nAt any commit carrying #12107's fix:\n\n```\nnode scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack\n# → Unreachable — the 12 famil(ies) …\n#   1 where THE LAYOUT MOVED …:  check:skill-refs\n```\n\nRefs: #12107 (the fix that surfaces this) · #11556 · #12074 · #11199 (the rest of the serial queue\non this file) · #12064 (adjacent worklist-output defect, different mechanism)\n"
+}

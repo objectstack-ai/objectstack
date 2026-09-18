@@ -1,0 +1,34 @@
+{
+  "number": 11551,
+  "kind": "issue",
+  "title": "[finding] lint.yml's sink-contract step comment carries measured counts that drift silently — \"13 cases, 36 sink types, 15 baselined\" against a tree with 19/41/5",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T03:13:01Z",
+  "updated_at": "2026-08-25T17:06:59Z",
+  "closed_at": "2026-08-25T17:06:24Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11551",
+  "body": "Observation filed while landing the #11069 gate fix (PR #11549). Not a claim; unassigned. Not repaired there — editing `.github/workflows/lint.yml` would add a hot conflict-magnet file and new gate families to a `scripts/**`-only PR, which is scope this card should own instead.\n\n`.github/workflows/lint.yml`'s **\"Optional-`error` sink contract\"** step (around line 1315) carries a comment stating measured counts:\n\n```yaml\n      # Runs its own --self-test FIRST (13 cases, both directions, both\n      # narrowings pinned as counts), then the scan — 36 sink types, 15\n      # baselined shrink-only. AST over packages/**, no spawns; ~3.5 s.\n```\n\nEvery number in it is now wrong, and each drifted for a different reason:\n\n| the comment says | reality on `cd932772` | reality after PR #11549 | what moved it |\n|---|---|---|---|\n| `13 cases` | 13 | **19** | #11549 added six self-test cases |\n| `36 sink types` | 38 | **41** | ordinary tree growth, then #11549's population widening |\n| `15 baselined` | **2** | **5** | #10556's paydown (15 → 3 → 2), then #11549's three ledger rows |\n\nThe `15 baselined` figure is the sharpest: it has been wrong since **#10556** paid the ledger down, long before #11069 existed. A reader who trusts it believes there are fifteen outstanding sink repairs when there are five, and the ledger's whole point is to be the count of remaining debt.\n\n## Why this is worth a card rather than a one-line fix on the next PR that passes by\n\nThe numbers are a **census of a moving tree** pinned in prose in a file nothing re-measures. That is a strictly worse home for them than the gate's own header, which at least sits next to the code that produces them — and #11069 was filed about exactly this species one level down (a gate's own printed counts bounded by a filter nobody re-checked).\n\nSo the fix is probably not \"correct the three numbers\" — that just resets a clock that will drift again on the next PR that touches any sink in `packages/**`. Options worth weighing:\n\n- **Drop the counts from the workflow comment entirely**, keeping only the invariant facts (runs its own `--self-test` first, AST over `packages/**`, no spawns, no `paths:` filter and why). The gate prints its live census on every run; the comment does not need a stale copy.\n- **Keep a count but make it re-measurable** — e.g. state it as \"see the gate's own census line\" rather than a literal.\n- Leave it and accept the drift, explicitly, with a note saying the numbers are illustrative.\n\nI lean to the first: the timing (`~3.5 s`) and the \"no `paths:` filter, because a filter on `packages/**` would go dormant on the PR that edits the baseline\" rationale are the parts that earn their place, and neither drifts.\n\n## Same family, already open\n\n- #9828 — cut-rc.yml's hotcrm smoke warning describes a keying that release.yml changed away from\n- #10894 — lint.yml states the #9465 fence as covering root `package.json`, fifteen times\n- #10572 — lint.yml's \"must stay immediately above the re-measure\" ordering contract is prose-only and violating it is silent\n\nAll four are the same shape: **a workflow comment asserting a fact about the world, with nothing that re-checks it.** Worth someone deciding whether that shape wants a gate rather than four separate repairs.\n\n## Refs\n\n#9754 (the gate) · #10556 (the ledger paydown that stranded `15 baselined`) · #11069 / PR #11549 (where this was measured)\n"
+}

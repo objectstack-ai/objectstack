@@ -1,0 +1,32 @@
+{
+  "number": 11678,
+  "kind": "issue",
+  "title": "`MetadataProtocol` declares no `auditMetaItem` member at all, so the REST audit door's request literal is compiled against nothing",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T11:57:51Z",
+  "updated_at": "2026-08-25T09:09:11Z",
+  "closed_at": "2026-08-25T09:08:24Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11678",
+  "body": "Found while implementing #11145 (the `publishMetaItem` consumer cleanup) — the retired docblock there named this door as its twin, and the twin is still in the state `publishMetaItem` just left. Filed rather than touched: the fix is a `packages/spec` contract decision, and `packages/spec` is off limits from the engine lane.\n\n## Measured on `origin/main` @ `c251ef4213`\n\n`auditMetaItem` appears **zero** times in `packages/spec/src/api/protocol.zod.ts`:\n\n```\n$ grep -c \"auditMetaItem\" packages/spec/src/api/protocol.zod.ts\n0\n```\n\nPositive control that the matcher works: the same grep against `publishMetaItem` in that file returns 4 hits, and `MetadataProtocol` gained its `publishMetaItem` member at line 2535 via #11426.\n\nBoth REST sites still reach the method through a cast — `packages/rest/src/rest-server.ts`:\n\n- `5787`: `if (typeof (p as any).auditMetaItem !== 'function')` — the feature-detection guard\n- `5873`: `const result = await (p as any).auditMetaItem({ … })` — the call\n\nThe request literal at 5873 threads four members (`type`, `name`, `organizationId`, conditionally `limit`). No declared type sees any of them, so an undeclared key added here would ship silently — exactly the blindness #9741 / #9805 / #11145 closed one door at a time.\n\n## Why this is the same shape #11006 adjudicated, one level earlier\n\n#11006 (maintainer ruling 2026-08-22, 「同意所有」 item 5, option B) was about a **half**-declared door: `PublishMetaItemResponseSchema` existed (#7294) while the request schema and the interface member did not. This door is a step behind that — **neither** side is declared. The in-tree comment at `rest-server.ts:5812` states the position as it stands: \"`auditMetaItem` is not a member of …\".\n\nSo the question is the same one #11006 answered, and it is a maintainer call rather than a mechanical catch-up:\n\n- **A** — leave it an ADR-0076 D9 server-only extension, and say so where the cast sits (it already partly does).\n- **B** — declare the optional member plus an `AuditMetaItemRequest` on `MetadataProtocol`, mirroring what #11426 did for publish, after which the cast comes off in the engine lane the way #11145 did it.\n\n⚠️ Not a straight copy of #11006's answer: the audit door has its own history (#9426 covered its `{events: []}` behaviour on a missing capability), and B widens the declared surface, which the startup scope discipline weighs against on its own terms. Needs triage into `domain:spec`, not a same-lane fix.\n\n## Scope note\n\nDeliberately **not** bundled into #11145's PR: that card's file surface is this file, but its scope is the one method, and the bounded in-place exemption does not apply — the correct shape here is not pinned by existing evidence, it is an open contract decision.\n"
+}

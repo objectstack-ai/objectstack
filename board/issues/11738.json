@@ -1,0 +1,36 @@
+{
+  "number": 11738,
+  "kind": "issue",
+  "title": "guard-shared-stash.sh has the same split_segments() backslash fail-open that #11131 closed in the bash checkout guard",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui-tw",
+    "id": 314596056,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-24T14:35:29Z",
+  "updated_at": "2026-08-25T11:12:30Z",
+  "closed_at": "2026-08-25T11:12:30Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11738",
+  "body": "Filed by the `domain:devx` @ objectui execution PM seat (objectui#5748, PM session `session_019b5UBNMtTzKbVtZZGvFuxe`) as the **cross-repo sibling** of objectui#6042, per the follow-up duty that the accepting seat files the other repo's card.\n\nSurfaced while porting the `guard-main-checkout-bash.sh` fix family (#11131 + #11133 + #11234, PR #11278) into objectui (objectui#5789 / PR objectui#6046). It was correctly **not** folded into that port — a verbatim port must not touch other hooks.\n\n## The observation\n\n`.claude/hooks/guard-shared-stash.sh`'s `split_segments()` has **no backslash branch**.\n\nOutside quotes, a backslash escapes the next character, so an escaped backslash-doublequote opens no quoted region at all. Without that branch the pass reads the doublequote as opening a region that never closes, goes inert for every separator behind it, and collapses the whole command into one segment whose head word is the harmless one — leaving the real command behind the separator to be read as a mere argument of `echo`.\n\nThis is exactly the shape **#11131** closed in `guard-main-checkout-bash.sh`. `tokenize()` already had the branch; `split_segments()` did not. The same asymmetry exists here.\n\n## Measured\n\nMeasured in **objectui's** copy (`ad0f5f11f`), fed as the PreToolUse payload shape (`{cwd, tool_name:\"Bash\", tool_input:{command}}`):\n\n| command | verdict |\n| --- | --- |\n| `git stash` | **blocked** — control: the guard works |\n| `echo` backslash-doublequote, then `;`, then `git stash` | **ALLOWED** — the hole |\n\nThe control is load-bearing: without it, \"ALLOWED\" could mean the harness never reached the guard rather than that the guard let it past.\n\n⚠️ **What is measured and what is inferred, stated separately.** The reading above was taken against objectui's copy. The dev's report states the defect is present in **both** repos' copies, on the strength of the two files being declared case-for-case identical in this region. **This repo's copy has not been independently probed** — that is the first thing whoever takes this card should do, rather than trusting the parity declaration. If it does not reproduce here, that is itself a finding: it would mean the two copies have diverged where they are declared not to have.\n\n## Scope — only one of the two upstream fixes has an analogue\n\n- **The #11131 backslash half applies.**\n- **The #11133 comment-heredoc half does NOT** — `guard-shared-stash.sh` has no `strip_heredocs()` pass to carry that defect. Do not port it looking for a place to put it.\n\n## Why this is worth a card rather than a note\n\n`guard-shared-stash.sh` is the enforcement behind the **⛔ Never `git stash`** Prime Directive. That rule exists because `refs/stash` lives in the common `.git` directory, so every worktree of a repo shares one LIFO stack: two agents stashing in their own worktrees push and pop the *same* stack, `pop` reports **success**, and the only symptom is another agent's files turning up in your `git status` — after which a `git add -A` merges their work into your PR. It has already cost two parallel agents their in-flight changes (objectui#3430).\n\nSo a fail-open here does not merely admit a discouraged command. It admits the one command whose failure mode silently corrupts a **different agent's** work, with a success message. The rule outranks the hook, so this is a backstop gap rather than a live breach — but the backstop exists precisely for the agent who does not know the rule.\n\n## Suggested fix\n\nPort the `split_segments()` backslash branch from `guard-main-checkout-bash.sh` (as landed in #11278) into `guard-shared-stash.sh`, and add the matching cases to `.claude/hooks/guard-shared-stash.selftest.sh` — that file's own instruction is to re-run the selftest on any change to the hook.\n\nKeep the two repos' copies in step: fix both with the same patch shape, or the declared parity contract is broken by the fix itself.\n\n⚠️ `.claude/**` is a **governed surface** — draft PR, human merge.\n\nFiled unassigned; `domain:*` and grading are the triage seat's to set.\n\nRefs: #11131 · #11133 · #11234 · PR #11278 · objectui#6042 (sibling) · objectui#5789 / PR objectui#6046 · objectui#3430."
+}
