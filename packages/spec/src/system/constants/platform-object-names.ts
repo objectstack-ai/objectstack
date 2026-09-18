@@ -149,6 +149,7 @@ export const PLATFORM_OBJECTS_BY_PACKAGE: Readonly<Record<string, readonly strin
 export const CLOUD_PROVIDED_OBJECT_NAMES: readonly string[] = [
   'sys_app',
   'sys_environment',
+  'sys_environment_credential',
   'sys_environment_member',
   'sys_license',
   'sys_package',
