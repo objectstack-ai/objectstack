@@ -17,6 +17,13 @@ import { assertRefsResolve, assertNoDegradedSchemas } from './lib/openapi-self-c
 // step, which shares this directory and must not sweep it away (#5371). Imported
 // rather than spelled again so a rename here moves the declaration with it.
 import { OPENAPI_ARTIFACT_NAME } from './lib/json-schema-out-dir';
+// The ONE call the published projection is produced through (#18670 item 2).
+// This generator writes `json-schema/openapi.json`, which ships in the tarball
+// (`files[]` carries `json-schema`) and is exported as `./openapi.json`, so it
+// is a published projection and belongs behind the same choke point as
+// `build-schemas.ts` — see that helper's docblock for why the override cannot
+// be a per-call-site convention.
+import { projectPublishedJsonSchema } from './lib/refinement-projection';
 
 const OUT_DIR = path.resolve(__dirname, '../json-schema');
 const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../package.json'), 'utf-8'));
@@ -92,7 +99,24 @@ function generateComponentSchemas(): Record<string, Record<string, unknown>> {
     if (!isZodLike) continue; // reported by assertNoDegradedSchemas below
 
     try {
-      schemas[name] = z.toJSONSchema(schema as z.ZodType, { target: 'draft-2020-12' });
+      // ⛔ Not a bare `z.toJSONSchema(schema, { target: 'draft-2020-12' })`.
+      // That call was a SECOND, override-less route to the published
+      // projection: the closed list of projectable refinements
+      // (`src/shared/refinement-projection.ts`) reached `json-schema/**`
+      // through `build-schemas.ts` and stopped at this file's door, so a
+      // refinement declared for publication would have been emitted in
+      // `api/CreateRequest.json` and silently dropped from the same schema's
+      // copy inside `openapi.json` — one published artifact stating the rule
+      // and another, shipped in the same tarball, accepting the documents it
+      // refuses. The helper carries the override itself and spells the same
+      // `draft-2020-12` target (`PUBLISHED_JSON_SCHEMA_TARGET`), so there is
+      // no argument left here to forget.
+      //
+      // Measured at the commit that routed it: the nine carry NO refinement of
+      // any kind today (census over all nine: 0 dropped / 0 projected / 0
+      // undecidable), so the emitted document is byte-identical across this
+      // change. The change is about the day one of them grows a `.refine()`.
+      schemas[name] = projectPublishedJsonSchema(schema as z.ZodType) as Record<string, unknown>;
     } catch {
       degraded.push(name);
     }

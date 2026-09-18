@@ -230,7 +230,7 @@ declare const ActionNavItemSchema: z.ZodObject<{
         params: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
     }, z.core.$strict>;
     id: z.ZodString;
-    label: z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
+    label: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
         key?: never;
         defaultValue?: never;
     }, Record<string, string> & {
@@ -242,7 +242,7 @@ declare const ActionNavItemSchema: z.ZodObject<{
     }, Record<string, string> & {
         key?: never;
         defaultValue?: never;
-    }>>]>;
+    }>>]>>;
     icon: z.ZodOptional<z.ZodString>;
     order: z.ZodOptional<z.ZodNumber>;
     badge: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>;
@@ -2761,7 +2761,7 @@ declare const ComponentNavItemSchema: z.ZodObject<{
     componentRef: z.ZodString;
     params: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
     id: z.ZodString;
-    label: z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
+    label: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
         key?: never;
         defaultValue?: never;
     }, Record<string, string> & {
@@ -2773,7 +2773,7 @@ declare const ComponentNavItemSchema: z.ZodObject<{
     }, Record<string, string> & {
         key?: never;
         defaultValue?: never;
-    }>>]>;
+    }>>]>>;
     icon: z.ZodOptional<z.ZodString>;
     order: z.ZodOptional<z.ZodNumber>;
     badge: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>;
@@ -5358,7 +5358,7 @@ declare const DashboardNavItemSchema: z.ZodObject<{
     type: z.ZodLiteral<"dashboard">;
     dashboardName: z.ZodString;
     id: z.ZodString;
-    label: z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
+    label: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
         key?: never;
         defaultValue?: never;
     }, Record<string, string> & {
@@ -5370,7 +5370,7 @@ declare const DashboardNavItemSchema: z.ZodObject<{
     }, Record<string, string> & {
         key?: never;
         defaultValue?: never;
-    }>>]>;
+    }>>]>>;
     icon: z.ZodOptional<z.ZodString>;
     order: z.ZodOptional<z.ZodNumber>;
     badge: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>;
@@ -8764,7 +8764,7 @@ declare const GroupNavItemSchema: z.ZodObject<{
     type: z.ZodLiteral<"group">;
     expanded: z.ZodDefault<z.ZodBoolean>;
     id: z.ZodString;
-    label: z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
+    label: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
         key?: never;
         defaultValue?: never;
     }, Record<string, string> & {
@@ -8776,7 +8776,7 @@ declare const GroupNavItemSchema: z.ZodObject<{
     }, Record<string, string> & {
         key?: never;
         defaultValue?: never;
-    }>>]>;
+    }>>]>>;
     icon: z.ZodOptional<z.ZodString>;
     order: z.ZodOptional<z.ZodNumber>;
     badge: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>;
@@ -12225,7 +12225,7 @@ declare const ObjectNavItemSchema: z.ZodObject<{
     filters: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
     runAction: z.ZodOptional<z.ZodString>;
     id: z.ZodString;
-    label: z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
+    label: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
         key?: never;
         defaultValue?: never;
     }, Record<string, string> & {
@@ -12237,7 +12237,7 @@ declare const ObjectNavItemSchema: z.ZodObject<{
     }, Record<string, string> & {
         key?: never;
         defaultValue?: never;
-    }>>]>;
+    }>>]>>;
     icon: z.ZodOptional<z.ZodString>;
     order: z.ZodOptional<z.ZodNumber>;
     badge: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>;
@@ -12924,7 +12924,7 @@ declare const PageNavItemSchema: z.ZodObject<{
     pageName: z.ZodString;
     params: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
     id: z.ZodString;
-    label: z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
+    label: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
         key?: never;
         defaultValue?: never;
     }, Record<string, string> & {
@@ -12936,7 +12936,7 @@ declare const PageNavItemSchema: z.ZodObject<{
     }, Record<string, string> & {
         key?: never;
         defaultValue?: never;
-    }>>]>;
+    }>>]>>;
     icon: z.ZodOptional<z.ZodString>;
     order: z.ZodOptional<z.ZodNumber>;
     badge: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>;
@@ -19230,7 +19230,7 @@ declare const ReportNavItemSchema: z.ZodObject<{
     type: z.ZodLiteral<"report">;
     reportName: z.ZodString;
     id: z.ZodString;
-    label: z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
+    label: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
         key?: never;
         defaultValue?: never;
     }, Record<string, string> & {
@@ -19242,7 +19242,7 @@ declare const ReportNavItemSchema: z.ZodObject<{
     }, Record<string, string> & {
         key?: never;
         defaultValue?: never;
-    }>>]>;
+    }>>]>>;
     icon: z.ZodOptional<z.ZodString>;
     order: z.ZodOptional<z.ZodNumber>;
     badge: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>;
@@ -19683,7 +19683,7 @@ declare const UrlNavItemSchema: z.ZodObject<{
         _blank: "_blank";
     }>>;
     id: z.ZodString;
-    label: z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
+    label: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
         key?: never;
         defaultValue?: never;
     }, Record<string, string> & {
@@ -19695,7 +19695,7 @@ declare const UrlNavItemSchema: z.ZodObject<{
     }, Record<string, string> & {
         key?: never;
         defaultValue?: never;
-    }>>]>;
+    }>>]>>;
     icon: z.ZodOptional<z.ZodString>;
     order: z.ZodOptional<z.ZodNumber>;
     badge: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>;

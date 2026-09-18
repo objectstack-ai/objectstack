@@ -26,6 +26,13 @@
  * that the wording be true for each origin BOTH BEFORE AND AFTER this arm
  * narrows, so the assertions below judge the sentence against the input and
  * the origin rather than pinning prose for its own sake.
+ *
+ * [#18278] The same criterion, one value deeper: the arm judges a bound's TYPE
+ * and never its VALUE, so `['', '']` is ACCEPTED here and refused past the
+ * door by every face. Its author was told "received a two-element array" — the
+ * shape they had just written — so that description is now the LIT control for
+ * a window with nothing else wrong, and the empty bound is named at the bound
+ * that is empty.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -161,6 +168,38 @@ describe('analyticsDateRangeRefusalMessage — each ORIGIN gets a true sentence 
     expect(analyticsDateRangeRefusalMessage(null, 'schema')).toContain('received null');
     expect(analyticsDateRangeRefusalMessage(42, 'schema')).toContain('received number');
     expect(analyticsDateRangeRefusalMessage({ start: '2026-01-01' }, 'schema')).toContain('received object');
+  });
+
+  it('⭐ names the EMPTY bound the arm cannot refuse, at the bound that is empty (#18278)', () => {
+    // The premise, asserted rather than assumed: the tuple arm judges arity and
+    // bound TYPE, never a bound's VALUE, so this window is ACCEPTED at the
+    // schema door and refused PAST it — the residue
+    // `analyticsDateRangeUnrecognizedError`'s header names. ⛔ This card does
+    // not move that accept set; it makes the sentence true.
+    expect(AnalyticsDateRangeSchema.safeParse(['', '']).success).toBe(true);
+    for (const origin of ['schema', 'runtime'] as const) {
+      const message = analyticsDateRangeRefusalMessage(['', ''], origin);
+      expect(message).toContain('received a two-element array whose bounds are both empty strings');
+      // ⛔ The DARK control — the description this card was filed about, which
+      // handed the author back the shape they had just written.
+      expect(message).not.toContain('received a two-element array.');
+      expect(message).not.toContain('non-string bound');
+    }
+    // One empty bound is named AT the bound that is empty: the sentence never
+    // echoes the value, so "which one" is a clause only this function can give.
+    expect(analyticsDateRangeRefusalMessage(['', '2026-01-31'], 'runtime'))
+      .toContain('received a two-element array whose start bound is an empty string');
+    expect(analyticsDateRangeRefusalMessage(['2026-01-01', ''], 'runtime'))
+      .toContain('received a two-element array whose end bound is an empty string');
+    // A bound that is not a string keeps its TYPE description — `['', 3]` has
+    // both faults, and the one the arm itself refuses is named first.
+    expect(analyticsDateRangeRefusalMessage(['', 3], 'runtime'))
+      .toContain('received an array with a non-string bound');
+    // ⭐ The LIT control: a two-bound window with nothing this clause can name
+    // keeps the bare shape description, so the empty-bound clause is not
+    // claimed when it is not true.
+    expect(analyticsDateRangeRefusalMessage(['2026-01-01', '2026-01-31'], 'runtime'))
+      .toContain('received a two-element array.');
   });
 
   it('is true both BEFORE and AFTER the arm narrows — the ruling\'s acceptance criterion', () => {

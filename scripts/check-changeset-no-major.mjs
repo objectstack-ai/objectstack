@@ -658,6 +658,92 @@ export function judge({ introduced, pre }) {
 
 // ── Reporting ────────────────────────────────────────────────────────────────
 
+// ── Saying the reason where the API can read it (#18263) ────────────────────
+//
+// This gate's refusals are among the most informative in the repo: they name
+// the missing reading, quote the offending line and spell the remedy verbatim,
+// down to "the line is read from the body on the next `edited` event, so this
+// red clears with no push and no re-run". All of that goes to STDOUT/STDERR,
+// which is the JOB LOG — and the job log is not the check run.
+//
+// Measured on this repository rather than assumed (#18263, and its comment
+// `5705401851` on PR #18524's run `104955982460`): a failing `Check Changeset`
+// check run answers `output.title` = null, `output.summary` = 0 bytes,
+// `output.text` = 0 bytes, and carries `annotations_count` = 1 — the runner's
+// own generic exit-code annotation:
+//
+//     path .github | level failure | title '' | message 'Process completed with exit code 1.'
+//
+// ⚠️ So the accurate description is NOT "an empty output"; it is "ONE generic
+// annotation that states no cause". The distinction is what makes this fix
+// cheap: the annotation channel is already OPEN and already carried by this
+// job. A plain `run:` step owns exactly one way onto it — the `::error::`
+// workflow command — and this file already writes its sibling (`::notice` in
+// the RC-exemption lane below). Nothing here needs a token, an API call, or a
+// line of `.github/workflows/**`.
+//
+// What the card is about is therefore not missing information. The reason is
+// COMPUTED and then DISCARDED at the check-run boundary; the repair is to say
+// it. Two refusals that used to be one event from outside — "the clause-②
+// declaration was a near miss" and "this PR added no changeset" — now answer
+// different annotation titles and different messages.
+//
+// ⛔ ONE annotation per refusal, deliberately. GitHub caps a check run at 10
+// annotations per level, and this file has been past that cap before: the
+// stock-scoped predecessor emitted 171 `::notice` lines on PRs that introduced
+// none of them (see `list()`). A refusal that spends the cap on itself takes
+// the runner's own annotation down with it.
+//
+// ⛔ And NOT conditioned on `GITHUB_ACTIONS`. `render` and `renderLevel` are
+// pure by design — that is what lets the self-test assert the MESSAGE rather
+// than the exit code — and an env read inside them would make the one thing
+// this card adds the one thing the fixtures cannot see. Outside Actions the
+// line is inert text; inside, it is the annotation.
+
+/**
+ * Escape a value for the DATA half of a workflow command (after the `::`).
+ *
+ * The three replacements are the documented set and the order matters: `%`
+ * first, or the escapes introduced by the other two would be escaped again.
+ *
+ * @param {string} value
+ * @returns {string}
+ */
+function annotationData(value) {
+  return String(value ?? '').replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
+}
+
+/**
+ * Escape a value for a PROPERTY of a workflow command (before the `::`).
+ *
+ * Properties are comma-separated `name=value` pairs terminated by `::`, so a
+ * title carrying a colon or a comma would truncate the command and the
+ * annotation would arrive mangled or not at all — a silent loss in the exact
+ * channel this card exists to open.
+ *
+ * @param {string} value
+ * @returns {string}
+ */
+function annotationProperty(value) {
+  return annotationData(value).replace(/:/g, '%3A').replace(/,/g, '%2C');
+}
+
+/**
+ * ONE `::error::` workflow command, carrying a title and a multi-line message.
+ *
+ * Emitted on STDOUT beside the prose, never instead of it: the job log keeps
+ * the full text an author reads, and this line is the one-screen version that
+ * survives the check-run boundary. No `file=` property — the diagnosis is about
+ * a PR BODY or a changeset set, not a line of source, and an annotation with no
+ * path lands at job level exactly where the runner's own one does.
+ *
+ * @param {{ title: string, message: string }} input
+ * @returns {string}
+ */
+export function errorAnnotation({ title, message }) {
+  return `::error title=${annotationProperty(title)}::${annotationData(message)}`;
+}
+
 /**
  * Render a verdict into the lines this script prints and the code it exits with.
  *
@@ -681,6 +767,14 @@ export function render(result) {
       stderr.push(
         '⛔ check-changeset-no-major: the diff against the branch point could not be computed, ' +
           'so nothing was verified. Missing input is a failure, never a pass (#4690).',
+      );
+      stdout.push(
+        errorAnnotation({
+          title: 'Check Changeset: the diff against the branch point could not be computed',
+          message:
+            'Nothing was verified. A gate that cannot read its input has verified nothing, so this is a failure ' +
+            'rather than a pass (#4690). The step log carries the git error.',
+        }),
       );
       return { exitCode: 1, stdout, stderr };
 
@@ -723,6 +817,18 @@ export function render(result) {
           'If a whole-stack major release is genuinely intended, add the `allow-major` label to\n' +
           'the PR to skip this check.',
       );
+      stdout.push(
+        errorAnnotation({
+          title: 'Check Changeset: this diff introduces a `major` bump',
+          message:
+            `Introduced by this diff: ${result.offenders
+              .map(({ file, majors }) => `${file} (${majors.join(', ')})`)
+              .join('; ')}\n` +
+            'Every publishable package is in the Changesets `fixed` (lockstep) group, so one `major` promotes the ' +
+            'ENTIRE monorepo. During the launch window ship breaking changes as `minor`. If a whole-stack major is ' +
+            'genuinely intended, add the `allow-major` label. Full list in this step\'s log.',
+        }),
+      );
       return { exitCode: 1, stdout, stderr };
 
     default:
@@ -732,6 +838,14 @@ export function render(result) {
       stderr.push(
         `⛔ internal: check-changeset-no-major produced an unknown verdict ${JSON.stringify(result?.verdict ?? null)}. ` +
           'A guard that cannot classify its own input has verified nothing.',
+      );
+      stdout.push(
+        errorAnnotation({
+          title: 'Check Changeset: internal — the guard could not classify its own verdict',
+          message:
+            `Unknown verdict ${JSON.stringify(result?.verdict ?? null)}. A guard that cannot classify its own input ` +
+            'has verified nothing, so it refuses rather than printing a tick (#4690).',
+        }),
       );
       return { exitCode: 1, stdout, stderr };
   }
@@ -1255,6 +1369,89 @@ export function packagesTouched({ cwd, from, head }) {
   return { packages: [...packages].sort(), unreadable: [...unreadable].sort() };
 }
 
+// ── The near-miss remedy vocabulary (#18263) ────────────────────────────────
+//
+// `readClause2Line` returns a REASON with every near miss, and this gate used
+// to print the offending line without it: the reader knew which of three
+// different mistakes the author had made, and the refusal said only "a near
+// miss". The three owe different remedies — `check-clause2-carriers.mjs` says
+// so in its own words ("⛔ The reason changes the sentence, never the state") —
+// so the sentence is what this map supplies.
+//
+// ⛔ THIS MAP IS NOT THE REASON LIST. It is a lookup FROM whatever reason the
+// reader produced, and its miss path is loud rather than silent: a reason this
+// file has never been taught still prints, still names the line, and still says
+// where the reason came from. That direction is deliberate and it is the whole
+// of what keeps this fix from re-creating the defect one layer along — the
+// reader is a live surface (PR #18903 is open on it), and a gate that matched
+// reasons against a frozen list would answer a new one with exactly the silence
+// this card exists to remove.
+//
+// The accepted line-start decoration is the reader's, quoted rather than
+// re-derived: `CLAUSE2_KEY_LINE` tolerates leading whitespace, `> `, `- ` / `* `
+// and `**` — and nothing else. A markdown heading marker is not on that list,
+// which is why `## Clause-②: no` reads `spelling`.
+const CLAUSE2_NEAR_MISS_REMEDIES = Object.freeze({
+  spelling:
+    'the line does not carry `Clause-②:` in the fixed spelling at the start of a line. The reader tolerates a ' +
+    '`- `, `* `, `> ` or `**` prefix and NOTHING else, so a markdown HEADING (`## Clause-②: no — …`) is a near ' +
+    'miss and not a declaration. Write it bare, on a line of its own.',
+  'inline-key':
+    'the key is spelled exactly right but sits INSIDE a line, after text that no line-start decoration explains ' +
+    '(`Domain: `x` · Clause-②: no`). The spelling is not what is wrong — the POSITION is. Give the declaration a ' +
+    'line of its own.',
+  describing:
+    'the line carries the key in the fixed spelling at the start of a line, but it QUOTES the spelling instead of ' +
+    'declaring a value: it either names `Clause-②:` twice on one line, or opens a backtick span at the key and ' +
+    'continues past the closing tick (the `Clause-②: no` · `skip-changeset` shape). ADD the declaration on a line ' +
+    'of its own, bare, with nothing following it.',
+});
+
+/**
+ * The remedy sentence for one near-miss reason — or a loud miss.
+ *
+ * ⛔ The miss path never returns an empty string and never returns `null`: the
+ * caller prints whatever comes back, and a blank remedy is the silent fall-back
+ * this card is about, moved one function along.
+ *
+ * @param {string|null|undefined} reason — whatever `readClause2Line` reported.
+ * @param {string} line — the offending line, quoted back on the miss path too.
+ * @returns {string}
+ */
+export function clause2NearMissRemedy(reason, line) {
+  if (typeof reason === 'string' && Object.prototype.hasOwnProperty.call(CLAUSE2_NEAR_MISS_REMEDIES, reason)) {
+    return CLAUSE2_NEAR_MISS_REMEDIES[reason];
+  }
+  return (
+    `this gate carries no remedy sentence for a near miss of reason ${JSON.stringify(reason ?? null)} — ` +
+    '`readClause2Line` (scripts/pm/check-clause2-carriers.mjs) reports a reason this file has not been taught, ' +
+    `and the reason plus the line are printed rather than swallowed. The offending line is: ${line}. Whatever the ` +
+    'reason, a declaration is `Clause-②: yes` or `Clause-②: no`, bare, at the start of a line of its own. Add the ' +
+    'sentence for this reason to CLAUSE2_NEAR_MISS_REMEDIES in scripts/check-changeset-no-major.mjs.'
+  );
+}
+
+/**
+ * The TWO readings a near miss contributes: what it was, and what to do.
+ *
+ * Exported and pure so the self-test can drive a reason this file has never
+ * been taught — which is the one case that cannot be produced by handing
+ * `readClause2Line` a body, and is exactly the case #18263 must not answer with
+ * silence. Both lines interpolate the reason rather than matching it, so an
+ * unknown one names ITSELF here and takes the loud path in the remedy.
+ *
+ * @param {string|null|undefined} reason
+ * @param {string} line
+ * @returns {string[]}
+ */
+export function nearMissReadings(reason, line) {
+  const named = typeof reason === 'string' && reason ? reason : '(unnamed)';
+  return [
+    `declaration line: a near miss, not a declaration — reason \`${named}\` — ${line}`,
+    `remedy for \`${named}\`: ${clause2NearMissRemedy(reason, line)}`,
+  ];
+}
+
 /**
  * The clause-② declaration this PR carries, read from the event payload alone.
  *
@@ -1348,8 +1545,13 @@ export function declarationFromPullRequest(pr) {
   const line = readClause2Line(pr.body ?? '');
   if (line?.kind === 'declared') readings.push(`declaration line: \`${line.line}\``);
   else if (line?.kind === 'malformed') readings.push(`declaration line: MALFORMED, not a declaration — ${line.line}`);
-  else if (line?.kind === 'near-miss') readings.push(`declaration line: a near miss, not a declaration — ${line.line}`);
-  else readings.push('declaration line: the PR body carries no `Clause-②:` line');
+  else if (line?.kind === 'near-miss') {
+    // #18263. The reason travels with the line, and it is RENDERED rather than
+    // matched: `readClause2Line` decides the vocabulary, this file only says the
+    // sentence. A reason it has never seen names itself here and takes the loud
+    // miss path in `clause2NearMissRemedy` — it never reaches the silent one.
+    readings.push(...nearMissReadings(line.reason, line.line));
+  } else readings.push('declaration line: the PR body carries no `Clause-②:` line');
 
   // #16421. The arm is reported on its own line whichever way it reads, INCLUDING
   // its absence on a declaration that carries one: "this PR declared no
@@ -1523,6 +1725,13 @@ export function renderLevel(result) {
   const stdout = [];
   const stderr = [];
   const readings = (result?.readings ?? []).map((r) => `   · ${r}`);
+  // #18263. The same readings, one screen wide, for the ANNOTATION. They already
+  // carry the near-miss reason and its remedy, so nothing here re-derives a
+  // diagnosis the reader above produced — this is the prose, crossing the
+  // check-run boundary the job log does not cross.
+  const readingsBlock = (result?.readings ?? []).map((r) => `· ${r}`).join('\n');
+  const offenderList = (offenders) =>
+    (offenders ?? []).flatMap(({ file, packages }) => (packages ?? []).map((pkg) => `${pkg}: patch (${file})`)).join('; ');
   // The `patch` lines, listed WITHOUT a per-package claim about what the diff
   // did to each one. The old rendering appended "← this PR moves <pkg>'s
   // packages/*/src/**" to every line, which is true, directly under a headline
@@ -1564,6 +1773,14 @@ export function renderLevel(result) {
         '⛔ check-changeset-no-major (level axis): the diff against the branch point could not be computed, ' +
           'so the changeset level was not judged either. Missing input is a failure, never a pass (#4690).',
       );
+      stdout.push(
+        errorAnnotation({
+          title: 'Check Changeset (level axis): the diff against the branch point could not be computed',
+          message:
+            'The changeset level was not judged. Missing input is a failure, never a pass (#4690). The step log ' +
+            'carries the git error.',
+        }),
+      );
       return { exitCode: 1, stdout, stderr };
 
     case 'payload-unreadable':
@@ -1572,6 +1789,14 @@ export function renderLevel(result) {
           'read, so the clause-② declaration had no carrier to come from. The runner writes that file; a run that ' +
           'cannot read it has verified nothing, and missing input is a failure, never a pass (#4690).',
         ...readings,
+      );
+      stdout.push(
+        errorAnnotation({
+          title: 'Check Changeset (level axis): the `pull_request` event payload could not be read',
+          message:
+            'This is a `pull_request` run, so the runner wrote that file; a run that cannot read it has verified ' +
+            `nothing (#4690). What WAS read:\n${readingsBlock}`,
+        }),
       );
       return { exitCode: 1, stdout, stderr };
 
@@ -1629,6 +1854,24 @@ export function renderLevel(result) {
           '⛔ The remedy is the declaration, never the deletion: dropping the changeset, or regrading the package to\n' +
           'dodge this message, changes what ships in order to quiet a gate. And the line is read from the body on the\n' +
           'next `edited` event (pr-automation.yml subscribes to it), so this red clears with no push and no re-run.',
+      );
+      // #18263. The discriminator, on the ONE channel the check run exposes.
+      // This title and the `Require a changeset` step's own `::error::` are what
+      // now tell a MISSING CHANGESET apart from an UNREADABLE DECLARATION —
+      // the two refusals this card measured as one event from outside.
+      stdout.push(
+        errorAnnotation({
+          title: 'Check Changeset (level axis): no readable `Clause-②:` declaration, and it is the reading this PR needed',
+          message:
+            `Every package this diff moves under \`packages/**/src/**\` is graded \`patch\` (${offenderList(result.offenders)}), ` +
+            'which is exactly the shape a `yes` refuses (#16361) — so the declaration that was not readable is what ' +
+            `decides this verdict.\n${readingsBlock}\n` +
+            'DECLARE IT: one line in the PR BODY, bare and at the START of a line of its own — `Clause-②: no` (this PR ' +
+            'puts no new key on a published payload) or `Clause-②: yes` plus at least `minor` on the package that grew. ' +
+            'A `- `, `> ` or `**` prefix is read too; a `## ` heading and a backtick span that runs past the key are ' +
+            'not. ⛔ The remedy is the declaration, never dropping the changeset. The body is re-read on the next ' +
+            '`edited` event, so this red clears with no push and no re-run. Full text in this step\'s log.',
+        }),
       );
       return { exitCode: 1, stdout, stderr };
 
@@ -1717,12 +1960,35 @@ export function renderLevel(result) {
           'Only what THIS diff introduces is listed above — an entry the branch point already carried at\n' +
           'the same bump is not this PR\'s to answer for (#7005).',
       );
+      stdout.push(
+        errorAnnotation({
+          title: 'Check Changeset (level axis): clause-② declares YES while no moved package is graded `minor` or above',
+          message:
+            `Moved and graded \`patch\`: ${offenderList(result.offenders)}. None of them is graded \`minor\` or above.\n` +
+            `${readingsBlock}\n` +
+            'A purely additive widening of a published package\'s public surface takes AT LEAST `minor` (maintainer ' +
+            'ruling 2026-09-04, decision batch #35, on #15294). Raise the ONE package that actually grew, or correct ' +
+            'the declaration at its producer. ' +
+            (carrierUnread
+              ? `⚠️ The \`${CONTRACT_REVIEW_LABEL}\` carrier was NOT MEASURED on this run and is not part of the remedy here.`
+              : '') +
+            ' Full text in this step\'s log.',
+        }),
+      );
       return { exitCode: 1, stdout, stderr };
 
     default:
       stderr.push(
         `⛔ internal: check-changeset-no-major produced an unknown level verdict ${JSON.stringify(result?.verdict ?? null)}. ` +
           'A guard that cannot classify its own input has verified nothing.',
+      );
+      stdout.push(
+        errorAnnotation({
+          title: 'Check Changeset (level axis): internal — the guard could not classify its own verdict',
+          message:
+            `Unknown level verdict ${JSON.stringify(result?.verdict ?? null)}. A guard that cannot classify its own ` +
+            'input has verified nothing, so it refuses rather than printing a tick (#4690).',
+        }),
       );
       return { exitCode: 1, stdout, stderr };
   }
@@ -1954,7 +2220,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'THE FIX (#7004): the shapes the old `([A-Za-z]+)\\s*$` anchor hid': 13,
   'The exemption switch, in BOTH directions': 17,
   'Order of operations is contract': 3,
-  'Missing input is a failure, never a pass (#4690 / #7006)': 5,
+  'Missing input is a failure, never a pass (#4690 / #7006)': 6,
   'The readers': 12,
   'The diff scoping, on real temp git repositories': 18,
   '#7107: an `R` row whose BASE side is README.md subtracts NOTHING': 4,
@@ -1966,11 +2232,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'THE DEPTH: a nested package is a candidate the axis can refuse (#16713)': 21,
   'THE ROOT: a packed `bin` target is a published surface the axis can refuse (#16692)': 37,
   '#17229: an UNREAD carrier is NOT MEASURED, never an absent one': 25,
+  '#18263: the refusal says its reason, and says it where the API can read it': 35,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 18;
+const SELF_TEST_BATTERY_FLOOR = 19;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -2217,7 +2484,18 @@ function selfTest() {
     render(unreadable).exitCode === 1,
     'FLIPPED by #7005 (was pinned at exit 0 as the #7006 residual): a gate that could not read its input now FAILS. The `no-changeset-dir` verdict it replaced is gone with the directory read',
   );
-  assert(render(unreadable).stdout.length === 0, 'the unreadable verdict prints no tick on stdout — that was the whole of the #4690 shape');
+  // #18263 moved this pin rather than relaxing it. What #4690 forbids on stdout
+  // is a TICK — a line a reader takes for a pass. The `::error::` annotation
+  // this verdict now emits is the opposite of one, so the pin is spelled as what
+  // it always meant: no tick, and nothing on stdout that is not the annotation.
+  assert(
+    render(unreadable).stdout.every((l) => l.startsWith('::error ')),
+    `the unreadable verdict prints no tick on stdout — the only stdout line it may carry is its \`::error::\` annotation (#18263). Got ${JSON.stringify(render(unreadable).stdout)}`,
+  );
+  assert(
+    render(unreadable).stdout.filter((l) => l.startsWith('::error ')).length === 1,
+    'and EXACTLY one annotation — the check run caps annotations at ten per level, and a refusal that spends the cap on itself takes the runner\'s own exit-code annotation down with it',
+  );
   assert(render({ verdict: 'something-new' }).exitCode === 1, 'an unknown verdict exits 1 — a guard that cannot classify itself prints no tick');
   assert(render(undefined).exitCode === 1, 'no verdict at all exits 1');
 
@@ -3783,6 +4061,185 @@ function selfTest() {
     assert(
       !/pull_request/.test((cutRc.match(/^on:[\s\S]*?\njobs:/m) ?? [''])[0]),
       'wiring: cut-rc.yml must stay off `pull_request` triggers — its `no-pull-request` lane is what keeps the #16776 refusal shippable, and a PR trigger there would make it a PR run with a payload',
+    );
+  }
+
+  // ── #18263: the refusal SAYS its reason, on the channel the check run shows ─
+  //
+  // The card: `Check Changeset` ends `failure` while the check run answers
+  // `output.title` = null and 0-byte `summary`/`text`, carrying ONE annotation —
+  // the runner's generic `Process completed with exit code 1.` So a near-miss
+  // declaration and a missing changeset are the same event from outside, while
+  // this gate has already computed which one it is and thrown it away.
+  //
+  // Every case below drives the REAL predicate (`readClause2Line`, imported, the
+  // same one the gate calls) — ⛔ never a regex written here. A hand-written
+  // matcher would pass on shapes the reader classifies differently, which is the
+  // drift the gate's own header forbids by name.
+  battery('#18263: the refusal says its reason, and says it where the API can read it');
+  {
+    const csFile = '.changeset/x.md';
+    const PKG = '@objectstack/spec';
+    const materialLevels = [{ file: csFile, entries: [{ pkg: PKG, bump: 'patch' }] }];
+    const materialTouched = { packages: [PKG], unreadable: [] };
+    const refuseOn = (body) =>
+      renderLevel(
+        judgeLevel({
+          levels: materialLevels,
+          touched: materialTouched,
+          declaration: declarationFromPullRequest({ labels: [{ name: 'domain:devx' }], body }),
+          prEvent: true,
+        }),
+      );
+    const annotationsOf = (out) => out.stdout.filter((l) => l.startsWith('::error '));
+
+    // The four shapes the card reproduces, each read by the real predicate
+    // FIRST, so the assertion below is about the text the gate emits for the
+    // reason the reader actually returned — not about a shape assumed here.
+    const HEADING = '## Clause-②: no — nothing published moves here';
+    const SHARING = '`Clause-②: no` · `skip-changeset`';
+    const INLINE = 'Domain: `domain:devx` · Clause-②: no';
+    const CORRECT = 'Clause-②: no';
+
+    const headingRead = readClause2Line(HEADING);
+    const sharingRead = readClause2Line(SHARING);
+    const inlineRead = readClause2Line(INLINE);
+    const correctRead = readClause2Line(CORRECT);
+
+    assert(headingRead?.kind === 'near-miss', `the heading shape is a near miss to the real reader — got ${JSON.stringify(headingRead)}`);
+    assert(sharingRead?.kind === 'near-miss', `the backticked-and-sharing shape is a near miss to the real reader — got ${JSON.stringify(sharingRead)}`);
+    assert(inlineRead?.kind === 'near-miss', `a key that sits inside a line is a near miss to the real reader — got ${JSON.stringify(inlineRead)}`);
+    // The control that makes the three above mean something: the SAME key,
+    // written bare on a line of its own, is a declaration and reaches no near
+    // miss at all. Without it "is a near miss" could be true of every string.
+    assert(correctRead?.kind === 'declared' && correctRead.value === 'no', `control: the bare line IS a declaration — got ${JSON.stringify(correctRead)}`);
+    // NEGATIVE CONTROL, and it can fail: a body with nothing of the kind reads
+    // `null`, which is a THIRD state — neither a declaration nor a near miss.
+    assert(readClause2Line('nothing here') === null, 'negative control: a body with no clause-② line at all reads `null`');
+
+    // Each near miss now REACHES THE TEXT: the reason the reader returned, the
+    // offending line verbatim, and a remedy — all three, in the annotation that
+    // crosses the check-run boundary.
+    for (const [label, body, read] of [
+      ['heading', HEADING, headingRead],
+      ['backticked and sharing the line', SHARING, sharingRead],
+      ['key inside a line', INLINE, inlineRead],
+    ]) {
+      const out = refuseOn(`Fixes #1\n\n${body}\n`);
+      const annotation = annotationsOf(out)[0] ?? '';
+      assert(out.exitCode === 1, `${label}: the near miss still REFUSES — this card changes what is said, never which bodies are accepted`);
+      assert(annotation.includes(String(read?.reason)), `${label}: the emitted annotation names the reason \`${read?.reason}\` the reader returned`);
+      assert(annotation.includes('remedy for'), `${label}: and carries a remedy, which is the half an author cannot compute from "a near miss"`);
+    }
+
+    // The three remedies are DIFFERENT sentences. If they were one sentence the
+    // assertions above would pass while the reason was being ignored.
+    const remedyFor = (read) => clause2NearMissRemedy(read?.reason, read?.line ?? '');
+    assert(
+      new Set([remedyFor(headingRead), remedyFor(sharingRead), remedyFor(inlineRead)]).size === 3,
+      'the three near-miss reasons owe three DIFFERENT remedies — one shared sentence would pass every assertion above while reading no reason at all',
+    );
+
+    // ⭐ THE REASON LIST IS READ, NOT HARDCODED. `readClause2Line` is a live
+    // surface, so a reason added to it later must PRINT — never fall through to
+    // the silent output this card is about.
+    const INVENTED = 'a-reason-this-file-has-never-been-taught';
+    const OFFENDING = '## Clause-②: no — the line that would be lost';
+    const grownReadings = nearMissReadings(INVENTED, OFFENDING);
+    assert(grownReadings.length === 2, 'an unknown reason still produces BOTH readings — what it was, and what to do');
+    assert(
+      grownReadings.every((r) => r.includes(INVENTED)),
+      'an unknown reason NAMES ITSELF in the output rather than being swallowed — the reason is interpolated, never matched against a list here',
+    );
+    assert(
+      grownReadings.some((r) => r.includes(OFFENDING)) && clause2NearMissRemedy(INVENTED, OFFENDING).includes(OFFENDING),
+      'and the OFFENDING LINE is still quoted on the unknown-reason path — the one thing an author cannot reconstruct',
+    );
+    assert(
+      clause2NearMissRemedy(INVENTED, OFFENDING) !== remedyFor(headingRead),
+      'control: the unknown reason does not silently borrow a known remedy — a wrong prescription is worse than a named gap',
+    );
+    assert(
+      clause2NearMissRemedy(null, OFFENDING).length > 0 && clause2NearMissRemedy(undefined, OFFENDING).length > 0,
+      'a reason of `null` or `undefined` still returns a sentence — an empty remedy is this card\'s defect moved one function along',
+    );
+
+    // A MISSING CHANGESET and a NEAR MISS must be distinguishable FROM THE
+    // EMITTED OUTPUT ALONE. That is the card's whole claim, so it is pinned on
+    // both sides: this script's own refusals carry distinct titles, and the
+    // workflow step that refuses a missing changeset carries an `::error::` of
+    // its own (wiring, below).
+    const nearMissAnnotation = annotationsOf(refuseOn(`Fixes #1\n\n${HEADING}\n`))[0] ?? '';
+    const absentAnnotation = annotationsOf(refuseOn('Fixes #1\n\nnothing of the kind here\n'))[0] ?? '';
+    assert(nearMissAnnotation.length > 0 && absentAnnotation.length > 0, 'both unreadable-declaration refusals annotate');
+    assert(
+      nearMissAnnotation !== absentAnnotation,
+      'a body that ALMOST declared and a body that never tried produce different text — they share a verdict, and used to share every byte anyone outside could read',
+    );
+    assert(
+      absentAnnotation.includes('carries no `Clause-②:` line') && !absentAnnotation.includes('remedy for'),
+      'and the absent case says THAT, rather than borrowing a near miss\'s remedy for a line that does not exist',
+    );
+    const levelEnforce = renderLevel(
+      judgeLevel({
+        levels: materialLevels,
+        touched: materialTouched,
+        declaration: declarationFromPullRequest({ labels: [{ name: CONTRACT_REVIEW_LABEL }], body: 'Fixes #1\n' }),
+        prEvent: true,
+      }),
+    );
+    assert(levelEnforce.exitCode === 1, 'control: the `enforce` lane still refuses');
+    assert(
+      (annotationsOf(levelEnforce)[0] ?? '').split('::')[1] !== nearMissAnnotation.split('::')[1],
+      'the `enforce` refusal and the unreadable-declaration refusal answer DIFFERENT annotation titles — one title for two verdicts is the collapse this card is about',
+    );
+
+    // Every refusing lane annotates EXACTLY ONCE, and every green annotates not
+    // at all. The cap is ten per level and the runner already spends one.
+    const lane = (result) => annotationsOf(renderLevel(result)).length;
+    const declaredNoDecl = declarationFromPullRequest({ labels: [{ name: 'domain:devx' }], body: 'Clause-②: no\n' });
+    assert(
+      lane({ verdict: 'unreadable-diff', offenders: [], readings: [], unreadable: [] }) === 1 &&
+        lane({ verdict: 'payload-unreadable', offenders: [], readings: [], unreadable: [] }) === 1 &&
+        lane({ verdict: 'no-such-verdict' }) === 1,
+      'the three remaining refusing lanes each annotate exactly once',
+    );
+    assert(
+      lane(judgeLevel({ levels: materialLevels, touched: materialTouched, declaration: declaredNoDecl, prEvent: true })) === 0 &&
+        lane(judgeLevel({ levels: materialLevels, touched: { packages: [], unreadable: [] }, declaration: declarationFromPullRequest({ labels: [{ name: 'x' }], body: 'nope\n' }), prEvent: true })) === 0,
+      'and a GREEN lane annotates NOTHING — an annotation is a failure marker, and one on a pass is a false red in the Checks tab',
+    );
+    assert(
+      annotationsOf(refuseOn(`Fixes #1\n\n${HEADING}\n`)).every((l) => !l.includes('\n')),
+      'the annotation is ONE line — a workflow command that carries a raw newline is truncated at it, and the diagnosis would be lost in the channel that exists to carry it',
+    );
+
+    // The escaping, driven rather than described. A title carrying a colon or a
+    // comma would terminate the property list early and the annotation would
+    // arrive mangled; a message carrying a newline would be cut at it.
+    const escaped = errorAnnotation({ title: 'a: b, c', message: 'one\ntwo 50% d' });
+    assert(!escaped.includes('\n'), 'escaping: a message newline is encoded, never emitted raw');
+    assert(escaped.includes('%0A') && escaped.includes('%25'), 'escaping: the newline becomes %0A and the percent becomes %25 — and the percent is escaped FIRST, or it would re-escape the others');
+    assert(escaped.startsWith('::error title=a%3A b%2C c::'), `escaping: a colon and a comma in the TITLE are encoded so the property list is not terminated early — got ${JSON.stringify(escaped.slice(0, 40))}`);
+    assert(
+      errorAnnotation({ title: 'plain', message: 'plain' }) === '::error title=plain::plain',
+      'control: text needing no escaping round-trips unchanged, so the assertions above are about the escaping and not about the format',
+    );
+
+    // WIRING, the other half of the distinguishability claim: the step that
+    // refuses a MISSING CHANGESET is in the workflow, not in this script, and it
+    // is only distinguishable from the refusals above while it keeps an
+    // `::error::` of its own. ⛔ This pins the annotation, never the sentence.
+    const automationPath = join(REPO_ROOT, '.github/workflows/pr-automation.yml');
+    assert(existsSync(automationPath), 'wiring: pr-automation.yml must exist — the missing-changeset refusal lives there');
+    const automationText = existsSync(automationPath) ? readFileSync(automationPath, 'utf8') : '';
+    const missingChangesetStep = automationText
+      .split(/\n(?=      - name: )/)
+      .find((s) => /name: Require a changeset/.test(s));
+    assert(missingChangesetStep !== undefined, 'wiring: the `Require a changeset` step could not be sliced out — the assertion below would judge undefined');
+    assert(
+      /::error::This PR adds no changeset\./.test(missingChangesetStep ?? ''),
+      'wiring: the missing-changeset refusal must keep its own `::error::` annotation — without it that refusal and this script\'s are once again one event from outside the run (#18263)',
     );
   }
 

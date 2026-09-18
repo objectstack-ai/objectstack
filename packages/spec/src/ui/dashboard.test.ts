@@ -755,6 +755,34 @@ describe('#16458 — DashboardHeaderAction fields carry an item-level `title`', 
     icon: 'Icon',
   };
 
+  /**
+   * The marker a tombstone's description carries, matched HEAD-ANCHORED and
+   * with the trailing space — `retiredKey()` writes `[REMOVED] ${guidance}`
+   * (`shared/retired-key.ts`), and so does the element-grain
+   * `retiredComponentProps` (`ui/component.zod.ts`), so the head is where both
+   * producers put it.
+   *
+   * ⛔ Not `includes`. Both spellings select the same five keys on this row
+   * today, so the choice is about the failure direction rather than today's
+   * reading: a tombstone's guidance is free prose, and a live key's
+   * `.describe()` may quote the marker while explaining a retirement — under
+   * `includes` that key joins a set this test then reports as "every
+   * tombstone", and asserting it is untitled would be asserting the opposite
+   * of the rule for an authorable key. The repo's other reader of this marker
+   * is head-anchored (`isRetirementTombstone`,
+   * `data/datasource-credential-redaction.ts`), as is the ledger pin's
+   * `RETIRED_PREFIX` (`kernel/repeater-item-titles.test.ts`): one marker, one
+   * predicate.
+   */
+  const RETIRED_DESCRIPTION_PREFIX = '[REMOVED] ';
+
+  /**
+   * Every `retiredKey()` tombstone on the `widgets[]` row, BY NAME, derived
+   * from `z.toJSONSchema(DashboardSchema)` on this tree — the same five under
+   * `io: 'input'` and `io: 'output'`, out of 22 row properties.
+   */
+  const WIDGET_ROW_TOMBSTONES = ['actionIcon', 'actionType', 'actionUrl', 'aria', 'responsive'] as const;
+
   // The console derives the panel schema with `io: 'input'`; `GET /meta`
   // derives it in output mode. The name must survive both.
   for (const io of ['input', 'output'] as const) {
@@ -770,15 +798,30 @@ describe('#16458 — DashboardHeaderAction fields carry an item-level `title`', 
       }
       // Control — a sibling item property with no authored title has none:
       // the pin above is reading a title, not a default the emitter invents.
-      // The control is a `retiredKey()` TOMBSTONE, which is the one widget row
-      // property that must stay untitled on purpose: it declares the key
-      // unwritable, and an authoring label would advertise it as writable.
+      // The controls are the `retiredKey()` TOMBSTONES on the widget row, and
+      // the rule is CLASS-wide: a tombstone declares its key unwritable, so an
+      // authoring label on ANY of them would advertise it as writable. Naming
+      // one carrier here pins one INSTANCE of that rule — the other tombstones
+      // could each be titled with this file still green — so the set is
+      // DERIVED from the served schema and every member is asserted.
       // (`widgets[].id` held this role until its carrier was titled.)
       const widgetProps = js.properties.widgets.items.properties;
-      expect(widgetProps.actionUrl.title).toBeUndefined();
-      expect(widgetProps.actionUrl.description).toMatch(/^\[REMOVED\] /);
-      // Lit — the authorable sibling really does carry one, so the line above
-      // measures the tombstone rule, not an emitter that never writes titles.
+      const tombstones = Object.keys(widgetProps).filter(
+        (k) =>
+          typeof widgetProps[k]?.description === 'string' &&
+          widgetProps[k].description.startsWith(RETIRED_DESCRIPTION_PREFIX),
+      );
+      // Floor, BY NAME — the loop below is vacuously green over an EMPTY set,
+      // and the `'Widget ID'` leg guards only that the node resolved, not that
+      // the predicate still selects anything. A floor rather than an equality:
+      // a sixth tombstone is covered by the loop on the day it lands, which is
+      // the reason for deriving the set instead of listing it.
+      expect(tombstones.slice().sort()).toEqual(expect.arrayContaining([...WIDGET_ROW_TOMBSTONES]));
+      for (const key of tombstones) {
+        expect(widgetProps[key].title, `widgets.items.properties.${key}.title`).toBeUndefined();
+      }
+      // Lit — the authorable sibling really does carry one, so the lines above
+      // measure the tombstone rule, not an emitter that never writes titles.
       expect(widgetProps.id.title).toBe('Widget ID');
     });
   }
