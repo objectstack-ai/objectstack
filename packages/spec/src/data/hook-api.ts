@@ -344,20 +344,16 @@ export interface HookApi {
  *     repository — measured, at head, with the three-name variant applied. A
  *     one-name patch publishes a HALF closure that READS closed, which is the
  *     declared-not-enforced shape this repo refuses.
- *   - The second of those two names is not free. Adding
- *     `IScopedObjectRepository` to this entry moves the dts bundler's module
- *     order enough to reorder members inside object type literals in the
- *     UNRELATED `ui` shard: 330 lines, which `check:api-surface-declarations`
- *     reports as "33 reshaped" and asks a reviewer to rule on. Measured as
- *     order-only — identical token multiset, identical line count, nothing
- *     added, removed or renamed — and the generator is stable against a fixed
- *     dist, so it is noise rather than drift. But it is a verdict somebody has
- *     to read, in a shard this card does not touch.
+ *   - So it is a TWO-name change to a face this card does not own. Both names
+ *     are declared in `contracts/scoped-context.ts` and neither is introduced
+ *     to this entry by anything in this diff: `HookContext.api` has carried
+ *     the leak since #5945, on this card's base exactly as on its head. What
+ *     this file owes is the two names its OWN new declarations introduced.
  *
- * Two names with a clean surface delta, or four names plus an adjudication in
- * someone else's shard: that is a trade for its own card and its own review,
- * not a rider on a FAIL remediation. The pre-existing leak is reported with
- * both measurements so that card can be written without re-deriving them.
+ * So: fixed here, the instances this card created; reported, the pre-existing
+ * one, with the measurement that it takes two names rather than one — which is
+ * the part a reader would otherwise get wrong. It is a card of its own, with
+ * its own review, not a rider on a FAIL remediation.
  *
  * ⛔ `check:entry-nameability` is NOT the instrument that answers this. By its
  * own docblock it probes the CALL surface of VALUE exports that have a call
