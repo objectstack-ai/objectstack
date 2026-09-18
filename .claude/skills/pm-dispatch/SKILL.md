@@ -39,7 +39,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 
 ## 优先级
 
-- 优先序:维护者裁决 > `AGENTS.md` > 红线 > 核心条款 > 细则 > 座位判断。
+- 优先序:维护者裁决 > 北极星 > `AGENTS.md` > 红线 > 核心条款 > 细则 > 座位判断。
 - 核心条款住 `references/core-rules.md`,是本文的子集;细则是本文其余各节与其它 references。
 - 一条规则在本文与核心条款一处改动,另一处同 PR 同改。
 - 红线与各节的禁止行都在四轴权衡之外,⛔ 不因更合理的理由被推翻。
@@ -251,6 +251,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 | `domain:skills` | governed 面全量(含本文件;统一定义见「governed 面统一定义」行);非门禁的 `scripts/pm/**`(PM 循环工具);governed 面的治理执行文件:`.github/CODEOWNERS` + SUBJECT 是 governed 面本身的门禁/审计(现为 `scripts/pm/check-governed-merges.mjs`) |
 | `domain:spec` | `packages/spec` 整包:schema 形状、`contracts/**`、退役行为半边、strictness 台账;describe/JSDoc/墓碑散文/错误 guidance 与 alias 表;`packages/spec/scripts/**`、`packages/spec/docs/**` 及按锚定规则的例外归本域的工具链(域边界枚举与席内分派见 `references/lanes/spec.md`) |
 | `domain:cli` | `packages/cli`、`runtime`、`verify`、`packages/qa`、`types`、`packages/rest`、`packages/mcp`、`packages/observability`、`packages/client*`、`cloud-connection`、`create-objectstack`、`packages/adapters/*`、`plugin-hono-server`、`plugin-dev` |
+| `domain:cloud` | 云服务旅程,停放(加 `status:parked`,sweep 免扫)待 cloud PM 迁移,本仓不派 |
 | (无固定归属,按落点分诊) | `packages/apps/*`、`packages/console`(dist 由脚本生成 ⛔ 不手改;UI 缺陷走 `repo:objectui`)、`examples/*`(归它演练的子系统)、`docs/audits/**` |
 
 - 表未覆盖的包首次分诊时归类并走 PR 更新本表;新增或退役 `domain:*` 必须同批改本表。
@@ -354,14 +355,13 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 先修复:正文被 sanitizer 截断的卡不可派发,评论修复指令后跳过。
 - 停摆指令判据必须比其它分类更硬(双读取),事后证伪同处公开作废。
 - 决策箱勤务:落卡入箱时校验/补全四棱块与速读;存量卡低频子轮回填,语言按不变量。
-- 原生 issue 类型 Bug/Feature/Task 是分诊的固定产出。
-- 分诊席是 `type` 字段的唯一权威生产者;立单者可预填,分诊校正。
-- 判据:违背已声明契约 ⇒ `Bug`,扩大接受集/公开面 ⇒ `Feature`,其余 ⇒ `Task`。
+- `type`(Bug/Feature/Task)是分诊固定产出,分诊席唯一权威生产;立单者可预填,分诊校正。
+- 判据:违背已声明契约 ⇒ `Bug`,扩大接受集/公开面越出已声明 ⇒ `Feature`,其余 ⇒ `Task`。
 - `Bug` 无具名落点或复现路径不入 `pm:queue`(标记补复现)。
 - ⛔ 不回填存量 backlog 的 type;新卡即时打、存量卡下次碰到补。
-- 路由是分诊的技术判断,⛔ 永不升级哪个仓的问题。
+- 定级按 `docs/NORTH-STAR.md`「优先级」第 1、2 条;正文首行 `Path: P<n> | <清单区> | none`。
+- 路由是分诊的技术判断,⛔ 永不升级哪个仓的问题;父单是协调节点,永不派发。
 - 父单已有子结构的:父单队列标签即可,分诊逐个展开路由、补 `Blocked-by:` 排序。
-- 父单是协调节点,永不派发。
 - 每张留一条英文审计评论(`Triage: lands in …; rationale: …`),可选带 `Size/model suggestion:` 行。
 - 查重/shadow 检查先按文件/机制查本仓与姊妹仓 open 卡(含 `pm:dispatched`),再跟引用与关键词。
 - 同文件同缺陷 = 同一发现,不分车道:证据搬到先卡,后卡关 `duplicate_of`,⛔ 不并排派发。
@@ -449,16 +449,16 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 并行纪律四条(常规,非豁免):① 认领申报文件面到区域级,拿不准就串行。
 - ② 开 PR 前合一次 main;③ 兄弟卡落地后再合一次;④ 冲突交合并队列仲裁,⛔ 不手动排序。
 - 文件面不相交只保证文本可合并;跨文件语义耦合由队列 CI 逮住,⛔ 不读作不可能冲突。
-- 阻塞解除后给延后单重新定价:派发前一单时带必答项。
-- 必答项:你的改动让 #X 变简单、变难、变得不必要还是无影响。
+- 阻塞解除后延后单重定价:前一单派发词必答 #X 变简单、变难、不必要或无影响。
 - 派发后一单前用该回答重读它的选项与成本,⛔ 不沿用立单时那份。
 - 在飞卡衍生三分:不修它验收过不过;in-scope ⇒ 父卡 sub-issue,认领席自有、优先级继承。
 - 该 sub-issue 带父卡域与优先级直接派发,唯一绕过分诊;sweep 事后扫,重复关 `duplicate`。
 - 阻塞项无主 ⇒ 被挡席认领做掉,不限大小;在该卡走完整认领、尊重其热文件串行队。
 - 阻塞项在飞 ⇒ 等:`pm:blocking` 在其车道排最前、等待者写该卡;p0/p1 优先级沿链传递。
+- 取卡前置 = `docs/NORTH-STAR.md`「优先级」第 3 条:产品仓开放 P0/P1 每次取卡现读。
 - 取卡全序:`priority:p0` > `pm:blocking` > `target:` 板上项 > p1 > p2 > p3 > 无级;同级先 `Bug` 再卡龄。
 - `pm:blocking` 级内先按解锁扇出(从 `Blocked-by:` 反向索引现算,⛔ 扇出数不落标签)。
-- 全序每级取既有信号现读/现算,零逐卡维护;优先是排序不是豁免;无级卡轮报记分诊缺口。
+- 全序每级取既有信号现读/现算,零逐卡维护;优先非豁免;无级/缺 `Path:` 轮报记分诊缺口。
 - 解锁那一刻 PM 自己的判断最不可信:裁决收窄或关掉了那张卡是假设不是前提。
 - 该假设以机制假设身份进派发令,被证伪就在同一张卡公开更正。
 
@@ -602,7 +602,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 判决 ESCALATE:见 升级与决策 节。
 - **ACCEPT 之后的路径分叉**:翻 ready / 挂 auto-merge / 入队前先取一次 PR 的路径面。
 - 路径面用 `get_files` 取,⛔ 不看报告自述;动手之前先分,不是事后对照。
-- governed 面统一定义:`docs/adr/**` + `.claude/**`(全量,含 agents/hooks/settings)+ `skills/**`。
+- governed 面统一定义:`docs/adr/**` + `.claude/**`(全量)+ `skills/**` + `docs/NORTH-STAR.md`。
 - governed 面同含 `AGENTS.md` + `CLAUDE.md`;`GOVERNED_REPOS` 各仓同治理待遇,执行席恒随落地仓车道。
 - 路径面命中规则层 ⇒ ACCEPT 换终局四件套,混合 diff ⛔ 不按比例判;要拆让 dev 单独开 PR。
 - ① 复核结论照常写在 issue 上;技能面 hunk 须由契约复审档的席复核,档外席先交 skills 席。

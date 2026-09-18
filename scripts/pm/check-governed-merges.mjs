@@ -861,7 +861,9 @@ export const EXIT_TEST_NOT_GOVERNED = 0;
  * The governed surfaces, in report order — the 2026-08-18 unified definition
  * (see header). `prefix` entries match path prefixes; `exact` entries match
  * one repo-relative path byte-for-byte (the repo-ROOT instruction files, not
- * `examples/AGENTS.md`, not template copies). One path hit governs a whole
+ * `examples/AGENTS.md`, not template copies — and `docs/NORTH-STAR.md`, the
+ * maintainer's North Star, joined 2026-09-18 on his word as the law above
+ * `AGENTS.md`; the PM skill cites it by section). One path hit governs a whole
  * PR — 「混合 diff 一条命中即整 PR 分叉」; proportion is never a question.
  * The register is repo-agnostic: it applies in all of `GOVERNED_REPOS`.
  */
@@ -871,6 +873,7 @@ export const GOVERNED_SURFACES = Object.freeze([
   Object.freeze({ id: 'skills-catalog', prefix: 'skills/', glob: 'skills/**', what: 'the published skills catalog' }),
   Object.freeze({ id: 'agents-md', exact: 'AGENTS.md', glob: 'AGENTS.md', what: 'the repo-root agent instruction file' }),
   Object.freeze({ id: 'claude-md', exact: 'CLAUDE.md', glob: 'CLAUDE.md', what: 'the repo-root Claude instruction file' }),
+  Object.freeze({ id: 'north-star', exact: 'docs/NORTH-STAR.md', glob: 'docs/NORTH-STAR.md', what: "the maintainer's North Star — the law above AGENTS.md" }),
 ]);
 
 /**
@@ -881,10 +884,12 @@ export const GOVERNED_SURFACES = Object.freeze([
  * own source, and "looks like a path" there means "carries a separator". The
  * three `prefix` rows above have one and reach dispatch-gates already — the
  * `skills/**` row is one of the three specimens that motivated reading a hint
- * AS WRITTEN. The two `exact` rows do not: a repo-root FILE carries no
- * separator, so an `AGENTS.md` or `CLAUDE.md` card derived this gate not at all
- * while the same card is GOVERNED by it (draft-only PR, maintainer merge) —
- * the loudest possible thing to learn late.
+ * AS WRITTEN. The two repo-ROOT `exact` rows do not: a repo-root FILE carries
+ * no separator, so an `AGENTS.md` or `CLAUDE.md` card derived this gate not at
+ * all while the same card is GOVERNED by it (draft-only PR, maintainer merge)
+ * — the loudest possible thing to learn late. The `docs/NORTH-STAR.md` row is
+ * `exact` WITH a separator: it reaches dispatch-gates as written and declares
+ * no hint (the self-test pins that an exact row with a separator has none).
  *
  * `<file>/**` is the form that reaches one: the extractor accepts it, and
  * `collapseHint` reduces it back to that single path. `examples/AGENTS.md` and
@@ -3223,15 +3228,16 @@ async function selfTest() {
   // ── the governed predicate: the 2026-08-18 unified list, exactly ──────────
   battery('the governed predicate: the 2026-08-18 unified list, exactly');
   const ids = (paths) => governedPathsIn(paths).map((s) => s.id);
-  assert('all-five-surfaces-declared-in-order', GOVERNED_SURFACES.map((s) => s.id).join(',') === 'adr,claude-tree,skills-catalog,agents-md,claude-md', GOVERNED_SURFACES.map((s) => s.id).join(','));
+  assert('all-six-surfaces-declared-in-order', GOVERNED_SURFACES.map((s) => s.id).join(',') === 'adr,claude-tree,skills-catalog,agents-md,claude-md,north-star', GOVERNED_SURFACES.map((s) => s.id).join(','));
   assert('adr-prefix', ids(['docs/adr/0001-x.md']).join() === 'adr');
   assert('whole-claude-tree-not-only-skills', ids(['.claude/hooks/guard-main-checkout.sh', '.claude/agents/os-dev.md', '.claude/settings.json']).join() === 'claude-tree');
   assert('published-skills-catalog-is-governed', ids(['skills/objectstack-ui/SKILL.md']).join() === 'skills-catalog');
   assert('root-agents-md-exact', ids(['AGENTS.md']).join() === 'agents-md');
   assert('root-claude-md-exact', ids(['CLAUDE.md']).join() === 'claude-md');
+  assert('north-star-exact', ids(['docs/NORTH-STAR.md']).join() === 'north-star');
   // Near misses, each load-bearing: prefixes need their trailing slash; the
   // exact entries are the repo-root files only (see header).
-  assert('near-misses-stay-out', ids(['docs/adrs/z.md', '.claude-x/y.md', 'skillsx/a.md', 'examples/AGENTS.md', 'packages/create-objectstack/src/templates/AGENTS.md', 'apps/CLAUDE.md.bak']).length === 0, JSON.stringify(ids(['examples/AGENTS.md'])));
+  assert('near-misses-stay-out', ids(['docs/adrs/z.md', '.claude-x/y.md', 'skillsx/a.md', 'examples/AGENTS.md', 'packages/create-objectstack/src/templates/AGENTS.md', 'apps/CLAUDE.md.bak', 'docs/north-star.md', 'docs/NORTH-STAR.md.bak', 'examples/docs/NORTH-STAR.md']).length === 0, JSON.stringify(ids(['examples/AGENTS.md'])));
   assert('a-mixed-diff-groups-by-surface', ids(['docs/adr/0001.md', 'AGENTS.md', 'package.json']).join() === 'adr,agents-md');
 
   // ── the dispatch-gates declaration (#9979) ───────────────────────────────
@@ -3241,7 +3247,10 @@ async function selfTest() {
   // shows up only as a dev dispatched on a root-file card who is not told that
   // the card is GOVERNED.
   battery('the dispatch-gates declaration (#9979)');
-  const rootExacts = GOVERNED_SURFACES.filter((s) => s.exact).map((s) => s.exact);
+  // Only the SEPARATOR-LESS exact rows need a hint; an exact row that carries a
+  // separator (`docs/NORTH-STAR.md`) reaches dispatch-gates as written.
+  const rootExacts = GOVERNED_SURFACES.filter((s) => s.exact && !s.exact.includes('/')).map((s) => s.exact);
+  assert('an-exact-row-with-a-separator-declares-no-hint', GOVERNED_SURFACES.filter((s) => s.exact && s.exact.includes('/')).every((s) => !ROOT_FILE_WATCH_HINTS.includes(`${s.exact}/**`)) && GOVERNED_SURFACES.some((s) => s.exact === 'docs/NORTH-STAR.md'));
   assert('every-exact-root-row-declares-a-watch-hint', rootExacts.every((f) => ROOT_FILE_WATCH_HINTS.includes(`${f}/**`)), JSON.stringify(rootExacts));
   assert('the-declaration-names-no-file-this-register-does-not-govern', ROOT_FILE_WATCH_HINTS.every((h) => rootExacts.includes(h.replace(/\/\*+$/, ''))), JSON.stringify(ROOT_FILE_WATCH_HINTS));
   assert('both-root-instruction-files-are-declared', ROOT_FILE_WATCH_HINTS.join(',') === 'AGENTS.md/**,CLAUDE.md/**', ROOT_FILE_WATCH_HINTS.join(','));
@@ -4581,13 +4590,13 @@ async function selfTest() {
   const liftedHead = renderTestVerdict(liftedTest).split('\n')[0];
   assert(
     '⭐ the-test-head-no-longer-reports-a-post-lift-zero-as-if-nothing-had-hit-the-register',
-    liftedHead === 'governed-surface predicate: 0 of 4 path(s) hit the register after 1 generated-artifact lift(s) (5 surfaces, repo-agnostic).',
+    liftedHead === 'governed-surface predicate: 0 of 4 path(s) hit the register after 1 generated-artifact lift(s) (6 surfaces, repo-agnostic).',
     liftedHead,
   );
   const plainHead = renderTestVerdict(testVerdict(['packages/spec/src/ui/view.zod.ts'])).split('\n')[0];
   assert(
     'and-a-verdict-with-no-lift-keeps-its-head-line-byte-for-byte',
-    plainHead === 'governed-surface predicate: 0 of 1 path(s) hit the register (5 surfaces, repo-agnostic).',
+    plainHead === 'governed-surface predicate: 0 of 1 path(s) hit the register (6 surfaces, repo-agnostic).',
     plainHead,
   );
 
