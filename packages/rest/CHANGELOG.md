@@ -5262,9 +5262,9 @@ export`) are DERIVED from the primitives, never declared standalone. (This
   request, where before it was one statement that mostly failed anyway.
 
   **The cap moved to the routes, and the schemas gave it up.** Batch size is
-  deployment policy — `RestServerConfig.batch.maxBatchSize`, 1..1000, default 200
+  embedder policy — `RestServerConfig.batch.maxBatchSize`, 1..1000, default 200
   — so a hardcoded bound in the spec could only ever be a second, wrong answer
-  (a deployment raising the limit to 500 would still have been refused at 200).
+  (a host raising the limit to 500 would still have been refused at 200).
   All five bulk routes now call one `enforceBatchSize` helper with the configured
   value and answer with one envelope:
 
@@ -5300,9 +5300,10 @@ export`) are DERIVED from the primitives, never declared standalone. (This
   **Behaviour changes.**
 
   - A bulk request over the configured cap is `400 BATCH_TOO_LARGE` instead of
-    being executed. Deployments that were quietly relying on unbounded batches
-    should raise `batch.maxBatchSize` (up to 1000) rather than discover the cap in
-    production.
+    being executed. A deployment that was quietly relying on unbounded batches
+    meets the cap at whatever value the host embedding the server passed for
+    `batch.maxBatchSize` — 200 unless it passed one, which no shipped boot path
+    does.
   - `.min(1)` is gone with `.max(200)`: an empty batch is a no-op returning
     `total: 0`, which is what these routes already did, rather than a validation
     error the schema claimed but nothing raised.
@@ -5311,6 +5312,8 @@ export`) are DERIVED from the primitives, never declared standalone. (This
     that — the route has validated the strict shape since #3933 — but the declared
     type was looser.
   - New export: `UpdateManyRecordSchema` / `UpdateManyRecord`.
+
+  *Erratum, 2026-09-18 — this entry called the batch cap "deployment policy" and told operators that deployments relying on unbounded batches "should raise `batch.maxBatchSize` (up to 1000)". The cap is embedder policy: `RestServerConfig.batch.maxBatchSize` is the argument a host passes when it constructs the server, and neither shipped boot path passes it — `os serve` forwards exactly two keys out of the stack config's `api:` block (`api.enableProjectScoping`, `api.projectResolution`) and the dev plugin calls `createRestApiPlugin()` with no config at all — so a CLI-started deployment always gets the 200 default and no flag, config file or CLI option moves it. Two passages above are corrected in place; the 1..1000 range, the 200 default and the enforcement this release shipped are unchanged. (Corrected after publication, #18740.)*
 
 - fccec22: fix(rest): bulk writes bind to the object in the path, not the one in the body (#3933)
 
@@ -15189,9 +15192,9 @@ IEmailService`, `ExternalDatasourceService implements IExternalDatasourceService
   request, where before it was one statement that mostly failed anyway.
 
   **The cap moved to the routes, and the schemas gave it up.** Batch size is
-  deployment policy — `RestServerConfig.batch.maxBatchSize`, 1..1000, default 200
+  embedder policy — `RestServerConfig.batch.maxBatchSize`, 1..1000, default 200
   — so a hardcoded bound in the spec could only ever be a second, wrong answer
-  (a deployment raising the limit to 500 would still have been refused at 200).
+  (a host raising the limit to 500 would still have been refused at 200).
   All five bulk routes now call one `enforceBatchSize` helper with the configured
   value and answer with one envelope:
 
@@ -15227,9 +15230,10 @@ IEmailService`, `ExternalDatasourceService implements IExternalDatasourceService
   **Behaviour changes.**
 
   - A bulk request over the configured cap is `400 BATCH_TOO_LARGE` instead of
-    being executed. Deployments that were quietly relying on unbounded batches
-    should raise `batch.maxBatchSize` (up to 1000) rather than discover the cap in
-    production.
+    being executed. A deployment that was quietly relying on unbounded batches
+    meets the cap at whatever value the host embedding the server passed for
+    `batch.maxBatchSize` — 200 unless it passed one, which no shipped boot path
+    does.
   - `.min(1)` is gone with `.max(200)`: an empty batch is a no-op returning
     `total: 0`, which is what these routes already did, rather than a validation
     error the schema claimed but nothing raised.
@@ -15238,6 +15242,8 @@ IEmailService`, `ExternalDatasourceService implements IExternalDatasourceService
     that — the route has validated the strict shape since #3933 — but the declared
     type was looser.
   - New export: `UpdateManyRecordSchema` / `UpdateManyRecord`.
+
+  *Erratum, 2026-09-18 — this entry called the batch cap "deployment policy" and told operators that deployments relying on unbounded batches "should raise `batch.maxBatchSize` (up to 1000)". The cap is embedder policy: `RestServerConfig.batch.maxBatchSize` is the argument a host passes when it constructs the server, and neither shipped boot path passes it — `os serve` forwards exactly two keys out of the stack config's `api:` block (`api.enableProjectScoping`, `api.projectResolution`) and the dev plugin calls `createRestApiPlugin()` with no config at all — so a CLI-started deployment always gets the 200 default and no flag, config file or CLI option moves it. Two passages above are corrected in place; the 1..1000 range, the 200 default and the enforcement this release shipped are unchanged. (Corrected after publication, #18740.)*
 
 - fccec22: fix(rest): bulk writes bind to the object in the path, not the one in the body (#3933)
 
