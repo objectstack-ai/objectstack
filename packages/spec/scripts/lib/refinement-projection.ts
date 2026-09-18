@@ -90,22 +90,30 @@ export function projectableRefinementsOf(schema: z.ZodType): ProjectableRefineme
 type JsonObject = Record<string, unknown>;
 
 /**
- * `anyOf` of one `required` per key, conjoined with whatever the node already
- * says.
+ * `anyOf` of one `required` per key, conjoined onto the node through `allOf`.
  *
- * Written into `anyOf` when that keyword is free — the spelling a reader of the
- * file and the reference tables expect — and nested inside `allOf` when it is
- * not, because two `anyOf`s on one node would silently replace one rule with the
- * other. (No node on the shipped tree needs the `allOf` arm today; it is here so
- * that the day one does, the file states both rules instead of one.)
+ * ⭐ The nesting is MEASURED, not stylistic. Written as a TOP-LEVEL `anyOf`
+ * beside the node's own `type: 'object'` and `properties`, the pattern is valid
+ * JSON Schema and reads correctly to a validator — and it breaks the one real
+ * reader this repository has. `scripts/lib/format-type.ts` tests `anyOf` BEFORE
+ * `properties`, so the node stopped rendering as its object shape and started
+ * rendering as its `anyOf` branches, which carry no `type` at all: measured on
+ * `content/docs/references/system/tracing.mdx`, the `condition` cell went from
+ * `Record<string, any> | string | { dialect: …; source?: string; ast?: any }` to
+ * `Record<string, any> | string | any | any`, and 26 reference pages moved the
+ * same way. The reference tables are the authoritative input for AI authors
+ * (ADR-0033), so a cell that loses a shape it used to state is a second lie
+ * traded for the first one this change exists to remove.
+ *
+ * `allOf` is the conjunction JSON Schema provides for exactly this — a
+ * constraint added BESIDE a node's own keywords rather than instead of them —
+ * so a validator reads the same rule, the reference table keeps the shape it
+ * always stated, and two arms can land on one node without either replacing
+ * the other.
  */
 function emitRequiredOneOf(jsonSchema: JsonObject, keys: readonly string[]): void {
   if (keys.length === 0) return;
   const anyOf = keys.map((key) => ({ required: [key] }));
-  if (!('anyOf' in jsonSchema)) {
-    jsonSchema.anyOf = anyOf;
-    return;
-  }
   const allOf = Array.isArray(jsonSchema.allOf) ? (jsonSchema.allOf as unknown[]) : [];
   jsonSchema.allOf = [...allOf, { anyOf }];
 }

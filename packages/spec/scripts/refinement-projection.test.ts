@@ -66,11 +66,18 @@ const publish = (schema: z.ZodType, io: 'input' | 'output' = 'output'): Record<s
     override: refinementProjectionOverride,
   }) as Record<string, unknown>;
 
-/** `anyOf` of one `required` per key — evaluated the way a validator would. */
-const anyOfRequiredSatisfied = (node: Record<string, unknown>, doc: Record<string, unknown>): boolean => {
-  const anyOf = node.anyOf as Array<{ required: string[] }> | undefined;
-  if (!anyOf) throw new Error('the node carries no anyOf — nothing to evaluate');
-  return anyOf.some((branch) => branch.required.every((key) => Object.prototype.hasOwnProperty.call(doc, key)));
+/**
+ * The node's `allOf[].anyOf[].required` rule — evaluated the way a validator
+ * would, and refusing to report anything when the node carries no such rule, so
+ * a projection that stopped emitting fails rather than passing vacuously.
+ */
+const requiredOneOfSatisfied = (node: Record<string, unknown>, doc: Record<string, unknown>): boolean => {
+  const allOf = node.allOf as Array<{ anyOf?: Array<{ required: string[] }> }> | undefined;
+  const branches = allOf?.flatMap((clause) => clause.anyOf ?? []);
+  if (!branches || branches.length === 0) {
+    throw new Error('the node carries no allOf[].anyOf[].required — nothing to evaluate');
+  }
+  return branches.some((branch) => branch.required.every((key) => Object.prototype.hasOwnProperty.call(doc, key)));
 };
 
 /**
@@ -122,10 +129,24 @@ describe('required-one-of: one key list, read twice', () => {
     expect(projectableRefinementOf(rule)).toEqual({ pattern: 'required-one-of', keys: ['source', 'ast'] });
   });
 
-  it('emits an `anyOf` of one `required` per key', () => {
+  it('emits an `anyOf` of one `required` per key, conjoined through `allOf`', () => {
     const node: Record<string, unknown> = { type: 'object' };
     emitProjectableRefinement(node, { pattern: 'required-one-of', keys: ['a', 'b'] });
-    expect(node.anyOf).toEqual([{ required: ['a'] }, { required: ['b'] }]);
+    expect(node).toEqual({
+      type: 'object',
+      allOf: [{ anyOf: [{ required: ['a'] }, { required: ['b'] }] }],
+    });
+  });
+
+  it('⛔ never writes a TOP-LEVEL `anyOf` — the reference renderer reads that as the node\'s TYPE', () => {
+    // Measured: `format-type.ts` tests `anyOf` before `properties`, so a
+    // top-level `anyOf` here makes 26 reference pages print `any | any` in
+    // place of an object shape they used to state. Pinned as an absence
+    // because the regression is silent in every gate.
+    const node: Record<string, unknown> = { type: 'object', properties: { a: { type: 'string' } } };
+    emitProjectableRefinement(node, { pattern: 'required-one-of', keys: ['a', 'b'] });
+    expect(node.anyOf).toBeUndefined();
+    expect(node.properties).toEqual({ a: { type: 'string' } });
   });
 
   it('the predicate and the keywords agree over the whole presence lattice', () => {
@@ -143,7 +164,7 @@ describe('required-one-of: one key list, read twice', () => {
       expect(
         rule(asJson as never),
         `runtime vs keywords disagree for ${JSON.stringify(asJson)}`,
-      ).toBe(anyOfRequiredSatisfied(node, asJson));
+      ).toBe(requiredOneOfSatisfied(node, asJson));
     }
   });
 
@@ -152,14 +173,24 @@ describe('required-one-of: one key list, read twice', () => {
     const node = publish(z.object({ a: z.unknown().optional(), b: z.unknown().optional() }).refine(rule));
     const doc = { a: null };
     expect(rule(doc as never)).toBe(true);
-    expect(anyOfRequiredSatisfied(node, doc)).toBe(true);
+    expect(requiredOneOfSatisfied(node, doc)).toBe(true);
   });
 
-  it('conjoins through `allOf` rather than replacing an `anyOf` the node already has', () => {
+  it('leaves a union `anyOf` the node already has completely alone', () => {
     const node: Record<string, unknown> = { anyOf: [{ type: 'string' }, { type: 'number' }] };
     emitProjectableRefinement(node, { pattern: 'required-one-of', keys: ['a'] });
     expect(node.anyOf).toEqual([{ type: 'string' }, { type: 'number' }]);
     expect(node.allOf).toEqual([{ anyOf: [{ required: ['a'] }] }]);
+  });
+
+  it('two arms on one node both land, neither replacing the other', () => {
+    const node: Record<string, unknown> = { type: 'object' };
+    emitProjectableRefinement(node, { pattern: 'required-one-of', keys: ['a'] });
+    emitProjectableRefinement(node, { pattern: 'required-one-of', keys: ['b', 'c'] });
+    expect(node.allOf).toEqual([
+      { anyOf: [{ required: ['a'] }] },
+      { anyOf: [{ required: ['b'] }, { required: ['c'] }] },
+    ]);
   });
 });
 
@@ -217,14 +248,17 @@ describe('non-blank-string: the trim and the regex are ONE set', () => {
 });
 
 describe('the LIVE seam: the published file now states the rule it used to drop', () => {
-  it('`Expression` publishes the source-or-ast rule', () => {
-    expect(publish(ExpressionSchema).anyOf).toEqual([{ required: ['source'] }, { required: ['ast'] }]);
+  it('`Expression` publishes the source-or-ast rule, and keeps its object shape', () => {
+    const node = publish(ExpressionSchema);
+    expect(node.allOf).toEqual([{ anyOf: [{ required: ['source'] }, { required: ['ast'] }] }]);
+    expect(node.type).toBe('object');
+    expect(Object.keys(node.properties as Record<string, unknown>)).toEqual(['dialect', 'source', 'ast', 'meta']);
   });
 
   it('the card\'s own specimen — `{ dialect: \'cel\' }` — is refused by BOTH sides now', () => {
     const doc = { dialect: 'cel' };
     expect(ExpressionSchema.safeParse(doc).success).toBe(false);
-    expect(anyOfRequiredSatisfied(publish(ExpressionSchema), doc)).toBe(false);
+    expect(requiredOneOfSatisfied(publish(ExpressionSchema), doc)).toBe(false);
   });
 
   it('⛔ no envelope the runtime ACCEPTS is refused by the emitted keywords', () => {
@@ -240,7 +274,7 @@ describe('the LIVE seam: the published file now states the rule it used to drop'
     ];
     for (const doc of corpus) {
       const runtimeAccepts = ExpressionSchema.safeParse(doc).success;
-      const keywordsAccept = anyOfRequiredSatisfied(node, doc);
+      const keywordsAccept = requiredOneOfSatisfied(node, doc);
       // Equality, not implication: this arm is exact, so a one-sided pin would
       // pass a projection that had stopped narrowing at all.
       expect(keywordsAccept, `disagreement on ${JSON.stringify(doc)}`).toBe(runtimeAccepts);
