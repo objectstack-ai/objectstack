@@ -296,8 +296,27 @@ const BaseNavItemSchema = z.object({
   /** Unique identifier for the item */
   id: SnakeCaseIdentifierSchema.describe('Unique identifier for this navigation item (lowercase snake_case)'),
   
-  /** Display label */
-  label: I18nLabelSchema.describe('Display proper label'),
+  /**
+   * Display label — OPTIONAL since the cloud#2021 / objectui#9868 letter-A
+   * ruling, and optional in the ACCEPT sense only: an entry still shows text.
+   *
+   * Absent ⇒ the entry inherits, **at render time**, the CURRENT label of what
+   * it opens — the view's label when it names a view and that view is labelled,
+   * else the object's / dashboard's label. Present ⇒ rendered verbatim, never
+   * overwritten. Nothing is stored for the absent case: there is no `inherited`
+   * flag and no materialised copy, which is what makes a renamed target show
+   * its new name on the next render rather than a stale snapshot.
+   *
+   * The rule this relaxes — *every real destination must have identity and
+   * text* — still holds: identity is the target, text is inherited at render.
+   */
+  label: I18nLabelSchema.optional().describe(
+    'Display proper label. Optional: absent ⇒ the entry inherits the CURRENT label of what it opens at render '
+    + "time — the view's label when it names a view and that view is labelled, else the object's / dashboard's "
+    + 'label; a present label renders verbatim and is never overwritten. Every real destination must have identity '
+    + 'and text: identity is the target, text is inherited at render. No stored inherited flag; nothing is '
+    + 'materialised for the absent case.',
+  ),
   
   /** Icon name (Lucide) */
   icon: z.string().optional().describe('Icon name'),
