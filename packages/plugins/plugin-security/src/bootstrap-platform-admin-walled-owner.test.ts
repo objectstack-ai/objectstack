@@ -45,11 +45,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
-import {
-  resetLegacyPlatformAdminGrantReport,
-  setPlatformAdminConfigSink,
-  type PlatformAdminConfigSink,
-} from '@objectstack/core';
+import { setPlatformAdminConfigSink, type PlatformAdminConfigSink } from '@objectstack/core';
 import { SystemUserId } from '@objectstack/spec/system';
 import { bootstrapPlatformAdmin, shouldReplayBootstrapFor } from './bootstrap-platform-admin.js';
 
@@ -339,25 +335,34 @@ describe('walled posture + UNDECLARED owner — fail-closed backstop (unchanged 
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-// [#11663 P5] The deprecation pointer for a LEGACY grant — loud migration,
-// exactly ONCE per process, through the SAME latch the derivation-site
-// reporter uses (boot-time + request-time detection can never total two).
+// [#11663 L5] The migration window's EXIT, boot side.
+//
+// L4 pointed any pre-existing unscoped `admin_full_access` holder at the config
+// path, once per process, and SKIPPED the fail-closed "nobody is declared" line
+// for such a rig on the stated ground that 「the deployment HAS an administrator,
+// on the old anchor」. L5 retired the walled anchor at the derivation site, so
+// both halves of that arrangement are over: there is no pointer, and the
+// deployment does NOT have an administrator.
+//
+// ⛔ These arms assert the LOUD half as hard as the quiet one. A walled rig that
+// silently keeps a row conferring nothing, and says nothing about it, is the
+// exact failure the window was built to prevent.
 // ───────────────────────────────────────────────────────────────────────────
-describe('walled posture — legacy grant deprecation pointer (#11663 P5)', () => {
+describe('walled posture — the legacy grant is no longer an anchor (#11663 L5)', () => {
   let sinkWarns: string[];
+  let sinkErrors: string[];
   let prevSink: PlatformAdminConfigSink;
 
   beforeEach(() => {
     sinkWarns = [];
-    resetLegacyPlatformAdminGrantReport();
+    sinkErrors = [];
     prevSink = setPlatformAdminConfigSink({
-      error: () => {},
+      error: (m) => sinkErrors.push(m),
       warn: (m) => sinkWarns.push(m),
     });
   });
   afterEach(() => {
     setPlatformAdminConfigSink(prevSink);
-    resetLegacyPlatformAdminGrantReport();
   });
 
   /** A legacy DB: the admin set row already exists, and a human holds the
@@ -369,49 +374,72 @@ describe('walled posture — legacy grant deprecation pointer (#11663 P5)', () =
       grants: [{ id: 'ups_1', user_id: 'u_legacy', permission_set_id: 'ps_admin', organization_id: null }],
     });
 
-  it('a seeded legacy grant produces EXACTLY ONE line naming OS_PLATFORM_OWNER_EMAIL — even across repeated bootstraps', async () => {
+  it('⛔ a seeded legacy grant produces NO deprecation line any more — the window is closed', async () => {
     process.env.OS_TENANCY_POSTURE = 'isolated';
     process.env.OS_PLATFORM_OWNER_EMAIL = 'operator@corp.example';
     const ql = legacyDb();
     const r1 = await bootstrapPlatformAdmin(ql as any, [adminFullAccess()], { logger: logger() });
     const r2 = await bootstrapPlatformAdmin(ql as any, [adminFullAccess()], { logger: logger() });
-    // The acceptance pin: exactly one deprecation line, naming the variable,
-    // the holder and their address (the exact config line to add).
-    expect(sinkWarns).toHaveLength(1);
-    expect(sinkWarns[0]).toContain('OS_PLATFORM_OWNER_EMAIL');
-    expect(sinkWarns[0]).toContain('u_legacy');
-    expect(sinkWarns[0]).toContain('legacy-admin@corp.example');
-    // Nothing is revoked and nothing new is minted: the one legacy row stays.
+    // This is the pin L4 owned, inverted: exactly ZERO deprecation lines, across
+    // repeated bootstraps, with an administrator declared.
+    expect(sinkWarns).toEqual([]);
+    // Nothing is revoked and nothing new is minted: the one legacy row stays
+    // exactly where it is. ⛔ Retiring the ANCHOR is not deleting the ROW —
+    // that row's ownership is ADR-0131 C3's, on the v18 line.
     expect(ql.grants()).toHaveLength(1);
     expect(r1.reason).toBe('walled_config_derived');
     expect(r2.reason).toBe('walled_config_derived');
   });
 
-  it('legacy grant + UNDECLARED config: the pointer is the remedy — the undeclared error line is skipped', async () => {
-    // The deployment HAS an administrator (on the old anchor); yelling "no
-    // usable administrator" beside the pointer would be false. The reason
-    // still answers undeclared, truthfully.
+  it('⭐ legacy grant + UNDECLARED config: the fail-closed line is NO LONGER skipped', async () => {
+    // The consequence that makes this leg safe to ship. L4 stayed quiet here
+    // because the pointer carried the remedy and the row still conferred.
+    // Neither holds now: under a wall this rig has ZERO platform administrators,
+    // so the backstop must say so at error, naming the variable.
     process.env.OS_TENANCY_POSTURE = 'isolated';
     const log = logger();
     const ql = legacyDb();
     const r = await bootstrapPlatformAdmin(ql as any, [adminFullAccess()], { logger: log });
     expect(r.reason).toBe('walled_owner_email_undeclared');
-    expect(sinkWarns).toHaveLength(1);
-    expect(sinkWarns[0]).toContain('OS_PLATFORM_OWNER_EMAIL');
-    expect(log.error).not.toHaveBeenCalled();
+    expect(log.error).toHaveBeenCalledTimes(1);
+    const line = String(log.error.mock.calls[0][0]);
+    expect(line).toContain('OS_PLATFORM_OWNER_EMAIL');
+    // …and it names the row and its holder, so the operator can tell WHOSE
+    // standing just ended rather than only that nobody is declared.
+    expect(line).toContain('u_legacy');
+    expect(line).toContain('admin_full_access');
+    // The row is untouched, and no deprecation pointer came back through the
+    // module sink either.
     expect(ql.grants()).toHaveLength(1);
+    expect(sinkWarns).toEqual([]);
   });
 
-  it('a usr_system-held grant is NOT a legacy holder — no pointer', async () => {
+  it('the holder clause is CONDITIONAL — a walled rig with no legacy row says only the general line', async () => {
+    // The control for the arm above: the extra sentence must come from the row
+    // actually being there, not from the message having grown unconditionally.
     process.env.OS_TENANCY_POSTURE = 'isolated';
-    process.env.OS_PLATFORM_OWNER_EMAIL = 'operator@corp.example';
+    const log = logger();
+    const ql = makeQl({
+      users: [user('u_stranger', 'stranger@evil.example', '2026-08-23T01:00:00Z')],
+    });
+    const r = await bootstrapPlatformAdmin(ql as any, [adminFullAccess()], { logger: log });
+    expect(r.reason).toBe('walled_owner_email_undeclared');
+    const line = String(log.error.mock.calls[0][0]);
+    expect(line).toContain('OS_PLATFORM_OWNER_EMAIL');
+    expect(line).not.toContain('legacy unscoped');
+  });
+
+  it('a usr_system-held grant is still NOT a legacy holder — the general line only', async () => {
+    process.env.OS_TENANCY_POSTURE = 'isolated';
+    const log = logger();
     const ql = makeQl({
       sets: [{ id: 'ps_admin', name: 'admin_full_access', active: true }],
       grants: [{ id: 'ups_1', user_id: SystemUserId.SYSTEM, permission_set_id: 'ps_admin', organization_id: null }],
     });
-    const r = await bootstrapPlatformAdmin(ql as any, [adminFullAccess()], { logger: logger() });
-    expect(sinkWarns).toHaveLength(0);
-    expect(r.reason).toBe('walled_config_derived');
+    const r = await bootstrapPlatformAdmin(ql as any, [adminFullAccess()], { logger: log });
+    expect(r.reason).toBe('walled_owner_email_undeclared');
+    expect(String(log.error.mock.calls[0][0])).not.toContain('legacy unscoped');
+    expect(sinkWarns).toEqual([]);
   });
 });
 

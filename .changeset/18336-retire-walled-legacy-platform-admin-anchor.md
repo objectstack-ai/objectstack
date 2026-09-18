@@ -1,0 +1,14 @@
+---
+"@objectstack/core": minor
+"@objectstack/plugin-security": minor
+---
+
+**Breaking (shipped as `minor` under the launch-window convention).** Under a **walled** tenancy posture (`group` / `isolated`), a legacy unscoped `admin_full_access` grant row no longer confers `PLATFORM_ADMIN`; platform standing there is derived from `OS_PLATFORM_OWNER_EMAIL` and from nothing else. The migration pointer that announced this since 17.3.0 is retired with it: `reportLegacyPlatformAdminGrant` and `resetLegacyPlatformAdminGrantReport` are **removed from `@objectstack/core`'s published entry** (#18336, #11663 leg L5).
+
+⚠️ **The `single` posture is untouched, deliberately.** Its zero-config first-user promotion still mints that row and that row still confers `PLATFORM_ADMIN` — a development environment started for a moment cannot be asked to declare an administrator first. Choice 4A (#11974) rules that promotion correct, and the maintainer's 2026-09-08 ruling on #16682 is verbatim: 「retiring the walled write must not retire the `single` one」. The `single` half's disposition is #11979's. ADR-0131 D5, as amended 2026-09-17 (#18413), is the governing record.
+
+**What a walled deployment must do.** Declare each administrator's **verified** address in `OS_PLATFORM_OWNER_EMAIL` (comma-separated for several) before upgrading. A walled rig that upgrades with the variable undeclared and an unscoped grant row still in place has **zero** platform administrators; the bootstrap now says so **at error**, naming the variable, the row and its holder — L4 used to skip that line for exactly this rig, on the ground that the deprecation pointer carried the remedy instead, and both halves of that arrangement have now expired.
+
+- **17.3.0 opened the window, this closes it.** L4 (17.3.0) stopped the walled bootstrap from ever *writing* the row and started the once-per-process pointer; L5 stops the walled derivation from *reading* it. The window was time-boxed and loud by design (#11663 P5).
+- **The retirement takes the ANCHOR, not the ROW.** Nothing here writes, deletes or re-owns any grant row — a walled holder keeps the `admin_full_access` permission set they hold, and loses only platform-admin *standing*: the rung and the built-in `platform_admin` position. That row's ownership is ADR-0131 C3's, on the v18 line.
+- **No new query.** The posture gate reads the environment, never the engine, so the recorded query multiset is identical under both of its answers — measured, not asserted.
