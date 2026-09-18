@@ -31,7 +31,7 @@
 - ✓ 祖先与对比 `GET .../compare/{base}...{head}` —— 浅检出上本地祖先判据不可信时的正解。
 - ✓ `GET .../commits/{sha}/check-runs` 门禁、`GET .../actions/runs` workflow、`GET /rate_limit` 配额零计费。
 
-## 写侧 —— 全部可迁移
+## 写侧 —— 全部可迁移;允许规则按首个 glob 前的字面前缀匹配:verb 紧跟裸 url,`-H`/`-d` 后置
 
 - ✓ 评论 `POST .../issues/{n}/comments`;改评论 `PATCH .../issues/comments/{id}`。
 - ✓ 标签加法 `POST .../issues/{n}/labels`,定向删 `DELETE .../issues/{n}/labels/{name}`;加法优先。
@@ -45,11 +45,11 @@
 - ✓ 请求复审 `POST .../pulls/{n}/requested_reviewers` · 开 PR `POST .../pulls` 带 `draft=true`。
 - ✓ `origin/main` 合进 PR head:`PUT .../pulls/{n}/update-branch`,PM 席位、零文件写、真合并提交。
 - `expected_head_sha` 须完整 40 字符 SHA(短 SHA 回 422);base 未动回 422 = 无事可做,不是失败。
-- ✓ draft 转 ready `POST .../pulls/{n}/ccr/ready_for_review`,反向 `.../ccr/convert_to_draft`。
+- ✓ draft 转 ready `curl -sS -X POST .../pulls/{n}/ccr/ready_for_review -d '{}'`,反向 `.../ccr/convert_to_draft`。
 - ⛔ 裸 `PATCH /pulls/{n}` 带 `{"draft": false}` 回 200 零改;状态码不作数,`GET /pulls/{n}` 才作数。
 - 线程自己建:`POST .../pulls/{n}/comments` 带 `commit_id`·`path`·`line`,回读看 `review_threads`。
 - ✓ `POST .../ccr/comments/{id}/resolve` · `/unresolve`;`{id}` 是评审评论 id,⛔ 只在自己 PR 上探。
-- ✓ auto-merge 挂载 `PUT .../pulls/{n}/ccr/auto_merge` 带 `{"merge_method":"SQUASH"}`,`DELETE` 卸载。
+- ✓ auto-merge 挂载 `curl -sS -X PUT .../pulls/{n}/ccr/auto_merge -d '{"merge_method":"SQUASH"}'`,`DELETE` 卸载。
 - ⛔ `PUT .../ccr/auto_merge` 在 draft 上 422 零存储;`DELETE` 无挂载回 422 = 本就没挂,非失败。
 - ⛔ 永不 MCP `update_pull_request`(锁 1 已拒);ready/draft 翻转只走 ccr 路;auto-merge MCP 锁 1 同拒。
 - 直合仓 `PUT .../pulls/{n}/merge`;actor 记令牌类,按账号非会话、逐写回读;见配额段,MCP 恒用户。
