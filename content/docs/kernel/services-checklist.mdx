@@ -470,7 +470,11 @@ When an app bundle includes an `i18n` config and `translations` array, `AppPlugi
 
 ```typescript
 export default defineStack({
-  manifest: { id: 'com.example.crm', namespace: 'crm' },
+  manifest: {
+    id: 'com.example.crm',
+    namespace: 'crm',
+    /* …full ObjectStackManifest… */
+  },
   i18n: { defaultLocale: 'en', supportedLocales: ['en', 'zh-CN'], fallbackLocale: 'en' },
   translations: [CrmTranslations],   // TranslationBundle[]
 });

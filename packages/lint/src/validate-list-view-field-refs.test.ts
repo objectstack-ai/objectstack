@@ -75,7 +75,7 @@ const FULL_LIST_VIEW: AnyRec = {
     tabs: [{ name: 'open', filter: [{ field: 'status', operator: 'equals', value: 'open' }] }],
   },
   tabs: [{ name: 'mine', filter: [{ field: 'business_unit', operator: 'equals', value: 'x' }] }],
-  kanban: { groupByField: 'status', summarizeField: 'estimate', columns: ['title'] },
+  kanban: { groupByField: 'status', summarizeField: 'estimate', columns: ['title'], titleField: 'title' },
   calendar: {
     startDateField: 'due_at',
     endDateField: 'visible_from',
@@ -227,6 +227,10 @@ describe('#14107 — every other walked position', () => {
     ],
     [{ kanban: { summarizeField: BAD } }, 'views[0].list.kanban.summarizeField', 'warning'],
     [{ kanban: { columns: [BAD] } }, 'views[0].list.kanban.columns[0]', 'warning'],
+    // [#18565] Calendar's level, not the required siblings' — see the row's
+    // own note in the rule. The board renders every card; only the title is
+    // not the one the author named.
+    [{ kanban: { titleField: BAD } }, 'views[0].list.kanban.titleField', 'warning'],
     [{ calendar: { endDateField: BAD } }, 'views[0].list.calendar.endDateField', 'warning'],
     [{ calendar: { titleField: BAD } }, 'views[0].list.calendar.titleField', 'warning'],
     [{ calendar: { colorField: BAD } }, 'views[0].list.calendar.colorField', 'warning'],
@@ -281,7 +285,7 @@ describe('#14107 — every other walked position', () => {
   // A floor, so a position quietly dropped from the rule's table cannot pass
   // by simply never being asserted.
   it('covers every position the rule walks', () => {
-    expect(cases.length).toBeGreaterThanOrEqual(46);
+    expect(cases.length).toBeGreaterThanOrEqual(47);
   });
 });
 
