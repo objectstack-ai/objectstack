@@ -1558,15 +1558,26 @@ interface GuidanceRoutes {
  * key in it, a union or pipe the probe cannot drive to a single door, or a refusal
  * whose message does not carry the declared text — all read as "no evidence",
  * never as "proved". ⛔ And the verdict for the second half says only THAT the
- * prescription did not arrive, never WHY: on the shipped graph 7 of the 8 defs in
- * that state are unions, where "the door is open" would be a guess this gate has
- * not measured — the mistake this proof's first cut made about
- * `additionalProperties` and must not repeat one layer down.
+ * prescription did not arrive, never WHY: at `88aa326deb` that state held 9 keys
+ * on 4 defs, 3 of those 4 defs unions carrying 7 of the 9 keys — for a union
+ * "the door is open" would be a guess this gate has not measured, the mistake
+ * this proof's first cut made about `additionalProperties` and must not repeat
+ * one layer down.
  *
- * Measured on the shipped graph at #18301 with THIS instrument — see the PR body
- * for the census run: `integration/DataSyncConfig` has NO route (its shape is not
- * a `strictObject` and nothing prescribes for `schedule`), so this proof does not
- * reach the 2026-09-10 ruling that withheld that tombstone.
+ * Every count above is a reading of ONE tree — objectstack-ai/objectstack
+ * `88aa326deb`, where #18579 re-took all of them with THIS instrument — and each
+ * is written beside the population it counts: of the 1527 emitted defs, 258
+ * resolve to exactly one declaration, and 147 of those 258 name a key the def
+ * does not declare; those 147 defs promise 779 keys, of which 770 are delivered
+ * and the 9 above are not. Which defs sit in that last group is a fact about the
+ * graph at that commit and not a property of this proof — closing an open door
+ * moves it — so a later reader RE-MEASURES rather than re-dates these, and ⛔
+ * derives none of them from the #18301 PR body, whose census row gives the 147
+ * population the 258 count: a count wearing another population's label is the
+ * defect this docblock was corrected for.
+ * `integration/DataSyncConfig` has NO route (its shape is not a `strictObject`
+ * and nothing prescribes for `schedule`), so this proof does not reach the
+ * 2026-09-10 ruling that withheld that tombstone.
  */
 function computeGuidanceRoutes(): GuidanceRoutes {
   const shapeSignature = (shape: Record<string, unknown>): string =>

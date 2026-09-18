@@ -44,6 +44,7 @@ import { parseCLI } from 'vitest/node';
 import {
   exactAndGlobPopulations,
   runFilterPreflight,
+  runProjectCliOverridePreflight,
 } from '../vitest-filter-preflight/src/index.js';
 
 // Files proven eligible for the worker-shared plain showcase stack.
@@ -88,6 +89,25 @@ runFilterPreflight({
     exact: { 'shared-showcase': SHARED_SHOWCASE },
     globProject: 'isolated',
   }),
+  parse: parseCLI,
+});
+
+// #18788 — the same narrowing, the same failure direction, a different input.
+// `projects` also swallows a CLI TIMEOUT OVERRIDE: vitest 4.1.11 carries only a
+// closed twenty-name allowlist into a project config, `hookTimeout` and
+// `teardownTimeout` are not on it, and a run naming one silently uses the
+// DEFAULT budget and reports a pass that MEASURED NOTHING. That flag is the
+// instrument this repo's own prior art reaches for to witness a cold load
+// leaving a clocked window, so the green it returns in a `projects` package is
+// indistinguishable from one that passed. The run is REFUSED instead, loudly,
+// naming the spellings that DO bite here — ⛔ never forwarded into the projects
+// below; the shared module's header carries the measured table, the three
+// routes and why this is the one. Every package that declares `projects` calls
+// this, and `test/config-wiring-sweep.test.ts` spawns a real vitest child per
+// package to prove the refusal is a behaviour rather than a spelling.
+runProjectCliOverridePreflight({
+  argv: process.argv,
+  packageName: '@objectstack/dogfood',
   parse: parseCLI,
 });
 

@@ -419,6 +419,65 @@ export const FIRING_CONTROL = [
   '',
 ].join('\n');
 
+/**
+ * The three specifiers UNPUBLISHED_SUBPATH_CONTROL exists to keep COUNTED. The
+ * block below and this list are held equal by a self-test battery, so editing
+ * one without the other is a failure rather than a silent narrowing.
+ */
+export const UNPUBLISHED_SUBPATH_SPECIFIERS = Object.freeze([
+  '@objectstack/spec/hub',
+  '@objectstack/core/errors',
+  '@objectstack/core/plugin',
+]);
+
+/**
+ * MUST be reported failing, with a TS2307 on EACH of the three specifiers
+ * above, every one of them classified `unpublished-subpath` and forgiven by
+ * nothing.
+ *
+ * Reconstructed line-for-line from `packages/spec/V3_MIGRATION_GUIDE.md` as it
+ * read BEFORE #18753 repaired it. That document announced a migration that
+ * never happened: `466f32ea22` deleted `createErrorResponse`,
+ * `getHttpStatusForCategory` and `definePlugin` from spec and created neither
+ * destination, so the guide told a reader to import from subpaths their
+ * packages publish in no `exports` entry.
+ *
+ * ⭐ SYNTHETIC ON PURPOSE, and it is the whole reason this fixture exists. A
+ * control that IS the live document disarms itself the moment the document is
+ * repaired — the census number falls, and the fourth instance in the next guide
+ * is just as green. FIRING_CONTROL was reconstructed from PR #18712's diff for
+ * exactly this reason; this is the same move for the `unpublished-subpath`
+ * family, which FIRING_CONTROL (a TS2341) does not cover at all.
+ *
+ * ⭐ WHAT IT GUARDS IS THE TOLERANCE RULE, not the corpus. Widen
+ * `classifyDiagnostic` until a `@objectstack/*` TS2307 is forgiven and every
+ * unresolvable documented import in this repository goes quiet at once — with
+ * no other control able to notice. That is why it sits on the refusal list
+ * beside the other two instead of firing only under `--self-test`.
+ *
+ * ⚠️ THE COST, stated because it is real: if one of the three subpaths is ever
+ * genuinely published, this control stops producing TS2307 for it and EVERY
+ * census refuses until someone edits the fixture. That is the same exposure
+ * FIRING_CONTROL already carries (make `ObjectKernel.logger` public and it
+ * stops producing TS2341), and it is answered the same way — the refusal text
+ * names the remedy instead of leaving a stale fixture to be diagnosed.
+ *
+ * ⛔ It carries NO elision marker and NO syntax error, both load-bearing: a
+ * marker would let the (disqualified) exclusion reading skip it, and a syntax
+ * error would land it in pass 1's unparseable set, where tsc never type-checks
+ * it and the three TS2307s it exists to produce would never be reported at all.
+ */
+export const UNPUBLISHED_SUBPATH_CONTROL = [
+  '# unpublished-subpath control',
+  '',
+  '```typescript',
+  "import { TenantSchema } from '@objectstack/spec/hub';",
+  "import { createErrorResponse, getHttpStatusForCategory } from '@objectstack/core/errors';",
+  "import { definePlugin } from '@objectstack/core/plugin';",
+  '```',
+  '',
+].join('\n');
+
 // ── Resolution: a `paths` map generated from each package's own exports map ──
 
 /** Walk a conditional exports value for the `types` condition an importer sees. */
@@ -643,6 +702,14 @@ function controlUnits() {
   return [
     { ...extractBlocks(GREEN_CONTROL)[0], file: 'control:green', index: 0, kind: 'control', control: 'green', stratum: 'control' },
     { ...extractBlocks(FIRING_CONTROL)[0], file: 'control:firing', index: 0, kind: 'control', control: 'firing', stratum: 'control' },
+    {
+      ...extractBlocks(UNPUBLISHED_SUBPATH_CONTROL)[0],
+      file: 'control:unpublished-subpath',
+      index: 0,
+      kind: 'control',
+      control: 'unpublished-subpath',
+      stratum: 'control',
+    },
   ];
 }
 
@@ -683,6 +750,37 @@ export function controlProblems(controls) {
       problems.push(
         'FIRING_CONTROL no longer carries an elision marker, so this run cannot demonstrate why the exclusion '
           + 'reading is disqualified. Restore the `// ... plugin registration code ...` line from PR #18712.',
+      );
+    }
+  }
+  const subpath = controls.find((c) => c.control === 'unpublished-subpath');
+  if (!subpath) problems.push('UNPUBLISHED_SUBPATH_CONTROL did not extract to a block — the extractor is broken.');
+  else {
+    for (const specifier of UNPUBLISHED_SUBPATH_SPECIFIERS) {
+      const hit = subpath.diagnostics.find((d) => d.code === 2307 && d.specifier === specifier);
+      if (!hit) {
+        problems.push(
+          `UNPUBLISHED_SUBPATH_CONTROL produced no TS2307 for '${specifier}'. Either the compile path no longer `
+            + 'reaches this fixture, or that subpath is now PUBLISHED. If it is published, this control is obsolete '
+            + 'for that specifier: repoint it at one that is still in no `exports` entry, in the same edit that '
+            + 'records why — ⛔ never by deleting the leg, which removes the guard for the other two with it.',
+        );
+        continue;
+      }
+      if (hit.family !== 'unpublished-subpath' || hit.forgiven) {
+        problems.push(
+          `UNPUBLISHED_SUBPATH_CONTROL's TS2307 for '${specifier}' classified as ${hit.family} / `
+            + `forgiven=${hit.forgiven}, not unpublished-subpath / forgiven=false. The tolerance rule has been `
+            + 'widened until a documented import that resolves for NO consumer of the published package is forgiven, '
+            + 'which silences this whole family of defect at once.',
+        );
+      }
+    }
+    if (subpath.raw && !subpath.tolerant) {
+      problems.push(
+        'The tolerance rule FORGAVE the unpublished-subpath control outright, so every unresolvable '
+          + '`@objectstack/*` import in the corpus is now invisible to the TOLERANT reading — the one number a gate '
+          + 'could be built on.',
       );
     }
   }
@@ -753,6 +851,11 @@ function report(units, controls, summary, files) {
   console.log(
     '  FIRING_CONTROL also carries an elision marker, so the EXCLUSION reading SKIPS it. '
       + 'That is why exclusion is reported below as disqualified rather than offered.',
+  );
+  console.log(
+    `  UNPUBLISHED_SUBPATH_CONTROL reports TS2307 on all ${UNPUBLISHED_SUBPATH_SPECIFIERS.length} of its specifiers `
+      + `(${UNPUBLISHED_SUBPATH_SPECIFIERS.join(', ')}), every one COUNTED as `
+      + 'unpublished-subpath — the tolerance rule still refuses to forgive an import that resolves for no consumer.',
   );
 
   console.log('\nPOPULATION');
@@ -858,6 +961,11 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'fixture — FIRING_CONTROL extracts to one block that reads kernel.logger': 1,
   'fixture — FIRING_CONTROL carries the elision marker that disqualifies exclusion': 1,
   'fixture — GREEN_CONTROL extracts to one block importing @objectstack/core': 1,
+  'fixture — UNPUBLISHED_SUBPATH_CONTROL extracts to one block whose specifiers are exactly UNPUBLISHED_SUBPATH_SPECIFIERS': 1,
+  'fixture — UNPUBLISHED_SUBPATH_CONTROL carries no elision marker, so no reading can skip it': 1,
+  'classify — every UNPUBLISHED_SUBPATH_SPECIFIERS entry is COUNTED as unpublished-subpath': 1,
+  'refusal — a missing TS2307 on a listed specifier REFUSES the census': 1,
+  'refusal — a FORGIVEN unpublished-subpath diagnostic REFUSES the census': 1,
   'population — stratumOf separates CHANGELOG.md from hand-written Markdown': 1,
   'population — isDepthOne separates a depth-1 package root from a nested one': 1,
   'exports — pickTypesTarget reads the types entry under the import condition': 1,
@@ -866,11 +974,28 @@ const SELF_TEST_BATTERIES = Object.freeze({
 
 // Deleting an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 30;
+const SELF_TEST_BATTERY_FLOOR = 35;
 
 const md = (...lines) => lines.join('\n');
 
 function selfTest() {
+  // Healthy stand-ins for the other two controls, so a refusal battery reads
+  // only the problems the unpublished-subpath leg contributes — and asserts the
+  // healthy trio reports NONE before asserting a broken one reports some, since
+  // a `controlProblems` that always complained would otherwise pass.
+  const healthyGreen = () => ({ control: 'green', raw: false, tolerant: false, elided: false, diagnostics: [] });
+  const healthyFiring = () => ({
+    control: 'firing',
+    raw: true,
+    tolerant: true,
+    elided: true,
+    diagnostics: [{ code: 2341, family: 'semantic', forgiven: false }],
+  });
+  const healthySubpathDiagnostics = () => UNPUBLISHED_SUBPATH_SPECIFIERS.map((specifier) => ({
+    code: 2307, specifier, family: 'unpublished-subpath', forgiven: false,
+  }));
+  const subpathControl = (diagnostics) => ({ control: 'unpublished-subpath', raw: true, tolerant: true, elided: false, diagnostics });
+
   const cases = [
     { label: 'extract — a plain ```ts fence is a block', run: () => (extractBlocks(md('```ts', 'const a = 1;', '```')).length === 1 ? null : 'expected 1 block') },
     { label: 'extract — a ```typescript fence is a block', run: () => (extractBlocks(md('```typescript', 'const a = 1;', '```'))[0]?.lang === 'typescript' ? null : 'expected a typescript block') },
@@ -966,6 +1091,66 @@ function selfTest() {
         const b = extractBlocks(GREEN_CONTROL);
         if (b.length !== 1) return `expected 1 block, got ${b.length}`;
         return specifiersIn(b[0].code).includes('@objectstack/core') ? null : 'the green control stopped importing anything';
+      },
+    },
+    {
+      label: 'fixture — UNPUBLISHED_SUBPATH_CONTROL extracts to one block whose specifiers are exactly UNPUBLISHED_SUBPATH_SPECIFIERS',
+      run: () => {
+        const b = extractBlocks(UNPUBLISHED_SUBPATH_CONTROL);
+        if (b.length !== 1) return `expected 1 block, got ${b.length}`;
+        const found = specifiersIn(b[0].code);
+        const expected = [...UNPUBLISHED_SUBPATH_SPECIFIERS];
+        return found.length === expected.length && expected.every((s) => found.includes(s))
+          ? null
+          : `the block imports ${JSON.stringify(found)} but the roster is ${JSON.stringify(expected)} — editing one without the other narrows the guard silently`;
+      },
+    },
+    {
+      label: 'fixture — UNPUBLISHED_SUBPATH_CONTROL carries no elision marker, so no reading can skip it',
+      run: () => (hasElisionMarker(extractBlocks(UNPUBLISHED_SUBPATH_CONTROL)[0].code)
+        ? 'the fixture gained an elision marker, so the exclusion reading would skip the one leg guarding this family'
+        : null),
+    },
+    {
+      label: 'classify — every UNPUBLISHED_SUBPATH_SPECIFIERS entry is COUNTED as unpublished-subpath',
+      run: () => {
+        for (const specifier of UNPUBLISHED_SUBPATH_SPECIFIERS) {
+          const verdict = classifyDiagnostic({
+            code: 2307,
+            message: `Cannot find module '${specifier}' or its corresponding type declarations.`,
+          });
+          if (verdict.family !== 'unpublished-subpath' || verdict.forgiven) {
+            return `${specifier} classified ${verdict.family} / forgiven=${verdict.forgiven}`;
+          }
+        }
+        return null;
+      },
+    },
+    {
+      label: 'refusal — a missing TS2307 on a listed specifier REFUSES the census',
+      run: () => {
+        const healthy = controlProblems([healthyGreen(), healthyFiring(), subpathControl(healthySubpathDiagnostics())]);
+        if (healthy.length !== 0) return `the healthy control trio already reported ${healthy.length} problem(s): ${healthy[0]}`;
+        const dropped = UNPUBLISHED_SUBPATH_SPECIFIERS[1];
+        const problems = controlProblems([
+          healthyGreen(),
+          healthyFiring(),
+          subpathControl(healthySubpathDiagnostics().filter((d) => d.specifier !== dropped)),
+        ]);
+        return problems.some((p) => p.includes(dropped)) ? null : `dropping ${dropped} produced ${JSON.stringify(problems)}`;
+      },
+    },
+    {
+      label: 'refusal — a FORGIVEN unpublished-subpath diagnostic REFUSES the census',
+      run: () => {
+        const target = UNPUBLISHED_SUBPATH_SPECIFIERS[2];
+        const widened = healthySubpathDiagnostics().map((d) => (d.specifier === target
+          ? { ...d, family: 'external-not-installed', forgiven: true }
+          : d));
+        const problems = controlProblems([healthyGreen(), healthyFiring(), subpathControl(widened)]);
+        return problems.some((p) => p.includes(target) && p.includes('forgiven=true'))
+          ? null
+          : `forgiving ${target} produced ${JSON.stringify(problems)}`;
       },
     },
     { label: 'population — stratumOf separates CHANGELOG.md from hand-written Markdown', run: () => (stratumOf('packages/core/CHANGELOG.md') === 'changelog' && stratumOf('packages/core/README.md') === 'handwritten' ? null : 'stratum split broken') },
@@ -1077,7 +1262,12 @@ function main() {
 
   const summary = summarise(units);
   if (wantJson) console.log(JSON.stringify(toJson(units, controls, summary, files), null, 2));
-  else if (controlsOnly) console.log('✓ both controls behaved: GREEN compiles, FIRING reports TS2341 and survives the tolerance rule.');
+  else if (controlsOnly) {
+    console.log(
+      '✓ all three controls behaved: GREEN compiles, FIRING reports TS2341 and survives the tolerance rule, '
+        + 'UNPUBLISHED_SUBPATH reports a COUNTED TS2307 on each of its three specifiers.',
+    );
+  }
   else report(units, controls, summary, files);
 }
 

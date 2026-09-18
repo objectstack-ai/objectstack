@@ -747,10 +747,35 @@ describe('[#4911] `./integration` no longer publishes an outbound rate-limit sha
       windowMs: 60000,
       maxRequests: 100,
     });
-    // It still strips outbound-shaped keys — pinned, not fixed: correct
-    // behaviour for a non-strict schema, and the reason it is NOT the
-    // replacement for the retired key.
-    expect(sharedEntry.RateLimitConfigSchema.parse({ windowSeconds: 60, strategy: 'token_bucket' }))
+    // It REFUSES outbound-shaped keys now — this assertion used to pin the
+    // opposite ("still strips them — pinned, not fixed: correct behaviour for a
+    // non-strict schema"), and the strip was the defect, not the posture. Both
+    // keys below are the retired outbound vocabulary, and each answers
+    // differently on purpose:
+    //
+    //   - `windowSeconds` is an ALIAS the shared declaration curates, so the
+    //     author is renamed onto `windowMs`. Under the old strip it parsed green
+    //     and metered 60000 ms — a thousandfold miss on a key whose whole job is
+    //     to bound spend, reported as success.
+    //   - `strategy` has no inbound counterpart at all and no near-miss inside
+    //     the budget, so it is refused with no rename — which is the right
+    //     answer: the shared INBOUND budget is still NOT the replacement for the
+    //     retired outbound key, and rewriting one into the other would throttle
+    //     the wrong direction (the upgrade guide's own words).
+    const outbound = sharedEntry.RateLimitConfigSchema.safeParse({
+      windowSeconds: 60,
+      strategy: 'token_bucket',
+    });
+    expect(outbound.success).toBe(false);
+    const outboundMessage = outbound.success
+      ? ''
+      : outbound.error.issues.map((i) => i.message).join('\n');
+    expect(outboundMessage).toMatch(/`windowSeconds` → `windowMs`/);
+    expect(outboundMessage).not.toMatch(/`strategy` →/);
+    // Dark leg for the two above: the declared keys still parse, so the refusal
+    // is attributable to the outbound spellings and not to a shape that has
+    // stopped accepting anything.
+    expect(sharedEntry.RateLimitConfigSchema.parse({ windowMs: 60_000, maxRequests: 100 }))
       .toEqual({ enabled: false, windowMs: 60000, maxRequests: 100 });
   });
 

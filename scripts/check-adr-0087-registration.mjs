@@ -213,6 +213,12 @@
 // by hand, or pattern-matches the much looser "no metadata surface => no changeset
 // discipline", which is NOT what #8277 argued.
 //
+// ⚠️ #18745 is that same miss recurring, through a DIFFERENT gap in the detector, on
+// a changeset claiming the category this section built. The paragraph above stays as
+// written because it records what was measured on #8277; what it must not be read as
+// is "the hole is closed". See the `#18745` section above for which gap each of the
+// two misses went through and why closing the second does not close the first.
+//
 // ### What is checked, and why it is a NARROWING
 //
 // The claim names the symbols it is about, and each one is verified at HEAD:
@@ -413,6 +419,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'G8: a CAPABILITY table under the same framing stays GREEN': 1,
   'G9: THE #6967 SHAPE -- a changeset that POINTS AT prescriptions': 1,
   'R14: ...and the SAME sentence with the goods still refuses the catch-all': 4,
+  'RM (#18745): a rewrite whose TO side is an INSTRUCTION, not an operand': 9,
+  'RM1-RM12 (#18745): the retirement arm, and the class it must not widen past': 12,
   'The #8299 category: `runtime-interface-only`': 12,
   '#12881: a metadata surface that names the symbol only in PROSE': 30,
   'The #13080 category: `type-surface-only`': 26,
@@ -891,6 +899,66 @@ export function breakingDeclaration(parsed) {
 //     imperative verb), whose false-positive surface is intuitively much larger:
 //     any changeset enumerating API usage would hit it. Falsify before implementing.
 //
+// ## #18745 -- the RETIREMENT arm: a rewrite whose TO side is an INSTRUCTION
+//
+// Every arm above reads a rewrite as a PAIR: an old name and a new one, across an
+// arrow or across a cell boundary. That is the shape of a RENAME. A REMOVAL has no
+// new name, so an author who writes the most careful possible prescription for one
+// writes the only thing there is to write -- an instruction:
+//
+//     **Migration -- `api: { ... }` -> delete the property.**
+//
+// That is `.changeset/18318-evalcontext-no-query-api.md` (#18318, PR #18736), and it
+// is the same failure this header records against #8277 one section down, arriving
+// through a different door. The line carries the framing word, it carries the arrow,
+// and its FROM side is a proper backticked operand. It was missed on ONE predicate:
+// `REWRITE_RE` requires an OPERAND on BOTH sides, and `delete the property` is an
+// instruction, not a name -- so branches 2 and 3 never saw the line, the body read as
+// carrying no prescription, and `not-required (runtime-interface-only ...)` was
+// verified against a silence. The verdict on that PR was sound -- its author verified
+// all four `runtime-interface-only` predicates POSITIVELY and handed the detector miss
+// up rather than letting it carry the claim -- and that is exactly why it is worth
+// repairing: the next author's claim would have rested on the silence.
+//
+// THE TWO MISSES ARE DIFFERENT HOLES, and the distinction decides what a repair can
+// cover. #8277's prescription is `read `result.driverFault?.message` where you read
+// `result.error`` -- no arrow, no table, no pair the vocabulary can match. It is the
+// IMPERATIVE-SENTENCE residue listed above, still deliberately out of reach, and this
+// arm does not move it one inch (RM11/RM12 pin that, so a later author widening toward
+// it has to argue with a red test rather than with prose). #18745's prescription has
+// the pair shape and fails only on the RIGHT-HAND operand. Repairing the second does
+// not repair the first, and a repair that claimed to would be the over-matching
+// criterion the residue paragraph says to falsify before implementing.
+//
+// Measured before it was written, over every `.changeset/*.md` blob in this
+// repository's history -- 5524 unique blobs -- the framed arrow lines whose right side
+// is NOT an operand number THREE, and every candidate removal vocabulary tried (the
+// bare imperatives; plus `unset`/`omit`; plus `none`/`nothing`; plus the past
+// participles; plus the Chinese arm) flags the SAME TWO changesets and no others:
+// `18318-evalcontext-no-query-api.md` and `drop-dead-env-template-flag.md`
+// (`**Migration.** `os environments create --template <id>` -> drop the flag`). Both
+// are genuine removal prescriptions on inspection. Zero false positives at any width
+// -- so the class shipped is the NARROW one, because a wider one buys nothing measured
+// and each extra word is a claim somebody later has to defend. The third non-operand
+// right side in the stock, `lookup-reference-target-gate.md`, is running prose about
+// resolution rungs, and this arm leaves it alone.
+//
+// Over the CURRENT stock (414 changesets) the arm moves exactly one verdict, from
+// `null` to `framed-removal`, and the other 413 are byte-identical before and after.
+// The one it moves holds `not-required (runtime-interface-only ...)`, so it WOULD be
+// refused if a future PR touched that file and the gate re-judged it -- this gate only
+// judges changesets a diff adds or modifies, so nothing reds today. That reading was
+// handed back rather than acted on: ⛔ a detector repair does not get to edit somebody
+// else's changeset on its way past.
+//
+// One boundary is DELIBERATE and measured rather than assumed: `carriesConcreteRewrite`,
+// the corroboration predicate branch 1 consults for a prose-governed placeholder, is NOT
+// taught this vocabulary. Over the same history, 298 blobs carry the `FROM`/`TO`
+// placeholder at all, and of those ZERO are both missed today and carry a retirement line
+// anywhere in the body -- so the widening would buy nothing and would loosen a predicate
+// whose whole licence to be loose is that it only ever grants back an occurrence the
+// positional rule already found. Re-measure before changing that.
+//
 // ## #6967 -- the first NARROWING, and why the direction reversed
 //
 // #6419, #6497 and #6559 all fixed UNDER-matching, and each is written above as a
@@ -1052,6 +1120,67 @@ export const REWRITE_RE = new RegExp(`${OPERAND}\\s*${ARROW}\\s*${OPERAND}`);
 
 /** One operand anywhere in the text -- the per-CELL half of the table arm (#6497). */
 const OPERAND_RE = new RegExp(OPERAND);
+
+/**
+ * The RIGHT-HAND side of a RETIREMENT prescription -- the half of a rewrite whose
+ * answer is "there is nothing to write instead" (#18745).
+ *
+ * `REWRITE_RE` wants a code-ish OPERAND on both sides, and for a RENAME that is
+ * exactly right: the author is telling a consumer what to type instead. A REMOVAL
+ * has no such operand to name, so the author writes the only thing there is to
+ * write -- an instruction:
+ *
+ *     **Migration -- `api: { ... }` -> delete the property.**
+ *
+ * That is `.changeset/18318-evalcontext-no-query-api.md`, and it was missed on
+ * exactly ONE predicate. It carries the framing word, it carries the arrow, and its
+ * FROM side is a proper backticked operand; `delete the property` is not an
+ * OPERAND, so `REWRITE_RE` never matched and branches 2 and 3 never saw the line.
+ * A prescription saying "delete it" prescribes as much consumer work as one saying
+ * "write `x` instead", and it contradicts the same exemption -- which is the whole
+ * teeth of `no-migration-prescription` and of the `runtime-interface-only`
+ * narrowing that inherits it (#8299).
+ *
+ * ⚠️ A CLOSED CLASS, and IMPERATIVE only. Derived from the stock rather than
+ * invented: measured over every `.changeset/*.md` blob in this repository's history
+ * (5524 unique blobs), the framed arrow lines whose right side is NOT an operand
+ * number three, and the removal spellings among them are `-> delete the property`
+ * (`18318-evalcontext-no-query-api.md`), `-> drop the flag`
+ * (`drop-dead-env-template-flag.md`) and `-> remove (never had an effect)`
+ * (`remove-dead-metadata-props-2377.md`, already caught by an older branch on
+ * another line). The other two non-operand right sides are running prose in
+ * `lookup-reference-target-gate.md`, and this class leaves both alone.
+ *
+ * ⚠️ The Chinese arm is this file's ordinary parity -- `MIGRATION_FRAMING_RE`,
+ * `OLD_COLUMN_RE` and `NEW_COLUMN_RE` each carry one -- and it adds ZERO hits over
+ * that same 5524-blob history: it buys no measured true positive and introduces no
+ * measured false one. It is here so the arm is not shaped by the language the
+ * author happened to write in, which is the "the only passing form was to avoid a
+ * word" failure `HEADING_DENIAL_RE` documents one rule over.
+ *
+ * ⚠️ `none` / `nothing` in ARROW position was measured and REFUSED. The stock
+ * evidences that spelling only as a table CELL (`| AuditConfigSchema.enabled |
+ * none -- ... |`), which branch 4 already reads, and in arrow position it has a
+ * competing reading an imperative verb does not: `... -> none of this changes what
+ * you write` is a running sentence, not a prescription. Nothing measured gained, a
+ * new way to be wrong -- the trade #6559 refused for `was`/`now`.
+ *
+ * ⚠️ The trailing lookahead is load-bearing in the NARROW direction. Without it
+ * `drop` reads `drop-in replacement` and `delete` reads `deletes rows in batches`,
+ * and neither is an instruction to remove the thing on the left.
+ */
+const REMOVAL_INSTRUCTION = '\\**\\s*(?:(?:delete|remove|drop)(?![A-Za-z-])|删除|移除|删掉|去掉)';
+
+/**
+ * `X → delete it` -- an operand RETIRED rather than renamed. Stateless (no `g`):
+ * it is used inside a loop, exactly as `REWRITE_RE` is.
+ *
+ * Read ONLY under the same framing branches 2 and 3 require. An unframed
+ * `X -> delete ...` stays invisible on purpose: framing is what separates "here is
+ * what you must rewrite" from "here is what the code does", and this arm buys no
+ * exception to that.
+ */
+export const RETIREMENT_RE = new RegExp(`${OPERAND}\\s*${ARROW}\\s*${REMOVAL_INSTRUCTION}`);
 
 /**
  * A markdown table's delimiter row (`| --- | :---: |`) -- the line that turns the
@@ -1557,7 +1686,9 @@ function carriesConcreteRewrite(body) {
  * which shapes are deliberately out of reach.
  *
  * @param {string} body
- * @returns {{ branch: 'from-to-label' | 'framed-line' | 'framed-section' | 'framed-table' | 'header-framed-table', line: string } | null}
+ * @returns {{ branch: 'from-to-label' | 'framed-line' | 'framed-section' | 'framed-table'
+ *             | 'header-framed-table' | 'framed-removal' | 'framed-section-removal',
+ *             line: string } | null}
  */
 export function findMigrationPrescription(body) {
   const lines = body.split(/\r?\n/);
@@ -1613,6 +1744,13 @@ export function findMigrationPrescription(body) {
   // take a hit away from an older one, and nothing has to be re-measured to know it.
   let headerTable = null;
   let headerFramed = false;
+  // The RETIREMENT arm's first hit (#18745), held back for the reason the two above
+  // are and consulted LAST, so the whole function stays exactly
+  // `arrowBranches ?? framedTable ?? headerFramedTable ?? framedRemoval`. That keeps
+  // the superset property STRUCTURAL one more level down: no body an older arm
+  // already reads can change its branch or its evidence line because this arm exists,
+  // and nobody has to re-measure the stock to know it.
+  let removal = null;
   let prev = '';
   for (const line of lines) {
     const heading = HEADING_RE.exec(line);
@@ -1627,6 +1765,15 @@ export function findMigrationPrescription(body) {
     if (REWRITE_RE.test(line)) {
       if (MIGRATION_FRAMING_RE.test(line)) return { branch: 'framed-line', line: line.trim() };
       if (framedSection) return { branch: 'framed-section', line: line.trim() };
+    }
+    // A rewrite whose TO side is an INSTRUCTION rather than an operand -- the
+    // author has nothing to name because the answer is "delete it" (#18745). Read
+    // under exactly the framing branches 2 and 3 require, and never instead of
+    // them: `REWRITE_RE` is tested first above, so a line that is both a rename and
+    // a removal keeps the branch and evidence it already had.
+    if (removal === null && RETIREMENT_RE.test(line)) {
+      if (MIGRATION_FRAMING_RE.test(line)) removal = { branch: 'framed-removal', line: line.trim() };
+      else if (framedSection) removal = { branch: 'framed-section-removal', line: line.trim() };
     }
     // Delimiter first: it also matches TABLE_ROW_RE, and it is the row that opens
     // the data region rather than a row inside it. The line ABOVE it is the header,
@@ -1644,7 +1791,7 @@ export function findMigrationPrescription(body) {
     }
     prev = line;
   }
-  return table ?? headerTable;
+  return table ?? headerTable ?? removal;
 }
 
 /**
@@ -2088,6 +2235,15 @@ export function assertInputs({ cwd, head }) {
       'framed-table',
     ],
     ['an arrow rewrite under a `## 迁移` heading', '## 迁移\n\n- `a.b` → `a.c`\n', 'framed-section'],
+    // The retirement arm (#18745) reads a rewrite inside the SAME framed region, so
+    // it rots with the framing scan and is controlled with it. Without this row a
+    // framing scan that stopped seeing headings would take the removal arm down
+    // silently and the three rows above would still say the scan is healthy.
+    [
+      'a REMOVAL prescription under a `## Migration` heading (#18745)',
+      '## Migration\n\n- `a.b` → delete the property\n',
+      'framed-section-removal',
+    ],
   ];
   const MUST_NOT_FRAME = [
     [
@@ -4578,6 +4734,137 @@ function selfTest() {
       }),
     },
   })), [/contradicts the changeset's own body/, /Evidence \(from-to-label\)/, /mappings baked into it/]);
+
+  // ---- RM: THE #18745 SHAPE -- a rewrite whose TO side is an INSTRUCTION -------
+  //
+  // `.changeset/18318-evalcontext-no-query-api.md`, reduced to its shape. The line
+  // carries the framing word, the arrow and a proper operand on the FROM side, and
+  // it was missed on exactly ONE predicate: `REWRITE_RE` wants an OPERAND on BOTH
+  // sides, and `delete the property` is an instruction, not a name. So a changeset
+  // that PRESCRIBES a removal held an exemption whose one mechanical check is "your
+  // body carries no prescription" -- granted by SILENCE rather than by a finding,
+  // which is the very failure the #8299 section of this header records against
+  // #8277 and which the `runtime-interface-only` narrowing exists to end.
+  //
+  // RM-E2E1 is the card's own scenario end to end: the real missed text under the
+  // real category it rode on. Reverse-verified -- drop the retirement arm and this
+  // case reports "expected RED, got green".
+  battery('RM (#18745): a rewrite whose TO side is an INSTRUCTION, not an operand');
+  const RM_BODY = (marker) =>
+    '**BREAKING** for a TypeScript consumer: an `EvalContext` literal carrying `api` stops compiling\n\n' +
+    '**Migration — `api: { … }` → delete the property.** There is no replacement key and\n' +
+    'nothing to re-point: every implementation ever passed there was discarded before\n' +
+    'evaluation.\n\n' +
+    `<!-- adr-0087: ${marker} -->\n`;
+
+  // Self-contained rather than borrowing the `#8299` fixture below: this case has to
+  // hold the CARD'S symbol (`packages/formula/src/types.ts#EvalContext`), and a
+  // fixture shared with another rule is a fixture two rules can quietly move.
+  const RM_PKGS = {
+    '@objectstack/spec': { dir: 'packages/spec', private: false },
+    '@objectstack/formula': { dir: 'packages/formula', private: false },
+  };
+  // The `.zod.ts` is the #4690 half: predicate 4 refuses a claim it cannot check, so
+  // a fixture with NO metadata surface at all is refused for absence rather than
+  // judged. It names a different symbol on purpose -- the scan must have something
+  // real to read and nothing to find.
+  const RM_FILES = {
+    'packages/formula/src/types.ts': 'export interface EvalContext {\n  user?: { id: string };\n}\n',
+    'packages/spec/src/data/unrelated.zod.ts':
+      "import { z } from 'zod';\n\nexport const UnrelatedSchema = z.object({ id: z.string() });\n",
+  };
+
+  red('RM-E2E1 the real missed text still rides `runtime-interface-only`', run(mk({
+    pkgs: RM_PKGS,
+    files: {
+      ...RM_FILES,
+      '.changeset/x.md': CS({
+        bumps: [['@objectstack/formula', 'major']],
+        body: RM_BODY('not-required (runtime-interface-only packages/formula/src/types.ts#EvalContext) no Zod schema, no spec declaration, no stored form'),
+      }),
+    },
+  })), [/contradicts the changeset's own body/, /Evidence \(framed-removal\)/, /delete the property/]);
+
+  // The positive control for RM-E2E1's own fixture: the SAME claim on the SAME
+  // symbol, with the removal sentence taken out, is ACCEPTED. It is what says the
+  // RED above is the prescription refusal rather than a `runtime-interface-only`
+  // predicate failing for some unrelated reason in a hand-built fixture.
+  green('RM-E2E1b the same runtime-interface-only claim without the removal line is accepted', run(mk({
+    pkgs: RM_PKGS,
+    files: {
+      ...RM_FILES,
+      '.changeset/x.md': CS({
+        bumps: [['@objectstack/formula', 'major']],
+        body:
+          '**BREAKING** for a TypeScript consumer: an `EvalContext` literal carrying `api` stops compiling\n\n' +
+          'There is no replacement key and nothing to re-point.\n\n' +
+          '<!-- adr-0087: not-required (runtime-interface-only packages/formula/src/types.ts#EvalContext) no Zod schema, no spec declaration, no stored form -->\n',
+      }),
+    },
+  })));
+
+  red('RM-E2E2 ...and under the catch-all it rode into, for the same reason', run(mk({
+    files: {
+      '.changeset/x.md': CS({
+        body: RM_BODY('not-required (no-migration-prescription) the member was inert and nothing stored moves'),
+      }),
+    },
+  })), [/contradicts the changeset's own body/, /Evidence \(framed-removal\)/]);
+
+  // The control that makes the two REDs above attributable to the LINE rather than
+  // to anything else in the fixture: the identical changeset with the removal
+  // sentence taken out is GREEN. Without it, a fixture that reds for an unrelated
+  // reason reads exactly like a working detector.
+  green('RM-E2E3 the SAME changeset without the removal line keeps its exemption', run(mk({
+    files: {
+      '.changeset/x.md': CS({
+        body:
+          '**BREAKING** for a TypeScript consumer: an `EvalContext` literal carrying `api` stops compiling\n\n' +
+          'There is no replacement key and nothing to re-point: every implementation ever\n' +
+          'passed there was discarded before evaluation.\n\n' +
+          '<!-- adr-0087: not-required (no-migration-prescription) the member was inert and nothing stored moves -->\n',
+      }),
+    },
+  })));
+
+  // ---- RM1-RM12: unit pins on the retirement arm and on its CLOSED class -------
+  //
+  // RM1-RM3 are the arm. RM4-RM9 are the floor: every one of them is a shape that
+  // must NOT read as a prescription, and each was a live over-matching candidate
+  // rather than a hypothetical. RM10 is the SUPERSET pin -- a body an older arm
+  // already reads keeps that arm's branch AND its evidence line, which is what
+  // makes "this can only add hits" structural instead of remembered. RM11-RM12 pin
+  // the DIFFERENT hole: #8277's imperative-sentence prescription (no arrow, no
+  // table) is the residue this header lists as deliberate, and this arm does not
+  // and must not reach it -- if a later author widens toward it, these two say so.
+  battery('RM1-RM12 (#18745): the retirement arm, and the class it must not widen past');
+  assert(findMigrationPrescription('**Migration — `api: { … }` → delete the property.**\n')?.branch === 'framed-removal',
+    'RM1: the real missed line reads as a framed removal prescription');
+  assert(findMigrationPrescription('## Migration\n\n- `node.config.filters` → remove it\n')?.branch === 'framed-section-removal',
+    'RM2: a removal under a migration HEADING reads on the section branch');
+  assert(findMigrationPrescription('**迁移** — `api` → 删除该属性。\n')?.branch === 'framed-removal',
+    'RM3: the Chinese removal spelling reads the same as the English one');
+  assert(findMigrationPrescription('`api: { … }` → delete the property.\n') === null,
+    'RM4: an UNFRAMED removal is not a prescription -- framing is still what separates a rewrite from a description');
+  assert(findMigrationPrescription('**Migration.** `a.b` → drop-in replacement keeps working\n') === null,
+    'RM5: `drop-in` is not the imperative `drop` -- the trailing lookahead is load-bearing');
+  assert(findMigrationPrescription('## Migration\n\nthe pipeline `a.b` → deletes rows in batches now\n') === null,
+    'RM6: `deletes` is a description of behaviour, not an instruction to remove');
+  assert(findMigrationPrescription('**Migration.** runtime → delete the package\n') === null,
+    'RM7: a BARE word on the FROM side is not an operand -- the left half is unchanged');
+  assert(findMigrationPrescription('**Migration.** `a.b` → none of this changes what you write\n') === null,
+    'RM8: `none` in arrow position stays REFUSED -- it is a running sentence as often as a prescription');
+  assert(findMigrationPrescription('## What changed\n\n- `a.b` → delete the property\n') === null,
+    'RM9: a removal under a heading carrying NO framing is not a prescription');
+  assert(
+    findMigrationPrescription('## Migration\n\n- `a.b` → delete the property\n- `c.d` → `c.e`\n')?.branch === 'framed-section' &&
+    findMigrationPrescription('## Migration\n\n- `a.b` → delete the property\n- `c.d` → `c.e`\n')?.line === '- `c.d` → `c.e`',
+    'RM10: a body an OLDER arm already reads keeps that arm\'s branch and evidence line, removal line or not');
+  assert(findMigrationPrescription('If you only *call* `publish`, read `result.driverFault?.message` where you read `result.error`.\n') === null,
+    'RM11: the #8277 shape -- an imperative SENTENCE with no arrow and no table -- is a DIFFERENT hole and stays out of reach');
+  assert(findMigrationPrescription('## Migration\n\nread `result.driverFault?.message` where you read `result.error`.\n') === null,
+    'RM12: ...and framing alone does not reach it either -- this arm needs the arrow the #8277 body never had');
+
 
   // ---- The #8299 category: `runtime-interface-only` -------------------------
   //

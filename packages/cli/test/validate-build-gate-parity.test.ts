@@ -187,6 +187,19 @@ const NOT_A_GATE: Readonly<Record<string, readonly string[]>> = {
       'printWarning',
       'printBulletList',
       'printAuthoringAdvisories',
+      // [#18780] `compile.ts`' local once-guard around the line above it. It
+      // decides WHEN that printer is called — after the per-package pass has
+      // appended its survivors, so the closing `N author-time warning(s) — see
+      // above` stands over the list it counts — and nothing else. It reads no
+      // stack, reaches no verdict and can refuse nothing: every finding it
+      // renders was already produced by `runAuthoringRules` and
+      // `runPerPackageAuthoringRules`, both classified as gates above, and the
+      // identical list rides `--json` on every face whether this helper runs
+      // or not. ⛔ NOT a BUILD_ONLY_GATES row: there is nothing here for
+      // `validate.ts` to wire by hand, because that command already renders
+      // its advisory list once, at the end, and has no "see above" sentence to
+      // keep honest.
+      'printAdvisoriesOnce',
       'printAuthoringRuleErrors',
       'printDocIssueErrors',
       'printMetadataStats',

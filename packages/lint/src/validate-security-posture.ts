@@ -1045,12 +1045,41 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
  * [ADR-0090 D3] The `security-role-word` vocabulary freeze, as its own rule.
  *
  * Scope: security-relevant identifiers/labels across SIX collections — objects
- * (names, field names, action names), permission sets, positions, apps, books.
+ * (names, field names, action names, field-group keys and labels), permission
+ * sets, positions, apps, books.
  * Pages/views/components are NOT scanned — `role` there is HTML/ARIA
  * semantics, not permission vocabulary. The sole platform exception
  * (better-auth `sys_member.role`) is a system object, which app stacks never
  * author. Books entered the security-relevant set when `book.audience` became
  * a permission-model reference (ADR-0046 §6.7 / ADR-0090).
+ *
+ * ## Why `objects[].fieldGroups[]` IS scanned, and a page section is not
+ *
+ * [#18306] Measured, not assumed — the question is which fact separates the
+ * scanned surfaces from the excluded ones, and it is NOT "does this key carry
+ * permission semantics". `object.label`, `field.label` and `action.label`
+ * carry none either, and all three are scanned: the ban ADR-0090 D3 writes is
+ * on the WORD, in "identifiers, UI copy, and documentation". A field group
+ * declares both halves — `key` is an identifier (`Field.group` assigns
+ * membership by it, and a layout section's `group` inherits the whole group by
+ * it, ADR-0085 §5), and `label` is the section header an admin reads on the
+ * record page. So it is inside the ban by the ban's own terms.
+ *
+ * What excludes pages/views/components is a different fact: `role` there is
+ * the HTML/ARIA attribute — a machine word with a fixed foreign meaning, not a
+ * word the author picked. No such collision exists on a group header.
+ *
+ * Leaving the surface out built the #7220 shape one grain FINER than the one
+ * this function's own split exists to avoid: on a single record page a field
+ * labelled `Role Of Record` was refused while the group header directly above
+ * it, `Account & Role`, walked through — the author renames the field and the
+ * heading keeps the word. `key` is visited beside `label` for the same reason
+ * the other six surfaces visit name beside label: refusing `fields: { role }`
+ * while admitting `fieldGroups: [{ key: 'role' }]` is that shape again.
+ *
+ * Deliberately NOT widened with it: `listViews`, `recordTypes` and the other
+ * label-bearing surfaces. They are unmeasured here, not judged — each needs
+ * the same reading this one got before it is in or out.
  *
  * ## Why this is a separate function from {@link validateSecurityPosture}
  *
@@ -1076,7 +1105,22 @@ export function validateSecurityRoleWord(stack: AnyRec): SecurityFinding[] {
   const objects = recordsOf(stack.objects);
   const permissionSets = recordsOf(stack.permissions);
 
-  const flagRole = (kind: string, name: unknown, label: unknown, where: string, path: string) => {
+  /**
+   * `idKey` is the spelling of the IDENTIFIER slot on the surface being
+   * flagged. Six of the seven spell it `name`; `ObjectFieldGroupSchema` spells
+   * it `key` and REJECTS `name` as an alias, so a fix-it naming `name` there
+   * would point the author at a key the schema refuses — and the derived
+   * sibling-label path would address a child of the identifier rather than the
+   * identifier's neighbour.
+   */
+  const flagRole = (
+    kind: string,
+    name: unknown,
+    label: unknown,
+    where: string,
+    path: string,
+    idKey: 'name' | 'key' = 'name',
+  ) => {
     if (identifierHasRoleToken(name)) {
       findings.push({
         severity: 'error',
@@ -1084,7 +1128,7 @@ export function validateSecurityRoleWord(stack: AnyRec): SecurityFinding[] {
         where,
         path,
         message:
-          `${kind} name "${String(name)}" uses the reserved word "role" — the platform vocabulary ` +
+          `${kind} ${idKey} "${String(name)}" uses the reserved word "role" — the platform vocabulary ` +
           `is permission_set (capability), position (distribution), business_unit (hierarchy) (ADR-0090 D3).`,
         hint: `Rename using 'position' for distribution groups or a domain word (e.g. 'function', 'duty').`,
       });
@@ -1093,7 +1137,7 @@ export function validateSecurityRoleWord(stack: AnyRec): SecurityFinding[] {
         severity: 'error',
         rule: SECURITY_ROLE_WORD,
         where,
-        path: `${path.replace(/\.name$/, '')}.label`,
+        path: `${path.replace(/\.(?:name|key)$/, '')}.label`,
         message: `${kind} label "${String(label)}" uses the reserved word "role" (ADR-0090 D3).`,
         hint: `Relabel with 'Position' (distribution) or a domain word — admins must meet ONE vocabulary.`,
       });
@@ -1110,6 +1154,19 @@ export function validateSecurityRoleWord(stack: AnyRec): SecurityFinding[] {
     }
     for (const [ai, action] of recordsOf(obj.actions).entries()) {
       flagRole('action', action.name, action.label, `action "${objName}.${String(action.name ?? '?')}"`, `objects[${i}].actions[${ai}].name`);
+    }
+    // [#18306] Field groups sit INSIDE this loop deliberately: the system-object
+    // exemption above (better-auth `sys_member`) has to cover a group header on
+    // a platform object exactly as it covers the fields under it.
+    for (const [gi, group] of recordsOf(obj.fieldGroups).entries()) {
+      flagRole(
+        'field group',
+        group.key,
+        group.label,
+        `field group "${objName}.${String(group.key ?? '?')}"`,
+        `objects[${i}].fieldGroups[${gi}].key`,
+        'key',
+      );
     }
   }
   for (let i = 0; i < permissionSets.length; i++) {

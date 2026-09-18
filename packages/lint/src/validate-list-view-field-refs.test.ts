@@ -46,6 +46,14 @@ const OBJECTS = [
       { name: 'payload', type: 'json', label: 'Payload' },
       { name: 'score', type: 'formula', label: 'Score' },
       { name: 'tags', type: 'text', multiple: true, label: 'Tags' },
+      // [#18835] The targets for the four field-naming keys that had no
+      // position row, each declared at the type its own `.describe()` names —
+      // `allDayField` / `lockField` say "boolean field", `objectField` carries
+      // an object api name and `borderColorField` a colour string.
+      { name: 'is_all_day', type: 'boolean', label: 'All day' },
+      { name: 'is_locked', type: 'boolean', label: 'Locked' },
+      { name: 'alert_color', type: 'text', label: 'Alert colour' },
+      { name: 'row_object', type: 'text', label: 'Row object' },
     ],
   },
   {
@@ -75,12 +83,13 @@ const FULL_LIST_VIEW: AnyRec = {
     tabs: [{ name: 'open', filter: [{ field: 'status', operator: 'equals', value: 'open' }] }],
   },
   tabs: [{ name: 'mine', filter: [{ field: 'business_unit', operator: 'equals', value: 'x' }] }],
-  kanban: { groupByField: 'status', summarizeField: 'estimate', columns: ['title'] },
+  kanban: { groupByField: 'status', summarizeField: 'estimate', columns: ['title'], titleField: 'title' },
   calendar: {
     startDateField: 'due_at',
     endDateField: 'visible_from',
     titleField: 'title',
     colorField: 'status',
+    allDayField: 'is_all_day',
   },
   gantt: {
     startDateField: 'visible_from',
@@ -98,6 +107,9 @@ const FULL_LIST_VIEW: AnyRec = {
     effortField: 'estimate',
     tooltipFields: ['status', { field: 'business_unit' }],
     quickFilters: [{ field: 'status' }],
+    borderColorField: 'alert_color',
+    lockField: 'is_locked',
+    objectField: 'row_object',
   },
   timeline: {
     startDateField: 'visible_from',
@@ -227,10 +239,18 @@ describe('#14107 — every other walked position', () => {
     ],
     [{ kanban: { summarizeField: BAD } }, 'views[0].list.kanban.summarizeField', 'warning'],
     [{ kanban: { columns: [BAD] } }, 'views[0].list.kanban.columns[0]', 'warning'],
+    // [#18565] Calendar's level, not the required siblings' — see the row's
+    // own note in the rule. The board renders every card; only the title is
+    // not the one the author named.
+    [{ kanban: { titleField: BAD } }, 'views[0].list.kanban.titleField', 'warning'],
     [{ calendar: { endDateField: BAD } }, 'views[0].list.calendar.endDateField', 'warning'],
     [{ calendar: { titleField: BAD } }, 'views[0].list.calendar.titleField', 'warning'],
     [{ calendar: { colorField: BAD } }, 'views[0].list.calendar.colorField', 'warning'],
     [{ calendar: { startDateField: BAD } }, 'views[0].list.calendar.startDateField', 'error'],
+    // [#18835] A declared `allDayField` is absolute — it switches the
+    // renderer's own all-day inference off — so a miss un-bands every event.
+    // They all still render, at their start time: one decoration.
+    [{ calendar: { allDayField: BAD } }, 'views[0].list.calendar.allDayField', 'warning'],
     [{ gantt: { endDateField: BAD } }, 'views[0].list.gantt.endDateField', 'error'],
     [{ gantt: { titleField: BAD } }, 'views[0].list.gantt.titleField', 'error'],
     [{ gantt: { progressField: BAD } }, 'views[0].list.gantt.progressField', 'warning'],
@@ -243,6 +263,13 @@ describe('#14107 — every other walked position', () => {
     [{ gantt: { groupByField: BAD } }, 'views[0].list.gantt.groupByField', 'warning'],
     [{ gantt: { assigneeField: BAD } }, 'views[0].list.gantt.assigneeField', 'warning'],
     [{ gantt: { effortField: BAD } }, 'views[0].list.gantt.effortField', 'warning'],
+    // [#18835] The three objectui-lifted field bindings, on three different
+    // levels — see each row's note in the rule. The stroke is a decoration;
+    // the lock is a write guard that fails open; `objectField` makes every row
+    // answer the synthetic-row test, so nothing in the chart opens.
+    [{ gantt: { borderColorField: BAD } }, 'views[0].list.gantt.borderColorField', 'warning'],
+    [{ gantt: { lockField: BAD } }, 'views[0].list.gantt.lockField', 'error'],
+    [{ gantt: { objectField: BAD } }, 'views[0].list.gantt.objectField', 'error'],
     [{ gantt: { tooltipFields: [BAD] } }, 'views[0].list.gantt.tooltipFields[0]', 'warning'],
     [
       { gantt: { tooltipFields: [{ field: BAD }] } },
@@ -280,8 +307,104 @@ describe('#14107 — every other walked position', () => {
 
   // A floor, so a position quietly dropped from the rule's table cannot pass
   // by simply never being asserted.
+  //
+  // [#18835] Raised by the four rows this card adds — `calendar.allDayField`
+  // and the three objectui-lifted `gantt` bindings. The number moves by what
+  // was added and nothing else; the floor's own semantics are untouched.
   it('covers every position the rule walks', () => {
-    expect(cases.length).toBeGreaterThanOrEqual(46);
+    expect(cases.length).toBeGreaterThanOrEqual(51);
+  });
+});
+
+/**
+ * [#18835] The four declared, authorable field-naming keys that had no row in
+ * `POSITIONS` at all: `calendar.allDayField` and the three objectui-lifted
+ * `gantt` bindings (`borderColorField`, `lockField`, `objectField`). Each was
+ * admitted by the schema, walked by nothing, and dropped by the runtime.
+ *
+ * All four are `.optional()`, and that is deliberately NOT what tiers them —
+ * the tier is the consequence, read per key off its own `.describe()` and its
+ * renderer (objectui `dda8f3815`). Two land in each tier, and the block below
+ * asserts the tiers where they are felt: `validate` / `build`.
+ *
+ * Each key is pinned SEPARATELY, in both directions. One key proven does not
+ * generalise to the other three: they are four different renderer behaviours
+ * that happen to share a schema shape.
+ */
+describe('#18835 — the four keys with no position row', () => {
+  const KEYS: Array<[string, (bad: string) => AnyRec, string, 'error' | 'warning', string]> = [
+    [
+      'calendar.allDayField',
+      (v) => ({ calendar: { allDayField: v } }),
+      'views[0].list.calendar.allDayField',
+      'warning',
+      'is_all_day',
+    ],
+    [
+      'gantt.borderColorField',
+      (v) => ({ gantt: { borderColorField: v } }),
+      'views[0].list.gantt.borderColorField',
+      'warning',
+      'alert_color',
+    ],
+    [
+      'gantt.lockField',
+      (v) => ({ gantt: { lockField: v } }),
+      'views[0].list.gantt.lockField',
+      'error',
+      'is_locked',
+    ],
+    [
+      'gantt.objectField',
+      (v) => ({ gantt: { objectField: v } }),
+      'views[0].list.gantt.objectField',
+      'error',
+      'row_object',
+    ],
+  ];
+
+  for (const [label, patch, path, severity, realField] of KEYS) {
+    it(`${label} naming a field that does not exist reports at \`${severity}\``, () => {
+      const findings = validateListViewFieldRefs(stackWith(mutate(patch('zz_no_such_field'))));
+      expect(idsOf(findings)).toEqual([path]);
+      expect(findings[0].rule).toBe(LIST_VIEW_FIELD_UNKNOWN);
+      expect(findings[0].severity).toBe(severity);
+      expect(findings[0].message).toContain('is not a field on object "duly_task"');
+      expect(findings[0].hint).toContain('Fields on "duly_task"');
+    });
+
+    // The dark half, per key: a real field is silent, so the rows report the
+    // MISS and not the key's presence.
+    it(`${label} naming a real field ("${realField}") stays silent`, () => {
+      expect(validateListViewFieldRefs(stackWith(mutate(patch(realField))))).toEqual([]);
+    });
+
+    const arm = severity === 'error' ? 'gates' : 'advises';
+    it(`${label} ${arm} \`build\``, () => {
+      const normalized = stackWith(mutate(patch('zz_no_such_field')));
+      const { errors, advisories } = splitBySeverity(runAuthoringRules('build', { normalized }));
+      const gated = errors.some((f) => f.path === path);
+      const advised = advisories.some((f) => f.path === path);
+      expect([gated, advised]).toEqual(severity === 'error' ? [true, false] : [false, true]);
+    });
+  }
+
+  it('the reference-integrity suite carries all four', () => {
+    // One stack, all four missed at once: the suite reports four findings and
+    // not one, so no key rides on a neighbour's row.
+    const stack = stackWith(
+      mutate({
+        calendar: { allDayField: 'zz_a' },
+        gantt: { borderColorField: 'zz_b', lockField: 'zz_c', objectField: 'zz_d' },
+      }),
+    );
+    const mine = validateReferenceIntegrity(stack).filter((f) => f.rule === LIST_VIEW_FIELD_UNKNOWN);
+    expect(mine.map((f) => f.path).sort()).toEqual([
+      'views[0].list.calendar.allDayField',
+      'views[0].list.gantt.borderColorField',
+      'views[0].list.gantt.lockField',
+      'views[0].list.gantt.objectField',
+    ]);
   });
 });
 
@@ -531,8 +654,18 @@ describe('#14282 — the measured exclusions: positions read CLIENT-SIDE', () =>
         mutate({
           rowColor: { field: 'owner.name' },
           kanban: { groupByField: 'owner.name' },
-          calendar: { titleField: 'owner.name' },
+          calendar: { titleField: 'owner.name', allDayField: 'owner.name' },
           gallery: { coverField: 'owner.name' },
+          // [#18835] The four positions this card adds are in POSITIONS and
+          // deliberately NOT in DOTTED_AXIS, which is what "a position added to
+          // the surface map does not silently acquire a dotted verdict nobody
+          // measured" means in practice. Pinned here so the default is a
+          // decision rather than an omission.
+          gantt: {
+            borderColorField: 'owner.name',
+            lockField: 'owner.name',
+            objectField: 'owner.name',
+          },
           tree: { parentField: 'owner.name' },
           grouping: { fields: [{ field: 'owner.name' }] },
           hiddenFields: ['owner.name'],
