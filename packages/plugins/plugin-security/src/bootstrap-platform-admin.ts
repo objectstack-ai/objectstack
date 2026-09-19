@@ -90,7 +90,148 @@ import {
   reportSeedWriteRefusals,
   type SeedWriteRefusals,
 } from './per-organization-catalog.js';
-import { resolvePlatformAdminStanding } from './platform-admin-service.js';
+import {
+  resolvePlatformAdminStanding,
+  type PlatformAdminStandingEntry,
+} from './platform-admin-service.js';
+import {
+  buildPlatformAdminStandingRow,
+  platformAdminStandingChanged,
+  platformAdminStandingSnapshot,
+  PLATFORM_ADMIN_STANDING_ACTION,
+  PLATFORM_ADMIN_STANDING_LEDGER,
+  readRecordedStandingSnapshot,
+  serializePlatformAdminStandingSnapshot,
+} from './platform-admin-standing-audit.js';
+
+/**
+ * The order the standing-audit read states TO THE DRIVER.
+ *
+ * `created_at` and not `id`: `sys_audit_log` ids carry no ordering, while
+ * `created_at` is the field every shipped list view on that object already
+ * sorts by, and it is the column the row's own meaning rests on. The read is
+ * capped at one row, and a capped read without an order returns whichever row
+ * that driver produced first — see {@link tryFind}.
+ */
+const STANDING_AUDIT_SCAN_ORDER: { field: string; order: 'asc' | 'desc' }[] = [
+  { field: 'created_at', order: 'desc' },
+];
+
+/**
+ * [#18412] Record a CHANGE of platform-admin standing on the existing audit
+ * ledger, and write nothing when nothing changed.
+ *
+ * ## Three states, and the third is the one a two-valued read would lose
+ *
+ * - the ledger is not mounted → SKIP, silently. `sys_audit_log` belongs to the
+ *   OPTIONAL `@objectstack/plugin-audit`; a host that never mounted it
+ *   (`serve --preset minimal`, an EE host that composes no audit) has not
+ *   FAILED to write a row, it declined to have a ledger. Attempting the insert
+ *   would throw and be reported as a degradation on a deployment behaving
+ *   exactly as composed — the #18368 lesson, one file over.
+ * - the ledger is mounted and the last row is readable → compare, and write
+ *   only on a difference.
+ * - ⛔ the read was REFUSED → write NOTHING and say so. A refusal is not
+ *   「no record exists」: reading it that way writes a fresh baseline on every
+ *   boot, which is precisely the per-boot noise the ruling rejected. The
+ *   record stays silent for this boot and the next successful read catches up,
+ *   because the comparison is against the ledger rather than against a memo.
+ *
+ * Best-effort throughout: an audit write must never be what stops a deployment
+ * booting, and this runs after the bootstrap has already done its work.
+ */
+async function recordPlatformAdminStandingChange(
+  ql: any,
+  standing: readonly PlatformAdminStandingEntry[],
+  logger?: BootstrapOptions['logger'] & { debug?: (message: string) => void },
+): Promise<void> {
+  // ⛔ Ask before writing, and only an engine that ANSWERS licenses the skip.
+  // `getSchema` is an ObjectQL member, not an `IDataEngine` one, so an engine
+  // that does not carry it has told us NOTHING about the ledger — that case
+  // leaves the write attempted rather than skipped.
+  const getSchema = ql?.getSchema;
+  let ledgerSchema: any;
+  if (typeof getSchema === 'function') {
+    try {
+      ledgerSchema = ql.getSchema(PLATFORM_ADMIN_STANDING_LEDGER);
+    } catch {
+      ledgerSchema = undefined;
+    }
+    if (ledgerSchema == null) return;
+  }
+
+  const declared: string[] = Array.isArray(ledgerSchema?.fields)
+    ? ledgerSchema.fields.map((f: any) => f?.name).filter(Boolean)
+    : ledgerSchema?.fields && typeof ledgerSchema.fields === 'object'
+      ? Object.keys(ledgerSchema.fields)
+      : [];
+  const declaresField = (field: string): boolean => declared.includes(field);
+
+  let refused: unknown;
+  const previousRows = await tryFind(
+    ql,
+    PLATFORM_ADMIN_STANDING_LEDGER,
+    { action: PLATFORM_ADMIN_STANDING_ACTION },
+    1,
+    STANDING_AUDIT_SCAN_ORDER,
+    undefined,
+    (e) => {
+      refused = e;
+    },
+  );
+  if (refused !== undefined) {
+    const message =
+      '[security] platform-admin standing was NOT recorded on this boot: the audit ledger ' +
+      `(${PLATFORM_ADMIN_STANDING_LEDGER}) refused the read of the last recorded snapshot, so ` +
+      'this boot cannot tell whether standing changed. ⛔ Nothing was written — writing a ' +
+      'baseline here would file a fresh row on every boot. The next boot whose read succeeds ' +
+      'records the current standing. Cause: ' +
+      String((refused as any)?.message ?? refused);
+    if (logger?.error) logger.error(message);
+    else logger?.warn?.(message);
+    return;
+  }
+
+  const snapshot = platformAdminStandingSnapshot(standing);
+  const serialized = serializePlatformAdminStandingSnapshot(snapshot);
+  const previousSerialized = readRecordedStandingSnapshot(previousRows[0]);
+  if (!platformAdminStandingChanged(previousSerialized, serialized)) {
+    logger?.debug?.(
+      '[security] platform-admin standing is unchanged since the last recorded entry — no ' +
+        'audit row written. One entry per CHANGE of standing is the recorded shape (#18412).',
+    );
+    return;
+  }
+
+  const row = buildPlatformAdminStandingRow({
+    snapshot,
+    previousSerialized,
+    declaresOrganizationId: declaresField('organization_id'),
+    declaresActor: declaresField('actor'),
+  });
+  // ⛔ Through this file's ONE write door, not a second `ql.insert` beside it.
+  // `tryInsert` already threads the system execution context every write here
+  // needs, and a second door with identical semantics would be a second place
+  // for that context to be forgotten — it is also a second row on the
+  // tenant-audit write-call-site census for one write.
+  let insertRefusal: unknown;
+  await tryInsert(ql, PLATFORM_ADMIN_STANDING_LEDGER, row, undefined, (e) => {
+    insertRefusal = e;
+  });
+  if (insertRefusal !== undefined) {
+    // The ledger IS mounted (or could not be asked) and the insert still
+    // failed, which is AGENTS.md's durability degradation to the letter: the
+    // deployment's administrators just changed and the record that was
+    // supposed to outlive the process is missing. Loud, and never fatal.
+    const message =
+      '[security] platform-admin standing CHANGED and the audit row was NOT written — the ' +
+      'durable record of who administers this deployment is missing for this change, and ' +
+      'nothing retries it. Boot itself is unaffected. Cause: ' +
+      String((insertRefusal as any)?.message ?? insertRefusal);
+    if (logger?.error) logger.error(message);
+    else logger?.warn?.(message);
+  }
+}
 
 interface BootstrapOptions {
   /** Logger from PluginContext. */
@@ -226,6 +367,13 @@ async function tryFind(
   limit = 100,
   orderBy?: { field: string; order: 'asc' | 'desc' }[],
   offset?: number,
+  // ⛔ "Refused" and "empty" are not the same answer, and on most call sites in
+  // this file the difference is harmless because `[]` is the conservative
+  // reading. On the standing-audit read below it is NOT: `[]` would read as
+  // "no record has ever been written", which writes a duplicate baseline on
+  // every boot of a rig whose driver refused the query. A caller that cannot
+  // afford that conflation passes this and is told.
+  onRefusal?: (error: unknown) => void,
 ): Promise<any[]> {
   try {
     const query: Record<string, any> = { where, limit };
@@ -233,7 +381,8 @@ async function tryFind(
     if (offset !== undefined) query.offset = offset;
     const rows = await ql.find(object, query, { context: SYSTEM_CTX });
     return Array.isArray(rows) ? rows : [];
-  } catch {
+  } catch (e) {
+    onRefusal?.(e);
     return [];
   }
 }
@@ -246,11 +395,16 @@ async function tryFind(
 // boots. See `reportSeedWriteRefusals` in `per-organization-catalog.ts`.
 async function tryInsert(
   ql: any, object: string, data: any, refusals?: SeedWriteRefusals,
+  // Symmetric with {@link tryFind}'s observer, and for the same reason: a
+  // caller outside the SEED pass needs the refusal itself, not a `null` that
+  // the seed reporter will later summarize on a channel that is not its own.
+  onRefusal?: (error: unknown) => void,
 ): Promise<any | null> {
   try {
     return await ql.insert(object, data, { context: SYSTEM_CTX });
   } catch (e) {
     refusals?.record(object, e);
+    onRefusal?.(e);
     return null;
   }
 }
@@ -789,6 +943,13 @@ export async function bootstrapPlatformAdmin(
         `at request time. ${summary}`,
       { standing: standing.map((s) => ({ ...s })) },
     );
+    // [#18412] …and the SAME answer, recorded durably. The log line above is
+    // the operator's first sight of it and nothing else: it is not queryable,
+    // it does not survive the process, and an auditor asking 「who held
+    // administrator standing three months ago, and since when」 cannot read it.
+    // This is the write that makes that question answerable — one entry per
+    // CHANGE of standing, plus the first-boot baseline.
+    await recordPlatformAdminStandingChange(ql, standing, logger);
     return {
       seeded: seededCount,
       adminPromoted: false,
