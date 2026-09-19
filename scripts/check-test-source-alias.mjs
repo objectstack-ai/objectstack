@@ -3131,16 +3131,18 @@ function selfTest() {
     // reads it as a false positive: the callee is named, the hop is named, and
     // the reason the specifier is literal only here is stated.
     expect(
-      clockedIn('packages/clocked-helper-routed/src/thing.test.ts:5').every(
-        (f) => f.includes('via `./loader.js`') && f.includes('VARIABLE'),
-      ),
+      clockedIn('packages/clocked-helper-routed/src/thing.test.ts:5').length === 1 &&
+        clockedIn('packages/clocked-helper-routed/src/thing.test.ts:5').every(
+          (f) => f.includes('via `./loader.js`') && f.includes('VARIABLE'),
+        ),
       'the routed finding did not name the hop it followed — an author cannot tell it from a false positive',
     );
     // …and it still prints the one remedy, which is unchanged by the routing.
     expect(
-      clockedIn('packages/clocked-helper-routed/src/thing.test.ts:5').every(
-        (f) => f.includes('COLLECTION') && f.includes("import '@fx/core';"),
-      ),
+      clockedIn('packages/clocked-helper-routed/src/thing.test.ts:5').length === 1 &&
+        clockedIn('packages/clocked-helper-routed/src/thing.test.ts:5').every(
+          (f) => f.includes('COLLECTION') && f.includes("import '@fx/core';"),
+        ),
       'the routed finding printed no module-top import to add — the remedy is the same one, not a new one',
     );
     // BOUND ONE: the callee must be a LOADER. `describeThing` is exported from
