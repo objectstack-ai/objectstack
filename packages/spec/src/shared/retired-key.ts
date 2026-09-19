@@ -230,10 +230,13 @@ export function acceptRetiredDefaultResidue<S extends z.ZodObject<z.ZodRawShape>
  * ADR that removed it, a clause saying why it went, an imperative fix, and —
  * where an ADR-0087 conversion covers the surface — the house `os migrate
  * meta` sentence. That sentence is pinned class-wide by
- * `retired-key-migrate-sentence.test.ts`, which is a plain TEXT scan over
- * string literals in `packages/spec/src` with no dependency on `retiredKey()`
- * — so a value retirement's prescription is judged by the same pin as a key
- * retirement's, for free, wherever in the tree it is declared.
+ * `retired-key-migrate-sentence.test.ts`, a plain TEXT scan over string
+ * literals with no dependency on `retiredKey()` — so a value retirement's
+ * prescription is judged by the same pin as a key retirement's, for free and
+ * with no change to the pin. Its walk yields non-test `.ts` only, which is
+ * the right boundary (a fixture is not a shipped prescription) and is why
+ * this helper's own test fixture is NOT evidence the pin fires: planting the
+ * withdrawn spelling there was measured to leave the pin green.
  *
  * ⛔ Not a structured `{ from, to }` record. The machine-readable channel for
  * a retirement already exists one layer out — the ADR-0087 conversion registry
