@@ -46,7 +46,7 @@ next-sequential numbers do.
   "id": "approvals.per-group-signoff",   // "<area>.<slug>" — immutable, globally unique, never reused
   "title": "Per-group sign-off (会签) needs one approval from EACH group",
   "since": "v16",                        // release that introduced the capability
-  "status": "active",                    // active | draft | retired
+  "status": "active",                    // active | draft | planned | retired  (see "Implementation status")
   "revision": 1,                         // bumps on any semantic edit
   "priority": "P1",                      // P0 = release-gating smoke · P1 = core · P2 = extended
   "surface": "browser",                  // browser | api | cli | build | mixed  (the 15.1 plan's 🖥/🔌 lanes)
@@ -296,6 +296,65 @@ Three things worth knowing before you meet it:
   ref}`) meaning "not runnable on stock fixtures today, tracked at <ref>". The
   showcase-side fixture gaps #3358 uncovered (#3408, #3409, #3415) each cost a sweep to
   rediscover; recording the gap on the item is what stops that.
+
+## Implementation status — `planned` is how the ledger holds a capability gap
+
+The ledger used to record only capabilities that already work, so a missing piece of a
+listed capability had nowhere to live: the backlog sweep had nothing to point a `Path:`
+at, and the platform's implementation status lived in nobody's head. The North Star's
+definition line (「做出来的是什么」…「缺任何一样就不是这个应用」) makes such a piece a
+**requirement**, so it belongs on the ledger — as a fourth status, not as a second
+document. A separate feature list would drift against this one with no gate able to say
+which is wrong (the ADR-0136 lesson), and the reading entry carries numbers only because
+a command produces them.
+
+**`status: "planned"`** — the definition requires this capability and the platform does
+not yet implement or verify it. What a planned item carries, and what it deliberately
+does not:
+
+| field | on a planned item |
+|:---|:---|
+| `id` · `title` · `priority` · `surface` · `revision` · `history` | as for any item — an id is picked once and is immutable, so it can be pointed at from the day the gap is found |
+| `personas` | **required** — who the capability is for is knowable the day the gap is found, and is what makes the gap readable to the next sweep |
+| `since` | `null` (no target release chosen) **or the TARGET release** — never a release that already shipped without it |
+| `steps` | **none.** There is nothing to drive. Steps arrive in the PR that implements the capability, in the same edit that promotes the item |
+| `acceptance` | not required — no oracle can be consulted yet. Clauses drafted early are still validated |
+
+Three consequences, all mechanical:
+
+- **A planned item never runs.** `scripts/checklist-select.mjs` resolves it in no
+  selector's runnable set, and there is no flag that makes it one. The selector reports
+  it separately and the run record carries the verdict `planned` — ⛔ never `pass`,
+  `fail` or `blocked` ([RUNNER.md](./RUNNER.md) "Verdicts"). A blocked item is a real
+  test the environment cannot run today; a planned item has nothing to run at all.
+- **A planned item is not coverage.** It is a legal `coverage.json` map target — that is
+  where a capability-gap card points — and it contributes zero: a kind whose *only*
+  items are planned is reported **UNMAPPED**, exactly as if the entry were empty.
+  Otherwise `planned` would be the cheapest way to green an untested kind, and the
+  ratchet would measure intentions instead of tests.
+- **Promotion `planned → active` is earned, not declared.** It takes a run record in
+  which the item **passed**: steps and acceptance arrive with the implementation, the
+  item is run, and only then does the status flip (bumping `revision` and appending to
+  `history` like any other semantic edit). ⛔ Flipping the status because the code
+  landed is how a ledger starts reporting coverage it does not have.
+
+**Reading the status** — one command, and the human entry point it publishes:
+
+```bash
+pnpm gen:checklist-status              # per-area active/planned counts + every planned id
+pnpm gen:checklist-status --out <dir>  # also render the wiki pages into <dir>
+```
+
+The wiki index **[Platform-Checklist](https://github.com/objectstack-ai/objectstack/wiki/Platform-Checklist)**
+is the 「平台功能清单 + 实现状态」 reading entry: one row per area with its active and
+planned counts, linking to one `Checklist-<area>` page per area that lists every item
+(`id · title · priority · status · personas`) with the planned ones in their own section
+first. It is regenerated on a schedule by
+[`.github/workflows/checklist-status.yml`](../../../.github/workflows/checklist-status.yml)
+and is never committed here — ⛔ there is no `STATUS.md` in this tree and no gate paired
+with one, by maintainer ruling: staleness is tolerated, and a generated page in the tree
+is a third artifact to keep fresh whose stale copy reads exactly as authoritative as a
+current one.
 
 ## Capability coverage — every capability the platform has gets tested
 
