@@ -1,5 +1,1160 @@
 # @objectstack/runtime
 
+## 17.5.0
+
+### Minor Changes
+
+- 1a25f4a: fix(runtime): `GET /api/v1/packages/:id` honours `?version=` instead of silently ignoring it (#17416)
+  
+  The route accepted a `?version=` query parameter and the only surface serving it
+  never read the parameter. A caller asking for a version that is not installed
+  was answered `200` with the **installed** row, and nothing in the status,
+  headers or body distinguished that from a version-scoped read that actually
+  happened.
+  
+  The parameter is not hypothetical traffic: `ScopedEnvironmentClient.packages.get`
+  (`@objectstack/client`) declares `version?: string` and appends it, so the SDK
+  has been sending a parameter the runtime dropped. The handler that honoured it
+  — the REST registrar's twin of this route — was removed with the duplicate
+  response shape, and the dispatcher's `/packages` domain never had that read to
+  inherit.
+  
+  ```
+  FROM  GET /api/v1/packages/com.acme.crm?version=99.0.0   (1.0.0 installed)
+        -> 200 { data: { manifest: { version: "1.0.0" }, … } }
+  
+  TO    GET /api/v1/packages/com.acme.crm?version=99.0.0
+        -> 404 { error: { message: "Package 'com.acme.crm' version '99.0.0' not
+                                    found — installed version is '1.0.0'" } }
+  ```
+  
+  **What does not change.** The unversioned read is untouched, down to the row and
+  the writability verdict it stamps — pinned as the lit control beside the new
+  assertions, because a green on only the scoped path would also pass with the
+  ordinary read broken. `?version=` naming the installed version is served
+  exactly as the unversioned read is, and so is `?version=latest`: the deleted
+  handler read `requested.value || 'latest'` and its store resolved `latest` to
+  the newest row, so "no version" and "`latest`" named one request there and name
+  one request here. An id the registry does not hold keeps its existing 404
+  wording whether or not `?version=` rode along — a package that is not installed
+  cannot be at the wrong version.
+  
+  **This is request-side only.** The response shape is not touched, so the route
+  still answers with exactly one body shape; comparison is exact string equality
+  on the version, the same predicate the durable package store uses (`AND version
+  = ?`), so the two answers to "is this package at version v" cannot drift into
+  semver-range semantics at one of them.
+  
+  A repeated `?version=a&version=b` is no longer resolved by silently choosing
+  one — it is answered with a refusal naming what was seen. The repo's one rule
+  for a repeated single-valued parameter answers `400 VALIDATION_ERROR` and is
+  the right end state for this door too; it is not restated here, because the
+  helper that owns that rule and its message is not exported from
+  `@objectstack/rest`.
+- 182bbde: the resume door's `repairable` is answered by the engine on the exits that stamp no status — `IAutomationService` declares the read-only `inspectConsumedSuspension` (#17541)
+  
+  Clause-②: yes (widening)
+  
+  The resume route's `400 FLOW_FAILED` details computed `repairable` as the single
+  expression `status === 'stranded'`. That word is stamped on exactly one exit —
+  the run that consumed its OWN pause and then threw downstream. The subflow
+  DELEGATION exit stamps nothing on purpose: a caller resumes the PARENT, the
+  signal is forwarded down, the child strands, and the parent frame answers
+  `{ success: false, error, durationMs }`, because nothing re-arms an ancestor by
+  resuming it and stamping `'stranded'` there would send an operator to retry a
+  recovery that cannot succeed.
+  
+  Since the nested-chain restore landed, that parent's consumed pause IS
+  journalled and one `restoreConsumedSuspension(parentRunId)` re-arms the whole
+  chain leaf-first. So the wire answered `repairable: false` about a run the
+  operator verb WILL repair, and a client written exactly as the reference page
+  instructs closed it as terminal. Measured through the HTTP route, before and
+  after, on the same parked delegation:
+  
+  ```json
+  before  400 { "error": { "code": "FLOW_FAILED",
+                 "details": { "runId": "run_…", "repairable": false } } }
+  after   400 { "error": { "code": "FLOW_FAILED",
+                 "details": { "runId": "run_…", "repairable": true } } }
+  ```
+  
+  …while at that same instant the engine answered
+  `inspectConsumedSuspension(runId) → { repairable: true, witness: 'journal' }`
+  and `restoreConsumedSuspension(runId) → { restored: true, chain: [child, parent] }`.
+  
+  **`@objectstack/spec` — additive, `minor`.** `IAutomationService` declares the
+  optional read-only member `inspectConsumedSuspension(runId)`, which
+  `AutomationEngine` already implements publicly: would the restore verb have a
+  consumed suspension to put back for this run? It re-arms nothing and reads the
+  same two witnesses that verb reads, so what it calls repairable IS what that
+  verb restores. The declared result is deliberately narrower than the
+  implementation's, the way `restoreConsumedSuspension`'s already is — `reason` is
+  typed as the string the implementation answers, not as an enumeration this
+  contract would have to keep in step, and the engine's wider type satisfies it
+  under `implements`. `ResumeFailureDetailsSchema.repairable`'s `.describe()` is
+  rewritten to the truth and the generated reference page regenerated with it. No
+  key is added, renamed or retired on any wire schema.
+  
+  **`@objectstack/runtime` — the door.** On a `400 FLOW_FAILED` whose result
+  carries a `status`, that stamp still decides, and the engine is not consulted at
+  all. On a result that carries none, the door asks the declared member and relays
+  its `repairable`. Both ways of not getting an answer are FAIL-CLOSED: a service
+  that declares no inspection member answers `false` exactly as it did before, and
+  an inspection that REJECTS (a store it could not read) answers `false` and says
+  so once at `warn` — an unreadable store is UNKNOWN, not "nothing to restore",
+  and it is never allowed to replace the `400` the caller asked for with a `500`.
+  
+  ⛔ The fence is untouched: a cascade-failed ancestor is still never STAMPED
+  `'stranded'`. Its repairability is carried by the journal and REPORTED by the
+  inspection, which is exactly why the door asks instead of reading a word. ⛔ And
+  no new `AutomationResult.status` member is minted for this exit — there is
+  nothing new for a client to learn, and `details.repairable` is the member a
+  client was already told to branch on.
+- 2b6a207: fix(runtime): the API root is the discovery route, under a second spelling — a gated session's `GET ${prefix}/` reaches discovery again (#17625)
+  
+  `HttpDispatcher.dispatch()` strips one trailing slash, so both root spellings it
+  accepts collapsed onto the empty string: `${prefix}/` arrives as `/` and
+  `${prefix}` arrives as `` (the MSW / base-URL-stripped form). Only the discovery
+  branch at the foot of the method knew that empty string meant the API root. The
+  ADR-0069 authentication-policy gate, which runs far above it, did not.
+  
+  That disagreement was invisible while `isAuthGateAllowlisted` answered `true`
+  for a falsy path. objectstack#7898 made the predicate fail-closed at the source
+  — exemption is now something a path EARNS by naming an allow-listed route — and
+  the bare-root discovery request started answering 403 for a session carrying an
+  `authGate` posture (expired password, required MFA):
+  
+  ```
+  FROM  GET ${prefix}/   (session with user.authGate)  ->  200  discovery document
+  TO    GET ${prefix}/   (session with user.authGate)  ->  403  PASSWORD_EXPIRED   // regression
+  NOW   GET ${prefix}/   (session with user.authGate)  ->  200  discovery document
+  ```
+  
+  **Normalising the root to `/` is measured insufficient and is not what landed.**
+  `isAuthGateAllowlisted('/')` is `false` — a segment-less path matches no
+  `ALLOW_ROUTES` entry — and the discovery branch tests `/discovery` or the empty
+  string, neither of which `/` satisfies. `'' -> '/'` therefore relocates the 403
+  rather than removing it. Both legs are pinned upstream in
+  `packages/core/src/security/auth-gate.test.ts` ("does not exempt the dispatcher
+  bare-root `cleanPath` — step 2 is #17625").
+  
+  The root is canonicalised to `/discovery` instead — the route it has always
+  served — read from one constant by both the canonicalisation and the branch that
+  serves it, so the two cannot drift into a third disagreement about what the
+  empty path means.
+  
+  **⛔ No allow-list was widened and `packages/core` is untouched.** The only input
+  whose gate answer moves is the API root, and it gains exactly the exemption
+  `/discovery` already carried, by BEING that route — no new information is
+  reachable, since `/discovery` was already exempt and already outside the
+  project-membership skip check. A caller that reaches the gate with no path at
+  all is still refused at the predicate, and the pathless case stays declared
+  where it lives (`shouldDenyAnonymous`) rather than re-derived at this seam.
+  
+  **What does NOT change.** `${prefix}` with no trailing slash keeps serving the
+  same document; the named `/discovery` route is untouched; the
+  environment-scoped root `${prefix}/environments/<id>` keeps its own answer,
+  which matched no allow-listed route before objectstack#7898 either. `//` strips
+  to `/`, not to the empty string, so it is not the root and is not canonicalised.
+  
+  **Why `minor` on a change whose commit type is `fix`.** The two are independent
+  and the floor is mechanical, not editorial: this PR's clause ② is declared
+  affirmative, and the maintainer's ruling of 2026-09-04 (decision batch #35, on
+  objectstack#15294) puts an affirmative clause ② on a package whose
+  `packages/**/src/**` the diff moves at AT LEAST `minor` — *the commit type may
+  raise a bump but never lower it below what the act requires*, written out under
+  "WHICH LEVEL" in the `Check Changeset` step of
+  `.github/workflows/pr-automation.yml`. ⛔ So the reading that this is "a 403 that
+  should be a 200, therefore a patch" is an argument about INTENT and does not
+  reach the level: the act re-admits an input class the merged tree refuses, on an
+  authorisation surface, and that is what the level grades. The commit type stays
+  `fix(runtime)`, because the type describes the act and the level prices it.
+  
+  **ADR-0087 disposition: no ledger entry is owed and no marker is required.**
+  This changeset declares no breaking change, which is the only condition under
+  which `check:adr-0087-registration` demands a disposition marker. On the
+  substance: no ADR-0087 shape surface moved — the diff touches one
+  `packages/runtime` transport file and its sibling test, no `*.zod.ts`, no
+  `packages/spec/**`, no `packages/spec/src/contracts/**` entry and no object
+  definition — so `objectstack migrate meta` has nothing to reach, and no
+  authorable metadata key, accept set or stored shape changes. Nor is this an
+  ADR-0087 conversion-layer entry: nothing lenient is being accepted from a
+  metadata producer. One transport's two spellings of its own route are being
+  reconciled to the route's own name, which is the opposite direction — a dialect
+  removed, not tolerated.
+- 156792e: The package-install request contract now names the door that actually serves it, declares the two body forms that door accepts, and the door honours `enableOnInstall` instead of ignoring it (#18058).
+  
+  `PackageInstallRequestSchema` was declared, published and bound to `POST /api/v1/packages/install` — a path the composed runtime mounts nowhere: the dispatcher answers `handled=false` and `@objectstack/rest`'s registrar mounts only `POST /api/v1/packages/publish`. Meanwhile `POST /api/v1/packages`, the door that answers `201`, had no declared request contract at all, so the read contract was strictly more truthful than the write contract producing the rows it describes.
+  
+  Clause-②: yes (widening)
+  
+  **What moved on the published surface**
+  
+  - `PackageApiContracts.installPackage.path` — `'/api/v1/packages/install'` → `'/api/v1/packages'`. A caller that read the constant to build a URL was building one nothing serves; a caller that hard-coded the old string gets a `404` today and should send `POST /api/v1/packages`. The method (`POST`) is unchanged and is what distinguishes this entry from `listPackages`.
+  - `PackageApiContracts.installPackage.input` — `PackageInstallRequestSchema` → the new `PackageInstallBodySchema`. The wrapped schema is still exported and still parses the wrapped form; the new export is a union that also parses a bare manifest.
+  - `PackageInstallRequestSchema` gains **`overwrite?: boolean`**. This is a declaration of behaviour that already shipped: the door reads `overwrite` from the body (or `?overwrite=true`) to opt back in to replacing an already-installed id instead of answering `409 Conflict`, the first-party SDK sends it, and no schema declared it — so any parse at that door would have silently stripped it and turned a deliberate re-install into a conflict.
+  - **`PackageInstallBodySchema`** / `PackageInstallBody` / `PackageInstallBodyParsed` are new. The door reads `body.manifest || body`, and first-party callers really do post a bare manifest as the whole body, so the contract declares both forms as a union — every parse is a full parse of one coherent form, never a tolerant shape. The two branches are disjoint, but only the BARE one is CLOSED: `PackageInstallRequestSchema` is a plain `z.object`, so an unknown key on the wrapped form is DROPPED (`{ manifest, bogus: 1 }` parses and `bogus` is gone) while the same key on a bare manifest is refused by name. That asymmetry matches the door, which reads four keys off the wrapper and ignores the rest — closing the wrapped branch would refuse bodies the door answers `201` to. The bare form carries no install options: `settings`, `enableOnInstall` and `overwrite` are not manifest keys and the manifest surface is closed, so a bare-form caller reaches `overwrite` through the query string alone.
+  
+  **What moved at the runtime**
+  
+  `POST /api/v1/packages` now honours `enableOnInstall: false` in the wrapped body: the package installs `disabled`, through the same registry flip and durable state write `PATCH /packages/:id/disable` uses, so a restart does not re-enable what the caller switched off. `true` and absent install enabled, which is the declared default. Previously the key was declared in three schemas, sent by the SDK, and read by no handler at all.
+  
+  The durable write happens on **both** arms, not just the disable. `POST /packages` is a create that an already-installed id reaches through `overwrite`, and `DELETE /packages/:id` does not clear this record either, so an install could answer `201` with `enabled: true` while the state file still listed the id as disabled — and `SchemaRegistry.installPackage` reads that file at boot, re-installing the package DISABLED one restart later with nothing red in between. The mirror of that risk is why the write follows the ROW this door returned rather than the request's intent: `SchemaRegistry.installPackage` lands an id in the boot-seeded `initialDisabledPackageIds` DISABLED whatever the request says, and `enableOnInstall` defaults to `true`, so persisting the request would clear an operator's earlier disable off disk on the SDK's default call while the row being served says `enabled: false`. A flag-absent install of a seeded id therefore answers `enabled: false` and records it disabled — wire, registry and disk agree, and the next boot reads the same. Every install now persists the state it returned.
+  
+  **What the declaration does NOT cover — the measured residual**
+  
+  This is a subset description of the live door, deliberately, and it is recorded rather than implied. Measured through `HttpDispatcher.handlePackages`, the door also answers `201` to: a manifest missing `type` and/or `version` (both of the runtime's own door drives post one); unknown keys on either form (refused by name on the bare branch, dropped on the wrapped one, `201` either way); a string-typed `enableOnInstall` / `overwrite`, which is compared against `true`/`false`/`'true'` and therefore treated as absent — `enableOnInstall: 'false'` installs ENABLED; and install options spelled on the bare form, which are ignored. In the opposite direction the door answers `400` to a whitespace-only `id` this declaration admits. `ManifestSchema` is not relaxed to close any of that.
+  
+  **Documentation**
+  
+  `packages/client`'s README install example could not parse against the manifest contract — no `id`, no `type`, and a `label` key the closed manifest surface refuses by name — and the live door answered it `400 Package id is required`. It is now a manifest that parses, and the example names the `overwrite` opt-in beside it.
+- 74832b6: **Breaking (shipped as `minor` under the launch-window convention).** Under a **walled** tenancy posture (`group` / `isolated`), a legacy unscoped `admin_full_access` grant row no longer confers `PLATFORM_ADMIN`; platform standing there is derived from `OS_PLATFORM_OWNER_EMAIL` and from nothing else. The migration pointer that announced this since 17.3.0 is retired with it: `reportLegacyPlatformAdminGrant` and `resetLegacyPlatformAdminGrantReport` are **removed from `@objectstack/core`'s published entry** (#18336, #11663 leg L5).
+  
+  ⚠️ **The `single` posture is untouched, deliberately.** Its zero-config first-user promotion still mints that row and that row still confers `PLATFORM_ADMIN` — a development environment started for a moment cannot be asked to declare an administrator first. Choice 4A (#11974) rules that promotion correct, and the maintainer's 2026-09-08 ruling on #16682 is verbatim: 「retiring the walled write must not retire the `single` one」. The `single` half's disposition is #11979's. ADR-0131 D5, as amended 2026-09-17 (#18413), is the governing record.
+  
+  **What a walled deployment must do.** Declare each administrator's **verified** address in `OS_PLATFORM_OWNER_EMAIL` (comma-separated for several) before upgrading. A walled rig that upgrades with the variable undeclared and an unscoped grant row still in place has **zero** platform administrators; the bootstrap now says so **at error**, naming the variable, the row and its holder — L4 used to skip that line for exactly this rig, on the ground that the deprecation pointer carried the remedy instead, and both halves of that arrangement have now expired.
+  
+  - **17.3.0 opened the window, this closes it.** L4 (17.3.0) stopped the walled bootstrap from ever *writing* the row and started the once-per-process pointer; L5 stops the walled derivation from *reading* it. The window was time-boxed and loud by design (#11663 P5).
+  - **The retirement takes the ANCHOR, not the ROW.** Nothing here writes, deletes or re-owns any grant row — a walled holder keeps the `admin_full_access` permission set they hold, and loses only platform-admin *standing*: the rung and the built-in `platform_admin` position. That row's ownership is ADR-0131 C3's, on the v18 line.
+  - **No new query.** The posture gate reads the environment, never the engine, so the recorded query multiset is identical under both of its answers — measured, not asserted. Under a wall the guard's grade-1 scan is skipped outright, so that path issues one read fewer.
+  - **`@objectstack/plugin-auth` moves with it, at TWO readers.** `ensureDefaultOrganization`'s step-2 legacy fallback is keyed on the same expression: under a wall it no longer answers「which user is the platform admin?」from the oldest unscoped grant, so the account it would have bound as the Default Organization's `owner` — and handed the org's seeded rows to — is no longer selected. ⛔ That reader does not merely count the population, it **confers** on it, which is why it is keyed here rather than sequenced. Its bootstrap-trigger predicate retires the matching `sys_user_permission_set`-insert arm under a wall with it (cost only; the `sys_user` arms are untouched, and on a walled rig the declared owner's verifying update is the only write that ever grows the population). And:
+  - **`@objectstack/plugin-auth`'s break-glass guard moves with it.** `last-admin-guard.ts` enumerates the administrator population from the SAME anchor, and its contract is to answer the same question the derivation answers. Its grade-1 (grant-anchored) enumeration is now keyed on the identical expression, so under a wall the guard no longer counts a holder the derivation does not recognise. Consequence on a walled rig: a write that would end the last **config**-anchored administrator's standing is now REFUSED where it was permitted, and a write that removes the now-inert grant row is no longer refused as though it removed the last administrator. Under `single` the guard is unchanged. Its two zero-population refusals also gained a walled clause, because「restore the `admin_full_access` row」stopped being a remedy that ends the emptiness there.
+  - **`@objectstack/organizations`' walled bootstrap moves with it.** That package wraps `ensureDefaultOrganization` and is the runtime that actually performs the default-organization bootstrap on a walled deployment (plugin-auth's own wiring skips it there). With the helper's legacy fallback keyed off, a walled rig carrying a legacy grant row **no longer** has a Default Organization created for that holder, and that holder is no longer bound as its `owner`; the bootstrap waits for a declared administrator to verify instead. ⚠️ Named because the behaviour an operator gets **from this package** moves — its own source does not change, and the pin re-authored inside it is not the reason.
+  - **Why `@objectstack/runtime` and `@objectstack/plugin-hono-server` are named.** Neither package's own source changes. Both carry `export * from '@objectstack/core'` (`runtime/src/index.ts`, `plugin-hono-server/src/adapter.ts`) and their built `.d.ts` carry that statement, so the two removed names leave their published surfaces too. All publishable packages sit in one Changesets `fixed` group, so naming them moves no version — it is named so the tombstone reaches the CHANGELOG an upgrading consumer of THOSE packages greps. Precedent is mixed (a core-only declaration exists); this follows the `ApiRegistry` precedent, which named every package the removal reached.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing here is a metadata surface: the two removed symbols are plain runtime functions in `packages/core/src/security/platform-admin.ts` with no Zod schema, no `packages/spec` declaration and no stored representation, and the behaviour change is an authorization derivation keyed on an environment variable. `objectstack migrate meta` therefore has nothing to rewrite — the channels that reach an affected consumer are the compiler (for the removed exports) and the boot-time fail-closed log line (for the walled standing). No grant row is written, deleted or re-owned by this change; that rows own migration is ADR-0131 D10/C3 and stays on the v18 line. The plugin-auth guard change and the two re-export packages add no metadata surface either. -->
+- 76ddab7: fix(runtime,mcp): `action.ai.requiresConfirmation` is ENFORCED at the AI-facing action door — an unconfirmed call is refused, and `run_action` grows the `confirm` member that satisfies it (#15942)
+  
+  **Behaviour change — read this if any of your actions declare `ai.requiresConfirmation: true`.** An AI-facing invocation of such an action (`invokeBusinessAction`, reached from the MCP `run_action` tool) is now REFUSED unless the request carries the confirmation member. A call that succeeded before starts answering `428 ACTION_CONFIRMATION_REQUIRED`, and nothing dispatches: the action body does not run, and the subject record is not even read.
+  
+  FROM → TO, for a caller of a gated action:
+  
+  ```
+  run_action({ actionName: 'archive_lead', recordId: 'lead_1' })                  // was: ran
+  run_action({ actionName: 'archive_lead', recordId: 'lead_1', confirm: true })   // now: required
+  ```
+  
+  The refusal is machine-readable so the retry is mechanical rather than guessed — `error.details` carries `{ actionName, objectName?, confirmationMember }`, and `confirmationMember` echoes the member's exact spelling (`AI_ACTION_CONFIRMATION_MEMBER`, `@objectstack/spec/contracts`). The `run_action` tool schema advertises `confirm` as an optional boolean, so an agent discovers the retry from the tool definition rather than from prose.
+  
+  **What is NOT gated**, because this narrows a published accept set and the narrowing is deliberately as small as the author's own declaration:
+  
+  - Only the DECLARED flag gates. `ai.requiresConfirmation: true`, set by the action's author, and nothing else. The wider `list_actions` heuristic — `mode: 'delete'` / `variant: 'danger'` on an action whose author declared nothing — still reports `requiresConfirmation: true` to advise a client, and still does NOT refuse. An explicit `ai.requiresConfirmation: false` never refuses.
+  - Only the boolean `true` confirms. `'true'`, `1` and `false` are not attestations.
+  - Only the AI-facing doors. The enforced set is the doors that enforce `ai.exposed` — today `invokeBusinessAction` via MCP `run_action`. REST `/actions` is not `ai.exposed`-gated and sits outside this gate.
+  - `list_actions` is unchanged.
+  
+  **A gate, not a queue.** Nothing is parked, nothing is held for an operator, and there is no resume path: a refused call simply did not run, and the caller confirms with its human and retries. And `confirm: true` is an unverifiable caller claim — an agent that always sends it bypasses the gate. The gate makes FORGETTING loud; it does not prove a human.
+  
+  Why it is worth the break: the flag was read once and consumed once, to fill a field of the `list_actions` summary. It stopped nothing. That is the failure ADR-0049 retired `tool.requiresConfirmation` for — "a SAFETY flag that is merely accepted is false compliance" — reappearing on the very key the retirement's own ledger entry told authors to move to. The contract this implements landed in `@objectstack/spec` first (#16293).
+- ea4d164: Bind an environment artifact's install-time GRANTED permission set to the packages that artifact materializes.
+  
+  `EnvironmentArtifactSchema.grantedPermissions` — the consented `{ services, hooks, network, fs }` set the control plane compiles onto the artifact at install-consent time (ADR-0025 §3.5 step 2 / F4) — now reaches `PluginPermissionEnforcer.registerGrantedPermissions` at materialize time, one call per consent record, keyed by the plugin manifest `id`. `AppPlugin.init()` performs the binding, so it happens on every path that turns an artifact into a kernel plugin without either caller changing a line, and the enforcer holding the result is readable as `AppPlugin.permissionEnforcer` (with `AppPlugin.grantBinding` recording what bound).
+  
+  Absent, `{}` and a consented entry stay three distinct states. An artifact carrying no `grantedPermissions` key allocates no enforcer and registers nothing, so a package with no consent record loads exactly as it did; a per-plugin `{}` is a consent record that consented to nothing and registers a bag that denies every service, hook, host and path. A consent record naming a package the artifact does not carry is reported at `warn` rather than passing in silence.
+  
+  Fixed alongside, because without it the binding was unreachable: the `{ schemaVersion, metadata }` envelope unwrap in `loadArtifactBundle` handed the kernel `metadata` alone and dropped every key standing beside it, so an envelope artifact reached the kernel with `grantedPermissions` stripped. The loss was silent and indistinguishable from the legitimate absent reading. The unwrap now carries the key across when the envelope declares it, `{}` included, and never invents one.
+  
+  New exports from `@objectstack/runtime`: `registerArtifactGrantedPermissions`, `resolveArtifactGrantBinding`, `carriedPackageIds`, `ArtifactGrantBinding`.
+  
+  This is the registration half. Access-time enforcement runs through `SecurePluginContext`, which no production path constructs; that seam is ADR-0025 install-flow work and is unchanged here.
+- 331a1a2: fix(security): an OAuth-connected MCP agent runs at its delegator's record depth — "you connect as yourself" becomes true (#16549)
+  
+  Maintainer ruling, decision batch #81 item 1 (2026-09-08), option 1: **the OAuth agent runs with the user's own permissions; the ceiling only subtracts; the diagnostic lands regardless.**
+  
+  **The defect, measured.** The Setup → Connect an Agent page promises, verbatim, *"you connect as yourself, and every call runs under your own permissions and row-level security."* It did not. The same sales manager, same questions, same server:
+  
+  | identity path | `crm_account` | `crm_opportunity` | `crm_task` |
+  |:--|--:|--:|--:|
+  | API key, `principalKind: human` | 9 | 23 | 45 |
+  | OAuth, `principalKind: agent`, `onBehalfOf` = same user | **5** | **0** | **0** |
+  
+  The agent read `own` scope where the human read `viewAllRecords`, so any profile whose visibility comes from `viewAllRecords` — every manager-type profile — collapsed to *own + explicit shares*. And it was **silent**: the MCP tools answered `total: 0` with no note, so the agent reported "there are no opportunities this quarter" as a fact about the data.
+  
+  **The mechanism, in one line.** `mcp_agent_data_read` / `mcp_agent_data_write` are pure CAPABILITY ceilings — a `'*'` grant with no `readScope` and no `viewAllRecords`, whose own doc says *"NO row-level security … all row/owner/tenant narrowing comes from the delegating user"*. `PermissionEvaluator.getEffectiveScope` nevertheless answered `'own'` for them, because its owner-only default turns a granting-but-silent set into an owner-scoped one. That default is correct for a principal standing on its own and wrong as an input to an intersection: it made the ADR-0090 D10 fold subtract with an opinion nobody declared.
+  
+  **(1) Parity.** A new `PermissionEvaluator.getDeclaredScope` answers the depth a set actually *declares*, or `undefined` when every granting set is silent; `intersectDelegatedScope` reads that silence as **no opinion**, so the delegated principal's own leg contributes no owner narrowing and the delegator's depth stands — `agent ∩ user = user` for visibility. A ceiling that *does* declare a depth keeps its full subtractive force. The explain engine's `depth` layer folds through the identical function, so a report cannot describe an intersection the query did not have.
+  
+  ⛔ **Only visibility depth moved.** Each ceiling's remaining subtractions are now written down explicitly beside the sets themselves (`objects/default-permission-sets.ts`): `data:read` still cannot write, create, delete, export or `allowTransfer`; `data:write` still cannot `allowTransfer` or export, and `sys_*` / better-auth-managed identity tables stay read-only; neither reaches a `private`-posture object nor carries any `systemPermissions`; a dangling delegator still fails CLOSED; and share-MANAGEMENT authority is still not delegated (`hasWriteBypass` → `false`, `resolveWriteScope` → `'own'` for any on-behalf-of context). Putting `viewAllRecords` / `modifyAllRecords` on the ceiling — the ruling's other permitted route — would have granted `allowTransfer` (`MODIFY_ALL_WRITE_KEYS` covers it) and reached `private` objects through the superuser wildcard, both explicitly fenced off, which is why the fix lands on the intersection instead.
+  
+  **(2) The diagnostic, independent of (1).** `ISecurityService.describeDelegationNarrowing` (optional) reports whether the agent ceiling narrowed a delegated read, resolved from the same two evaluator calls the CRUD middleware stashes as `__readScope`. `McpDataBridge.diagnoseDelegation` (optional) carries it to the transport, and MCP `query_records` serves a narrowed result with `delegationNarrowed: true` plus a `warning` sentence naming the D10 intersection — the `partial` / `warning` shape `list_objects` already uses. The rows are still served; what is added is the fact the payload could not previously carry: *this count describes the ceiling, not the object.* An un-narrowed read, a non-delegated read, a bridge with no probe and a throwing probe all render exactly what they rendered before.
+  
+  **(3)** The Setup page's promise is untouched — it is now true rather than rewritten.
+  
+  Purely additive on every published surface: two new optional members, one new exported type (`DelegationNarrowing`), and one new evaluator method. No existing member changed shape, and the only behavioural change is on the delegated path with a ceiling that declares no depth.
+  
+  `DelegationNarrowing` is a **discriminated union** on `narrowed`, not one shape with three optional fields, because the two shapes are not symmetric once released:
+  
+  | direction, after release | consumer cost |
+  |:--|:--|
+  | ship optional fields, later tighten them to required | a compile break |
+  | ship discriminated, later loosen it (a new union member, or an optional field on the `true` arm) | none |
+  
+  The loose shape buys nothing and forecloses the tightening. It also removes the very failure mode the method exists to prevent: `statement` is the sentence an AI consumer renders, so left optional, a consumer that forgets the `narrowed` check silently renders `undefined` — the same silence the table above measures. The five-member scope ladder it reports names the alias that already exists for it, `ObjectAccessScope` (ADR-0057 D1, `@objectstack/spec/security`), rather than minting a second declaration of one ladder; `resolveWriteScope` now names it too, so the union is spelled once instead of three times and no export is added beyond `DelegationNarrowing` itself.
+- e6965dd: **`AppPlugin` now names the manifest-stage `permissions` value its ADR-0057 security registrar cannot read, instead of dropping it in silence.**
+  
+  The registrar flattens the manifest under the stack's own collections (`{ ...manifest, ...collections }`), so `manifest.permissions` is read whenever the stack declares no `permissions` collection of its own. That key is the ADR-0025 §3.2 capability grant a package *requests* — a flat list of permission strings, or `{ services, hooks, network, fs }` — while the registrar wants ADR-0090 `PermissionSet[]`. Both arms were skipped with nothing logged: the structured arm is not an array, so the whole value never entered the loop; every member of the flat list carries no `name`, so all of them were dropped. An author who wrote `manifest: { permissions: ['sales_rep'] }` meaning a permission set got no set registered, no `sys_audience_binding_suggestion`, and no line anywhere saying why — the "absence must be loud" rule in AGENTS.md → Route & surface ownership §3.
+  
+  It now warns once per boot, naming the field, how many entries were lost, both readings of the key, and where permission sets belong (`defineStack({ permissions: [ … ] })`). The report is written per `SECURITY_FIELDS` entry, so a hand-built bundle carrying `positions` / `capabilities` / `sharingRules` on its manifest is named too.
+  
+  **Nothing else moves.** Which items register is byte-for-byte unchanged — the registrar is deliberately *not* made tolerant of the grant reading (widening the key was rejected by name, #14242 road C, maintainer 2026-09-02). The line is `warn`, not `error`: nothing here claimed to persist anything. It stays silent on every shape where nothing was lost — a stack declaring its own `permissions` collection, a manifest with no such key, a manifest whose entries the registrar really can read, and the `securityMetadataRegistrar: 'artifact-door'` composition that owns the route.
+- 777d0c2: fix(rest,runtime): a sandboxed body that crashed now answers the sanitised 500 at the bulk REST door and at `/api/v1/actions`, instead of a declared 4xx or a 400 carrying the crash text (#17273)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable moves: no `packages/spec` key, no Zod schema, no object definition, no config field and no stored representation changes its name, its type or its optionality, so `objectstack migrate meta` has nothing to visit, `spec-changes.json` has nothing to project and the upgrade guide has no row to gain. What moves is the RESPONSE two published doors give for one input shape at request time, and this changeset ships no instructions for rewriting anything a consumer authored -- there is no authored artifact to rewrite. The affected caller's remedy is not an edit but the truth: the body crashed, and the 500 says so. The other four categories are closed on facts: `@objectstack/rest` and `@objectstack/runtime` both publish to npm (not `unpublished`); no ADR-0087 id is minted in this diff (not `registered`) and none pre-dates the base that would cover it (not `already-registered`); no named `path#Symbol` is a non-metadata runtime interface whose members moved -- no exported declaration changes at all, the crash gate being file-local in `error-response.ts` and a local `const` in `domains/actions.ts`, absent from both package entries (not `runtime-interface-only`), which is also why `type-surface-only` has no subject. -->
+  
+  **BREAKING** — the answer two published doors give moves for existing inputs. No
+  export, signature or declared type changes; what changes is the response an
+  existing call observes, and a client branching on `error.code` or on the status
+  for the affected shape now falls to its 5xx path instead of its refusal path.
+  Shipped as `minor` under the launch-window convention (`major` is refused while
+  the fixed group versions in lockstep), so this banner — not the level — is the
+  breaking-ness signal.
+  
+  **What changes for an operator.** #15071 ruled that a crash inside a sandboxed
+  hook or action body is a FAULT, not the refusal a declared code names, and
+  converged the single-record `/api/v1/data` door on it. Two doors that door does
+  not decide kept the old answer, and both are closed here. Measured, driven end
+  to end:
+  
+  The bulk / metadata / UI routes — everything reporting through
+  `handleRouteError` / `sendThrownError` — for a crash that declared a 4xx:
+  
+  ```
+  FROM  409 {"error":"hook 'guard' threw: TypeError: ctx.input.title.trim is not a function",
+             "code":"DELETE_RESTRICTED","object":"account"}
+  TO    500 {"error":"Internal server error","code":"INTERNAL_ERROR"}
+  ```
+  
+  `POST /api/v1/actions/:object/:action`, for a body that really crashed inside
+  QuickJS (`return ctx.input.title.trim();` with a numeric `title`):
+  
+  ```
+  FROM  400 {"success":false,"error":{"code":"VALIDATION_ERROR",
+             "message":"TypeError: not a function","httpStatus":400}}
+  TO    500 {"success":false,"error":{"code":"INTERNAL_ERROR",
+             "message":"Internal server error","httpStatus":500}}
+  ```
+  
+  and, when that crash also declared a status of its own, `409 DELETE_RESTRICTED`
+  with the same `TypeError:` message becomes the same sanitised 500.
+  
+  The full `<kind> '<name>' threw: …` wrapper still reaches the server log on both
+  paths, so nothing an operator diagnoses with is lost.
+  
+  **The `/actions` answer was also contradicting its own published page.** The
+  error catalog states for this very route that "a `TypeError` / a
+  `ReferenceError` / a driver's own error class is a crash (500)", and this module's
+  header says `did it reject or crash? reject → 400; crash → 500`. The door said
+  400. The code now matches the page; the page is unchanged.
+  
+  **What does NOT change.** An ordinary sandboxed REFUSAL — a body that throws a
+  business error and does not crash — is untouched at both doors: same status,
+  same code, same sentence, same structured fields. A refusal whose text merely
+  mentions a native error name ("Import failed with a TypeError in row 4") is
+  still a refusal, because the name list is anchored. Non-sandbox producers are
+  untouched. The 5xx passthrough arm's unconditional prose-drop is not narrowed:
+  the fault terminal withholds prose too.
+  
+  **Why.** A declared code, and a declared status, are the author's statement
+  about a failure mode they handled; a crash is not that mode. Answering one with
+  a business status shipped an internal, stack-shaped sentence to an end user and
+  told the client the wrong thing about what happened. #15071's own residue note
+  said closing it meant moving a status a passthrough decided — that is what this
+  does, deliberately and in the shrinking direction: the wire loses the crash
+  text and the producer's code, and gains nothing.
+  
+  **If you were relying on the old answer,** the affected shape is a sandboxed
+  hook or action body that FAULTS (`TypeError`, `ReferenceError`, a driver's own
+  class). It now surfaces as a 5xx to clients, retry policies and alerting rather
+  than as a 4xx — which is the point of the change.
+- f04be62: feat(types,triggers,service-automation,runtime,cli,spec,lint)!: package-authored scheduled work is a deployment decision — `OS_AUTOMATION_SCHEDULED_WORK_ENABLED`, off by default everywhere (#17396)
+  
+  <!-- adr-0087: not-required (already-registered schedule-flow-acting-organization-required) entry 18 is the ledger row for this exact surface — the start-node `config.organization` key of a time-triggered flow — and this change REWRITES it rather than adding a sibling: its surface, replacement, reason and acceptance criteria now carry the deployment switch and the posture split, so an upgrader reading `objectstack migrate meta`, `spec-changes.json` or the generated upgrade guide gets the narrowed rule from the one row that was always going to be their channel. A second entry would split one prescription across two rows and let a reader act on half of it. -->
+  
+  Maintainer ruling, 2026-09-12, verbatim, untranslated:
+  
+  > schedule 是风险很大的模型，尤其在云端，无算是单独多租户还是每库一租户，可能造成极大的资源浪费。对于单租户或着集团版私有部署，我觉得不需要做限制。定时任务 如果不好处理，现在也没想清楚，有没有可能定义为一个环境变量，根据环境变量控制？
+  
+  > 如果多租户暂时只接禁用定时任务，完整的考虑一下影响面。
+  
+  > group 默认也关，云端每库一租户全局默认关
+  
+  **A new deployment variable, `OS_AUTOMATION_SCHEDULED_WORK_ENABLED`, decides whether this deployment runs PACKAGE-AUTHORED scheduled work at all** — time-triggered flows (`type: 'schedule'` with a `config.schedule` cadence, and the `timeRelative` sweep) and packaged `defineJob` cron jobs. It is read at boot beside `resolveTenancyPosture` and is ⛔ **not** a metadata concept and ⛔ **not** a new spec key: whether a clock-driven workload is affordable is a fact about the deployment — its database, its tenants, its budget — that no package author can know, and a metadata key would ask them to.
+  
+  **OFF by default, in every posture and in every kernel.** Unset means off; `true` / `1` / `on` / `yes` (case-insensitive) means on. ⛔ Deliberately not the opt-out `!== 'false'` shape `OS_MULTI_ORG_ENABLED` uses, which reads a typo as "on" — here that would arm exactly the workload an operator meant to refuse.
+  
+  ⛔ **Platform-internal scheduled work is NOT gated** and runs either way: approvals escalation, the lifecycle Reaper, the messaging dispatch loop, membership backfill. The boundary is **authored by a package**, not "runs on the job service" — the platform's own maintenance is part of the runtime a deployment asked for.
+  
+  **BREAKING**, in two directions, and both land inside the same launch window as #16659 / PR #17334, so no published version ever saw the rule this narrows.
+  
+  1. **A NARROWING, and it is the one to plan for.** A deployment that upgrades and does nothing runs **no** packaged time-triggered flow and **no** packaged `defineJob`. Anything that was firing from a package stops. ⇒ Set `OS_AUTOMATION_SCHEDULED_WORK_ENABLED=true` if you depend on it. Nothing detects the shape for you at authoring time, by design — but nothing is silent either: every such flow is listed in `getTriggerBindingAudit()` and the `os dev` / `os start` startup summary with a DISTINCT reason, **disabled by deployment policy**, ⛔ never as "binding failed"; the packaged-job loop says so once per app at `info` with the count; and `os doctor` prints the effective value in both states.
+  2. **A WIDENING of what binds.** With the switch on and tenancy posture `single`, a time-triggered flow that declares **no** `config.organization` now binds and runs — under #16659 alone it was refused. That posture holds exactly one organization (a second is refused), so the run carries **no** organization and every tenant-scoped insert beneath it resolves that one the way a single-organization install always did; a `timeRelative` sweep there runs **unscoped**. ⛔ Nothing is invented: the key is OMITTED, never filled from the install, the platform organization, or the swept record's own `organization_id`.
+  
+  **Under a walled posture (`group` / `isolated`) the 2026-09-08 ruling on #16659 stands unchanged**: a time-triggered flow declares `config.organization` or it is not armed, there is no fan-out, and no organization is ever chosen for it. `group` is walled here for a measured reason rather than by analogy — `resolveSystemWriteOrganization` refuses an organization-less system insert under any wall and `TenancyService.defaultOrgId()` answers `null` (ADR-0093 D3), so an organization-less group-wide sweep could read the whole group while every row it inserts is refused. Which organization such a sweep's inserts belong to is not yet decided; until it is, `group` behaves as walled.
+  
+  **`flow-schedule-organization-missing` is DELETED** from `@objectstack/lint` (the id and its exported constant, `FLOW_SCHEDULE_ORGANIZATION_MISSING`; both are unreleased — they were introduced by the still-unconsumed #16659 changeset in this same window, so no consumer can be holding either). The rule family's criterion is *is this stack enough to know the flow is dead?*, and the honest answer here is no: the deployment switch and the tenancy posture decide it, and neither is in any stack. A finding that is false for the default deployment is noise. ⛔ The near-miss diagnostic did **not** go with it — `describeMissingScheduleOrganization` and its `organizationId` / `tenantId` / … scan still fire at BIND, the one door that can read both facts, and only where the key is actually required.
+  
+  **ADR-0087 semantic entry 18 (`schedule-flow-acting-organization-required`) is REWRITTEN, not added.** Its acceptance criteria required every time-triggered flow to declare; that is no longer the rule. It now prescribes the two decisions in order — decide the switch, then declare per organization under a wall — and records that `os lint` reporting nothing is the criterion being met rather than a check that was skipped. The unconsumed `.changeset/schedule-trigger-acting-organization.md` carries a banner saying the same, so a reader of either one cannot get the narrower half alone.
+  
+  **Where the switch is read, and where it is not.** Both triggers gate at `start()`, ahead of the descriptor and the declaration, so an operator on a deployment that was never going to run a flow is not sent to fix a descriptor nothing would have read. `AutomationEngine.activateFlowTrigger` reads the same resolver and does not call `start()` at all when it is off — that is what keeps the audit's reason precise, since a refusal arriving as a THROW can only be reported through the catch that says "Failed to bind". Neither read is cached: the resolver reads `process.env` live, so a host that rebinds after the environment changes sees the value current at the bind. The scope is `schedule` and `time_relative` only — `record_change` and `api` are fired by a caller that already exists and already carries an identity, and a kind added to `FlowTriggerKind` later is OUTSIDE the switch until someone decides otherwise, because a new capability that disappears on arrival is the worse default.
+- 4280055: fix(runtime): mount the scoped `/api/v1/environments/:id/packages*` door, and reconcile the package read/delete responses to their declared schemas (#16781)
+  
+  **The door.** `mountPackagesRoute` mounted `/packages*` at the unscoped prefix only, while automation / actions / ai each registered a scoped variant twenty lines away. On a host composed as `@objectstack/plugin-hono-server` + this plugin with `enableProjectScoping: true` and **without** `@objectstack/hono`'s `createHonoApp`, that left `GET /api/v1/environments/:id/packages`, `GET …/packages/:id` and `DELETE …/packages/:id` answered by the transport's own `notFound` — a bare 404 on routes `content/docs/api/environment-routing.mdx` documents. The domain has resolved scoped package paths since #15859; nothing mounted one.
+  
+  `mountPackagesRoute` is now wrapped in a `base`-taking `registerPackageRoutes(base)`, exactly like its three siblings, and called a second time with the scoped base. **The same handler, no second implementation.** The unscoped mounts keep their registration position and their unconditional mounting, so the change is purely additive: no route that answered before stops answering.
+  
+  **The wire.** Two responses gained the key their own declared schema requires (contract review of #16628, finding F2). Both additions are **additive** — no key left either payload:
+  
+  - `GET /packages` now sends **`hasMore`** (`ListInstalledPackagesResponseSchema`). It is `false`: this door applies its `status` / `type` filters and returns every remaining row, reading no `limit` and no `cursor`, so there is no next page to announce.
+  - `DELETE /packages/:id` now sends **`packageId`** (`UninstallPackageApiResponseSchema`). `registryRemoved` and `persisted` stay on the wire unchanged.
+  
+  A client that reads only the keys it read before is unaffected; a client parsing either payload against the published schema stops being refused.
+  
+  The `DELETE /packages/:id` route-ledger row now carries `responseSchema: 'UninstallPackageApiResponseSchema'`, backed by new conformance coverage that drives the real handler. `GET /packages` is deliberately left blank: its rows are the ASSEMBLED package body, while `InstalledPackageSchema` wraps the AUTHORING-stage `ManifestSchema` — the #14242 stage mismatch, which no `@objectstack/spec/api` export declares yet. Both directions of that boundary are pinned, so the row becomes fillable against a red test rather than a guess.
+- de1a611: `AppPlugin` now supplies `SeedLoaderConfig.locale`, so the `Seed.locale` axis takes effect on the default boot path.
+  
+  The locale filter axis landed complete on the consumer side: the loader reads `Seed.locale`, composes it with `env` by conjunction, and names every dataset it drops. What it never had was a **producer** — no first-party call site passed `config.locale`, so `filterByLocale` returned its input on its first line and `dataset.locale` was never read at all. Authoring the key changed nothing. That is the same shape `Seed.env` spent releases in before framework#4704.
+  
+  - **The locale is resolved from the app's own `i18n.defaultLocale`** — the same envelope key, read the same way `loadTranslations` already reads it for `setDefaultLocale` — and threaded into all three `SeedLoaderRequest`s `AppPlugin` builds: the inline boot seed, the per-org replayer registered for tenant provisioning, and the dev hot-reload seeder.
+  - **An app that declares no locale sends no `locale` key at all**, rather than an `'en'` default. Absence is the loader's unrestricted spelling, so a stack that never opted in keeps loading every dataset exactly as before; defaulting would have turned a wiring change into a data change, silently dropping a `locale: ['zh-CN']` dataset on every stack without an `i18n` block. A blank or non-string `defaultLocale` is treated as absence for the same reason.
+  - **Resolved at the call sites, not inside `load()`.** The sibling `env` axis resolves itself in the loader off an ambient `NODE_ENV`; a locale has no ambient source, and the only layer that knows which locale a stack runs in is the app config the loader is never handed. So this axis needs a real producer, which is what this change is.
+  
+  `SeedLoaderService#warnOnUnresolvedLocaleScope` **stays**. It is not a signpost for an unwired state that has now gone away: three of this repo's six seed-request builders are publish/install-time paths that are handed no stack config and still pass no locale, embedding hosts build their own requests, and a stack may declare no `i18n` block at all. Every one of those still reaches `load()` with locale-scoped datasets and no `config.locale`, and the warning is what keeps that loud instead of silently inert.
+  
+  The liveness ledger row `seed.locale` moves `experimental` → `live` with a `producer` pointer naming this wiring, and records which call sites supply the locale and which do not rather than claiming the frontier away.
+  
+  ⚠️ **Release-note reconciliation, for whoever compiles this release.** The sibling changeset `seed-locale-axis.md` (from the PR that landed the consumer half) states in the present tense that no first-party call site supplies `config.locale`, that the axis is inert on the default boot path, and that the liveness ledger records `seed.locale` as `experimental`. All three sentences describe the state that changeset shipped into, and **this change ends all three**. If both land in one release, the notes must read them in order — or fold them into one entry — rather than publishing the earlier state as current. ⛔ That sibling changeset is deliberately not edited here: it accurately records what its own PR did, and release notes are compiled centrally.
+  
+  ⛔ Out of scope, unchanged: rows already written under a different locale stay resident. Every seed is an `upsert` and the loader only writes, so switching a stack's locale on a non-empty database does not remove the other market's rows.
+
+### Patch Changes
+
+- 7f62536: A **declared capability absence** — a 5xx answered because the deployment did not install an optional service — is now reported **once per route per process at `warn`**, naming the missing service, instead of one `error` line per request. Every other 5xx keeps the per-request `error` line #14310 shipped.
+  
+  Measured before the change, on a stock showcase boot: `GET /api/v1/ai/*` (the cloud-only AI service's declared `501 NOT_IMPLEMENTED`) printed one `error`-level line per request, and Studio opens it unprompted. A deployment that is working exactly as configured was training the channel built to mean "an operator must look" into noise — which is the failure mode `--log-level`-watching operators learn as "skim the errors".
+  
+  - **What counts as an absence** is the envelope the door composed: a producer-declared 5xx (`declaresServerFault` — the repo's existing declared-5xx predicate) whose ADR-0112 `code` is `NOT_IMPLEMENTED` or `SERVICE_UNAVAILABLE`. Nothing is invented to recognise one; the code the producer already declared *is* the declaration.
+  - **The predicate is applied inside the shared funnel** (`logServerFault`, `@objectstack/types`), not at each door, so `sendError`'s nested-envelope exit and the runtime dispatcher read one answer by construction. A door cannot opt in, opt out, or drift.
+  - **The dedupe key is (route, process).** A restart reports again, and a second, different route reports on its own — deliberately not a global "first N", which is the shape that hides the second route. A door that supplies no route coordinates is demoted to `warn` but never suppressed: an un-keyed bucket is that same hiding shape.
+  - **A thrown 5xx keeps its `error` line even when it declared `501`.** The thrown exit hands the funnel the throw and no envelope `code`, so it is not recognised as an absence — fail-loud for the half that carries a stack.
+  
+  ⛔ **No wire byte moves.** Status, `code`, `message` and body shape are unchanged at both doors; this changes a log level and a count. The response bytes are pinned in `packages/runtime/src/declared-capability-absence-warn-once.test.ts`, and that block runs green on the pre-change tree too, which is what makes it a before/after measurement rather than a claim.
+  
+  Operators who were alerting on `[5xx]` at `error` level for an uninstalled optional service will now see one `warn` line per route per process instead. The line says so in its own text: `(declared capability absence — reported once per route per process)`.
+- 4af758d: refactor(runtime,mcp): the last two admission doors classify the `tenancy` rejection through the shared `classifyAdmissionTenancyPosture` (#17114)
+  
+  `@objectstack/core`'s `classifyAdmissionTenancyPosture` is the one place the
+  #13906 decision 1 option A classification lives: a branded "never registered"
+  rejection is the supported no-tenancy composition and answers a quiet
+  `undefined`, while every other rejection becomes
+  `AuthzStoreUnavailableError('tenancy', err)` — ADR-0112 `SERVICE_UNAVAILABLE` /
+  503 — because the posture is an authorization INPUT and admission was never
+  decided.
+  
+  Two admission doors were still hand-writing that classification, out of the
+  declared scope of the fold that extracted it:
+  
+  - `@objectstack/runtime`'s `resolveExecutionContext` — the REST/dispatcher
+    entry-point identity resolver;
+  - `@objectstack/mcp`'s `resolveStdioTenancyPosture` — the stdio door's **async
+    kernel** leg.
+  
+  Both now call the shared function. ⛔ **No behaviour changes at either door.**
+  Tenancy posture decides which rows a caller may see, so a divergence between
+  copies would be two answers to "whose data is this", and the copies are the
+  stale ones by construction — the shared version is the one that will be
+  maintained.
+  
+  **The resolution stayed at each seam, deliberately.** The extractable part is
+  the classification, not the resolution: each door keeps its own accessor guard
+  and hands its own former accessor expression in as the thunk, so the helper
+  never learns *how* a seam reaches the service. A helper that owned the wiring
+  too would be wrong for one seam or grow a flag per seam.
+  
+  **One neighbouring leg is deliberately NOT folded.** The stdio door's **sync**
+  fallback is taken only on a `KernelBase`-shaped host with no `getServiceAsync`,
+  whose accessor reports its one possible fault — nothing registered under that
+  name — **unbranded**. Routing it through the shared classification would mint a
+  503 outage out of a supported composition, so its bare `catch` remains that
+  seam's recorded decision. A test arm now fails if that leg is ever folded.
+  
+  Shipped rather than `skip-changeset`: both packages publish `files[]: ["dist"]`,
+  and the built `dist` of each carries the new call (2 files each, measured after
+  a real build, with a symbol known-absent scoring 0 and
+  `isServiceNotRegisteredError` scoring 4 in `runtime/dist` as the lit control).
+  `@objectstack/mcp`'s `dist` no longer mentions `isServiceNotRegisteredError` at
+  all.
+- bdb247d: `@objectstack/spec/kernel` exports `SEED_WRITE_EXECUTION_CONTEXT`, the one spelling of the seed-write posture every seeder now reads
+  
+  The execution context a seed write must use — `isSystem`, `skipTriggers`,
+  `seedReplay` — had **no exported form**, so every seeder held a private copy of
+  it and nothing held the copies equal. There were three on `main`:
+  `SeedLoaderService.SEED_OPTIONS` (`@objectstack/metadata-protocol`),
+  `SEED_WRITE_OPTIONS` (`@objectstack/runtime`'s `AppPlugin`, whose own docblock
+  already recorded that it "mirrors" the first) and `SEED_CONTEXT`
+  (`@objectstack/verify`'s fixture writer, which spelled it a third time
+  specifically because the runtime kept its copy module-private).
+  
+  **Why a shared constant rather than three accurate copies.** `skipTriggers` is
+  what suppresses "on create" automation for seed rows, and `isSystem` alone does
+  **not** suppress dispatch. A seed path that lost that flag once seeded with
+  automation live while the main path had it suppressed — a self-trigger loop that
+  wedged first boot (#3760). A constant whose divergence re-opens a boot-wedging
+  defect is a kernel semantic, not a local detail.
+  
+  **What is exported, and what deliberately is not.** The **inner**
+  `ExecutionContext` value, and nothing wrapped around it:
+  
+  ```ts
+  import { SEED_WRITE_EXECUTION_CONTEXT } from '@objectstack/spec/kernel';
+  
+  await ql.insert(object, rows, { context: SEED_WRITE_EXECUTION_CONTEXT });
+  ```
+  
+  The `{ context: … }` options bag stays at the call site. It is what all three
+  sites ultimately hand to `insert`, but it is an options envelope rather than the
+  posture: its type differs per engine method, so freezing one bag onto the
+  protocol surface would serve `insert` and no other operation, and it is
+  precisely the convenience bundle this export is not.
+  
+  ⛔ **No behaviour change.** The value is byte-identical to all three previous
+  copies, the three flags keep their existing meanings, and no seed path changes
+  what it writes or how. The three former copies now read this export, so the two
+  option bags are `{ context: SEED_WRITE_EXECUTION_CONTEXT }` and the `verify`
+  context is the export itself.
+  
+  **Additive, so `minor` on `@objectstack/spec`**: one new name on the existing
+  `./kernel` entry point, no existing export removed, renamed or narrowed. The
+  three consumers take `patch` — their published `dist` changes (an import edge,
+  and the constant now resolves through `@objectstack/spec/kernel`) while their
+  own public surfaces do not move.
+- cea85fd: A sandboxed hook's business refusal reached through a script action answers 4xx, not `500 INTERNAL_ERROR`
+  
+  `POST /api/v1/actions/:object/:action` answered **`500 INTERNAL_ERROR`** when a
+  `beforeUpdate` hook refused a state transition for a business reason and the
+  refusal travelled out through the action body's `ctx.api` write. The same refusal
+  has answered **`400`**, with the hook's sentence verbatim, on `/data` since
+  objectstack#11588. A 500 tells every client "the platform broke", so a
+  well-behaved one retries, alerts or pages for a guard that will never say yes.
+  
+  **Where the producer was.** Not in the action route's classifier — that read the
+  shape it was handed correctly, and both sides of the line it pins (`a deliberate
+  REJECTION is a 400` / `an unexpected FAULT is a 500`) are unchanged. The refusal
+  arrived already stripped of every mark that says "a body reported this on
+  purpose", one VM hop earlier: `hostErrorToVm` marked **every** `SandboxError`
+  crossing into the action body's VM as the sandbox's OWN fault (objectstack#4431)
+  on an `instanceof` test — and a nested sandboxed hook's refusal *is* a
+  `SandboxError`, wrapped by the same runner one level down. The pump branch that
+  reads that marker then discarded `innerMessage`, `code`, `status` and `fields`,
+  and the classifier read the missing business message as a crash.
+  
+  **What changed.** The marker now asks the question the `/data` door asks —
+  `sandboxBusinessMessage`, objectstack#11588 — instead of testing the error's
+  class. Both of that predicate's conditions travel, because both are load-bearing:
+  a capability denial carries no business message and stays a fault, and a nested
+  body that **crashed** carries `TypeError: …` and stays a fault too.
+  
+  **No status was picked for this route.** It matches what `/data` already answers
+  for the same producer: the status the body declared, or `400` when it declared
+  none. A refusal that declares `{ status: 409, code: 'RECORD_LOCKED' }` now
+  reaches the caller as `409 RECORD_LOCKED` instead of losing both.
+  
+  **The sentence a caller receives is byte-identical to what the 500 carried** —
+  this moves the status, not the prose. The flattened `SandboxError: ` name prefix
+  is stripped on the rejection path by the same helper the fault path already used.
+  
+  No authorable key, accept set or export surface moves; no consumer needs a
+  change. Clients branching on 5xx to decide whether to retry will stop retrying
+  these refusals.
+- 310760d: `ActionEngineFacade.delete` refuses a nullish id instead of silently skipping it
+  
+  **Who this is for: untyped hosts.** A JS host, or a `registerAction` handler
+  whose context slot is still `(ctx: any)`, can hand `ctx.engine.delete()` a
+  nullish id — `delete('todo_task', null)`, or an array with a hole in it. Until
+  now the arm dropped that element on the floor: nothing refused it, nothing
+  warned, and the call **resolved as though the row had been deleted**. A silent
+  no-op on a destructive verb is the one failure an untyped caller has no way to
+  detect, which is why it is worth a line in your changelog rather than a shrug.
+  
+  **What changes.** Every id now reaches the engine as written, and the engine's
+  own delete-dispatch predicate refuses a `where.id` that is not a truthy scalar:
+  the call rejects with `Delete requires an ID or options.multi=true` where it
+  used to resolve in silence. In the array form the refusal stops the loop where
+  the declared member doc already said a failure stops it — ids before the
+  nullish element are deleted, ids after it are untouched.
+  
+  **If a host was leaning on the old behaviour**, filter before you call:
+  
+  ```js
+  const ids = candidates.filter((id) => id != null);
+  if (ids.length > 0) await ctx.engine.delete('todo_task', ids);
+  // `delete nothing` is the EMPTY ARRAY (it resolves, deleting nothing) —
+  // never a null id. An empty array is contract; a nullish id never was.
+  ```
+  
+  ⛔ **No declaration moves, and this is not a correction of the `string | string[]`
+  widening that shipped just before it.** That declaration is accurate: it takes a
+  single id or an array of them, and under it **no typed caller could ever reach
+  the skipped branch** — the accept set it publishes has never admitted nullish.
+  The array form, its per-row semantics, its ordering and its empty-array case are
+  all unchanged and pinned as controls. What moves is only the runtime's
+  undeclared tolerance for a value three separate statements already excluded: the
+  published type, the member's own doc comment, and the spec-side pin that reads
+  «"delete nothing" is the EMPTY ARRAY, never a null id».
+- 2b08a72: fix(runtime): a repeated `?version=` on `GET /packages/:id` is refused `400 VALIDATION_ERROR` in the repo's one message, and `@objectstack/rest` publishes the rule that owns it (#17672)
+  
+  `GET /api/v1/packages/:id?version=a&version=b` answered **`404`**, with a second
+  sentence written at that door. This repo already had a landed answer for exactly
+  that condition on exactly that route — `400 VALIDATION_ERROR` in the ADR-0112
+  nested body (#6307) — and one implementation of it, `refuseRepeatedQueryParams`
+  / `repeatedQueryParamMessage` in `packages/rest/src/query-multiplicity.ts`,
+  whose header is the authority on the rule.
+  
+  Driven before the change, one host, three refusals:
+  
+  ```
+  GET /packages/com.acme.crm?version=a&version=b  -> 404 RESOURCE_NOT_FOUND
+  GET /packages/com.acme.crm?version=99.0.0       -> 404 RESOURCE_NOT_FOUND
+  GET /packages/com.absent.pkg?version=99.0.0     -> 404 RESOURCE_NOT_FOUND
+  ```
+  
+  A client branching on the answer could not tell "your request named the
+  parameter twice" from the two genuine not-founds. After:
+  
+  ```
+  GET /packages/com.acme.crm?version=a&version=b  -> 400 VALIDATION_ERROR
+  GET /packages/com.acme.crm?version=99.0.0       -> 404 RESOURCE_NOT_FOUND
+  GET /packages/com.absent.pkg?version=99.0.0     -> 404 RESOURCE_NOT_FOUND
+  ```
+  
+  The body is the dispatcher's declared envelope —
+  `{ success: false, error: { code: 'VALIDATION_ERROR', message, httpStatus: 400 } }`
+  — with `VALIDATION_ERROR` derived by `buildApiError` from
+  `standardErrorCodeForHttpStatus(400)`, the standard catalog's member for 400.
+  ⛔ Nothing in `packages/spec` moves.
+  
+  **What was actually blocking this was reachability, not judgement.**
+  `@objectstack/rest` declares exactly one export subpath and that module was not
+  on it, so #17668 could neither call the rule nor (correctly) copy it, and
+  shipped the `404` with its own sentence instead. The barrel now publishes
+  `repeatedQueryParamMessage` and `refuseRepeatedQueryParams`, and the dispatcher
+  domain calls the message function — so the sentence a caller is told for a
+  repeated parameter is the same one on every door that carries the rule, ⛔ never
+  a second copy that drifts.
+  
+  ⚠️ The two published symbols are not interchangeable across a package boundary,
+  and the barrel entry says so. `repeatedQueryParamMessage` is the portable half:
+  a pure function of two primitives. `refuseRepeatedQueryParams` writes the bare
+  ADR-0112 body onto a `res`, which suits handlers of that shape and ⛔ not a
+  runtime dispatcher domain — measured, its body fails that surface's
+  `BaseResponseSchema` with `success is missing, must be a boolean`.
+  
+  **Not a breaking change, measured rather than assumed.** The `404` it replaces
+  was introduced by #17668 (`1a25f4a8d`), which is not an ancestor of
+  `@objectstack/runtime@17.4.0` (exit 1; two control commits from that tag's own
+  history answer exit 0 on the same predicate, in a checkout
+  `--is-shallow-repository` reports `false`). It has never been published, so no
+  released consumer can have branched on it. Everything else about the door is
+  unchanged: `?version=<installed>` and `?version=latest` still serve the
+  installed row, an absent version and an unknown id still answer `404`, and a
+  one-element array is still one occurrence.
+  
+  Also corrected, on the module that owns the rule: its header said the
+  dispatcher's `/packages` domain "reads no `version`" — load-bearing prose,
+  since it is part of why the rule needs only one home. That stopped being true
+  when #17668 landed. The paragraph now states what is true, which is that the one
+  home did not move and now serves two doors.
+- 758ac40: refactor(types): one `isNativeErrorName` reader, so three doors cannot disagree about what a crash is (#17681)
+  
+  The predicate that decides whether a sandboxed body's `throw` is a business
+  REFUSAL (4xx, the author's words relayed) or a CRASH (5xx, the words withheld)
+  had **three byte-identical copies** — measured, one distinct 74-character regex
+  literal across three packages:
+  
+  | copy | package | its stated reason for being a copy |
+  |:--|:--|:--|
+  | `isScriptFaultMessage` | `@objectstack/rest` (`error-response.ts`, #7543) | the original |
+  | `isScriptCrash` | `@objectstack/objectql` (`hook-withheld-readonly-fault.ts`) | this package must not depend on `@objectstack/rest` for a regex |
+  | `sandboxRefusalMessage` | `@objectstack/runtime` (`sandbox/quickjs-runner.ts`, #17265) | rest declares one export subpath and re-exports nothing from `error-response` |
+  
+  ⭐ **Every reason is a statement about reaching `@objectstack/rest`, and none of
+  them survives moving the rule.** `@objectstack/types` now owns
+  `isNativeErrorName` — the name list, the `^` anchor, and the deliberate absence
+  of a bare `Error:`. All three packages already depend on it and it depends on
+  none of them, so this fold **adds zero dependency edges** and cannot cycle.
+  
+  ⚠️ The hazard was never style. One copy learning a new native error name and the
+  others not means the same throw is a refusal at one door and a crash at the
+  next — a crash message **leaked** at one boundary and **withheld** at another.
+  #16013's argument for extracting exactly this class applies verbatim: the
+  classification is the part nobody may get wrong, so one *tested* helper is worth
+  more than N correct copies that must each stay correct forever.
+  
+  ⛔ **No behaviour changes at any door, per case.** This is a pure refactor and
+  the three WRAPPERS are deliberately NOT folded, because they are not the same
+  shape and merging them would move a door's answer:
+  
+  - rest asks a trimmed message and answers a boolean;
+  - objectql asks **two** slots — `err.name` **or** `err.innerMessage.trim()` —
+    because a code hook and a sandboxed body carry the native name in different
+    places;
+  - runtime asks the trimmed inner message and answers the **message**, not a
+    boolean.
+  
+  What the three share is the predicate, so the predicate is what moved. Each call
+  site keeps its own slot choice and its own trimming, and `isNativeErrorName`
+  deliberately does **not** trim for its callers — a contract pinned in its test.
+  
+  **Shipped rather than `skip-changeset`**, measured on a real build: all four
+  packages publish `files[]: ["dist", …]`, and the built `dist` of each carries
+  the new call — `@objectstack/types` 4 files, `@objectstack/objectql` 4,
+  `@objectstack/rest` 3, `@objectstack/runtime` 2 — with `looksLikeInternalErrorLeak`
+  scoring 4 in `types/dist` as the lit control and a nonexistent symbol scoring 0.
+  The retired copies are gone from the artifacts too: the regex literal scores
+  **0** in `rest/dist`, `objectql/dist` and `runtime/dist`, and **2** in
+  `types/dist` (the ESM and CJS bundles).
+  
+  `@objectstack/types` takes **minor**: a new export is a purely additive widening
+  of a published surface, which is at least minor whatever the commit type says.
+  The three consumers take `patch` — their artifacts change, their behaviour does
+  not.
+- c17ff70: The dispatcher's `/meta` domain answers `GET /meta/:type/:name` for a name with nothing behind it with `404 RESOURCE_NOT_FOUND` on its generic `:type/:name` branch, instead of announcing the miss as a `200` (#18401).
+  
+  **Clause-②: no** — no schema key moves, no accept set widens or narrows, no export changes, and no error code is minted: the refusal reuses the branch's own existing `deps.error('Not found', 404)`, whose code `standardErrorCodeForHttpStatus` already derives.
+  
+  `protocol.getMetaItem` answers a miss with the protection envelope wrapped around an absent item — `{ type, name, item: undefined, lock, editable, deletable, resettable }`, because `resolveLockState(undefined, false)` is unconditional — never with `undefined`. The generic branch returned that straight through, and `JSON.stringify` at the transport then dropped the `item` member, so a caller was handed a `200` whose body is the declared `GetMetaItemResponseSchema` envelope **minus its required member**.
+  
+  - **The branch disagreed with its own sibling.** The `object` branch of the same function already refused that exact shape and answered `404`, so one function answered "does absence mean success?" both ways, decided by which type you asked for. The generic branch now runs the same hit test.
+  - **A miss still falls through, it is not a hard refusal.** An item-less protocol answer hands the read on to the `MetadataService` resolver exactly as the object branch hands its own on to the ObjectQL registry; only a read that no resolver can satisfy reaches the `404`.
+  - **No new refusal dialect.** The fall-through ends at the branch's own pre-existing `404`, the ADR-0112 nested `{ success:false, error:{ code, message, httpStatus } }` this file already speaks — so the separate question of how this route spells its refusals is untouched.
+  - **What a caller observes**: a name with no item behind it. A request that was previously answered `200` with an item-less body is now answered `404`; a request that resolves to a real item is byte-identical to before, protection envelope included.
+- 74327d3: fix(runtime): a NON-sandboxed crash at `/api/v1/actions` no longer ships its native error message verbatim (#18540)
+  
+  Clause-②: no
+  
+  A plain `TypeError` thrown by an in-process registered action handler answered
+  `500 INTERNAL_ERROR` carrying the native sentence on the wire:
+  
+  ```
+  {"success":false,"error":{"code":"INTERNAL_ERROR",
+   "message":"Cannot read properties of undefined (reading 'id')","httpStatus":500}}
+  ```
+  
+  The identical crash through the `/data` door answered `"Internal server error"`
+  (#7543 / #15071). One repository, two doors, one already meeting the contract.
+  
+  **The status was already right; what leaked was the sentence.** No status code,
+  no `error.code` and no envelope key moves — reaching this branch already proves
+  the throw declared no `status`/`statusCode` (the branch above serves those) and
+  is not a `ValidationError`, so the resolver's status was the 500 fallback and its
+  code was the status-derived `INTERNAL_ERROR`. Only `error.message` changes.
+  
+  **Why neither existing guard caught it.** #17273's crash terminal is keyed on the
+  SANDBOX — `isNativeErrorName` read over the `innerMessage` the QuickJS runner
+  fills — and this face never crosses a VM boundary, so nothing sets `innerMessage`
+  and that terminal never fires. *A predicate that classifies by HOW a crash
+  arrived is structurally blind to crashes that did not arrive that way, while
+  looking exhaustive.* The other guard, the dispatcher's 5xx withhold, is gated on
+  `looksLikeInternalErrorLeak`, which recognises DRIVER DUMPS and reads FALSE for
+  stack-shaped prose.
+  
+  **The structural difference, which is the fix.** The `/data` door is default-DENY:
+  `classifyDataError` ends in an unconditional `UNCLASSIFIED_FAULT()`, and its
+  `looksLikeInternalErrorLeak` limb only picks `DATABASE_ERROR` over
+  `INTERNAL_ERROR` — that limb is not what sanitises. The actions door's
+  `unexpectedFault` exit relayed `err.message` and was therefore default-ALLOW:
+  prose shipped unless a heuristic recognised it. That exit is this door's
+  unclassified-fault terminal, so it now answers the terminal's envelope —
+  `INTERNAL_ERROR_MESSAGE`, through the same `deps.error` seam #17273's terminal
+  uses.
+  
+  ⛔ `looksLikeInternalErrorLeak` is NOT re-pointed at stack-shaped prose. It guards
+  a different question at every other boundary, and widening it would change what
+  each of them withholds.
+  
+  **Measured population.** Driven through the real `HttpDispatcher.handleActions`
+  door against `mapDataError` on the same throws: seven shapes leaked at `/actions`
+  and were already sanitised at `/data` — `TypeError`, `ReferenceError`,
+  `RangeError`, `SyntaxError`, a driver class whose prose the heuristic does not
+  recognise (this one shipped a server **filesystem path**), a sandbox timeout and
+  a sandbox capability denial. All seven now answer the same sentence at both
+  doors. Two controls are unchanged in both directions: a deliberate rejection
+  keeps its `400` and its own words, and a crash that DECLARED its own status keeps
+  that status and that sentence.
+  
+  **Who is affected.** Any caller reading `error.message` off a `500` from
+  `/api/v1/actions` to tell one crash from another. That text was never a contract
+  — it is the thrown error's own prose — and the full text still reaches the
+  operator: the `console.error` on the line above keeps it, the same
+  "the client does not read it, the log keeps it" split `rest` already draws.
+- a484966: The TypeScript examples in these packages' **published** `README.md` now compile against the package they document — 43 of the 44 blocks the `measure-markdown-ts-blocks` census reported as syntactically valid and wrong, in documents that ship inside the npm tarball.
+  
+  `README.md` is listed in every one of these packages' `files[]`, so these bytes are the artefact a consumer — or a consumer's AI — reads and copies. What the census counted was not style: the examples named options the packages no longer accept, chained a method that returns a promise, and implemented interfaces they never imported.
+  
+  The corrections, by class:
+  
+  - **Legacy option vocabulary.** `@objectstack/client-react`'s hooks take `fields` / `orderBy` / `limit` / `where`, not `select` / `sort` / `top` / `filters`, and `PaginatedResult` carries `records`, not `value`. `@objectstack/service-job` takes `timeoutMs`, `@objectstack/service-queue` takes `maxAttempts`, and `IDataEngine.find` takes `where`.
+  - **Async registration used synchronously.** `ObjectKernel.use()` returns `Promise<this>`, so `kernel.use(a).use(b)` does not chain; the examples now `await` each registration. `ObjectKernelConfig` has no `plugins` member.
+  - **Interfaces implemented but never imported.** Several plugin examples wrote `implements Plugin` with no import, which bound to the DOM's `Plugin`; they now import `Plugin` / `PluginContext` and declare the required `init`. `PluginContext.getService<T>()` has no default type argument, so the examples that read a service now name its contract.
+  - **Removed or never-existing API.** `@objectstack/driver-memory`'s default export is a legacy `onEnable` object that `kernel.use()` refuses — the quick start now registers through `DriverPlugin`; its persistence adapters take an options bag under `persistence.adapter`. `defineStack` has no `driver` key. `@objectstack/rest`'s `RestServer` takes the host `IHttpServer` first and `registerRoutes()` takes no arguments; `RouteManager` is constructed on a server. `@objectstack/spec`'s `ObjectSchema.parse()` returns the value — the `{ success, data }` envelope is `safeParse`'s. `useMutation` has no `onMutate` / mutation context.
+  
+  No runtime code changed and no gate was added (#18715 ruling F). One block is deliberately left: `@objectstack/knowledge-ragflow`'s README writes `source.options.datasetId`, which is what the shipped adapter reads and what `KnowledgeSourceSchema` does not declare — correcting the document either way would contradict one of the two, so the conflict is reported rather than papered over.
+- c3ebe4a: A producer-declared 5xx **refusal** now keeps its message on the wire, at every door that reads the declaration.
+  
+  `ApiErrorSchema.refusal` (`@objectstack/spec`) is the producer-side declaration that a 5xx is a deliberate refusal whose `message` is authored for the caller. Until now nothing read it: all three arms that withhold a declared 5xx's prose could tell only that the producer had declared a *status*, so a refusal and a driver fault were sanitised alike and every producer-declared 5xx refusal reached the caller as `"Internal server error"`.
+  
+  The read is one new function, `declaredRefusalMessage` (`@objectstack/types`), called by all three arms — `declaredServerFaultAnswer` and `resolveErrorResponse`'s 5xx passthrough in `@objectstack/rest`, and `errorResponseBase` in `@objectstack/runtime`. REST's logging follows the same field: a declared refusal is no longer logged as `[REST] Unhandled error`.
+  
+  **What changes for a caller.** A 5xx whose producer sets `refusal: true` beside a `status` (or `statusCode`) in the 500-599 band and a non-empty `code` now carries that producer's message, bounded exactly as a 4xx message is. The first live case is `GET /api/v1/meta/:type/:name/references` for an unanswerable target, whose ADR-0110 D3 sentence ("Ask the owning object instead: …") reaches an operator again.
+  
+  **What does not change.** Everything else, and the default is fail-closed: a declared 5xx that carries no `refusal` is withheld exactly as before, an undeclared 5xx still goes through the leak heuristic, and a rewrap that drops the flag is withheld as a fault. A refusal cannot buy leaky prose past `looksLikeInternalErrorLeak` either — the declaration says the prose is *addressed* to the caller, not that it is *safe*.
+  
+  **For producers.** Setting `refusal: true` on a thrown 5xx is opt-in and additive; a producer that does not set it is unaffected. Platform and driver code must never set it on a fault.
+- e77a23f: Attach four TSDoc blocks to the declarations they describe.
+  
+  TSDoc binds a block by position, so a block can end up describing a declaration
+  it does not document, or none at all. Four had: three in
+  `packages/rest/src/rest-server.ts` (the `resolveProtocol` paragraph stacked above
+  `resolveHostnameCached`'s own block, the exported `RestServer` class overview
+  orphaned by the `RestEnvRegistry` block, and the `registerSharingEndpoints` route
+  table orphaned by the analytics block) and one in
+  `packages/runtime/src/http-dispatcher.ts`, where the block above
+  `resolveActiveOrganizationId` still described `resolveCallerUserId`, a sibling
+  deleted with the multi-tenant `/cloud` control plane.
+  
+  No runtime behaviour changes and no API surface moves. This is a `patch` rather
+  than `skip-changeset` because the block text was measured to ship: each of the
+  four appears in the published `dist/index.d.ts` and `dist/index.d.cts` of its
+  package, both of which are inside `files: ["dist", ...]`. Anyone reading
+  `@objectstack/rest` or `@objectstack/runtime` declarations in an editor was being
+  shown a description of the wrong function.
+  
+  Clause-②: no
+- Updated dependencies [863c7c4]
+- Updated dependencies [0f95f43]
+- Updated dependencies [825d70f]
+- Updated dependencies [7f62536]
+- Updated dependencies [abc4b83]
+- Updated dependencies [7382c5d]
+- Updated dependencies [ea2940d]
+- Updated dependencies [245f360]
+- Updated dependencies [324968e]
+- Updated dependencies [3a5eaea]
+- Updated dependencies [7843663]
+- Updated dependencies [ce57857]
+- Updated dependencies [2d81e39]
+- Updated dependencies [c7d4825]
+- Updated dependencies [4844840]
+- Updated dependencies [fe71032]
+- Updated dependencies [d8b12fc]
+- Updated dependencies [74eaab8]
+- Updated dependencies [0b788da]
+- Updated dependencies [482d34d]
+- Updated dependencies [839d1b0]
+- Updated dependencies [ee6fbd7]
+- Updated dependencies [2fc092b]
+- Updated dependencies [4f1a56b]
+- Updated dependencies [6059b29]
+- Updated dependencies [88a072e]
+- Updated dependencies [d4a1a28]
+- Updated dependencies [baf9745]
+- Updated dependencies [3d8779d]
+- Updated dependencies [0bd7dae]
+- Updated dependencies [d34f9b6]
+- Updated dependencies [57343f7]
+- Updated dependencies [271d6bb]
+- Updated dependencies [1e20f81]
+- Updated dependencies [38472ce]
+- Updated dependencies [8b48903]
+- Updated dependencies [2d235bc]
+- Updated dependencies [aaacf1d]
+- Updated dependencies [6548118]
+- Updated dependencies [146c291]
+- Updated dependencies [e0e4a56]
+- Updated dependencies [7aae005]
+- Updated dependencies [dc709b2]
+- Updated dependencies [04333d0]
+- Updated dependencies [07f93e0]
+- Updated dependencies [bdb247d]
+- Updated dependencies [d5c91dd]
+- Updated dependencies [32be735]
+- Updated dependencies [c9246fa]
+- Updated dependencies [0e51278]
+- Updated dependencies [48203ff]
+- Updated dependencies [b6471ba]
+- Updated dependencies [ada2869]
+- Updated dependencies [d88a47d]
+- Updated dependencies [2f1a6f6]
+- Updated dependencies [23fc5d6]
+- Updated dependencies [2d34f32]
+- Updated dependencies [9e3c485]
+- Updated dependencies [82cb69f]
+- Updated dependencies [e1796ad]
+- Updated dependencies [de62769]
+- Updated dependencies [c9eb773]
+- Updated dependencies [4342c99]
+- Updated dependencies [132dd13]
+- Updated dependencies [d285bf0]
+- Updated dependencies [dfeba25]
+- Updated dependencies [0a88a80]
+- Updated dependencies [12bb672]
+- Updated dependencies [69b5059]
+- Updated dependencies [97233b9]
+- Updated dependencies [c54d8d6]
+- Updated dependencies [182bbde]
+- Updated dependencies [0252320]
+- Updated dependencies [2eb4724]
+- Updated dependencies [e743fb5]
+- Updated dependencies [d46deba]
+- Updated dependencies [e04a0af]
+- Updated dependencies [6b97a20]
+- Updated dependencies [e7ff9c2]
+- Updated dependencies [75237a9]
+- Updated dependencies [920f887]
+- Updated dependencies [7e74af3]
+- Updated dependencies [497655f]
+- Updated dependencies [7c2c5ae]
+- Updated dependencies [3a9ad22]
+- Updated dependencies [2b08a72]
+- Updated dependencies [758ac40]
+- Updated dependencies [be5c602]
+- Updated dependencies [2bf6ef1]
+- Updated dependencies [09e16a5]
+- Updated dependencies [98bd798]
+- Updated dependencies [cbcae14]
+- Updated dependencies [8261ff7]
+- Updated dependencies [24489f1]
+- Updated dependencies [fc28c1d]
+- Updated dependencies [6d64785]
+- Updated dependencies [00c332b]
+- Updated dependencies [b3b43b6]
+- Updated dependencies [d93400f]
+- Updated dependencies [9ccc417]
+- Updated dependencies [134b410]
+- Updated dependencies [84e6b05]
+- Updated dependencies [cb1f274]
+- Updated dependencies [5c28cc7]
+- Updated dependencies [b0eb9a5]
+- Updated dependencies [17005cc]
+- Updated dependencies [176b035]
+- Updated dependencies [b5cbfef]
+- Updated dependencies [d438b3a]
+- Updated dependencies [a83dbb6]
+- Updated dependencies [51297e9]
+- Updated dependencies [156792e]
+- Updated dependencies [5ba2ec3]
+- Updated dependencies [4d2008c]
+- Updated dependencies [abb01f1]
+- Updated dependencies [cf39b83]
+- Updated dependencies [e64ae15]
+- Updated dependencies [02bdeaa]
+- Updated dependencies [66abef3]
+- Updated dependencies [25c9a83]
+- Updated dependencies [ee5812a]
+- Updated dependencies [68fea8b]
+- Updated dependencies [c049e74]
+- Updated dependencies [bb9794a]
+- Updated dependencies [d402e32]
+- Updated dependencies [9a910c4]
+- Updated dependencies [340b6dc]
+- Updated dependencies [fe0ae5c]
+- Updated dependencies [99fcb4a]
+- Updated dependencies [0f1cd83]
+- Updated dependencies [a3d4c59]
+- Updated dependencies [9be2b59]
+- Updated dependencies [922c755]
+- Updated dependencies [74832b6]
+- Updated dependencies [df1b275]
+- Updated dependencies [1aa5026]
+- Updated dependencies [ef67b47]
+- Updated dependencies [877dc03]
+- Updated dependencies [b9d5422]
+- Updated dependencies [21b7c12]
+- Updated dependencies [627382b]
+- Updated dependencies [627382b]
+- Updated dependencies [a675ad4]
+- Updated dependencies [0b31d90]
+- Updated dependencies [e75cc3c]
+- Updated dependencies [5941246]
+- Updated dependencies [559041d]
+- Updated dependencies [e0d0553]
+- Updated dependencies [5100c42]
+- Updated dependencies [5380daa]
+- Updated dependencies [00b38d7]
+- Updated dependencies [62bce5c]
+- Updated dependencies [47a9002]
+- Updated dependencies [5eebc9e]
+- Updated dependencies [72c1640]
+- Updated dependencies [5e5ec9f]
+- Updated dependencies [922923b]
+- Updated dependencies [e6c34f6]
+- Updated dependencies [062f5cd]
+- Updated dependencies [5d8319f]
+- Updated dependencies [43f4766]
+- Updated dependencies [8e8ea99]
+- Updated dependencies [a484966]
+- Updated dependencies [021755a]
+- Updated dependencies [dbd4744]
+- Updated dependencies [14a762f]
+- Updated dependencies [b146102]
+- Updated dependencies [75c0dac]
+- Updated dependencies [9bb059d]
+- Updated dependencies [07c6f82]
+- Updated dependencies [362035c]
+- Updated dependencies [74554a3]
+- Updated dependencies [4c42fd1]
+- Updated dependencies [344d475]
+- Updated dependencies [5f392f0]
+- Updated dependencies [a362e0e]
+- Updated dependencies [f26fb8e]
+- Updated dependencies [bc2ec80]
+- Updated dependencies [94c9302]
+- Updated dependencies [0da638c]
+- Updated dependencies [041d9fd]
+- Updated dependencies [f03f6c7]
+- Updated dependencies [374d9d3]
+- Updated dependencies [b8ec127]
+- Updated dependencies [cf79182]
+- Updated dependencies [efa2533]
+- Updated dependencies [2c87a48]
+- Updated dependencies [dd2fd20]
+- Updated dependencies [e81c4e5]
+- Updated dependencies [929d9e3]
+- Updated dependencies [8a5240a]
+- Updated dependencies [c1d54db]
+- Updated dependencies [c7af6bd]
+- Updated dependencies [1f0b565]
+- Updated dependencies [23aa83c]
+- Updated dependencies [357f499]
+- Updated dependencies [80aef80]
+- Updated dependencies [c3ebe4a]
+- Updated dependencies [a900841]
+- Updated dependencies [65ad77d]
+- Updated dependencies [88a9330]
+- Updated dependencies [3cbcedb]
+- Updated dependencies [88a9330]
+- Updated dependencies [3cbcedb]
+- Updated dependencies [bdea10a]
+- Updated dependencies [a61ae59]
+- Updated dependencies [a54ecaa]
+- Updated dependencies [854639b]
+- Updated dependencies [0780e88]
+- Updated dependencies [44c917a]
+- Updated dependencies [613d35a]
+- Updated dependencies [e08c8b0]
+- Updated dependencies [0ee32ed]
+- Updated dependencies [2bed4c3]
+- Updated dependencies [77c801e]
+- Updated dependencies [58b36fa]
+- Updated dependencies [4792049]
+- Updated dependencies [53ec0b1]
+- Updated dependencies [71629a1]
+- Updated dependencies [2266438]
+- Updated dependencies [0a56d3b]
+- Updated dependencies [f8e5790]
+- Updated dependencies [d2c1d19]
+- Updated dependencies [681871e]
+- Updated dependencies [54e8234]
+- Updated dependencies [706ad0f]
+- Updated dependencies [288fe9c]
+- Updated dependencies [e77a23f]
+- Updated dependencies [d127f9b]
+- Updated dependencies [4bbf766]
+- Updated dependencies [c17b494]
+- Updated dependencies [96684bb]
+- Updated dependencies [ab56ea3]
+- Updated dependencies [9ca49eb]
+- Updated dependencies [a016f08]
+- Updated dependencies [b110578]
+- Updated dependencies [d414e2b]
+- Updated dependencies [af98a04]
+- Updated dependencies [43cbe14]
+- Updated dependencies [6e3462d]
+- Updated dependencies [c4d1759]
+- Updated dependencies [f7a9740]
+- Updated dependencies [3644fad]
+- Updated dependencies [45c2cf9]
+- Updated dependencies [555a89c]
+- Updated dependencies [b90aff8]
+- Updated dependencies [0f38ab0]
+- Updated dependencies [dfb42c5]
+- Updated dependencies [29d00cc]
+- Updated dependencies [cca1dc0]
+- Updated dependencies [9cdffbe]
+- Updated dependencies [331a1a2]
+- Updated dependencies [9788f1e]
+- Updated dependencies [980dc78]
+- Updated dependencies [5c8f5af]
+- Updated dependencies [2bd53f1]
+- Updated dependencies [5f9f846]
+- Updated dependencies [5a95b0e]
+- Updated dependencies [5d527f7]
+- Updated dependencies [5bf2330]
+- Updated dependencies [9165d5c]
+- Updated dependencies [1c83ca2]
+- Updated dependencies [9b9581b]
+- Updated dependencies [9ca49eb]
+- Updated dependencies [fb7d75f]
+- Updated dependencies [d9e1587]
+- Updated dependencies [07150b3]
+- Updated dependencies [143c715]
+- Updated dependencies [fb2bccf]
+- Updated dependencies [5b5bd36]
+- Updated dependencies [2e8e118]
+- Updated dependencies [d2badf7]
+- Updated dependencies [2a79726]
+- Updated dependencies [d64bcb6]
+- Updated dependencies [d4f5232]
+- Updated dependencies [396eae3]
+- Updated dependencies [470746a]
+- Updated dependencies [ac24458]
+- Updated dependencies [7026141]
+- Updated dependencies [4062aef]
+- Updated dependencies [777d0c2]
+- Updated dependencies [cf6e0a1]
+- Updated dependencies [ecdfc94]
+- Updated dependencies [f04be62]
+- Updated dependencies [de1a611]
+- Updated dependencies [e758131]
+- Updated dependencies [db76982]
+- Updated dependencies [3b1dab9]
+- Updated dependencies [7607076]
+- Updated dependencies [1555ed4]
+- Updated dependencies [776d64c]
+- Updated dependencies [ab450f4]
+- Updated dependencies [025588a]
+- Updated dependencies [a49e8ae]
+- Updated dependencies [8c9bd8f]
+- Updated dependencies [5505646]
+- Updated dependencies [f3e3d59]
+- Updated dependencies [7173d7d]
+- Updated dependencies [9bd4344]
+- Updated dependencies [51efbf1]
+- Updated dependencies [9c44eed]
+- Updated dependencies [bbca441]
+- Updated dependencies [ab1c585]
+- Updated dependencies [7cd5874]
+- Updated dependencies [7887077]
+- Updated dependencies [29dd1a6]
+  - @objectstack/spec@17.5.0
+  - @objectstack/plugin-auth@17.5.0
+  - @objectstack/core@17.5.0
+  - @objectstack/types@17.5.0
+  - @objectstack/rest@17.5.0
+  - @objectstack/formula@17.5.0
+  - @objectstack/driver-sql@17.5.0
+  - @objectstack/objectql@17.5.0
+  - @objectstack/metadata-protocol@17.5.0
+  - @objectstack/metadata@17.5.0
+  - @objectstack/plugin-security@17.5.0
+  - @objectstack/driver-memory@17.5.0
+  - @objectstack/driver-turso@17.5.0
+  - @objectstack/metadata-core@17.5.0
+  - @objectstack/observability@17.5.0
+  - @objectstack/service-i18n@17.5.0
+  - @objectstack/service-datasource@17.5.0
+  - @objectstack/driver-sqlite-wasm@17.5.0
+  - @objectstack/service-cluster@17.5.0
+
 ## 17.4.0
 
 ### Minor Changes

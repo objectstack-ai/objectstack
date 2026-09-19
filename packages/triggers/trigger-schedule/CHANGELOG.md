@@ -1,5 +1,521 @@
 # @objectstack/plugin-trigger-schedule
 
+## 17.5.0
+
+### Minor Changes
+
+- 0a56d3b: feat(spec,types,triggers)!: `group` runs package-authored scheduled work without a declaration, owning each run's writes per record (#18378)
+  
+  <!-- adr-0087: not-required (already-registered schedule-flow-acting-organization-required) This amends the EXISTING semantic entry rather than adding one: same authorable key, same deployment switch, same surface, and the entry predates this diff at the merge base. Nothing is renamed, retired or re-typed — the start node's `config` is an open record (ADR-0018), so every flow that parses today parses byte-identically afterwards and `objectstack migrate meta` has nothing new to rewrite. What moves is the BIND-time accept set (it WIDENS) and the RUN-time organization such a flow's writes carry; the entry's own surface/replacement/reason/acceptanceCriteria each gained their `group` row in this diff. -->
+  
+  `Clause-②: yes (widening)`
+  
+  **ADR-0087 disposition — `not-required (already-registered)`, not `registered`.**
+  The ledger entry this change belongs to already exists
+  (`schedule-flow-acting-organization-required`, entry 18) and predates this diff
+  at the merge base, so `registered` would assert a registration this PR did not
+  make. The entry's `surface`, `replacement`, `reason` and `acceptanceCriteria`
+  each gained their `group` row here, the rejected bootstrap-organization arm
+  included — recorded because it is the one a later reader will re-propose.
+  
+  **Marked breaking (`!`) for the behaviour change, not for a narrowing.** Nothing
+  that worked stops working and nothing that was admitted becomes refused — the
+  accept set WIDENS in one cell. What earns the banner is the other direction: on a
+  `group` deployment with the switch already on, flows that were refused at bind
+  now arm and run, so clock-driven work appears where an operator had none. That is
+  worth reading before upgrading even though no consumer has to change anything.
+  
+  ## What changes
+  
+  With `OS_AUTOMATION_SCHEDULED_WORK_ENABLED` on and tenancy posture `group`, a
+  time-triggered flow that declares no `config.organization` now **binds and
+  runs**, where it was previously refused at bind. The organization its writes
+  carry follows the record:
+  
+  | posture | declaration | a bound run's writes act as |
+  |---|---|---|
+  | `single` | not read | nothing — the install's one organization resolves beneath each write |
+  | `group` | **optional** | declared ⇒ the declaration; undeclared ⇒ **the swept record's own organization** |
+  | `isolated` | **required** | the declaration; undeclared ⇒ not armed, unchanged |
+  
+  A `timeRelative` sweep under `group` reads group-wide — inherent to the posture
+  (ADR-0105 D1) — and stamps each run it launches with that record's organization:
+  sweep contracts across four plants and each plant's contract yields a run acting
+  as that plant, whose notifications reach that plant's inboxes.
+  
+  ## Why this is not a fallback that guesses
+  
+  It is the order `sys_automation_run` was **already** ruled to use.
+  `ObjectStoreSuspendedRunStore` resolves a run's organization as
+  `organizationOf(<subject record>) ?? ctx.tenantId` — subject first, acting
+  context as the fallback and never the primary. Before this change those two
+  halves disagreed under `group`: the history row was stamped from the record while
+  the inbox and delivery rows followed an acting context that could not exist
+  there, so they were refused while the tick summarised itself as healthy.
+  
+  ⚠️ With one stated exception, because the two halves ask different questions:
+  the history row is STAMPED (`tenancy.organizationField` wins there) while the
+  run's acting organization is a WALL reading that never consults that key. They
+  agree on every object where the two coincide — which is every ordinary object,
+  since a declared stamp column is what makes them differ and one shipped object
+  declares one (`sys_api_key`, deliberately unwalled). Sweeping that object under
+  `group` stamps its history row while the run itself acts as nothing: the correct
+  pair of answers, not a residue of the old disagreement, and recorded rather than
+  smoothed over.
+  
+  ⛔ A record-less run under `group` that declared nothing still resolves
+  **nothing** and is refused at its first tenant-scoped write (`walled-posture`,
+  ADR-0112), loudly and by name. The rejected alternative was a fallback to the
+  bootstrap organization (`slug='default'`): under a wall that organization is
+  minted admin-keyed by the enterprise organizations runtime and may not exist at
+  all, and where it does it is whichever organization the platform owner
+  registered under — plausibly one plant of many, not the group's head office.
+  
+  ## Upgrading
+  
+  **Most deployments: nothing to do.** The switch this depends on is OFF by default
+  and ships unreleased alongside this change, so the `group`-is-walled behaviour
+  being amended has never appeared in a published version — no released consumer
+  can be relying on it.
+  
+  If you run posture `group` **and** turn the switch on, read your boot log: each
+  time-triggered flow's bind line now names which of the three shapes it bound as
+  ("as organization '…'", "with per-record acting organization", or "with NO
+  acting organization"). Two things to check:
+  
+  - A flow you expected to act as ONE organization but which binds per-record is
+    missing its `config.organization`. Add it — declaring still narrows, bounding
+    the sweep's query as well as its identity.
+  - A plain `schedule` cron flow that binds "with NO acting organization" has no
+    record to derive one from. If it writes notifications, inbox messages or any
+    other per-organization row, declare `organization` on its start node; the bind
+    line says so, and so does the refusal at the first tick.
+  
+  ## Which organization a record belongs to — the WALL question, not the stamp one
+  
+  `@objectstack/metadata-core` gains a second face on the record→organization
+  resolver, and the split is the point: `resolveRecordOrganizationField` /
+  `createRecordOrganizationResolver` answer **"who is this row ABOUT"** (the STAMP
+  question, whose `tenancy.organizationField` limb stays pinned to the three
+  sanctioned platform-row writers), while the new
+  `resolveRecordWallOrganizationField` / `createRecordWallOrganizationResolver`
+  answer **"what is this row WALLED by"** — `tenancy.enabled: false` ⇒ nothing,
+  then a declared `tenancy.tenantField`, then the kernel's `organization_id`.
+  
+  The sweep uses the WALL face, because "which organization does this run act as"
+  is a question about the wall. ⛔ It never reads `tenancy.organizationField`: that
+  key is declared on exactly one shipped object (`sys_api_key`, deliberately
+  unwalled, #8287), and reading it here would turn "the audit trail should follow
+  this row's own organization even though nothing walls it" into an acting
+  identity. A sweep over such an object resolves **nothing** and takes the
+  `walled-posture` refusal at its first tenant-scoped write, which is the honest
+  answer. Limbs 1 to 4 are one implementation shared by both faces, pinned as
+  such, so the half they agree on cannot drift apart.
+  
+  **API:** `ScheduledWorkPolicy` gains `runOwnership: 'unscoped' | 'per-record' |
+  'declared'`, and `requiresActingOrganization` narrows from "any walled posture"
+  to `isolated` only. The two are deliberately separate axes: the boolean decides
+  whether BIND refuses, `runOwnership` decides what a run that DID bind carries.
+  Inside `@objectstack/trigger-schedule`, both triggers share one bind-line
+  vocabulary (`describeScheduleRunOwnership`) so they cannot describe one
+  deployment differently. ⚠️ That helper is module-level, NOT a package export: it
+  is not re-exported from the package barrel, whose own note says an export whose
+  only consumers live inside its own package belongs in a non-barrel module. The
+  new PUBLIC surface in this change is `ScheduledRunOwnership` and the
+  `runOwnership` key on `@objectstack/types`, plus
+  `resolveRecordWallOrganizationField` and
+  `createRecordWallOrganizationResolver` on `@objectstack/metadata-core` — and
+  those four are what put `Clause-②` at `yes`. Nothing existing is renamed or
+  re-typed: both stamp-face exports keep their names, their signatures and their
+  answers, limb 0 included.
+- ecdfc94: fix(triggers,spec,service-automation,lint)!: a time-triggered flow declares its acting organization behind a tenancy wall, and both its query and its run are confined to it (#16659, narrowed by #17396)
+  
+  <!-- adr-0087: registered schedule-flow-acting-organization-required -->
+  
+  > ⚠️ **Read this banner with #17396's ruling applied — it NARROWS everything below, and the narrowing shipped in the same launch window, so no released version ever saw the wider rule.** Two deployment facts now sit in front of every statement here, and neither is metadata: (1) package-authored scheduled work is gated by `OS_AUTOMATION_SCHEDULED_WORK_ENABLED` and is **OFF by default in every tenancy posture and every kernel** — while it is off NOTHING below happens, because nothing arms; (2) with it on, the declaration requirement below applies under a **walled** posture (`group` / `isolated`) only. Under `single` an armed time-triggered flow declares nothing, carries no organization, and resolves the deployment's one organization beneath it exactly as it did before #16659. ⇒ Wherever this banner says "a time-triggered flow MUST declare", read "under a wall, with scheduled work switched on". The lint finding it announces, `flow-schedule-organization-missing`, is **deleted**: lint can see neither fact.
+  
+  **Registered as an ADR-0087 semantic migration**
+  (`schedule-flow-acting-organization-required`, protocol 18). Nothing authorable
+  is renamed, retired or re-typed — no `packages/spec` key changes its name, its
+  type or its optionality, no stored shape moves, and every flow, node and
+  start-node `config` that parses today parses byte-identically afterwards,
+  because the start node's `config` is an OPEN record (ADR-0018) and the new
+  `organization` key is an addition to a slot that already accepted anything. So
+  `objectstack migrate meta` has nothing MECHANICAL to prescribe: the remedy is a
+  value only the deployment holds, a `sys_organization.id` minted at runtime, with
+  no authored artifact and no stored representation a rewrite could act on — and
+  inventing one is precisely what the ruling forbids. ⚠️ That is the argument
+  against a CONVERSION, and it is not an argument for silence: ADR-0087 D3 says a
+  migration that cannot be expressed declaratively gets a structured TODO
+  (surface, reason, acceptance criteria) rather than nothing, and what follows IS
+  a prescription in that sense — declare `config.organization` once per
+  organization, no fan-out, then act on the three consequences of the split named
+  below. Direct precedent: `rest-requireauth-default-flip` (protocol 12) —
+  behaviour-only, no shape moved, a deployment judgement no transform can make,
+  registered anyway. Filed under protocol **18**, not 17: v17.0.0 was cut before
+  this narrowing landed, so the enforcement rides the 17.x line by the
+  launch-window convention while the prescription belongs at the major boundary
+  where `migrate meta` users look.
+  
+  **BREAKING** in the accept-set sense, and in TWO places rather than one —
+  landing in the launch window as `minor` on all four packages (the lockstep
+  convention: during the window the bump level is not the carrier, this banner and
+  the disposition above are). Nothing that was refused becomes admitted. ⚠️ #17396
+  changes that last sentence in one direction: under `single` with the switch on,
+  a flow that this changeset would have left unarmed **binds and runs**. That is a
+  widening, it lands in the same window, and it is why #17396's own changeset is
+  also a `minor`.
+  
+  1. **Bind time.** A `schedule` or `time_relative` flow that declares no
+     `organization` is no longer armed.
+  2. **Run time — the DATA PLANE.** A time-triggered run now carries a
+     `tenantId`, and a `time_relative` sweep now carries one on its own query.
+     Where a run previously read, updated and deleted across every organization,
+     it is now confined to the one it declares.
+  
+  ⚠️ **Read (2) as a narrowing that can stop something that was working**, because
+  it is one. Two shapes to plan for, and neither is hypothetical:
+  
+  - **A deployment running ONE time-triggered flow to cover ALL organizations must
+    now declare one flow per organization.** That is the ruling
+    (「不允许跨组织的定时任务」) and it is the whole point, but it is migration
+    work: there is no fan-out, and a sweep wanted in N organizations is N
+    declarations. Nothing detects the shape for you — the flow simply starts
+    seeing one organization's rows.
+  
+    ⚠️ **And the split has three effects the sentence above does not carry.** Each
+    is deployment work, and none of them is detected for you either:
+  
+    1. **A NULL-organization row fans out N-fold.** The driver's scope is
+       `org = :tenant OR org IS NULL` (`sql-driver.ts`), so a platform row with no
+       tenant column value stays visible to a *scoped* read — this PR's own
+       negative control fixture selects exactly that row under scope, on purpose.
+       After the split every `organization_id IS NULL` row in a swept object is
+       therefore matched **once per flow**: N runs, N notifications, each acting
+       as a different organization. Before the split it was matched once. ⇒ Either
+       backfill the tenant column on swept objects or declare the object
+       platform-global (`tenancy: { enabled: false }`, ADR-0066), which stops the
+       scope rather than multiplying under it.
+    2. **The current window's dispatch claims are abandoned.** The dedup key
+       embeds the FLOW NAME — `schedule:<flowName>:<window>` and
+       `time-relative:<flowName>:<scope>:<recordId>` — so N differently-named
+       flows claim under N different keys. A window already delivered under the
+       old name can deliver again, once, under each new one. ⇒ Cut over at a
+       window boundary, or accept one duplicate window.
+    3. **A run suspended before the upgrade is not retroactively confined.**
+       Resume rebuilds the run's context from `context_json`
+       (`suspended-run-store.ts`), and a row written before this change carries no
+       `tenantId` — so it resumes org-less, exactly as it ran. Nothing back-fills
+       it. Not a regression (that is how it already ran), but the banner would
+       otherwise imply "after upgrade, runs are confined". ⇒ Drain in-flight
+       suspended time-triggered runs, or accept that the tail of them is
+       unconfined.
+  - **On a SINGLE-organization install a time-triggered flow WAS delivering** —
+    the #8844 guard derives the only organization there — and after this change it
+    is unarmed at boot until someone adds one line. On `@objectstack/driver-sql`
+    that install loses nothing at run time once the line is added: the scope is
+    `org = :tenant OR org IS NULL` and its one organization is the only scope there
+    was. ⛔ **On `@objectstack/driver-memory` it does lose something, and the loss
+    has no legal configuration.** That driver refuses *any* call handed a tenant
+    scope (`assertCallNotTenantScoped`, `MEMORY_MULTI_TENANT_UNSUPPORTED`, #16589)
+    — `find` / `findOne` / `create` / `update` / `upsert` / `delete` / `count` /
+    `bulk*` / `aggregate`, one call at a time, regardless of how many
+    organizations the install holds. So a time-triggered flow that touches
+    per-organization data on that driver is refused per call if it declares an
+    organization and unarmed at boot if it does not. The declaration is not what
+    breaks it — the driver has no row-level tenant isolation to offer either way —
+    but this change is what moves such a flow from the "no organization context at
+    all → served" case into the refused one. Multi-organization deployments use
+    `@objectstack/driver-sql`; a `driver-memory` install whose swept objects are
+    genuinely platform-global can declare them so (`tenancy: { enabled: false }`,
+    ADR-0066) and is served unchanged, and ⛔ that is not a way to silence the
+    refusal on data that really is per-organization.
+  
+  A `type: 'schedule'` flow and a `time_relative` sweep now declare their acting organization on the start node, and the run executes as that organization.
+  
+  Maintainer ruling, 2026-09-08, verbatim: 「多组织定时任务本来只能在组织内运行，应该带组织ID，不允许跨组织的定时任务。」
+  
+  A time-triggered flow launches its run from a job tick, and a job tick carries no identity, so `ScheduleTrigger` and `TimeRelativeTrigger` built an `AutomationContext` with no `tenantId`. Two consumers already read that key and both resolved NULL: `notify-node.ts` threads it onto the notification it emits (#11303), and `AutomationEngine.recordLog` copies it onto the `sys_automation_run` history row (#10101). On an install holding more than one `sys_organization` the #8844 guard then refused every tenant-scoped row beneath the run — `sys_inbox_message`, `sys_notification_delivery`, `sys_notification_receipt` and the history row — one layer BELOW anything that summarises a run. So the tick selected its rows, landed its `update_record` steps, reported `unmeasured=0`, and delivered nothing.
+  
+  - **`@objectstack/spec`** declares the start-node `config.organization` key (`schedule-organization.zod.ts`): `SCHEDULE_ORGANIZATION_KEY`, `ScheduleOrganizationSchema`, the `ScheduleOrganization` type, `resolveScheduleOrganization` and `describeMissingScheduleOrganization` — five names, so the engine's lift and both triggers cannot drift about what counts as declared. The near-miss scan is module-local and runs INSIDE the refusal sentence (`describeMissingScheduleOrganization(flowName, { kind, config })`): both callers only ever wanted the sentence, and a `minor` freezes what it publishes — removing an export later is breaking where adding one is not.
+  - **`@objectstack/lint`** ⚠️ **nothing, after #17396.** This changeset originally added `flow-schedule-organization-missing` at `warning`; that id is deleted in the same window and was never published. The reason is the rule family's own criterion — *is this stack enough to know the flow is dead?* — answered honestly: it is not, because the deployment switch and the tenancy posture decide it and neither is in any stack. The near-miss diagnostic it shared with the triggers stays at BIND, where both facts are readable.
+  - **`@objectstack/service-automation`** lifts the declaration onto the `schedule` / `time_relative` binding, beside `schedule`. `record_change` and `api` bindings leave it `undefined` by construction: both are fired by a caller who already carries an organization, and lifting a declared one onto them would let a flow overrule the tenant of the write that triggered it.
+  - **`@objectstack/trigger-schedule`** refuses to bind a time-triggered flow that declares none — at `error`, naming the flow, and dropping any prior binding so a hot re-publish that REMOVES the key cannot leave the previous job armed — and threads the declared organization onto the run as `tenantId`, **and onto the `time_relative` sweep's own query**. The refusal is **thrown** from `start()`, not merely logged: `FlowTrigger.start` returns `void`, so a logged-and-returned refusal leaves the engine free to record the flow as bound. Thrown, it takes the engine's designed catch path — the flow is never marked bound, `getFlowRuntimeStates()` reports `bound: false`, and `getTriggerBindingAudit()` lists it, so the `kernel:bootstrapped` warning and the CLI startup summary both name it.
+  
+  **What an existing deployment feels.** A scheduled or time-relative flow with no `organization` stops being armed at boot; the log line names the flow, the key, where the key goes, and — when the author wrote a near-miss (`organizationId`, `tenantId`, `orgId`, …) — which spelling of theirs the open `config` record accepted and then ignored. On a SINGLE-organization install such a flow was working, because the #8844 guard derives the only organization there; it now needs one line to say so. That cost is the ruling's, not an implementation choice: "declared = enforced" is what makes the multi-organization case safe, and a posture-conditional refusal would leave a flow that is legal on a one-organization install and silently inert the day a second organization is created — which is the defect being closed, moved one step later.
+  
+  ⛔ Nothing on this path ever CHOOSES an organization — not the install's only one, not the platform organization, not the first row of `sys_organization`, not the swept record's own `organization_id`. (The trigger does read the declared value from two places, the lifted binding field and the raw start-node `config`; that is one value read twice, so an engine predating the lift reports a correctly declared flow as declared instead of turning a version skew into an authoring error. It resolves nothing the author did not write.) A wrong `organization_id` is worse than a refusal: a refusal is visible at boot and names its flow, while a wrong value is silently authoritative to every report, export and cleanup that filters by organization. ⛔ There is no fan-out either: a sweep wanted in N organizations is declared N times, and a single flow never spans them.
+  
+  **Run-history volume is bounded by a contract that already exists.** Scheduled runs now persist to `sys_automation_run` where they previously could not, and that table's retention is two-sided and declared: a per-flow cap on terminal rows enforced at WRITE time (`runHistoryMaxPerFlow`, default 100) and declarative age retention (`retention: { maxAge: '30d', onlyWhen: { status: { $in: ['completed', 'failed'] } } }`, ADR-0057 / #2834, with `paused` rows retained regardless of age). A minute-cadence flow is bounded by the per-flow cap, not by the tick rate. Measured before landing this: nothing in the tree depends on scheduled runs NOT reaching `sys_automation_run` — no test asserts an absent or zero run-history row for a time-triggered flow, and no deployment config, migration or quota keys off that emptiness.
+  
+  No object's tenancy declaration changes, and `NotifyConfigSchema` is untouched — the two routes the ruling excluded. `system-write-organization.ts` stays exactly as it is: the producer it guards against now carries what it demands.
+  
+  **What the declaration now bounds, precisely.** The value goes onto the run's `AutomationContext.tenantId`, and — for a `time_relative` sweep — onto its `find` context as well. From there it is the platform's existing tenancy path and nothing new: `Engine.buildDriverOptions` turns `context.tenantId` into `DriverOptions.tenantId`, and the driver scopes reads, updates, deletes and aggregates to that organization. ⛔ No `organization_id` predicate is hand-built anywhere — that would be a second implementation of tenancy inside a trigger, hardcoding a column an object is free to rename, selecting nothing on a platform-global object and breaking a federated one. Two consequences follow from using the platform's mechanism rather than a private one, and both are stated rather than discovered:
+  
+  - **A store that cannot scope refuses the call instead of answering it.** `@objectstack/driver-memory` implements no row-level tenant isolation and refuses any call handed a tenant scope (`MEMORY_MULTI_TENANT_UNSUPPORTED`, #16589), so a time-triggered flow on that driver fails loudly rather than quietly crossing organizations. Multi-organization deployments use `@objectstack/driver-sql`; this is the same refusal that driver already gives every other org-scoped read.
+  - **On a platform-global (`tenancy: { enabled: false }`, ADR-0066) or federated (ADR-0015) object the declaration cannot narrow anything** — the engine drops the scope for those by design. Such a sweep still selects across every organization while its runs act as the declared one, and the trigger says so at bind, at `warn`, naming the object. ⛔ It does not pretend the flow is contained.
+  
+  **The four flows this repo itself ships** — ⚠️ this paragraph is superseded by #17396 and kept for the record of what was measured. Their answer is now the deployment switch, not an authoring repair: off, they are listed as *disabled by deployment policy*; on under `single`, they run as written; on under a wall, they still need a declaration no package can carry. The original measurement follows.
+  
+  **They stop firing, and cannot be repaired by authoring.** `showcase_scheduled_digest` and `showcase_task_due_reminder` (`examples/app-showcase`), `task_reminder` and `overdue_escalation` (`examples/app-todo`) are all time-triggered and none declares an organization. There is no value they COULD declare: organization ids are minted per install at runtime, so a package-shipped flow has nothing to write there, and ⛔ inventing a placeholder is strictly worse than the omission — a value matching no row is silently authoritative. Each of the four now carries a comment saying it does not fire as shipped and why. What a package-shipped time-triggered flow should do instead is an open maintainer decision, tracked on #17396; this changeset and those comments are the record until it is ruled. That corpus is also why the new lint id is a `warning`: at `error` it gates `objectstack build`, which was run and refuses `examples/app-showcase` outright — the repo would be unable to build its own examples for a defect they have no way to fix.
+- f04be62: feat(types,triggers,service-automation,runtime,cli,spec,lint)!: package-authored scheduled work is a deployment decision — `OS_AUTOMATION_SCHEDULED_WORK_ENABLED`, off by default everywhere (#17396)
+  
+  <!-- adr-0087: not-required (already-registered schedule-flow-acting-organization-required) entry 18 is the ledger row for this exact surface — the start-node `config.organization` key of a time-triggered flow — and this change REWRITES it rather than adding a sibling: its surface, replacement, reason and acceptance criteria now carry the deployment switch and the posture split, so an upgrader reading `objectstack migrate meta`, `spec-changes.json` or the generated upgrade guide gets the narrowed rule from the one row that was always going to be their channel. A second entry would split one prescription across two rows and let a reader act on half of it. -->
+  
+  Maintainer ruling, 2026-09-12, verbatim, untranslated:
+  
+  > schedule 是风险很大的模型，尤其在云端，无算是单独多租户还是每库一租户，可能造成极大的资源浪费。对于单租户或着集团版私有部署，我觉得不需要做限制。定时任务 如果不好处理，现在也没想清楚，有没有可能定义为一个环境变量，根据环境变量控制？
+  
+  > 如果多租户暂时只接禁用定时任务，完整的考虑一下影响面。
+  
+  > group 默认也关，云端每库一租户全局默认关
+  
+  **A new deployment variable, `OS_AUTOMATION_SCHEDULED_WORK_ENABLED`, decides whether this deployment runs PACKAGE-AUTHORED scheduled work at all** — time-triggered flows (`type: 'schedule'` with a `config.schedule` cadence, and the `timeRelative` sweep) and packaged `defineJob` cron jobs. It is read at boot beside `resolveTenancyPosture` and is ⛔ **not** a metadata concept and ⛔ **not** a new spec key: whether a clock-driven workload is affordable is a fact about the deployment — its database, its tenants, its budget — that no package author can know, and a metadata key would ask them to.
+  
+  **OFF by default, in every posture and in every kernel.** Unset means off; `true` / `1` / `on` / `yes` (case-insensitive) means on. ⛔ Deliberately not the opt-out `!== 'false'` shape `OS_MULTI_ORG_ENABLED` uses, which reads a typo as "on" — here that would arm exactly the workload an operator meant to refuse.
+  
+  ⛔ **Platform-internal scheduled work is NOT gated** and runs either way: approvals escalation, the lifecycle Reaper, the messaging dispatch loop, membership backfill. The boundary is **authored by a package**, not "runs on the job service" — the platform's own maintenance is part of the runtime a deployment asked for.
+  
+  **BREAKING**, in two directions, and both land inside the same launch window as #16659 / PR #17334, so no published version ever saw the rule this narrows.
+  
+  1. **A NARROWING, and it is the one to plan for.** A deployment that upgrades and does nothing runs **no** packaged time-triggered flow and **no** packaged `defineJob`. Anything that was firing from a package stops. ⇒ Set `OS_AUTOMATION_SCHEDULED_WORK_ENABLED=true` if you depend on it. Nothing detects the shape for you at authoring time, by design — but nothing is silent either: every such flow is listed in `getTriggerBindingAudit()` and the `os dev` / `os start` startup summary with a DISTINCT reason, **disabled by deployment policy**, ⛔ never as "binding failed"; the packaged-job loop says so once per app at `info` with the count; and `os doctor` prints the effective value in both states.
+  2. **A WIDENING of what binds.** With the switch on and tenancy posture `single`, a time-triggered flow that declares **no** `config.organization` now binds and runs — under #16659 alone it was refused. That posture holds exactly one organization (a second is refused), so the run carries **no** organization and every tenant-scoped insert beneath it resolves that one the way a single-organization install always did; a `timeRelative` sweep there runs **unscoped**. ⛔ Nothing is invented: the key is OMITTED, never filled from the install, the platform organization, or the swept record's own `organization_id`.
+  
+  **Under a walled posture (`group` / `isolated`) the 2026-09-08 ruling on #16659 stands unchanged**: a time-triggered flow declares `config.organization` or it is not armed, there is no fan-out, and no organization is ever chosen for it. `group` is walled here for a measured reason rather than by analogy — `resolveSystemWriteOrganization` refuses an organization-less system insert under any wall and `TenancyService.defaultOrgId()` answers `null` (ADR-0093 D3), so an organization-less group-wide sweep could read the whole group while every row it inserts is refused. Which organization such a sweep's inserts belong to is not yet decided; until it is, `group` behaves as walled.
+  
+  **`flow-schedule-organization-missing` is DELETED** from `@objectstack/lint` (the id and its exported constant, `FLOW_SCHEDULE_ORGANIZATION_MISSING`; both are unreleased — they were introduced by the still-unconsumed #16659 changeset in this same window, so no consumer can be holding either). The rule family's criterion is *is this stack enough to know the flow is dead?*, and the honest answer here is no: the deployment switch and the tenancy posture decide it, and neither is in any stack. A finding that is false for the default deployment is noise. ⛔ The near-miss diagnostic did **not** go with it — `describeMissingScheduleOrganization` and its `organizationId` / `tenantId` / … scan still fire at BIND, the one door that can read both facts, and only where the key is actually required.
+  
+  **ADR-0087 semantic entry 18 (`schedule-flow-acting-organization-required`) is REWRITTEN, not added.** Its acceptance criteria required every time-triggered flow to declare; that is no longer the rule. It now prescribes the two decisions in order — decide the switch, then declare per organization under a wall — and records that `os lint` reporting nothing is the criterion being met rather than a check that was skipped. The unconsumed `.changeset/schedule-trigger-acting-organization.md` carries a banner saying the same, so a reader of either one cannot get the narrower half alone.
+  
+  **Where the switch is read, and where it is not.** Both triggers gate at `start()`, ahead of the descriptor and the declaration, so an operator on a deployment that was never going to run a flow is not sent to fix a descriptor nothing would have read. `AutomationEngine.activateFlowTrigger` reads the same resolver and does not call `start()` at all when it is off — that is what keeps the audit's reason precise, since a refusal arriving as a THROW can only be reported through the catch that says "Failed to bind". Neither read is cached: the resolver reads `process.env` live, so a host that rebinds after the environment changes sees the value current at the bind. The scope is `schedule` and `time_relative` only — `record_change` and `api` are fired by a caller that already exists and already carries an identity, and a kind added to `FlowTriggerKind` later is OUTSIDE the switch until someone decides otherwise, because a new capability that disappears on arrival is the worse default.
+
+### Patch Changes
+
+- Updated dependencies [863c7c4]
+- Updated dependencies [0f95f43]
+- Updated dependencies [825d70f]
+- Updated dependencies [7f62536]
+- Updated dependencies [abc4b83]
+- Updated dependencies [7382c5d]
+- Updated dependencies [ea2940d]
+- Updated dependencies [245f360]
+- Updated dependencies [324968e]
+- Updated dependencies [7843663]
+- Updated dependencies [ce57857]
+- Updated dependencies [c7d4825]
+- Updated dependencies [4844840]
+- Updated dependencies [fe71032]
+- Updated dependencies [d8b12fc]
+- Updated dependencies [74eaab8]
+- Updated dependencies [0b788da]
+- Updated dependencies [482d34d]
+- Updated dependencies [839d1b0]
+- Updated dependencies [2fc092b]
+- Updated dependencies [6059b29]
+- Updated dependencies [88a072e]
+- Updated dependencies [d4a1a28]
+- Updated dependencies [baf9745]
+- Updated dependencies [3d8779d]
+- Updated dependencies [0bd7dae]
+- Updated dependencies [d34f9b6]
+- Updated dependencies [57343f7]
+- Updated dependencies [271d6bb]
+- Updated dependencies [1e20f81]
+- Updated dependencies [38472ce]
+- Updated dependencies [8b48903]
+- Updated dependencies [2d235bc]
+- Updated dependencies [aaacf1d]
+- Updated dependencies [6548118]
+- Updated dependencies [146c291]
+- Updated dependencies [e0e4a56]
+- Updated dependencies [7aae005]
+- Updated dependencies [bdb247d]
+- Updated dependencies [d5c91dd]
+- Updated dependencies [0e51278]
+- Updated dependencies [48203ff]
+- Updated dependencies [ada2869]
+- Updated dependencies [d88a47d]
+- Updated dependencies [2f1a6f6]
+- Updated dependencies [23fc5d6]
+- Updated dependencies [2d34f32]
+- Updated dependencies [9e3c485]
+- Updated dependencies [e1796ad]
+- Updated dependencies [c9eb773]
+- Updated dependencies [4342c99]
+- Updated dependencies [132dd13]
+- Updated dependencies [d285bf0]
+- Updated dependencies [dfeba25]
+- Updated dependencies [0a88a80]
+- Updated dependencies [12bb672]
+- Updated dependencies [97233b9]
+- Updated dependencies [182bbde]
+- Updated dependencies [0252320]
+- Updated dependencies [2eb4724]
+- Updated dependencies [e04a0af]
+- Updated dependencies [6b97a20]
+- Updated dependencies [e7ff9c2]
+- Updated dependencies [75237a9]
+- Updated dependencies [920f887]
+- Updated dependencies [497655f]
+- Updated dependencies [3a9ad22]
+- Updated dependencies [758ac40]
+- Updated dependencies [2bf6ef1]
+- Updated dependencies [09e16a5]
+- Updated dependencies [98bd798]
+- Updated dependencies [cbcae14]
+- Updated dependencies [8261ff7]
+- Updated dependencies [24489f1]
+- Updated dependencies [fc28c1d]
+- Updated dependencies [6d64785]
+- Updated dependencies [00c332b]
+- Updated dependencies [b3b43b6]
+- Updated dependencies [d93400f]
+- Updated dependencies [134b410]
+- Updated dependencies [84e6b05]
+- Updated dependencies [cb1f274]
+- Updated dependencies [5c28cc7]
+- Updated dependencies [b0eb9a5]
+- Updated dependencies [176b035]
+- Updated dependencies [a83dbb6]
+- Updated dependencies [51297e9]
+- Updated dependencies [156792e]
+- Updated dependencies [5ba2ec3]
+- Updated dependencies [abb01f1]
+- Updated dependencies [e64ae15]
+- Updated dependencies [02bdeaa]
+- Updated dependencies [66abef3]
+- Updated dependencies [25c9a83]
+- Updated dependencies [ee5812a]
+- Updated dependencies [68fea8b]
+- Updated dependencies [c049e74]
+- Updated dependencies [bb9794a]
+- Updated dependencies [d402e32]
+- Updated dependencies [9a910c4]
+- Updated dependencies [340b6dc]
+- Updated dependencies [fe0ae5c]
+- Updated dependencies [99fcb4a]
+- Updated dependencies [0f1cd83]
+- Updated dependencies [a3d4c59]
+- Updated dependencies [74832b6]
+- Updated dependencies [1aa5026]
+- Updated dependencies [b9d5422]
+- Updated dependencies [627382b]
+- Updated dependencies [0b31d90]
+- Updated dependencies [559041d]
+- Updated dependencies [e0d0553]
+- Updated dependencies [5100c42]
+- Updated dependencies [5380daa]
+- Updated dependencies [00b38d7]
+- Updated dependencies [47a9002]
+- Updated dependencies [5eebc9e]
+- Updated dependencies [72c1640]
+- Updated dependencies [5e5ec9f]
+- Updated dependencies [922923b]
+- Updated dependencies [e6c34f6]
+- Updated dependencies [062f5cd]
+- Updated dependencies [5d8319f]
+- Updated dependencies [43f4766]
+- Updated dependencies [8e8ea99]
+- Updated dependencies [a484966]
+- Updated dependencies [021755a]
+- Updated dependencies [dbd4744]
+- Updated dependencies [14a762f]
+- Updated dependencies [b146102]
+- Updated dependencies [75c0dac]
+- Updated dependencies [9bb059d]
+- Updated dependencies [07c6f82]
+- Updated dependencies [362035c]
+- Updated dependencies [74554a3]
+- Updated dependencies [4c42fd1]
+- Updated dependencies [5f392f0]
+- Updated dependencies [a362e0e]
+- Updated dependencies [f26fb8e]
+- Updated dependencies [bc2ec80]
+- Updated dependencies [0da638c]
+- Updated dependencies [041d9fd]
+- Updated dependencies [f03f6c7]
+- Updated dependencies [b8ec127]
+- Updated dependencies [cf79182]
+- Updated dependencies [e81c4e5]
+- Updated dependencies [929d9e3]
+- Updated dependencies [8a5240a]
+- Updated dependencies [c1d54db]
+- Updated dependencies [c7af6bd]
+- Updated dependencies [1f0b565]
+- Updated dependencies [23aa83c]
+- Updated dependencies [357f499]
+- Updated dependencies [80aef80]
+- Updated dependencies [c3ebe4a]
+- Updated dependencies [65ad77d]
+- Updated dependencies [a61ae59]
+- Updated dependencies [a54ecaa]
+- Updated dependencies [854639b]
+- Updated dependencies [44c917a]
+- Updated dependencies [613d35a]
+- Updated dependencies [e08c8b0]
+- Updated dependencies [0ee32ed]
+- Updated dependencies [2bed4c3]
+- Updated dependencies [58b36fa]
+- Updated dependencies [4792049]
+- Updated dependencies [53ec0b1]
+- Updated dependencies [71629a1]
+- Updated dependencies [0a56d3b]
+- Updated dependencies [f8e5790]
+- Updated dependencies [d2c1d19]
+- Updated dependencies [681871e]
+- Updated dependencies [54e8234]
+- Updated dependencies [288fe9c]
+- Updated dependencies [d127f9b]
+- Updated dependencies [4bbf766]
+- Updated dependencies [c17b494]
+- Updated dependencies [d414e2b]
+- Updated dependencies [af98a04]
+- Updated dependencies [43cbe14]
+- Updated dependencies [6e3462d]
+- Updated dependencies [c4d1759]
+- Updated dependencies [f7a9740]
+- Updated dependencies [cca1dc0]
+- Updated dependencies [9cdffbe]
+- Updated dependencies [331a1a2]
+- Updated dependencies [9788f1e]
+- Updated dependencies [2bd53f1]
+- Updated dependencies [5f9f846]
+- Updated dependencies [5a95b0e]
+- Updated dependencies [5d527f7]
+- Updated dependencies [5bf2330]
+- Updated dependencies [9165d5c]
+- Updated dependencies [d9e1587]
+- Updated dependencies [07150b3]
+- Updated dependencies [143c715]
+- Updated dependencies [fb2bccf]
+- Updated dependencies [d2badf7]
+- Updated dependencies [d64bcb6]
+- Updated dependencies [d4f5232]
+- Updated dependencies [396eae3]
+- Updated dependencies [ecdfc94]
+- Updated dependencies [f04be62]
+- Updated dependencies [de1a611]
+- Updated dependencies [db76982]
+- Updated dependencies [3b1dab9]
+- Updated dependencies [7607076]
+- Updated dependencies [1555ed4]
+- Updated dependencies [776d64c]
+- Updated dependencies [ab450f4]
+- Updated dependencies [025588a]
+- Updated dependencies [a49e8ae]
+- Updated dependencies [f3e3d59]
+- Updated dependencies [9bd4344]
+- Updated dependencies [51efbf1]
+- Updated dependencies [9c44eed]
+- Updated dependencies [bbca441]
+- Updated dependencies [7cd5874]
+- Updated dependencies [7887077]
+- Updated dependencies [29dd1a6]
+  - @objectstack/spec@17.5.0
+  - @objectstack/core@17.5.0
+  - @objectstack/types@17.5.0
+  - @objectstack/metadata-core@17.5.0
+
 ## 17.4.0
 
 ### Minor Changes

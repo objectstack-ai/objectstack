@@ -1,5 +1,439 @@
 # @objectstack/metadata-core
 
+## 17.5.0
+
+### Minor Changes
+
+- 2bed4c3: fix(objectql)!: a field whose `type` is absent or is not a `FieldType` member is refused at the registration door, and every downstream family default becomes a refusal (#16319)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) nothing an author can write is removed or renamed, and no conversion could repair these bodies: a field with no `type` carries no statement of intent for a conversion to rewrite, which is exactly the finding — the platform cannot know whether the author meant a bounded VARCHAR or an unbounded TEXT, and the two producers guessed differently. The remedy is a human decision per field, so it is prescribed in prose and in the refusal text rather than registered as a mechanical rewrite. -->
+  
+  **BREAKING** for stored metadata only: an object whose declaration carries a field with no `type`, or with a `type` that is not a `FieldType` member, **no longer loads**. Shipped as `minor` under the repo's launch-window convention. Maintainer ruling, 2026-09-10, verbatim: 「16319 一个没写 type(或拼错)的字段 应该禁止加载。这个才是合理的吧?其他同意」.
+  
+  **What you have to do.** Nothing, unless a `sys_metadata` row in your deployment carries such a field. If one does, the startup log names it at `error` level — object, field and reason — and the row is left untouched and still reachable: open it in Studio and give the field a real `FieldType` member, or delete it (`DELETE /api/v1/metadata/object/NAME`). Nothing that passes `FieldSchema` is affected: it has always required `type` and always refused a non-member, so only the doors that skip Zod could ever deliver one.
+  
+  ## What was wrong
+  
+  One declaration produced two different columns. Measured on live PostgreSQL 16.13, driving all three producers from one object:
+  
+  | declaration | driver | `os generate migration --format sql` | `--format ts` |
+  |:---|:---|:---|:---|
+  | `{ maxLength: 100 }`, no `type` | `character varying(100)` | `TEXT` | `TEXT` |
+  | `{ type: 'this_is_not_a_field_type', maxLength: 100 }` | `character varying(255)` | `TEXT` | `TEXT` |
+  
+  `SqlDriver.createColumn` read `field.type || 'string'`, which heads its STRING-family arm and sizes the column from the declared `maxLength` (knex's 255 without one). All four generator loops in `os generate` read `String(fieldDef.type || 'text')`, which heads the TEXT family — unbounded unless the column is keyed. Both directions of harm are in the first row: the platform refuses a 101-character value that both generated tables accept, and a table generated from the same object accepts values the platform will not store.
+  
+  ## What it does now
+  
+  - **One point of closure, at the registration door.** `SchemaRegistry.registerObject` refuses the WHOLE object declaration, with the ADR-0112 envelope (`INVALID_METADATA` + `422`), naming the object, the field and the reason — and offering the spec's own "did you mean?" for a mis-spelling. ⛔ The offending field is never dropped on its own: an object loaded one field short reports success at every authoring surface while the column is never created and every read of it answers `undefined`. Every door goes through this one — declared stacks, package and plugin manifests, `saveMetaItem`, the `sys_metadata` boot rehydration, and raw `registerObject` calls — and all three contributor kinds (`own`, `overlay`, `extend`) are judged, because `ObjectSchema.fields` and `ObjectExtensionSchema.fields` are both `z.record(z.string(), FieldSchema)`.
+  - **The startup policy is revised for this class.** `loadMetaFromDb`'s 「Registered anyway so it stays serveable and fixable」 no longer applies to it. The row does not register; the startup log states the consequence and the fix once, at `error`. The row itself is untouched, and the metadata API's raw-row path still lists it, still serves it with the offending field visible, still accepts a corrected write, and still deletes it — pinned, because a refused row that vanished from Studio would be unfixable.
+  - **Downstream guesses become refusals.** `createColumn` refuses a field that declares no `type` instead of building `varchar(255)` for it. All four `os generate` loops — both migration formats and both `os generate types` loops — refuse an absent or non-member `type` and generate nothing for that object, rather than emitting a table one column short. `fieldTypeToSql`'s docblock is rewritten in the same stroke: its `TEXT` miss branch is now dead residue of a total table, ⛔ not a family default to route anything new to.
+  
+  ## Scope, stated rather than left to be inferred
+  
+  `SqlDriver.createColumn` refuses `type` ABSENCE, not `FieldType` MEMBERSHIP. Membership is refused for the whole object at the registration door, which fronts every route into `syncSchema`, so a non-member cannot reach the driver from a runtime at all. `driver-sql`'s own test corpus declares 388 non-member spellings across ~100 files that drive `initObjects` directly, and `'string'` is a declared `case` arm of that switch whose column shape differs from every member's — so closing that half is a corpus migration with column consequences, deliberately not folded into this change. A pin holds the boundary in both directions.
+  
+  ONE fixture in that corpus is migrated here, because it is the one that crosses the door. `CROSS_FIELD_OBJECT_FIELDS` — exported from this package's root, so a published export and not only a local literal — declared `stage` and `owner` as `'string'`. Four of its five consumers hand it to `driver.initObjects`, which the paragraph above leaves alone; the fifth hands it to `ql.registerObject`, which now refuses the whole object. Both fields are re-spelled `'text'`. That is not a re-typing: `canonicalizeSqlType('varchar(255)')` is `'text'` and `suggestFieldTypeForSqlType('varchar(255)')` is `'text'`, both pinned in `spec/data/type-compat.test.ts`, so `'text'` is the spelling of the column `'string'` was already producing. It does move the emitted column from `varchar(255)` to `TEXT` (measured on sqlite-wasm: `stage varchar(255)` becomes `stage text`), which is inert for this fixture — no index keys either column, `initObjects` is passed no indexes, and the corpus's longest value in them is four characters.
+- 0a56d3b: feat(spec,types,triggers)!: `group` runs package-authored scheduled work without a declaration, owning each run's writes per record (#18378)
+  
+  <!-- adr-0087: not-required (already-registered schedule-flow-acting-organization-required) This amends the EXISTING semantic entry rather than adding one: same authorable key, same deployment switch, same surface, and the entry predates this diff at the merge base. Nothing is renamed, retired or re-typed — the start node's `config` is an open record (ADR-0018), so every flow that parses today parses byte-identically afterwards and `objectstack migrate meta` has nothing new to rewrite. What moves is the BIND-time accept set (it WIDENS) and the RUN-time organization such a flow's writes carry; the entry's own surface/replacement/reason/acceptanceCriteria each gained their `group` row in this diff. -->
+  
+  `Clause-②: yes (widening)`
+  
+  **ADR-0087 disposition — `not-required (already-registered)`, not `registered`.**
+  The ledger entry this change belongs to already exists
+  (`schedule-flow-acting-organization-required`, entry 18) and predates this diff
+  at the merge base, so `registered` would assert a registration this PR did not
+  make. The entry's `surface`, `replacement`, `reason` and `acceptanceCriteria`
+  each gained their `group` row here, the rejected bootstrap-organization arm
+  included — recorded because it is the one a later reader will re-propose.
+  
+  **Marked breaking (`!`) for the behaviour change, not for a narrowing.** Nothing
+  that worked stops working and nothing that was admitted becomes refused — the
+  accept set WIDENS in one cell. What earns the banner is the other direction: on a
+  `group` deployment with the switch already on, flows that were refused at bind
+  now arm and run, so clock-driven work appears where an operator had none. That is
+  worth reading before upgrading even though no consumer has to change anything.
+  
+  ## What changes
+  
+  With `OS_AUTOMATION_SCHEDULED_WORK_ENABLED` on and tenancy posture `group`, a
+  time-triggered flow that declares no `config.organization` now **binds and
+  runs**, where it was previously refused at bind. The organization its writes
+  carry follows the record:
+  
+  | posture | declaration | a bound run's writes act as |
+  |---|---|---|
+  | `single` | not read | nothing — the install's one organization resolves beneath each write |
+  | `group` | **optional** | declared ⇒ the declaration; undeclared ⇒ **the swept record's own organization** |
+  | `isolated` | **required** | the declaration; undeclared ⇒ not armed, unchanged |
+  
+  A `timeRelative` sweep under `group` reads group-wide — inherent to the posture
+  (ADR-0105 D1) — and stamps each run it launches with that record's organization:
+  sweep contracts across four plants and each plant's contract yields a run acting
+  as that plant, whose notifications reach that plant's inboxes.
+  
+  ## Why this is not a fallback that guesses
+  
+  It is the order `sys_automation_run` was **already** ruled to use.
+  `ObjectStoreSuspendedRunStore` resolves a run's organization as
+  `organizationOf(<subject record>) ?? ctx.tenantId` — subject first, acting
+  context as the fallback and never the primary. Before this change those two
+  halves disagreed under `group`: the history row was stamped from the record while
+  the inbox and delivery rows followed an acting context that could not exist
+  there, so they were refused while the tick summarised itself as healthy.
+  
+  ⚠️ With one stated exception, because the two halves ask different questions:
+  the history row is STAMPED (`tenancy.organizationField` wins there) while the
+  run's acting organization is a WALL reading that never consults that key. They
+  agree on every object where the two coincide — which is every ordinary object,
+  since a declared stamp column is what makes them differ and one shipped object
+  declares one (`sys_api_key`, deliberately unwalled). Sweeping that object under
+  `group` stamps its history row while the run itself acts as nothing: the correct
+  pair of answers, not a residue of the old disagreement, and recorded rather than
+  smoothed over.
+  
+  ⛔ A record-less run under `group` that declared nothing still resolves
+  **nothing** and is refused at its first tenant-scoped write (`walled-posture`,
+  ADR-0112), loudly and by name. The rejected alternative was a fallback to the
+  bootstrap organization (`slug='default'`): under a wall that organization is
+  minted admin-keyed by the enterprise organizations runtime and may not exist at
+  all, and where it does it is whichever organization the platform owner
+  registered under — plausibly one plant of many, not the group's head office.
+  
+  ## Upgrading
+  
+  **Most deployments: nothing to do.** The switch this depends on is OFF by default
+  and ships unreleased alongside this change, so the `group`-is-walled behaviour
+  being amended has never appeared in a published version — no released consumer
+  can be relying on it.
+  
+  If you run posture `group` **and** turn the switch on, read your boot log: each
+  time-triggered flow's bind line now names which of the three shapes it bound as
+  ("as organization '…'", "with per-record acting organization", or "with NO
+  acting organization"). Two things to check:
+  
+  - A flow you expected to act as ONE organization but which binds per-record is
+    missing its `config.organization`. Add it — declaring still narrows, bounding
+    the sweep's query as well as its identity.
+  - A plain `schedule` cron flow that binds "with NO acting organization" has no
+    record to derive one from. If it writes notifications, inbox messages or any
+    other per-organization row, declare `organization` on its start node; the bind
+    line says so, and so does the refusal at the first tick.
+  
+  ## Which organization a record belongs to — the WALL question, not the stamp one
+  
+  `@objectstack/metadata-core` gains a second face on the record→organization
+  resolver, and the split is the point: `resolveRecordOrganizationField` /
+  `createRecordOrganizationResolver` answer **"who is this row ABOUT"** (the STAMP
+  question, whose `tenancy.organizationField` limb stays pinned to the three
+  sanctioned platform-row writers), while the new
+  `resolveRecordWallOrganizationField` / `createRecordWallOrganizationResolver`
+  answer **"what is this row WALLED by"** — `tenancy.enabled: false` ⇒ nothing,
+  then a declared `tenancy.tenantField`, then the kernel's `organization_id`.
+  
+  The sweep uses the WALL face, because "which organization does this run act as"
+  is a question about the wall. ⛔ It never reads `tenancy.organizationField`: that
+  key is declared on exactly one shipped object (`sys_api_key`, deliberately
+  unwalled, #8287), and reading it here would turn "the audit trail should follow
+  this row's own organization even though nothing walls it" into an acting
+  identity. A sweep over such an object resolves **nothing** and takes the
+  `walled-posture` refusal at its first tenant-scoped write, which is the honest
+  answer. Limbs 1 to 4 are one implementation shared by both faces, pinned as
+  such, so the half they agree on cannot drift apart.
+  
+  **API:** `ScheduledWorkPolicy` gains `runOwnership: 'unscoped' | 'per-record' |
+  'declared'`, and `requiresActingOrganization` narrows from "any walled posture"
+  to `isolated` only. The two are deliberately separate axes: the boolean decides
+  whether BIND refuses, `runOwnership` decides what a run that DID bind carries.
+  Inside `@objectstack/trigger-schedule`, both triggers share one bind-line
+  vocabulary (`describeScheduleRunOwnership`) so they cannot describe one
+  deployment differently. ⚠️ That helper is module-level, NOT a package export: it
+  is not re-exported from the package barrel, whose own note says an export whose
+  only consumers live inside its own package belongs in a non-barrel module. The
+  new PUBLIC surface in this change is `ScheduledRunOwnership` and the
+  `runOwnership` key on `@objectstack/types`, plus
+  `resolveRecordWallOrganizationField` and
+  `createRecordWallOrganizationResolver` on `@objectstack/metadata-core` — and
+  those four are what put `Clause-②` at `yes`. Nothing existing is renamed or
+  re-typed: both stamp-face exports keep their names, their signatures and their
+  answers, limb 0 included.
+- cca1dc0: <!-- adr-0087: not-required (no-migration-prescription) both renamed members are RUNTIME OUTPUT, not authored metadata: a CLI `--json` key emitted from an inline object literal, and a member of a TypeScript diagnostic object built at throw time. Neither has a Zod schema, a `packages/spec` declaration or a stored representation, so `objectstack migrate meta` has nothing to reach and a ledger entry would project into `spec-changes.json` and the upgrade guide as an instruction no metadata upgrader can act on. The prescription in this body addresses a SOURCE-CODE and stdout-reading consumer, whose delivery channel is the compiler and this changelog (ADR-0087 D8) -- the same disposition and the same argument as the `specVersionGap` to `protocolVersionGap` rename that shipped from this repo. -->
+  
+  feat(cli,metadata-core)!: the protocol version is emitted under `protocolVersion`, never under a `runtime`-shaped name (#15585)
+  
+  **BREAKING** — two published machine surfaces change a key name. There is **no alias
+  and no dual-key transition window**: one axis, one name.
+  
+  | Surface | Was | Now |
+  |:--|:--|:--|
+  | `os migrate meta --json` payload | `runtime` | `protocolVersion` |
+  | `OS_PROTOCOL_INCOMPATIBLE` diagnostic (`ProtocolIncompatibleError.diagnostic`) | `runtimeVersion` | `protocolVersion` |
+  | `checkProtocolCompat()` / `assertProtocolCompat()` 2nd parameter | `runtimeVersion` | `protocolVersion` |
+  
+  The **value** is unchanged on every one of them: it is `PROTOCOL_VERSION`, the protocol
+  major padded to a semver (`'17.0.0'`), exactly as before. Nothing else on either payload
+  moves — no other key is added, removed or reshaped, and both text faces are byte-identical.
+  The parameter rename is positional, so no call site changes.
+  
+  ## Why the name had to move
+  
+  `PROTOCOL_VERSION` is the protocol major padded to a semver and never tracks the installed
+  `@objectstack/cli` or runtime package version. Printed or emitted under the word *runtime*
+  it read as one: on a 17.3.0 install `runtime: "17.0.0"` reads as an apparent downgrade or
+  a stale install, next to the real package versions of the same upgrade session.
+  
+  The human line was repaired first and now reads
+  `Chain:  protocol 17 → 17 (this runtime implements protocol 17)`. The machine face is the
+  worse half and was left standing, because a key on a published payload is a contract
+  change: an agent scripting an upgrade has no prose to disambiguate at all, and the
+  diagnostic's own `message` — which *is* unambiguous — is the one part a machine consumer
+  does not parse.
+  
+  ## What a consumer should do
+  
+  Read the new key. The old one is absent, so a consumer that does not move reads
+  `undefined` rather than a wrong value.
+  
+  ```diff
+  - const v = payload.runtime;                  // os migrate meta --json
+  + const v = payload.protocolVersion;
+  
+  - const v = err.diagnostic.runtimeVersion;    // OS_PROTOCOL_INCOMPATIBLE
+  + const v = err.diagnostic.protocolVersion;
+  ```
+  
+  The diagnostic surfaces through every package that re-emits it — `@objectstack/runtime`
+  spreads it into `ArtifactReferenceError.detail`, `@objectstack/metadata-protocol` throws it
+  from the package install boundary, and `@objectstack/services-package` reads it during
+  hydration — so a consumer reading it from any of those reads the new name too.
+  
+  `runtimeMajor` on the same diagnostic is deliberately **unchanged**: it is an integer
+  protocol major, not a semver in a version position, and it does not carry the ambiguity
+  this rename closes.
+  
+  The breaking surface was measured before the rename and is closed inside this repository:
+  the only reader of the `--json` key was this repo's own e2e pin and the only reader of the
+  diagnostic member was `metadata-core`'s own unit test, both of which move in this same
+  change; the published `skills/objectstack-upgrade/SKILL.md` documents `--json` without ever
+  naming the field. **Zero external consumers were found.** Graded `minor` rather than
+  `major` for the launch window; the banner above carries the breaking-ness the level cannot.
+
+### Patch Changes
+
+- 134b410: The artifact-ingestion door no longer replays the **default-flip** class of ADR-0087 conversion, so an artifact carrying `defineApp({ hidden: true })` is registered with `hidden: true` — not as an unpublished app (#17885, #4829).
+  
+  `app-hidden-to-unpublished` rewrites `app.hidden: true` into `app._unpublished: true`. Both keys are live and they mean opposite kinds of thing: `hidden` is navigation presentation and *"never an access gate"* (`ui/app.zod.ts`), while `_unpublished` is the machine-managed publish gate `filterAppForUser` drops the app on for every user without `studio.access` / `setup.access`. Measured before the change, on an artifact declaring `engines.protocol: ^17.0.0` — the range `create-objectstack` stamps — against a 17.4.0 runtime: the door emitted the `app-hidden-to-unpublished` notice and the object that reached registration carried `hidden: undefined`, `_unpublished: true`. So an author who asked for "keep this out of the App Switcher" got "nobody but a builder can see this" — the incident the `_unpublished` split was introduced to end, arriving through the conversion layer.
+  
+  - **The entry is not withdrawn and no key moves.** It still fires where its precondition is a fact — the stored-row rehydration seams (a pre-split `hidden: true` row can only have come from the materialization path) and `os migrate meta`, where the operator asserts the source's age. What changed is that the artifact door, whose evidence is the artifact's **declared `engines.protocol` floor** rather than its age, no longer treats that guess as sufficient for a rewrite that reinterprets a live authorable key.
+  - **The retired window stays open.** Closing it wholesale would fix this and re-break #12772: an artifact built by 17.1.0 tooling carrying `allowRestore` / `allowPurge` would again be refused at the tombstone with no operator remedy. The door refuses one named class by id, with its reason written beside it, and the pin drives a retired conversion and a non-retired one through the same window to prove it.
+  - **New seam option, no new export.** `applyConversions` accepts `excludeConversionIds` — the seat-level spelling of "my evidence cannot carry this entry". `retiredFromLoadPath` cannot express it: that flag's jurisdiction is the authoring funnel and nothing else.
+  - ⛔ **The consumer is unchanged.** `filterAppForUser` withholding on `_unpublished` is correct; the defect was who writes `_unpublished`.
+  
+  Deployments whose apps were being served as unpublished purely because of a permissive `engines.protocol` range will see those apps again, for every user, on the next boot. No artifact file changes and no stored row is rewritten.
+- Updated dependencies [863c7c4]
+- Updated dependencies [0f95f43]
+- Updated dependencies [825d70f]
+- Updated dependencies [abc4b83]
+- Updated dependencies [7382c5d]
+- Updated dependencies [ea2940d]
+- Updated dependencies [245f360]
+- Updated dependencies [324968e]
+- Updated dependencies [7843663]
+- Updated dependencies [ce57857]
+- Updated dependencies [c7d4825]
+- Updated dependencies [4844840]
+- Updated dependencies [fe71032]
+- Updated dependencies [d8b12fc]
+- Updated dependencies [74eaab8]
+- Updated dependencies [0b788da]
+- Updated dependencies [482d34d]
+- Updated dependencies [839d1b0]
+- Updated dependencies [2fc092b]
+- Updated dependencies [6059b29]
+- Updated dependencies [88a072e]
+- Updated dependencies [d4a1a28]
+- Updated dependencies [3d8779d]
+- Updated dependencies [0bd7dae]
+- Updated dependencies [d34f9b6]
+- Updated dependencies [57343f7]
+- Updated dependencies [271d6bb]
+- Updated dependencies [1e20f81]
+- Updated dependencies [38472ce]
+- Updated dependencies [8b48903]
+- Updated dependencies [2d235bc]
+- Updated dependencies [aaacf1d]
+- Updated dependencies [146c291]
+- Updated dependencies [e0e4a56]
+- Updated dependencies [7aae005]
+- Updated dependencies [bdb247d]
+- Updated dependencies [d5c91dd]
+- Updated dependencies [0e51278]
+- Updated dependencies [48203ff]
+- Updated dependencies [ada2869]
+- Updated dependencies [d88a47d]
+- Updated dependencies [2f1a6f6]
+- Updated dependencies [23fc5d6]
+- Updated dependencies [2d34f32]
+- Updated dependencies [9e3c485]
+- Updated dependencies [e1796ad]
+- Updated dependencies [c9eb773]
+- Updated dependencies [4342c99]
+- Updated dependencies [132dd13]
+- Updated dependencies [d285bf0]
+- Updated dependencies [dfeba25]
+- Updated dependencies [0a88a80]
+- Updated dependencies [12bb672]
+- Updated dependencies [97233b9]
+- Updated dependencies [182bbde]
+- Updated dependencies [0252320]
+- Updated dependencies [2eb4724]
+- Updated dependencies [e04a0af]
+- Updated dependencies [6b97a20]
+- Updated dependencies [75237a9]
+- Updated dependencies [497655f]
+- Updated dependencies [3a9ad22]
+- Updated dependencies [2bf6ef1]
+- Updated dependencies [09e16a5]
+- Updated dependencies [98bd798]
+- Updated dependencies [cbcae14]
+- Updated dependencies [8261ff7]
+- Updated dependencies [24489f1]
+- Updated dependencies [fc28c1d]
+- Updated dependencies [6d64785]
+- Updated dependencies [00c332b]
+- Updated dependencies [b3b43b6]
+- Updated dependencies [d93400f]
+- Updated dependencies [134b410]
+- Updated dependencies [84e6b05]
+- Updated dependencies [cb1f274]
+- Updated dependencies [5c28cc7]
+- Updated dependencies [b0eb9a5]
+- Updated dependencies [176b035]
+- Updated dependencies [a83dbb6]
+- Updated dependencies [51297e9]
+- Updated dependencies [156792e]
+- Updated dependencies [5ba2ec3]
+- Updated dependencies [abb01f1]
+- Updated dependencies [e64ae15]
+- Updated dependencies [02bdeaa]
+- Updated dependencies [66abef3]
+- Updated dependencies [25c9a83]
+- Updated dependencies [ee5812a]
+- Updated dependencies [68fea8b]
+- Updated dependencies [c049e74]
+- Updated dependencies [bb9794a]
+- Updated dependencies [d402e32]
+- Updated dependencies [9a910c4]
+- Updated dependencies [340b6dc]
+- Updated dependencies [99fcb4a]
+- Updated dependencies [0f1cd83]
+- Updated dependencies [a3d4c59]
+- Updated dependencies [1aa5026]
+- Updated dependencies [b9d5422]
+- Updated dependencies [627382b]
+- Updated dependencies [0b31d90]
+- Updated dependencies [559041d]
+- Updated dependencies [e0d0553]
+- Updated dependencies [5100c42]
+- Updated dependencies [5380daa]
+- Updated dependencies [00b38d7]
+- Updated dependencies [47a9002]
+- Updated dependencies [5eebc9e]
+- Updated dependencies [72c1640]
+- Updated dependencies [5e5ec9f]
+- Updated dependencies [922923b]
+- Updated dependencies [e6c34f6]
+- Updated dependencies [062f5cd]
+- Updated dependencies [5d8319f]
+- Updated dependencies [43f4766]
+- Updated dependencies [8e8ea99]
+- Updated dependencies [a484966]
+- Updated dependencies [021755a]
+- Updated dependencies [dbd4744]
+- Updated dependencies [14a762f]
+- Updated dependencies [b146102]
+- Updated dependencies [75c0dac]
+- Updated dependencies [9bb059d]
+- Updated dependencies [07c6f82]
+- Updated dependencies [362035c]
+- Updated dependencies [74554a3]
+- Updated dependencies [5f392f0]
+- Updated dependencies [a362e0e]
+- Updated dependencies [f26fb8e]
+- Updated dependencies [0da638c]
+- Updated dependencies [041d9fd]
+- Updated dependencies [b8ec127]
+- Updated dependencies [e81c4e5]
+- Updated dependencies [929d9e3]
+- Updated dependencies [8a5240a]
+- Updated dependencies [c1d54db]
+- Updated dependencies [c7af6bd]
+- Updated dependencies [1f0b565]
+- Updated dependencies [23aa83c]
+- Updated dependencies [357f499]
+- Updated dependencies [80aef80]
+- Updated dependencies [65ad77d]
+- Updated dependencies [a61ae59]
+- Updated dependencies [a54ecaa]
+- Updated dependencies [854639b]
+- Updated dependencies [44c917a]
+- Updated dependencies [613d35a]
+- Updated dependencies [e08c8b0]
+- Updated dependencies [0ee32ed]
+- Updated dependencies [58b36fa]
+- Updated dependencies [4792049]
+- Updated dependencies [53ec0b1]
+- Updated dependencies [0a56d3b]
+- Updated dependencies [f8e5790]
+- Updated dependencies [d2c1d19]
+- Updated dependencies [681871e]
+- Updated dependencies [54e8234]
+- Updated dependencies [d127f9b]
+- Updated dependencies [4bbf766]
+- Updated dependencies [c17b494]
+- Updated dependencies [d414e2b]
+- Updated dependencies [af98a04]
+- Updated dependencies [43cbe14]
+- Updated dependencies [c4d1759]
+- Updated dependencies [f7a9740]
+- Updated dependencies [9cdffbe]
+- Updated dependencies [331a1a2]
+- Updated dependencies [9788f1e]
+- Updated dependencies [2bd53f1]
+- Updated dependencies [5f9f846]
+- Updated dependencies [5d527f7]
+- Updated dependencies [5bf2330]
+- Updated dependencies [9165d5c]
+- Updated dependencies [d9e1587]
+- Updated dependencies [07150b3]
+- Updated dependencies [143c715]
+- Updated dependencies [fb2bccf]
+- Updated dependencies [d2badf7]
+- Updated dependencies [d64bcb6]
+- Updated dependencies [d4f5232]
+- Updated dependencies [396eae3]
+- Updated dependencies [ecdfc94]
+- Updated dependencies [f04be62]
+- Updated dependencies [de1a611]
+- Updated dependencies [db76982]
+- Updated dependencies [3b1dab9]
+- Updated dependencies [7607076]
+- Updated dependencies [1555ed4]
+- Updated dependencies [776d64c]
+- Updated dependencies [ab450f4]
+- Updated dependencies [025588a]
+- Updated dependencies [a49e8ae]
+- Updated dependencies [f3e3d59]
+- Updated dependencies [9bd4344]
+- Updated dependencies [51efbf1]
+- Updated dependencies [9c44eed]
+- Updated dependencies [bbca441]
+- Updated dependencies [7cd5874]
+- Updated dependencies [7887077]
+- Updated dependencies [29dd1a6]
+  - @objectstack/spec@17.5.0
+
 ## 17.4.0
 
 ### Patch Changes

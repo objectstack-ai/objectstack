@@ -1,5 +1,458 @@
 # @objectstack/plugin-approvals
 
+## 17.5.0
+
+### Minor Changes
+
+- c8a006f: An approval `decide()` that resumes a subflow CHILD now tells the caller when that resume bubbles into a PARENT run that stranded — instead of answering full success with nothing to distinguish it from a healthy composition (#15556; the #16472 family ruling, decision batch #76, option A).
+  
+  **The composition.** A parent flow parks at a `subflow` node whose child hosts the `approval` node, so the approvals row names the CHILD run. The decision door resumes the child, the child completes, `bubbleToParent` resumes the parent, and the parent's own downstream node throws. The parent lands on the engine's `'stranded'` exit — it consumed its suspension and is now terminal, repairable only by an operator's `restoreConsumedSuspension` — and `bubbleToParent` already logged that at `error` (unchanged by this fix). What the caller was TOLD did not: `resumed: true`, no `resumeError`, and a `runId` naming the healthy child — identical to what a fully healthy composition answers.
+  
+  ```
+  FROM  service.decide(requestId, { decision: 'approve' }, ctx)
+        -> { finalized: true, decision: 'approve', runId: '<child>', resumed: true }
+           // identical to a healthy composition's answer — no caller can tell
+  
+  TO    service.decide(requestId, { decision: 'approve' }, ctx)
+        -> { finalized: true, decision: 'approve', runId: '<child>', resumed: true,
+             resumeError: "RESUME_FAILED: … its own flow run '<child>' resumed, but the " +
+                          "subflow parent above it — run '<parent>' — consumed its suspension " +
+                          "and is now stranded: <downstream error>",
+             resumeFailure: { code: 'RESUME_FAILED', runId: '<parent>', status: 'stranded', repairable: true } }
+  ```
+  
+  **Additive only — no migration.** `ApprovalDecisionResult.resumeFailure` was already declared (and pinned) in `@objectstack/spec` ahead of this card; this fix is the first producer that fills it. No existing field changes shape, no status code moves (the door still never throws for this shape — `AGENTS.md`'s "a failure handed to the caller" answer does not apply here, since before this fix no caller was told at all), and the door's `error` log line is untouched. A consumer that already ignores unknown fields sees no difference; a consumer that reads `resumeFailure` can now tell a bubbled parent strand from a clean resume without diffing `runId` against a durable run history.
+  
+  **What did not move, on purpose.** `RESUME_IN_PROGRESS` / `STORE_UNAVAILABLE` bubble outcomes stay the functional degradation they always were (`warn`, unreported on `resumeFailure`) — the #16472 ruling is scoped to the one exit the engine calls `'stranded'`. The sibling `recall` door (`ApprovalRecallResult.resumeFailure`, #15970) is a separate card and is not touched here.
+  
+  **New public surface — the reason for `minor` on both packages, not `patch`.** Getting the parent's strand from the engine to the approvals door without touching `packages/spec` or the wire-visible `AutomationResult` (which a raw REST `POST …/resume` also serves verbatim, so a field there would leak an undeclared key onto every subflow resume, not only an approvals-mediated one) needed a small new internal channel:
+  
+  - `@objectstack/service-automation`: `AutomationEngine` gains a new public method, `takeSubflowParentStrand(childRunId: string): SubflowParentStrand | undefined` — read-once (deletes on read), populated only by `bubbleToParent`'s `'stranded'` exit. `SubflowParentStrand` is a new exported interface (`{ runId, repairable: true, error }`).
+  - `@objectstack/plugin-approvals`: `ApprovalResumeSurface` (already exported from the package entry) gains a matching optional member, `takeSubflowParentStrand?(childRunId): { runId, repairable, error } | undefined`.
+  
+  Both are additive and optional; nothing existing changes shape or behaviour. Neither reaches any wire payload — `AutomationResult`, the REST resume door's response, and every other published contract are byte-for-byte unchanged.
+- b0eb9a5: Approval nodes gain a fourth empty-slate policy — `onEmptyApprovers: 'fallback'` with a sibling `fallbackApprovers` list — so a rung that expands to nobody opens the request on people you named instead of on a slot nobody can act on.
+  
+  Until now an approval node whose approvers resolved to nobody had three endings, and none of them named anyone: `admin_rescue` (the default — the request opens on a dead `type:value` slot and waits for a privileged admin), `fail` (the run dies) and `auto_approve` (the record is waved through). All five graph approver types reach that dead end, and `{ type: 'manager' }` reaches it without anybody authoring a wrong value: `manager` omits `value`, so the literal the expansion falls back to is `manager:undefined`.
+  
+  ```ts
+  {
+    approvers: [{ type: 'manager' }],
+    onEmptyApprovers: 'fallback',
+    fallbackApprovers: [{ type: 'org_membership_level', value: 'owner' }],
+  }
+  ```
+  
+  - **`fallbackApprovers` is the approver shape you already write** — the same entries as `approvers`, resolved by the same expansion, so every approver type, OOO delegation and `per_group` tagging behaves identically on it. It is not a second, reduced approver dialect.
+  - **The pairing is enforced in both directions.** `'fallback'` without a list is refused; a list under any other policy is refused too, because nothing would ever read it — a node that declares a rescue slate and silently ignores it is the failure this config shape is `.strict()` against. Both messages name both keys.
+  - **A fallback that itself resolves to nobody degrades to `admin_rescue`.** The run is never killed and the record is never waved through by a policy whose author only asked for different people; the log says both that the fallback fired and that it found nobody.
+  - **This is on the node, not on the `manager` rung** — the node is already where emptiness is decided, and a fallback is wanted for every approver type, not one of them.
+  - **`os lint` names the new escape and keeps firing without it.** `approval-approvers-may-resolve-empty` still reports a manager-only slate even when a fallback is declared: the rule reads shape, and a static check can no more prove a `fallbackApprovers` list resolves than it can read `sys_user.manager_id`. A seeded manager chain remains the one silencer.
+
+### Patch Changes
+
+- 9fca8eb: An approval `recall()` whose resume strands the run now tells the caller WHICH failure it was, in fields — `resumeFailure: { code, runId, status, repairable }` beside the prose `resumeError` — instead of one sentence a caller has to parse (#15970; the #16472 family ruling, decision batch #76, option A).
+  
+  **The shape.** A flow parks at an `approval` node; the reject branch's downstream node throws. The submitter recalls the request, which resumes the run down the `reject` edge — and that resume strands it. The withdrawal is durable and the call correctly does not throw, but the engine's own discriminator never reached the caller: `recall` resumes DIRECTLY rather than through `resumeRecordedOutcome`, and its `catch` kept `err.message` alone, discarding the `resumeStatus` (`AutomationResult.status: 'stranded'`) the error already carried one line before the result was built. `repairable` had a producer and, on this door, no consumer.
+  
+  ```
+  FROM  service.recall(requestId, { actorId }, ctx)
+        -> { request: { status: 'recalled' }, runId, resumed: false,
+             resumeError: "resume of run '<run>' failed: <downstream error>" }
+           // prose only — nothing says the run is still repairable
+  
+  TO    service.recall(requestId, { actorId }, ctx)
+        -> { request: { status: 'recalled' }, runId, resumed: false,
+             resumeError: "resume of run '<run>' failed: <downstream error>",
+             resumeFailure: { code: 'RESUME_FAILED', runId: '<run>',
+                              status: 'stranded', repairable: true } }
+  ```
+  
+  **⛔ The no-throw stays, and that is the ruling's point.** The withdrawal and the record-lock release are the product of this call and they have already happened when the resume fails; making `recall` fail would be the wrong fix, not a stricter one. The door's `error` log line is untouched too, at the same level with the same context keys — the ruling left logging alone, and the report is a sibling of that line, not a replacement for it.
+  
+  **Two exits report, and the rest deliberately do not.** A report is stamped exactly where the engine's own verdict says `'stranded'`: this door's own resume stranding, and (the sibling half of #15556, whose producer landed one door over) a resume that SUCCEEDED while the subflow parent above it stranded — which answers `resumed: true` with the PARENT's `runId` on `resumeFailure`, exactly as `ApprovalRecallResult.resumed`'s docblock already declared. Every other exit answers as it always did, with no `resumeFailure` at all: a lost run's honest code is `RESUME_TARGET_LOST` and the tolerated duplicate's is `RESUME_IN_PROGRESS`, and this package's ADR-0112 ledger row admits exactly one code, so stamping `RESUME_FAILED` there would make the discriminator lie about which failure it was — the defect this fixes, one field over. Per the member's own docblock, an absent `resumeFailure` means no report was made, never that no run is stranded.
+  
+  **Additive only — no migration, and `patch` rather than `minor`.** `ApprovalRecallResult.resumeFailure` was already declared, exported and type-pinned in `@objectstack/spec` ahead of this card (`contracts/approval-service.ts`, `resume-failure-report.pin.test.ts`); this fix is the first producer that fills it. The delivered diff adds no exported symbol to `@objectstack/plugin-approvals` — nothing new is reachable from its published entry — and adds no key to a payload that did not already declare one. Nothing existing changes shape: a consumer that ignores unknown fields sees no difference, and one that reads `resumeFailure` can now branch on `repairable` and call `restoreConsumedSuspension` on the run the report names.
+- 917b87e: `ApprovalService`'s privileged-override gate now resolves TENANT-admin standing from the ADR-0095 capability rung alone. Its tenant arm previously also admitted any principal whose `current_user.positions` contained the built-in identity names `org_owner` or `org_admin`, and a name on that array is not evidence of the capability behind it (#16166).
+  
+  `positions[]` carries two different things at once: the ADR-0068 D2 **projection** of a membership role, whose source of truth is `sys_member.role`, and ADR-0057 D4 `sys_user_position` assignment values. A stored assignment row spelling one of those built-in names therefore arrived on the array with no org-administration grant behind it and satisfied the override gate anyway — for `decideNode`, `recall` and the console's participant-visibility read, within that organization. This is the tenant half of the same defect the platform arm of the same predicate had (#15981), and it lands the same way: **read the rung, never the name.**
+  
+  - **The tenant rung is not the platform one.** ADR-0095 D3 resolves `TENANT_ADMIN` in `derivePosture` from the org-admin capability grants (`organization_admin` / `organization_admin_no_bypass`) and from nothing else, and those grants are what `packages/spec` declares that rung's source of truth. So the surviving two arms — the derived `posture` and the held capability — are one authority read in two spellings, kept apart only so a transport that never resolved `posture` still reads the grant.
+  - **The #3424 stuck-approval escape hatch is unchanged** for anyone who actually holds org-admin standing: a genuine `organization_admin` grant still overrides, still only inside its own organization, and the decision is still audited as `via_override`.
+  - **Who could notice.** A principal whose only claim to tenant-admin override was a stored `sys_user_position` row spelling `org_owner` / `org_admin` loses it. That row was never an assignment of the identity it spells — the platform refuses new ones on write — and the supported route to override standing is the org-admin capability grant, which the membership role provisions automatically for owners and admins.
+- 29a1b3d: fix(approvals): the record-lock refusal names the record, not its primary key (#18153)
+  
+  Clause-②: no
+  
+  A record held by a live approval refused the write with
+  `record '<id>' of '<apiName>' is locked while an approval is in progress`. The
+  console copies that sentence into a toast verbatim, so an end user read an
+  opaque primary key and a machine identifier — neither of which tells them an
+  approval has the record — and a deny-path toast is exactly the string that ends
+  up in screenshots, screen recordings and support tickets.
+  
+  It now reads `Opportunity 'Acme renewal' is locked while an approval is in
+  progress, and cannot be edited until that approval is complete`, degrading to
+  `This Opportunity is locked …` when the object declares no resolvable title and
+  to `This record is locked …` when the registry is unreachable — ⛔ never back to
+  the id. The record id and the object's API name are not deleted: they move to
+  the CONSOLE (`logger.info`, alongside the pending request's id), which is where
+  a support path reads them and where a screen recording does not.
+  
+  **No read was added.** Both halves were already in hand at the refusal: the
+  object's `label` and its ADR-0079 title pointer come from the engine's in-memory
+  registry (`getSchema`), and the record itself is `ctx.previous`, the pre-image
+  the engine has already read — measured on all four update shapes (by-id,
+  `updateManyData`, predicate `multi`, unscoped `multi`), every one of which
+  dispatches the hook per row with `previous` bound. Deliberately NOT used: a
+  system-context read of the record on the deny path (it would title a row the
+  caller may not be allowed to READ — the very state this lock exists to gate) and
+  the `payload_json` snapshot (served redacted per reader).
+  
+  **Nothing else moved.** `RECORD_LOCKED` and its `409` are unchanged and pinned
+  in both directions, the `CODE: message` envelope is unchanged, and the three
+  OPERATOR-facing refusals in the same file — the two `PENDING_LOCK_LIMIT` cap
+  messages and the unanswerable-intersection message — still name the object's API
+  name, which is the useful thing to say to whoever has to rescope that write.
+  They are pinned byte for byte so a later "harmonise the lock's messages" sweep
+  cannot fold them into the end-user shape.
+  
+  A client asserting on the old sentence's text will need updating; a client
+  branching on `error.code` or the 409 needs no change.
+- d7f7e34: Four readers of `FieldSchema.reference` gated the carrier with a truthiness test and then **propagated** it. `FieldSchema.reference` is declared an optional **string**, so the answer a reader owes for a carrier it cannot read is absence — and one of these four did worse than lose the information, it invented a name for it:
+  
+  ```
+  out.push({ key, reference: String(f.reference) })   // -> reference: '[object Object]'
+  ```
+  
+  Each site now reads the carrier through the one arbiter, `referenceCarrierOf`, and catches its refusal **at the site** — so the reader answers absence and reports, instead of aborting. That is the deliberate difference from `@objectstack/objectql`'s cascade seams, which let the same refusal propagate: those assert something positive about the schema on a write path, while these four are best-effort display and diagnostic readers whose own failure handling would have turned one unreadable field into a much wider loss.
+  
+  - **`@objectstack/plugin-approvals`** — `resolveLookupFields`. The stringified carrier was handed on as an object name to `engine.find()`, where it could never resolve and the failure was swallowed by the caller's `catch`. The field is now left out of the inbox display enrichment and logged; readable targets are unaffected. It is dropped rather than carried with an absent target because the sole consumer uses `reference` as the object name and has nothing to do with an entry carrying none.
+  - **`@objectstack/service-analytics`** — the ADR-0021 relationship → target-object resolver. An unreadable carrier became the joined table for a dataset's `include`; the resolver now answers `undefined`, which its existing fallback turns into the compiler's own refusal, plus one warning naming the field.
+  - **`@objectstack/cli`** — `os doctor`'s circular-dependency and unused-object checks, which put the carrier into a graph node and a name set. Both now report the unreadable carrier as a finding rather than skipping it, because "no circular references detected" and "defined but not referenced" are positive claims that an edge nobody could read cannot support. The same file's `collectViewObjectRefs` already narrowed its carrier this way.
+  
+  `null`, `undefined` and `''` are absence, not a wrong shape, and still pass silently at every one of these sites — a field is allowed to name no target. Each site's absence answer and its readable-target answer are pinned alongside the refusal.
+  
+  Upgrading: nothing conformant changes. A non-string `reference` is refused by `ObjectSchema.safeParse`, so a value in that shape only ever reaches these readers without having passed parse at all.
+- 4ef8247: fix(approvals): the dead-run sweep classifies every `ExecutionStatus` member, so a `refused` run releases its pending approval (#16433)
+  
+  `ApprovalService.releaseDeadRunRequests` guarded on a hand-copied four-member subset of `ExecutionStatus` — `completed`, `failed`, `cancelled`, `timed_out` — written when that enum had eight members. #14945 then appended `refused`, documented on the enum as *"Terminal, never resumed"*, and the subset did not grow with it. A run in `refused` was therefore skipped by the sweep, so a still-pending approval on it read as ALIVE, was never released, and kept its record lock forever.
+  
+  **Why this is shipped as a fix rather than left alone.** Nothing inside this repo drives a run to `refused` yet — that is #15788 (lane 2 of the #14945 ruling), still open. But `ApprovalService` takes a HOST-supplied automation surface through `attachAutomation`, so a host whose `getRun` already answers with the status the published spec declares sees the corrected behaviour the moment it upgrades, rather than on the day lane 2 lands. That is a real behaviour change in a published package, which is why it carries a bump instead of `skip-changeset`.
+  
+  The repair is not "add `refused`" — that yields a five-member hand-copy with the identical trap re-armed for the tenth member — and it is not "derive the terminal set from the enum" either, since `running` and `paused` are plainly not terminal and a wholesale derivation would default every future member to terminal, i.e. to releasing approvals out from under LIVE runs. Instead the file now declares a **total map** over `ExecutionStatus`, classifying each member `terminal` or `live`, from which the terminal set is derived. A tenth member fails to compile until someone classifies it, and fails a test as well.
+  
+  No API change: the classification is module-internal and the package barrel is untouched.
+- 9540590: `restoreConsumedSuspension` reaches a NESTED run: the ancestors a stranded descendant cascade-failed are journalled too, and the chain is re-armed as one unit
+  
+  `resumeInternal`'s catch arm journalled the consumed suspension of the run that
+  threw, and nothing else. For a nested run the ancestors were handled on both
+  paths with no journal at all: up-bubble (`failAncestors` walks `$parentRunId`
+  and calls `failSuspendedRun` on each suspended ancestor) and delegation (the
+  parent frame sees a failed child with no retryable code and calls
+  `failSuspendedRun` on itself). `failSuspendedRun` was `forgetSuspendedRun(run,
+  'failed')` plus a `failed` log record — it journalled nothing.
+  
+  So the leaf was restorable while every ancestor was recorded `failed` with its
+  pause consumed and no snapshot (`restoreConsumedSuspension(PARENT)` answered
+  `NO_CONSUMED_SUSPENSION`), and restoring the leaf completed it into a parent
+  that never continues: `bubbleToParent` found no parent suspension and logged.
+  The operator ended up worse off than before using the exit.
+  
+  `failSuspendedRun` now journals the pause it consumes whenever the descendant
+  whose failure consumed it is itself repairable — from the same single producer
+  and onto the same durable terminal row as the strand's own snapshot, so the
+  chain is repairable from any replica and after a restart, not only from the
+  process that stranded it. `restoreConsumedSuspension` then repairs the chain as
+  one unit: it walks down to the stranded descendant and up through the ancestors
+  it cascaded into, and re-arms every member DEEPEST FIRST, so an ancestor becomes
+  resumable only after the run it is parked awaiting is parked again. The entry
+  point does not matter — naming any member of the chain repairs all of it — and
+  the continuation is then re-issued once, on the run that was named.
+  
+  Additive on the wire and in the type: the result's existing fields still
+  describe the run the caller named, and the new `chain` key is present only when
+  the repair was a chain repair. `ChainRestoreEntry` is exported for it. The
+  narrower `IAutomationService.restoreConsumedSuspension` contract in
+  `@objectstack/spec` is unchanged and the HTTP door's payload is unchanged — the
+  door answers `{ runId, restored, reason }` as it always did.
+  
+  Every member goes through the same per-run call as a flat restore — its own
+  in-process claim, its own strict live-suspension read, its own two-witness read,
+  its own durable park — so idempotence and the #14333 advance claim hold per run
+  in the chain: a second restore finds every member parked and answers
+  `RUN_SUSPENDED` without minting a second pause anywhere.
+  
+  ⛔ No ancestor is stamped `'stranded'`. That word is the resume result of a run
+  that consumed its OWN pause and then threw downstream, and nothing re-arms an
+  ancestor by resuming it; stamping it would send an operator to retry a recovery
+  that cannot succeed. The parent frame's delegation result still carries no
+  status at all, and an ancestor's repairability is carried by the journal and by
+  this verb's answer.
+  
+  Journalling is EARNED, not applied to every cascade: an ancestor whose
+  descendant is beyond repair is still consumed without a snapshot, because
+  re-arming it would promise a chain repair that could not be completed.
+  
+  **`@objectstack/plugin-approvals`** reports the consequence rather than causing
+  it: `inspectStrandedRequests` asks the engine per run, so a cascade-failed
+  ancestor whose descendant is repairable now comes back `runState:
+  'repairable'` instead of `'unrepairable'`, and restoring either row repairs the
+  pair. `'unrepairable'` keeps its other causes — a run that never paused, a
+  snapshot no longer held, and a cascade whose descendant was itself beyond
+  repair. No plugin logic changed; the docblocks that documented the old
+  limitation did.
+- 6465cc0: Correct the `resolveRecordedContinuation` discriminator's stated invariant in
+  `approval-service.ts` to what was measured. The comment claimed the
+  `action: 'resubmit'` audit row was "at most one per request"; a `resubmit` whose
+  own resume strands opens no next round, so the row stays `returned` and a second
+  `resubmit` after `restoreConsumedSuspension` lands a second such row. The
+  comment now records that more than one row can exist, states why the read is
+  correct anyway (it is a presence check with `limit: 1`, deciding identically on
+  one row or two), and points at the pin that measured it.
+  
+  Prose only — no behaviour change, no door narrowed, no guard touched. The audit
+  trail's one-row-per-advancement shape is accepted residue; requiring one row per
+  advancement is a separate change.
+- Updated dependencies [863c7c4]
+- Updated dependencies [0f95f43]
+- Updated dependencies [825d70f]
+- Updated dependencies [7f62536]
+- Updated dependencies [abc4b83]
+- Updated dependencies [7382c5d]
+- Updated dependencies [ea2940d]
+- Updated dependencies [245f360]
+- Updated dependencies [324968e]
+- Updated dependencies [7843663]
+- Updated dependencies [ce57857]
+- Updated dependencies [c7d4825]
+- Updated dependencies [4844840]
+- Updated dependencies [fe71032]
+- Updated dependencies [d8b12fc]
+- Updated dependencies [74eaab8]
+- Updated dependencies [0b788da]
+- Updated dependencies [482d34d]
+- Updated dependencies [305e7fc]
+- Updated dependencies [839d1b0]
+- Updated dependencies [2fc092b]
+- Updated dependencies [6059b29]
+- Updated dependencies [88a072e]
+- Updated dependencies [9c577c1]
+- Updated dependencies [d4a1a28]
+- Updated dependencies [baf9745]
+- Updated dependencies [3d8779d]
+- Updated dependencies [0bd7dae]
+- Updated dependencies [d34f9b6]
+- Updated dependencies [57343f7]
+- Updated dependencies [271d6bb]
+- Updated dependencies [1e20f81]
+- Updated dependencies [38472ce]
+- Updated dependencies [8b48903]
+- Updated dependencies [2d235bc]
+- Updated dependencies [aaacf1d]
+- Updated dependencies [6548118]
+- Updated dependencies [146c291]
+- Updated dependencies [e0e4a56]
+- Updated dependencies [7aae005]
+- Updated dependencies [bdb247d]
+- Updated dependencies [d5c91dd]
+- Updated dependencies [0e51278]
+- Updated dependencies [48203ff]
+- Updated dependencies [b6471ba]
+- Updated dependencies [ada2869]
+- Updated dependencies [d88a47d]
+- Updated dependencies [2f1a6f6]
+- Updated dependencies [23fc5d6]
+- Updated dependencies [2d34f32]
+- Updated dependencies [9e3c485]
+- Updated dependencies [e1796ad]
+- Updated dependencies [de62769]
+- Updated dependencies [c9eb773]
+- Updated dependencies [4342c99]
+- Updated dependencies [132dd13]
+- Updated dependencies [d285bf0]
+- Updated dependencies [dfeba25]
+- Updated dependencies [0a88a80]
+- Updated dependencies [12bb672]
+- Updated dependencies [97233b9]
+- Updated dependencies [182bbde]
+- Updated dependencies [0252320]
+- Updated dependencies [2eb4724]
+- Updated dependencies [e04a0af]
+- Updated dependencies [6b97a20]
+- Updated dependencies [e7ff9c2]
+- Updated dependencies [75237a9]
+- Updated dependencies [920f887]
+- Updated dependencies [8a017af]
+- Updated dependencies [497655f]
+- Updated dependencies [3a9ad22]
+- Updated dependencies [758ac40]
+- Updated dependencies [a2c2852]
+- Updated dependencies [2bf6ef1]
+- Updated dependencies [c744c0a]
+- Updated dependencies [09e16a5]
+- Updated dependencies [98bd798]
+- Updated dependencies [cbcae14]
+- Updated dependencies [8261ff7]
+- Updated dependencies [24489f1]
+- Updated dependencies [fc28c1d]
+- Updated dependencies [6d64785]
+- Updated dependencies [00c332b]
+- Updated dependencies [b3b43b6]
+- Updated dependencies [d93400f]
+- Updated dependencies [134b410]
+- Updated dependencies [84e6b05]
+- Updated dependencies [cb1f274]
+- Updated dependencies [5c28cc7]
+- Updated dependencies [b0eb9a5]
+- Updated dependencies [176b035]
+- Updated dependencies [a83dbb6]
+- Updated dependencies [51297e9]
+- Updated dependencies [156792e]
+- Updated dependencies [5ba2ec3]
+- Updated dependencies [abb01f1]
+- Updated dependencies [e64ae15]
+- Updated dependencies [02bdeaa]
+- Updated dependencies [66abef3]
+- Updated dependencies [25c9a83]
+- Updated dependencies [ee5812a]
+- Updated dependencies [68fea8b]
+- Updated dependencies [c049e74]
+- Updated dependencies [bb9794a]
+- Updated dependencies [d402e32]
+- Updated dependencies [9a910c4]
+- Updated dependencies [340b6dc]
+- Updated dependencies [fe0ae5c]
+- Updated dependencies [99fcb4a]
+- Updated dependencies [0f1cd83]
+- Updated dependencies [a3d4c59]
+- Updated dependencies [9be2b59]
+- Updated dependencies [74832b6]
+- Updated dependencies [1aa5026]
+- Updated dependencies [b9d5422]
+- Updated dependencies [627382b]
+- Updated dependencies [627382b]
+- Updated dependencies [0b31d90]
+- Updated dependencies [e75cc3c]
+- Updated dependencies [559041d]
+- Updated dependencies [e0d0553]
+- Updated dependencies [5100c42]
+- Updated dependencies [5380daa]
+- Updated dependencies [00b38d7]
+- Updated dependencies [47a9002]
+- Updated dependencies [5eebc9e]
+- Updated dependencies [72c1640]
+- Updated dependencies [5e5ec9f]
+- Updated dependencies [922923b]
+- Updated dependencies [e6c34f6]
+- Updated dependencies [062f5cd]
+- Updated dependencies [5d8319f]
+- Updated dependencies [43f4766]
+- Updated dependencies [8e8ea99]
+- Updated dependencies [a484966]
+- Updated dependencies [021755a]
+- Updated dependencies [dbd4744]
+- Updated dependencies [14a762f]
+- Updated dependencies [b146102]
+- Updated dependencies [75c0dac]
+- Updated dependencies [9bb059d]
+- Updated dependencies [07c6f82]
+- Updated dependencies [362035c]
+- Updated dependencies [74554a3]
+- Updated dependencies [4c42fd1]
+- Updated dependencies [5f392f0]
+- Updated dependencies [a362e0e]
+- Updated dependencies [f26fb8e]
+- Updated dependencies [bc2ec80]
+- Updated dependencies [0da638c]
+- Updated dependencies [041d9fd]
+- Updated dependencies [f03f6c7]
+- Updated dependencies [b8ec127]
+- Updated dependencies [cf79182]
+- Updated dependencies [e81c4e5]
+- Updated dependencies [929d9e3]
+- Updated dependencies [8a5240a]
+- Updated dependencies [c1d54db]
+- Updated dependencies [c7af6bd]
+- Updated dependencies [1f0b565]
+- Updated dependencies [23aa83c]
+- Updated dependencies [357f499]
+- Updated dependencies [80aef80]
+- Updated dependencies [c3ebe4a]
+- Updated dependencies [65ad77d]
+- Updated dependencies [a61ae59]
+- Updated dependencies [a54ecaa]
+- Updated dependencies [854639b]
+- Updated dependencies [44c917a]
+- Updated dependencies [613d35a]
+- Updated dependencies [e08c8b0]
+- Updated dependencies [0ee32ed]
+- Updated dependencies [2bed4c3]
+- Updated dependencies [58b36fa]
+- Updated dependencies [4792049]
+- Updated dependencies [53ec0b1]
+- Updated dependencies [71629a1]
+- Updated dependencies [0a56d3b]
+- Updated dependencies [f8e5790]
+- Updated dependencies [d2c1d19]
+- Updated dependencies [681871e]
+- Updated dependencies [54e8234]
+- Updated dependencies [288fe9c]
+- Updated dependencies [d127f9b]
+- Updated dependencies [4bbf766]
+- Updated dependencies [c17b494]
+- Updated dependencies [d414e2b]
+- Updated dependencies [af98a04]
+- Updated dependencies [43cbe14]
+- Updated dependencies [6e3462d]
+- Updated dependencies [c4d1759]
+- Updated dependencies [f7a9740]
+- Updated dependencies [cca1dc0]
+- Updated dependencies [9cdffbe]
+- Updated dependencies [331a1a2]
+- Updated dependencies [9788f1e]
+- Updated dependencies [2bd53f1]
+- Updated dependencies [5f9f846]
+- Updated dependencies [5a95b0e]
+- Updated dependencies [5d527f7]
+- Updated dependencies [5bf2330]
+- Updated dependencies [9165d5c]
+- Updated dependencies [d9e1587]
+- Updated dependencies [07150b3]
+- Updated dependencies [143c715]
+- Updated dependencies [fb2bccf]
+- Updated dependencies [d2badf7]
+- Updated dependencies [d64bcb6]
+- Updated dependencies [d4f5232]
+- Updated dependencies [396eae3]
+- Updated dependencies [ecdfc94]
+- Updated dependencies [f04be62]
+- Updated dependencies [de1a611]
+- Updated dependencies [db76982]
+- Updated dependencies [3b1dab9]
+- Updated dependencies [7607076]
+- Updated dependencies [1555ed4]
+- Updated dependencies [776d64c]
+- Updated dependencies [ab450f4]
+- Updated dependencies [025588a]
+- Updated dependencies [a49e8ae]
+- Updated dependencies [5505646]
+- Updated dependencies [f3e3d59]
+- Updated dependencies [9bd4344]
+- Updated dependencies [4215417]
+- Updated dependencies [51efbf1]
+- Updated dependencies [9c44eed]
+- Updated dependencies [bbca441]
+- Updated dependencies [7cd5874]
+- Updated dependencies [7887077]
+- Updated dependencies [29dd1a6]
+  - @objectstack/spec@17.5.0
+  - @objectstack/platform-objects@17.5.0
+  - @objectstack/core@17.5.0
+  - @objectstack/types@17.5.0
+  - @objectstack/formula@17.5.0
+  - @objectstack/metadata-core@17.5.0
+
 ## 17.4.0
 
 ### Minor Changes
