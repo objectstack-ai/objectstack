@@ -249,6 +249,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "enable.clone": {
         label: "Clone"
       },
+      validations: {
+        label: "Validations",
+        helpText: "Object-level validation rules — an array of rule objects, e.g. [{ \"type\": \"script\", \"name\": \"amount_positive\", \"condition\": \"amount > 0\", \"message\": \"Amount must be positive\" }]. State-machine transition tables are declared here too (ADR-0020)"
+      },
       datasource: {
         label: "Fuente de datos",
         helpText: "ID de fuente de datos de destino (valor predeterminado: \"default\")"
@@ -423,6 +427,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       deleteBehavior: {
         label: "Comportamiento al eliminar",
         helpText: "Qué ocurre cuando se elimina el registro referenciado"
+      },
+      relatedListFilter: {
+        label: "Related List Filter",
+        helpText: "Default filter for this relationship's related list on the parent's detail page — AND-composed with the parent-record match, and the tab badge counts the same set"
       },
       expression: {
         label: "Expresión",
