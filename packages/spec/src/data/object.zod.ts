@@ -9,7 +9,7 @@ import { ObjectListViewSchema } from '../ui/view.zod';
 /**
  * API Operations Enum
  */
-import { ExpressionInputSchema, TemplateExpressionInputSchema, type Expression, type ExpressionInput } from '../shared/expression.zod';
+import { EvaluatedExpressionInputSchema, TemplateExpressionInputSchema, type EvaluatedExpression, type EvaluatedExpressionInput } from '../shared/expression.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { strictObject } from '../shared/strict-object';
@@ -1191,7 +1191,7 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
    * together with its enforcement once the section-gating consumer shipped —
    * declared = enforced on day one, both times.
    */
-  visibleWhen: ExpressionInputSchema.optional().describe(
+  visibleWhen: EvaluatedExpressionInputSchema.optional().describe(
     "Section visibility predicate (CEL) — the whole group (header included) is shown only when TRUE, else hidden (fail-closed). e.g. P`record.type == 'invoice'`",
   ),
 
@@ -1384,10 +1384,10 @@ export const RowCrudActionOverrideSchema = strictObject({
   enabled: z.boolean().optional().describe(
     'Object-level on/off for the generic affordance; same meaning as the bare boolean form. Omitted → managedBy bucket default.',
   ),
-  visibleWhen: ExpressionInputSchema.optional().describe(
+  visibleWhen: EvaluatedExpressionInputSchema.optional().describe(
     'CEL predicate over the record in scope (row record for edit/delete, host record for a related-list create/import toolbar); false → hide the button. Fail-closed.',
   ),
-  disabledWhen: ExpressionInputSchema.optional().describe(
+  disabledWhen: EvaluatedExpressionInputSchema.optional().describe(
     'CEL predicate over the record in scope (row record for edit/delete, host record for a related-list create/import toolbar); true → render the button disabled. Fail-soft.',
   ),
 }).describe('Boolean-or-predicates override for a built-in CRUD affordance.');
@@ -2960,8 +2960,8 @@ export interface CrudAffordances {
  * consumers hand them to the canonical CEL row-predicate evaluator untouched.
  */
 export interface RowCrudPredicates {
-  visibleWhen?: Expression | ExpressionInput;
-  disabledWhen?: Expression | ExpressionInput;
+  visibleWhen?: EvaluatedExpression | EvaluatedExpressionInput;
+  disabledWhen?: EvaluatedExpression | EvaluatedExpressionInput;
 }
 
 /**

@@ -12,8 +12,8 @@
 # excluded: documentation drift is `check:docs`'s axis, not this one.
 #
 # entry: ./automation
-# exported names: 273
-# declarations: 279
+# exported names: 274
+# declarations: 280
 #
 # GENERATED — ⛔ never hand-edited. Regenerate after a real build:
 #   pnpm --filter @objectstack/spec build && pnpm --filter @objectstack/spec gen:api-surface-declarations
@@ -215,8 +215,8 @@ declare const ActionRefSchema: z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
 
 // ── ApprovalDecision (const) ──
 declare const ApprovalDecision: z.ZodEnum<{
-    reject: "reject";
     approve: "approve";
+    reject: "reject";
 }>;
 
 // ── ApprovalDecision (type) ──
@@ -311,8 +311,8 @@ declare const ApprovalNodeConfigSchema: z.ZodObject<{
     lockRecord: z.ZodDefault<z.ZodBoolean>;
     approvalStatusField: z.ZodOptional<z.ZodString>;
     onEmptyApprovers: z.ZodDefault<z.ZodEnum<{
-        fail: "fail";
         fallback: "fallback";
+        fail: "fail";
         auto_approve: "auto_approve";
         admin_rescue: "admin_rescue";
     }>>;
@@ -987,6 +987,9 @@ declare const FLOW_BUILTIN_NODE_TYPES: readonly string[];
 
 // ── FLOW_NODE_EXPRESSION_PATHS (const) ──
 declare const FLOW_NODE_EXPRESSION_PATHS: readonly FlowNodeExpressionPath[];
+
+// ── FLOW_PAUSE_CAPABLE_NODE_TYPES (const) ──
+declare const FLOW_PAUSE_CAPABLE_NODE_TYPES: readonly string[];
 
 // ── FLOW_REGION_CONFIG_KEYS (const) ──
 declare const FLOW_REGION_CONFIG_KEYS: ReadonlySet<string>;
@@ -3737,7 +3740,7 @@ declare const flowForm: {
         description?: string | undefined;
         visibleWhen?: {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -3745,7 +3748,7 @@ declare const flowForm: {
             } | undefined;
         } | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -3754,7 +3757,7 @@ declare const flowForm: {
         } | undefined;
         visibleOn?: {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -3762,7 +3765,7 @@ declare const flowForm: {
             } | undefined;
         } | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -3785,7 +3788,7 @@ declare const flowForm: {
         description?: string | undefined;
         visibleWhen?: {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -3793,7 +3796,7 @@ declare const flowForm: {
             } | undefined;
         } | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -3802,7 +3805,7 @@ declare const flowForm: {
         } | undefined;
         visibleOn?: {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -3810,7 +3813,7 @@ declare const flowForm: {
             } | undefined;
         } | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;

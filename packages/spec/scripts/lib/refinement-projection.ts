@@ -33,7 +33,7 @@
  * the runtime accepts becomes refused. ⛔ An arm that could only approximate
  * its rule would be a behaviour change wearing a correction's clothes.
  */
-import type { z } from 'zod';
+import { z } from 'zod';
 import {
   NON_BLANK_PATTERN,
   projectableRefinementOf,
@@ -137,6 +137,33 @@ function emitNonBlankString(jsonSchema: JsonObject): void {
   jsonSchema.allOf = [...allOf, { pattern: NON_BLANK_PATTERN }];
 }
 
+/**
+ * JSON Schema's own `dependentRequired` — the keyword whose meaning IS this
+ * arm's sentence, so nothing is encoded and nothing approximated.
+ *
+ * An entry with an empty requirement list is dropped rather than emitted: it
+ * constrains nothing, and `{}` in the published file would read as a rule to
+ * anyone diffing it. A node that somehow already carries the keyword is
+ * conjoined through `allOf` rather than overwritten, for the reason
+ * `emitRequiredOneOf` is: two arms on one node must both land.
+ */
+function emitDependentRequired(
+  jsonSchema: JsonObject,
+  dependencies: Readonly<Record<string, readonly string[]>>,
+): void {
+  const emitted: Record<string, string[]> = {};
+  for (const [key, required] of Object.entries(dependencies)) {
+    if (required.length > 0) emitted[key] = [...required];
+  }
+  if (Object.keys(emitted).length === 0) return;
+  if (!('dependentRequired' in jsonSchema)) {
+    jsonSchema.dependentRequired = emitted;
+    return;
+  }
+  const allOf = Array.isArray(jsonSchema.allOf) ? (jsonSchema.allOf as unknown[]) : [];
+  jsonSchema.allOf = [...allOf, { dependentRequired: emitted }];
+}
+
 /** Write one declared arm's keywords onto one emitted node. */
 export function emitProjectableRefinement(jsonSchema: JsonObject, declared: ProjectableRefinement): void {
   switch (declared.pattern) {
@@ -145,6 +172,9 @@ export function emitProjectableRefinement(jsonSchema: JsonObject, declared: Proj
       return;
     case 'non-blank-string':
       emitNonBlankString(jsonSchema);
+      return;
+    case 'dependent-required':
+      emitDependentRequired(jsonSchema, declared.dependencies);
       return;
   }
 }
@@ -175,4 +205,111 @@ export function composeOverrides<C>(first: (ctx: C) => void, second: (ctx: C) =>
     first(ctx);
     second(ctx);
   };
+}
+
+/**
+ * The `target` every published projection uses. Named once because it is now
+ * passed from one place; a second literal elsewhere would be a second answer to
+ * a question that has one.
+ */
+export const PUBLISHED_JSON_SCHEMA_TARGET = 'draft-2020-12' as const;
+
+/**
+ * The context object `z.toJSONSchema` hands its `override`. `jsonSchema` is the
+ * node's emitted object, which every override here writes keywords onto, so it
+ * is typed as one rather than as `unknown`.
+ */
+export interface ProjectionOverrideContext {
+  readonly zodSchema: unknown;
+  readonly jsonSchema: JsonObject;
+  readonly path: (string | number)[];
+}
+
+/**
+ * ⭐ The ONE call through which `z.toJSONSchema` is reached anywhere
+ * **`packages/spec` writes a published JSON Schema artifact**. Four producers,
+ * named because the claim is only worth as much as its enumeration:
+ *
+ *   1. `build-schemas.ts` — the generator's three attempts, writing
+ *      `json-schema/<category>/<Name>.json`;
+ *   2. `lib/union-branch-projection.ts` — the union-branch projector behind the
+ *      third of those attempts;
+ *   3. `lib/dropped-refinements.ts` — the detector's differential, which is
+ *      only about the real published file while it projects the way (1) does;
+ *   4. `build-openapi.ts` — the OpenAPI generator, writing
+ *      `json-schema/openapi.json`. That file ships in the tarball (`files[]`
+ *      carries `json-schema`) and is exported as `./openapi.json`, so it is a
+ *      published projection like any other; it reached this list late, and the
+ *      shape of the gap is the point — see below.
+ *
+ * ## ⛔ What is NOT behind it — stated so the next reader need not re-derive it
+ *
+ * This helper governs the projection CALL for the four producers above. It is
+ * ⛔ not a repo-wide guarantee, and three populations sit deliberately outside
+ * it. Naming them is the difference between a claim and a slogan; each was
+ * measured, not assumed:
+ *
+ *   - **The representability probe** in `union-branch-projection.ts`
+ *     (`projectsUnderStrictMode`) calls `z.toJSONSchema(..., { unrepresentable:
+ *     'throw' })` to ask zod a yes/no question and DISCARDS the result. Nothing
+ *     it produces is published, so routing it here would answer a different
+ *     question.
+ *   - **Producers outside `packages/spec`'s own artifacts** — the CLI's
+ *     `os generate` writes a JSON Schema of `ObjectStackDefinitionSchema` into
+ *     an author's project, and `build-react-blocks-contract.ts` renders block
+ *     prop tables into the published skills catalog. Both call
+ *     `z.toJSONSchema` directly, and the first was measured DIVERGENT from this
+ *     projection at seven declared sites. They are a separate decision about
+ *     how wide the published-projection guarantee reaches, ⛔ not an oversight
+ *     to be silently swept in here.
+ *   - **Runtime derivations** (`packages/metadata-protocol`) project schemas to
+ *     SERVE them, not to publish an artifact; they are governed by their own
+ *     contracts.
+ *
+ * `published-projection-choke-point.test.ts` holds the first bullet's boundary
+ * mechanically — it fails when a producer in this package grows a direct call —
+ * so the enumeration above cannot rot into prose.
+ *
+ * ## Why a choke point and not a convention
+ *
+ * The generator and the detector have to project the SAME way or the ledger
+ * stops describing the file. While each passed `override:` for itself, that
+ * agreement was a convention two call sites kept, and the failure mode was
+ * silent and one-sided: drop it on the GENERATOR side alone and every declared
+ * site still reads `projected` — the detector is still passing it — so the
+ * ledger stays green, the gate stays green, and the published file goes WIDE
+ * again with no `x-dropped-refinements` to say so. Measured on the code before
+ * this helper existed: with the generator's import stubbed out, `gen:schema`
+ * exited 0 and printed the same 553 dropped / 201 schemas / 197 projected as an
+ * untouched run, while `shared/Expression.json` lost its `allOf` and the
+ * non-blank pattern went from 35 published files to 0. That is the pre-#18729
+ * silence restored, standing behind a green ratchet — strictly worse than the
+ * state the card was filed about, because the ledger now certifies it.
+ *
+ * A merge-conflict resolution was enough to cause it; nothing had to be
+ * misunderstood. So the override is applied HERE, where the caller has no
+ * argument to drop, and both halves lose it together or not at all — which is
+ * what makes the ablation that removes it loud rather than silent.
+ *
+ * A caller that needs an override of its own (the union-branch projector marks
+ * nodes with one) hands it in `override` and it runs FIRST, before the
+ * refinement pass — the order those two passes were written for.
+ */
+export function projectPublishedJsonSchema(
+  schema: z.ZodType,
+  options: {
+    readonly io?: 'input' | 'output';
+    readonly unrepresentable?: 'any' | 'throw';
+    readonly override?: (ctx: ProjectionOverrideContext) => void;
+  } = {},
+): unknown {
+  const { io, unrepresentable, override } = options;
+  return z.toJSONSchema(schema, {
+    target: PUBLISHED_JSON_SCHEMA_TARGET,
+    ...(io === 'input' ? { io } : {}),
+    ...(unrepresentable ? { unrepresentable } : {}),
+    override: override
+      ? composeOverrides<ProjectionOverrideContext>(override, refinementProjectionOverride)
+      : refinementProjectionOverride,
+  });
 }

@@ -21,7 +21,6 @@
 import { describe, it, expect } from 'vitest';
 import { EndConfigSchema } from './builtin-node-config.zod';
 import { FlowSchema, FlowNodeSchema, defineFlow, type Flow } from './flow.zod';
-import { validateControlFlow } from './control-flow.zod';
 import { ExecutionLogSchema, ExecutionStatus } from './execution.zod';
 import { formatZodError } from '../shared/error-map.zod';
 
@@ -218,13 +217,15 @@ describe('FlowSchema applies the `end` contract — the structural node\'s only 
     expect(issues?.map((i) => [i.code, i.path])).toEqual([['custom', ['nodes', 1, 'config', 'message']]]);
   });
 
-  it('a region-nested `end` is checked at the region door: the flow parse leaves the region raw, validateControlFlow refuses it by name', () => {
-    // `parseFlowNodeRegions` deliberately leaves a region it cannot parse
-    // untouched (the registration walk owns nested diagnostics, #4389), so the
-    // FLOW parse alone does not surface a nested refusal — the same boundary
-    // every other nested node key has. `validateControlFlow` re-parses the
-    // region through `FlowNodeSchema`, where this contract now lives, and
-    // throws with the same sentence.
+  it('a region-nested `end` is refused by the FLOW parse itself (#15646/#18112) — the region-door reading this test used to pin is unreachable, because the shape is gone', () => {
+    // ⚠️ REPLACED, not re-spelled. This case used to assert that the flow parse
+    // was GREEN here and that `validateControlFlow` was the door — a true
+    // reading of `parseFlowNodeRegions` leaving a refused region raw (#4389).
+    // #15646 removes its subject: an `end` node inside a structured region body
+    // is refused at parse, whatever its `config`, so there is no longer a
+    // region-nested `end` whose CONFIG can be judged one door later. Keeping the
+    // old assertion by weakening it would have pinned an `end`-in-region shape
+    // that is now undeclarable.
     const nested: Flow = {
       name: 'nested_refusal',
       label: 'Nested refusal',
@@ -249,16 +250,31 @@ describe('FlowSchema applies the `end` contract — the structural node\'s only 
       ],
     };
     const parsed = FlowSchema.safeParse(nested);
-    expect(parsed.success).toBe(true);
-    if (!parsed.success) return;
-    let message = '';
-    try {
-      validateControlFlow(parsed.data);
-    } catch (error) {
-      message = (error as Error).message;
-    }
-    expect(message).toContain("loop 'each' body");
-    expect(message).toContain("`outcome: 'refused'` requires a `message`");
+    expect(parsed.success).toBe(false);
+    if (parsed.success) return;
+    expect(parsed.error.issues.map((i) => [i.code, i.path])).toEqual([
+      ['custom', ['nodes', 1, 'config', 'body', 'nodes', 0, 'type']],
+    ]);
+    expect(parsed.error.issues[0].message).toContain(
+      "An `end` node may not sit inside a structured region — `loop 'each' body` is a region body and the `end` node `inner_end` is inside it",
+    );
+
+    // CONTROL — the identical `end` node, identical malformed config, on the
+    // TOP-LEVEL graph: refused by the `end` CONFIG contract instead, at
+    // `config.message`. So the reading above is the region rule firing, not this
+    // fixture being malformed in some way that would fail anywhere.
+    const topLevel = FlowSchema.safeParse({
+      ...nested,
+      nodes: [
+        { id: 'start', type: 'start', label: 'Start' },
+        { id: 'inner_end', type: 'end', label: 'Inner end', config: { outcome: 'refused' } },
+      ],
+      edges: [{ id: 'e1', source: 'start', target: 'inner_end' }],
+    } as Flow);
+    expect(topLevel.success).toBe(false);
+    if (topLevel.success) return;
+    expect(topLevel.error.issues.map((i) => i.path)).toEqual([['nodes', 1, 'config', 'message']]);
+    expect(topLevel.error.issues[0].message).toContain("`outcome: 'refused'` requires a `message`");
   });
 });
 

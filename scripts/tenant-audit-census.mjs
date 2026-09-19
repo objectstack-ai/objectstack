@@ -153,9 +153,30 @@
  *   run, carried per site in `--json`, and counted under ENFORCEMENT in both
  *   artefacts -- so a type that leaves the index lands in the diff by name instead
  *   of removing a site in silence. ⛔ No subtraction is withdrawn on this basis and
- *   ⛔ no exit code changed: three sites on a clean tree are undefended today, two
- *   of them with a write door in their own inline type text, and a gate that reds
- *   on arrival is a gate that gets weakened.
+ *   ⛔ no exit code changed: one site on a clean tree is undefended today, and a
+ *   gate that reds on arrival is a gate that gets weakened.
+ *
+ * ## ⭐ The door rule is applied to the TYPE, not to the type's NAME
+ *
+ * {@link memberIsEngineDoor} was applied to NAMED declarations only, so a receiver
+ * whose declared type is an inline type literal had no name for the index to be
+ * keyed on and was subtracted as `kind: 'other'` however plainly its own text
+ * stated a write door. Two sites on a clean tree were exactly that, both writing
+ * under an elevated context: `resolveInsertEngine()`'s
+ * `{ insert: (name: string, …) => … } | null` in `plugin-auth`, and
+ * `migrateLegacySsoClientSecrets`'s `engine as unknown as { find(object: string, …);
+ * update(object: string, …) }`. The census PRINTED both -- `doorShaped` in
+ * {@link nonEngineReason} is that diagnostic -- and subtracted them anyway. ⛔ A
+ * diagnostic that names a subtraction as probably wrong and then takes it is not a
+ * report, it is a deferral.
+ *
+ * ⇒ {@link inlineEngineDoorOrOther} closes it: when a declared type text names no
+ *   indexed engine, the SAME door rule is read off the type text itself, and a
+ *   write door there places the site. ⛔ Not a widening of the definition -- it IS
+ *   the definition, applied where it had only been reported. The diagnostic stays,
+ *   and its door-shaped count is now 0 BY CONSTRUCTION: a non-zero value there
+ *   means a door-shaped receiver reached the subtraction anyway, i.e. this hole has
+ *   reopened.
  *
  * ## Refusals, never quiet passes (#4690)
  *
@@ -560,7 +581,7 @@ export function resolveReceiver(recvNode, sf, decls, index, depth = 0) {
     if (entry.type && /^(any|unknown)$/.test(entry.type.trim())) {
       return { kind: 'unresolved', how: `${how}:any`, detail: entry.type };
     }
-    if (entry.type) return { kind: 'other', type: entry.type, how };
+    if (entry.type) return inlineEngineDoorOrOther(entry.type, how);
     if (entry.init) {
       const t2 = nameOf(entry.init);
       if (t2) return { kind: 'engine', type: t2, how: `${how}/init` };
@@ -589,7 +610,7 @@ export function resolveReceiver(recvNode, sf, decls, index, depth = 0) {
       if (via.kind !== 'unresolved') return { ...via, how: `as-any/${via.how}` };
       return { kind: 'unresolved', how: 'as-any', detail: receiverKey(r.expression, sf) };
     }
-    return { kind: 'other', type: r.type.getText(sf), how: 'as' };
+    return inlineEngineDoorOrOther(r.type.getText(sf), 'as');
   }
   if (ts.isPropertyAccessExpression(r) && r.expression.kind === ts.SyntaxKind.ThisKeyword) {
     return fromEntry(decls.thisProps.get(r.name.text), `this.${r.name.text}`);
@@ -608,7 +629,7 @@ export function resolveReceiver(recvNode, sf, decls, index, depth = 0) {
     if (mt) {
       const t = nameOf(mt);
       if (t) return { kind: 'engine', type: t, how: `member ${r.name.text}` };
-      return { kind: 'other', type: mt, how: `member ${r.name.text}` };
+      return inlineEngineDoorOrOther(mt, `member ${r.name.text}`);
     }
   }
   if (ts.isCallExpression(r)) {
@@ -630,7 +651,7 @@ export function resolveReceiver(recvNode, sf, decls, index, depth = 0) {
       if (mt) {
         const t = nameOf(mt);
         if (t) return { kind: 'engine', type: t, how: `${fname}() return` };
-        return { kind: 'other', type: mt, how: `${fname}() return` };
+        return inlineEngineDoorOrOther(mt, `${fname}() return`);
       }
     }
     const entry = fname ? decls.fnReturns.get(fname) : null;
@@ -692,6 +713,13 @@ const TYPE_SYNTAX_WORDS = new Set([
  *   those are reported per site, in both artefacts, by receiver and by the type text
  *   it could not place. ⛔ A subtraction is never *withdrawn* on this basis: that
  *   would be the census guessing in the other direction. It is DECLARED.
+ *
+ * ⚠️ `anonymous-type` is now the RESIDUE of a rule that runs first: an inline type
+ * literal whose own text states a write door is placed by
+ * {@link inlineEngineDoorOrOther} and never reaches here, so what lands on this arm
+ * is an unnamed type the door rule read and rejected. Its `doorShaped` flag is
+ * therefore 0 in both artefacts by construction, and is kept as that invariant's
+ * alarm rather than as a running count.
  */
 export const NON_ENGINE_REASONS = Object.freeze({
   'builtin-import': 'the receiver is an identifier imported from a `node:` builtin',
@@ -715,8 +743,11 @@ export const UNDEFENDED_REASONS = Object.freeze(['type-not-in-corpus', 'anonymou
  *
  * ⭐ A `true` here is the sharpest thing this diagnostic can say: the census
  * subtracted a write call whose receiver type satisfies its OWN definition of an
- * engine, and the only reason it did is that the definition is applied to NAMED
- * declarations while this type is spelled inline. It is reported, ⛔ not acted on.
+ * engine, and the only reason it did is that the definition was applied to NAMED
+ * declarations while this type is spelled inline. It is now ACTED ON --
+ * {@link inlineEngineDoorOrOther} places such a receiver instead of subtracting it
+ * -- and this predicate is kept as that invariant's alarm: a door-shaped
+ * subtraction reaching the artefacts means the placement rule has a hole again.
  */
 export function typeTextDeclaresEngineDoor(typeText) {
   if (typeof typeText !== 'string' || !/\b(insert|update|delete)\b/.test(typeText)) return false;
@@ -734,6 +765,47 @@ export function typeTextDeclaresEngineDoor(typeText) {
   };
   visit(sf);
   return door;
+}
+
+/**
+ * What {@link runCensus} records as the engine type of a receiver placed by its
+ * own inline type literal rather than by a name in the index.
+ *
+ * Deliberately a SENTENCE and not a type name, because there is no name -- the
+ * index is keyed on names and this receiver has none. `--json` is where a reader
+ * navigating one site learns which rule placed it; the enforced artefacts
+ * aggregate by (file, verb, object, tenancy, context posture) and never render
+ * this text, so its wording cannot move a count.
+ */
+const INLINE_ENGINE_TYPE = 'inline type literal stating an engine door';
+
+/**
+ * A declared type text that names no indexed engine, judged ONE more time -- by
+ * the door rule read off the text itself.
+ *
+ * {@link buildEngineTypeIndex} is keyed on declaration NAMES, so an inline type
+ * literal cannot be in the index however plainly it declares a write door.
+ * Answering `kind: 'other'` on that basis is the census answering "not an engine"
+ * to a question it never asked, and it fails in the expensive direction: the site
+ * is SUBTRACTED from the certified population. Two sites on a clean tree were
+ * exactly that, both writing under `{ context: { isSystem: true } }`.
+ *
+ * ⛔ This is not a second reading of "what an engine door looks like". It calls
+ * {@link typeTextDeclaresEngineDoor}, which calls {@link memberIsEngineDoor} -- the
+ * one function that answers that question for a named declaration too. Two
+ * spellings of the rule is how the two drift.
+ *
+ * ⚠️ Reached ONLY after {@link resolveReceiver} has failed to find an indexed name
+ * in the type text, so a named engine type still wins and still reports its own
+ * name. The `how` gains an `/inline-door` suffix for anyone tracing a resolution;
+ * ⛔ `how` is not carried onto a PLACED site, so what `--json` shows for one of
+ * these is its `engineType`, the sentence above.
+ */
+function inlineEngineDoorOrOther(typeText, how) {
+  if (typeTextDeclaresEngineDoor(typeText)) {
+    return { kind: 'engine', type: INLINE_ENGINE_TYPE, how: `${how}/inline-door` };
+  }
+  return { kind: 'other', type: typeText, how };
 }
 
 /**
@@ -1447,6 +1519,12 @@ export function renderUndefendedSubtractions(census, heading, { withRows = true 
   out.push(`| write calls subtracted with no defensible reason | **${rows.reduce((n, r) => n + r.count, 0)}** |`);
   out.push(`| …whose declared type text states an engine door anyway | **${doorShaped}** |`);
   out.push('');
+  out.push('⛔ The second row is **0 by construction**, not a tally that happens to be low.');
+  out.push('An inline type literal stating a write door has no name for the engine type index');
+  out.push('to be keyed on, so the door rule is read off the type text itself and the site is');
+  out.push('PLACED — it is in the population above rather than subtracted here. A non-zero');
+  out.push('value on that row means a door-shaped receiver reached the subtraction anyway.');
+  out.push('');
   if (rows.length === 0) {
     out.push('None: every non-engine subtraction in this census rests on a named fact.');
     return out;
@@ -1562,11 +1640,17 @@ export function renderGeneratedRegion(census) {
 /**
  * The audit ledger: every site, regenerated WHOLE.
  *
- * No prose to preserve, so nothing here is spliced -- the file is rewritten. That
- * is what makes `merge=os-regen` the right resolution for it, the same as its
- * strictness-ledger sibling: two branches that each add a write call site produce
- * rows that git merges cleanly and a header that merges cleanly and WRONG. The
- * correct resolution is always "recompute from the merged tree".
+ * No prose to preserve, so nothing here is spliced -- the file is rewritten. Two
+ * branches that each add a write call site produce rows that git merges cleanly and
+ * a header that merges cleanly and WRONG, so the correct resolution is always
+ * "recompute from the merged tree" -- `node scripts/tenant-audit-census.mjs --write`,
+ * which is what the header this function emits tells a merging author to do.
+ *
+ * That resolution is not delegated to a merge driver: no `.gitattributes` entry
+ * covers this path, so `git check-attr merge` over it reads `unspecified` and git
+ * text-merges it like any other file. `scripts/check-tenant-audit-census.mjs` is the
+ * backstop -- a wrongly merged file fails the build loudly instead of landing
+ * silently.
  */
 export function renderCountsFile(census) {
   const t = census.totals;
@@ -1592,9 +1676,13 @@ export function renderCountsFile(census) {
   out.push('');
   out.push('⚠️ **On a merge conflict here, regenerate — never resolve by hand.** Two branches');
   out.push('that each add a write call site produce rows git merges cleanly and totals that');
-  out.push('merge cleanly and WRONG. This file is deliberately NOT `merge=os-regen`: that');
-  out.push('driver resolves an artefact\'s `gen:`/`check:` scripts in `@objectstack/spec`');
-  out.push('only, and these are root-level tooling. The gate is the backstop — a wrongly');
+  out.push('merge cleanly and WRONG. This file is NOT `merge=os-regen`: no `.gitattributes`');
+  out.push('row names it, so `git check-attr merge` over it reads `unspecified`. Routing it');
+  out.push('would take a `REGEN_ARTIFACTS` row whose `gen:`/`check:` names exist in the');
+  out.push('manifest that row declares as owner, and no manifest declares such a pair for');
+  out.push('this census — the gate runs straight from the lint workflow. Root-level tooling');
+  out.push('is no obstacle by itself: the driver resolves those names in whichever manifest');
+  out.push('the row names, the root one included. The gate is the backstop — a wrongly');
   out.push('merged file fails `check-tenant-audit-census`, so the error is loud rather than');
   out.push('silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.');
   out.push('');
@@ -1906,6 +1994,46 @@ export function selfTest() {
   t('⭐ the same receiver, type NOT in the index, is a subtraction that says WHY',
     resolveIn([]), 'other/type-not-in-corpus');
 
+  // ⭐⭐ THE DOOR RULE ON A TYPE WITH NO NAME. Same source shape, same index; the
+  // only variable is whether the receiver's inline type literal states a WRITE
+  // door. The index is keyed on names and an inline literal has none, so before
+  // `inlineEngineDoorOrOther` every one of these read `other/anonymous-type` --
+  // including the two real sites, which the diagnostic printed as probably wrong
+  // and the classifier subtracted anyway. Pinned in BOTH directions, because a
+  // rule that places every inline literal would be the same failure mirrored.
+  const resolveInline = (typeText, indexNames = []) => {
+    const src = `declare const e: ${typeText};\ne.insert('sys_user', {}, { context: { isSystem: true } });\n`;
+    const sf = parseSourceFile('selftest.ts', src);
+    const decls = declaredTypesIn(sf);
+    const index = new Map(indexNames.map((n) => [n, { decls: ['probe.ts'], verbs: ['insert'] }]));
+    let out = 'NO-CALL';
+    const visit = (node) => {
+      if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
+          && WRITE_VERBS.includes(node.expression.name.text)) {
+        const res = resolveReceiver(node.expression.expression, sf, decls, index);
+        out = res.kind === 'other'
+          ? `other/${nonEngineReason(res, new Set()).reason}`
+          : `${res.kind}/${res.type ?? ''}`;
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sf);
+    return out;
+  };
+  t('⭐ an inline type literal stating a write door is PLACED, with no name in the index',
+    resolveInline('{ insert(object: string, data: unknown): Promise<void> }'),
+    `engine/${INLINE_ENGINE_TYPE}`);
+  t('⭐ …through a property-signature door in a union, which is how one real site is spelled',
+    resolveInline('{ insert: (name: string, data: any, options?: any) => Promise<unknown> } | null'),
+    `engine/${INLINE_ENGINE_TYPE}`);
+  t('⛔ an inline literal whose only door is a READ door is still a subtraction',
+    resolveInline('{ find(object: string, query: unknown): Promise<void> }'), 'other/anonymous-type');
+  t('⛔ a same-named method whose first parameter is not an object name is no door',
+    resolveInline('{ delete(key: string): void }'), 'other/anonymous-type');
+  t('⛔ an indexed NAME beside an inline literal still wins and reports itself',
+    resolveInline('IProbeEngine | { insert(object: string): Promise<void> }', ['IProbeEngine']),
+    'engine/IProbeEngine');
+
   const failed = cases.filter((c) => !c.ok);
   for (const c of failed) console.error(`  ✗ ${c.name} -- ${c.detail}`);
   if (failed.length > 0) {
@@ -1920,7 +2048,9 @@ export function selfTest() {
     + 'counts two, while `inlineColumns`, validation-rule, action, list-view and index names '
     + 'in the same file count none -- and the TRACKED-ONLY criterion in both directions: one '
     + 'receiver, one source text, and index membership the only variable, reading `engine` in '
-    + 'the index and a subtraction that NAMES the unplaceable type out of it).',
+    + 'the index and a subtraction that NAMES the unplaceable type out of it -- and the door '
+    + 'rule read off a type with no NAME at all, placing an inline literal that states a write '
+    + 'door while still subtracting one that states none).',
   );
   return 0;
 }

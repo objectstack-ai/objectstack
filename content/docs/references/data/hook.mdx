@@ -35,7 +35,7 @@ const result = HookSchema.parse(data);
 | **body** | `{ language: 'expression'; source: string } \| { language: 'js'; source: string; capabilities?: Enum<'api.read' \| 'api.write' \| 'api.transaction' \| 'crypto.uuid' \| 'log'>[]; timeoutMs?: integer; … }` | optional | Hook body — expression (L1) or sandboxed JS (L2) |
 | **priority** | `number` | optional (default: `100`) | Execution priority |
 | **async** | `boolean` | optional (default: `false`) | Run specifically as fire-and-forget |
-| **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Predicate (CEL); hook runs only when TRUE. e.g. P`record.status == "closed" && record.amount > 1000` |
+| **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Predicate (CEL); hook runs only when TRUE. e.g. P`record.status == "closed" && record.amount > 1000` |
 | **description** | `string` | optional | Human-readable description of what this hook does |
 | **retryPolicy** | `{ maxRetries?: number; backoffMs?: number }` | optional | Retry policy for failed hook executions |
 | **timeoutMs** | `number` | optional | Maximum execution time in milliseconds before the hook is aborted |

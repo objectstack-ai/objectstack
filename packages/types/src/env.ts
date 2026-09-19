@@ -20,6 +20,7 @@
 import {
   normalizeTenancyPosture,
   postureEnforcesWall,
+  postureUsesUnionScope,
   TENANCY_POSTURES,
   type TenancyPosture,
 } from '@objectstack/spec/security';
@@ -210,12 +211,19 @@ export const SCHEDULED_WORK_ENV = 'OS_AUTOMATION_SCHEDULED_WORK_ENABLED';
  *
  * Unset means off. A deployment that wants package-authored scheduled work
  * turns it on explicitly — including a `single` private install and a `group`
- * one. `group` is not free today and is off for a measured reason rather than
- * by analogy: it is a WALLED posture, so `resolveSystemWriteOrganization`
- * refuses an organization-less system insert under it and
- * `TenancyService.defaultOrgId()` answers `null` (ADR-0093 D3). Which
- * organization a group-wide sweep's inserts belong to is not yet decided, and
- * until it is, `group` behaves as walled.
+ * one. ⚠️ The switch is orthogonal to the posture and stays OFF by default in
+ * all three: whether clock-driven work is affordable is a fact about the
+ * deployment's database, tenants and budget, which no posture answers.
+ *
+ * [#18378] What the posture decides is what binds ONCE THE OPERATOR HAS TURNED
+ * IT ON — see {@link resolveScheduledWorkPolicy}. `group` used to be walled
+ * here by analogy with `isolated`, on the ground that
+ * `resolveSystemWriteOrganization` refuses an organization-less system insert
+ * under any wall and `TenancyService.defaultOrgId()` answers `null` (ADR-0093
+ * D3), leaving which organization a group-wide sweep's inserts belong to
+ * undecided. That question is answered (ruling A′, 2026-09-16): the swept
+ * record's own. Both facts above still hold — they are why an undeclared
+ * `group` run with NO record to derive from is still refused at the write.
  *
  * Accepts `true`/`1`/`on`/`yes`, case-insensitive; anything else — including an
  * unset variable and an empty string — is off. ⚠️ Deliberately NOT the
@@ -239,11 +247,22 @@ export function resolveScheduledWorkEnabled(): boolean {
  * One resolver rather than two reads at each call site, because the three
  * states are not independent and spelling them apart is how they drift:
  *
- * | state | `enabled` | `requiresActingOrganization` | what binds |
- * |:--|:--|:--|:--|
- * | OFF (default) | `false` | `false` | nothing — no time trigger arms, no package job schedules |
- * | ON under `single` | `true` | `false` | every time-triggered flow, carrying NO organization |
- * | ON under a wall (`group` / `isolated`) | `true` | `true` | only a flow that declares `config.organization` |
+ * | state | `enabled` | `requiresActingOrganization` | `runOwnership` | what binds |
+ * |:--|:--|:--|:--|:--|
+ * | OFF (default) | `false` | `false` | the posture's rule (moot) | nothing — no time trigger arms, no package job schedules |
+ * | ON under `single` | `true` | `false` | `'unscoped'` | every time-triggered flow, carrying NO organization |
+ * | ON under `group` | `true` | `false` | `'per-record'` | every time-triggered flow; a declared one acts as its declaration, an undeclared one acts as each swept record's own organization |
+ * | ON under `isolated` | `true` | `true` | `'declared'` | only a flow that declares `config.organization` |
+ *
+ * [#18378, ruling A′] The `group` row was `requiresActingOrganization: true`
+ * until 2026-09-16 — it was walled by analogy with `isolated`, recorded as
+ * provisional at the time because which organization a group-wide run's inserts
+ * belong to was the part that was not yet thought through. It is answered now:
+ * the swept record's own, which is the subject-first order `sys_automation_run`
+ * was already ruled to use. ⛔ Do not re-derive this row from
+ * `postureEnforcesWall` — `group` DOES enforce a wall, and that is precisely
+ * why its reads span the group and its writes still need an owner. The
+ * predicate that separates it is {@link postureUsesUnionScope}.
  *
  * `requiresActingOrganization` is `false` when the switch is OFF because
  * nothing binds there at all: reporting a declaration requirement for a flow
@@ -251,6 +270,17 @@ export function resolveScheduledWorkEnabled(): boolean {
  * remedy for a deployment decision. The OFF state has its own reason —
  * {@link SCHEDULED_WORK_DISABLED_REASON} — and it is the one that must be
  * reported.
+ *
+ * ⚠️ `runOwnership` is NOT gated on the switch the way that boolean is, and the
+ * OFF row above says "the posture's rule" rather than a value for exactly that
+ * reason: it answers a question about the POSTURE — where a bound run's writes
+ * would get their organization — so with the switch off it still reports
+ * `'per-record'` under `group` and `'declared'` under `isolated`, not
+ * `'unscoped'`. Nothing binds there, so no run can reach the state it names:
+ * ⛔ never read `runOwnership` alone as evidence that a run exists or that one
+ * is going to; {@link ScheduledWorkPolicy.enabled} is the discriminator, and
+ * the OFF reason above is what an operator gets told. Both halves are pinned in
+ * `env.test.ts`.
  *
  * ⚠️ `posture` is what the deployment ASKED FOR, exactly as
  * {@link resolveTenancyPosture} answers it — whether the wall is actually
@@ -263,6 +293,40 @@ export function resolveScheduledWorkEnabled(): boolean {
  * unrecognized `OS_TENANCY_POSTURE` — a typo'd posture must not silently
  * resolve to `single` and drop the declaration requirement with it.
  */
+/**
+ * [#18378] Where a BOUND time-triggered run's writes get their organization,
+ * once the flow's own declaration has been consulted and found absent.
+ *
+ * It is a separate axis from {@link ScheduledWorkPolicy.requiresActingOrganization}
+ * because the two answer different doors: that boolean decides whether BIND
+ * refuses, this decides what a run that DID bind carries. Collapsing them is
+ * what made `group` walled by analogy in the first place — the posture has a
+ * wall (so an org-less insert is refused) AND group-wide reads (so the batch is
+ * legitimate), and only a second axis can say both.
+ */
+export type ScheduledRunOwnership =
+  /**
+   * `single`: the run carries no organization at all. The install holds exactly
+   * one (plugin-auth's org-create posture gate refuses a second) and the #8844
+   * guard resolves it beneath every tenant-scoped insert.
+   */
+  | 'unscoped'
+  /**
+   * `group`: the run acts as the SWEPT RECORD's own organization. Reads stay
+   * group-wide — inherent to the posture (ADR-0105 D1) — and ownership follows
+   * the row, which is the order `ObjectStoreSuspendedRunStore` already uses for
+   * `sys_automation_run` (`organizationOf(record) ?? ctx.tenantId`, subject
+   * first). A run with no record to derive from resolves nothing and takes the
+   * existing `walled-posture` refusal at its first tenant-scoped write; ⛔ there
+   * is no limb that picks one instead.
+   */
+  | 'per-record'
+  /**
+   * `isolated`: the declaration, or the flow does not arm. The 2026-09-08
+   * ruling on cross-organization scheduled tasks, unchanged.
+   */
+  | 'declared';
+
 export interface ScheduledWorkPolicy {
   /** Whether package-authored scheduled work runs on this deployment at all. */
   readonly enabled: boolean;
@@ -270,20 +334,47 @@ export interface ScheduledWorkPolicy {
   readonly posture: TenancyPosture;
   /**
    * Whether an armed time-triggered flow must declare `config.organization`.
-   * True only under a walled posture with the switch on — the 2026-09-08
-   * ruling on cross-organization scheduled tasks, unchanged.
+   * True only under `isolated` with the switch on — the 2026-09-08 ruling on
+   * cross-organization scheduled tasks, narrowed to that posture by #18378.
    */
   readonly requiresActingOrganization: boolean;
+  /**
+   * What an armed run that declared nothing acts as. ⚠️ A fact about
+   * {@link posture}, NOT about the switch: it reports that posture's rule
+   * (`group` ⇒ `'per-record'`, `isolated` ⇒ `'declared'`) whether or not
+   * {@link enabled}. With the switch off nothing binds, so no run can reach the
+   * state this names — ⛔ read it together with {@link enabled}, never alone as
+   * evidence that a run exists.
+   */
+  readonly runOwnership: ScheduledRunOwnership;
+}
+
+/**
+ * Which ownership rule a posture implies, independent of the switch.
+ *
+ * ⛔ Deliberately NOT `postureEnforcesWall ? 'declared' : 'unscoped'`. Both
+ * walled postures enforce a wall; what separates them is READ REACH, and
+ * {@link postureUsesUnionScope} is the protocol's existing name for exactly
+ * that distinction (`group` only). A posture whose reads already span every
+ * organization in the deployment is one where a batch job is a capability
+ * rather than a boundary violation — so it is the one posture that can own its
+ * writes per-row instead of demanding a declaration up front.
+ */
+function scheduledRunOwnershipFor(posture: TenancyPosture): ScheduledRunOwnership {
+  if (!postureEnforcesWall(posture)) return 'unscoped';
+  return postureUsesUnionScope(posture) ? 'per-record' : 'declared';
 }
 
 /** Resolve {@link ScheduledWorkPolicy} from the environment. */
 export function resolveScheduledWorkPolicy(): ScheduledWorkPolicy {
   const enabled = resolveScheduledWorkEnabled();
   const posture = resolveTenancyPosture();
+  const runOwnership = scheduledRunOwnershipFor(posture);
   return {
     enabled,
     posture,
-    requiresActingOrganization: enabled && postureEnforcesWall(posture),
+    requiresActingOrganization: enabled && runOwnership === 'declared',
+    runOwnership,
   };
 }
 

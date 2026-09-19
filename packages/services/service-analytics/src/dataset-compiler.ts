@@ -584,7 +584,6 @@ export function compileDataset(
       );
     }
     let fromObject = dataset.object;
-    let parentAlias = dataset.object;
     let prefix = '';
     for (const seg of segments) {
       prefix = prefix ? `${prefix}.${seg}` : seg;
@@ -596,14 +595,14 @@ export function compileDataset(
       if (!joins[alias]) {
         // KEY is the SQL-safe alias; `name` carries the join TABLE; the strategy
         // rebuilds the ON clause from the alias convention (`<parent>.<seg> = <alias>.id`).
-        joins[alias] = {
-          name: target.table,
-          relationship: 'many_to_one',
-          sql: `${parentAlias}.${seg} = ${prefix}.id`,
-        };
+        // That derivation is now the whole contract: #18612 removed `CubeJoin.sql`
+        // and `CubeJoin.relationship` (ADR-0049 enforce-or-remove), so the two
+        // constants this literal used to carry are gone rather than re-synthesised
+        // here. Nothing ever read them — both strategies resolve a join through
+        // `cube.joins?.[alias]?.name` alone.
+        joins[alias] = { name: target.table };
       }
       fromObject = target.object;
-      parentAlias = prefix;
     }
   }
 

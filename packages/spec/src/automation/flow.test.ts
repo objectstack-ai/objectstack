@@ -1464,22 +1464,26 @@ describe('BPMN — Wait Event Configuration', () => {
   });
 
   /**
-   * Nested in an ADR-0031 region, the refusal is reached through the REGION
-   * CONTRACT, not through `FlowSchema` — measured here rather than assumed,
-   * because the two doors answer differently and only one of them is the door
-   * a run actually passes through.
+   * Nested in an ADR-0031 region, `waitEventConfig`'s refusal is reached through
+   * the REGION CONTRACT (`LoopConfigSchema`) — measured here rather than
+   * assumed, because the two doors answer differently and only one of them is
+   * the door a run actually passes through.
    *
    * `parseFlowNodeRegions` parses each region slot with `safeParse` and, on a
    * refusal, leaves the region RAW and continues (its own comment says so: a
-   * refused region is left for `validateControlFlow` to name). That policy
-   * predates this change and is not specific to `waitEventConfig` — it is why the
-   * flow-level parse below is GREEN with a block-less wait sitting in the loop
-   * body. The contract that refuses it is `LoopConfigSchema`, which is what
-   * `loop`'s executor parses its config through at execute time
-   * (`parseNodeConfig` → a guard refusal), so the nested shape still cannot
-   * run; it is refused one door later and by node id.
+   * refused region is left for `validateControlFlow` to name). That policy is
+   * not specific to `waitEventConfig`, and it is why the flow parse never
+   * carried this key's refusal.
+   *
+   * ⚠️ What #15646 changed, and what it did not: the FLOW parse is no longer
+   * green on the nested fixture, because a `wait` node may not sit inside a
+   * region body AT ALL now — a region body cannot durably pause, and `wait`
+   * always does. So the flow parse refuses the fixture for a reason that has
+   * nothing to do with `waitEventConfig`, and the block's own refusal is still
+   * the region contract's. Both are asserted below so the two cannot be
+   * confused for each other again.
    */
-  it('nested in a region: the flow parse leaves it raw, and the REGION contract refuses it by path', () => {
+  it('nested in a region: the flow parse refuses the `wait` node itself, and the REGION contract still refuses the missing block by path', () => {
     const loopConfig = (bodyNode: Record<string, unknown>) => ({
       collection: '{rows}', iteratorVariable: 'row',
       body: { nodes: [bodyNode], edges: [] },
@@ -1498,20 +1502,34 @@ describe('BPMN — Wait Event Configuration', () => {
       edges: [{ id: 'e1', source: 'start', target: 'loop' }],
     });
 
-    // Door 1 — the flow parse: green, and the body node comes back UNPARSED.
+    // Door 1 — the flow parse: refused on the node TYPE, not on the block.
     const flowParse = FlowSchema.safeParse(flowWith(bare));
-    expect(flowParse.success).toBe(true);
+    expect(flowParse.success).toBe(false);
+    if (flowParse.success) return;
+    expect(flowParse.error.issues.map(i => i.path.join('.'))).toEqual(['nodes.1.config.body.nodes.0.type']);
+    expect(flowParse.error.issues[0].message).toContain('A `wait` node may not sit inside a structured region');
 
     // Door 2 — the region contract the `loop` executor parses through: refused,
-    // anchored on the block, at the node's own index inside the body.
+    // anchored on the block, at the node's own index inside the body. Reached
+    // directly, because the flow that would carry it no longer parses.
     const refused = LoopConfigSchema.safeParse(loopConfig(bare));
     expect(refused.success).toBe(false);
     expect(refused.error!.issues.map(i => i.path.join('.'))).toContain('body.nodes.0.waitEventConfig');
 
-    // CONTROL — the declared body node passes both doors, so the refusal above
-    // is the missing block and not the region fixture.
-    expect(FlowSchema.safeParse(flowWith(declared)).success).toBe(true);
+    // CONTROL — the DECLARED body node still passes door 2, so door 2's refusal
+    // above is the missing block and not the region fixture. It does not pass
+    // door 1: the region rule judges the type, and a declared block does not
+    // make a `wait` pausable-in-a-region.
     expect(LoopConfigSchema.safeParse(loopConfig(declared)).success).toBe(true);
+    expect(FlowSchema.safeParse(flowWith(declared)).success).toBe(false);
+
+    // CONTROL — the same declared `wait` on the TOP-LEVEL graph passes the flow
+    // parse, so door 1's refusal is the region and not the node.
+    expect(FlowSchema.safeParse({
+      name: 'top_level', label: 'Top level', type: 'autolaunched',
+      nodes: [{ id: 'start', type: 'start', label: 'Start' }, declared],
+      edges: [{ id: 'e1', source: 'start', target: 'pause' }],
+    }).success).toBe(true);
   });
 });
 

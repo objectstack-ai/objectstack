@@ -43,7 +43,7 @@
 - 放宽 tell 由 `scripts/pm/check-widening-tells.mjs` 判,`no` 撞新键/成员/导出/登记即拒,附 file:line。
 - ③ PR check 全绿,⛔ 非 required 子集;例外:merge-base 同签名的红不计、按设计而红见 SKILL.md。
 - 签名 = 失败步 + 首错行,读 base check runs 的 API ⛔ 不凭口述;主干红止血立单不变。
-- 规则层等维护者的字;受管路径全在 `.claude/skills/pm-dispatch/references/` 者达档过本三条入队。
+- Tier H(规则层)等维护者的字;受管路径全在 Tier S 面(`.claude/**`)者达档过本三条入队。
 
 ## 降档保险丝(机读)
 

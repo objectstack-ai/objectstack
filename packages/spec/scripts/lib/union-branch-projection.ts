@@ -61,6 +61,7 @@
  * type Zod refused.
  */
 import { z } from 'zod';
+import { projectPublishedJsonSchema } from './refinement-projection';
 
 /**
  * Temporary marker key written onto a node Zod could not project. It never
@@ -267,39 +268,24 @@ export function findSurvivingMark(node: unknown, at = '#'): string | null {
  * Fewest drops is the most faithful projection available, and the `x-io` flag
  * already tells a reader which shape they are looking at (#2967 / #2978).
  */
-export function projectByPruningUnionBranches(
-  value: z.ZodType,
-  options: {
-    readonly target: 'draft-2020-12';
-    /**
-     * An extra `override` to run after this module's own marker pass — the
-     * generator's refinement projection (#18670 item 2). This function owns the
-     * single `override` slot `toJSONSchema` provides, so a caller that also
-     * needs one hands it here rather than losing one of the two silently: an
-     * export that reaches its published file through THIS path would otherwise
-     * be the one artifact missing a narrowing the ledger already recorded as
-     * closed (`data/Hook` is the live case).
-     */
-    readonly override?: (ctx: { zodSchema: unknown; jsonSchema: unknown; path: (string | number)[] }) => void;
-  },
-): BranchProjection | null {
+export function projectByPruningUnionBranches(value: z.ZodType): BranchProjection | null {
   const candidates: BranchProjection[] = [];
 
   for (const io of ['output', 'input'] as const) {
     let schema: JsonObject;
     try {
-      const mark = markUnprojectableNodes(io);
-      const extra = options.override;
-      schema = z.toJSONSchema(value, {
-        target: options.target,
+      // ⭐ Through `projectPublishedJsonSchema`, never `z.toJSONSchema` directly
+      // (#18670 third arm). This path owns the single `override` slot
+      // `toJSONSchema` provides, so the refinement projection used to be handed
+      // in by the caller — and an export reaching its published file through
+      // HERE was then one forgotten argument away from being the one artifact
+      // missing a narrowing the ledger records as closed (`data/Hook` is the
+      // live case). The helper composes this module's marker pass with the
+      // refinement pass itself, so there is no argument left to forget.
+      schema = projectPublishedJsonSchema(value, {
+        io,
         unrepresentable: 'any',
-        override: extra
-          ? (ctx): void => {
-              mark(ctx);
-              extra(ctx);
-            }
-          : mark,
-        ...(io === 'input' ? { io } : {}),
+        override: markUnprojectableNodes(io),
       }) as JsonObject;
     } catch {
       // `unrepresentable: 'any'` removes the unrepresentable-type throws, so

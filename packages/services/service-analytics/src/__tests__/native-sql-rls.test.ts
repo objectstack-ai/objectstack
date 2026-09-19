@@ -71,7 +71,7 @@ describe('NativeSQLStrategy — D-C RLS hardening', () => {
 
   it('joins the resolved TARGET TABLE when cube.joins maps alias→table (namespaced)', async () => {
     // alias `account` → table `crm_account` (what the dataset compiler emits).
-    const nsCube: Cube = { ...cube, joins: { account: { name: 'crm_account', relationship: 'many_to_one', sql: '' } } };
+    const nsCube: Cube = { ...cube, joins: { account: { name: 'crm_account' } } };
     const strategy = new NativeSQLStrategy();
     const ctx = ctxWith({
       getCube: (n) => (n === 'sales' ? nsCube : undefined),
@@ -123,7 +123,7 @@ describe('NativeSQLStrategy — base-column qualification under joins', () => {
       status: { name: 'status', label: 'Status', type: 'string', sql: 'status' },
       region: { name: 'region', label: 'Region', type: 'string', sql: 'account.region' },
     },
-    joins: { account: { name: 'account', relationship: 'many_to_one', sql: '' } },
+    joins: { account: { name: 'account' } },
     public: false,
   };
 
@@ -168,8 +168,8 @@ describe('NativeSQLStrategy — multi-hop joins (ADR-0071)', () => {
       owner_region: { name: 'owner_region', label: 'Owner Region', type: 'string', sql: 'account.owner.region' },
     },
     joins: {
-      account: { name: 'crm_account', relationship: 'many_to_one', sql: 'opportunity.account = account.id' },
-      'account__owner': { name: 'core_user', relationship: 'many_to_one', sql: 'account.owner = account__owner.id' },
+      account: { name: 'crm_account' },
+      'account__owner': { name: 'core_user' },
     },
     public: false,
   };

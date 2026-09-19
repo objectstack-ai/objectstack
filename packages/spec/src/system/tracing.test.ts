@@ -687,3 +687,110 @@ describe('the OTel exporter and performance durations carry their unit (#17785)'
       .toBe('Background span-export interval in milliseconds');
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// #18118 — TraceSamplingConfig.composite[].condition
+// ---------------------------------------------------------------------------
+
+/**
+ * The slot whose CEL arm was RETIRED, and the structured filter that survived it.
+ *
+ * The union was `z.union([<a structured filter record>, <the evaluated
+ * expression schema>])`. Nothing anywhere evaluated the expression arm, so a
+ * condition authored as a predicate parsed, registered and read back while
+ * sampling nothing (ADR-0049 enforce-or-remove, ruled A). The arm is gone; the
+ * record arm is untouched.
+ *
+ * Three facts, and any one alone is a green that proves nothing:
+ *
+ *  - ACCEPT SET, the surviving half. A structured filter carrying no `dialect`
+ *    key parses exactly as it did before. Without this control a table of
+ *    `false`s below would be a schema that refuses everything.
+ *  - ACCEPT SET, the retired half. A bare string and a HEALTHY
+ *    `{ dialect: 'cel', source: '…' }` envelope were accepted before and are
+ *    refused now — that pair IS the retirement, and pinning only the shapes
+ *    #15811 already refused would pin nothing this card changed.
+ *  - MESSAGES. A refusal the author cannot read is a retirement that gets
+ *    re-authored. Every refusal in the retired half carries the prescription,
+ *    by two different routes — the record's own `error` map for a non-object,
+ *    the aborting `dialect` refine for an object — so a pin on one says nothing
+ *    about the other. The negative is pinned too: a value refused for a reason
+ *    that is NOT the retirement must not borrow its sentence.
+ */
+describe('#18118 TraceSamplingConfig.composite[].condition — the retired CEL arm', () => {
+  const parse = (condition: unknown) => TraceSamplingConfigSchema.safeParse({
+    type: 'composite',
+    composite: [{ strategy: 'always_on', condition }],
+  });
+  /** Issues as the caller reads them — top level, before any nested arm walk. */
+  const topIssues = (condition: unknown) => {
+    const r = parse(condition);
+    expect(r.success, `expected a refusal for ${JSON.stringify(condition)}`).toBe(false);
+    return r.success ? [] : r.error.issues;
+  };
+  /** The one sentence this slot refuses a retired expression with. */
+  const PRESCRIPTION = /`tracing\.sampling\.composite\[\]\.condition` no longer accepts a CEL predicate.*removed in @objectstack\/spec 17\.5\.0 \(ADR-0049 enforce-or-remove\).*structured filter/s;
+
+  it('CONTROL — a structured filter carrying no `dialect` key is accepted, as before', () => {
+    // This is what makes the refusals below a reading about the retired arm and
+    // not about the slot having been switched off.
+    expect(parse({}).success).toBe(true);
+    expect(parse({ service: 'api' }).success).toBe(true);
+    expect(parse({ attributes: { 'http.route': '/v1/orders' } }).success).toBe(true);
+    // `source` alone carries no dialect, so it is an ordinary filter key and
+    // stays accepted — the retirement narrowed the `dialect` door, not this one.
+    expect(parse({ source: 'x' }).success).toBe(true);
+  });
+
+  it.each([
+    ['a bare CEL predicate', 'record.amount > 10'],
+    ['an empty bare string', ''],
+    ['a blank bare string', '   '],
+  ] as const)('REFUSES %s with the retirement prescription — it parsed before this card', (_label, condition) => {
+    const issues = topIssues(condition);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].code).toBe('invalid_type');
+    expect(issues[0].path).toEqual(['composite', 0, 'condition']);
+    expect(issues[0].message).toMatch(PRESCRIPTION);
+  });
+
+  it.each([
+    ["a HEALTHY { dialect: 'cel', source } envelope", { dialect: 'cel', source: 'record.amount > 10' }],
+    ["{ dialect: 'cel' }", { dialect: 'cel' }],
+    ["{ dialect: 'cel', ast }", { dialect: 'cel', ast: { kind: 'const', value: 1 } }],
+    ["{ dialect: 'js', source: 'x' }", { dialect: 'js', source: 'x' }],
+    ["{ dialect: 'zzz', foo: 1 }", { dialect: 'zzz', foo: 1 }],
+  ] as const)('REFUSES %s with the retirement prescription — an object carrying `dialect` is an expression attempt', (_label, condition) => {
+    const issues = topIssues(condition);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].code).toBe('custom');
+    expect(issues[0].path).toEqual(['composite', 0, 'condition']);
+    expect(issues[0].message).toMatch(PRESCRIPTION);
+  });
+
+  it('does NOT borrow the retirement sentence for a refusal that is not the retirement', () => {
+    // A number is not an expression attempt in any spelling; zod's own
+    // `expected record` message is the honest answer and must stand.
+    const issues = topIssues(5);
+    expect(issues.map((i) => i.message).join('\n')).not.toMatch(PRESCRIPTION);
+    expect(issues[0].message).toMatch(/expected record/);
+  });
+
+  it('publishes the retirement in the `describe()` the reference page renders', () => {
+    // `.refine()` has NO JSON Schema projection (zod 4.4, measured: the
+    // projected node is byte-identical with and without it), so the reference
+    // table's TYPE cell cannot carry this constraint and the description
+    // column is the only place the published page can state it.
+    // `composite` is `z.array(...).optional()`, so the element sits one
+    // wrapper down; the `.describe()` sits on the OPTIONAL wrapper, which is
+    // the node `build-docs.ts` reads, so it is not unwrapped further.
+    const unwrapOnce = (node: any): any => node?.def?.innerType ?? node?._def?.innerType ?? node;
+    const composite = unwrapOnce((TraceSamplingConfigSchema as any).shape.composite);
+    const element = (composite.def ?? composite._def).element;
+    const condition = element.shape.condition as { description?: string };
+    expect(condition.description).toBeTypeOf('string');
+    expect(condition.description).toContain('carrying no `dialect` key');
+    expect(condition.description).toContain('A CEL predicate is NOT accepted here');
+  });
+});

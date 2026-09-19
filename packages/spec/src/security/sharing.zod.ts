@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { ExpressionInputSchema } from '../shared/expression.zod';
+import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
 import { strictObject } from '../shared/strict-object';
 
 /**
@@ -245,7 +245,7 @@ const BaseSharingRuleSchema = strictObject(
  */
 export const CriteriaSharingRuleSchema = lazySchema(() => BaseSharingRuleSchema.extend({
   type: z.literal('criteria'),
-  condition: ExpressionInputSchema.describe('Predicate (CEL). e.g. P`record.department == "Sales"`'),
+  condition: EvaluatedExpressionInputSchema.describe('Predicate (CEL). e.g. P`record.department == "Sales"`'),
 }));
 
 /**

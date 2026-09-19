@@ -157,6 +157,7 @@
     "system/MetricsConfig:enabled = true",
     "system/MetricsConfig:exports = []",
     "system/MetricsConfig:metrics = []",
+    "system/MetricsConfig:slis = []",
     "system/MetricsConfig:slos = []",
     "system/MiddlewareConfig:enabled = true",
     "system/MiddlewareConfig:order = 100",
@@ -248,6 +249,7 @@
     "system/TraceSamplingConfig:rules = []",
     "system/TracingConfig:enabled = true",
     "system/TracingConfig:propagation = {\"extract\":true,\"formats\":[\"w3c\"],\"inject\":true}",
+    "system/TracingConfig:sampling = {\"rules\":[],\"type\":\"always_on\"}",
     "system/TracingConfig:traceIdGenerator = \"random\""
   ]
 }
