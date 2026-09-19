@@ -12,8 +12,8 @@
 # excluded: documentation drift is `check:docs`'s axis, not this one.
 #
 # entry: ./ui
-# exported names: 471
-# declarations: 485
+# exported names: 474
+# declarations: 488
 #
 # GENERATED — ⛔ never hand-edited. Regenerate after a real build:
 #   pnpm --filter @objectstack/spec build && pnpm --filter @objectstack/spec gen:api-surface-declarations
@@ -4679,6 +4679,29 @@ declare const ComponentPropsMap: {
         quickAdd: z.ZodOptional<z.ZodNever>;
         coverImageField: z.ZodOptional<z.ZodString>;
         conditionalFormatting: z.ZodOptional<z.ZodUnknown>;
+        navigation: z.ZodOptional<z.ZodObject<{
+            mode: z.ZodDefault<z.ZodEnum<{
+                split: "split";
+                none: "none";
+                modal: "modal";
+                drawer: "drawer";
+                page: "page";
+                popover: "popover";
+                new_window: "new_window";
+            }>>;
+            view: z.ZodOptional<z.ZodNever>;
+            preventNavigation: z.ZodDefault<z.ZodBoolean>;
+            openNewTab: z.ZodDefault<z.ZodBoolean>;
+            size: z.ZodDefault<z.ZodEnum<{
+                full: "full";
+                md: "md";
+                auto: "auto";
+                sm: "sm";
+                lg: "lg";
+                xl: "xl";
+            }>>;
+            width: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>;
+        }, z.core.$strict>>;
     }, z.core.$strict>;
     readonly 'object-calendar': z.ZodObject<{
         objectName: z.ZodOptional<z.ZodString>;
@@ -4725,6 +4748,29 @@ declare const ComponentPropsMap: {
         staticData: z.ZodOptional<z.ZodArray<z.ZodUnknown>>;
         locale: z.ZodOptional<z.ZodString>;
         loading: z.ZodOptional<z.ZodBoolean>;
+        navigation: z.ZodOptional<z.ZodObject<{
+            mode: z.ZodDefault<z.ZodEnum<{
+                split: "split";
+                none: "none";
+                modal: "modal";
+                drawer: "drawer";
+                page: "page";
+                popover: "popover";
+                new_window: "new_window";
+            }>>;
+            view: z.ZodOptional<z.ZodNever>;
+            preventNavigation: z.ZodDefault<z.ZodBoolean>;
+            openNewTab: z.ZodDefault<z.ZodBoolean>;
+            size: z.ZodDefault<z.ZodEnum<{
+                full: "full";
+                md: "md";
+                auto: "auto";
+                sm: "sm";
+                lg: "lg";
+                xl: "xl";
+            }>>;
+            width: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>;
+        }, z.core.$strict>>;
     }, z.core.$strict>;
     readonly 'object-form': z.ZodObject<{
         objectName: z.ZodOptional<z.ZodString>;
@@ -5272,6 +5318,97 @@ declare const ComponentPropsMap: {
             defaultExpandedDepth: z.ZodOptional<z.ZodNumber>;
         }, z.core.$strict>>;
         navigation: z.ZodOptional<z.ZodUnknown>;
+    }, z.core.$strict>;
+    readonly 'object-timeline': z.ZodObject<{
+        objectName: z.ZodOptional<z.ZodString>;
+        timeline: z.ZodOptional<z.ZodObject<{
+            startDateField: z.ZodString;
+            endDateField: z.ZodOptional<z.ZodString>;
+            titleField: z.ZodString;
+            groupByField: z.ZodOptional<z.ZodString>;
+            colorField: z.ZodOptional<z.ZodString>;
+            scale: z.ZodDefault<z.ZodEnum<{
+                year: "year";
+                month: "month";
+                day: "day";
+                hour: "hour";
+                week: "week";
+                quarter: "quarter";
+            }>>;
+        }, z.core.$strict>>;
+        filter: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            field: z.ZodString;
+            operator: z.ZodPreprocess<z.ZodEnum<{
+                in: "in";
+                starts_with: "starts_with";
+                ends_with: "ends_with";
+                not_in: "not_in";
+                between: "between";
+                greater_than: "greater_than";
+                after: "after";
+                greater_than_or_equal: "greater_than_or_equal";
+                less_than: "less_than";
+                before: "before";
+                less_than_or_equal: "less_than_or_equal";
+                equals: "equals";
+                not_equals: "not_equals";
+                contains: "contains";
+                not_contains: "not_contains";
+                icontains: "icontains";
+                is_null: "is_null";
+                is_not_null: "is_not_null";
+                is_empty: "is_empty";
+                is_not_empty: "is_not_empty";
+            }>>;
+            value: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodNumber, z.ZodBoolean, z.ZodNull, z.ZodArray<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>]>>;
+        }, z.core.$strict>>>;
+        sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            field: z.ZodString;
+            order: z.ZodEnum<{
+                desc: "desc";
+                asc: "asc";
+            }>;
+        }, z.core.$strip>>>;
+        limit: z.ZodOptional<z.ZodNumber>;
+        items: z.ZodOptional<z.ZodArray<z.ZodUnknown>>;
+        variant: z.ZodOptional<z.ZodEnum<{
+            gantt: "gantt";
+            vertical: "vertical";
+            horizontal: "horizontal";
+        }>>;
+        dateFormat: z.ZodOptional<z.ZodEnum<{
+            long: "long";
+            short: "short";
+            iso: "iso";
+        }>>;
+        rowLabel: z.ZodOptional<z.ZodString>;
+        minDate: z.ZodOptional<z.ZodString>;
+        maxDate: z.ZodOptional<z.ZodString>;
+        descriptionField: z.ZodOptional<z.ZodString>;
+        mapping: z.ZodOptional<z.ZodUnknown>;
+        navigation: z.ZodOptional<z.ZodObject<{
+            mode: z.ZodDefault<z.ZodEnum<{
+                split: "split";
+                none: "none";
+                modal: "modal";
+                drawer: "drawer";
+                page: "page";
+                popover: "popover";
+                new_window: "new_window";
+            }>>;
+            view: z.ZodOptional<z.ZodNever>;
+            preventNavigation: z.ZodDefault<z.ZodBoolean>;
+            openNewTab: z.ZodDefault<z.ZodBoolean>;
+            size: z.ZodDefault<z.ZodEnum<{
+                full: "full";
+                md: "md";
+                auto: "auto";
+                sm: "sm";
+                lg: "lg";
+                xl: "xl";
+            }>>;
+            width: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>;
+        }, z.core.$strict>>;
     }, z.core.$strict>;
 };
 
@@ -10692,6 +10829,29 @@ declare const ObjectCalendarPropsSchema: z.ZodObject<{
     staticData: z.ZodOptional<z.ZodArray<z.ZodUnknown>>;
     locale: z.ZodOptional<z.ZodString>;
     loading: z.ZodOptional<z.ZodBoolean>;
+    navigation: z.ZodOptional<z.ZodObject<{
+        mode: z.ZodDefault<z.ZodEnum<{
+            split: "split";
+            none: "none";
+            modal: "modal";
+            drawer: "drawer";
+            page: "page";
+            popover: "popover";
+            new_window: "new_window";
+        }>>;
+        view: z.ZodOptional<z.ZodNever>;
+        preventNavigation: z.ZodDefault<z.ZodBoolean>;
+        openNewTab: z.ZodDefault<z.ZodBoolean>;
+        size: z.ZodDefault<z.ZodEnum<{
+            full: "full";
+            md: "md";
+            auto: "auto";
+            sm: "sm";
+            lg: "lg";
+            xl: "xl";
+        }>>;
+        width: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>;
+    }, z.core.$strict>>;
 }, z.core.$strict>;
 
 // ── ObjectFormProps (type) ──
@@ -11221,6 +11381,29 @@ declare const ObjectKanbanPropsSchema: z.ZodObject<{
     quickAdd: z.ZodOptional<z.ZodNever>;
     coverImageField: z.ZodOptional<z.ZodString>;
     conditionalFormatting: z.ZodOptional<z.ZodUnknown>;
+    navigation: z.ZodOptional<z.ZodObject<{
+        mode: z.ZodDefault<z.ZodEnum<{
+            split: "split";
+            none: "none";
+            modal: "modal";
+            drawer: "drawer";
+            page: "page";
+            popover: "popover";
+            new_window: "new_window";
+        }>>;
+        view: z.ZodOptional<z.ZodNever>;
+        preventNavigation: z.ZodDefault<z.ZodBoolean>;
+        openNewTab: z.ZodDefault<z.ZodBoolean>;
+        size: z.ZodDefault<z.ZodEnum<{
+            full: "full";
+            md: "md";
+            auto: "auto";
+            sm: "sm";
+            lg: "lg";
+            xl: "xl";
+        }>>;
+        width: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>;
+    }, z.core.$strict>>;
 }, z.core.$strict>;
 
 // ── ObjectListViewSchema (const) ──
@@ -12283,6 +12466,105 @@ declare const ObjectNavItemSchema: z.ZodObject<{
     requiredPermissions: z.ZodOptional<z.ZodArray<z.ZodString>>;
     requiresObject: z.ZodOptional<z.ZodString>;
     requiresService: z.ZodOptional<z.ZodString>;
+}, z.core.$strict>;
+
+// ── ObjectTimelineProps (type) ──
+type ObjectTimelineProps = z.input<typeof ObjectTimelinePropsSchema>;
+
+// ── ObjectTimelinePropsParsed (type) ──
+type ObjectTimelinePropsParsed = z.infer<typeof ObjectTimelinePropsSchema>;
+
+// ── ObjectTimelinePropsSchema (const) ──
+declare const ObjectTimelinePropsSchema: z.ZodObject<{
+    objectName: z.ZodOptional<z.ZodString>;
+    timeline: z.ZodOptional<z.ZodObject<{
+        startDateField: z.ZodString;
+        endDateField: z.ZodOptional<z.ZodString>;
+        titleField: z.ZodString;
+        groupByField: z.ZodOptional<z.ZodString>;
+        colorField: z.ZodOptional<z.ZodString>;
+        scale: z.ZodDefault<z.ZodEnum<{
+            year: "year";
+            month: "month";
+            day: "day";
+            hour: "hour";
+            week: "week";
+            quarter: "quarter";
+        }>>;
+    }, z.core.$strict>>;
+    filter: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        field: z.ZodString;
+        operator: z.ZodPreprocess<z.ZodEnum<{
+            in: "in";
+            starts_with: "starts_with";
+            ends_with: "ends_with";
+            not_in: "not_in";
+            between: "between";
+            greater_than: "greater_than";
+            after: "after";
+            greater_than_or_equal: "greater_than_or_equal";
+            less_than: "less_than";
+            before: "before";
+            less_than_or_equal: "less_than_or_equal";
+            equals: "equals";
+            not_equals: "not_equals";
+            contains: "contains";
+            not_contains: "not_contains";
+            icontains: "icontains";
+            is_null: "is_null";
+            is_not_null: "is_not_null";
+            is_empty: "is_empty";
+            is_not_empty: "is_not_empty";
+        }>>;
+        value: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodNumber, z.ZodBoolean, z.ZodNull, z.ZodArray<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>]>>;
+    }, z.core.$strict>>>;
+    sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        field: z.ZodString;
+        order: z.ZodEnum<{
+            desc: "desc";
+            asc: "asc";
+        }>;
+    }, z.core.$strip>>>;
+    limit: z.ZodOptional<z.ZodNumber>;
+    items: z.ZodOptional<z.ZodArray<z.ZodUnknown>>;
+    variant: z.ZodOptional<z.ZodEnum<{
+        gantt: "gantt";
+        vertical: "vertical";
+        horizontal: "horizontal";
+    }>>;
+    dateFormat: z.ZodOptional<z.ZodEnum<{
+        long: "long";
+        short: "short";
+        iso: "iso";
+    }>>;
+    rowLabel: z.ZodOptional<z.ZodString>;
+    minDate: z.ZodOptional<z.ZodString>;
+    maxDate: z.ZodOptional<z.ZodString>;
+    descriptionField: z.ZodOptional<z.ZodString>;
+    mapping: z.ZodOptional<z.ZodUnknown>;
+    navigation: z.ZodOptional<z.ZodObject<{
+        mode: z.ZodDefault<z.ZodEnum<{
+            split: "split";
+            none: "none";
+            modal: "modal";
+            drawer: "drawer";
+            page: "page";
+            popover: "popover";
+            new_window: "new_window";
+        }>>;
+        view: z.ZodOptional<z.ZodNever>;
+        preventNavigation: z.ZodDefault<z.ZodBoolean>;
+        openNewTab: z.ZodDefault<z.ZodBoolean>;
+        size: z.ZodDefault<z.ZodEnum<{
+            full: "full";
+            md: "md";
+            auto: "auto";
+            sm: "sm";
+            lg: "lg";
+            xl: "xl";
+        }>>;
+        width: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>;
+    }, z.core.$strict>>;
 }, z.core.$strict>;
 
 // ── ObjectTreeProps (type) ──

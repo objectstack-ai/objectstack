@@ -100,6 +100,7 @@
     "ui/ObjectMasterDetailFormProps",
     "ui/ObjectMetricProps",
     "ui/ObjectNavItem",
+    "ui/ObjectTimelineProps",
     "ui/ObjectTreeProps",
     "ui/ObjectUserFilters",
     "ui/Page",

@@ -3854,7 +3854,7 @@ const OBJECT_TIMELINE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
       'Write this as a key of the `timeline` config object instead — `timeline: { startDateField, endDateField, titleField, groupByField, colorField, scale }`. The flat top-level spelling '
       + 'is the runtime handoff `ListView` emits for a timeline view and a stored-document '
       + 'fallback the renderer keeps reading; it is not a second authoring spelling (one key per '
-      + 'concept, Prime Directive #12). A `dateField` is the block\'s `startDateField` — it is only '
+      + 'concept). A `dateField` is the block\'s `startDateField` — it is only '
       + 'ever read as that key\'s alias.',
   },
 ];
@@ -3943,7 +3943,7 @@ export const ObjectTimelinePropsSchema = lazySchema(() => strictObject({
   items: z.array(z.unknown()).optional()
     .describe('Static inline entries — read FIRST and bypasses the object query entirely (the renderer becomes a pass-through and the author owns the item shape)'),
   variant: z.enum(['vertical', 'horizontal', 'gantt']).optional()
-    .describe("Rail layout (renderer default `vertical`). ⚠️ `gantt` needs authored `items`: the object-bound path composes flat feed entries, which the gantt branch cannot draw, and refuses that combination with a diagnostic (objectui#6655)"),
+    .describe("Rail layout (renderer default `vertical`). ⚠️ `gantt` needs authored `items`: the object-bound path composes flat feed entries, which the gantt branch cannot draw, and refuses that combination with a named diagnostic instead of drawing an empty chart"),
   dateFormat: z.enum(['short', 'long', 'iso']).optional()
     .describe("How each entry's date is rendered (renderer default `short`): `short` / `long` are locale-formatted, `iso` is the locale-free machine form"),
   rowLabel: z.string().optional()
