@@ -35,11 +35,27 @@ Per **item**, derived — never hand-assigned:
 - `partial` — some passed, none failed (the "proved half, left it unticked" state from
   #3358, now first-class instead of a prose apology);
 - `fail` — any clause failed;
-- `blocked` / `not-run` — nothing consulted.
+- `blocked` / `not-run` — nothing consulted;
+- `planned` — the item's `status` is `planned`: the definition requires the capability
+  and the platform does not verify it yet. Read off the item, never derived from a run.
 
 **No verdict without evidence.** A clause with no captured artifact is `not-run`, not
 `pass`. Evidence means: the API/network trace, the screenshot, the log excerpt, or the
 test-run output the clause's `evidence` field names.
+
+**A `planned` item is never driven, and never scores.** `scripts/checklist-select.mjs`
+returns it in no selector's runnable set — it prints the matches under a separate
+PLANNED heading and hands the runner only what can run. Carry each one into the run
+record as `planned`, with no clause table: there are no `steps` to follow and no
+`acceptance` to consult, so ⛔ it is never `pass`, never `fail`, never `blocked` and
+never `not-run`. The distinction that matters is against `blocked`: a blocked item is a
+**real test** the environment cannot run today, so its gap is a fixture debt and the
+right answer is to provision it; a planned item has **nothing to run at all**, so its
+gap is a platform debt and the right answer is to build the capability. Scoring one as
+the other sends the next sweep to fix the wrong thing. A planned item earns `active`
+only through a run record in which it passed — see the README's "Implementation status".
+The completion criterion is unchanged by them: an area is run when every item the
+selector handed you has a verdict; planned ids are listed, not chased.
 
 ## The accuracy rules
 
@@ -428,6 +444,13 @@ QA run · <selector> (<judged>/<total>) · <framework-sha8> · <YYYY-MM-DD> · <
 
 **An omitted bucket means "not declared", never zero** — the roll-up renders the two
 differently, so write `0 FAIL` when you mean zero.
+
+**⛔ `planned` items appear nowhere in this title** — not inside `<total>`, and not as a
+sixth bucket. The counts vocabulary is closed at the five verdicts above, and a planned
+item was never a judgeable unit of this run: putting one in `<total>` deflates the
+coverage claim the record is read on, and inventing a `PLANNED` segment is a deviation
+the roll-up refuses to parse. They are named in the body, under the scope section that
+already records the selector.
 
 **Retired phrasings — ⛔ none of these may be written again:** `(FULL area)`, `(N items)`,
 `(N of M items)`, `(N/M items consulted)`, omitting the parenthetical entirely, and the

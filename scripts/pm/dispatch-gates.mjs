@@ -5211,9 +5211,9 @@ const BARE_ENTRY_POINT_NAME = 'selfTest';
  *
  * ## The census, re-derived on this tree
  *
- * 253 code-position matches over the tracked JS/TS corpus. 223 are the bare
- * `selfTest`; the remaining 30 carry compound names over 27 distinct spellings,
- * and they are the rows below. Nineteen are genuine self-test batteries — the
+ * 275 code-position matches over the tracked JS/TS corpus. 244 are the bare
+ * `selfTest`; the remaining 31 carry compound names over 28 distinct spellings,
+ * and they are the rows below. Twenty are genuine self-test batteries — the
  * anchor firing on them is the anchor working. ELEVEN are production code:
  *
  *   scripts/check-self-test-wired.mjs             carriesSelfTest
@@ -5240,7 +5240,7 @@ const BARE_ENTRY_POINT_NAME = 'selfTest';
  * and it is exactly the kind of claim that stops being true without anything
  * going red, which is what the pin in this module's self-test exists to catch.
  *
- * The same measurement, redone over the table's current nineteen genuine rows,
+ * The same measurement, redone over the table's current twenty genuine rows,
  * is still NOT zero, and that asymmetry is what makes the classification
  * load-bearing rather than decorative: `fixtureSelfTest` drops
  * `packages/spec/spec-changes.json` and `prePushIsArmedSelfTest` drops
@@ -5269,8 +5269,8 @@ const BARE_ENTRY_POINT_NAME = 'selfTest';
  *     wider — and it would make the tool's self-scan differ from every other
  *     scan, which is a hazard of its own.
  *
- * ⇒ What ships is neither. The anchor keeps firing on all 30, the mask keeps
- * blanking all 30, and the cost of the eleven accidental ones is MEASURED on
+ * ⇒ What ships is neither. The anchor keeps firing on all 31, the mask keeps
+ * blanking all 31, and the cost of the eleven accidental ones is MEASURED on
  * every run instead of asserted in prose. Silence was the defect; the remedy is
  * noise on the day it starts costing something.
  *
@@ -5306,6 +5306,7 @@ const COMPOUND_ANCHOR_LEDGER = [
   ['scripts/check-platform-checklist.mjs', 'selfTestMetaCallSpelling', false],
   ['scripts/check-platform-checklist.mjs', 'selfTestLineCitationBinding', false],
   ['scripts/check-platform-checklist.mjs', 'selfTestSymbolAnchors', false],
+  ['scripts/check-platform-checklist.mjs', 'selfTestPlannedStatus', false],
   ['scripts/check-regen-pending.mjs', 'fixtureSelfTest', false],
   ['scripts/check-regen-pending.mjs', 'prePushIsArmedSelfTest', false],
   ['scripts/check-regen-pending.mjs', 'decisionTableSelfTest', false],
