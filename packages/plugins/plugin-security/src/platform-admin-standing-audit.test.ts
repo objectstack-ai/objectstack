@@ -119,7 +119,12 @@ function makeQl(
     // hand-mirrored guard (`check:engine-double-contract`): a fixture drifting
     // to a call shape ObjectQL.update would refuse fails loudly here. Nothing
     // in this file updates, and that is exactly why the refusal must be real.
-    async update(object: string, data: any, options?: any) {
+    //
+    // `_object` keeps the door's POSITION — the object name is argument one on
+    // every `IDataEngine` write — while telling `noUnusedParameters` that not
+    // reading it is deliberate. Dropping it would shift `data` and `options`
+    // one place left and hand the dispatch predicate the wrong arguments.
+    async update(_object: string, data: any, options?: any) {
       assertEngineUpdateDispatch(data, options);
       return null;
     },
