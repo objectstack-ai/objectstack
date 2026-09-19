@@ -528,6 +528,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir, totalmem } from 'node:os';
 import { join, posix, resolve } from 'node:path';
 import { getHeapStatistics } from 'node:v8';
+import { gitFreeEnv } from './git-env.mjs';
 import {
   selfTest as workspaceEnumeratorSelfTest,
   workspaceEnumeratorFloorFailures,
@@ -1740,6 +1741,7 @@ function gitIgnoredPaths(rels) {
   if (rels.length === 0) return new Set();
   const res = spawnSync('git', ['-c', 'core.excludesFile=', 'check-ignore', '--stdin', '-z'], {
     cwd: ROOT,
+    env: gitFreeEnv(), // LOCAL-ONLY (#16644): the ignore rules of the tree at `cwd`, never a hook's
     input: rels.map((r) => `${r}\0`).join(''),
     encoding: 'utf8',
     maxBuffer: 16 * 1024 * 1024,
@@ -1828,7 +1830,10 @@ function readIgnoredPaths(cwd) {
       '--directory',
       '-z',
     ],
-    { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
+    // LOCAL-ONLY (#16644): `cwd` is a package directory on a gate run and a mkdtemp
+    // fixture in the self-test battery below; an inherited GIT_DIR outranks it and this
+    // would answer with the real repository's ignored paths for a fixture.
+    { cwd, env: gitFreeEnv(), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
   );
   if (res.error) {
     refusePrerequisite(
@@ -5914,7 +5919,8 @@ function selfTest() {
   const ignoreRepo = mkdtempSync(join(tmpdir(), 'objectstack-type-check-ignore-'));
   let ignoreSourceCases = [];
   try {
-    const g = (args) => spawnSync('git', args, { cwd: ignoreRepo, encoding: 'utf8' });
+    // LOCAL-ONLY (#16644): `init` / `config` / `add` against a mkdtemp fixture.
+    const g = (args) => spawnSync('git', args, { cwd: ignoreRepo, encoding: 'utf8', env: gitFreeEnv() });
     g(['init', '-q', '.']);
     g(['config', 'user.email', 'self-test@objectstack.invalid']);
     g(['config', 'user.name', 'check-type-check-coverage self-test']);

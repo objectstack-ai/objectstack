@@ -231,6 +231,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { gitFreeEnv } from './git-env.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -294,8 +295,13 @@ const isChangesetFile = (p) => p.startsWith('.changeset/') && p.endsWith('.md') 
 
 // ── git helpers ──────────────────────────────────────────────────────────────
 
+// #16644: `cwd` is the only thing that may name the repository, and the self-test
+// hands this helper mkdtemp fixtures -- `init`, `add -A`, `commit`, `fetch` from a
+// sibling temp repo. An inherited GIT_DIR outranks `cwd` and redirects all of them
+// onto the real checkout. The `fetch` legs name their remote by local PATH, so the
+// strip costs them no transport configuration.
 function git(args, cwd) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  return execFileSync('git', args, { cwd, env: gitFreeEnv(), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 }
 
 /** File contents at a rev, or `null` when the path does not exist there. */

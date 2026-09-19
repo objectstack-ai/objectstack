@@ -365,6 +365,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { gitFreeEnv } from './git-env.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 import { maskComments, maskCommentsAndLiterals } from './js-comment-mask.mjs';
 // #16421 — the DIRECTION ARM, read through the fleet's one declaration reader.
@@ -2002,11 +2003,16 @@ export function projectedMigrationIds(specChangesJson) {
 // ---------------------------------------------------------------------------
 
 function git(args, cwd) {
+  // `env: gitFreeEnv()` (#16644): every caller of this helper -- the real checkout on a
+  // gate run, a mkdtemp fixture in the self-test -- names its repository by `cwd`. An
+  // inherited GIT_DIR outranks `cwd`, so without the strip the fixture legs read and
+  // write THE REAL REPOSITORY under a hook, silently and with `ok` printed throughout.
+  //
   // stderr is PIPED, not inherited: `showOrNull` probes paths that legitimately do
   // not exist at a rev (a ledger file added mid-history, a changeset deleted), and
   // git's "fatal: path ... does not exist" would otherwise print as though the gate
   // had failed while it is in fact answering the question it asked.
-  return execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
+  return execFileSync('git', args, { cwd, env: gitFreeEnv(), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
 }
 
 /** File contents at a rev, or `null` when the path does not exist there. */
@@ -2035,7 +2041,7 @@ function showManyOrNull(rev, paths, cwd) {
   let out;
   try {
     out = execFileSync('git', ['cat-file', '--batch'], {
-      cwd, input, maxBuffer: 512 * 1024 * 1024, stdio: ['pipe', 'pipe', 'pipe'],
+      cwd, env: gitFreeEnv(), input, maxBuffer: 512 * 1024 * 1024, stdio: ['pipe', 'pipe', 'pipe'],
     });
   } catch { return found; }
 

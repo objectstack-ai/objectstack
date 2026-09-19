@@ -383,6 +383,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { gitFreeEnv } from './git-env.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 // #16055, the level axis below. Both are IMPORTED rather than restated: the
 // clause-② declaration has exactly one legal spelling and exactly one label
@@ -469,6 +470,13 @@ const isChangesetFile = (p) => p.startsWith('.changeset/') && p.endsWith('.md') 
 function git(args, cwd, { quiet = false } = {}) {
   return execFileSync('git', args, {
     cwd,
+    // #16644: `cwd` is the only thing that may name the repository here, and the
+    // self-test hands it mkdtemp fixtures. GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE
+    // outrank `cwd`, so an inherited one redirects `init`, `add -A` and `commit`
+    // onto the real checkout. ⭐ This helper is also the one that runs `fetch` in the
+    // #4690 leg -- its remote there is another LOCAL mkdtemp repository passed by
+    // path, so no transport configuration is in play and the strip is safe.
+    env: gitFreeEnv(),
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
     // `execFileSync` inherits the child's stderr by default. That is right for
