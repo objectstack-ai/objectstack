@@ -164,6 +164,36 @@ function emitDependentRequired(
   jsonSchema.allOf = [...allOf, { dependentRequired: emitted }];
 }
 
+/**
+ * `propertyNames` with a `not` over the banned names — the keyword JSON Schema
+ * has for a rule about NAMES, so nothing is encoded and nothing approximated.
+ *
+ * A node that already carries `propertyNames` is conjoined through `allOf`
+ * rather than overwritten, for the reason `emitRequiredOneOf` is: a record
+ * emits `propertyNames: { type: 'string' }` of its own, and replacing it would
+ * trade the rule this arm adds for the key-type rule the node already stated.
+ * An identical rule already present is left alone rather than duplicated, so
+ * the arm is idempotent the way `emitNonBlankString` is.
+ *
+ * An EMPTY key list emits nothing, and the reason is stronger than "it would
+ * ban nothing": `enum` is specified as a non-empty array, so `{ not: { enum:
+ * [] } }` is an INVALID SCHEMA rather than a vacuous one — ajv refuses it with
+ * "enum must have non-empty array", which would take the whole published file
+ * down with it instead of leaving a keyword nobody reads.
+ */
+function emitBannedKeys(jsonSchema: JsonObject, keys: readonly string[]): void {
+  if (keys.length === 0) return;
+  const rule = { not: { enum: [...keys] } };
+  if (!('propertyNames' in jsonSchema)) {
+    jsonSchema.propertyNames = rule;
+    return;
+  }
+  if (JSON.stringify(jsonSchema.propertyNames) === JSON.stringify(rule)) return;
+  const allOf = Array.isArray(jsonSchema.allOf) ? (jsonSchema.allOf as unknown[]) : [];
+  if (allOf.some((clause) => JSON.stringify(clause) === JSON.stringify({ propertyNames: rule }))) return;
+  jsonSchema.allOf = [...allOf, { propertyNames: rule }];
+}
+
 /** Write one declared arm's keywords onto one emitted node. */
 export function emitProjectableRefinement(jsonSchema: JsonObject, declared: ProjectableRefinement): void {
   switch (declared.pattern) {
@@ -175,6 +205,9 @@ export function emitProjectableRefinement(jsonSchema: JsonObject, declared: Proj
       return;
     case 'dependent-required':
       emitDependentRequired(jsonSchema, declared.dependencies);
+      return;
+    case 'banned-keys':
+      emitBannedKeys(jsonSchema, declared.keys);
       return;
   }
 }

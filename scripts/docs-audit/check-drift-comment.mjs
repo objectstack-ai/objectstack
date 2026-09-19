@@ -69,6 +69,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import process from 'node:process';
 
+import { gitFreeEnv } from '../git-env.mjs';
+
 const HERE = dirname(new URL(import.meta.url).pathname);
 const REPO_ROOT = join(HERE, '..', '..');
 const WORKFLOW = join(REPO_ROOT, '.github', 'workflows', 'docs-drift-check.yml');
@@ -163,8 +165,12 @@ async function renderComment(scriptText, affectedJson, { headSha = 'f'.repeat(40
 // the sdk route bridge, so these repos (which declare no route ledger) do not trip the
 // bridge's broken-scan verdicts and the fixture stays about the headline.
 // ---------------------------------------------------------------------------
+// LOCAL-ONLY (#16644): every `git` and every mapper run below is aimed at a throwaway
+// fixture repository under `workdir`. `gitFreeEnv()` is the BASE so no inherited GIT_DIR /
+// GIT_WORK_TREE / GIT_INDEX_FILE can outrank that `cwd` -- the identity and config-file
+// pins that follow are deliberate and are re-applied ON TOP of the strip.
 const GIT_ENV = {
-  ...process.env,
+  ...gitFreeEnv(),
   GIT_AUTHOR_NAME: 'fixture', GIT_AUTHOR_EMAIL: 'fixture@objectstack.ai',
   GIT_COMMITTER_NAME: 'fixture', GIT_COMMITTER_EMAIL: 'fixture@objectstack.ai',
   GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null',
