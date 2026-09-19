@@ -50,6 +50,7 @@ export const zhCN: TranslationData = {
           },
         },
         due_date: { label: '截止日期' },
+        days_overdue: { label: '逾期天数' },
         reminder_date: { label: '提醒日期/时间' },
         completed_date: { label: '完成日期' },
         owner: { label: '负责人' },

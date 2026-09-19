@@ -46,6 +46,7 @@ export const jaJP: TranslationData = {
           },
         },
         due_date: { label: '期日' },
+        days_overdue: { label: '超過日数' },
         reminder_date: { label: 'リマインダー日時' },
         completed_date: { label: '完了日' },
         owner: { label: '担当者' },
