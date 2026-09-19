@@ -2983,7 +2983,7 @@ export function selfTest() {
   const seatClaim = renderBody(SEAT_CLAIM, NOW_MS);
   t('⭐ THE SEAT\'S OWN CLAIM SHAPE: a `{{WAS:…}}` in prose beside backticked names, no `{{NOW}}`, is ACCEPTED', seatClaim.ok === true);
   t('…stamped by DECLARATION rather than by this act\'s clock', seatClaim.verdict === 'stamped-by-declaration');
-  t('…and the declared stamp is what reaches the board', seatClaim.body.includes('this file last landed 2026-09-08T14:00Z.'));
+  t('…and the declared stamp is what reaches the board', String(seatClaim.body).includes('this file last landed 2026-09-08T14:00Z.'));
   const DOCBLOCK_SHAPED =
     'The contract has two spellings: `{{NOW}}` is the clock this act reads, and\n' +
     '`{{WAS:YYYY-MM-DDThh:mmZ}}` declares a reading of something else.\n\n' +
@@ -2991,8 +2991,8 @@ export function selfTest() {
   const docblockShaped = renderBody(DOCBLOCK_SHAPED, NOW_MS);
   t('⭐ THIS TOOL\'S OWN DOCBLOCK SHAPE: a body that QUOTES both tokens and declares a stamp is ACCEPTED', docblockShaped.ok === true);
   t('⭐ …and it is exactly the body the excluded criterion would have refused: 0 substituted, 2 verbatim', docblockShaped.substituted === 0 && docblockShaped.verbatim === 2);
-  t('…both quotations reach the board as written', docblockShaped.body.includes('`{{NOW}}`') && docblockShaped.body.includes('`{{WAS:YYYY-MM-DDThh:mmZ}}`'));
-  t('…while the declaration OUTSIDE them renders its own value', docblockShaped.body.includes('Measured on this channel 2026-09-08T14:00Z.'));
+  t('…both quotations reach the board as written', String(docblockShaped.body).includes('`{{NOW}}`') && String(docblockShaped.body).includes('`{{WAS:YYYY-MM-DDThh:mmZ}}`'));
+  t('…while the declaration OUTSIDE them renders its own value', String(docblockShaped.body).includes('Measured on this channel 2026-09-08T14:00Z.'));
 
   // The predicate itself, over the counts alone — the deliverable this card
   // asked for FIRST, and the one place the decision is made.
@@ -3022,16 +3022,16 @@ export function selfTest() {
 
   // The refusal text: the same register as the unrecognised-opener refusal,
   // because it reports the same two facts.
-  t('the refusal NAMES the quoted opener it means', legA.error.includes('`{{NOW}}`'));
-  t('…and the construct that holds it, in the words a reader would use', legA.error.includes(QUOTED_SPAN_KINDS['code-span']));
-  t('…and the MISSING STAMP, as the counts nothing had compared to intent before', legA.error.includes('0 {{NOW}}, 0 quoted'));
-  t('…and that nothing was written', legA.error.includes('Nothing was written'));
-  t('⭐ …and the quiet direction by name, in the UNKNOWN refusal\'s own words', legA.error.includes('the quiet direction') && unrecognisedOpenerText([{ kind: 'unknown-token-name', at: 0, span: '{{now}}' }]).includes('the quiet direction'));
-  t('…the remedy is a token OUTSIDE the quotation, never a route that cannot work there', legA.error.includes('OUTSIDE the quotation'));
-  t('…offering BOTH legal spellings, never only the act-clock one', legA.error.includes(STAMP_TOKEN) && legA.error.includes('{{WAS:YYYY-MM-DDThh:mmZ}}'));
-  t('⭐ …and saying what is NOT refused, so a reader cannot over-read it', legA.error.includes('spells no token at all is not this refusal'));
-  t('a FENCED offender is named as a fence rather than as a span', renderBody('Claim: seat.\n\n```\n{{NOW}}\n```\n', NOW_MS).error.includes(QUOTED_SPAN_KINDS.fenced));
-  t('EVERY quoted token is listed, not just the first', renderBody('Claim: seat.\n\nRead `{{NOW}}` and `{{WAS:YYYY-MM-DDThh:mmZ}}`.\n', NOW_MS).error.split('\n').filter((l) => /^ {2}\d+\. /u.test(l)).length === 2);
+  t('the refusal NAMES the quoted opener it means', String(legA.error).includes('`{{NOW}}`'));
+  t('…and the construct that holds it, in the words a reader would use', String(legA.error).includes(QUOTED_SPAN_KINDS['code-span']));
+  t('…and the MISSING STAMP, as the counts nothing had compared to intent before', String(legA.error).includes('0 {{NOW}}, 0 quoted'));
+  t('…and that nothing was written', String(legA.error).includes('Nothing was written'));
+  t('⭐ …and the quiet direction by name, in the UNKNOWN refusal\'s own words', String(legA.error).includes('the quiet direction') && unrecognisedOpenerText([{ kind: 'unknown-token-name', at: 0, span: '{{now}}' }]).includes('the quiet direction'));
+  t('…the remedy is a token OUTSIDE the quotation, never a route that cannot work there', String(legA.error).includes('OUTSIDE the quotation'));
+  t('…offering BOTH legal spellings, never only the act-clock one', String(legA.error).includes(STAMP_TOKEN) && String(legA.error).includes('{{WAS:YYYY-MM-DDThh:mmZ}}'));
+  t('⭐ …and saying what is NOT refused, so a reader cannot over-read it', String(legA.error).includes('spells no token at all is not this refusal'));
+  t('a FENCED offender is named as a fence rather than as a span', String(renderBody('Claim: seat.\n\n```\n{{NOW}}\n```\n', NOW_MS).error).includes(QUOTED_SPAN_KINDS.fenced));
+  t('EVERY quoted token is listed, not just the first', String(renderBody('Claim: seat.\n\nRead `{{NOW}}` and `{{WAS:YYYY-MM-DDThh:mmZ}}`.\n', NOW_MS).error).split('\n').filter((l) => /^ {2}\d+\. /u.test(l)).length === 2);
 
   // ⛔ The refusal ORDERING is unchanged: this rule is LAST, and every refusal
   // that used to fire still fires first on a body that breaks both.
