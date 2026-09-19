@@ -6,21 +6,22 @@
   ],
   "objectui": {
     "repo": "https://github.com/objectstack-ai/objectui.git",
-    "rev": "53ded82bf7a494f54e344e19099dbf00854b8694",
-    "revDate": "2026-09-05T15:42:42+00:00",
+    "rev": "cfcc17d9dd04ebb80c092cacb4f4034425f51b29",
+    "revDate": "2026-09-14T11:40:39+00:00",
     "source": "packages/sdui-parser/src",
     "files": [
       "packages/sdui-parser/src/codegen.ts",
       "packages/sdui-parser/src/dashboard-widget-options.ts",
       "packages/sdui-parser/src/index.ts",
       "packages/sdui-parser/src/input-type.ts",
+      "packages/sdui-parser/src/kanban-quick-add.ts",
       "packages/sdui-parser/src/parse.ts",
       "packages/sdui-parser/src/provenance.ts",
       "packages/sdui-parser/src/types.ts",
       "packages/sdui-parser/src/validate.ts"
     ]
   },
-  "recordedAgainstPin": "53ded82bf7a494f54e344e19099dbf00854b8694",
+  "recordedAgainstPin": "cfcc17d9dd04ebb80c092cacb4f4034425f51b29",
   "grammarRegion": {
     "file": "packages/sdui-parser/src/parse.ts",
     "delimiter": "/* ---------------------- the JS literal subset (#6614) ---------------------- */",
@@ -37,7 +38,9 @@
     "forbidden-attr",
     "forbidden-tag",
     "inert-expression",
+    "inert-quick-add",
     "invalid-enum",
+    "member-type-mismatch",
     "mismatched-tag",
     "missing-required-prop",
     "multiple-roots",

@@ -77,6 +77,27 @@ export interface ManifestInput {
    * declared and every already-published entry serializes byte-identically.
    */
   type: ManifestInputType | ManifestInputType[];
+  /**
+   * The coarse kind of the input's MEMBERS — array elements, or the values of
+   * an object used as a map — as ONE kind or an ARRAY of kinds for a member
+   * contract that is a union (objectui#8067).
+   *
+   * Absent means "not declared", which is what every input published before
+   * this key existed says: {@link validateTree} checks no member and the
+   * codegen emits the unnarrowed element type, exactly as before. So a
+   * manifest gains this key only where a member kind was really declared, and
+   * every already-published entry serializes byte-identically.
+   *
+   * Read the arms through `inputTypeArms(input.of)` — the same accessor
+   * `type`'s arms go through, since the two fields carry the same shape and a
+   * reader that forgets the array form is silently inert on it.
+   *
+   * LOCKSTEP: this key and its three readers — `validateTree`'s member check,
+   * `manifestFromConfigs`' canonicalization and the codegen's element type —
+   * are the port of objectui's copy. The two copies must agree on the accepted
+   * grammar AND on diagnostic codes; change this only together with objectui.
+   */
+  of?: ManifestInputType | ManifestInputType[];
   required?: boolean;
   /** allowed values for `enum` inputs */
   enum?: Array<string | { value: unknown; label?: string }>;
