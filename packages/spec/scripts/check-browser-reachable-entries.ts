@@ -715,6 +715,65 @@ function audit(): never {
 // Self-test — the shapes, not the corpus
 // ---------------------------------------------------------------------------
 
+// Set by `selfTest()` only after its verdict line prints, and read at the
+// dispatch at the foot of this file: a `return` that leaves the function above
+// that line prints nothing, and here it does not even stop — control falls
+// through to `audit()`, which on a built tree prints its own green line and
+// exits 0. A self-test that never finished, reported as one that passed.
+// ⛔ AN EXIT CODE IS NOT A HANDSHAKE; the flag is the thing an early return
+// cannot carry with it.
+let selfTestReachedVerdict = false;
+
+// ── The self-test's own battery roster and floor ───────────────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition,
+// and the verdict line names three mechanisms rather than a count, so "every
+// case held" and "the cases never ran" printed the same sentence. The shrink was
+// measured on the sibling `check-exported-any.ts`, whose self-test has the same
+// anatomy — deleting one name from a fixture name list de-registers that case
+// and the run still prints its verdict byte-identically and still exits 0.
+//
+// Closed the way `scripts/check-agent-model-declared.mjs` and its TypeScript
+// ports (`scripts/check-test-typecheck.mts`, `check-duration-unit-keys.ts` in
+// this directory) closed it — COPIED and ⛔ never imported, because every
+// self-test has to keep running standalone as
+// `tsx scripts/check-browser-reachable-entries.ts --self-test`, and a shared
+// assertion module would be one point of failure for every instrument at once.
+// What is pinned is the registered NAMES, not a number.
+//
+// A BATTERY HERE IS A SECTION — the `// ──` groups this self-test was already
+// written in. Each opens with `battery('<name>')` and every `check()` after it
+// is attributed to that name until the next one opens, so a section that stops
+// running names ITSELF at the floor rather than going quiet.
+//
+// ⛔ A pinned TOTAL is not the repair — the refusal battery falling from 10
+// cases to 1 keeps a total "right" the moment a sibling grows — and ⛔ neither
+// is a roster DERIVED from the run: a count taken from the cases that ran can
+// never notice one that stopped.
+//
+// The counts are a FLOOR, not an equality: adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running.
+const SELF_TEST_BATTERIES: Readonly<Record<string, number>> = Object.freeze({
+  'the scanner FINDS real specifiers': 1,
+  'the scanner does NOT fabricate specifiers out of prose or lookalikes': 1,
+  'the walk: transitive over relative hops, both verdicts': 4,
+  'the refusal: an unbuilt or stale tree is NOT MEASURED': 10,
+  'the reconciliation: both directions': 4,
+  'target resolution reads BOTH conditions': 1,
+  "the browser condition's targets, and only when declared (#11072)": 4,
+  'what counts as Node-only (#11072)': 2,
+  'the node-only verdict over a walked graph, BOTH directions (#11072)': 2,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 9;
+
+// The key a case is filed under when no battery is open. It is not a declared
+// battery, so it reds by the same set difference rather than silently inflating
+// whichever battery happened to open last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 /**
  * A green run over today's build proves only what today's build contains, and
  * two of the things this gate must do cannot be exercised by it at all: the tree
@@ -722,14 +781,33 @@ function audit(): never {
  * transitive walk — the part that keeps the gate honest the day `splitting` is
  * turned on — would ship never having run. These fixtures are the contract.
  */
-function selfTest(): never {
+function selfTest(): void {
   const failures: string[] = [];
+  // The battery ledger this self-test's floor is evaluated against.
+  // `battery()` opens a battery; every `check()` below is attributed to the one
+  // most recently opened.
+  //
+  // Registration is the FIRST statement of `check()`, before the line is
+  // printed and before `failures` moves, because the floor asserts REACH: a
+  // case that runs and FAILS still registers, and only a case that never runs
+  // at all goes missing from the ledger. Routing registration through the
+  // failure sink instead would register a case only when it failed — a fully
+  // green run would register 0 and every battery would read DID NOT RUN, the
+  // floor inverted rather than installed.
+  const seen = new Map<string, number>();
+  let openBattery: string | undefined;
+  const battery = (name: string): void => {
+    openBattery = name;
+  };
   const check = (name: string, ok: boolean, detail = ''): void => {
+    const attributedTo = openBattery ?? UNATTRIBUTED_BATTERY;
+    seen.set(attributedTo, (seen.get(attributedTo) ?? 0) + 1);
     if (!ok) failures.push(`${name}${detail ? ` — ${detail}` : ''}`);
     console.log(`  ${ok ? '✓' : '✗'} ${name}${!ok && detail ? ` — ${detail}` : ''}`);
   };
 
   // ── The scanner: it must FIND real specifiers … ──────────────────────────
+  battery('the scanner FINDS real specifiers');
   const real = [
     `import { z } from 'zod';`,
     `export { a } from "./chunk-A.mjs";`,
@@ -746,6 +824,7 @@ function selfTest(): never {
   );
 
   // ── … and it must NOT fabricate them out of prose or lookalikes ──────────
+  battery('the scanner does NOT fabricate specifiers out of prose or lookalikes');
   // The first case is REAL text from dist/index.mjs: a documentation string that
   // contains a complete import statement. A naive grep reports it as a link.
   const ghost = [
@@ -764,6 +843,7 @@ function selfTest(): never {
   );
 
   // ── The walk: transitive over relative hops, both verdicts ───────────────
+  battery('the walk: transitive over relative hops, both verdicts');
   const tmp = mkdtempSync(join(tmpdir(), 'os-browser-reachable-'));
   try {
     const dist = join(tmp, 'dist');
@@ -813,6 +893,7 @@ function selfTest(): never {
   }
 
   // ── The refusal: an unbuilt or stale tree is NOT MEASURED ────────────────
+  battery('the refusal: an unbuilt or stale tree is NOT MEASURED');
   // Driven here rather than against this workspace, because the only way to
   // observe the refusal on the real tree is to break the real tree. Both
   // verdicts are pinned: a guard only ever seen green cannot be told apart from
@@ -998,6 +1079,7 @@ function selfTest(): never {
   }
 
   // ── The reconciliation: both directions ──────────────────────────────────
+  battery('the reconciliation: both directions');
   const emptyLedger = (): Ledger => ({ browserReachable: {}, unjudged: [], notAModule: [] });
 
   let problems: string[] = [];
@@ -1033,6 +1115,7 @@ function selfTest(): never {
   check('accepts a fully classified exports map', problems.length === 0, JSON.stringify(problems));
 
   // ── Target resolution reads BOTH conditions ──────────────────────────────
+  battery('target resolution reads BOTH conditions');
   const targets = targetsOf({
     import: { types: './dist/x/index.d.mts', default: './dist/x/index.mjs' },
     require: { types: './dist/x/index.d.ts', default: './dist/x/index.js' },
@@ -1044,6 +1127,7 @@ function selfTest(): never {
   );
 
   // ── #11072: the browser condition's targets, and only when declared ──────
+  battery("the browser condition's targets, and only when declared (#11072)");
   const conditioned = {
     browser: {
       import: { types: './dist/x/index.d.mts', default: './dist/browser/x/index.mjs' },
@@ -1077,6 +1161,7 @@ function selfTest(): never {
   );
 
   // ── #11072: what counts as Node-only ─────────────────────────────────────
+  battery('what counts as Node-only (#11072)');
   const nodeOnly = ['fs', 'node:fs', 'fs/promises', 'node:path', 'pg-connection-string',
     'pg-connection-string/index.js'];
   const browserSafe = ['zod', 'zod/v4', './chunk.mjs', 'ai'];
@@ -1092,6 +1177,7 @@ function selfTest(): never {
   );
 
   // ── #11072: the node-only verdict over a walked graph, BOTH directions ───
+  battery('the node-only verdict over a walked graph, BOTH directions (#11072)');
   const nodeOnlyTmp = mkdtempSync(join(tmpdir(), 'os-browser-reachable-nodeonly-'));
   try {
     const dist = join(nodeOnlyTmp, 'dist');
@@ -1131,13 +1217,78 @@ function selfTest(): never {
     rmSync(nodeOnlyTmp, { recursive: true, force: true });
   }
 
-  if (failures.length) {
-    console.error(`\n✗ self-test: ${failures.length} case(s) failed.`);
+  // ── The floor: every declared battery RAN, and ran its cases ─────────────
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered EQUALS the set declared, each at or above its own
+  // count. A set difference names WHICH battery stopped; a count says only that
+  // something did — and, before this block existed, not even that.
+  const floorProblems: string[] = [];
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorProblems.push(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of seen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorProblems.push(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — a case attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = seen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorProblems.push(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — ${SELF_TEST_BATTERIES[name] - count} case(s) that used to run no longer do.`,
+    );
+  }
+  if (floorProblems.length > 0) {
+    for (const problem of floorProblems) console.error(`✗ self-test floor: ${problem}`);
+    console.error(
+      '✗ self-test floor: A battery below its floor means cases STOPPED RUNNING — the battery is the ' +
+        'bug, not the number. Find what stopped registering (a deleted case, a fixture the cases are ' +
+        'built from that no longer exists, a guard that now skips) and restore it.',
+    );
+  }
+
+  if (failures.length || floorProblems.length) {
+    if (failures.length) console.error(`\n✗ self-test: ${failures.length} case(s) failed.`);
     process.exit(1);
   }
-  console.log('✅  self-test: scanner, transitive walk and ledger reconciliation all behave.');
-  process.exit(0);
+  // The count is printed because a reader had to hand-tally the checkmarks to
+  // get one, and it is printed AFTER the floor rather than instead of it: the
+  // number is evidence, the floor is the proof.
+  const registered = [...seen.values()].reduce((a, b) => a + b, 0);
+  console.log(
+    '✅  self-test: scanner, transitive walk and ledger reconciliation all behave — ' +
+      `${registered} case(s) across ${declaredBatteries.length} batteries, every battery at or above ` +
+      'its pinned floor.',
+  );
+  selfTestReachedVerdict = true;
 }
 
-if (SELF_TEST) selfTest();
+if (SELF_TEST) {
+  selfTest();
+  // The handshake. Without it a `return` above the verdict prints nothing and
+  // does not even stop: control reaches `audit()` below, which on a built tree
+  // prints its own green line and exits 0 — a self-test that never finished,
+  // reported as one that passed.
+  if (!selfTestReachedVerdict) {
+    console.error(
+      '\n✗ check-browser-reachable-entries self-test: selfTest() returned without reaching its verdict,\n' +
+        'so no verdict line was printed. Exiting 0 here would report a self-test that never\n' +
+        'finished as a self-test that passed.\n',
+    );
+    process.exit(1);
+  }
+  process.exit(0);
+}
 audit();

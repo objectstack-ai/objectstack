@@ -64,7 +64,7 @@ Server-connected object table with toolbar and switchable visualizations (grid/k
 | `options` | `Record<string, any>` | binding |  | View-type-specific options bag (kanban/calendar/gantt extras); prefer the typed spec props where they exist. |
 | `filters` | `FilterArray e.g. ['status','=','active']` | controlled |  | ObjectQL base filter; drive from React state for tabbed/searched lists. ([field, op, value]; ops =, !=, >, <, contains, in; compound: ["and", […], […]]). |
 | `onRowClick` | `(record) => void` | callback |  | Called with the clicked row's record — the hook for master/detail. |
-| `onNavigate` | `(recordId, action: 'view' \| 'edit') => void` | callback |  | Called for page-level navigation. |
+| `onNavigate` | `(recordId, action: 'view' \| 'new_window') => void` | callback |  | Called for page-level navigation. The second argument is a navigation-MODE token from a CLOSED vocabulary — 'view' opens the record page, 'new_window' opens it in a new browser tab; the reference implementation emits no other value and reads no other branch. |
 | `columns` | `string[] \| object[]` | data | ✓ | Fields to display as columns |
 | `type` | `'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'` | data |  |  |
 | `sort` | `object[]` | data |  |  |

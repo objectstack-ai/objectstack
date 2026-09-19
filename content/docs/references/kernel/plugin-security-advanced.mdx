@@ -226,7 +226,7 @@ Scope of permission application
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **resourceIds** | `string[]` | optional |  |
-| **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Predicate (CEL) filter, e.g. P`record.owner == os.user.id`. |
+| **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Predicate (CEL) filter, e.g. P`record.owner == os.user.id`. |
 | **fields** | `string[]` | optional | Allowed fields for data resources |
 
 

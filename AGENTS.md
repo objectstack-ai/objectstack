@@ -4,6 +4,7 @@ Primary AI instruction file for this repo — and the human contributors' source
 Read natively by Claude Code, GitHub Copilot (coding agent + CLI), and other agents — no
 separate `.github/copilot-instructions.md` mirror needed. When any other instruction file
 in this repo (including `.claude/skills/**`) conflicts with this one, **AGENTS.md wins**.
+`docs/NORTH-STAR.md` (先做什么: goals, priority) outranks it; `content/docs/concepts/north-star.mdx` = architecture.
 
 > **v5.0 breaking rename: `project` → `environment`** everywhere (CLI `-e`, `/api/v1/environments/:id`, header `X-Environment-Id`, `OS_ENVIRONMENT_ID`, DB column `environment_id` [control-plane tables; on the metadata tables since deprecated in favour of `organization_id`, ADR-0006 v4]). No aliases. See ADR-0006. "Project" now only means the npm/monorepo sense.
 
@@ -19,7 +20,6 @@ script's own header is the authority on detail.
 ## Communication
 
 语言规则分两件事:**和维护者说话用什么语言**,与**留在 GitHub 上的产物用什么语言**。
-一条规则一个通道,互不重叠。
 
 - **在 Claude Code 中与维护者对话一律使用中文**(对话回复、轮次报告等聊天通道里的内容)。
 - **GitHub 产物一律使用英文**:issue 与 PR 的标题、正文、评论。
@@ -252,40 +252,40 @@ localStorage / auth gotchas.
     When a cloud decision's **mechanism half** governs open code here, this repo carries its own ADR — own number, a
     `## Provenance` section naming the cloud record and its date, the commercial half left in cloud — and the cloud
     record gains a one-line pointer. Files never move between registries and numbers are never reassigned.
-14. **⛔ A governed surface is confirmed and merged by the maintainer, by hand — or confirmed by an authorized
-    approval and then landed by the owning seat; before that approval no AI seat merges, queues, or arms auto-merge on a
-    PR whose diff touches one.** The governed surfaces are `docs/adr/**`, `.claude/**` (agents, hooks and settings —
-    not only skills), `skills/**`, `AGENTS.md` and `CLAUDE.md` — the file you are reading is one — and a mixed diff
-    is governed whole on a single path hit. The register is the `GOVERNED_SURFACES` table in
-    `scripts/pm/check-governed-merges.mjs`; adding a surface is an edit *there*, never here, and `pnpm
-    check:pm-governed-prose` reds per-PR when this paragraph names fewer surfaces than the register — or more. When it
-    reds, name the surface here.
+14. **⛔ A governed surface lands only the way its tier allows — Tier H by the maintainer's hand or by an authorized
+    approval, Tier S by the owning seat on a contract-tier review of record; before that record no AI seat merges,
+    queues, or arms auto-merge on a PR whose diff touches one.** The governed surfaces are `docs/adr/**`,
+    `docs/NORTH-STAR.md`, `.claude/**` (agents, hooks and settings — not only skills), `skills/**`, `AGENTS.md` and
+    `CLAUDE.md` — the file you are reading is one — and a mixed diff is governed whole on a single path hit. The
+    register is the `GOVERNED_SURFACES` table in `scripts/pm/check-governed-merges.mjs`, each row carrying its tier;
+    adding a surface is an edit *there*, never here, and `pnpm check:pm-governed-prose` reds per-PR when this
+    paragraph names fewer surfaces than the register — or more. When it reds, name the surface here.
 
     **Authoring stays open to every seat** — drafting, pushing, opening and revising the PR. What is reserved is the
     **landing**: on a PR whose diff touches a governed surface ⛔ never merge, ⛔ never queue, ⛔ never arm
     auto-merge, ⛔ never flip it out of draft to make any of those possible — judged on the PR's **file list**, not
     its description; a **mixed diff is not a proportion question**, one path hit is enough; to land the rest, split off
-    the governed files. **Those four lift only for an authorized APPROVED review** — by an account in
-    `GOVERNED_APPROVERS` (`scripts/pm/check-governed-queue-guard.mjs`), on ANY commit and not dismissed. That word is
-    spent once per PR: the OWNING seat then lands it, later pushes included, re-queuing after an ejection or a rebase on
-    its own pre-landing check; this gate does not re-review it. Hand-authored governed content needs that approval; a PR
-    whose only governed paths are register rows the queue leg regenerates byte-exact clears with zero approvals — an
-    uncertified recompute, drift or a hand-authored sibling keeps it governed. Unapproved, no seat lands it: the
-    ending is that approval, then the owning seat. **Landing is tiered**: a PR whose governed paths all lie under
-    `.claude/skills/pm-dispatch/references/` lands through the queue after the skills seat's contract-tier review; every
-    other governed path is the rules layer and waits for the maintainer's word, which the director seat requests as ONE
-    batch of at most five rows — the approval stays the maintainer's click. ⛔ **No agent seat submits an approving
-    review on a governed-surface PR, under any account** — an authorized account is agent-operated too; "CI is green"
-    carries no information about a governance change.
+    the governed files. **The landing is tiered by the register; one Tier H path makes the whole PR Tier H.** **Tier H**
+    (人合: `docs/adr/**`, `docs/NORTH-STAR.md`, `skills/**`, `AGENTS.md`, `CLAUDE.md`): those four lift only for an
+    authorized APPROVED review by an account in `GOVERNED_APPROVERS`, on ANY commit and not dismissed; that word is
+    spent once per PR — the OWNING seat then lands it, later pushes included; the director seat requests the word as
+    ONE batch of at most five rows, and the click stays the maintainer's. **Tier S** (席内达档复核落地: all of
+    `.claude/**`): those four lift once the PR thread or its card carries a `## Contract review` record for the PR's
+    current head with `Served-tier: CONTRACT_REVIEW_TIER` and a PASS verdict, `check-clause2-carriers.mjs --pair N`
+    reads 0 and every check is green — the owning seat then lands it through the queue; the post-merge audit is the
+    compensating control. A PR whose only governed paths are register rows the queue leg regenerates byte-exact clears
+    with zero approvals — an uncertified recompute, drift or a hand-authored sibling keeps it governed. ⛔ **No agent
+    seat submits an approving review on a governed-surface PR, under any account** — an authorized account is
+    agent-operated too; "CI is green" carries no information about a governance change.
 
     **Already armed or queued when you read this?** Convert it back to **draft** AND disable auto-merge — draft is
     what removes queue membership, disabling alone drops only the arming — then confirm from the remote that it is in
     neither the queue nor `origin/main`. **Draft is no barrier by itself — the barrier is this directive**, and a
-    spent approval IS the review record, ⛔ not a relaxation. Behind it: the queue guard refuses an unpinned governed
-    diff; CODEOWNERS routes review requests for `docs/adr/` only, so nothing summons the maintainer on the other four;
-    the post-merge audit (`scripts/pm/check-governed-merges.mjs`) lists every governed-surface merge with its approver
-    and merger — a merger the maintainer does not recognise, or any agent approval, is a seat violation, filed and
-    rolled back. The rule has no exception for a seat to judge.
+    spent approval or a standing record IS the review record, ⛔ not a relaxation. Behind it: the queue guard refuses a
+    governed diff without its tier's record; CODEOWNERS routes review requests for `docs/adr/` only, so nothing summons
+    the maintainer on the other Tier H surfaces; the post-merge audit (`scripts/pm/check-governed-merges.mjs`) lists
+    every governed-surface merge with its approver and merger — a merger the maintainer does not recognise, any agent
+    approval, or a Tier S merge without a PASS record is a seat violation, filed and rolled back. No seat judges this.
 
 15. **⛔ A version release is performed by the maintainer, by hand — no AI seat publishes, tags, cuts a Release, or
     triggers a release workflow, and none merges the Version Packages PR.** A rule that binds every seat lives here,
@@ -459,7 +459,7 @@ Even inside your own worktree, operate defensively:
 2. **One feature branch + one PR per task.** Branch off `main`. **Never commit task work
    straight to `main`.** Name the branch after the issue it fixes: `claude/issue-<n>-<slug>`.
    The issue number is what makes in-flight work *discoverable* — `git ls-remote --heads
-   origin | grep issue-<n>` is a one-command pre-check, and the Duplicate Fix Guard
+   origin | grep -E 'issue-<n>(-|$)'` is a one-command pre-check, and the Duplicate Fix Guard
    workflow warns on fix PRs whose branch names no declared issue. A hit is a hint, not a
    claim — most heads carry no PR: ⛔ never skip a card on one, the `Claim:` comment decides.
 
@@ -797,7 +797,7 @@ working in its domain — browse the directory, never a hand-written list here:
 - `.claude/skills/` — repo-internal agent playbooks; every entry must carry
   `metadata.internal: true`.
 
-⛔ **Both roots are governed surfaces** — human-merge only, or **Prime Directive #14**'s pinned-approval path.
+⛔ **Both roots are governed surfaces** — `skills/` is Tier H, `.claude/skills/` Tier S (**Prime Directive #14**).
 
 ---
 
@@ -1059,8 +1059,8 @@ Both non-handshake shapes, and how to classify and probe your own:
    §7: never straight to `main`; never arm a PR that isn't green yet). A finished task
    = a merged PR, not a dirty working tree. ⛔ **Except a diff touching a governed
    surface** (Prime Directive #14 names them — more than ADRs): push it, open the PR, and stop
-   there; landing waits for the maintainer's word. For that class, a finished task = a PR
-   left visibly awaiting that word.
+   there; landing waits for its tier's record — the maintainer's word, or a seat's contract-tier
+   review. For that class, a finished task = a PR left visibly awaiting that record.
 3. **Add a changeset for anything that publishes.** Feature, functional improvement or fix — run `pnpm changeset`
    (or add a `.changeset/*.md` entry) describing it before committing. A bug fix in a released package takes a
    **`patch`** changeset — never none, and ⛔ never `skip-changeset`: that label is for a diff that publishes

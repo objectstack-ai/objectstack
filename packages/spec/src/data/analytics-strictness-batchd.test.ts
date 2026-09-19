@@ -109,7 +109,7 @@ describe('#4001 batch D — the doors the cube family is reachable through', () 
     accept(CubeSchema, {
       ...CUBE,
       title: 'Probe',
-      joins: { other: { name: 'other', relationship: 'many_to_one', sql: 'a.id = b.a_id' } },
+      joins: { other: { name: 'other' } },
       refreshKey: { every: '1 hour', sql: 'SELECT max(updated_at)' },
       public: true,
     });
@@ -168,13 +168,53 @@ describe('#4001 batch D — closed sites reject unknown keys where they live', (
     ).toContain('primaryKey');
   });
 
-  it('`CubeJoin` — through the cube `joins` record; a typo\'d `relationship` used to fall back to the default silently', () => {
+  // Batch D closed this shape because a typo'd `relationship` fell back to the
+  // `many_to_one` default silently. #18612 then removed `relationship` and `sql`
+  // outright (ADR-0049 enforce-or-remove) — so the fixture drops the two retired
+  // spellings and this pin keeps pinning what it always pinned: an UNDECLARED key
+  // on a cube join is refused by name rather than dropped. The near-miss is now a
+  // near-miss of nothing, which is exactly why the batch-D door still has to hold.
+  it('`CubeJoin` — through the cube `joins` record; an undeclared key is refused by name', () => {
     expect(
       reject(CubeSchema, {
         ...CUBE,
-        joins: { j: { name: 'other', sql: 'x', relationshipp: 'one_to_one' } },
+        joins: { j: { name: 'other', relationshipp: 'one_to_one' } },
       }),
     ).toContain('relationshipp');
+  });
+
+  // The two REMOVED keys, at the same door: each rejects with its own
+  // prescription rather than as a bare unknown, and the prescription names the
+  // derivation that replaced it (#18612).
+  it('`CubeJoin.sql` — REMOVED; the refusal carries the derivation, not a bare unknown', () => {
+    const issues = reject(CubeSchema, {
+      ...CUBE,
+      joins: { j: { name: 'other', sql: 'a.id = b.a_id' } },
+    });
+    expect(issues).toContain('`joins.<alias>.sql` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove)');
+    expect(issues).toContain('DERIVED from the declared relationship between the two cubes\' objects');
+  });
+
+  it('`CubeJoin.relationship` — REMOVED; the refusal carries the derivation', () => {
+    const issues = reject(CubeSchema, {
+      ...CUBE,
+      joins: { j: { name: 'other', relationship: 'one_to_many' } },
+    });
+    expect(issues).toContain('`joins.<alias>.relationship` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove)');
+    expect(issues).toContain('DERIVED from the declared relationship between the two cubes\' objects');
+  });
+
+  // `on` was the CURATED alias for `sql` until #18612. An alias naming a key the
+  // shape can no longer accept is the `triggerPhrase` failure `strict-object.ts`
+  // records, so it became a `guidance` entry: the answer is the derivation, and
+  // — pinned here — never a rename suggestion pointing back at `sql`.
+  it('`CubeJoin.on` — the retired alias answers with the derivation, never `→ sql`', () => {
+    const issues = reject(CubeSchema, {
+      ...CUBE,
+      joins: { j: { name: 'other', on: 'a.id = b.a_id' } },
+    });
+    expect(issues).toContain('DERIVED from the declared relationship between the two cubes\' objects');
+    expect(issues).not.toContain('→ `sql`');
   });
 
   it('`AnalyticsQuery` — the base top level (already gated at the REST wrapper; now gated at every door)', () => {

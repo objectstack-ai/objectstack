@@ -231,6 +231,37 @@ const RULE_CARRYING_BLIND_SPOT =
   + ' that restate it.';
 
 /**
+ * The #19093 boundary line, byte-exact — the SECOND fold entry that is not a report about
+ * the run, and the second asserted on every case.
+ *
+ * The class: the line above prescribes a hand re-read, and a hand re-read is a name-based
+ * search. A name does not identify a key — `tools` is authorable on `SkillSchema` and a
+ * `[REMOVED]` tombstone on `AgentSchema` — so a grep hit on a live example is
+ * indistinguishable from evidence about the dead key. Measured on #19059, where
+ * `content/docs/ai/agents.mdx` was reported as contradicting the `agent.tools` tombstone
+ * over an example that sits inside a `defineSkill({` block.
+ *
+ * ⛔ The payload is the NAMES, never a count: the defect is precisely that a count cannot
+ * tell two identically-named keys apart. A re-measure that replaces them with a number has
+ * removed the reading, and this pin is byte-exact so it cannot happen quietly.
+ */
+const SAME_NAME_DIFFERENT_SHAPE =
+  'a key NAME is not a key, so the hand re-read the line above prescribes can land on the'
+  + ' wrong schema. The same spelling is authorable on one governed type and a `[REMOVED]`'
+  + ' tombstone on another for each of `active`, `aria`, `joins`, `objects`, `template`,'
+  + ' `tools` and `version` (censused on #19093 over the liveness ledger\'s governed types,'
+  + ' top-level keys); nothing in a search result distinguishes the two, so a grep hit on a'
+  + ' LIVE example reads as evidence about the DEAD key. Measured on #19059:'
+  + ' `content/docs/ai/agents.mdx` was reported as contradicting the `agent.tools` tombstone'
+  + ' over its `tools:` example at `:161`, which is inside the `defineSkill({` block opened'
+  + ' at `:155` — the page was already correct. Settle ownership by PARSING the value against'
+  + ' both schemas, never by the name: that literal PASSES `SkillSchema`, and as an'
+  + ' `AgentSchema` it FAILS at `tools` with the tombstone prescription. ⛔ These names are'
+  + ' not the whole class — a key retired through a `.strict()` guidance map leaves no'
+  + ' tombstone in the walked shape and none of them here (`tool.category`, live as'
+  + ' `AIToolDefinition.category`).';
+
+/**
  * `want` is the mapper contract each case rides on — asserted before any text is, so a
  * case that silently stopped exercising its branch fails here instead of passing there.
  */
@@ -348,6 +379,13 @@ try {
       true, body.includes(`- ${RULE_CARRYING_BLIND_SPOT}`));
     check(c.id, 'and it stays out of the headline, which reports this run only',
       false, headline.includes('shares no identifier with the **emitter**'));
+    // #19093 — the same opposite pin, for the same reason, on the line that states the
+    // hand-grep remedy's own failure mode. Byte-exact so the NAMES cannot be quietly
+    // replaced by a count: on this class a count is structurally not a reading.
+    check(c.id, 'the same-name-different-shape boundary is stated in the fold, byte-exact',
+      true, body.includes(`- ${SAME_NAME_DIFFERENT_SHAPE}`));
+    check(c.id, 'and it stays out of the headline, which reports this run only',
+      false, headline.includes('a key NAME is not a key'));
     c.expect(headline, body);
   }
 } finally {

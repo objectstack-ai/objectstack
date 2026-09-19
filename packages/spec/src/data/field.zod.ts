@@ -11,7 +11,7 @@ import type { KeySetGuidance } from '../shared/suggestions.zod';
 import { SELECT_OPTION_EDITABILITY_GUIDANCE } from '../shared/editability-boundary';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { SystemIdentifierSchema } from '../shared/identifiers.zod';
-import { ExpressionInputSchema } from '../shared/expression.zod';
+import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
 import { FilterConditionSchema } from './filter.zod';
 import { FIELD_KEY_GUIDANCE } from './authoring-key-lint';
 import { DEFAULT_AUTONUMBER_FORMAT } from './autonumber-format';
@@ -384,7 +384,7 @@ export const SelectOptionSchema = lazySchema(() => strictObject({
    * rule-validator evaluates the picked value's `visibleWhen`) — hiding it in the
    * dropdown alone is bypassable.
    */
-  visibleWhen: ExpressionInputSchema.optional().describe("Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Env: the live `record` plus the host predicate scope, which binds `current_user`. The one VISIBILITY predicate the SERVER also enforces — the rule validator refuses a write of a value whose predicate is false — so a user-gated CHOICE belongs here. e.g. P`record.country == 'cn'` or P`'admin' in current_user.positions`"),
+  visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Env: the live `record` plus the host predicate scope, which binds `current_user`. The one VISIBILITY predicate the SERVER also enforces — the rule validator refuses a write of a value whose predicate is false — so a user-gated CHOICE belongs here. e.g. P`record.country == 'cn'` or P`'admin' in current_user.positions`"),
 }));
 
 /**
@@ -809,6 +809,51 @@ function fieldKeyGuidanceAsStrictOptions() {
 }
 
 /**
+ * The platform ceiling on decimal places — why a spec-valid `scale` may not
+ * exceed 100 (#18972, the objectstack half of objectui#9808).
+ *
+ * Every renderer that turns a declared `scale` into fraction digits reaches one
+ * of two platform primitives, and BOTH refuse above 100. Measured first-hand on
+ * node v22.22.2:
+ *
+ *   (1.5).toFixed(100)                                 -> '1.5000...'  (ok)
+ *   (1.5).toFixed(101)                                 -> RangeError: toFixed() digits argument must be between 0 and 100
+ *   new Intl.NumberFormat(u, { maximumFractionDigits: 100 })  -> ok
+ *   new Intl.NumberFormat(u, { maximumFractionDigits: 101 })  -> RangeError: maximumFractionDigits value is out of range.
+ *
+ * Both readers are live, one per `scale` declaration in this file: objectui's
+ * `computeRow` (`packages/fields/src/widgets/GridField.tsx`) rounds a computed
+ * grid cell with `Number(v.toFixed(column.scale))`, and its number cell
+ * renderer (`packages/fields/src/index.tsx`) passes a FIELD's `scale` straight
+ * into `maximumFractionDigits`. So an unbounded declaration published clean
+ * here and arrived as a `RangeError` at render time in someone else's
+ * repository, with no signal to the author at publish time.
+ *
+ * The bound is the PLATFORM's, not a policy: it is the largest value every
+ * conforming consumer can render. `packages/objectql` records the same 100 from
+ * the consumer side in its module-private `MAX_FORMULA_SCALE` (it skips the
+ * rounding past it so a display declaration can never fail a read) — this is
+ * the producer-side half of that same fact. The two are deliberately not one
+ * import: `packages/spec` may not depend on a consumer package.
+ *
+ * Deliberately module-private — exporting it would widen the published API
+ * surface, and nothing outside this file reads the number today.
+ */
+const MAX_RENDERABLE_SCALE = 100;
+
+/**
+ * The refusal text for a `scale` past {@link MAX_RENDERABLE_SCALE}. It names
+ * WHY, so an author reads a platform limit they can verify rather than an
+ * arbitrary cap somebody chose.
+ */
+const SCALE_UPPER_BOUND_MESSAGE =
+  'Decimal places cannot exceed 100 — the limit is the renderers\', not a policy: every consumer '
+  + 'turns `scale` into fraction digits, and both `Number.prototype.toFixed` and '
+  + '`Intl.NumberFormat`\'s `maximumFractionDigits` throw a RangeError above 100, so a larger '
+  + 'declaration is unrenderable rather than merely large. Declare at most 100 (an IEEE-754 '
+  + 'double carries ~17 significant digits, so a meaningful display precision is far below it).';
+
+/**
  * What `z.array(z.any())` cost on the two explicit column lists below (#9227):
  * every column object validated — right keys, wrong keys, misspelled keys,
  * empty objects — so a mis-keyed column published clean and surfaced only in
@@ -879,10 +924,15 @@ export const InlineGridColumnSchema = lazySchema(() => strictObject({
   defaultHidden: z.boolean().optional().describe("Collapsed into the grid's column chooser by default (not dropped); required columns are never default-hidden."),
   computed: z.boolean().optional().describe('Read-only computed column, recomputed live from sibling cells via `expr` and written back into the row.'),
   expr: z.string().min(1).optional().describe("Arithmetic expression for a computed column — a BARE string over `+ - * / %`, parentheses, numeric literals and field refs (`record.qty` or `qty`), evaluated by the grid's own safe evaluator. Deliberately NOT a CEL Expression envelope; `{ dialect, source }` is refused here."),
-  scale: z.number().int().nonnegative().optional().describe('Decimal places to round a computed numeric/currency result to.'),
+  // #18972 — the upper bound is the SAME platform ceiling as `FieldSchema.scale`
+  // below, reached by a different primitive: this key is the one objectui's
+  // `computeRow` hands to `Number(v.toFixed(scale))`, which throws above 100.
+  // See {@link MAX_RENDERABLE_SCALE}.
+  scale: z.number().int().nonnegative().max(MAX_RENDERABLE_SCALE, { message: SCALE_UPPER_BOUND_MESSAGE }).optional()
+    .describe('Decimal places to round a computed numeric/currency result to (integer 0-100). The upper bound is the renderer\'s: the grid rounds with `toFixed`, which throws a RangeError above 100.'),
   autofill: z.boolean().optional().describe("For `lookup` columns: picking a record copies its same-named fields into sibling columns (a product's unit_price/description). On by default; set false to disable."),
-  readonlyWhen: ExpressionInputSchema.optional().describe("Predicate (CEL) — the cell is read-only when TRUE, evaluated per row against the row as `record` plus the header as `parent` (e.g. P`parent.status == 'paid'`)."),
-  requiredWhen: ExpressionInputSchema.optional().describe('Predicate (CEL) — the cell is required when TRUE. Same `record` + `parent` scope as `readonlyWhen`. PRESENTATION ONLY: this flags the cell inline-invalid in the grid; nothing on the write path reads it. The server-enforced contract is the child FIELD\'s own `requiredWhen` — a transition gate, see `Field.requiredWhen` — which hydration copies onto an identity-only column, so declaring the requirement here alone enforces nothing.'),
+  readonlyWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — the cell is read-only when TRUE, evaluated per row against the row as `record` plus the header as `parent` (e.g. P`parent.status == 'paid'`)."),
+  requiredWhen: EvaluatedExpressionInputSchema.optional().describe('Predicate (CEL) — the cell is required when TRUE. Same `record` + `parent` scope as `readonlyWhen`. PRESENTATION ONLY: this flags the cell inline-invalid in the grid; nothing on the write path reads it. The server-enforced contract is the child FIELD\'s own `requiredWhen` — a transition gate, see `Field.requiredWhen` — which hydration copies onto an identity-only column, so declaring the requirement here alone enforces nothing.'),
 }));
 
 /**
@@ -1155,7 +1205,13 @@ export const FieldSchema = lazySchema(() => {
   // ⚠️ `CurrencyConfigSchema.precision` above is a DIFFERENT surface with its
   // own alias table (`scale → precision` there) — do not conflate.
   precision: z.number().int().min(0).optional().describe('Total digits (non-negative integer)'),
-  scale: z.number().int().min(0).optional().describe('Decimal places (non-negative integer)'),
+  // #18972 — and an UPPER bound, for the same declared=enforced reason one
+  // axis over: `scale` is unrenderable above 100 at every consumer, so a
+  // larger declaration could only ever crash a reader. See
+  // {@link MAX_RENDERABLE_SCALE} for the measurement and why the number is
+  // the platform's rather than a policy.
+  scale: z.number().int().min(0).max(MAX_RENDERABLE_SCALE, { message: SCALE_UPPER_BOUND_MESSAGE }).optional()
+    .describe('Decimal places (integer 0-100). The upper bound is the platform\'s, not a policy: renderers turn `scale` into fraction digits through `toFixed` and `Intl.NumberFormat`\'s `maximumFractionDigits`, both of which throw a RangeError above 100 — so a larger declaration is unrenderable by any conforming consumer.'),
   min: z.number().optional().describe('Minimum value. Checked on the WRITTEN value only — the same transition-gate class as `requiredWhen`: an UPDATE validates just the fields the payload carries, so a stored value below a bound declared later is never re-read and survives unrelated edits; only a write that carries an out-of-bound value is refused, and a repairing write is accepted. For an invariant re-checked on every write, declare a `validations[]` `script` rule instead.'),
   max: z.number().optional().describe('Maximum value. Checked on the WRITTEN value only — the same transition-gate class as `min`: a stored value above a bound declared later is never re-read and survives unrelated edits; only a write that carries an out-of-bound value is refused. For an invariant re-checked on every write, declare a `validations[]` `script` rule instead.'),
   /**
@@ -1510,7 +1566,7 @@ export const FieldSchema = lazySchema(() => {
   allowCreate: z.boolean().optional().describe('Allow inline quick-create from the record picker: when no match exists the user can create a record from the typed text (optimistic dataSource.create with the display field). Best for simple objects whose only required field is the display field.'),
 
   /** Calculation — CEL formula. Plain string accepted for back-compat; build emits canonical envelope. */
-  expression: ExpressionInputSchema.optional().describe('Formula expression (CEL). e.g. F`record.amount * 0.1`'),
+  expression: EvaluatedExpressionInputSchema.optional().describe('Formula expression (CEL). e.g. F`record.amount * 0.1`'),
   /**
    * The value type a `formula` field computes, declared at authoring (the way
    * Salesforce/Airtable carry a formula's result type). Lets consumers — dataset
@@ -1640,9 +1696,9 @@ export const FieldSchema = lazySchema(() => {
    * `requiredWhen` and ignores writes to a field whose `readonlyWhen` is TRUE
    * (so the rule can't be bypassed). e.g. `P\`record.status == 'paid'\``.
    */
-  visibleWhen: ExpressionInputSchema.optional().describe("Predicate (CEL) — field is shown only when TRUE (else hidden). e.g. P`record.type == 'invoice'`"),
-  readonlyWhen: ExpressionInputSchema.optional().describe("Predicate (CEL) — field is read-only when TRUE. e.g. P`record.status == 'paid'`"),
-  requiredWhen: ExpressionInputSchema.optional().describe("Predicate (CEL) — field is required when TRUE. A TRANSITION GATE, not an invariant: the write is refused only when the merged record violates the requirement AND the pre-write record complied — so the write that flips the predicate TRUE, an INSERT born inside the gate, and a write that clears the cell are all refused, while a row that was already missing the value keeps passing unrelated edits and state moves that stay inside the gate (ADR-0113 non-regression: adding the rule to a deployed object never bricks existing rows). Need an invariant every write must satisfy instead ('X may never exceed Y') — declare a `validations[]` `script` rule, which re-checks the merged record with no exemption. Enforced by `evaluateValidationRules`. The only slot; the `conditionalRequired` alias was removed in protocol 17."),
+  visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — field is shown only when TRUE (else hidden). e.g. P`record.type == 'invoice'`"),
+  readonlyWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — field is read-only when TRUE. e.g. P`record.status == 'paid'`"),
+  requiredWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — field is required when TRUE. A TRANSITION GATE, not an invariant: the write is refused only when the merged record violates the requirement AND the pre-write record complied — so the write that flips the predicate TRUE, an INSERT born inside the gate, and a write that clears the cell are all refused, while a row that was already missing the value keeps passing unrelated edits and state moves that stay inside the gate (ADR-0113 non-regression: adding the rule to a deployed object never bricks existing rows). Need an invariant every write must satisfy instead ('X may never exceed Y') — declare a `validations[]` `script` rule, which re-checks the merged record with no exemption. Enforced by `evaluateValidationRules`. The only slot; the `conditionalRequired` alias was removed in protocol 17."),
 
   /**
    * [REMOVED in protocol 17 — #3855] The deprecated alias of `requiredWhen`.

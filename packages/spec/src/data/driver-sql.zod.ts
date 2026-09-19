@@ -8,6 +8,7 @@ import { DriverConfigSchema } from './driver.zod';
  * Supported SQL database dialects
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { dependentRequired } from '../shared/refinement-projection';
 export const SQLDialectSchema = lazySchema(() => z.enum([
   'postgresql',
   'mysql',
@@ -65,12 +66,7 @@ export const SSLConfigSchema = lazySchema(() => z.object({
   ca: z.string().optional().describe('CA certificate file path or content'),
   cert: z.string().optional().describe('Client certificate file path or content'),
   key: z.string().optional().describe('Client private key file path or content'),
-}).refine((data) => {
-  // If cert is provided, key must also be provided, and vice versa
-  const hasCert = data.cert !== undefined;
-  const hasKey = data.key !== undefined;
-  return hasCert === hasKey;
-}, {
+}).refine(dependentRequired({ cert: ['key'], key: ['cert'] }), {
   message: 'Client certificate (cert) and private key (key) must be provided together',
 }));
 

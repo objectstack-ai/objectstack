@@ -21,7 +21,9 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   createFieldPresenceProbe,
   createRecordOrganizationResolver,
+  createRecordWallOrganizationResolver,
   resolveRecordOrganizationField,
+  resolveRecordWallOrganizationField,
 } from './record-organization.js';
 
 /** Minimal engine double: `getSchema` over a name → definition map. */
@@ -89,6 +91,102 @@ describe('resolveRecordOrganizationField — the four-limb precedence', () => {
     expect(resolveRecordOrganizationField(def, hasFieldOf(def))).toBeNull();
     expect(resolveRecordOrganizationField(undefined, () => true)).toBeNull();
     expect(resolveRecordOrganizationField(null, () => true)).toBeNull();
+  });
+});
+
+/**
+ * [#18378] The WALL face — the same limbs MINUS limb 0.
+ *
+ * ⭐ The pins are written as a PAIR against the stamp face above wherever the
+ * two can diverge, because "these two answer the same question except here" is
+ * the whole claim, and a pin that only exercised the wall face would pass on an
+ * implementation that had quietly become a second copy of the precedence.
+ */
+describe('resolveRecordWallOrganizationField — limb 0 is not a limb here', () => {
+  it('the sys_api_key shape: the stamp face answers the declared column, the wall face answers NULL', () => {
+    // The ONE shipped object that declares the key, and the reason the two
+    // faces exist: `enabled: false` says nothing walls this table (#8287), so
+    // there is no organization for work launched from such a row to ACT AS,
+    // however clearly the row says who it is ABOUT.
+    const def = {
+      name: 'sys_api_key',
+      tenancy: { enabled: false, organizationField: 'active_organization_id' },
+      fields: { id: {}, name: {}, user_id: {}, active_organization_id: {}, revoked: {} },
+    };
+    expect(resolveRecordOrganizationField(def, hasFieldOf(def))).toBe('active_organization_id');
+    expect(resolveRecordWallOrganizationField(def, hasFieldOf(def))).toBeNull();
+  });
+
+  it('a declared organizationField on a WALLED object is still not read — the wall answers its own column', () => {
+    // The hypothetical an author could write today: the stamp key on an object
+    // that IS walled, by a different column. The stamp face honours limb 0; the
+    // wall face takes limb 2, because that is the column the row is scoped by
+    // and therefore the only one an acting identity may come from.
+    const def = {
+      name: 'ws_doc',
+      tenancy: { enabled: true, tenantField: 'workspace_id', organizationField: 'about_org_id' },
+      fields: { id: {}, workspace_id: {}, about_org_id: {}, organization_id: {} },
+    };
+    expect(resolveRecordOrganizationField(def, hasFieldOf(def))).toBe('about_org_id');
+    expect(resolveRecordWallOrganizationField(def, hasFieldOf(def))).toBe('workspace_id');
+  });
+
+  it('limbs 1 to 4 are SHARED — the two faces agree everywhere limb 0 is absent', () => {
+    // The anti-drift pin. Every shape the stamp face pins above, minus the two
+    // that declare the key: the answers must be identical, so a future edit
+    // that "fixes" one body cannot leave the other behind.
+    const shapes = [
+      { name: 'sys_sso_provider', tenancy: { enabled: false }, fields: { id: {}, organization_id: {} } },
+      { name: 'ws_doc', tenancy: { enabled: true, tenantField: 'workspace_id' }, fields: { id: {}, workspace_id: {}, organization_id: {} } },
+      { name: 'ws_doc_phantom', tenancy: { enabled: true, tenantField: 'nope' }, fields: { id: {}, organization_id: {} } },
+      { name: 'crm_deal', fields: { id: {}, organization_id: {} } },
+      { name: 'crm_deal_bare', fields: { id: {}, amount: {} } },
+    ];
+    for (const def of shapes) {
+      expect(
+        resolveRecordWallOrganizationField(def, hasFieldOf(def)),
+        `wall and stamp must agree on '${def.name}'`,
+      ).toBe(resolveRecordOrganizationField(def, hasFieldOf(def)));
+    }
+    expect(resolveRecordWallOrganizationField(undefined, () => true)).toBeNull();
+    expect(resolveRecordWallOrganizationField(null, () => true)).toBeNull();
+  });
+});
+
+describe('createRecordWallOrganizationResolver — the sweep’s memoized face', () => {
+  it('resolves the wall column end to end, and answers null on the unwalled credential shape', () => {
+    const engine = engineOf({
+      crm_deal: { fields: { id: {}, organization_id: {} } },
+      sys_api_key: {
+        tenancy: { enabled: false, organizationField: 'active_organization_id' },
+        fields: { id: {}, active_organization_id: {} },
+      },
+    });
+    const wall = createRecordWallOrganizationResolver(engine);
+    expect(wall.organizationFieldFor('crm_deal')).toBe('organization_id');
+    expect(wall.organizationOf('crm_deal', { id: 'd1', organization_id: 'org_A' })).toBe('org_A');
+    expect(wall.organizationFieldFor('sys_api_key')).toBeNull();
+    expect(wall.organizationOf('sys_api_key', { id: 'k1', active_organization_id: 'org_key' })).toBeNull();
+    // The stamp face over the SAME engine still answers — the divergence is in
+    // the faces, not in the engine or the fixture.
+    expect(
+      createRecordOrganizationResolver(engine).organizationOf('sys_api_key', {
+        id: 'k1',
+        active_organization_id: 'org_key',
+      }),
+    ).toBe('org_key');
+  });
+
+  it('shares the glue: same degradation posture, same memoization', () => {
+    expect(createRecordWallOrganizationResolver({}).organizationOf('crm_deal', { organization_id: 'org_A' })).toBeNull();
+    const throwing = { getSchema: () => { throw new Error('not booted'); } };
+    expect(createRecordWallOrganizationResolver(throwing).organizationOf('crm_deal', { organization_id: 'org_A' })).toBeNull();
+    const engine = engineOf({ crm_deal: { fields: { id: {}, organization_id: {} } } });
+    const wall = createRecordWallOrganizationResolver(engine);
+    wall.organizationOf('crm_deal', { organization_id: 'a' });
+    const calls = engine.getSchema.mock.calls.filter(([n]) => n === 'crm_deal').length;
+    wall.organizationOf('crm_deal', { organization_id: 'b' });
+    expect(engine.getSchema.mock.calls.filter(([n]) => n === 'crm_deal').length).toBe(calls);
   });
 });
 

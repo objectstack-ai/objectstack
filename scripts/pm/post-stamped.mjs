@@ -507,6 +507,84 @@
  * not forgiven: the platform inserting a byte the act never sent is a cell
  * nobody has measured, whatever it looks like.
  *
+ * ## A size refusal is a REFUSAL, not a missing route (#18843)
+ *
+ * The register above had four codes and no place for the fifth thing that
+ * actually happens: the platform reads the write, considers it, and refuses it
+ * because the body is over the surface's cap. `rest()` threw on every non-2xx,
+ * both call sites caught it as a PREREQUISITE, and a real HTTP 422 was reported
+ * as 「no route, no act at all」 with the remedy 「run this where node's fetch
+ * reaches api.github.com with a token that can write issues」.
+ *
+ * Every clause of that is wrong for this cause. The route existed — the write
+ * travelled it. The token was accepted. And the remedy sends the caller to
+ * another route with another token, where the same bytes are refused
+ * identically: this file's own header already has the word for that shape — a
+ * refusal text prescribing a refused remedy is a tool arguing with itself.
+ *
+ * Measured, twice, by the #18806 dev on probe objectstack#18826 (writes 5 and
+ * 6): a 262,145-byte comment through `--comment=18826` answered HTTP 422, and
+ * this tool exited 3. So the class is its own:
+ *
+ *   TRIGGER   HTTP 422, plus a refusal text that names the body's LENGTH. Both
+ *             halves are required and ⛔ the class is NOT every 422: the
+ *             issues listing answers 422 to deep pagination (page 99 stores,
+ *             page 100 refuses — measured 2026-08-31, `check-half-states.mjs`),
+ *             and that 422 is about a cursor, not a body. It keeps its 3.
+ *   TEXT      the bytes this act SENT, the measured cap for the surface it
+ *             sent them to, the overage between them, and the remedy that can
+ *             work: SHORTEN the body or SPLIT it. ⛔ Never a route remedy —
+ *             pinned held apart, in both directions, against the constant exit
+ *             3 prescribes with.
+ *   CODE      `EXIT_TOO_LARGE`. Nothing was written and nothing was read back,
+ *             which it shares with 3; what it does not share is what a caller
+ *             must DO, and the register exists to carry exactly that.
+ *
+ * ⛔ The cap in that text is never the number the platform's own message
+ * carries. GitHub says 「maximum is 65536 characters」 on all three write
+ * surfaces, and that string is false in unit AND value — objectstack#18826's
+ * write 4 stored a 262,144-byte comment, four times it, and #18793 bisected the
+ * issue-body surface to the same figure. It is the most likely provenance of
+ * the 65,536 folklore this fleet has already had to correct once, so the text
+ * quotes the platform's sentence (a reader needs to see what the platform said)
+ * and names it FALSE in the same breath, beside the bisected cap. A reader who
+ * re-derives a cap from a refusal's own text re-derives the false number.
+ *
+ * The two spellings are NOT one string, which is why the trigger is
+ * case-insensitive rather than an equality: `POST /issues/{n}/comments` answers
+ * `Body is too long (maximum is 65536 characters)` and
+ * `PATCH /issues/comments/{id}` answers the same sentence with a lower-case
+ * `body` (objectstack#18826's record, captured verbatim on both). An equality
+ * pinned to the create-side capital would have left the update side at 3.
+ *
+ * ⛔ And the trigger does not read the platform's number even to confirm
+ * itself. Keying on 「maximum is 65536」 would tie this class to a false clause,
+ * so the day GitHub corrects its own text the refusal would silently fall back
+ * to 3 — a gate that fails when its subject gets BETTER.
+ *
+ * The cap named is the cap of the surface this act wrote to, and the two are
+ * separate constants on purpose: `COMMENT_BODY_LIMIT` for `--comment`
+ * (`POST /issues/{n}/comments`, bisected on objectstack#18826) and
+ * `ISSUE_BODY_LIMIT` for `--body` (`PATCH /issues/{n}`, bisected on #18793).
+ * They hold the same number today, and ⛔ one constant for both would be a
+ * reading neither bisection took: two surfaces measured independently that
+ * agree is not one measurement, and the day one moves, a shared constant lies
+ * about the other.
+ *
+ * ⚠️ The two surfaces do not refuse the same WAY, so this class is mostly the
+ * comment one. On `PATCH /issues/{n}` the refusal is SILENT — 200, the old body
+ * kept, nothing reported (#18793) — and that is what `EXIT_NOT_STORED` exists
+ * for; a `--body` refresh over the cap still lands in 4, and only a 422 the
+ * platform actually answers reaches 5. Both surfaces carry a cap here anyway,
+ * because the classifier must name the cap of whatever surface it is standing
+ * on rather than the one it was written for.
+ *
+ * ⭐ And a refusal the cap does NOT explain is reported as exactly that. If the
+ * platform refuses a body at or under the measured cap, the text says the
+ * refusal CONTRADICTS the reading and asks for a re-measurement instead of
+ * printing an overage of zero: the cap is a measurement, and a measurement a
+ * live write disagrees with is the reading that is due to move, never the write.
+ *
  * The register in full, one of which a caller reads:
  *
  *   0  written, and everything sent is on the platform.
@@ -515,6 +593,8 @@
  *      unread knock. Nothing written.
  *   3  PREREQUISITE NOT MET — no route, no token. No act at all.
  *   4  written, and the platform did NOT store it. Go read the artefact.
+ *   5  the platform ANSWERED and refused the body for its SIZE. Nothing
+ *      written; shorten or split it. ⛔ Not a route problem.
  *
  * ## The unread-knock check on a body refresh (#17905)
  *
@@ -578,8 +658,10 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from '../invoked-as.mjs';
 import {
+  COMMENT_BODY_LIMIT,
   EXIT_PREREQUISITE_NOT_MET,
   H56_STAMP_TOLERANCE_MIN,
+  ISSUE_BODY_LIMIT,
   PROXY_FLAG,
   h56StampedReadings,
   protocolStamps,
@@ -606,6 +688,18 @@ export const EXIT_REFUSED = 2;
  * for why a retry is the wrong move.
  */
 export const EXIT_NOT_STORED = 4;
+
+/**
+ * The platform ANSWERED this write and refused it: the body is over the cap for
+ * the surface it was sent to. Its own value because it is the one outcome the
+ * other four cannot carry — nothing was written (so it is not 0 or 4) and the
+ * body broke no contract of this tool's (so it is not 2), but a route existed
+ * and was used (so it is not 3, whose remedy would send a caller to another
+ * route to be refused identically). See the header's size-refusal section for
+ * the trigger, and for why the cap in the text is never the platform's own
+ * number.
+ */
+export const EXIT_TOO_LARGE = 5;
 
 /**
  * The re-exec guard, per script rather than shared with its neighbours: two
@@ -1618,9 +1712,211 @@ export function notStoredText(verdict, repo, target, mode = 'body') {
     '        ⛔ Do not retry blindly: the one measured hit of this shape was a size refusal the\n' +
     '        platform never reported, so an identical second write reproduces it exactly. Work out\n' +
     '        what is missing from what IS stored, then send a body that can land.\n' +
-    `\n  (Exit code ${EXIT_NOT_STORED}, distinct from ${EXIT_REFUSED}'s "the body broke the stamp contract" and\n` +
-    `  ${EXIT_PREREQUISITE_NOT_MET}'s "no act at all" — this write HAPPENED. Capture it BEFORE any pipe:\n` +
+    `\n  (Exit code ${EXIT_NOT_STORED}, distinct from ${EXIT_REFUSED}'s "the body broke the stamp contract",\n` +
+    `  ${EXIT_PREREQUISITE_NOT_MET}'s "no act at all" and ${EXIT_TOO_LARGE}'s "the platform answered and refused it on size" —\n` +
+    '  this write HAPPENED. Capture it BEFORE any pipe:\n' +
     '  `node scripts/pm/post-stamped.mjs … > /tmp/p.log 2>&1; echo "EXIT=$?"`.)'
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The size refusal — a 422 the platform ANSWERED, told apart from a route that
+// never existed. The header's size-refusal section is the authority on the
+// trigger, on why the class is not every 422, and on why the cap this text
+// names is never the number the platform's own message carries.
+// ---------------------------------------------------------------------------
+
+/**
+ * The status a size refusal arrives on, and the only one this class takes.
+ * Measured on objectstack#18826 (comment create and comment update) and on
+ * `POST /issues` (issue create) in the same run.
+ */
+export const SIZE_REFUSAL_STATUS = 422;
+
+/**
+ * The half of the platform's sentence this class keys on.
+ *
+ * ⛔ Case-INSENSITIVE because the two measured spellings are not one string:
+ * the create side says `Body is too long`, the update side the same sentence
+ * with a lower-case `body` (objectstack#18826, captured verbatim on both). An
+ * equality pinned to either one leaves the other at exit 3.
+ *
+ * ⛔ And it stops before the platform's number. `maximum is 65536 characters`
+ * is false in unit and value, so keying on it would tie this class to a false
+ * clause and un-classify the refusal the day GitHub corrects its own text.
+ *
+ * ⛔ NOT global, for `PROTOCOL_STAMP_RE`'s reason: a `g`-flagged exported regex
+ * carries `lastIndex` between callers.
+ */
+export const BODY_TOO_LONG_RE = /body is too long/i;
+
+/** How much of the platform's refusal text a report prints. */
+export const REFUSAL_TEXT_CHARS = 400;
+
+/**
+ * The surfaces this tool writes, each carrying the cap its OWN bisection
+ * measured, in the unit the platform refuses in.
+ *
+ * ⛔ Two constants, never one shared number. They hold the same value today —
+ * 256 KiB on both — and that agreement is two independent measurements
+ * agreeing, not one measurement: the day the platform moves one, a shared
+ * constant would lie about the other.
+ *
+ * ⚠️ The two do not refuse the same WAY. `POST /issues/{n}/comments` answers a
+ * real 422 and writes nothing; `PATCH /issues/{n}` refuses SILENTLY — 200, the
+ * old body kept, nothing reported (#18793) — which is `EXIT_NOT_STORED`'s
+ * population. A `--body` refresh over the cap therefore still lands in 4. The
+ * body surface carries its cap here anyway, because the classifier must name
+ * the cap of the surface it is standing on and never one it was written for.
+ */
+export const WRITE_SURFACES = Object.freeze({
+  comment: Object.freeze({
+    noun: 'a comment',
+    endpoint: 'POST /issues/{n}/comments',
+    cap: COMMENT_BODY_LIMIT,
+    measuredOn: 'objectstack#18826',
+  }),
+  body: Object.freeze({
+    noun: 'an issue body',
+    endpoint: 'PATCH /issues/{n}',
+    cap: ISSUE_BODY_LIMIT,
+    measuredOn: 'objectstack#18793',
+  }),
+});
+
+/**
+ * The remedy exit 3 prescribes, and the one a size refusal prescribes — each a
+ * single constant so the two texts can be pinned HELD APART in both directions.
+ * A route remedy inside a size refusal is the whole defect this class closes,
+ * and a pin on a retyped sentence goes green the first time either is reworded.
+ */
+export const ROUTE_REMEDY = "run this where node's fetch reaches api.github.com with a token that can write issues";
+export const SIZE_REMEDY = 'SHORTEN the body, or SPLIT it across more than one artefact';
+
+/** A byte count with thousands separators, the way every reading in this fleet is quoted. */
+function grouped(n) {
+  return String(n).replace(/\B(?=(\d{3})+(?!\d))/gu, ',');
+}
+
+/**
+ * What the platform SAID, out of the response body it said it in.
+ *
+ * GitHub's validation envelope carries a top-level `message` plus a `message`
+ * per entry in `errors`, and the sentence this class keys on arrived in an
+ * entry (objectstack#18826's record quotes that entry verbatim). Both levels
+ * are collected, in that order, so the text is read wherever the platform puts
+ * it; a payload that is not that envelope falls back to its own bytes rather
+ * than to silence — an unclassified refusal must still be able to say what it
+ * was told.
+ *
+ * ⛔ Never truncated here. The trigger reads this string, and a cut that landed
+ * mid-sentence would answer a question about the platform's text with a fact
+ * about this function's window. Clipping belongs to the printing.
+ */
+export function platformRefusalText(raw) {
+  const text = String(raw ?? '');
+  let payload = null;
+  try {
+    payload = JSON.parse(text);
+  } catch {
+    payload = null;
+  }
+  if (payload && typeof payload === 'object') {
+    const parts = [];
+    if (typeof payload.message === 'string' && payload.message !== '') parts.push(payload.message);
+    for (const entry of Array.isArray(payload.errors) ? payload.errors : []) {
+      if (entry && typeof entry.message === 'string' && entry.message !== '') parts.push(entry.message);
+    }
+    if (parts.length > 0) return parts.join(' · ');
+  }
+  return text.trim();
+}
+
+/**
+ * The refusal this answer IS, or null — one predicate, so the classification a
+ * caller reads and the text it reads cannot come to disagree.
+ *
+ * `null` means "not this class", which leaves the answer exactly where it was
+ * before this class existed: a 422 about anything other than a body's length —
+ * the issues listing's deep-pagination refusal is the measured one — keeps its
+ * PREREQUISITE reading, and so does every other status.
+ *
+ * `explained` is the honest half. It is false when the platform refused a body
+ * at or under the cap this file declares: that is a refusal the reading does
+ * not cover, and the text says so instead of printing an overage of zero. A
+ * live write disagreeing with a measurement moves the measurement, never the
+ * write.
+ */
+export function sizeRefusal({ status, refusalText, mode, sentBytes } = {}) {
+  if (Number(status) !== SIZE_REFUSAL_STATUS) return null;
+  // ⛔ The DECLARED regex, tested directly — never a copy rebuilt from its
+  // `.source` with flags retyped here. A rebuilt copy takes the pattern and
+  // leaves the flags behind, so the `i` that makes the two measured spellings
+  // one class would live in this line and not in the constant that documents
+  // it: an ablation dropping the flag from the declaration changed nothing and
+  // every case-insensitivity pin stayed green. Safe to test in place because
+  // this one is pinned non-global, so it carries no `lastIndex`.
+  if (!BODY_TOO_LONG_RE.test(String(refusalText ?? ''))) return null;
+  const surface = Object.prototype.hasOwnProperty.call(WRITE_SURFACES, String(mode)) ? WRITE_SURFACES[String(mode)] : null;
+  const cap = surface ? surface.cap : null;
+  const sent = Number.isFinite(sentBytes) ? Number(sentBytes) : null;
+  const explained = cap !== null && sent !== null && sent > cap;
+  return {
+    status: Number(status),
+    mode: String(mode),
+    surface,
+    cap,
+    sentBytes: sent,
+    over: explained ? sent - cap : null,
+    explained,
+    platformText: String(refusalText ?? ''),
+  };
+}
+
+/**
+ * What a caller is told when the platform refused the write for its size.
+ *
+ * Printed to stderr, in the shape the other two refusals use, and carrying the
+ * three things a caller needs and exit 3 could never give it: the bytes this
+ * act SENT, the measured cap for the surface it sent them to, and a remedy that
+ * can work. The platform's own sentence is quoted — a reader needs to see what
+ * the platform said — and named FALSE in the same breath, because that sentence
+ * is where the 65,536 folklore comes from.
+ */
+export function sizeRefusalText(refusal, repo, target) {
+  const surface = refusal?.surface ?? null;
+  const sent = refusal?.sentBytes;
+  const sentClause = Number.isFinite(sent) ? `${grouped(sent)} byte(s)` : 'a body of unrecorded size';
+  const head =
+    `\npost-stamped: TOO LARGE — the platform ANSWERED this write and REFUSED it: the body is over the cap\n` +
+    `for this surface. NOTHING WAS WRITTEN.\n\n` +
+    `  Sent to ${repo}#${target}: ${sentClause}` +
+    (surface ? ` as ${surface.noun} (\`${surface.endpoint}\`).\n` : '.\n');
+  const capLines = surface
+    ? `  The measured cap for ${surface.noun} is ${grouped(surface.cap)} bytes — UTF-8 BYTES, bisected on\n` +
+      `  ${surface.measuredOn}, one byte either side.\n` +
+      (refusal.explained
+        ? `  This body is ${grouped(refusal.over)} byte(s) over it.\n`
+        : '  ⚠️ …and this body is NOT over it. The platform refused a body the measured cap says stores, so\n' +
+          '  that reading is the thing due to move: RE-MEASURE the cap before trusting it again, and report\n' +
+          '  the refusal — a cap a live write contradicts is a cap nobody should be quoting.\n')
+    : '  ⚠️ This act wrote to a surface with no declared cap, so none is named here. ⛔ A cap invented at\n' +
+      '  the moment of a refusal is the folklore this class exists to end.\n';
+  return (
+    head +
+    capLines +
+    `\n  The platform said: ${String(refusal?.platformText ?? '').slice(0, REFUSAL_TEXT_CHARS)}\n` +
+    '  ⛔ Its number is FALSE in unit and value — the same fleet measured a 262,144-BYTE comment stored,\n' +
+    '     four times what that sentence claims as a maximum. The cap above is the bisected one; ⛔ never\n' +
+    "     re-derive a cap from a refusal's own text.\n" +
+    `\n  Fix:  ${SIZE_REMEDY}.\n` +
+    '        ⛔ This is NOT a transport problem and there is nothing to fix about the route: the write\n' +
+    '        reached the platform, was read and was refused, so the same bytes through another route with\n' +
+    '        another token are refused identically.\n' +
+    `\n  (Exit code ${EXIT_TOO_LARGE}, distinct from ${EXIT_PREREQUISITE_NOT_MET}'s "no route, no act at all" — this write WAS\n` +
+    `  routed and answered — from ${EXIT_REFUSED}'s "the body broke the stamp contract", which is this tool's own\n` +
+    `  rule and not the platform's, and from ${EXIT_NOT_STORED}'s "written but not stored", where a write HAPPENED.\n` +
+    '  Capture it BEFORE any pipe: `node scripts/pm/post-stamped.mjs … > /tmp/p.log 2>&1; echo "EXIT=$?"`.)'
   );
 }
 
@@ -1874,8 +2170,14 @@ async function rest(path, { method = 'GET', body = null } = {}) {
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
   if (!res.ok) {
+    // ⛔ The platform's own sentence is not discarded here. Reading it is what
+    // lets a refusal it ANSWERED be told from a route that never existed, and
+    // the refusal reports carry it either way: a 3 that prints only a status
+    // code hides the one line that says what went wrong.
+    const said = platformRefusalText(await res.text().catch(() => ''));
     const err = new Error(`${method} ${path} -> HTTP ${res.status}`);
     err.status = res.status;
+    err.refusalText = said;
     throw err;
   }
   if (res.status === 204) return null;
@@ -1911,17 +2213,36 @@ async function writeArtefact(repo, options, body) {
   return { id: options.number, url: back?.html_url ?? patched?.html_url ?? null, writtenAt: back?.updated_at ?? patched?.updated_at ?? null, stored: back?.body };
 }
 
-function reportPrerequisiteNotMet(err) {
-  console.error(
-    `\npost-stamped: PREREQUISITE NOT MET — ${err.message}\n\n` +
-      `  Fix:  run this where node's fetch reaches api.github.com with a token that can write issues\n` +
+/**
+ * What a caller is told when there was no act at all — built as a string rather
+ * than printed, so the ONE thing this text must never say can be pinned: the
+ * remedy it prescribes and the remedy a size refusal prescribes are held apart
+ * in BOTH directions, and a pin that can only read one of the two goes green the
+ * day the other one starts saying it.
+ */
+export function prerequisiteNotMetText(err) {
+  const said = typeof err?.refusalText === 'string' && err.refusalText !== '' ? err.refusalText : null;
+  return (
+    `\npost-stamped: PREREQUISITE NOT MET — ${err?.message ?? 'no message'}\n\n` +
+      // What the platform said, when it said anything at all. An answer this
+      // class does not recognise is still an answer, and a report that prints
+      // only the status code makes the reader go and re-run the request to see
+      // the one sentence that was already in hand.
+      (said ? `  The platform said: ${said.slice(0, REFUSAL_TEXT_CHARS)}\n\n` : '') +
+      `  Fix:  ${ROUTE_REMEDY}\n` +
       `        (a GitHub Actions runner, or an agent container with ${PROXY_FLAG} — this script re-execs\n` +
       '        itself with that flag when HTTPS_PROXY is set).\n\n' +
       '  NOTHING WAS WRITTEN, and nothing was read back. This is not a failed post and not a successful\n' +
       '  one — it is no act at all.\n' +
       `\n  (Exit code ${EXIT_PREREQUISITE_NOT_MET}, distinct from ${EXIT_REFUSED}'s "the body broke the stamp\n` +
-      '  contract". Capture it BEFORE any pipe: `node scripts/pm/post-stamped.mjs … > /tmp/p.log 2>&1; echo "EXIT=$?"`.)',
+      `  contract" and from ${EXIT_TOO_LARGE}'s "the platform answered and refused the body for its size", where a\n` +
+      '  route existed and the remedy above cannot help. Capture it BEFORE any pipe:\n' +
+      '  `node scripts/pm/post-stamped.mjs … > /tmp/p.log 2>&1; echo "EXIT=$?"`.)'
   );
+}
+
+function reportPrerequisiteNotMet(err) {
+  console.error(prerequisiteNotMetText(err));
   return EXIT_PREREQUISITE_NOT_MET;
 }
 
@@ -1931,17 +2252,24 @@ function readInput(file) {
 }
 
 function rearmThroughProxy(args) {
+  // `guard` is THIS tool's own variable (#18939). Without it the plan read the
+  // patrol's shared name straight out of `process.env`, so a sibling
+  // instrument's inherited guard answered "already re-armed" here — silently —
+  // and the un-re-armed run then bypassed the proxy and answered 401 Bad
+  // credentials, a false story about the credential. The own-guard `if` that
+  // used to sit below was never reached for that case; the plan's own branch
+  // now covers it, and PRINTS the variable through `plan.hint`.
   const plan = proxyRearmPlan({
     env: process.env,
     execArgv: process.execArgv,
     flagSupported: process.allowedNodeEnvironmentFlags.has(PROXY_FLAG),
+    guard: PROXY_REARM_GUARD,
   });
   if (plan.hint) {
     console.error(`ℹ️  ${plan.reason}. A refusal below may be about the route, not this container.`);
     return null;
   }
   if (!plan.rearm) return null;
-  if (process.env[PROXY_REARM_GUARD] === '1') return null;
   console.error(`ℹ️  re-exec with ${plan.flag}: ${plan.reason}.`);
   const quiet = process.allowedNodeEnvironmentFlags.has('--disable-warning') ? ['--disable-warning=UNDICI-EHPA'] : [];
   const child = spawnSync(process.execPath, [plan.flag, ...quiet, SELF_PATH, ...args], {
@@ -1979,7 +2307,9 @@ const USAGE = [
   '',
   `  Exit: 0 written and stored · ${EXIT_USAGE} usage · ${EXIT_REFUSED} refused, nothing written ·`,
   `  ${EXIT_PREREQUISITE_NOT_MET} no route, no act at all · ${EXIT_NOT_STORED} WRITTEN BUT NOT STORED — go read the artefact,`,
-  '  ⛔ do not retry blindly. Capture the code BEFORE any pipe.',
+  `  ⛔ do not retry blindly · ${EXIT_TOO_LARGE} TOO LARGE — the platform answered and refused the body for its size;`,
+  '  it names the bytes sent and the measured cap for that surface, and the remedy is to shorten or split',
+  '  the body, ⛔ never another route. Capture the code BEFORE any pipe.',
 ].join('\n');
 
 async function main(argv) {
@@ -2050,6 +2380,19 @@ async function main(argv) {
   try {
     written = await writeArtefact(repoRes.repo, options, rendered.body);
   } catch (err) {
+    // ⛔ Only the WRITE path is classified. A read sends no body, so a size
+    // refusal cannot be what it was answered with, and the pre-read above keeps
+    // its PREREQUISITE reading unchanged.
+    const refusal = sizeRefusal({
+      status: err?.status,
+      refusalText: err?.refusalText,
+      mode: options.mode,
+      sentBytes: Buffer.byteLength(rendered.body, 'utf8'),
+    });
+    if (refusal) {
+      console.error(sizeRefusalText(refusal, repoRes.repo, options.number));
+      return EXIT_TOO_LARGE;
+    }
     return reportPrerequisiteNotMet(err);
   }
 
@@ -2129,6 +2472,7 @@ async function main(argv) {
 // ---------------------------------------------------------------------------
 
 const SELF_TEST_BATTERIES = Object.freeze({
+  'the re-exec guard: the name this tool sets, and the patrol name that must not silence it': 11,
   'the token contract: the two spellings, and nothing else': 9,
   'the refusals: every route that must not reach the board': 20,
   'the opener scan: every `{{` is a token this tool renders, or the body is refused': 35,
@@ -2141,9 +2485,10 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the re-anchored footer: a newline the platform MOVED is not a byte lost': 41,
   'the CLI: the one decision a typo must never make': 16,
   'the unread-knock check: a refresh cannot void what nobody read': 49,
+  'the size refusal: a 422 the platform answered is not a route that never existed': 53,
   'the shared rule: this tool and H56 cannot come to disagree': 6,
 });
-const SELF_TEST_BATTERY_FLOOR = 13;
+const SELF_TEST_BATTERY_FLOOR = 14;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 let selfTestReachedVerdict = false;
@@ -2163,6 +2508,31 @@ export function selfTest() {
 
   const NOW_MS = Date.parse('2026-09-10T06:37:48Z');
   const kinds = (text, ms) => stampRefusals(text, ms).map((r) => r.kind);
+
+  // ── the re-exec guard (#18939) ────────────────────────────────────────────
+  // The plan reads the guard name THIS file sets, never a shared one. A sibling
+  // instrument's inherited guard used to answer 'already re-armed' here, and the
+  // un-re-armed run then bypassed the proxy and answered 401 Bad credentials —
+  // a false story about the credential, printed nowhere at all.
+  battery('the re-exec guard: the name this tool sets, and the patrol name that must not silence it');
+  {
+    const PATROL_GUARD = 'OS_HALF_STATES_PROXY_REARMED';
+    const proxied = { HTTPS_PROXY: 'http://127.0.0.1:40309' };
+    const rearm = (env) => proxyRearmPlan({ env, guard: PROXY_REARM_GUARD, flagSupported: true });
+    const own = { ...proxied, [PROXY_REARM_GUARD]: '1' };
+    const ownSource = readFileSync(SELF_PATH, 'utf8');
+    t('this tool\'s guard is its own name, never the patrol\'s', PROXY_REARM_GUARD !== PATROL_GUARD);
+    t('…and the patrol name pinned here IS the plan\'s default, so a rename reds this battery', proxyRearmPlan({ env: { ...proxied, [PATROL_GUARD]: '1' } }).guarded === PATROL_GUARD);
+    t('a proxied run with no guard set re-execs', rearm(proxied).rearm === true);
+    t('…this tool\'s OWN guard is what stops the loop', rearm(own).rearm === false);
+    t('…while the patrol\'s inherited guard does NOT suppress it', rearm({ ...proxied, [PATROL_GUARD]: '1' }).rearm === true);
+    t('a suppressed run SPEAKS — silence is the whole cost of this chain', rearm(own).hint === true);
+    t('…naming the variable a reader has to unset', rearm(own).reason.includes(PROXY_REARM_GUARD));
+    t('…and naming the 401 the silence would otherwise be read as', rearm(own).reason.includes('401 Bad credentials'));
+    t('the Actions-runner leg is unchanged: no proxy, no re-exec, no extra line', rearm({ [PROXY_REARM_GUARD]: '1' }).rearm === false && rearm({ [PROXY_REARM_GUARD]: '1' }).hint === false);
+    t('structural: the dispatch really hands the plan THIS file\'s guard', /\n\s+guard: PROXY_REARM_GUARD,\n/.test(ownSource));
+    t('structural: the plan is imported, not restated here', /\bproxyRearmPlan\b/.test(ownSource) && !/function\s+proxyRearmPlan\b/.test(ownSource));
+  }
 
   battery('the token contract: the two spellings, and nothing else');
   t('the act-clock token is `{{NOW}}`', STAMP_TOKEN === '{{NOW}}');
@@ -2722,6 +3092,107 @@ export function selfTest() {
   t('⭐ THE CONTROL, UNCHANGED: an ordinary later-SECOND comment is after the acknowledged one exactly as before', stale.kind === 'ack-not-newest' && stale.after.length === 1 && stale.after[0].id === 5648793698);
   t('⭐ same second, the ack naming the HIGHER id ⇒ cleared, it IS the newest', unreadComments({ storedBody: SEAT_BODY, comments: [PAIR_LOW, PAIR_HIGH], ackThrough: 5679000101 }).kind === 'acknowledged');
   t('…and the ack naming the newest still clears in the ordinary case too', unreadComments({ storedBody: SEAT_BODY, comments: [OLDER, KNOCK], ackThrough: 5646143629 }).ok === true);
+
+  // -- #18843: a size refusal is a REFUSAL, and its text may not prescribe a
+  // remedy the platform has already refused.
+  //
+  // The fixtures are the verbatim platform texts recorded on probe
+  // objectstack#18826 (writes 5, 6, 8, 10 and 12) — ⛔ no new oversized write is
+  // made to reproduce this, here or anywhere. What this battery floors is the
+  // TRIGGER's two sides (the sentence it keys on, and every answer it must
+  // leave alone), the CAP it names per surface, and the two remedies HELD APART
+  // in both directions — a pin that only reads the size text goes green the day
+  // exit 3's sentence creeps into it.
+  battery('the size refusal: a 422 the platform answered is not a route that never existed');
+  // Verbatim from objectstack#18826: the create side capitalises `Body`, the
+  // update side does not, and `POST /issues` carries the sentence twice.
+  const CREATE_422 = JSON.stringify({
+    message: 'Validation Failed',
+    errors: [{ resource: 'IssueComment', code: 'unprocessable', field: 'data', message: 'Body is too long (maximum is 65536 characters)' }],
+    documentation_url: 'https://docs.github.com/rest',
+  });
+  const UPDATE_422 = JSON.stringify({
+    message: 'Validation Failed',
+    errors: [{ resource: 'IssueComment', code: 'unprocessable', field: 'data', message: 'body is too long (maximum is 65536 characters)' }],
+  });
+  const TWICE_422 = JSON.stringify({
+    message: 'Validation Failed',
+    errors: [
+      { resource: 'Issue', code: 'unprocessable', field: 'data', message: 'Body is too long (maximum is 65536 characters)' },
+      { resource: 'Issue', code: 'unprocessable', field: 'data', message: 'Body is too long (maximum is 65536 characters)' },
+    ],
+  });
+  // The other 422 this tool can actually be answered with: the issues listing
+  // refuses deep pagination (page 99 stores, page 100 refuses — measured
+  // 2026-08-31). It is about a cursor and must keep its 3.
+  const PAGINATION_422 = JSON.stringify({
+    message: 'In order to keep the API fast for everyone, pagination is limited for this resource.',
+    documentation_url: 'https://docs.github.com/rest',
+  });
+  const refuse = (raw, mode, sentBytes, status = 422) => sizeRefusal({ status, refusalText: platformRefusalText(raw), mode, sentBytes });
+  const OVER_COMMENT = refuse(CREATE_422, 'comment', COMMENT_BODY_LIMIT + 1);
+  const OVER_BODY = refuse(CREATE_422, 'body', ISSUE_BODY_LIMIT + 1);
+
+  t('⭐ THE FILED READING: the create-side 422 is a size refusal, not a missing route', OVER_COMMENT !== null);
+  t('⭐ …and the update-side spelling is the SAME class, though it is NOT the same string', refuse(UPDATE_422, 'comment', COMMENT_BODY_LIMIT + 1) !== null);
+  t('⛔ …which is why the trigger is case-insensitive: the two measured sentences differ by one letter', CREATE_422.includes('Body is too long') && UPDATE_422.includes('body is too long'));
+  t('the sentence said twice (the issue-create surface) is read the same way', refuse(TWICE_422, 'body', ISSUE_BODY_LIMIT + 1) !== null);
+  t('⛔ THE CONTROL: the deep-pagination 422 is NOT this class — it keeps the prerequisite reading', refuse(PAGINATION_422, 'comment', 500) === null);
+  t('⛔ …and neither is a 422 with no text at all', refuse('', 'comment', 500) === null);
+  t('⛔ the same sentence on a 403 is not this class — the trigger needs BOTH halves', refuse(CREATE_422, 'comment', COMMENT_BODY_LIMIT + 1, 403) === null);
+  t('⛔ …nor on a 500', refuse(CREATE_422, 'comment', COMMENT_BODY_LIMIT + 1, 500) === null);
+  t('⛔ …nor on a 200, which no caller reaches through this path anyway', refuse(CREATE_422, 'comment', COMMENT_BODY_LIMIT + 1, 200) === null);
+  t('the trigger reads the SENTENCE, so a text carrying no `maximum is` clause still classifies', sizeRefusal({ status: 422, refusalText: 'Body is too long', mode: 'comment', sentBytes: 300000 }) !== null);
+  t("⛔ …and the platform's false clause ALONE does not classify — the class is never keyed on that number", sizeRefusal({ status: 422, refusalText: 'maximum is 65536 characters', mode: 'comment', sentBytes: 300000 }) === null);
+  t('⛔ the exported trigger regex is not global — a `g` regex carries a cursor between callers', BODY_TOO_LONG_RE.global === false);
+  t('⛔ …and the case-insensitivity lives on the DECLARATION, not retyped at the call site', BODY_TOO_LONG_RE.flags.includes('i'));
+
+  t("the envelope's per-error message is read, which is where the sentence arrived", platformRefusalText(CREATE_422).includes('Body is too long (maximum is 65536 characters)'));
+  t('…and the top-level one beside it, in that order', platformRefusalText(CREATE_422).startsWith('Validation Failed · Body is too long'));
+  t('a body that is not that envelope falls back to its own bytes, never to silence', platformRefusalText('502 Bad Gateway') === '502 Bad Gateway');
+  t('…and an empty answer is an empty string, never a throw', platformRefusalText('') === '' && platformRefusalText(undefined) === '');
+  t('⛔ …and the text is never truncated where the trigger reads it', platformRefusalText(JSON.stringify({ message: `${'x'.repeat(REFUSAL_TEXT_CHARS * 2)} Body is too long` })).endsWith('Body is too long'));
+
+  t('the comment surface names the comment cap', OVER_COMMENT?.cap === COMMENT_BODY_LIMIT);
+  t('the issue-body surface names the issue-body cap', OVER_BODY?.cap === ISSUE_BODY_LIMIT);
+  t('the two caps agree today — two bisections, one number', COMMENT_BODY_LIMIT === ISSUE_BODY_LIMIT);
+  t('⛔ …and they are two constants, so the day one moves the other does not lie', WRITE_SURFACES.comment.cap === COMMENT_BODY_LIMIT && WRITE_SURFACES.body.cap === ISSUE_BODY_LIMIT);
+  t("⛔ the cap is never the platform's own number", OVER_COMMENT?.cap !== undefined && OVER_COMMENT.cap !== 65536);
+  t('…it is four times it, which is what was measured stored', OVER_COMMENT?.cap === 65536 * 4);
+  t('⛔ a surface with no declared cap names none rather than inventing one', refuse(CREATE_422, 'reaction', 300000)?.cap === null);
+  t('the surface table is frozen, so no caller edits a measurement in place', Object.isFrozen(WRITE_SURFACES) && Object.isFrozen(WRITE_SURFACES.comment));
+
+  const OVER_TEXT = sizeRefusalText(refuse(CREATE_422, 'comment', 307200), 'objectstack-ai/objectstack', 18843);
+  t('⭐ THE READER TEST: a 300 KB comment reads the bytes it SENT', OVER_TEXT.includes('307,200 byte(s)'));
+  t('⭐ …the measured cap for THAT surface', OVER_TEXT.includes('262,144 bytes') && OVER_TEXT.includes('a comment'));
+  t('⭐ …the overage between them', OVER_TEXT.includes('45,056 byte(s) over it'));
+  t('⭐ …the remedy that can work', OVER_TEXT.includes(SIZE_REMEDY));
+  t('⛔ …and NOT the remedy exit 3 prescribes, which this write already proved cannot work', OVER_TEXT.includes(ROUTE_REMEDY) === false);
+  t('⛔ THE OTHER DIRECTION, so that pin cannot pass by the remedy drifting: exit 3 still prescribes it', prerequisiteNotMetText({ message: 'x' }).includes(ROUTE_REMEDY));
+  t('⛔ …and exit 3 never prescribes the size one', prerequisiteNotMetText({ message: 'x' }).includes(SIZE_REMEDY) === false);
+  t('the text names the endpoint the bytes went to', OVER_TEXT.includes('POST /issues/{n}/comments'));
+  t('…and the bisection the cap came from', OVER_TEXT.includes('objectstack#18826'));
+  t("…and quotes what the platform said, named FALSE in the same breath", OVER_TEXT.includes('maximum is 65536 characters') && OVER_TEXT.includes('FALSE in unit and value'));
+  t('the size text keeps the other four codes apart by name', [EXIT_REFUSED, EXIT_PREREQUISITE_NOT_MET, EXIT_NOT_STORED].every((code) => OVER_TEXT.includes(`${code}'s`)));
+  t('⭐ a reader of a 3 is told the fifth code exists, or the misclassification just moves', prerequisiteNotMetText({ message: 'x' }).includes(`${EXIT_TOO_LARGE}'s`));
+  t('…and a reader of a 4 too', notStoredText({ readBack: { offset: 7 } }, 'o/r', 1).includes(`${EXIT_TOO_LARGE}'s`));
+  t('the usage register carries the fifth code', USAGE.includes(`${EXIT_TOO_LARGE} TOO LARGE`));
+  t('⛔ …and the prerequisite report prints what the platform said, when it said anything', prerequisiteNotMetText({ message: 'x', refusalText: 'Resource not accessible by integration' }).includes('The platform said: Resource not accessible by integration'));
+  t('⛔ …and prints no such line for a throw that carries none, so the line means something', prerequisiteNotMetText({ message: 'fetch failed' }).includes('The platform said') === false);
+
+  const AT_CAP = refuse(CREATE_422, 'comment', COMMENT_BODY_LIMIT);
+  t('⭐ a refusal AT the measured cap is this class but is NOT explained by it', AT_CAP !== null && AT_CAP.explained === false);
+  t('…and the overage is null rather than 0 — there is no overage to print', AT_CAP?.over === null);
+  t('…so the text asks for a RE-MEASUREMENT instead of reporting a body over a cap it is not over', sizeRefusalText(AT_CAP, 'o/r', 1).includes('RE-MEASURE the cap'));
+  t('⛔ THE CONTROL: the ordinary over-cap text carries no re-measurement sentence', OVER_TEXT.includes('RE-MEASURE the cap') === false);
+  t('a refusal well UNDER the cap is unexplained the same way', refuse(CREATE_422, 'comment', 10)?.explained === false);
+  t('…and an unrecorded size does not read as zero bytes sent', sizeRefusalText(refuse(CREATE_422, 'comment', null), 'o/r', 1).includes('a body of unrecorded size'));
+
+  t('⭐ the exit register carries SIX distinct values — a caller reads exactly one', new Set([EXIT_OK, EXIT_USAGE, EXIT_REFUSED, EXIT_PREREQUISITE_NOT_MET, EXIT_NOT_STORED, EXIT_TOO_LARGE]).size === 6);
+  t('…and the size refusal is the fifth code', EXIT_TOO_LARGE === 5);
+  t('⛔ …standing apart from the transport failure it used to be reported as', EXIT_TOO_LARGE !== EXIT_PREREQUISITE_NOT_MET);
+  t('⛔ …from the contract refusal, which is this tool\'s rule and not the platform\'s', EXIT_TOO_LARGE !== EXIT_REFUSED);
+  t('⛔ …and from the write that HAPPENED and was not stored', EXIT_TOO_LARGE !== EXIT_NOT_STORED);
 
   battery('the shared rule: this tool and H56 cannot come to disagree');
   t('⭐ the positions this tool refuses are the ones H56 reads — one imported reader, never two', h56StampedReadings(maskQuotedStamps(OPENING)).length === 1);

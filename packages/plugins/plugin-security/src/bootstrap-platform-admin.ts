@@ -29,12 +29,19 @@
  *         this bootstrap still owns under walled postures is reporting: it
  *         logs the resolved admin list's standing (the same answer the
  *         read-only `platformAdmin` service serves — see
- *         `platform-admin-service.ts`), and points any LEGACY unscoped grant
- *         holder at the config path via the shared once-per-process
- *         deprecation reporter (`reportLegacyPlatformAdminGrant`, pin #5:
- *         loud migration, never a silent dual-track). Undeclared/blank/
- *         refused config still refuses loudly (fail-closed backstop; the
- *         boot-refusal half lives in plugin-auth `init()`).
+ *         `platform-admin-service.ts`). Undeclared/blank/refused config still
+ *         refuses loudly (fail-closed backstop; the boot-refusal half lives in
+ *         plugin-auth `init()`).
+ *
+ *         [#11663 L5] ⛔ The legacy-grant deprecation pointer is GONE. L4 opened
+ *         a time-boxed migration window and pointed any pre-existing unscoped
+ *         `admin_full_access` holder at the config path; L5 is its EXIT. Under a
+ *         walled posture that row is no longer an anchor at all — the derivation
+ *         site stopped reading it (`core/src/security/resolve-authz-context.ts`
+ *         §6b) — so there is nothing to migrate off and nothing to point at. The
+ *         consequence carried below: a walled rig holding such a row and
+ *         declaring nobody now has ZERO platform administrators, so the
+ *         fail-closed line fires for it too instead of being skipped.
  *
  * The "create a Default Organization for the freshly-promoted admin"
  * behavior moved to `@objectstack/organizations` (see
@@ -75,11 +82,7 @@ import {
   PLATFORM_OWNER_EMAIL_ENV,
   resolveTenancyPosture,
 } from '@objectstack/types';
-import {
-  normalizePlatformAdminEmail,
-  reportLegacyPlatformAdminGrant,
-  resolvePlatformAdminEmails,
-} from '@objectstack/core';
+import { normalizePlatformAdminEmail, resolvePlatformAdminEmails } from '@objectstack/core';
 import type { SeedSettlementSnapshot } from '@objectstack/spec/contracts';
 import { claimSeedOwnership } from './claim-seed-ownership.js';
 import {
@@ -682,8 +685,10 @@ export async function bootstrapPlatformAdmin(
   const grantScanCounts = { adminGrantRowsExamined };
 
   // `single`: a platform admin "already exists" — the promotion is a no-op
-  // forever. Under walled postures that same row is the LEGACY anchor and gets
-  // the deprecation pointer below instead of a silent early exit.
+  // forever, and under Choice 4A that row IS this rig's anchor. [#11663 L5]
+  // Under walled postures the same row is no longer an anchor at all, so the
+  // walled branch below does not take this early exit: it goes on to report
+  // config-derived standing, or to refuse fail-closed when nobody is declared.
   if (!walled && unscopedHolder) {
     return {
       seeded: seededCount,
@@ -701,20 +706,19 @@ export async function bootstrapPlatformAdmin(
   if (walled) {
     // [#11974 / #11663 L4, Choice 5A first half] The walled promotion is
     // RETIRED: no `sys_user_permission_set` row is minted, whatever accounts
-    // exist. Nothing is revoked either — an existing legacy grant still
-    // confers (P5's honoured window, enforced at the derivation site) — but
-    // it is now the OLD anchor, so its holder is pointed at the config path
-    // ONCE per process through the same latch the derivation-site reporter
-    // uses (`reportLegacyPlatformAdminGrant`): boot-time detection here and
-    // request-time detection there can never add up to two lines.
-    if (unscopedHolder) {
-      const holder = unscopedHolder;
-      const holderRows = await tryFind(ql, 'sys_user', { id: holder.user_id }, 1);
-      reportLegacyPlatformAdminGrant({
-        userId: String(holder.user_id),
-        email: holderRows[0]?.email,
-      });
-    }
+    // exist.
+    //
+    // [#11663 L5] …and the row is no longer READ either. L4 left an existing
+    // legacy grant conferring, inside a time-boxed window it announced once per
+    // process. That window has closed: the derivation site
+    // (`core/src/security/resolve-authz-context.ts` §6b) stops deriving
+    // PLATFORM_ADMIN from an unscoped `admin_full_access` row under a walled
+    // posture, so on these rigs standing is CONFIG-DERIVED and nothing else.
+    //
+    // ⛔ Nothing here writes, deletes or re-owns that row — its ownership is
+    // ADR-0131 C3's, on the v18 line. `unscopedHolder` therefore still means
+    // exactly what it meant: a row exists. What changed is what the row BUYS,
+    // which under a wall is now nothing.
 
     // Fail-closed backstop for an unusable config (unset, blank, or a list
     // REFUSED for an unparseable entry — #11663 Choice 2B folds all three
@@ -722,24 +726,40 @@ export async function bootstrapPlatformAdmin(
     // process). The startup half (walled + undeclared ⇒ REFUSE BOOT, naming
     // the variable) lives in plugin-auth's `init()`; this is the
     // defense-in-depth line for paths that reach the bootstrap without that
-    // guard (`os meta resync`, embeddings without plugin-auth). With a legacy
-    // holder present the deprecation pointer above already carries the
-    // remedy, so the extra error line is skipped — the deployment HAS an
-    // administrator, on the old anchor.
+    // guard (`os meta resync`, embeddings without plugin-auth).
+    //
+    // [#11663 L5] ⛔ This line is no longer skipped when a legacy holder exists.
+    // It used to be, and the reason it used to be has expired: L4's skip was
+    // justified by 「the deployment HAS an administrator, on the old anchor」 and
+    // by the deprecation pointer carrying the remedy instead. Both premises died
+    // with the walled dual read. A walled rig holding an unscoped
+    // `admin_full_access` row and declaring nobody now has ZERO platform
+    // administrators — exactly the state this line exists to announce — so
+    // staying quiet for it would be the silent half of a fail-closed guard.
     const platformAdminConfig = resolvePlatformAdminEmails();
     if (platformAdminConfig.emails.length === 0) {
-      if (!unscopedHolder) {
-        const message =
-          `[security] tenancy posture is walled but ${PLATFORM_OWNER_EMAIL_ENV} declares no usable ` +
-          'platform administrator (unset, blank, or refused for an unparseable entry) — ' +
-          'this deployment has ZERO config-derived platform administrators. Under walled ' +
-          'postures the first registrant is never promoted and no grant row is written; ' +
-          `platform admin standing is derived from ${PLATFORM_OWNER_EMAIL_ENV} at request ` +
-          "time. Set it to the operator's email address (or a comma-separated list of " +
-          'addresses) and make sure the account verifies its email.';
-        if (logger?.error) logger.error(message);
-        else logger?.warn?.(message);
-      }
+      const message =
+        `[security] tenancy posture is walled but ${PLATFORM_OWNER_EMAIL_ENV} declares no usable ` +
+        'platform administrator (unset, blank, or refused for an unparseable entry) — ' +
+        'this deployment has ZERO config-derived platform administrators. Under walled ' +
+        'postures the first registrant is never promoted and no grant row is written; ' +
+        `platform admin standing is derived from ${PLATFORM_OWNER_EMAIL_ENV} at request ` +
+        "time. Set it to the operator's email address (or a comma-separated list of " +
+        'addresses) and make sure the account verifies its email.' +
+        // [#11663 L5] The migration window's last word, said where an operator can
+        // act on it. This rig HAS an unscoped `admin_full_access` row and used to
+        // be administered through it; under a wall that row stopped conferring
+        // when the dual read retired, so saying only "declare somebody" would hide
+        // the fact that somebody has just lost standing.
+        (unscopedHolder
+          ? " This deployment also holds a legacy unscoped 'admin_full_access' grant row" +
+            ` (user ${String(unscopedHolder.user_id)}). Under a walled posture that row is NO LONGER` +
+            ` an anchor for platform admin standing — the migration window announced since 17.3.0 has` +
+            ` closed — so declaring that account's verified address in ${PLATFORM_OWNER_EMAIL_ENV} is` +
+            ' what restores it. The row itself is left exactly as it is.'
+          : '');
+      if (logger?.error) logger.error(message);
+      else logger?.warn?.(message);
       return {
         seeded: seededCount,
         adminPromoted: false,

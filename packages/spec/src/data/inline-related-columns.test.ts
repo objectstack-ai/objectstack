@@ -211,6 +211,28 @@ describe('#9227 inlineColumns — strict name-keyed element', () => {
     expect(issues).toContain('`text` → `label`');
   });
 
+  /**
+   * #18972 — the grid column's own `scale` carries the same platform ceiling
+   * as `FieldSchema.scale`, reached by a different primitive: this is the key
+   * objectui's `computeRow` hands to `Number(v.toFixed(scale))`
+   * (GridField.tsx), which throws `RangeError` above 100. Asserted THROUGH the
+   * door, like everything else in this file.
+   */
+  it('refuses a computed column whose `scale` is past the renderer ceiling (#18972)', () => {
+    acceptField({
+      inlineEdit: 'grid',
+      inlineColumns: [{ name: 'amount', computed: true, expr: 'quantity * unit_price', scale: 100 }],
+    });
+    const issues = rejectField({
+      inlineEdit: 'grid',
+      inlineColumns: [{ name: 'amount', computed: true, expr: 'quantity * unit_price', scale: 101 }],
+    });
+    expect(issues).toContain('too_big');
+    // The refusal names the renderer fact, so an author can check it.
+    expect(issues).toContain('toFixed');
+    expect(issues).toContain('RangeError');
+  });
+
   it('the element schema is exported and closed on its own', () => {
     accept(InlineGridColumnSchema, { name: 'quantity' });
     reject(InlineGridColumnSchema, { name: 'quantity', field: 'quantity' });

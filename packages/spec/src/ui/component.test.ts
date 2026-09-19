@@ -1369,11 +1369,53 @@ describe('ElementTextPropsSchema', () => {
     expect(props.align).toBe('center');
   });
 
-  it('should accept all variants', () => {
-    const variants = ['heading', 'subheading', 'body', 'caption'] as const;
-    variants.forEach(variant => {
-      expect(() => ElementTextPropsSchema.parse({ content: 'Test', variant })).not.toThrow();
-    });
+  /**
+   * The accept set, measured rather than described. Release 1 of the
+   * objectui#7450 convergence (maintainer 2026-09-09, option B) is additive
+   * only, so the assertion has two halves and BOTH are load-bearing: the nine
+   * published values are accepted, and the two legacy spellings are STILL
+   * accepted. A pin that only checked the nine would stay green through the
+   * release-2 retirement this card explicitly does not carry.
+   */
+  const PUBLISHED_NINE = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'body', 'caption', 'overline'] as const;
+  const STILL_ACCEPTED = ['heading', 'subheading'] as const;
+
+  it.each(PUBLISHED_NINE)('accepts the published variant %s', variant => {
+    const parsed = ElementTextPropsSchema.safeParse({ content: 'Test', variant });
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.variant).toBe(variant);
+  });
+
+  it.each(STILL_ACCEPTED)('release 1 refuses nothing — %s is still accepted', variant => {
+    const parsed = ElementTextPropsSchema.safeParse({ content: 'Test', variant });
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.variant).toBe(variant);
+  });
+
+  /**
+   * The lit control for the two tests above: the enum is still a CLOSED set,
+   * so a zero-refusal reading on the eleven is a reading and not a schema that
+   * stopped judging `variant` at all.
+   */
+  it('still refuses a value outside the eleven, with invalid_value', () => {
+    const parsed = ElementTextPropsSchema.safeParse({ content: 'Test', variant: 'small' });
+    expect(parsed.success).toBe(false);
+    expect(parsed.success ? [] : parsed.error.issues.map(issue => issue.code)).toContain('invalid_value');
+    expect(parsed.success ? [] : parsed.error.issues.map(issue => issue.path.join('.'))).toContain('variant');
+  });
+
+  /**
+   * Absence is the one thing this widening must not move (objectui#6942 keeps
+   * the `ui:text` side from synthesising `body`; the spec side always has).
+   * `.optional().default('body')` is kept deliberately, so an absent `variant`
+   * still materialises `'body'` — pinned here as well as in the minimal-props
+   * test above, because that test would keep passing if the default moved to
+   * some other member of the widened enum.
+   */
+  it('leaves absence exactly where it was — no variant materialises body', () => {
+    const parsed = ElementTextPropsSchema.safeParse({ content: 'Test' });
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.variant).toBe('body');
   });
 
   it('should reject without content', () => {

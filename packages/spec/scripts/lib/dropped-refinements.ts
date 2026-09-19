@@ -90,8 +90,8 @@ import {
   CUSTOM_CHECK_KIND,
   checkKindOf,
   customChecksOf,
+  projectPublishedJsonSchema,
   projectableRefinementsOf,
-  refinementProjectionOverride,
   zodDefOf,
 } from './refinement-projection';
 
@@ -149,6 +149,18 @@ export interface RefinementSite {
    * named, which reads differently from a refinement somebody deleted.
    */
   readonly declaredPatterns: readonly string[];
+  /**
+   * The RAW differential this node's verdict was adjudicated from: true when
+   * removing its `custom` checks changes the projection at all, i.e. SOMETHING
+   * about them reached the published file.
+   *
+   * ⛔ Not a synonym for `verdict === 'projected'`. The pair
+   * `verdict: 'dropped'` + `projectionMoved: true` is the one that carries
+   * information neither field holds alone — some of this node's rules are
+   * stated and at least one is not — and the pair
+   * `verdict: 'projected'` + `projectionMoved: false` cannot occur.
+   */
+  readonly projectionMoved: boolean;
 }
 
 /** Every refinement site under one published schema. */
@@ -221,20 +233,25 @@ function withoutCustomChecks(schema: z.ZodType): z.ZodType | null {
  * `toJSONSchema` in the generator's own io ladder, or `null` when neither side
  * has a JSON form.
  *
- * ⭐ It passes the generator's `override` (#18670 item 2). Without it this
- * function would measure a projection nothing publishes: a node whose rule the
- * closed list DOES emit would read byte-identical on both sides of the
- * differential and stay in the ledger for ever, and the shrink-only ledger's
- * whole use — a row deletion is the observable proof a site closed — would be
- * unreachable. With it, `dropped` means "this build's own published file states
- * nothing about this rule".
+ * ⭐ It projects through `projectPublishedJsonSchema` — the SAME call the
+ * generator reaches `z.toJSONSchema` through (#18670). Without the refinement
+ * projection this function would measure a projection nothing publishes: a node
+ * whose rule the closed list DOES emit would read byte-identical on both sides
+ * of the differential and stay in the ledger for ever, and the shrink-only
+ * ledger's whole use — a row deletion is the observable proof a site closed —
+ * would be unreachable. With it, `dropped` means "this build's own published
+ * file states nothing about this rule".
+ *
+ * ⛔ And it is reached through the shared helper rather than by passing
+ * `override:` here, because the two halves agreeing was otherwise a convention:
+ * dropped on the generator side alone it left every declared site reading
+ * `projected` behind a green ledger while the published file went wide in
+ * silence. The helper's own docblock carries that measurement.
  */
 function projectOrNull(schema: z.ZodType): string | null {
   for (const io of ['output', 'input'] as const) {
     try {
-      return JSON.stringify(
-        z.toJSONSchema(schema, { target: 'draft-2020-12', io, override: refinementProjectionOverride }),
-      );
+      return JSON.stringify(projectPublishedJsonSchema(schema, { io }));
     } catch {
       // Try the other direction — the generator does the same, for the same reason.
     }
@@ -242,13 +259,57 @@ function projectOrNull(schema: z.ZodType): string | null {
   return null;
 }
 
-function verdictFor(schema: z.ZodType): RefinementSite['verdict'] {
+/** One node's raw differential and the verdict adjudicated from it. */
+interface NodeProjectionReading {
+  readonly verdict: RefinementSite['verdict'];
+  readonly projectionMoved: boolean;
+}
+
+/**
+ * Measure one node, then adjudicate it.
+ *
+ * ## The differential is per NODE, and so is the ledger — but the RULES are not
+ *
+ * `withoutCustomChecks` removes ALL of a node's custom checks at once, so the
+ * comparison answers "did ANY of them reach the file", never "did each". A node
+ * carrying one DECLARED arm and one undeclared rule therefore moved the
+ * differential on the strength of the declared arm alone, and reading that as
+ * `projected` published the undeclared rule's silence: not in the ledger, not
+ * in `x-dropped-refinements`, and invisible to the generator's UNDECLARED line,
+ * which only sees sites with zero declared patterns. The ratchet stayed green
+ * over a refinement the file says nothing about — exactly what the ruling's
+ * 「A refinement that is not one of these named patterns stays dropped and
+ * annotated」 forbids. Measured before this fix, on the two-arm shape
+ * `z.string().refine(NON_BLANK_STRING).refine((s) => s.startsWith('x'))`:
+ * `dropped: []`, `projected: [{ count: 2, declaredPatterns: ['non-blank-string'] }]`.
+ *
+ * So `projected` now requires that EVERY custom check on the node is one the
+ * closed list declared. Anything else is `dropped`, conservatively: the ledger
+ * unit is the node, a node cannot be half-recorded, and over-recording costs a
+ * row while under-recording costs the silence this whole instrument exists to
+ * end.
+ *
+ * ## Why the raw differential is still reported
+ *
+ * Collapsing "the projection did not move" and "it moved for reasons this list
+ * does not cover" into one `dropped` would make the detector assert the drop
+ * instead of measuring it — the failure this module's header names, and the one
+ * that would keep it reading as current through the zod upgrade that fixes the
+ * gap. `projectionMoved` is the measurement; `verdict` is the adjudication. A
+ * site with `verdict: 'dropped'` and `projectionMoved: true` is news either way
+ * — a mixed node, or zod having started to project something on its own — and
+ * the generator prints it on its own line.
+ */
+function readProjection(schema: z.ZodType): NodeProjectionReading {
   const stripped = withoutCustomChecks(schema);
-  if (!stripped) return 'undecidable';
+  if (!stripped) return { verdict: 'undecidable', projectionMoved: false };
   const before = projectOrNull(schema);
   const after = projectOrNull(stripped);
-  if (before === null || after === null) return 'undecidable';
-  return before === after ? 'dropped' : 'projected';
+  if (before === null || after === null) return { verdict: 'undecidable', projectionMoved: false };
+  if (before === after) return { verdict: 'dropped', projectionMoved: false };
+  const stated = projectableRefinementsOf(schema).length;
+  const total = customChecksOf(schema).length;
+  return { verdict: total === stated ? 'projected' : 'dropped', projectionMoved: true };
 }
 
 /**
@@ -396,13 +457,15 @@ export function collectDroppedRefinements(defKey: string, root: z.ZodType): Refi
 
     const customs = customChecksOf(schema);
     if (customs.length > 0) {
+      const reading = readProjection(schema);
       const site: RefinementSite = {
         path: readablePath(path),
         nodeType: String(zodDefOf(schema)?.type ?? 'unknown'),
         count: customs.length,
         aborting: customs.some(checkAborts),
-        verdict: verdictFor(schema),
+        verdict: reading.verdict,
         declaredPatterns: projectableRefinementsOf(schema).map((declared) => declared.pattern),
+        projectionMoved: reading.projectionMoved,
       };
       if (site.verdict === 'dropped') dropped.push(site);
       else if (site.verdict === 'projected') projected.push(site);
