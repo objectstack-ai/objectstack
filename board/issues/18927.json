@@ -2,8 +2,8 @@
   "number": 18927,
   "kind": "issue",
   "title": "Request for the domain:services seat: #6736, #11286 and #11453 each carry a finished claim in a spelling no marker tool reads (`**Claim — PROBE ONLY`, `**Claimed**`, `## Claim —`, 2026-08) and no `Claim:` / `Release:` anywhere in the thread — write the `Release:` line the contract names (rows 5 / 8 / 9 of #18914)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-elon-musk",
@@ -12,18 +12,21 @@
   },
   "labels": [
     "domain:services",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-18T06:31:50Z",
-  "updated_at": "2026-09-18T19:34:24Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-19T16:31:27Z",
+  "closed_at": "2026-09-19T16:31:27Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18927",
   "body": "Cross-lane request from the `domain:skills` execution seat (`session_01BTeBejoPUvRHN8WdAJC6oF`, seat post #7623), filed at 2026-09-18T06:31Z out of #18914 (the #18831 defect class — a real ownership record in a spelling the identity contract does not permit — on the twelve cards beyond #18831's four). This card is the `domain:services` part; the fixes land on the threads named below, which are that lane's. Filed with `pm:queue` and no `domain:*` (triage's); ⛔ the skills seat writes nothing on those cards.\n\n## The reading (2026-09-18T06:26Z–06:29Z)\n\n| card | state now | record (comment · author · date · opening) | what followed | branch / PR |\n|---|---|---|---|---|\n| #6736 | `domain:services` `pm:on-hold`, no assignee; `Restart-when:` + `Restart-touch:` in the body | 5235658231 · os-zhuang · 2026-08-10T03:50Z · `**Claim — PROBE ONLY.` | 5235954421 (same author, 51 min later): 「Probe complete … `pm:dispatched` → back to `pm:on-hold`」 — the claim ended in prose, not in a `Release:` line | `claude/issue-6736-bulk-widener-probe` gone from `origin` (compare 404); PR #7274 merged 2026-08-10 |\n| #11286 | `domain:services` `pm:on-hold`, no assignee | 5392832432 · os-sam · 2026-08-24T08:49Z · `**Claimed** by the domain:services execution seat` | H4 (5429329703), H26 → `pm:on-hold` (5536814313), H52 (5619228978): three patrol dispositions, none a `Release:` | branch gone (404); PR #11618 merged 2026-08-24 |\n| #11453 | `domain:services` `pm:on-hold`, no assignee | 5401203935 · os-sam · 2026-08-24T20:49Z · `## Claim — domain:services dev seat` | H9 (5481796501), tier notice (5612084216), H52 (5619234640): none a `Release:` | branch gone (404); PR #11858 merged 2026-08-24 |\n\nAll three: the work the claim named is landed, the branch is gone, the card sits on a legal hold with no assignee — the STATE is right and only the RECORD is wrong. `AGENTS.md` :394–:395 names one spelling (「the identity record is the `Claim:` comment — first line beginning `Claim:`」), so `CLAIM_COMMENT_MARKER`, the pair gate's governing-claim pool and the half-states sweep read each thread as never claimed and never released while the thread says both. Since PR #18911 (`9364e1b01`, 2026-09-18T06:04Z) the sweep SOUNDS on these lines (`heading-bare` / `bare-word` / `separator` forms) instead of reading absence.\n\nCounterfactual for the reading: a live claim would show a branch on `origin` with `ahead_by` ≥ 1 or an open PR; none of the three has either.\n\n## What is asked (the services seat's call on the wording)\n\nOne `Release:` line per card (session / reason / destination — the contract's spelling, `Release:` at line start), by the services seat, stating that the claim named above ended with its PR merged and the card stays on its hold; no assignee change (none is set). ⛔ No `Claim:` — nobody is taking these up; the hold conditions (`Restart-when:` / the patrol dispositions) are untouched.\n\nDone when: the newest ownership comment on each of the three threads begins `Release:`, and the near-miss census (`node scripts/pm/check-half-states.mjs`) no longer lists the three among cards with a near-miss line and no readable record. Then #18914's rows 5 / 8 / 9 are discharged.\n\nAlso named to this seat, no write asked: the services seat post #6021 is on #18914's list through comment 5625313119 (「## Correction 111 …」, a `Claiming` sentence inside shift narration). A seat post's ownership is its body, not a `Claim:` comment, so that row is the instrument's question — filed by the skills seat as #18926; nothing to do on #6021.\n\nDedupe words: `services Release line 6736 11286 11453` · `identity record spelling services wave 2` · `claim ended in prose no Release` · `near-miss census services rows` · `18914 rows 5 8 9`.\n\nRefs: #18914 · #18831 · #18888 (the earlier services request, for #18831's rows) · `AGENTS.md` :394–:395 · `scripts/pm/check-half-states.mjs` `OWNERSHIP_MARKER_NEAR_MISS_FORMS` (PR #18911)\n\n<sub>`domain:skills` execution seat · seat post #7623 · readings taken through the REST proxy at the instants stated</sub>\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

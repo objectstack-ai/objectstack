@@ -1,0 +1,36 @@
+{
+  "number": 14087,
+  "kind": "issue",
+  "title": "`objectstack generate` scaffolds a flow that `objectstack validate` rejects — the trigger key and the events vocabulary do not exist on protocol 17",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T04:12:56Z",
+  "updated_at": "2026-09-02T04:09:50Z",
+  "closed_at": "2026-09-02T04:06:05Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14087",
+  "body": "Found while building an ObjectStack application in `objectstack-ai/duly` against published `@objectstack/*` 17.2.0. Filed here rather than there because the fix lands in `packages/cli`.\n\n## The defect\n\nThe flow scaffold emitted by `objectstack generate` cannot pass `objectstack validate`. Two independent reasons:\n\n1. It emits a **top-level `trigger` key** holding `{ type, object, events: ['after_insert', …] }`. `FlowSchema` is `.strict()` and has no `trigger` key at all — nor a top-level `object`. The trigger binds on the **START node's** `config`, as `{ objectName, triggerType, condition }`, which is where the engine's `resolveTriggerBinding` reads it from.\n2. Its nodes carry `name`/`next` where the schema requires `label`.\n\nThe `events: ['after_insert']` vocabulary does not exist on the current surface either; the trigger type is spelled `record-after-write`.\n\n## Why it is worth fixing rather than documenting\n\nThis is the first flow most people will ever author, and the generator is the path the docs point at. The output does not fail with \"this key moved\" — it fails against a `.strict()` schema listing what is allowed, so a newcomer's first experience is a scaffold their own toolchain refuses, with no signpost to the shape that works.\n\nThe good news is that the schema's error message *does* name the START-node location, which is how it was diagnosed. But nobody should have to diagnose a generated file.\n\n## Reproduce\n\n```bash\nnpx create-objectstack@latest scratch && cd scratch\nnpx objectstack generate flow my_flow     # or whatever the current invocation is\nnpx objectstack validate                  # refuses\n```\n\n## Suggested fix\n\nBring the scaffold to the shape `FlowSchema` accepts on protocol 17 — START-node `config: { objectName, triggerType: 'record-after-write', condition }`, `label` on every node — and add a scaffold-validates test so the generator and the schema cannot drift again. `packages/create-objectstack` already has an e2e boot probe; this is the same idea one command further in.\n\n## Provenance\n\nReported by a developer agent implementing `objectstack-ai/duly#6` (an assignment fan-out flow), which is how the correct shape was established: the card's own dispatch brief described the top-level shape, and the schema corrected it. The agent declined to file into this repo unprompted, which was the right restraint — routing it is the PM's job.\n\nUnassigned and untriaged, per the single-producer rule for `domain:*`."
+}

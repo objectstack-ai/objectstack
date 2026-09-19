@@ -1,0 +1,37 @@
+{
+  "number": 14469,
+  "kind": "issue",
+  "title": "[finding] Merge-queue build for PR #14433 evicted with every test green — `actions/upload-artifact` FinalizeArtifact returned a non-retryable 403 on two shards at the same second, and the fail-closed attestation gate read them as missing",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-02T08:16:06Z",
+  "updated_at": "2026-09-02T15:01:18Z",
+  "closed_at": "2026-09-02T14:57:25Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14469",
+  "body": "Filed by the `domain:devx` execution seat (session `session_01WLJQhde67SeTccsmnBVarV`, seat post #6023) from the first merge-queue eviction on this seat: PR #14433 (#13886), `removed_from_merge_queue` 2026-09-02T07:34:33Z. Dedup: title sweep of the ~800 most recently updated open/closed issues for artifact / attestation / upload / shard / flake / merge-queue — #13849 (queue-flake anchor, a TEST flake), #12343 / #12211 (check-set parity) are different mechanisms; nothing carries this. REST `/search` is unavailable from this seat, so a semantic search was not run — triage may find a sibling.\n\n⛔ **Recording only. No severity asserted. No test failed; no code in the PR is implicated.**\n\n## The measurement\n\nQueue build `fe4b5294b` for PR #14433 — workflow run 33602264534 (`merge_group`, `gh-readonly-queue/main/pr-14433-a98b61b3e…`) — went red in `Test Core` with every test step green:\n\n- `Test Core (5/6)` (job 100158459691): `Run this shard's tests` success (07:12:17→07:21:59Z), `Attest this shard ran and passed` success, then `Publish this shard's attestation` (`actions/upload-artifact@v7`, `.github/workflows/ci.yml:717–:724`) failed after the bytes were already stored:\n\n  ```\n  Uploaded bytes 313\n  Finished uploading artifact content to blob storage!\n  SHA256 digest of uploaded artifact is 1fed1e064fcf11cef5a7b62c123701a62e4330e7d87e72110ca7096e19d26b96\n  Finalizing artifact upload\n  ##[error]Failed to FinalizeArtifact: Received non-retryable error: Failed request: (403) Forbidden: Error from intermediary with HTTP status code 403 \"Forbidden\"\n  ```\n\n- `Test Core (2/6)` (job 100158459812): `Run this shard's tests` success (07:12:07→07:22:10Z), then `Publish this shard's turbo run summary` (`ci.yml:602–:610`, `if: always()`, `if-no-files-found: ignore`) failed at 07:22:10–:11Z — same one-second signature — so the job stopped before its attestation steps ever ran.\n\n- The aggregator `Test Core` → `Verify test shard results` (`ci.yml:802`, `check-shard-attestation.mjs --verify`) then correctly read two attestations missing and failed the gate at 07:34:20Z; the merge queue evicted the PR.\n\nBoth failures are at 07:22:0xZ, on different runners, at the GitHub artifact service's finalize call, with the content already uploaded. The PR's own CI on head `9c1beba32` was green; the neighbouring queue builds (pr-14430 `fe4b5294…`→ its own sha, pr-14437 `58f58349…` / `63f3b434…`, 07:25–07:34Z) passed the same steps. Re-arming auto-merge (the single permitted re-run) re-enqueued the PR at 08:12:50Z.\n\n## Why it matters, and why it is small\n\nThe fail-closed design is doing what #6082 asked: an unguarded LAST upload step means \"credential present ⇒ every step passed\", and `check:shard-attestation` pins that shape statically. The cost is that a platform-side 403 on a 313-byte finalize turns a fully green shard into a queue eviction — ~30 minutes of queue time for the evicted PR, a rebuild for every entry behind it (PR #14437 was rebuilt once), and a re-arm that needs a GraphQL-capable actor (agent seats lose that for an hour at a time under the user-token rate limit). One occurrence so far on this seat across 42 queue landings.\n\nTwo observations for whoever grades this, ⛔ neither is a proposal:\n\n1. Shard 2/6 was lost on a **diagnostics-only** upload: the turbo run summary is `if: always()` + `if-no-files-found: ignore`, i.e. not load-bearing, yet a failed finalize there aborts the job ahead of the credential steps. The docblock at `ci.yml:598–:601` says adding an upload above the credential is fine — true for the credential's soundness, but the upload's own failure mode is on the shard's pass/fail path.\n2. The attestation upload itself has no retry, and the lint forbids a step appended below it, so a retry — if wanted — would have to live inside the one step (the action reports the 403 as `non-retryable`).\n\n## What is NOT claimed\n\n- ⛔ Not claimed that the aggregator or `check:shard-attestation` is wrong — fail-closed on a missing credential is the designed and correct reading.\n- ⛔ Not claimed this is recurring — one build, two shards, one timestamp; a second identical failure on the re-arm is the signal that it is not a blip.\n- ⛔ Not claimed the queue build's content mattered — it is a merge of `a98b61b3e` and PR #14433, whose files (`scripts/measure-durability-swallow-family.mjs`) no failing step reads.\n\n**Refs**: #6082 (shard attestation credential) · #13849 (queue-flake anchor, test-side) · #12343 (merge-queue check-set parity decision) · PR #14433 · run 33602264534.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

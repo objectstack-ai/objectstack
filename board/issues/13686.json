@@ -1,0 +1,36 @@
+{
+  "number": 13686,
+  "kind": "issue",
+  "title": "service-job: DbJobAdapter 的 interval 型调度在多副本下无 leader-election(cron 型有)—— #2219 声明的 interval 半边缺失,竞态实锤重复执行",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-31T06:39:03Z",
+  "updated_at": "2026-09-02T01:07:23Z",
+  "closed_at": "2026-08-31T18:18:25Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13686",
+  "body": "## TL;DR(人话)\n\n多副本集群下,**interval 型调度(`{type:'interval', intervalMs}`)的定时任务没有选主**:每个副本各自 `setInterval` 各自执行,同一 tick 会在 N 个副本上重复跑。cron 表达式型调度有 per-fire 选主锁,行为正确。#2219(已关)声明的能力是「leader-elect scheduled **cron/interval** jobs across the cluster」——interval 半边在当前实现里丢了。\n\n## 版本与环境\n\n- objectos-ee 镜像 4.1.1(内建 runtime **17.2.0**),`@objectstack/service-job` / `@objectstack/service-cluster-redis` 随镜像\n- 拓扑:traefik 轮询 → 3 个 app 副本,共享 postgres + redis,`OS_CLUSTER_DRIVER=redis`\n- 单副本对照:两类调度都无重复(问题仅在多副本 interval)\n\n## 根因(读源码定位)\n\n- `CronJobAdapter.runScheduled()`:**cron 与 interval 两条注册路径都经它触发**,每次 fire 先 `lock.acquire('job:'+name)`(redis fence),抢不到就跳过——**这半边是对的**;\n- 但生产实际装配是 **`DbJobAdapter`**(serve 启动日志「job 服务已升级为 DbJobAdapter」),它的 `schedule()`:\n  - `type === 'cron'` → 委托给 `this.cron`(CronJobAdapter,有锁)✓\n  - **`type === 'interval'` → 只落到 `this.inner`(IntervalJobAdapter)**——纯 `setInterval`,全文件无 lock/leader/cluster 字样,**每个副本都起自己的计时器各自执行** ✗\n\n## 实测证据(三证)\n\n1. **fence 计数静止**:8 个 job 全配成 interval(60s)后,`os:fence:job:ts:*` 计数 100 秒纹丝不动(cron 模式下每 tick +N,N=副本数,已另测实锤);\n2. **竞态现行**:一条安灯 SLA 升级(动作本体有业务查重,恰升一次),但升级**通知 3 个收件人各收到 2 条、6 条 insert 挤在 54ms 窗口**——两个副本同 tick 并发执行的直接留痕;另一「升级无可用目标」通知同样 ×2(防重标记落库前双副本各发一次);\n3. **业务效果未翻倍纯属兜底**:各 handler 自带的业务查重(按周期/按当日/按状态)+ 各副本容器启动时刻错峰,掩盖了重复执行;查重覆盖不到的写(通知类)即翻倍。\n\n## 期望\n\ninterval 型调度与 cron 型同等经过 leader-election(每次 fire 抢 `job:<name>` 锁,抢不到跳过)——即恢复 #2219 声明的两类覆盖。可能的修法:`DbJobAdapter.schedule()` 对 interval 也委托 `this.cron`(CronJobAdapter 本就支持 interval 且带锁),`inner` 仅保留 trigger()/执行记录职责。\n\n## 影响与绕法\n\n- 影响:任何用数值 intervalMs 注册的 job 在多副本部署下重复执行;错峰+业务查重只能概率性掩盖;\n- 应用侧绕法:调度一律写 cron 表达式(我们已把这条定为部署铁律),不算修复。\n\n---\nPart of steedos-labs/os-project-titanwind-ehr(deploy-ee 集群第十轮定时任务专测发现;相关声明能力 #2219)\n"
+}

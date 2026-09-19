@@ -1,0 +1,38 @@
+{
+  "number": 14318,
+  "kind": "issue",
+  "title": "非法 OS_EMAIL_FROM 只在第一个用户注册时爆、且爆在 better-auth 后台任务里：用户看到「已发送验证邮件」，邮件从未发出，sys_email 无失败行",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:blocking",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T01:52:25Z",
+  "updated_at": "2026-09-02T10:04:42Z",
+  "closed_at": "2026-09-02T10:04:42Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14318",
+  "body": "## 现象（用户被告知「已发送验证邮件」，邮件其实从未发出）\n\n2026-09-02 cloud 最新主干本地 rig（framework pin `afbf2711`，`OS_AUTH_REQUIRE_EMAIL_VERIFICATION=true`，`OS_EMAIL_PROVIDER=log`），发件人配置为 `OS_EMAIL_FROM=\"ObjectOS Local <noreply@localhost>\"`：\n\n- `POST /api/v1/auth/sign-up/email` → 200，前端跳到 verify-email-prompt 显示「我们已向您的邮箱发送了一封验证邮件」；\n- 服务端 better-auth 后台任务抛错，只在日志里：\n\n```\nERROR [Better Auth]: Failed to run background task: Error: Invalid email address: noreply@localhost\n    at formatAddress (packages/plugins/plugin-email/dist/index.mjs:436:11)\n    at normalizeMessage … at EmailService.sendInternal … at EmailService.send … at EmailService.sendTemplate\n    at async Object.sendVerificationEmail (packages/plugins/plugin-auth/dist/index.mjs:4301:28)\n```\n\n`plugin-email` 的 `EMAIL_REGEX` 要求域名带点，`noreply@localhost` 不合法——这是合理的校验，问题是它在**第一个用户注册时**才爆，而且爆在没人看的地方：用户卡在验证页，「重新发送」同样静默失败，没有任何界面或运维信号。\n\n## 修复要求\n\n1. 发件人地址在服务启动（`EmailServicePlugin` 初始化 / 配置解析）时校验，不合法就以启动错误或明确的 WARN 暴露，而不是在每次发信时抛进后台任务。\n2. `sendVerificationEmail` / 邮件发送失败要有可观测出口：至少 `sys_email` 落一条 `status=failed` + error 的行（本次 `sys_email` 里没有任何失败记录），并让 auth 层能把「发送失败」返回给调用方（cloud 前端才有机会不显示「已发送」）。\n3. 补测试：非法 `from` 在启动期被拒；发送失败时 `sys_email` 有失败行。\n\n关联（cloud 侧）：验证页在发送失败时的文案与重发行为，待本卡提供失败信号后跟进。\n"
+}

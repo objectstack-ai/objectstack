@@ -1,0 +1,34 @@
+{
+  "number": 14538,
+  "kind": "pull_request",
+  "title": "docs(ci): stop hard-coding hook self-test deps in a comment",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T10:33:23Z",
+  "updated_at": "2026-09-02T11:59:18Z",
+  "closed_at": "2026-09-02T11:59:16Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-09-02T11:59:16Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/14538",
+  "body": "Fixes #14141\n\n## What\n\n`.github/workflows/lint.yml`'s `Claude hook guard self-tests` step discovers its\nmatrices by glob (`find .claude/hooks -type f -name '*.selftest.sh' | sort`), but\nthe comment above the step hard-coded a fixed dependency claim for the whole step.\nThat combination is a drift channel: a new matrix can need more than the original\ntwo did without touching this comment, and one already does\n(`guard-governed-enqueue.selftest.sh` needs `node` for real — see #14141 for the\nfull writeup). `check:step-collectors` cannot see this block (the comment already\nadmits as much a few lines up), so nothing catches the prose falling out of date.\n\nThis is option A from the triage (comment\nhttps://github.com/objectstack-ai/objectstack/issues/14141#issuecomment-5502874580):\nrewrite the dependency sentence to describe only what the *step itself* needs, and\npush the \"what else\" onto each matrix's own header — prose-for-prose, no new\nmachine channel. Options B/C (a preflight that parses matrix headers, deferred by\nthe triage) are out of scope here; `.claude/hooks/**` is untouched.\n\n**Before:**\n> Needs `jq` and `git` and nothing else — no pnpm, no node, no build, no network\n> (`jq` is in the runner image and is already relied on bare by cut-rc.yml and\n> release.yml). ~2 s measured.\n\n**After:**\n> This step itself needs only `jq` and `git` (both in the runner image; `jq` is\n> already relied on bare by cut-rc.yml and release.yml), plus whatever each\n> discovered matrix declares in its own header — discovery above is by glob, so a\n> matrix needing more (node, pnpm, a built tree, a generator) must say so there;\n> this comment is not the place to enumerate it.\n\nThe stale `~2 s measured` figure is dropped along with it. No other line moves:\nstep `name:`, `run:` script, the `find` discovery, and the rest of the \"Hermetic\nby construction\" paragraph (per-matrix throwaway git repos; re-run from a primary\ncheckout / detached HEAD / non-repo cwd) are untouched, and the\n`⚠️ check:step-collectors CANNOT see this block` admission stays as-is.\n\n## Selftest census (why this matters right now)\n\nAll five matrices currently discovered under `.claude/hooks/*.selftest.sh`, and\nwhether each calls anything beyond `jq`/`git`/`bash` for real (not counting\n`node`/`pnpm` strings that appear only inside simulated Bash-command fixtures fed\nto the guard under test):\n\n| matrix | own header says | real extra deps |\n|---|---|---|\n| `guard-governed-enqueue.selftest.sh` | \"Needs `jq` … and `node`\" | **`node`** (both predicates run for real; one case runs a generator `--check` when deps are installed) |\n| `guard-main-checkout-bash.selftest.sh` | \"Needs jq and git and nothing else\" | none |\n| `guard-main-checkout.selftest.sh` | \"Needs jq and git and nothing else\" | none |\n| `guard-shared-stash.selftest.sh` | \"Needs jq … and nothing\" | none |\n| `guard-tree-enum.selftest.sh` | \"Needs jq … and nothing else\" | none |\n\nOnly one matrix has drifted past jq+git so far, and it already documents its own\nextra dependency in its own header — which is exactly the shape the rewritten\nstep comment now describes instead of enumerating. No second drift instance was\nfound, so route B (a preflight parsing matrix headers) stays deferred per the\ntriage.\n\n## Testing\n\n- `find .claude/hooks -type f -name '*.selftest.sh' | sort` — the step's own\n  discovery command, run locally: discovers the same 5 files listed above.\n- The step's `run:` block executed locally, byte-for-byte (bash + jq + git + node\n  are all present on this machine): all 5 matrices `PASS`, exit 0.\n- Gate union derived via `node scripts/pm/dispatch-gates.mjs --repo\n  objectstack-ai/objectstack --commands .github/workflows/lint.yml` on the current\n  head (commit `7987b5b2e`, `origin/main` merged in twice as it advanced) — 23\n  families, 22 RAN-PASS, 1 NOT-MEASURED (`check:type-check-debt`, exit 3\n  `PREREQUISITE NOT MET` — needs the full workspace dependency closure built\n  first; this is a comment-only YAML change with no bearing on type-check debt).\n  `pnpm check:pm-dispatch-gates` (1240 self-test cases) also RAN-PASS. Full list\n  in the issue comment report.\n- No changeset: this PR touches only a YAML comment under `.github/**`, no\n  package or user-visible behaviour changes — `skip-changeset` label applied and\n  confirmed by reading the PR's labels back.\n\n_Session: https://claude.ai/code/session_01WLJQhde67SeTccsmnBVarV_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

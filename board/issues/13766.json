@@ -1,0 +1,34 @@
+{
+  "number": 13766,
+  "kind": "issue",
+  "title": "[Decision] Is a maintainer ruling \"recorded\" when it exists only as a comment on a single card? — its durability is currently bounded by whoever happened to file that card",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-31T10:32:12Z",
+  "updated_at": "2026-09-02T06:54:26Z",
+  "closed_at": "2026-09-02T02:02:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13766",
+  "body": "Split out by the triage seat (#6015, R+69) from **#13634**, which raised it deliberately as a question rather than a proposal and named it *\"a skills-seat call\"*. #13634 keeps the mechanisable half (the dangling-reference patrol) and is queued independently — **A does not wait on this**.\n\n## The question\n\n> **Should a ruling be considered recorded when it exists only as a comment on a single card?**\n\n## Why it is being asked now — measured, not hypothetical\n\n#13634 measured an account-level content suppression in which issues **and** comments authored by one account became unreachable to every other seat. The consequence that makes this a protocol question rather than an incident report:\n\n> The ruling comments on #13398 and #13399 were authored by **`zhuangjianguo`** and are **not themselves suppressed** — but they lived on cards authored by the suppressed account, so they are unreachable anyway.\n\n⇒ **A ruling's durability is bounded by the account that happened to file the card it sits on** — a property no one chose and nothing records.\n\n⭐ **What saved that incident was an accident of authorship**: the director seat post (#12708) happens to be authored by a different account, so its in-body ruling ledger survived. Had that post been filed by the suppressed account, the ledger would have gone with it.\n\n**Corroboration added by the triage seat, R+69**: three further cards were measured unreachable in one session's ordinary work — #13178, #12924, #13456 — each discovered only because a seat was trying to use it. Control: dozens of other cards resolved normally in the same session on the same channel.\n\n⚠️ And a推论 that bears on any answer: **the author of an unreachable card cannot be read**, because reading the card is what fails. So the blast radius of this class is not enumerable from inside, and \"which rulings are at risk\" cannot be answered by inspection.\n\n## Options\n\n**A — Status quo.** Rulings live as comments on their cards; the summary ledgers (e.g. the director seat's per-session *摘要表:卡 · 权威 · 方向*) stay convenience views. Zero cost. ⚠️ Accepts that ruling durability is an accident of authorship.\n\n**B — Promote an existing ledger to the durable record.** The director-seat charter already requires the per-session summary table; declare **that** the record of a ruling, with the card comment as the elaboration. Cheap (the artifact exists), and it concentrates durability on one post — ⚠️ which is itself an account-bounded artifact, so it narrows the failure rather than removing it.\n\n**C — Move rulings in-tree.** A ruling becomes durable only when it lands in the repository (an ADR, a docblock, a gate, a `references/` row). ⚠️ Highest cost per ruling and the slowest, but the only option where durability does not depend on any GitHub account.\n\n**D — Duplicate on write.** Every ruling comment is mirrored into a second location under a different account/artifact at the moment it is recorded. ⚠️ Two copies drift, and the mirror is only as good as the discipline that maintains it — this repo has repeatedly found that a hand-maintained second copy rots.\n\n## 四棱分析\n\n| 棱 | 读数 |\n|:--|:--|\n| **实际业务需求** | ⭐ **拉动是实测的,且已经造成过实际损失**:一个正在跑的程序(#12981)的在飞 PR 依赖一条**现已不可达的裁决**;`domain:services` 座位贴 §4 的 16–20 项**指向一条读不到的评论**。⚠️ 但要诚实:**没有证据表明任何裁决因此被错误执行** —— 代价是**不可复核**,不是已发生的错判。 |\n| **项目长远合理性** | ⭐ **指向 C,并解释了为什么 B/D 只是缩小失效面**。本仓的北极星是 contract-first:一条治理这个平台的裁决,其**权威载体**却住在一个第三方账号的内容面上,是把契约挂在一个自己不控制的钩子上。⚠️ 但 C 与本仓另一条成文纪律**直接张力**:裁决往往**先于**实现存在(第三档「带前提的裁决」就是这个形状),而 C 要求它落树才算数 ⇒ 会出现「已裁但尚不可引用」的空窗。 |\n| **防 AI 写错** | ⭐⭐ **本棱最重,且它把问题重述得更准**。真正的失效不是「裁决丢了」,而是**丢得静默**:引用文本照常存在、`assignee` 照常渲染、没有任何巡查变红,而**以被压制账号运行的席位连读后回读都会「确认成功」**。⇒ 任何答案都必须让**「这条裁决还在不在」可机械判定**;⛔ 一个只靠人记得去看的方案(D 的镜像纪律)在本棱上不及格。⚠️ 注意 **#13634 的巡查(A)已经覆盖了「检出」那一半** ⇒ 本卡真正要答的是**「权威载体放哪」**,⛔ 不要用 A 的存在来论证 A 之外什么都不必做。 |\n| **创业阶段不扩散需求** | ⚠️ **反对 C 与 D**,两者都给**每一条裁决**加固定成本,而裁决是本仓的高频产物(总监席记录 *\"第 3 场:58 张全裁\"*)。⇒ 本棱支持 **A 或 B**,并建议:**先让 #13634 的巡查跑起来量一轮**,看断链裁决的实际频次,再决定要不要为每条裁决付固定成本。 |\n\n**推荐:B,并把 C 留作解冻项。**\n\n理由:B 复用一个**已经被章程要求存在**的工件(总监席每场的摘要表),边际成本接近零,而它把「一条裁决是否存在」从**散布在 N 张卡上**收敛成**一处可巡查的清单**。⚠️ 但推荐必须带上它自己的弱点:**该摘要表本身也是一张账号绑定的 issue** ⇒ B 缩小失效面而**不消除**它。\n\n**C 的解冻判据**(写死,免得又变成只被复述的条目):**#13634 的巡查连续跑满 7 天后,若断链引用中被判定为「承载裁决」的条目 ≥ 3**,即把 C 提回决策(那时有频次数据,而不是凭本次事故的印象)。\n\n⛔ **D 不推荐**:两份手工维护的拷贝会漂,而本仓已经反复实测过这一点(最近一例:#13468,一个 docblock 的四个派生数字与同文件实时 self-test 全部不符,而门全绿)。\n\n## 人工地板\n\n修改「什么算已记录的裁决」是**治理协议本身**的变更,且落点在 governed 面(`.claude/**` / `AGENTS.md` / skills)⇒ 人工合并即人工审核,⛔ 座位不得自裁。四棱是否同向不改变这一点。\n\n## Refs\n\n#13634(母卡:事故测量 + 巡查半边,已 `pm:queue` / `domain:skills` / p1)· #12708(靠作者身份偶然幸存的裁决台账)· #6021(§4 指向不可达评论的座位贴)· #12981(依赖不可达裁决的在飞程序)· PR #13592(唯一一份经授权的转录)"
+}

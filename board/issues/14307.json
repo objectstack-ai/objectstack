@@ -1,0 +1,36 @@
+{
+  "number": 14307,
+  "kind": "issue",
+  "title": "Skills optimization flight — skills/objectstack-upgrade: DIET (≈ −1,808 tok, −22%) — a stale pinned `17.0.0-rc.5` registry snapshot (drift 29–165%), one rule stated five times, and a `--stored --apply` command that exits 1 for every agent reader because it omits `--yes`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T01:44:41Z",
+  "updated_at": "2026-09-02T12:32:52Z",
+  "closed_at": "2026-09-02T12:32:45Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14307",
+  "body": "Member card of the skills catalog optimization program #14292 (maintainer mandate 2026-09-02, verbatim: 「审核所有的 skills，进行全面的优化。」). Filed by the skills lane seat (session `session_01LraLgQVGq8egUwfYZpbYt1`). Read-only audit at objectstack `origin/main` a59f78d. Full findings table = audit record: the dev posts `audit/objectstack-upgrade/findings.md` (seat scratchpad) verbatim as the first comment at claim time.\n\n## Audit summary\n\nOne file, 693 lines, **8,333 tokens**, headroom 0 (4.4% of the bundle). Command surface verified accurate against `packages/cli/src/commands/migrate/meta.ts` (every flag, printed line, `--json` shape, `MIGRATION_SUPPORT_FLOOR = 10`, both `applyConversionsToStoredItem` seams). One TS fence, marked, symbols live — zero rot. Eight decision-changing surfaces at ≈1,040 tok each for a job run once per major. Verdict **DIET**: structure sound; oversized by a stale pinned registry snapshot, a triple-stated rule set, and prose re-teaching what the CLI already prints.\n\n## Top findings\n\n| # | id · span · proposal | Δtok |\n|:--|:--|--:|\n| 1 | UPG-D-01 · `SKILL.md:554-617` · DELETE the pinned \"v17 prescription set\" + refresh block; keep the two re-measure commands in §2.1 | −600 |\n| 2 | UPG-E-04 · `:509-553` · REWRITE-AS-CONSTRUCT — 3-row outcome→evidence table replaces §3.5's prose | −280 |\n| 3 | UPG-D-07 · `:33-47` · DELETE the \"upgrade agent\"/three-layers preamble + Layer table; keep the pipeline line at L38 | −190 |\n| 4 | UPG-D-03 · `:214-227` · REWRITE-AS-CONSTRUCT — the CLI prints this itself (`meta.ts:106-124, 137-141`) | −180 |\n| 5 | UPG-B-02 · `:669-683` → `:49-70` · MERGE — 4 of 6 Guardrails restate the ⛔ Boundary (keep all six rules in the target) | −170 |\n| 6 | UPG-D-05 · `:182-183`, `:543-547` · DELETE — \"validate green ≠ done\" is stated 5× | −120 |\n| 7 | UPG-D-04 · `:169-174` · DELETE the AST-is-lossy rationale; keep \"`--out` is the oracle\" | −110 |\n| 8 | UPG-C-01 · `:684-693` · MERGE-INTO `skills/README.md:94-110` (delete here) | −70 |\n| 9 | UPG-B-03 · `:88`, `:608` · DELETE — the same `[REMOVED]` grep appears 4× | −60 |\n| 10 | UPG-D-06 · `:194-199` · DELETE the two \"what that does and does not mean\" bullets | −60 |\n| 11 | UPG-A-02 · `:12-17` · REWRITE — frontmatter is 390 tok, largest of all 11 packages | −60 |\n| 12 | UPG-D-08 · `:505-508` · DELETE \"Section 5 earns its place…\" | −43 |\n| 13 | UPG-G-01 · `:19-24` · REWRITE `compatibility` to one line like the nine domain siblings | −40 |\n| 14 | UPG-F-02 · `:656-668` · ADD a `--json error` column to the failure-modes table (`meta.ts:262, 279, 414, 477, 504`) | +50 |\n| 15 | UPG-F-01 · absent · ADD the `--stored` exit-code contract (`meta.ts:449-454, 577-578, 621`) to §3 acceptance | +40 |\n\nNet −1,808 on 8,333 = −21.7% (−1,983 / +175).\n\n## Incidental falsehoods (fix in this flight)\n\n1. `:565-567` — counts pinned at `17.0.0-rc.5` (\"45 D2 conversions\", \"29 D3\", \"113 tombstones across 32 files\") vs measured at 17.2.0: 58 converted / 77 migrated (`spec-changes.json`), 179 `retiredKey(` sites across 44 files.\n2. `:570-577` — \"`RETIRED_KEYS_BY_MAJOR[17]` (3 entries)\": `registry.ts:7961-8195` holds 29, and one of the three listed is gone; the reconciliation rule (`:612-613`) points the wrong direction for a removal.\n3. `:579-582` — \"`RETIRED_DEFS_BY_MAJOR[17]` (1 entry)\": `registry.ts:9370-9510` holds 53.\n4. `:205` — `os migrate meta --stored --apply # rewrite the rows (prompts)`: `meta.ts:500-511` exits 1 with `confirmation_required` in any non-TTY (every agent session); the CLI's own example is `--stored --apply --yes --json`.\n5. `:517-535` — the reverse-check recipe is illustrated as producing the clean schema-gate refusal, but `os validate` loads without `authoredSource` (`validate.ts:159`; `config.ts:220-228` \"Set by `os migrate meta` only\"): a config calling `define*` throws inside the load; the probe must be a plain data literal.\n\nBoundary leak: `:570-591` explains the platform's own registration policy for the two registries a customer cannot read (`.claude/skills/spec-property-retirement` territory) — delete with UPG-D-01.\n\n## Three funded additions\n\n1. `--yes` on `:205` (UPG-E-02, +8, paid by UPG-D-08) — the one durable-rehydration command currently fails for every reader of this skill.\n2. `--stored` exit-code contract (UPG-F-01, +40, paid by UPG-D-04) — \"my metadata is on protocol N\" becomes a CI check instead of a belief.\n3. The ranged `engines.protocol` case (UPG-E-03, +30, paid by UPG-D-06) — every real config writes `engines: { protocol: '^17' }` (showcase/crm/todo) while the skill's only worked form is an exact `'16.0.0'`.\n\n## Flight scope\n\n**IMPLEMENT** (same-file, shrink-only): rows 1–15 and the findings file at HIGH or MED; falsehoods 1–5; the boundary-leak deletion; UPG-A-02 / UPG-G-01 frontmatter shrink (regenerate the README index only if a drift gate requires it).\n\n**DEFER**: UPG-H-01 (new evals file, #14296 item 2); UPG-A-01 (edits to `skills/objectstack-platform/SKILL.md` description and `skills/README.md` routing — record under \"follow-up for\" in the PR body; the platform flight #14299 owns that file).\n\n## Flight constraints (binding)\n\n- ONE draft PR, first line `Fixes #<this card>`; governed ⇒ stays draft; review requests are the seat's step.\n- Token ratchet: `SKILL.md` may not grow; additions paid by deletions in the same file; ⛔ re-wrap is not payment; ⛔ no ceiling raise; ⛔ no new files; ⛔ do not touch the ratchet script.\n- ⛔ Never edit another package's files or the internal playbook `.claude/skills/spec-property-retirement/SKILL.md` (read it only for the boundary).\n- Gates: `node scripts/check-skills-token-ratchet.mjs`, `pnpm --filter @objectstack/spec check:skill-examples`, `pnpm check:skill-compatibility`, `pnpm check:skill-identifier-liveness`, plus `node scripts/pm/dispatch-gates.mjs --commands <changed paths>`; record the head sha.\n- PR body: per-item 落点 | before | after keyed by finding id; token delta; `needs:contract-review` on both carriers (the exit-code contract and the `--yes` semantics are CLI contract claims).\n\nRefs: #14292 · #14296 · #13658."
+}

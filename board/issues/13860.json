@@ -1,0 +1,35 @@
+{
+  "number": 13860,
+  "kind": "issue",
+  "title": "\"Which protocol major was this stack authored against?\" has no declared home — three CLI commands advise off `manifest.specVersion`, which `ManifestSchema` does not declare",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-31T15:04:50Z",
+  "updated_at": "2026-09-01T19:01:59Z",
+  "closed_at": "2026-09-01T18:44:37Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13860",
+  "body": "Found by flight ⑨ of the published-skills factual sweep (#13658, member card #13840). Filed unassigned.\n\n## What was measured\n\n`os migrate meta --from N` requires the operator to state the protocol major the metadata was **authored** against. The published upgrade skill told readers to read it from `manifest.protocol` — a phantom: `manifest.protocol` had **zero** occurrences in this repo outside that one skill line, and `ManifestSchema` (`packages/spec/src/kernel/manifest.zod.ts`) declares no such key. That falsehood is corrected in the sweep PR by pointing at `manifest.engines.protocol`, which is declared (`PluginEnginesSchema`) and genuinely checked at boot (`assertProtocolCompat` in `packages/runtime/src/app-plugin.ts`; `assertArtifactProtocolCompatible` in `packages/runtime/src/artifact-reference.ts`, raising `OS_PROTOCOL_INCOMPATIBLE`).\n\nChasing that surfaced a second, separate gap the sweep did not fix.\n\n**`manifest.specVersion` is read by three CLI commands and declared by nothing:**\n\n| read at | line |\n|---|---|\n| `packages/cli/src/commands/validate.ts` | `checkSpecVersionGap(config.manifest)` |\n| `packages/cli/src/commands/doctor.ts` | `checkSpecVersionGap(config.manifest)` |\n| `packages/cli/src/commands/compile.ts` | `checkSpecVersionGap((config as ...).manifest)` |\n\n`packages/cli/src/utils/spec-version.ts` describes exactly what it wants: *\"when an app's authored `manifest.specVersion` declares an OLDER major than the `@objectstack/spec` actually installed ... there is breaking-change guidance the author should read before proceeding.\"* That is precisely the reading the upgrade flow needs.\n\nBut the key that call reads is the **stack config's** `manifest`, and `ManifestSchema` has no `specVersion` member. The only `specVersion` in the spec is on a different surface — `packages/spec/src/cloud/template-manifest.zod.ts` (the marketplace template manifest). Consequences, in the order they bite:\n\n1. `ManifestSchema` is not `.strict()`, so an authored `specVersion` is accepted and dropped. Nothing tells the author it went nowhere.\n2. Being undeclared, it is invisible to `check:authorable-surface`, carries no `.describe()`, and therefore never reaches the generated reference docs or Studio property forms — the same declared-versus-enforced asymmetry ADR-0049 exists for, running in the read-but-undeclared direction.\n3. So the advisory is, in practice, dead for stack configs: it can only fire for a manifest that carries a key the schema does not offer.\n\n## Why this is not #9264\n\n#9264 (closed) was the blank template declaring **two** protocol versions that disagreed — `specVersion: \"^6.0.0\"` in the manifest against `engines.protocol: '^17'` in the config — and fixed the sync between them. This is the layer under that: on the stack `ManifestSchema` there is no `specVersion` member to disagree with anything, while three commands read one.\n\n## The decision, not the patch\n\nTwo coherent shapes, and picking between them is a contract call rather than a bug fix:\n\n- **A — declare it.** Add `specVersion` to `ManifestSchema` with a `.describe()`, making the existing advisory reachable and authorable. Cost: a second version-shaped key beside `engines.protocol`, which is the ambiguity #9264 just paid down.\n- **B — retire the read.** Point `checkSpecVersionGap` at `engines.protocol`, which is already declared, already parsed and already enforced at boot, and delete `specVersion` from the CLI's vocabulary for stack configs. Cost: template manifests keep their own `specVersion`, so the name means one thing in one place and nothing in the other — which is the status quo, stated honestly.\n\n**Recommendation: B.** Real business need favours it — `engines.protocol` has live readers on the boot path today while `specVersion` on a stack manifest has none; long-term soundness favours one declared version axis over two; it makes AI-authored metadata harder to get wrong, because the key an agent can write is the key the runtime reads; and it is the smaller surface, which is the startup-scope posture. A is the answer only if someone wants an app-declared spec range that is deliberately independent of the plugin compatibility range — a real need nobody has stated.\n\nRefs: #13658 · #13840 · #9264 (closed, the adjacent template-side fix).\n\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

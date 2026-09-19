@@ -1,0 +1,36 @@
+{
+  "number": 14089,
+  "kind": "issue",
+  "title": "`validate-expressions` has no flow leg for bare identifiers — a bare field reference in a flow condition passes `objectstack validate` clean",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T04:22:47Z",
+  "updated_at": "2026-09-02T01:44:43Z",
+  "closed_at": "2026-09-02T01:43:23Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14089",
+  "body": "Found while building an ObjectStack application in `objectstack-ai/duly` against published `@objectstack/*` 17.2.0. Filed here because the fix lands in `packages/lint`.\n\n## Measured\n\nOn a real `record_change` flow whose START node config binds `objectName: 'duly_assignment'`:\n\n| Mutation to the START-node condition | `objectstack validate` |\n|---|---|\n| `P\\`status == \"dispatched\"\\`` — **bare identifier** | **exit 0, clean** |\n| `P\\`record.needs_colection == true\\`` — typo'd field, same site | **exit 1**, `unknown field \\`needs_colection\\` on \\`duly_assignment\\` — did you mean \\`needs_collection\\`?` |\n\nBoth mutations were confirmed on disk (injected literal present, removed literal absent, non-empty `git diff --stat`) before each run, and the tree restored after.\n\nSo the validator **does** resolve the bound object from the START node and **does** check field existence behind `record.` — the binding works. It skips only the bare-identifier case, and `collectBoundRecordReads` says so deliberately:\n\n> Deliberately NEVER a bare identifier: in a flattened flow scope a bare name may be a flow variable.\n\n## Why the exemption costs more than it saves\n\nThe reasoning is sound in isolation — a bare name in a flattened flow scope genuinely may be a flow variable, so a blanket rejection would produce false positives. But the current behaviour makes the *documented* guidance unenforceable exactly where it matters most:\n\n- Flow conditions are the surface where a wrong predicate is **least** visible. A view filter that matches nothing renders an empty grid someone notices. A flow condition that never fires produces *no output at all* — no record, no error, no log line. The dispatcher simply does not dispatch.\n- And in flows the failure is not even the documented one: a bare name does not evaluate to `null`, it either resolves through record flattening or throws (ADR-0032 §1c). So an author following the rule gets one failure mode, and an author breaking it gets a different, undocumented one.\n\n## Suggested direction\n\nThe false-positive concern is addressable rather than fatal, because the flow's own variable scope is authored metadata and therefore knowable at validate time:\n\n1. Collect the flow's declared variables (loop `iteratorVariable`/`indexVariable`, assignment targets, input/output variables) — including inside `loop` and region node bodies, where a hand-written predicate is easiest to miss.\n2. A bare identifier that matches **none** of them, but **does** match a field on the bound object, is a near-certain error and can be rejected with a corrective message (`did you mean record.status?`).\n3. A bare identifier matching neither is the genuinely ambiguous case and can stay a warning.\n\nThat keeps every legitimate flow-variable reference passing while catching the actual mistake, which is a field name written without its `record.` prefix.\n\n## Meanwhile\n\nThe consuming application is adding a local walk over its own flows as a stopgap. That is a workaround for a gap that belongs here — every ObjectStack application will need the same walk otherwise, which is the argument for fixing it once in `packages/lint`.\n\nRelated, filed separately: #14087 (`objectstack generate` scaffolds a flow the schema rejects) and #14088 (`stripReadonlyFields` `Object.is` provenance).\n\nUnassigned and untriaged, per the single-producer rule for `domain:*`."
+}

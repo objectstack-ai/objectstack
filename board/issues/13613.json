@@ -1,0 +1,36 @@
+{
+  "number": 13613,
+  "kind": "issue",
+  "title": "finding(spec): EventNameSchema's only three binding schemas have no runtime consumer — the live event vocabulary is a closed enum that never touches it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T03:19:40Z",
+  "updated_at": "2026-09-01T10:05:08Z",
+  "closed_at": "2026-09-01T10:04:13Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13613",
+  "body": "Observed while running the per-surface identifier census for #12245. Filed unassigned as a `finding`, not a defect claim.\n\n## What was observed\n\n`EventNameSchema` (`packages/spec/src/shared/identifiers.zod.ts`) is bound by exactly\nthree schemas, and by nothing else in either repository:\n\n| Binding | Site | Runtime consumer? |\n| :--- | :--- | :--- |\n| `EventTypeDefinitionSchema.name` | `kernel/events/core.zod.ts:94` | none |\n| `EventSchema.name` | `kernel/events/core.zod.ts:122` | none |\n| `EventMessageSchema.eventName` | `api/websocket.zod.ts:299` | none |\n\nReproduced on `origin/main` at `e2debee6`: outside `kernel/events/core.zod.ts` and\n`api/websocket.zod.ts` themselves, every reference to those three names is a generated\nbaseline (`api-surface/*.json`), the file's own test, `type-alias-convention.pin.test.ts`,\n`CHANGELOG.md`, or `V3_MIGRATION_GUIDE.md`. No plugin, service, driver, or app parses\nthrough any of them.\n\nWhat the platform *actually* validates event names with is a closed literal enum that\ndoes not reference `EventNameSchema` at all — `packages/spec/src/api/events.zod.ts`:\n\n```ts\nexport const DataEventType = z.enum([\n  'data.record.created',\n  'data.record.updated',\n  'data.record.deleted',\n]);\n\nexport const BulkDataEventType = z.enum([\n  'data.records.updated',\n  'data.records.deleted',\n]);\n```\n\n`grep -c EventNameSchema packages/spec/src/api/events.zod.ts` returns `0`.\n\nThe sibling free-text surface is unconstrained rather than schema-guarded:\n`WebSocketEventSchema.channel` is a bare `z.string()` (`api/websocket.zod.ts:468`) whose\nown describe() documents `\"record.account.123\"` and `\"user.456\"` as legitimate channel\nspellings.\n\n## Why it may matter\n\n`EventNameSchema` is presented as the platform's event-name grammar — the docblock on\n`SystemIdentifierSchema` lists \"Event keys\" among the surfaces it governs, and\n`EventNameSchema` carries its own worked examples. In practice it governs nothing that\nruns: the real vocabulary is closed and enumerated, and the one open event-ish surface\n(`channel`) opted out into `z.string()`.\n\nThat makes it the ADR-0049 declared-but-unenforced shape, with the usual consequence for\nAI-authored metadata: a generator that reads `EventNameSchema` and emits an event name\nsatisfying it has satisfied nothing the platform will check, while a generator that emits\nanything outside the closed enum is refused by a rule the identifier file never mentions.\n\nTwo routes, neither obvious and neither recommended here:\n\n1. **Bind it** — have the open event surfaces (starting with `channel`, and any future\n   custom-event registration) run through `EventNameSchema`, making the declared grammar\n   the enforced one.\n2. **Retire it** under ADR-0049 enforce-or-remove, and let `DataEventType` /\n   `BulkDataEventType` stand as the only event-name contract. This is a published-export\n   removal, so it takes the ADR-0087 conversion.\n\nRecording the measurement only; sizing and the route are a maintainer call.\n\nRelated: #12245 (the census that surfaced this) · #4673 (the same class, on\n`DataEventType`'s retired `data.field.changed` member) · ADR-0049.\n"
+}

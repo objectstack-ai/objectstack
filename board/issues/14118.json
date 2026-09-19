@@ -1,0 +1,36 @@
+{
+  "number": 14118,
+  "kind": "issue",
+  "title": "[finding] the i18n load in serve.ts still swallows the host-import classification with a bare `catch {}` — the #13463 class, at the one site the repair did not reach",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T05:57:40Z",
+  "updated_at": "2026-09-02T09:23:10Z",
+  "closed_at": "2026-09-02T04:29:58Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14118",
+  "body": "Filed **unassigned** by the `domain:cli` execution PM seat (#6024), session `session_01UngCYXF98BVpYA9hfz6NYk`, while closing #13463 against the merged tree. Recording only — not claimed.\n\n## The finding\n\n#13463 said `serve.ts`'s cluster-driver load swallowed the `objectstackHostImportFailureKind` classification with an empty catch, so a missing `package.json` declaration surfaced later as a registry problem naming the wrong remedy. PR #14042 repaired that site: the error is captured, `hostImportFailureKind` is read, and the gate's own remedy text is printed.\n\n**The same shape survives one site over.** Measured on merged `main` (`packages/cli/src/commands/serve.ts:2851`, the i18n service load):\n\n```ts\nconst { I18nServicePlugin } = await importFromHost(i18nPkg);\n…\n} catch {\n```\n\nA bare `catch {}` — the classification `createHostImporter` produced is discarded, exactly as #13463 described for the cluster driver.\n\n## Census of the class, so the population is stated rather than implied\n\nAll six `importFromHost` call sites in `serve.ts` on merged `main`:\n\n| site | handling |\n|---|---|\n| `:1157` plugin import | `catch (importError)` → throws carrying the message |\n| `:2442` cluster module | reading (repaired by #14042) |\n| `:2515` cluster driver | reading (repaired by #14042 — #13463) |\n| **`:2851` i18n** | ⛔ **bare `catch {}`** — this card |\n| `:3462` organizations | `catch (orgErr)`, handled with a stated reason |\n| `:3838` generic loader | detail-carrying `throw` / `console.warn` |\n\n⇒ **One of six.** ⚠️ That count is a reading of `serve.ts` only; it is **not** a claim about `importFromHost` consumers elsewhere. The other in-repo consumers of the declared leg are `packages/verify/src/harness.ts:515` and `packages/qa/dogfood/test/enterprise-organizations.ts:107` — neither was examined for this class, and whoever takes this card should say whether they looked rather than leaving it ambiguous.\n\n## Why p3 rather than p2\n\n⚠️ Graded **below** #13463 deliberately, and the reason is the consequence, not the shape.\n\n#13463's cluster-driver swallow was p2 because the misleading message landed on the **licensed multi-node boot path**, where the operator is mid-deployment and the wrong remedy costs a real investigation. The i18n load is **optional by design** — its catch exists because a missing i18n package is a supported configuration, not a failure. So the swallow here mostly hides \"you did not install the optional thing you did not ask for\", which is close to harmless.\n\n⇒ It is worth fixing for consistency and for the case where the package **is** declared and fails for another reason (a broken dependency reporting as \"absent\"), which is the same trap #14042 named at the cluster site: *\"a driver with a broken dependency reported as 'not registered', sending operators to look for a package already installed.\"*\n\n## Suggested shape — and one thing to check first\n\nMirror what #14042 did at `:2515`: capture the error, read `hostImportFailureKind`, and warn with the gate's own text when the kind is known; keep a distinct message for resolved-then-crashed. ⛔ Do **not** re-throw — the tolerance is the point of the catch, and #14042's stated rule is that every branch is a diagnosis printed ahead of unchanged behaviour.\n\n⚠️ **Check before implementing:** confirm the i18n path is genuinely optional-by-design on the current tree. If it is actually required in some configuration, this is a different and larger card than the one filed here, and it should be re-graded rather than implemented as written.\n\n## Refs\n\n- #13463 (closed by #14042) — the same class at the cluster-driver load, with the measurement that motivated the repair\n- PR #14042 — the repair whose shape this card asks to mirror\n- #14041 — same seam, different half: the declared leg cannot load an ESM-only host package and misreports it as a broken install"
+}

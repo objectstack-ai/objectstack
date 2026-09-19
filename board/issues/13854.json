@@ -1,0 +1,36 @@
+{
+  "number": 13854,
+  "kind": "issue",
+  "title": "driver-sql: `bulkUpdate` is a sequential per-row loop with no transaction — a mid-batch refusal leaves earlier rows committed (driver-turso inherits it via `super.`)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-31T14:54:42Z",
+  "updated_at": "2026-09-01T12:08:24Z",
+  "closed_at": "2026-09-01T12:06:59Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13854",
+  "body": "Found while implementing #13435 (`driver-memory`'s `bulkUpdate`/`bulkDelete` atomicity fix).\n\n## The observation\n\n`#13435`'s dispatch assumed (A2.3) that `driver-turso`'s `super.bulkUpdate`/`super.bulkDelete` calls would inherit the `InMemoryDriver` fix \"for free\". That assumption is **false**: `TursoDriver extends SqlDriver` (`packages/drivers/driver-turso/src/turso-driver.ts:270`, `import { SqlDriver } from '@objectstack/driver-sql'`), and `SqlDriver` `implements IDataDriver` directly — it has **no relationship to `InMemoryDriver`** at all. So `TursoDriver`'s `super.bulkUpdate(...)`/`super.bulkDelete(...)` (lines 1263/1268 on `origin/main` at the time of writing) resolve to `SqlDriver`'s own, separate implementations — completely untouched by the `driver-memory` fix.\n\n`SqlDriver.bulkDelete` (`packages/drivers/driver-sql/src/sql-driver.ts:7666`) is a single `builder.whereIn('id', ids).delete()` per rotation shard — one SQL statement, atomic on its own (barring cross-shard joint atomicity, a separate/pre-existing concern).\n\n`SqlDriver.bulkUpdate` (`packages/drivers/driver-sql/src/sql-driver.ts:7657`) is different:\n\n```ts\nasync bulkUpdate(object: string, updates: Array<{ id: string | number; data: Record<string, any> }>, options?: DriverOptions): Promise<Record<string, any>[]> {\n  const results: Record<string, any>[] = [];\n  for (const { id, data } of updates) {\n    const updated = await this.update(object, id, data, options);\n    if (updated) results.push(updated);\n  }\n  return results;\n}\n```\n\nThis is a sequential `for`-`await` loop over individual `update()` calls, **not wrapped in a transaction**. Each `update()` commits its own row immediately (autocommit). So a batch that refuses partway through — a unique-constraint violation, a missing-id throw, or any other per-row failure — leaves every row processed *before* the failure already committed to the database. That is the same defect class #13340/#13435 fixed on `driver-memory`, on `driver-sql`'s (and therefore `driver-turso`'s, via inheritance) `bulkUpdate` door.\n\n## Why this is out of scope for #13435\n\n#13435's dispatch was explicit: \"Do NOT edit `driver-turso` to fix it; if it needs its own change, that is a separate card.\" The actual defect lives one level up, in `driver-sql`, and fixing it needs `driver-sql`'s own tools (a transaction wrapper — `SqlDriver` already has transaction support used elsewhere in the file) rather than anything `driver-memory`'s fix could share.\n\n## Suggested direction (not binding)\n\nWrap `SqlDriver.bulkUpdate`'s loop in a transaction so a mid-batch refusal rolls back every row already applied in that call — the SQL-native equivalent of the check-then-mutate discipline `driver-memory` now uses. Worth checking whether `driver-mongodb`'s `bulkUpdate`/`bulkDelete` have the same shape while scoping this.\n\n## Where it is\n\n- `packages/drivers/driver-sql/src/sql-driver.ts:7657` — `SqlDriver.bulkUpdate`\n- `packages/drivers/driver-turso/src/turso-driver.ts:1256-1263` — inherits the shape via `super.bulkUpdate` on TursoDriver's local (non-remote) path\n\n## Related\n\n#13435 (`driver-memory`'s `bulkUpdate`/`bulkDelete` atomicity fix, which found this) · #13340 (`driver-memory`'s `bulkCreate` atomicity fix, the origin of this defect class)\n"
+}

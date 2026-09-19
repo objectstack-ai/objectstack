@@ -1,0 +1,36 @@
+{
+  "number": 13796,
+  "kind": "issue",
+  "title": "[finding] `@module` 标记行逐字渲染到发布参考页开篇(#13794 后 16 页)——生成器机件外漏到客户面,渲染器缺一个 tag 行过滤",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T12:55:06Z",
+  "updated_at": "2026-09-02T09:04:35Z",
+  "closed_at": "2026-09-02T09:04:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13796",
+  "body": "Found during #13334(PR #13794)复核移交,out of scope,filed unassigned 供分诊。无严重度断言。\n\n## The shape\n\n模块页头 docblock 里的 `@module <path>` 标记行被 build-docs **逐字渲染**为发布参考页的开篇行——例如 `content/docs/references/ui/sharing.mdx` 以字面文本 `@module ui/sharing` 开篇。#13794 前 14 页如此,#13794 落地后(2 个真页头新加标记)为 **16 页**。\n\n- skill 索引 extractor **已经**过滤 at-sign 行(所以 skill 面干净);\n- build-docs 渲染器**没有**同类过滤,于是生成器/工具机件文本进入客户可见页面。\n\n## 修复方向(供分诊定路线)\n\n渲染器补一个 tag 行 drop(仿照既有 `os:check` 标记的 drop 处理)即可一次清全部 16 页;cosmetic,但属于「机件外漏到发布面」类。\n\n## Refs\n\n- #13334 / PR #13794 — 发现现场(`@module` 门落地处;其 PR 正文注明「the marker line renders on their published pages the same way today」——即本缺陷在 #13794 之前已存在于 14 页,非其引入)\n- 查重:semantic 检索 0 命中(2026-08-31)。"
+}

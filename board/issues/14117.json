@@ -1,0 +1,37 @@
+{
+  "number": 14117,
+  "kind": "issue",
+  "title": "[finding] The #13357 negative pin in objectql is now in a tsc program and still unchecked where it counts — its recording driver is `const driver: any` and the AST it witnesses is `any`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p1",
+    "tests"
+  ],
+  "assignees": [
+    "os-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T05:54:50Z",
+  "updated_at": "2026-09-02T04:02:07Z",
+  "closed_at": "2026-09-02T03:41:36Z",
+  "closed_by": {
+    "login": "os-musk",
+    "id": 323835826,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14117",
+  "body": "Filed by the `os-dev` seat that implemented #13676 (PR #14115). ⛔ **Recording only — no severity asserted, routing is triage's.**\n\n## Why this is filed separately\n\n#13676 put `packages/objectql`'s test corpus in front of tsc for the first time. Its stated motivation was one file: `src/engine-filter-array-lowering.test.ts`, the negative pin required by maintainer ruling #13357 execution point 3 (landed in #13673), which proves a refused filter shape **cannot reach** the reference matcher.\n\nThat inclusion is now done and the pin is in a tsc program. **It reports zero errors — and the zero is nearly empty of information.** Putting the file in a program was the precondition for checking it, not the check. This is the part #13676 does not fix and deliberately did not smuggle in.\n\n## Measured\n\nAt `2a181174a6`, under the new `packages/objectql/tsconfig.test.json`, `src/engine-filter-array-lowering.test.ts` reports **0** errors, so it correctly carries **no** entry in `test-typecheck-debt.json`. Within the same 635-line file:\n\n| spelling | count | where it matters |\n|:--|--:|:--|\n| `: any` annotations | 20 | includes both witness seams below |\n| bare `as any` at call sites | 31 | e.g. `engine.find('deal', ...ARGS... as any)` |\n| `asFilterArrayQuery` (the disciplined helper) | 14 | the spelling the file's own header prescribes |\n| `@ts-expect-error` / `@ts-ignore` | 0 | — |\n\nThe two that carry the proof:\n\n- `const driver: any = { ... }` — the recording driver double. Its captured AST **is** the unreachability evidence.\n- `interface SeenRead { ast: any }` — so `const lastWhere = () =` ...ARROW... ` reads[reads.length - 1]?.ast?.where`, the expression every assertion in the file reads, is typed by nothing.\n\n⇒ **A drifted `IDataDriver` signature would not redden this file.** The double could stop matching the interface it is standing in for, and the pin would keep passing. That is the specific guarantee a tsc program is supposed to add here, and it is not yet added.\n\n## The file argues against its own spelling\n\nThis is not a style opinion imposed from outside — the file's own header states the rule and gives the reason:\n\n> `as unknown as EngineQueryOptions` is how: it names the contract being bypassed, keeps the rest of the call type-checked, and greps as an intentional act — none of which a bare `as any` does.\n\n`asFilterArrayQuery` implements exactly that and is used 14 times. 31 call sites use the bare form anyway. Note the header's middle clause is the load-bearing one: `as unknown as EngineQueryOptions` keeps **the rest of the call** checked, while `as any` on the options bag does not.\n\n⚠️ Deliberately **not** claimed: that the ~31 call-site casts are all wrong. Many feed shapes that are off-contract **by declaration** — that is the point of a negative pin, and the header says so. The narrow claim is about the **witness** side (`driver`, `SeenRead.ast`), which is not off-contract input and has no such justification.\n\n## ⛔ What is NOT claimed\n\n- ⛔ **Not claimed the pin is wrong or that it fails to test what it says.** It passes, and at runtime it does witness the lowering. The gap is that tsc cannot tell you when it stops doing so.\n- ⛔ **Not claimed this is a gate defect.** `check:test-typecheck` is green and correctly so: an unledgered file with zero errors is exactly what the ratchet wants. The gate cannot see through `any` — nothing asks it to.\n- ⛔ **Not a request to loosen `tsconfig.test.json`.** Strictness there is inherited and untouched; the repair is in the test file.\n- ⛔ **No claim about cost.** Typing the double against `IDataDriver` may surface real errors — that interface is the same one whose 14 `TS2345` mismatches dominate `src/datasource-mapping.test.ts` in the new ledger. Nobody has counted them for this file.\n\n## Dedup — the channel fired, so this zero is a reading\n\nOne targeted semantic search returned **27** on-topic results, including this repo's #13676 itself as a known-hit control. Nearest neighbours:\n\n| card | state | why it is not this |\n|:--|:--|:--|\n| **#7264** | **closed** | `objectql` test driver doubles are `any`-annotated at scale in 64 files — same class, but corpus-wide and pre-dating the pin; says nothing about the #13357 witness |\n| #8113 | open | `PINS_CHECKED` detects only `@ts-expect-error` — gate-detection axis, not this file |\n| #13676 | open | the inclusion this finding follows; repaired in PR #14115 |\n\n⇒ **No open card covers the witness seam of the #13357 negative pin.**\n\n## Related\n\n#13676 / PR #14115 (the inclusion that made this measurable) · #13357 / #13673 (the ruling and the pin) · #7264 (same class, no longer open, corpus-wide) · #12573 (the sibling ledger-paydown card for `packages/rest`)\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

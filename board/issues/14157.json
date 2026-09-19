@@ -1,0 +1,36 @@
+{
+  "number": 14157,
+  "kind": "issue",
+  "title": "`maybeSeedDevAdmin` gates on \"any sys_user row\", but runs at `kernel:ready` — so any app that seeds people permanently loses the `objectstack dev` login",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-01T09:06:41Z",
+  "updated_at": "2026-09-02T04:17:16Z",
+  "closed_at": "2026-09-02T04:16:11Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14157",
+  "body": "Measured on `@objectstack/plugin-auth` 17.2.0 / `@objectstack/cli` 17.2.0 against a real `objectstack dev` boot, twice, with and without an app seed. Not a race — a deterministic ordering.\n\n## What happens\n\n`objectstack dev` promises a loginable dev admin on an empty DB:\n\n> `--seed-admin` … Seed a known, loginable dev admin (admin@objectos.ai / admin123) in-process via the runtime on an EMPTY DB, then promote it to platform admin. Default: on (idempotent — only acts on a zero-user DB, never overwrites an existing account).\n\nAn app that declares any `sys_user` rows in `defineStack({ data })` makes the DB non-zero-user **before** that check runs, so the admin is never created — and because the check is \"any human exists\", it is never created on any later boot either. The deployment ends up with **no loginable account at all**.\n\n## Why it is ordering and not a race\n\n`AuthPlugin` registers the seeding on `kernel:ready`:\n\n```js\nctx.hook(\"kernel:ready\", async () => {\n  await this.maybeSeedDevAdmin(ctx);\n});\n```\n\n`kernel:ready` fires after every plugin has started. The app's declarative seed runs inside `AppPlugin.start()` — awaited there against `OS_INLINE_SEED_BUDGET_MS` — so it always completes first. Plugin registration order does not help: `serve.ts` mounts `AuthPlugin` at step 5d and the app's plugins afterwards, and the observed outcome is the same either way, because the phases are what order these two, not `use()`.\n\nThe gate itself:\n\n```js\nconst rows = await ql.find(SystemObjectName.USER, { where: {}, limit: 50 }, { context: { isSystem: true } });\nconst humans = rows.filter((u) => u && u.id !== SystemUserId.SYSTEM && u.role !== \"system\");\nif (humans.length > 0) { /* skipped */ }\n```\n\nA seeded person is a **directory row with no credential**. It is not a login, and treating it as one is the defect.\n\n## Measurement\n\nSame app (`objectstack-ai/duly`), same command, two trees. Baseline is the app with an empty `data: []`; the other seeds a 13-person demo org.\n\n| | baseline (`data: []`) | with a 13-person `sys_user` seed |\n|---|---|---|\n| `🔑 Dev admin: …` printed | yes | **no** |\n| `sys_user` rows | 1 (`Dev Admin`, `admin@objectos.ai`) | 13 (none with an email that can log in) |\n| `sys_account` rows | 1 (`provider_id: credential`) | **0** |\n| `POST /api/v1/auth/sign-in/email` as `admin@objectos.ai` | 200 | **401 `INVALID_EMAIL_OR_PASSWORD`** |\n| `GET /api/v1/auth/bootstrap-status` | — | `{\"hasOwner\": true}` |\n\nThat last row is what makes it a dead end rather than an inconvenience: `hasOwner: true` also tells the console there is already an owner, so no first-admin flow is offered. Self-registration still works (`disableSignUp: false`), but the account created that way is `role: \"user\"` and is not promoted, so it lands in an app it cannot read.\n\n## Reproduction\n\n```bash\ngit clone https://github.com/objectstack-ai/duly && cd duly && pnpm install\npnpm dev            # ✅ prints \"🔑 Dev admin: admin@objectos.ai / admin123\"; login works\n# now add any sys_user rows to dulySeeds in src/data/index.ts, on a FRESH db:\nrm -rf .objectstack/data && pnpm dev\n# ❌ no dev-admin line, sys_account empty, sign-in 401\n```\n\n## Suggested fix\n\nGate on **a credential-bearing account**, not on the existence of user rows. Either is enough on its own:\n\n- ask `sys_account` (`provider_id: 'credential'`) whether any local login exists; or\n- ask specifically whether the configured `OS_SEED_ADMIN_EMAIL` already resolves to a user with an account — which is the question `maybeReportExistingSeedAdmin` already asks two functions later, so the shape is right there.\n\n`bootstrap-status`'s `hasOwner` looks like it wants the same treatment, for the same reason.\n\nA workaround exists but is not one an evaluator will guess: boot once with the app's seed absent so the admin is minted, then boot normally. Verified — with the admin pre-existing, the same app seed loads all 459 rows, leaves the account's email and credential untouched, and the demo works end to end.\n\n## Why this is worth fixing rather than documenting\n\nDemo/onboarding seeds are exactly the apps that seed people, and `objectstack dev` on a clean checkout is exactly the moment an evaluator forms their opinion. The failure is silent on the seed side (`inserted: 459, errored: 0`), and the only symptom is a login page that rejects the credentials the CLI's own `--help` documents.\n\nFound while building the demo seed for `objectstack-ai/duly#7`."
+}

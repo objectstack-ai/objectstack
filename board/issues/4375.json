@@ -1,0 +1,30 @@
+{
+  "number": 4375,
+  "kind": "issue",
+  "title": "[import] 导入不支持 upsert:向导无写入模式选项、autonumber 编号列不可映射为匹配键、API writeMode 400",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T09:38:09Z",
+  "updated_at": "2026-09-01T14:44:10Z",
+  "closed_at": "2026-07-31T10:08:57Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4375",
+  "body": "## 现象\n\n数据导入不支持 upsert(「编号存在则更新,不存在则新增」),重复导入必然重复建行。\n\n## 实测证据(17.0.0-rc.0,浏览器导入向导真人实测 + API 对照)\n\nCSV 只含「编号,机位号」两列,编号取自库中已存在记录(autonumber 字段):\n1. 向导第 2 步字段映射里,「编号」列被强制映射成「— 跳过 —」;展开映射下拉,候选 13 个字段里**根本没有「编号」**(autonumber 只读字段不可映射)→ 无法把编号用作匹配键;\n2. 整个向导只有「上传→字段映射→预览」三步,**没有任何「写入模式/重复时更新」选项**;\n3. 且强制要求补齐全部必填列(「无法继续——以下必填字段未映射:…」)——纯新增语义;\n4. API 层同源:`POST /api/v1/data/:object/import` 显式传 `writeMode:'upsert'` / `'update'` 均 **400**。\n\n## 影响\n\n「模板导入,编号为空则新增、存在则更新」是实施期批量维护主数据的常见交付要求,后半段无法交付;存量更新只能批量编辑/逐条改。\n\n## 建议\n\n导入 API 与向导支持 `writeMode: 'insert' | 'upsert' | 'update'` + 可指定匹配键(唯一字段/autonumber/组合键);upsert 模式下必填列校验应只对「将新增的行」生效。\n\n下游登记:os-project-titanwind-ehr PLAT-DEF-020(相关早期挂起 #67)。\n"
+}

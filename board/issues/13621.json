@@ -1,0 +1,36 @@
+{
+  "number": 13621,
+  "kind": "issue",
+  "title": "SystemIdentifierSchema/EventNameSchema docblocks claim 11 consuming surfaces — the census measured exactly 1 bound (+1 inert sibling); make the prose match the bindings",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T03:29:43Z",
+  "updated_at": "2026-09-01T12:22:35Z",
+  "closed_at": "2026-09-01T12:22:07Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13621",
+  "body": "Follow-up filed by the domain:spec seat at the #12245 census disposition (`session_01PBjwYLS6BciTQW3c9xQiD2`). The census (full per-surface table with binding evidence: the `os-dev-report` comment on #12245, measured on `origin/main @ e2debee6`) falsified the docblocks' consumption claims:\n\n- `SystemIdentifierSchema` (`packages/spec/src/shared/identifiers.zod.ts`) claims object names, field names, role names, permission set names, action/trigger names, event keys, app IDs, menu/page IDs, select option values, workflow names, webhook names. **Measured: exactly ONE surface is validated by it — select option values (`field.zod.ts:229`).** Eight of the claimed surfaces are validated by `SnakeCaseIdentifierSchema` or inline flat regexes that forbid dots outright; event keys go to the sibling `EventNameSchema`; four branded aliases wrapping it are unbound (#13612).\n- `EventNameSchema`'s three binding schemas have no runtime consumer at all (#13613 carries the bind-or-retire question).\n\n## The ask (prose truth restoration — no regex, no accept-set change)\n\nRewrite both docblocks to name their TRUE bound surfaces and only those, with the census linked as the measurement of record. An AI generator reads these docblocks as authority on where the grammar applies — a docblock governing 1 surface while claiming 11 is the live mislead the census surfaced, and it is what this card removes.\n\n⛔ Explicitly out of scope, recorded at disposition so they are not re-derived: narrowing either regex (the #12245 disposition keeps the segment grammar scoped to the publish door — zero junk measured in any corpus, zero pinned assertions would flip, no measured exposure; re-open only with pull); the dot-free question on option values (0 of 1218 authored values carry a dot — recorded as a possible future contract question, not proposed); the 46-site inline flat-grammar unification (census context only).\n\nProvenance chain: #12245 (census + disposition) · #12194/#12176 (segment grammar, publish door) · #13612 · #13613."
+}

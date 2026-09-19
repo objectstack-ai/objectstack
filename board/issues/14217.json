@@ -1,0 +1,33 @@
+{
+  "number": 14217,
+  "kind": "pull_request",
+  "title": "fix(devx): print the importer's real repo-relative path in the prerequisite advisory",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T13:32:02Z",
+  "updated_at": "2026-09-01T14:14:57Z",
+  "closed_at": "2026-09-01T14:14:55Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-09-01T14:14:55Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/14217",
+  "body": "Fixes #13826\n\n`scripts/import-prerequisite.mjs` derived the gate name from the importer's basename and then interpolated it into a hard-coded `scripts/` directory. That basename is correct for the 42 importers under `scripts/**` and wrong for the three under `packages/lint/scripts/**`.\n\n## Premise re-verified on this tree, not inherited from the card\n\nThe card measured on a pre-#13983 branch. #13983 (exit-code reclassification, PR #14009) has since landed in the same output region, so the advisory now carries exit 3. Re-measured here at merge base `24b66352` with `node_modules` genuinely absent — the defect survives that change untouched:\n\n```\n$ node packages/lint/scripts/check-doc-formula-expressions.mjs     -> EXIT=3\n  `node scripts/check-doc-formula-expressions.mjs > /tmp/check-doc-formula-expressions.log 2>&1; echo \"EXIT=$?\"`.\n\n$ node scripts/check-doc-formula-expressions.mjs                   -> EXIT=1\n  Error: Cannot find module\n```\n\nThat is the whole cost, and it is worse than a cosmetic path. The banner exists because the reader is *already* confused about an exit code; it handed them a third failure wearing a **finding's** exit 1, which reads as an unrelated breakage rather than as a typo in the banner.\n\n## Before / after\n\n| importer | before | after |\n|---|---|---|\n| `packages/lint/scripts/check-doc-formula-expressions.mjs` | `node scripts/check-doc-formula-expressions.mjs …` (no such file) | `node packages/lint/scripts/check-doc-formula-expressions.mjs …` (runs) |\n| `scripts/check-ci-filter-parity.mjs` | `node scripts/check-ci-filter-parity.mjs …` | **byte-identical** |\n\nThe `scripts/**` advisory is unchanged as a whole file, not merely by eye — same sha256 before and after: `0fd6f669cc17d2061b249d2f24af5d2b75ac2563325f23a85602dbb6772c3dea`. That is the load-bearing half: 45 gates inherit this paragraph verbatim.\n\n## Scope, held to the triage grading\n\n- Only the printed **command** moves. The **headline** gate name stays a basename — it is correct as one, and a self-test case pins that it did not become a path.\n- The `/tmp/NAME.log` sink also keeps the basename, deliberately. A blanket substitution would spell `/tmp/packages/lint/scripts/….log`, whose parent directories do not exist — the same broken-command defect relocated one token to the right. Pinned.\n- The three lint importers are **not edited**; they inherit the frame.\n- No CI wiring here. Running `--self-test` in CI is #14007, queued behind this card.\n\n## Why `pnpm-workspace.yaml` and not `.git`\n\n`.git` is the obvious marker and is wrong for the checkout shape this repo mandates. In a linked worktree (`git worktree add`), `.git` is a **file** holding a `gitdir:` pointer, not a directory — measured here at 70 bytes. A walk testing `isDirectory()` steps straight past the worktree root and reports no root at all, in the one tree every agent actually works in. The self-test carries that as a paired measurement: the manifest walk finds the root, and a negative control proves the `.git`-isDirectory walk finds nothing in the same fixture.\n\nNearest marker wins, as node and pnpm resolve. When no root is locatable the command falls back to the **absolute** path — always runnable — never to the old basename guess.\n\n## Verification\n\nSelf-test grows 49 to 60 cases. The new pins were ablated rather than assumed: with the hard-coded `scripts/` interpolation put back (mutation confirmed on disk, anchor counts flipped 1 to 0 / 0 to 1), **4 of 60 cases go red**, naming the defect verbatim; the restore leg is proven by blob-hash identity to `HEAD`.\n\nGate family derived from the actual diff via `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` (14 families), all run at `e550a5d2`:\n\n```\nself-test 0 · agent-test-spelling 0 · bash32-floor 0 · cli-command-ids 0\ncross-package-test-inputs 0 · entry-guard 0 · parse-guard 0\npnpm-filter-targets 0 · watch-hint-literal 0 · ci-filter-parity 0\ncheck-cross-package-test-inputs 0 · shard-attestation 0\ncheck:doc-formula-expressions 0 · check:doc-security-posture 0\ncheck-reference-carrier-shape (+ --self-test) 0\ncheck-ratchet-remedy-authority 0 · check-nul-bytes 0\n```\n\n`check-ratchet-remedy-authority` was run because this diff changes remedy prose: 183 scripts swept, `import-prerequisite.mjs` stays among the 165 handing out no ratchet-expanding remedy, unchanged from baseline. `check-test-completeness` returns exit 3 (PREREQUISITE NOT MET — it grades a saved `turbo run test` log, none named): NOT MEASURED, not red, and unrelated to this diff.\n\nThe fix dogfoods itself: with `@objectstack/formula` unbuilt, the live refusal now prints `node packages/lint/scripts/check-doc-formula-expressions.mjs` — the same gate, the same reproduction as the card, now with a command that runs.\n\nNo changeset: this diff publishes nothing from any package. `skip-changeset` applied.\n\n## Sibling cards on this file\n\nTriage's baton order is #13983 then this card then #14007. #13983 landed as PR #14009 and is merged. #14007 (wiring the 60-case self-test into CI) is queued behind this one and stays untouched here — it edits the same `reportPrerequisiteNotMet` output region.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01WLJQhde67SeTccsmnBVarV)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WLJQhde67SeTccsmnBVarV)_"
+}

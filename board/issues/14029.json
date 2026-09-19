@@ -1,0 +1,38 @@
+{
+  "number": 14029,
+  "kind": "issue",
+  "title": "organization_admin_no_bypass holds a write-granting wildcard but is not in MANAGED_DENY_TARGET_SETS, so registry-derived managed-object denies never reach it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "priority:p2",
+    "security"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T00:28:36Z",
+  "updated_at": "2026-09-01T07:28:07Z",
+  "closed_at": "2026-09-01T07:28:07Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14029",
+  "body": "Found while correcting the `managed-object-write-denies.ts` docblock for #13822\n(PR #14028). Comment-only card; this is a behaviour observation deliberately\nleft out of that PR and filed instead. Read from source on `origin/main` at\n`c54d4d3d7`; not reproduced against a running kernel.\n\n## The gap\n\n`MANAGED_DENY_TARGET_SETS` is an exact-match allowlist of four names, and\n`applyManagedWriteDenies` matches on it exactly:\n\n```\nconst targets = new Set(MANAGED_DENY_TARGET_SETS);\n...\nif (!set || !targets.has((set as { name?: string }).name ?? '')) continue;\n```\n\n`organization_admin_no_bypass` is not one of the four. It nevertheless holds a\n**write-granting wildcard**: `deriveWallLessOrgAdmin` (end of\n`objects/default-permission-sets.ts`) copies `organization_admin` and removes\nonly the two superuser bits —\n\n```\nconst { viewAllRecords: _v, modifyAllRecords: _m, ...wildcardWithoutBypass } =\n  (objects['*'] ?? {}) as ...;   // Record cast elided: angle brackets do not\n                                 // survive GitHub's body sanitizer\nobjects['*'] = wildcardWithoutBypass;\n```\n\n— so `allowCreate` / `allowEdit` / `allowDelete` stay `true` on its `'*'`.\n\nThe derived variant IS in the array the injection walks: `defaultPermissionSets`\ninserts it directly after its parent, and `SecurityPlugin`'s\n`bootstrapPermissionSets` defaults to that array\n(`options.defaultPermissionSets ?? securityDefaultPermissionSets`), which is\nwhat `runBootstrap` hands to `applyManagedWriteDenies` at `kernel:ready`. So the\nvariant is walked and skipped, not absent.\n\nAnd the derivation cannot inherit the injection later: it is a **shallow copy\ntaken at module load** (`{ ...(base.objects ?? {}) }`), while the injection is an\nin-place mutation of the parent's `objects` at `kernel:ready`. Entries injected\ninto `organization_admin` therefore never reach the variant.\n\n## Why it matters\n\nThe variant does carry the **static** baseline, because `organization_admin`'s\nliteral spreads `...denyWritesOnManagedObjects()` and the copy takes it. The gap\nis exactly the one the registry-driven module exists to close: a schema that\ndeclares `managedBy: 'better-auth'` but is **not** in the hand-maintained\n`BETTER_AUTH_MANAGED_OBJECTS` list gets an injected deny in\n`organization_admin` and **nothing** in `organization_admin_no_bypass`, where\nthe wildcard then grants create / edit / delete on it.\n\nThat is ADR-0092's drift, one posture over. And it is not an obscure posture:\n`auto-org-admin-grant` grants this variant precisely when the deployment\nenforces no organization wall, i.e. where the bits are least bounded.\n\nThere is no gap **today** — the static list covers the 30 managed tables the\ntree currently declares. The gap opens on the next `managedBy: 'better-auth'`\nschema that lands without an edit to that list, which is the scenario the module\nwas written for.\n\n## Why it reads as an oversight rather than a decision\n\nThe one set deliberately excluded from the target list is documented as such in\nthe `MANAGED_DENY_TARGET_SETS` docblock (`admin_full_access` keeps its\nunqualified wildcard so an admin can rescue data directly). The derived variant\nis named nowhere in that rationale, nor in `deriveWallLessOrgAdmin`'s docblock,\nwhose stated contract is the opposite: \"everything else (object grants,\n**managed-write denies**, anti-escalation RBAC read-only rules, system\npermissions, the 15 identity RLS carve-outs) is carried over verbatim\" and \"the\nonly intended delta is the superuser bits\". Carried over verbatim is true of the\ncompile-time baseline and false of the registry union.\n\n## Nothing pins it\n\n- `managed-object-write-denies.test.ts` and `bootstrap-platform-admin.test.ts`\n  contain no reference to the variant (`git grep -n\n  'ORGANIZATION_ADMIN_NO_BYPASS\\|no_bypass'` over both: zero hits; the same grep\n  over `objects/default-permission-sets.test.ts` returns four, so the search is\n  live).\n- `default-permission-sets.test.ts`'s managed-denies pin iterates\n  `MANAGED_DENY_TARGET_SETS` itself, so it asserts the four members and is\n  structurally unable to see a fifth set that should have been one.\n\n## Options, not a recommendation to apply blind\n\n1. Add `ORGANIZATION_ADMIN_NO_BYPASS` to `MANAGED_DENY_TARGET_SETS`. One line,\n   matches the module's stated intent. Needs a look at whether the variant's own\n   `sys_api_key`-style explicit entries still survive (they should: the\n   injection skips any object the set already names).\n2. Derive the variant AFTER the union instead of at module load, so\n   \"carried over verbatim\" becomes true again. Larger, and it moves a\n   module-load constant into kernel:ready ordering.\n3. Rule it deliberate and say so in the docblock, the way `admin_full_access`\n   is. This is the option that needs a maintainer, not a dev: it means the\n   wall-less variant is allowed to write identity tables the walled one cannot.\n\nWhichever way it goes, the pin should stop iterating `MANAGED_DENY_TARGET_SETS`\nto check membership — a list checked against itself is the reason this survived.\n\nFiled unassigned, for triage. Behaviour-class, out of scope for #13822, which is\nprose only.\n\n_Generated by [Claude Code](https://claude.ai/code)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

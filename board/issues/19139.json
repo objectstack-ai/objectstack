@@ -14,7 +14,7 @@
     "documentation",
     "needs:contract-review",
     "protocol:system",
-    "size/xl",
+    "size/l",
     "tests",
     "tooling"
   ],
@@ -22,7 +22,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-18T22:42:54Z",
-  "updated_at": "2026-09-18T22:56:48Z",
+  "updated_at": "2026-09-19T20:10:45Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

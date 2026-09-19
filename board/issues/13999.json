@@ -1,0 +1,36 @@
+{
+  "number": 13999,
+  "kind": "issue",
+  "title": "`os migrate duplicates` reports each holder's `createdAt` as a `Date.toString()` spelling on Postgres/MySQL",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-31T22:45:06Z",
+  "updated_at": "2026-09-01T17:38:56Z",
+  "closed_at": "2026-09-01T17:01:02Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13999",
+  "body": "Found by the driver-materialisation consumer census on #13973 (class (c) — genuinely wrong on one side, lowest severity of the seven the census found). That sweep is not addressed by this card and does not close it.\n\n## The site\n\n`packages/cli/src/commands/migrate/duplicates.ts:684`, building a `DuplicateHolder`:\n\n```ts\nconst holder: DuplicateHolder = {\n  id: row.holder_id == null ? null : String(row.holder_id),\n  organization,\n  partition: organization ?? globalTenant,\n  createdAt: row.created_at == null ? null : String(row.created_at),   // <-- here\n};\n```\n\n`row` comes from the CLI's own holder query, which selects the column explicitly at line 346:\n\n```ts\nconst created = withCreatedAt ? `, ${quoteIdent('created_at', client)} AS created_at` : '';\n```\n\n`DuplicateHolder.createdAt` is declared `string | null` (line 133).\n\n## Why it is wrong on the production default driver\n\n`created_at` is a builtin audit column: not in `datetimeFields`, and `SqlDriver#formatOutput` repairs it only inside `if (this.isSqlite)` — and this path reads through knex directly anyway, so no presentation runs at all. Pinned in `packages/drivers/driver-sql/src/sql-driver-13567-audit-stamp-materialisation.test.ts`: the live dialects materialise it as a JS `Date`, SQLite as canonical ISO-Z text.\n\nSo the operator running `os migrate duplicates` against Postgres or MySQL sees\n\n```\nSun Aug 30 2026 18:19:25 GMT+0800 (China Standard Time)\n```\n\nwhere the same command against SQLite prints `2026-08-30T10:19:25.947Z` — whole seconds, the operator's local zone baked in, no `Z`, and not `Date.parse`-safe for anything consuming the CLI's JSON output.\n\n## Why it is ranked lowest, and why it is still class (c)\n\n`createdAt` here is **reported, never compared** — measured: the identifier appears at exactly three places in the file (`:133` the declaration, `:325` a doc comment, `:684` this assignment) and at no comparison or sort. So no wrong record is chosen and nothing is written; the defect is confined to a spelling in an operator-facing report and in the command's JSON.\n\nIt is still class (c) rather than (b) because the value is *wrong on one side*, not merely untested there: `string | null` is declared, a `Date`-derived non-ISO string is delivered, and which one you get depends on the dialect.\n\n## Why this is not a `??` fallback\n\nPer #13973's standing prohibition, the question is which side owes the canonical spelling. Here the CLI is a leaf consumer with a declared `string | null`, so the cheapest correct shape is **canonicalise at the mapper** — the repo's existing correct form is `packages/metadata-protocol/src/protocol.ts:7710-7715`. If the producer-side option (one presented shape per dialect at the read door) is taken for the census as a whole, this site is repaired by it for free — but that reverses a deliberate driver decision (`withPostgresCalendarDayAsText`) and is a maintainer call.\n\n## Re-run\n\n```\nrg -n 'String\\(row\\.created_at\\)' packages/cli/src/\n```\n\nBacklink: #13973 (census), #13382 (the OCC seam, the same class). Neither is addressed here."
+}

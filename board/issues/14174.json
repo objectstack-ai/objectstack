@@ -1,0 +1,33 @@
+{
+  "number": 14174,
+  "kind": "pull_request",
+  "title": "fix(pm): tell a completed clause-② review from a gate that never ran",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T09:57:29Z",
+  "updated_at": "2026-09-01T10:40:18Z",
+  "closed_at": "2026-09-01T10:40:16Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": "2026-09-01T10:40:16Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/14174",
+  "body": "Fixes #14155\n\n`check-clause2-carriers.mjs --pair` answered **C3 / exit 4 on a legitimately cleared clause-② pair**. A `Clause-②: yes` declaration is *history* — it stays on the thread forever. The gate label is *state* — a completed review clears it from **both** carriers, by rule. So every clause-② pair that completes its review lands in exactly C3's trigger shape: declared `yes`, gate on neither carrier. Read literally, precondition ② of the landing check could only be satisfied in the window **between** the review PASS and the label clear — the wrong order — and each landed pair kept its C3 row on every later sweep.\n\n## What changed\n\nC3 (and therefore `--pair`) now reads the `needs:contract-review` **label event stream** on both carriers and answers four distinguishable states:\n\n| events say | verdict | exit |\n|:---|:---|:---|\n| never hung on either carrier | C3 fires — the fail-open, unchanged | 4 |\n| hung then cleared on both, head unmoved since | **completed state — clean** | 0 |\n| hung then cleared on both, head moved since | adverse: the re-hang-owed state | 4 |\n| bound on one carrier only | adverse: one removal where a clear leaves two — the strip signature | 4 |\n| stream or head commit unreadable | UNJUDGED, never clean | 2 |\n\nThis mechanizes the recovery rule in `references/contract-review.md` — 「PASS + 无标 + head 未动 = 已清标非被剥;head 后移或无结论才重挂」 — **minus its PASS conjunct, which stays human**. Precondition ① is still a person reading the PASS comment on the card.\n\n## The three standing refusals are intact\n\n- **No verdict comment is read.** The PASS half is deliberately not mechanized: #12409 measured a strict `Contract review: PASS` marker at 5 of 35 removals against 26 for an \"any PASS token\" reading — a check that can barely fail — and reading a verdict to clear a gate is the 自查放行 this file exists against. Exit 0 now means \"the gate was bound by the discipline and cleared, and nothing has moved since\", never \"the review passed\".\n- **No spelling is relaxed.** `Clause-②: yes` / `Clause-②: no` remain the only two readings; the declaration reader is untouched.\n- **The tool still writes nothing.** No label, ever.\n\nThe exit register keeps its shape — 0/4/3(/2), 4 for pair-adverse, never 0-with-a-message — and the docblock's exit table is updated to match. Exit 2 already existed for `--pair`; it now also covers an unreadable event stream.\n\n## Cost\n\nEvent streams are fetched only for pairs already in C3's candidate shape (declared `yes`, bare on both carriers), and the head commit only once both carriers read cleared. `needsGateHistory` is the single predicate the live reader and the UNJUDGED accounting share, so the set that owes a stream and the set that gets one cannot drift apart. Measured live: full sweep 8s, 9 pairs, 0 UNJUDGED.\n\nTwo readings that shaped the implementation:\n\n- **The event endpoint returns rows OLDEST FIRST**, so a stream read short loses the *removal* and reads as a live hang or a never-hung gate. The reader pages to exhaustion and hands `null` — UNJUDGED — when it cannot.\n- **Head motion is read from the head commit's committer date**, one exact uncapped request. The unforgeable alternative (`head_ref_force_pushed`) exists only on the timeline endpoint, which caps at 250 events and truncates **silently**; a capped read backing a *clean* verdict is the fail-open shape this family refuses everywhere else. The residual hole — a force-push landing a deliberately backdated commit — is named at the reading site, and the human PASS conjunct is what closes it.\n\nThe gate label constant and the label-event vocabulary are imported from `check-half-states.mjs` rather than restated, so this row cannot disagree with H31/H35 about what a gate event is. The repo-wide, windowed form of the one-carrier question stays H35's; this row is the per-pair form and is unbounded in time, and it points at H35 rather than re-judging it.\n\n## Verification\n\nReverse-verified in two legs, each mutate → prove on disk → run → restore → prove restored (hash equals the HEAD blob, `git diff HEAD` empty):\n\n- **The card's own measurement, live.** Old tool on the real pair — `--pair 13864` → **exit 4** with the C3 row on card #13657. New tool, same pair, same minute → **exit 0**.\n- **Do the new cases bind?** Breaking only the completed-state early return turned the self-test red: `2 of 98 case(s) failed`, naming the completed-state cases. Restored: 98 pass.\n\nSelf-test grew 64 → 98 cases, with fixture pairs for all four states replayed from the 2026-09-01 measurement (card #13657 hung 16:55:54Z / cleared 08:54:47Z; PR #13864 hung 15:19:53Z / cleared 08:54:56Z — nine seconds apart; head `9af92aa3` dated 08:16:59Z). `lint.yml` still runs the self-test only; the network sweep stays out of CI.\n\nGates at final HEAD `260a96e4d`, exit codes captured before any pipe: the full derived union (`dispatch-gates.mjs --repo objectstack-ai/objectstack --commands`, 15 commands, re-derived at final HEAD and identical) passes, plus repo-wide `pnpm lint` (`eslint . --no-inline-config`, exit 0, full scan — no narrowing). `check-test-completeness` is NOT MEASURED rather than green: it grades a saved `turbo run test` log that CI tees and no standalone invocation can produce.\n\n`scripts/pm/**`-only diff — publishes nothing from any package, so `skip-changeset` rather than a changeset file.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01Msg17tAHJ3jVTYFgHydCm2)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Msg17tAHJ3jVTYFgHydCm2)_"
+}

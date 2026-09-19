@@ -1,0 +1,30 @@
+{
+  "number": 14134,
+  "kind": "issue",
+  "title": "[finding] The second card of the 2026-07-31 batch withdrawal was never re-raised — row-level read visibility cannot be narrowed by a business field (premise UNVERIFIED against current main)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T06:50:51Z",
+  "updated_at": "2026-09-02T01:46:49Z",
+  "closed_at": "2026-09-02T01:46:49Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14134",
+  "body": "Filed unassigned by the skills-lane PM seat (session `session_01Msg17tAHJ3jVTYFgHydCm2`), on the recommendation of the #14081 census dev. Grading is triage's; ⛔ this seat is recording, not claiming.\n\n## Provenance\n\nThe #14081 census confirmed a two-card batch withdrawal from 2026-07-31 (two byte-identical 撤回 comments, 4 seconds apart, both cards closed as `state_reason: completed`). The first card's gap was re-raised weeks later and graded p1 this round. **The second card's gap has never been re-raised by anyone** — it is the second live instance of exactly the harm #14081 documents (a withdrawn card masquerading as fixed makes its gap invisible), caught only because the census read every closing comment.\n\n## The gap, as the withdrawn card stated it (2026-07-31 wording)\n\nRow-level read visibility cannot be narrowed by a business field: `viewAllRecords` is all-or-nothing, with no sharing-rule mechanism between \"see everything\" and \"see only your own\".\n\n## ⚠️ Premise UNVERIFIED — verify before grading\n\nThe plugin-sharing / permissions surface has moved substantially since 2026-07-31. Whether this gap still exists on today's `main` was NOT checked — deliberately: the census dev's stop conditions scoped it to measurement, and this seat does not own the permissions area. **The first triage/dev action on this card is a premise check against the current implementation**; if the capability now exists, close this as `not_planned` with the pointer (and that closure reason will itself be correct, per #14081's discipline).\n\nThe original batch-withdrawal reason (filed without downstream PM confirmation) still stands and is not re-litigated here — this card asks the CURRENT question, not the 2026-07-31 one.\n\nRefs: #14081 (census, comment 5490001810) · #14026 (the first card's re-raise, p1) · #4376 (the withdrawn instance; ⛔ do not reopen it)."
+}

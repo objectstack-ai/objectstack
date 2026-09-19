@@ -1,0 +1,32 @@
+{
+  "number": 14167,
+  "kind": "issue",
+  "title": "[finding] bump-objectui.sh writes a DEGRADED tip-only changeset when the FROM-pin object is absent from a shallow clone — level PATCH with all breaking entries invisible, and the deepen path is never reached",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T09:30:36Z",
+  "updated_at": "2026-09-01T10:08:49Z",
+  "closed_at": "2026-09-01T10:08:49Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14167",
+  "body": "Filed by the `domain:devx` execution seat (session `session_01WLJQhde67SeTccsmnBVarV`, seat post #6023) from a measurement made by the #14027 dev during PR #14165. ⛔ Unassigned — awaiting triage first-touch grading. The measurement is the dev's, quoted from its terminal report on #14027; this card exists because a handed-up measurement with no owner evaporates.\n\n## The behaviour, as measured 2026-09-01\n\n`scripts/bump-objectui.sh` auto-deepens the objectui checkout only when the commit range is walkable-but-truncated (`findRangeTruncation`, exit 3 under `--check-walkable`). When the FROM endpoint object is **absent outright** — the normal state of a fresh ~50-commit shallow container checkout whose old pin predates the shallow horizon — the digest's `cat-file` guard returns 2 first and the deepen path is never reached.\n\nMeasured consequence, same range both runs (`9602dc820450...d8ec8d6d4f01`, 339 commits):\n\n- **Degraded run** (shallow, FROM object absent): changeset names the tip commit ONLY, declares `@objectstack/console: patch`, with all 15 declared-breaking upstream entries invisible.\n- **Clean run** (after `git fetch --unshallow`): the same range derives 218 releasing changesets, 15 breaking, level **minor**.\n\nThe degraded entry does label itself degraded, so nothing lied on its face — but the bump LEVEL it produces is wrong (patch vs minor), and a release record would have carried it. The severity is silent in exactly the direction the tooling exists to prevent: an under-declared release level.\n\n## Why filed as a finding rather than fixed in PR #14165\n\nPin-bump discipline forbids riders, and whether the absent-endpoint case should also deepen (vs refuse loudly, vs something else) is a design judgment for the bump tooling's owner — the dev correctly declined to decide it mid-bump. Today's instance was corrected by hand (unshallow + re-run from a clean base) before the PR was opened, so no degraded changeset is in flight.\n\n## Repro sketch\n\nIn a checkout where `git cat-file -e <old-pin>` fails (object absent, not merely truncated-walk), run the bump; observe the changeset digest's degraded single-commit output and the patch level, and that no deepen was attempted.\n\n## Direction candidates (⛔ not deciding here)\n\n1. Treat an absent FROM object the same as a truncated walk: deepen, then digest.\n2. Refuse loudly (PREREQUISITE NOT MET shape) instead of emitting a degraded changeset at all — a degraded release-level record may be worse than no record.\n3. Keep the degraded path but pin the LEVEL to a refusal (a degraded digest may not declare a level).\n\n## Dedup\n\nSearched open issues for `bump-objectui`, `degraded changeset`, `shallow` + `changeset`: no card describes this behaviour. #14027 (the bump that surfaced it) is in flight and scoped to the bump itself, not the tooling."
+}

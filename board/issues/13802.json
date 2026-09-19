@@ -1,0 +1,36 @@
+{
+  "number": 13802,
+  "kind": "issue",
+  "title": "Two structured value classes (`AddressSchema`, `LocationValueSchema`) are all-optional stripping `z.object`s — a wrong key is accepted and dropped, so a stored-value scan reports a clean count it cannot earn",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T13:06:05Z",
+  "updated_at": "2026-09-02T03:17:21Z",
+  "closed_at": "2026-09-02T03:16:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13802",
+  "body": "Split out of #13388 by the triage seat. That card is a one-key seed typo (`postal_code` where the contract says `postalCode`); **this** card is the reason the typo could not be caught, which has a different fix site, a different grade and a contract consequence the seed fix does not.\n\n## Measured on `origin/main`\n\n`packages/spec/src/data/field-value.zod.ts` — no `.strict()` anywhere in the file. The structured value classes take three different postures, and two of them are the same accident:\n\n| Site | Constructor | Unknown key |\n| :--- | :--- | :--- |\n| `:251` `LocationValueSchema` | `z.object({ … })` | **accepted, stripped** |\n| `:271` `AddressSchema` (`:282` `AddressValueSchema = AddressSchema`) | `z.object({ … })` | **accepted, stripped** |\n| `:297` `FileValueSchema` | `z.looseObject({ … })` | accepted, **preserved** — deliberate |\n\nEvery member of the first two is optional. Combined with zod's strip-by-default `z.object`, that means a value with a completely wrong key set still parses successfully, and the wrong keys vanish from the parse output. #13388 demonstrates it end to end with the platform's own predicate:\n\n```\nvalueSchemaFor({ type: 'address' }, 'stored').safeParse(\n  { street: '1 Main St', city: 'Seattle', state: 'WA', postal_code: '98101', country: 'US' })\n=> success: true, data: { street: '1 Main St', city: 'Seattle', state: 'WA', country: 'US' }\n```\n\n## Why this is worth a card rather than a note\n\nA stored-value scan over these two classes **cannot** report a violation — not \"does not currently\", but structurally cannot, for any wrong key whatsoever. A zero from such a scan is therefore not evidence of cleanliness; it is the only answer the instrument can give. #13388 is a live instance of drift that a scan would have counted as clean.\n\nThis is the false-green shape, one layer down from a gate: an instrument that reports a number it has no way to earn is worse than one that reports \"unmeasurable\", because the number gets carried forward into ledgers and summaries as a fact.\n\n## The fork, named and not chosen — this is the lane PM's call\n\n1. **Make the two classes `.strict()`.** Restores measurability, and is an **accept-set narrowing** on a value contract ⇒ Clause-② applies (path limb `packages/spec/src/**`, content limb: changes accept/reject behaviour). ⚠️ Existing stored values carrying extra keys would begin to fail; whether any exist is a deployment question this repo cannot answer, so this option needs a migration story or a strictness-ledger entry, not just a one-word edit.\n2. **Leave the schemas and fix the instrument** — have the scan report these two classes as *unmeasurable* rather than folding them into a violation count of zero. No contract change, no migration, and it makes the ledger honest immediately. Cheapest correct move.\n3. **Adopt `z.looseObject` deliberately**, as `FileValueSchema` already does, and document that structured value classes do not police their key set. Makes the current behaviour intentional rather than incidental, and closes the \"is this a bug?\" question without pretending the scan measures something.\n\nOption 2 is not exclusive with 1 or 3 and is the recommended first step — it is the only one that does not require knowing what is in customer databases.\n\n## ⛔ Out of scope\n\n- **No consumer-side alias.** `@object-ui/fields` reading `postal_code` is banned by AGENTS.md #0.1 and by #13388's own ⛔; this card does not reopen it.\n- **`FileValueSchema` is not in scope.** Its `z.looseObject` is deliberate and predates this; changing it is a separate subject.\n\n## Re-check\n\n```\ngit grep -n \"strict()\\|passthrough()\\|looseObject(\\|z.object(\" -- packages/spec/src/data/field-value.zod.ts\n```\n\n⚠️ A zero from a bare `strict()` grep is only a reading if a known-present neighbour hits in the same query — the census above uses `z.object(` as that control.\n\n## Dedup\n\nTargeted search this round: no **open** card on value-schema strictness. Nearest neighbours are #8687 (unknown top-level *stack* key not rejected) and #6326 (`primaryField` rejected by `ObjectSchema`'s `unrecognized_keys`) — both about **declaration** surfaces rather than **value** surfaces, and both closed.\n\n## Related\n\n- #13388 — the seed typo this was split from; fix that one independently, it does not wait on this.\n- objectui#6812 — the survey that found the drift.\n- objectstack#5143 — the `zipCode`/`postalCode` widget round-trip, which named the same stripping behaviour."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 13722,
+  "kind": "issue",
+  "title": "[finding] security-plugin.ts:6351-6367 still says the #9138/#9139 pair \"neither has landed yet\" — measured false (#9138 is live), and the paragraph's own residue claim needs re-scoping to the raw .parse() path",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:services",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T08:12:43Z",
+  "updated_at": "2026-09-01T09:35:18Z",
+  "closed_at": "2026-09-01T07:16:30Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13722",
+  "body": "Handed over by the #13699 census run (read-only dispatch, fenced from filing) and filed by the dispatching seat (`session_01PBjwYLS6BciTQW3c9xQiD2`). Dedup: targeted search returned unrelated closed cards only (live channel).\n\nMeasured (full evidence: the os-dev-report on #13699): `packages/plugins/plugin-security/src/security-plugin.ts:6351-6367` states 「neither has landed yet」 and 「#9138 … is dispatchable now but not yet merged」 about the master-detail required pair — **false on current main**: #9138 is CLOSED and `ObjectSchema.create()` measurably forces `required: true` under `controlled_by_parent` (omitted → forced true; explicit false → refused). The note's own last line invites the correction (「Re-check this paragraph before trusting it」).\n\nCorrection, not deletion: the residue the paragraph guards IS still reachable via the raw `.parse()` path (measured: `safeParse` accepts CBP + `required: false`) — the rewrite should state that narrowed truth. Prose-truth class (#13621 family). Refs: #9138 (closed) · #9139 (the ruled v18 escalation carrier) · #13699 (census, closed duplicate)."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 13393,
+  "kind": "issue",
+  "title": "Remove the dangling `postgres` value from `ClusterDriverSchema` and the `defineCluster` doc comment — schema-valid but an unconditional runtime throw (cloud#1626 ruling B rider)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T08:44:43Z",
+  "updated_at": "2026-09-01T07:47:14Z",
+  "closed_at": "2026-09-01T07:46:43Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13393",
+  "body": "Re-filed at destination from objectstack-ai/cloud#1647 (closed as moved) per file-at-destination: the subject lives in THIS repo — `packages/spec/src/kernel/cluster.zod.ts` exists at cloud's pin `1a540e82` and carries `ClusterDriverSchema`; the cloud repo holds no copy. Filed **unassigned and ungraded** — `domain:*`, type and grading are the central triage seat's to mint. ⚠️ Expected routing: `packages/spec` ⇒ spec seat, and removing an accepted enum value **narrows the accept set**, so Clause-② (contract-review tier) applies to the implementing card.\n\n## The defect (measured on cloud#1626 at cloud pin `41ae8d68`, re-locatable at any recent SHA)\n\n`postgres` validates in `ClusterDriverSchema` and is named in `defineCluster`'s doc comment, but **no package implements it** — the only non-test caller of `registerClusterDriver()` is `service-cluster-redis`, so `defineCluster()` with `driver: 'postgres'` passes schema validation and then reaches `if (!factory) throw` unconditionally at runtime. A schema-valid value must not be an unconditional runtime throw (声明即强制).\n\n## The ruling that decides the direction\n\nMaintainer, 2026-08-24, on objectstack-ai/cloud#1626 (batch acceptance, verbatim, untranslated): 「四维分析一致的，接手你的建议。」 — option B adopted: single-node is the official ObjectOS EE boundary, multi-node is Cloud (managed) differentiation, and the DB-first postgres driver is **not built** absent a concrete customer pull (the ruling records its own reversal condition). The ruling's ③-axis rider applies either way: the dangling enum value goes. cloud ADR-0010 has been amended to record this (cloud PR #1753, pending human merge); the honest schema state is to remove the value and the doc-comment mention rather than advertise an accept set the runtime refuses.\n\n## Scope notes carried over from the source card\n\n- Carry the change with a changeset naming the removed spelling and the ruling.\n- If a future ruling flips to A under the recorded reversal condition (a concrete multi-node customer/contract), the value returns with an implementation behind it — reopening is free; this card cites the ruling so the removal cannot read as an oversight.\n\n## Re-check commands\n\n- `git grep -n \"postgres\" -- packages/spec/src/kernel/cluster.zod.ts` (the enum value and any doc mention)\n- `git grep -rn \"registerClusterDriver(\" -- packages --and --not -e test` (the implementing-driver census)\n\nProvenance: source card objectstack-ai/cloud#1647 (triage seat, executing the cloud#1626 ruling); moved by the repo:cloud execution seat (objectstack#6026, session `session_01EzWYDkwr6WEwDGhMH1Jzuq`, R20) on the card's own landing-repo verification instruction."
+}

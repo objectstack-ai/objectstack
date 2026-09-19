@@ -1,0 +1,36 @@
+{
+  "number": 14019,
+  "kind": "issue",
+  "title": "[finding] `MetadataFacade`'s class docblock claims it is \"Registered as the 'metadata' kernel service\" — the same file says 60 lines later that nothing on `main` installs it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:engine",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T00:00:12Z",
+  "updated_at": "2026-09-02T13:38:15Z",
+  "closed_at": "2026-09-02T13:33:33Z",
+  "closed_by": {
+    "login": "os-musk",
+    "id": 323835826,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14019",
+  "body": "Found while producing the boot-path reading for #13331. Filed unassigned; recording only.\n\n## The drift\n\n`packages/objectql/src/metadata-facade.ts:67-79` (class docblock):\n\n> MetadataFacade\n>\n> Provides a clean, injectable interface over SchemaRegistry.\n> **Registered as the 'metadata' kernel service** to eliminate\n> downstream packages needing to manually wrap SchemaRegistry.\n\n`packages/objectql/src/metadata-facade.ts:134-136`, in the same file, in `registerObjectBothPlaces`' header:\n\n> Dormant in-tree only because **nothing on `main` installs a `MetadataFacade` into the\n> `metadata` slot** — but the class is exported from this package's root and\n> `core` entrypoints, so a downstream host got the split.\n\nThe two statements contradict each other and the second one is the true one.\n\n## Measured\n\n`ctx.registerService('metadata', ...)` has exactly one non-test site in the tree, and it is not this class:\n\n```\npackages/metadata/src/plugin.ts:353:        ctx.registerService('metadata', this.manager);\n```\n\nThe variable-key registrations that a literal-key query cannot see were swept separately (`registerService(` with a non-literal first argument); the only ones that reach the `metadata` slot are the kernel's own core-fallback pre-injection, `ObjectKernel.preInjectCoreFallbacks()` (`packages/core/src/kernel.ts:270`) and its safety-net twin in `validateSystemRequirements()` (`:303`), both of which register `CORE_FALLBACK_FACTORIES.metadata` = `createMemoryMetadata`, not a `MetadataFacade`.\n\nBooting a real `ObjectKernel` with no `MetadataPlugin` and reading `getService('metadata')` returns the memory fallback's exact member list, confirming it directly:\n\n```\n_serviceName           : metadata\n__serviceInfo.status   : degraded\nshape keys             : __serviceInfo,_serviceName,register,registerInMemory,get,\n                         list,unregister,exists,listNames,getObject,listObjects\n```\n\n## Why it is worth fixing rather than leaving\n\nThis line is load-bearing misinformation, not a cosmetic staleness: it is the most likely source of #13331's framing, which asserted as its premise that \"the runtime dispatcher/domain facade\" registers the `'metadata'` service and imagined the fix as adding a delegate method to that facade. A reader grepping for who fills the slot finds this docblock, believes it, and stops. The triage seat on #13331 independently found the premise did not hold up.\n\n## Suggested repair\n\nCorrect the class docblock to say what the `:134` header already says — the class is exported for downstream hosts and is **not** installed into the `metadata` slot by anything in this repo. Keep the two statements in one voice so the next reader cannot pick the wrong one.\n\nRelated: #13331 (the card whose premise this line likely produced)."
+}

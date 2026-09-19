@@ -1,0 +1,33 @@
+{
+  "number": 12573,
+  "kind": "issue",
+  "title": "Pay down `packages/rest`'s new 37-error test-typecheck ledger — 13 of them are one class in one file, and 14 more look like one call-signature story across five",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-26T11:27:55Z",
+  "updated_at": "2026-09-02T01:36:13Z",
+  "closed_at": "2026-09-02T01:36:13Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12573",
+  "body": "Filed unassigned and **ungraded** by the `domain:cli` seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, following [PR #12570](https://github.com/objectstack-ai/objectstack/pull/12570) (#12542). ⛔ Not graded, not routed.\n\n⚠️ **This is a follow-up by PM decision, not a defect the dev left behind.** #12542's ruling 3 was *ledger only, no test file touched* — because the deliverable was making 149 unchecked files **checked**, and because [PR #12421](https://github.com/objectstack-ai/objectstack/pull/12421) holds `packages/rest/src/rest.test.ts`. The dev asked whether a paydown card was wanted and ⛔ correctly did not file one unasked. This is that card.\n\n## The state after [PR #12570](https://github.com/objectstack-ai/objectstack/pull/12570)\n\n`packages/rest` now has a test-layer tsc program (`tsconfig.test.json`, the #5286 sibling route) named by its `typecheck` script. **37 errors across 13 files**, recorded per file in `packages/rest/test-typecheck-debt.json`, **EXACT and shrink-only** — so each one already reds the day someone regresses it. ⛔ Nothing here is unpinned; this card is about *paying* the debt, not about *tracking* it.\n\n## ⭐ The shape, which is the useful part\n\n| class | count | where |\n| :--- | ---: | :--- |\n| `TS2554` *Expected 2-5 arguments, but got 1* | 14 | across **five** files |\n| `TS18048` possibly-undefined | 13 | **all in `src/export-integration.test.ts`** |\n| `TS2345` | 5 | |\n| `TS7006` implicit any | 4 | |\n| `TS6133` unused | 1 | |\n\n⇒ **17 of 37 are in one file**, and the 14 `TS2554` are the *same message* — which reads as one call-signature story rather than fourteen independent repairs. ⭐ Two coherent chunks, not a long tail: whoever takes this should confirm that reading first, because if it holds the ledger drops to ~10 in two focused passes.\n\n## ⚠️ Two things to check before starting\n\n1. **`packages/rest/src/rest.test.ts` may still be fenced** by [PR #12421](https://github.com/objectstack-ai/objectstack/pull/12421). Re-derive the fence from that PR's own diff — ⛔ never inherit a fence list. It is one of the 13 ledgered files.\n2. ⭐ **Some of the 37 may not be the tests' fault.** #12542 measured that the *old* 155-error tally was largely a measurement of a misconfigured check: under vitest-matching module semantics `TS2835 ×72 → 0`, `TS2550 ×16 → 0`, `TS7006 ×49 → 4`. The residue includes `TS18048 ×13`, **a class the 155 never contained at all** — \"possibly undefined\" reads that only became visible once the imports above them resolved to real types. ⛔ Do not assume the remaining 37 are all genuine test defects until each is read; the #8612 lesson is that collapsing a cascade *exposes* errors as well as removing them.\n\n## ⛔ Out of scope\n\n- Raising the ledger. It is EXACT and shrink-only by design; ⛔ **raising a debt ledger's ceiling to absorb new errors is the gate-weakening floor.**\n- `@ts-expect-error`, `any`, or an `exclude` entry to dodge a hard file. ⚠️ There are exactly **zero** `TS2578` in the layer today, so both existing `@ts-expect-error` directives (`src/rest.test.ts`, `src/rest-api-plugin-slot-lookups.test.ts`) are **live** rather than phantom — ⛔ do not add a directive that would join them without being one.\n- Touching `tsconfig.test.json`'s strictness. It is inherited untouched on purpose.\n\nSeverity not judged; ⛔ no urgency claimed — the debt is pinned and reds on regression either way.\n\n## Re-check\n\n```\ncat packages/rest/test-typecheck-debt.json\npnpm --filter @objectstack/rest typecheck\ngit grep -n \"@ts-expect-error\" origin/main -- packages/rest/src\n```\n\n⛔ Reverse-check any zero with a term known present in the same file, and never a substring of the term under test.\n\n## Refs\n\n- #12542 / [PR #12570](https://github.com/objectstack-ai/objectstack/pull/12570) — where the program and the ledger landed, and where the 37 were measured\n- #12572 — the registry doc-block wall the next 14 onboardings hit\n- #8612 — collapsing a cascade exposes errors as well as removing them\n- #5286 / #5449 — the sibling-program mechanism"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 10622,
+  "kind": "issue",
+  "title": "Nothing declares that this repo has no formatter, and Prettier's defaults reject main's own files",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-21T06:35:49Z",
+  "updated_at": "2026-09-02T01:30:06Z",
+  "closed_at": "2026-09-02T01:20:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10622",
+  "body": "Observation found while implementing #10595 (a `scripts/**`-only diff). Filed unassigned, not fixed there — it is a different surface from that card and may well be deliberate.\n\n## What I measured\n\nThe repo has **no formatter of record**: no `.prettierrc*`, no `prettier.config.*`, no `.editorconfig`, no `format`/`prettier` entry in root `package.json` scripts, and no reference to `prettier` in any `.github/workflows/*.yml`. `AGENTS.md` says nothing about formatting either (`grep -niE \"prettier|formatter|format on|code style\" AGENTS.md` → no hits). The linter of record is ESLint (`pnpm lint`).\n\nThat is a coherent design. The trap is what happens to an agent told to \"run whatever lint/format the repo runs on changed files\" — the standing instruction in dispatch briefs. Reaching for the obvious tool gives a **false signal in both directions**:\n\n1. **Prettier's defaults reject files nobody touched.** Run against pristine `origin/main` content at its repo path:\n\n   ```\n   $ npx prettier --check scripts/check-nul-bytes.mjs scripts/assert-console-spec-injection.mjs scripts/invoked-as.mjs\n   [warn] scripts/check-nul-bytes.mjs\n   [warn] scripts/assert-console-spec-injection.mjs\n   [warn] scripts/invoked-as.mjs\n   ```\n\n   The disagreement is quote style — the codebase is single-quoted throughout, Prettier's default is double. So `prettier --write` on a changed file rewrites **every string literal in it**, burying a small diff under a whole-file reformat. On a PR that is reviewer-hostile and, in a gate script, actively dangerous.\n\n2. **Copying a file out of the repo to compare against flips the verdict.** I checked byte-identical `origin/main` content from a scratchpad path under `/tmp` and got `All matched files use Prettier code style!` for the *same bytes* that warn at the repo path — Prettier resolved some config outside the repo for the `/tmp` copy and none for the repo copy. An agent doing exactly that comparison concludes **their own edits** introduced the deviation, and \"fixes\" it.\n\n`npx prettier --find-config-path scripts/console-spec-probes.mjs` → `[error] Can not find configure file`, which is the honest answer and the one worth having in writing.\n\n## Why it is a `finding` and not a queued bug\n\nNothing is broken. CI never runs Prettier, so no PR has ever failed on this, and every file in the tree is internally consistent. The cost is one agent-round each time someone reaches for the tool — and the worst case is not a wasted round but a **merged whole-file reformat** riding on an unrelated fix.\n\n## Shape if it is taken\n\nCheapest is one line in `AGENTS.md` naming ESLint as the only style authority and saying Prettier is deliberately absent. A `.prettierignore` covering the repo would also make `--check` honest, and a `.prettierrc` with `singleQuote: true` would make the tool usable rather than merely silent — but that is a real decision about adopting a formatter, not a doc fix, and it should not be made as a rider on someone else's card.\n\nRefs: #10595 (the card this surfaced under)\n"
+}

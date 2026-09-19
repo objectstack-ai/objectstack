@@ -1,0 +1,33 @@
+{
+  "number": 14172,
+  "kind": "issue",
+  "title": "Contract question: may an app seed write `sys_user.primary_business_unit_id` directly, or must it seed `sys_business_unit_member` rows?",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T09:51:44Z",
+  "updated_at": "2026-09-02T01:46:52Z",
+  "closed_at": "2026-09-01T15:54:03Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14172",
+  "body": "A question about an intended contract, not a defect report — nothing is currently broken. Asked because it cannot be answered from outside the enterprise edition, and the failure mode if we guess wrong is silent.\n\n## The situation\n\n`@objectstack/platform-objects` declares `sys_user.primary_business_unit_id` as `readonly: true` and documents it as derived:\n\n> The user's primary business unit — a denormalised projection of `sys_business_unit_member.is_primary`, maintained by plugin-sharing (ADR-0057 addendum D12). … **Do not edit directly; set it via business-unit membership.**\n\nA demo seed in an app (`objectstack-ai/duly`) sets it directly, along with `sys_user.manager_id` (also `readonly`). Both writes land, because the declarative seed loader writes under `{ context: { isSystem: true } }`, which exempts them from the readonly strip. Measured on a real `objectstack dev` boot with `SharingServicePlugin` loaded: all twelve seeded people come back with their unit and manager resolved, and the app's unit rollups work.\n\n`sys_business_unit_member` is never populated.\n\n## The question\n\n**Is `{ isSystem: true }` a sanctioned way to write a documented projection column, or does it merely fail to stop it?**\n\nConcretely, either answer is actionable and they lead to different code:\n\n1. **If plugin-sharing ever recomputes `primary_business_unit_id`** — on a membership edit, a backfill, a boot-time reconciliation, a future version — then it would recompute from an *empty* junction and blank all twelve rows. Nothing would error. The demo's unit rollups and any `own_and_reports` / `unit_and_below` scope would just go quietly empty. In that case an app seed must write `sys_business_unit_member` rows with `is_primary` and let the projection derive, and the doc comment should probably say so in the imperative it already uses.\n\n2. **If the projection is only ever written forward** (set when membership changes, never reconciled), then writing it directly is a legitimate shortcut for a seed, and the `readonly` flag is about the API surface rather than about ownership of the value.\n\nThe same question applies to `sys_user.manager_id`.\n\n## Why we cannot answer it ourselves\n\nNeither `primary_business_unit_id` nor `business_unit_member` appears anywhere in the installed `@objectstack/*` tree — the recompute path, if it exists, is in the sharing/enterprise package, which an open-source app does not install. So the risk would first surface in an enterprise deployment: precisely the one where the hierarchy scopes that consume the projection are also the ones doing real work.\n\nIf the answer is (1), a note in the seed-loader docs would be worth more than the fix in any one app — writing directory data is the ordinary thing a demo or onboarding seed does, and `{ isSystem: true }` makes every projection column writable without saying that it should not be written.\n\nRecorded app-side as objectstack-ai/duly#74."
+}

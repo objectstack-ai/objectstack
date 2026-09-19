@@ -1,0 +1,37 @@
+{
+  "number": 12775,
+  "kind": "issue",
+  "title": "[Decision] Override-recall of a `returned` approval: an ADR-0044 side effect to retire, or a capability to keep? The gate, the prose and the viewer flag disagree three ways",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "approvals",
+    "domain:services",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-27T18:16:02Z",
+  "updated_at": "2026-09-02T14:22:29Z",
+  "closed_at": "2026-09-02T13:28:37Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12775",
+  "body": "Filed by the triage seat (session `session_01Aujz2zykf5LXt3T98gRsGe`) splitting the maintainer-floor half out of **#12716**, so that card is not held hostage to it. #12716 is queued for its own fix (surface the override-recall button on `pending`) and ⛔ does **not** depend on this ruling.\n\nMeasured by the #12716 dev and independently re-verified by the `domain:services` PM on `origin/main` at `86df0c99e` — full evidence chain in #12716 comment 5442740007. ⛔ Not re-measured by this seat; re-verify before acting.\n\n## The three-way disagreement\n\n| surface | what it says about override-recall on a `returned` request |\n|---|---|\n| the gate — `approval-service.ts:2763` + the **status-blind** override short-circuit at `:2774` | **admitted** |\n| the viewer flag — `attachViewers:4848`, `can_override: row.status === 'pending' && isOverrideActor(...)` (ANDed) | **pending-only** |\n| the prose — `:808` *\"may always act on a PENDING request … or recall it\"*, plus `:2767`, `:4833` | **pending-only** |\n\nTwo surfaces say pending-only; the gate is the odd one out, and `isOverrideActor(context, requestOrg?)` **structurally cannot** be status-aware — there is no status parameter.\n\n⭐ **The reach looks like a side effect, not a grant.** ADR-0044 widened recall's state check to cover the submitter's revise window; the override short-circuit sitting above it was never re-scoped alongside. Recall is the only one of the four override levers that accepts a non-pending status at all — `decideNode:2308` and `loadPendingRow:796` make approve / reject / reassign pending-only at the endpoint.\n\n## Why it is the maintainer's and not triage's\n\nRetiring the reach **narrows a permission on a live endpoint** and removes a capability that exists in shipped code and is pinned by nothing. Both the dev and the services PM reached that boundary and handed it up rather than taking it; this seat agrees and is ⛔ not ruling it.\n\n## Options\n\n| | shape | cost |\n|---|---|---|\n| **A** | Keep the reach; make prose and viewer flag agree with the gate | To actually surface it needs a **new, recall-specific viewer signal** — `can_override` cannot be relaxed, since it also feeds the three sibling predicates whose endpoints *are* pending-only. New declared surface, permanent obligation |\n| **B** | Retire the reach — re-scope the `:2774` short-circuit to `pending` so all three agree at one point | Narrows a live permission. ⚠️ If any operator workflow relies on override-recalling a `returned` request, B breaks it **silently** |\n| **C** | Leave all three as they are | The disagreement persists, undocumented. It has already cost one wrong triage ruling this round |\n\n&lt;!-- os-decision-facets --&gt;\n\n**一句话问题**:管理员能不能撤回一张「已退回给提交人修改」的审批单?代码说能,产品文档和界面判据都说不能 —— 三处对同一个问题给了两个答案,而且没人知道哪个是当初想要的。\n\n- **① 项目长远合理性**:B 让闸门、散文、视图旗标在**一个点**上一致,消除三方分歧;A 也能一致,但方向相反且要新增一个声明信号;C 把矛盾永久化 —— 它这一轮已经让一次分诊裁决翻车,下一个读代码的人还会再量一次。\n- **② 实际业务拉动**:⚠️ **未测,而且这是本卡最关键的空白** —— 不知道有没有运维流程真的在用「管理员撤回已退回单」。但有一条反向证据:`returned` 的记录锁**已经释放**(`approval-revise.test.ts:293`/`:313` pin 了 `returned → unlocked`),而 #3424 的原始动机场景(审批路由到无人岗位、单子卡死)按定义是 `pending`。⇒ 「管理员要来解救」这个理由在 `returned` 上不成立。\n- **③ 防 AI 犯错**:C 最差 —— 三个面对同一问题给三个答案,任何按约定读代码的 agent 都会推断错(本轮已实证)。B 让代码与散文一致且可被一条 pin 钉住;A 新增一个 recall 专用信号,面更大、更容易再漂。\n- **④ 创业阶段不扩散**:B 是收窄,不新增面;A 新增一个永久维护的声明信号。\n\n**推荐:B**,附**硬前置条件** —— 落地前先从审计留痕读出「是否真有 override actor 在 `returned` 上撤回过」。读数为零才动手;非零则当场改判 A,⛔ 不许带着非零读数硬做。**回退:A**。\n\n**置信缺口(本分析看不见什么)**:看不见生产部署里 override-recall-on-`returned` 的实际调用量。本席只能读代码,读不到运行数据 —— 而这恰恰是 A 与 B 之间唯一的真判据,也是 B 唯一的静默破坏风险所在。\n\n**裁后我会怎么执行(你不用管)**:裁 B ⇒ 翻 `pm:queue` 派 `domain:services` 席,派发令强制先跑审计读数、零才动手、非零停手回报;裁 A ⇒ 新增 recall 专用视图信号属扩大公开面,走条款②契约复审档位;裁 C ⇒ 关 not planned,但**必须**把三方分歧写进 `approval-service.ts` 的散文,免得第三次被人重新量出来。\n\n## Refs\n\n- **#12716** — the queued half (surface the button on `pending`); its option A is correct-by-construction because `can_override` is already pending-scoped\n- **#3424** — the admin override this all descends from · **ADR-0044** — the revise-window widening that produced the side effect\n- **#12769** — the unrelated defect the same probe run surfaced\n\n⚠️ Dedup run by this seat over the override / recall / revise-window family before filing: no existing card covers this scope question."
+}

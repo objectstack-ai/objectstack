@@ -1,0 +1,37 @@
+{
+  "number": 13095,
+  "kind": "issue",
+  "title": "Two more 4xx exits still ship the ADR-0111 `CODE:` prefix in the human-readable text — `resolveErrorResponse`'s passthrough, which the #12975 ruling did not reach",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:blocking",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-29T05:02:28Z",
+  "updated_at": "2026-09-01T07:13:36Z",
+  "closed_at": "2026-09-01T07:13:36Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 15,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13095",
+  "body": "Measured on `origin/main@db39dfc1c` plus the #12975 implementation branch (`claude/issue-12975-data-door-strips-code-prefix`). Filed unassigned from the #12975 dev seat, deliberately outside that card's ruled scope.\n\n## What the #12975 ruling moved, and what it did not\n\nThe 2026-08-29 maintainer ruling adopted option 1 on #12975: `classifyDataError`'s declared-4xx arm strips the ADR-0111 `CODE:` prefix from the human-readable `error` string, so `error` is human language and `code` is the machine token.\n\n`packages/rest/src/error-response.ts` has **two** declared-4xx arms, not one, and the ruling named the first:\n\n| arm | reached from | ships the prefix after #12975 |\n| :-- | :-- | :-- |\n| `classifyDataError`'s declared-status arm | `mapDataError` — the by-id CRUD routes | **no** (the ruled fix) |\n| `resolveErrorResponse`'s `passThroughStatus` 4xx arm | `handleRouteError` / `sendThrownError`, and `classifiedRefusalAnswer` | **yes** |\n\nThe second arm is checked *before* it delegates to `mapDataError`, which is the same structural fact `rest-hook-refusal-message-parity.test.ts` documents for the sandbox-wrapper defect: \"Batch / bulk / clone exit through `handleRouteError` to `resolveErrorResponse`, whose declared-status passthrough is checked BEFORE it delegates to `mapDataError`.\"\n\n## Measured, driving the real registered route handlers\n\nOne producer for every row: a thrown `Error` carrying `code: 'FORBIDDEN'`, `status: 403` and the message `FORBIDDEN: ` followed by the localized sentence — the exact shape `plugin-sharing/src/sharing-plugin.ts`'s by-id write gate throws.\n\n```text\nPATCH /api/v1/data/:object/:id\n  {\"error\":\"您无权修改或删除这条记录，如需修改请联系该记录的负责人或管理员。\",\"code\":\"FORBIDDEN\",\"object\":\"showcase_inquiry\"}   ← converged\n\nPOST /api/v1/data/:object/batch\n  {\"error\":\"FORBIDDEN: 您无权修改或删除这条记录，如需修改请联系该记录的负责人或管理员。\",\"code\":\"FORBIDDEN\"}                     ← still prefixed\n\nGET    /api/v1/data/:object/:id/shares\nDELETE /api/v1/data/:object/:id/shares/:shareId\n  {\"success\":false,\"error\":{\"code\":\"FORBIDDEN\",\"message\":\"FORBIDDEN: 您无权修改或删除这条记录，如需修改请联系该记录的负责人或管理员。\"}}   ← still prefixed\n```\n\nSo after #12975 lands, the same refusal reads two ways depending on which route caught it — the door-disagreement shape #7525 / #8016 / #11588 keep producing, now one arm over.\n\n## Why the share family is the sharper half\n\n`respondSharingError` has two arms and only one of them strips:\n\n- the **ADR-0111 prefix-idiom arm** (a bare `Error` whose message opens with one of the five codes, no `code`/`status`) strips, and always has — `sharing-envelope.test.ts`'s `stripsThePrefix` pins it;\n- the **classified arm** (`classifiedRefusalAnswer`, added by #11683 for producers that declare `code` plus `status`) re-dresses whatever `resolveErrorResponse` answered, prefix included.\n\nThat means `rest-server.ts`'s own `#8111` comment — \"The prefix is a SERVER-INTERNAL service to REST derivation: it is stripped below and never reaches the wire, so no consumer can read it\" — is true for the producers it was written about (the 11 bare-`Error` throw sites in `sharing-service.ts`, re-censused at #11683) and **not** true for the newer classified limb beside it.\n\n## Not a regression from #12975\n\nBoth rows above ship the prefix on `main` today as well; #12975 does not change either. What #12975 changes is that the by-id route stops agreeing with them.\n\n## Options, not a recommendation\n\n1. Apply the same declared-code-anchored strip in `resolveErrorResponse`'s 4xx arm, which converges every `/data` exit and — because the share family re-dresses that same classification — the record-share classified arm with it. Moves the pins that assert the prefixed text on those doors.\n2. Leave `resolveErrorResponse` alone and rule that the by-id door is the only one converging, correcting the `#8111` comment to name the limb it does not cover.\n3. Converge the record-share family only, leaving `/data`'s bulk exits as they are.\n\nOption 1 is the one that matches #12975's stated goal (\"one envelope semantics\"), but it moves pins beyond the two the #12975 ruling authorised, which is why it was not taken in that PR and is filed here instead of decided at a dev seat.\n\n## Evidence in the tree\n\n`packages/rest/src/rest-data-door-code-prefix.test.ts` carries a case titled \"MEASURED, NOT REPAIRED HERE\" that pins both rows above. It reddens the day either exit converges, so whichever option is adopted moves it deliberately."
+}

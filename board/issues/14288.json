@@ -1,0 +1,35 @@
+{
+  "number": 14288,
+  "kind": "issue",
+  "title": "lint: the #14089 shadowing warning covers node/edge `condition` only — the #4027 descriptor-declared expression slots are not passed through it, though they may share the flattened scope",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p3"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-02T00:55:55Z",
+  "updated_at": "2026-09-02T14:18:40Z",
+  "closed_at": "2026-09-02T14:16:59Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14288",
+  "body": "Found during contract review of PR #14263 (#14089). Non-blocking for that PR — it implements the maintainer's option-C ruling exactly as worded (\"flow node/edge condition\") — but the mechanism the warning describes is not confined to those two slots, and the gap is worth a card so it is not lost.\n\n## The gap\n\nPR #14263's `warnShadowedFieldReads` runs on exactly two expression positions per flow graph: the node `condition` and the edge `condition`. The descriptor-declared expression slots that #4027 added (`resolveFlowNodeExpressions` — the per-node-type expression positions such as a filter or a computed input) are checked by the existing `check(...)` in the same traversal but are **not** passed through the shadowing pass.\n\nIf those slots are evaluated in the same flattened scope `seedRunVariables` builds — the variable map is one per run, so a declared variable that shadows a field shadows it in every expression that scope reaches — then a bare name that is BOTH a declared flow variable AND a field on the bound object is silent there for the same reason it was silent on `condition` before #14263, and the author reads the variable when they meant the field.\n\n## What needs measuring first\n\nWhether the #4027 descriptor slots are evaluated against the run's flattened variable map, or against a narrower per-node scope. If the former, the fix is one more call site of `warnShadowedFieldReads` inside the descriptor-slot loop in `validate-expressions.ts`, reusing the same `declaredVariables` set already collected once per flow. If the latter, this card closes as not-a-gap with that measurement.\n\n⛔ Within option C's letter either way: the ruling excludes A/B/D (any judgement of a bare identifier *for being bare*); extending the shadowing-only warning to more expression positions moves no accept set and adds no error.\n\nRefs: #14089 (the ruling, director batch #23) · #14263 (the landing) · #4027 (the descriptor slots).\n\nUnassigned and untriaged, per the single-producer rule for `domain:*`."
+}

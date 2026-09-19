@@ -1,0 +1,34 @@
+{
+  "number": 13998,
+  "kind": "issue",
+  "title": "`migrate-sys-notification-to-event` writes `String(row.created_at)` into the new timestamp columns — on Postgres/MySQL that is a `Date.toString()` spelling, not ISO",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-31T22:44:49Z",
+  "updated_at": "2026-09-01T08:20:58Z",
+  "closed_at": "2026-09-01T08:20:58Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13998",
+  "body": "Found by the driver-materialisation consumer census on #13973 (class (c) — genuinely wrong on one side). That sweep is not addressed by this card and does not close it.\n\n## The site\n\n`packages/metadata/src/migrations/migrate-sys-notification-to-event.ts:103` and `:131`:\n\n```ts\nconst createdAt = row.created_at != null ? String(row.created_at) : now();\n…\nawait data.insert(INBOX_OBJECT,   { …, created_at: createdAt });\nawait data.insert(RECEIPT_OBJECT, { …, at: isRead && row.read_at != null ? String(row.read_at) : createdAt,\n                                        created_at: createdAt });\n```\n\n`row` comes from `selectLegacyRows(driver)` — a driver read of the legacy `sys_notification` table.\n\n## Why it is wrong on the production default driver\n\n`created_at` is a builtin audit column: not in `datetimeFields`, and `SqlDriver#formatOutput` repairs it only inside `if (this.isSqlite)`. Pinned in `packages/drivers/driver-sql/src/sql-driver-13567-audit-stamp-materialisation.test.ts` — the live dialects hand it out as a JS `Date`, SQLite as canonical ISO-Z text.\n\nSo on Postgres and MySQL this migration reads a `Date` and writes\n\n```\n\"Sun Aug 30 2026 18:19:25 GMT+0800 (China Standard Time)\"\n```\n\nback into `created_at` and `at` on the new inbox and receipt rows. Unlike the read-side sites in this census, **this one persists the wrong spelling** — the migration is one-way, so whatever lands is what the platform carries afterwards.\n\nTwo failure shapes are possible depending on the target column's type and the write path's coercion, and which one occurs should be measured against a live server rather than reasoned:\n\n- the value is accepted and stored with **milliseconds dropped and the migrating host's timezone baked in** (`Date.prototype.toString` renders whole seconds in the process zone), so the migrated history is silently skewed and de-precisioned; or\n- the value is rejected — the trailing `(China Standard Time)` is not part of any dialect's timestamp grammar — and the migration throws or degrades mid-run.\n\nNeither is visible today: this migration's tests drive SQLite/memory, where `String(row.created_at)` is the identity on already-canonical text.\n\n## Why this is not a `??` fallback\n\nPer #13973's standing prohibition, the question is which side owes the canonical spelling:\n\n- **A — canonicalise at the migration**, which is also the only shape that repairs already-migrated deployments if any exist. The repo's existing correct form is one file family over, `packages/metadata-protocol/src/protocol.ts:7710-7715`.\n- **B — normalise at the producer** (one presented shape per dialect at the read door) — fixes every sibling site, but reverses a deliberate driver decision (`withPostgresCalendarDayAsText`) and is a maintainer call.\n\n⚠️ Worth deciding first: whether any deployment has already run this migration against Postgres or MySQL. If so, the repair has a **data** half as well as a code half, and that changes its priority.\n\n## Re-run\n\n```\nrg -n 'String\\(row\\.(created_at|read_at)\\)' packages/metadata/src/migrations/\n```\n\nBacklink: #13973 (census), #13382 (the OCC seam, the same class). Neither is addressed here."
+}

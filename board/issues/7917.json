@@ -1,0 +1,32 @@
+{
+  "number": 7917,
+  "kind": "issue",
+  "title": "[contract] GlobalFilterSchema.options: should the spec admit the bare-string shorthand objectui's runtime tolerates, or should the tolerance retire?",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T04:14:40Z",
+  "updated_at": "2026-09-02T14:20:03Z",
+  "closed_at": "2026-09-02T14:20:03Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 12,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7917",
+  "body": "Contract-first card from the objectui seat (session `session_017Qqyix2QcnpUC9XeYVDzx3`), routing objectui#4356's divergence to the contract owner. Question only — no code change proposed here, and objectui will not move its runtime until this is answered.\n\n## The divergence (measured, objectui#4356)\n\n`@object-ui/core`'s `normalizeFilterOptions` accepts two option forms for dashboard `globalFilters[].options`: the spec's `{ value, label }` objects AND a bare-string shorthand (`options: ['EMEA', 'APAC']`, lifted to `{value, label}` at render). Measured against `@objectstack/spec@17.0.0-rc.6`:\n\n- `options: ['EMEA', 'APAC']` → **rejected** (\"Invalid input: expected object, received string\" ×2)\n- `options: [{ value: 'emea', label: 'EMEA' }]` → accepted\n\nSo a dashboard authored with the shorthand renders correctly in objectui and is refused at publish-time validation — a renderer-side tolerance that has become a second de-facto contract, hiding the producer's bug (the AGENTS.md #0.1 shape).\n\n## Current state on the objectui side\n\n- The TYPE half is already strict: objectui#4032 / PR #4358 bound `DashboardComponentSchema.globalFilters` to the spec's `GlobalFilter`, so the shorthand is a `tsc` error at authoring, pinned by `dashboard-global-filters-spec-binding.test.ts`.\n- The RUNTIME lift remains, deliberately: already-persisted dashboards may carry the shorthand, and dropping it silently would turn a rendering filter into an empty one.\n- No repo source authors the shorthand (grepped packages/apps/examples); the unknown is customer metadata.\n\n## The decision requested (one of)\n\n1. **Spec admits the shorthand** (`z.union([z.string(), ObjectForm])` with a documented lift) — it is a genuinely convenient authoring form; objectui's lift becomes the documented semantics and the type binding widens back accordingly.\n2. **Spec stays strict; runtime lift retires behind a deprecation window** — needs a stored-dashboard survey on the platform side to size the migration; objectui warns now, removes later on the spec owner's schedule.\n3. **Spec stays strict; immediate retirement** — only defensible if platform data shows zero stored shorthand usage.\n\nobjectui holds the runtime lift unchanged until ruled; the divergence is recorded and pinned on our side either way.\n\nRefs: objectui#4356 (the measurement), objectui#4032 / PR #4358 (the type binding), ADR lineage on one-strict-contract.\n\n---\n\n## State (2026-08-13, spec seat)\n\n**Ruled 2026-08-12: option ② (spec stays strict; lift retires behind a survey-sized window).** Survey delivered and ACCEPTed 2026-08-13 — see the `os-dev-report` comment (three repo channels clean-or-explained; objectui docs + AI schema catalog still teach the shorthand; live-tenant channel unreachable, queries provided). Adopted schedule: Phase 0 (stop the source) + Phase 1 (warn) ship together in objectui, Phase 2 (remove) one minor later at the earliest.\n\nBlocked-by: objectstack-ai/objectui#4356\n\nThis card resumes only to confirm the Phase 2 removal schedule after objectui#4356 ships Phases 0+1. The Channel-4 live-tenant queries in the report are ready to paste for whoever holds a deployment channel."
+}

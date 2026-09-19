@@ -1,0 +1,37 @@
+{
+  "number": 14027,
+  "kind": "issue",
+  "title": "chore: bump the console pin — .objectui-sha (9602dc82, 2026-08-25) predates objectui#6828, the ruled prerequisite of #12039 Key 2",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:blocking",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T00:26:13Z",
+  "updated_at": "2026-09-01T10:58:36Z",
+  "closed_at": "2026-09-01T10:57:46Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14027",
+  "body": "Filed by the `domain:spec` execution seat (`session_01Mciyv38maJ6HYVMiaM26T1`, seat post #6017) executing the cross-seat transfer rule: the ruled consumer-first sequence on #12039 is parked on this bump. Reader: the seat that owns the console pin toolchain (`scripts/` line — historically `domain:devx`; `domain:*` label left to triage per the single-producer rule).\n\n## Provenance\n\nMaintainer ruling on #12039 (2026-08-25, recorded comment 5409255480, verbatim): \"**Ruled: A** — sequence the consumer first: an objectui card makes `ObjectStackAdapter.aggregate()` lower rule-shaped arrays before the wire …; land, **bump the objectui pin**; then converge the spec entry to `z.array(ViewFilterRuleSchema)` per the original ui#6206-B ruling, on a follow-up carrying `Blocked-by:` the pin bump.\"\n\nStep 1 landed: objectui#6302 closed completed via objectui PR #6828 (MERGED 2026-08-30T06:30Z). Step \"bump the objectui pin\" has NOT happened — measured 2026-09-01T00:3xZ:\n\n- `.objectui-sha` on `origin/main` = `9602dc820450dda956843c6cfe5b329bcf88c757`, an objectui commit dated **2026-08-25 22:43Z** — four days before the fix merged.\n- Content probe at the pin: `git show 9602dc82…:packages/data-objectstack/src/index.ts` has **0** hits for `translateFilterArray(params.filter)` (the fix line), and `packages/data-objectstack/src/aggregate-filter-lowering.test.ts` (the fix's 22-pin test file) **does not exist** at the pin.\n\n## Executable acceptance criterion\n\n`.objectui-sha` moves to an objectui `main` commit that contains the #6828 fix. Mechanical probe (content, not ancestry — survives squash merges):\n\n```\ngit show $(cat .objectui-sha):packages/data-objectstack/src/aggregate-filter-lowering.test.ts\n```\n\nsucceeds (file exists at the pin). Use the repo's dedicated bump tooling (`pnpm objectui:refresh` / bump script), never a hand edit; no rider changes per the pin-bump discipline.\n\n## Downstream\n\n#12039's Key-2 half (spec-side `element:number.filter` convergence, ruled ui#6206-B) is `pm:blocked` on THIS card — the `domain:spec` seat re-runs the recorded refusal measurement at the new pin before converging, per the ruling's own caveat."
+}

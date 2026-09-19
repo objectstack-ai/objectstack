@@ -1,0 +1,33 @@
+{
+  "number": 14032,
+  "kind": "issue",
+  "title": "skills: harden the decision-batch presentation rule — exactly 5 per batch, each card explained in full prose; bulk lists/tables are a violation, not a summary",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T00:41:17Z",
+  "updated_at": "2026-09-01T08:14:59Z",
+  "closed_at": "2026-09-01T08:13:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14032",
+  "body": "Maintainer ruling, 2026-09-01, PM chat channel (director seat decision service), verbatim:\n\n> 每批5张详细解释，不是这样一堆列给我，这个也要写入skills\n\nContext: the director seat presented ~20 decision items in one message, compressed into tables and one-line verdicts. The maintainer rejected the form.\n\n## What to encode\n\nThe director charter (`references/lanes/director.md`) already carries the 2026-08-27 basic principle (「5张一批，要从业务角度解释清楚问题和和选项，并带上四维综合分析」). This ruling adds the enforcement teeth the incident showed were missing:\n\n1. **Exactly 5 cards per batch, one batch per report** — present the batch, then STOP and wait for the maintainer's reply before the next batch. ⛔ Never deliver multiple batches in one message.\n2. **\"详细解释\" is prose, per card**: the business problem in plain terms, each option with its real cost, the four-axis analysis written out (with the axis weighting per the sibling ruling — see #14030: long-term soundness ≥50%), and one recommendation. ⛔ A table row, a one-line verdict, or a \"changed/unchanged\" grid is NOT a detailed explanation and does not discharge the duty — compression of the batch is a violation of it.\n3. Re-analysis passes (e.g. after a framework/weighting change) follow the same batch discipline as first presentations.\n\n## Landing\n\n`references/lanes/director.md` (and/or `references/decision-analysis.md`, wherever the presentation duty lives) — same file family as #14030; the skills seat may family-dispatch the two together (both are governed `.claude/**` faces, draft-only + human merge; frame-sync copies untouched by this card).\n\nFiled by the director seat, session `session_015adLit3ZYASJiXwxKG78Wi`. Routing/grading is triage's."
+}

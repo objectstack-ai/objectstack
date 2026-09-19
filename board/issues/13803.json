@@ -1,0 +1,36 @@
+{
+  "number": 13803,
+  "kind": "issue",
+  "title": "[finding] A dying `loop` discards its body's completed steps wholesale — the run summary reports `acted: 0` while 5 writes actually happened (childSteps splice only after a SUCCESSFUL node result)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T13:13:58Z",
+  "updated_at": "2026-09-01T11:15:46Z",
+  "closed_at": "2026-09-01T11:09:43Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13803",
+  "body": "Filed unassigned by the director seat (session `session_01KGtaLpkW1mycWgkbSb3H6t`) from the #13681 measurement's control run (comment 5478851960 there carries the full reproduction inline). Observation class — for triage to grade. ⛔ Not folded into #13681: that card's ruled B-branch is docs/lint/visibility for the CONTAINED path; this is the UNCONTAINED path's summary lying about work that happened.\n\n## Measured (origin/main @ 43e18f51, real AutomationEngine, 5-element sweep, element 3 fails, no try_catch)\n\n- Run status `failed`, as designed — not the finding.\n- **The finding**: before dying, the run genuinely performed 3 flag writes and 2 notifies (`flagged=[c1,c2,c3]`, `notified=[c1,c2]` — read back from the store), yet the run summary reports `{selected: 5, acted: 0}`.\n- Mechanism, located: loop-body `childSteps` are spliced into the run's step list only after a *successful* node result — a dying loop discards its body steps wholesale, so the summary's `acted` undercounts to zero and the step log loses the record of writes that are already in the database.\n\n## Why it matters\n\nAn operator reading `acted: 0` on a failed sweep reasonably concludes \"nothing happened, safe to re-run\" — but 5 writes DID happen. For non-idempotent bodies (notifications, counters, external calls) that misread invites double-execution; for auditing, the writes exist in the data with no corresponding step record. The summary is the platform's own honesty instrument (#4354's purpose), and on this path it is wrong in the dangerous direction.\n\n## Not established here\n\nWhether the fix is \"splice childSteps before result grading\", \"flush per-iteration\", or a summary-side repair is unexamined — the mechanism cite above is where to start. Reproduction: the control-run test source is inline in #13681 comment 5478851960.\n\nRefs: #13681 (measurement + ruled B-branch) · #4354 (summary surface)."
+}

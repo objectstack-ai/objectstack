@@ -1,0 +1,34 @@
+{
+  "number": 14550,
+  "kind": "pull_request",
+  "title": "test(devx): pin the merge-queue triage comment's operative guidance prose",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T11:26:39Z",
+  "updated_at": "2026-09-02T12:48:33Z",
+  "closed_at": "2026-09-02T12:48:31Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-09-02T12:48:31Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/14550",
+  "body": "Fixes #13967\n\n## What\n\n`scripts/check-merge-queue-triage-outcome.mjs` pinned the fenced excerpt and the\ncross-PR aggregation, but nothing in its 73 assertions read the merge-queue triage\ncomment's operative guidance prose — the timeout-vs-assertion heuristic, its named\nexception (PR #13966), and the boundary sentence saying the re-queue allowance is\ngoverned elsewhere. Deleting all three from the workflow's `body` array left the\nwhole derived gate family green.\n\nThis adds:\n- `guidanceProse(r)` beside `excerptLines(r)`, built on `postedBody(r)` (the whole\n  posted comment) rather than through `excerptLines` — its docblock states why:\n  `excerptLines` is deliberately scoped to code-fence content, and the guidance\n  prose lives outside every fence, so going through it would leave the prose\n  unreadable by design, not by omission.\n- Three assertions in scenario `E1` (the timeout scenario — the body is composed\n  once, so one scenario carrying all three is enough), one per operative claim.\n- Three `MUTATIONS` rows (`M17`-`M19`) so `--self-test` proves each new assertion\n  can go RED, with `A1` as the `keepGreen` control (it posts the same comment but\n  never reads the prose, so it should not move).\n- The third \"what it holds\" row in `lint.yml`'s step comment, and a correction of\n  its mutation count (measured 20 after this change; it previously said \"fourteen\"\n  against a measured 17 — both numbers are fixed in this edit).\n\n`.github/workflows/merge-queue-triage.yml` is the SUBJECT being pinned and is\n**not** touched by this PR.\n\n## Pinned sentences (mandatory per the triage)\n\nOne assertion per operative claim, each on the shortest substring that carries\nthe claim and would not survive a deletion — never the whole sentence:\n\n| Claim | Pinned fragment(s) | Why load-bearing |\n|---|---|---|\n| The rule | `负载/时序` **and** `真实的行为改变` | These are the two poles of the timeout-vs-assertion heuristic itself (timeout ⇒ load/timing noise; assertion ⇒ real behaviour change) — the line the triage checklist turns on. |\n| The named exception (#13966) | `实验自身的有效性前提` **and** `时长、一个时间戳、一个耗时计数` | Names the exception's own object (an assertion about the experiment's validity premise) and the mechanical tell (duration/timestamp/elapsed-count) that separates it from a real regression. |\n| The boundary sentence | `后者由别处管` | The sentence saying this guidance only changes how a red is read, not which tests may be re-queued — a real boundary claim, not commentary. |\n\n**Deliberately NOT pinned**: the wording around these fragments — the framing\nprose, the two worked examples (`AssertionError: SecurityPlugin.init()...` /\n`...second-precision stamps could have differed too...`), and markdown emphasis.\nQuoting more than these fragments is exactly the failure mode the card names: *\"a\nprose pin that quotes too much turns every wording improvement into a two-file\nedit, and that is how pins rot into copy-paste.\"*\n\n## Tests\n\n- `node scripts/check-merge-queue-triage-outcome.mjs --self-test` → `104\n  assertions, 20 mutations of the shipped script each driven to red.`\n- `node scripts/check-merge-queue-triage-outcome.mjs` → `OK (76 assertions over\n  20 scenarios...)` (73 + 3 new; 20 scenarios unchanged, confirmed with `--list`).\n- Counter-measurement (the card's own falsification test): in the worktree, on a\n  committed baseline, blanked the rule pair and the boundary sentence directly in\n  `merge-queue-triage.yml` (restored via `git checkout HEAD --\n  .github/workflows/merge-queue-triage.yml` under a `trap ... EXIT INT TERM`,\n  confirmed clean by `git diff HEAD` after). The battery went RED naming exactly\n  the two mutated assertions:\n  ```\n  check-merge-queue-triage-outcome: 2 failed assertion(s) over the SHIPPED script\n    • [E1] the timeout-vs-assertion rule is present in the posted body: timeout -> load/timing, assertion -> real behaviour change\n    • [E1] the boundary sentence is present in the posted body: this only changes how a red is read, not which tests may be re-queued\n  ```\n  (The named-exception assertion, untouched by that mutation, correctly stayed\n  green — confirming the three assertions are independent.)\n- `eslint scripts/check-merge-queue-triage-outcome.mjs --no-inline-config\n  --format json`: 1 file, 0 errors, 0 warnings. Repo uses one flat\n  `eslint.config.mjs` with no `parserOptions.project` for any file (no type-aware\n  linting anywhere in the repo), so this file-narrowed run is a measurement, not\n  an assumption — it cannot move any unrelated file's verdict.\n- Re-ran self-test + main check after merging `origin/main` (no conflicts,\n  unrelated files) — both green on the merged tree at `4e61df652`.\n- Gate union: `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack\n  --commands scripts/check-merge-queue-triage-outcome.mjs\n  .github/workflows/lint.yml` → 35 commands; all 35 run, reconciled with `--ran`\n  (35 derived, 35 run, 0 NOT-MEASURED, 0 UNRUN). 33/35 passed; 2 exited\n  PREREQUISITE-NOT-MET locally (not a red — `check-test-completeness.mjs` needs a\n  saved `turbo run test` log CI produces; `check:type-check-debt` needs the full\n  workspace `dist/*.d.ts` closure built) and are unaffected by this diff. See the\n  `os-dev-report` comment on #13967 for the full per-command list.\n\n## Changeset\n\nNone. `scripts/**` + `.github/**` only, publishes nothing from any package —\n`skip-changeset` label applied and confirmed by reading it back.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WLJQhde67SeTccsmnBVarV)_"
+}

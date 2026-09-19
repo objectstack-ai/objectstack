@@ -1,0 +1,36 @@
+{
+  "number": 14163,
+  "kind": "issue",
+  "title": "ADR-0130 D1+D3:installPackage 命名空间闸认同物共同所有者 + 安装期对象名唯一性检查(同 PR 机器不可拆)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T09:23:11Z",
+  "updated_at": "2026-09-02T03:43:14Z",
+  "closed_at": "2026-09-02T03:43:14Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14163",
+  "body": "Blocked-by: #14162\n\n实现 ADR-0130 **D1 + D3**,epic #14122 实现面第 4+5 行。⚠️ 本卡是整个设计里唯一能伤到客户数据的部位,D3 的不可拆约束是硬验收。\n\n## 要求(单源在 ADR-0130 D1/D3)\n\n1. `installPackage` 命名空间闸(`packages/objectql/src/registry.ts:3575`,判据 `:3583`,抛错 `:3595`)从「同一包 id」改为「**同一发布物内的共同所有者**」;`RESERVED_NAMESPACES`/`isShareableNamespace` 行为不变。\n2. **同一 PR 内**新增**安装期逐对象名唯一性检查**:同物内两包定义同名对象 ⇒ 安装期 REFUSED,错误点名两个包与对象名;检查先于任何 DDL。⛔ 两者任一不得单独发布,顺序不可颠倒。\n3. **配对门测试**(D3 验收判据 2):断言为一个命题——「闸既已放行同物共同所有者,则同物同名对象的物必被安装期拒绝」;放宽存在而拒绝缺失 ⇒ 测试红。\n4. 拒绝断言遵循 ADR-0112 信封:断言错误的 **`code` 与 `status`**,⛔ 不是裸 throw(裸 throw 在驱动因无关原因抛普通 Error 时也绿)。\n5. 兼容性:新拒绝只拒今天本就会在 DB 层炸的配置(#14122 §6.2),更早更清楚,不是破坏。\n\n## Clause-②\n\n拒绝行为新增 = accept/reject 面移动 ⇒ 预期 yes,挂 `needs:contract-review`,PR 恒 draft 待复审。\n\n## 验收\n\n配对门测试红→绿双向证据(消融放宽保留、检查删除 ⇒ 必红);既有 NamespaceConflictError 测试全绿;跨物场景(不同物两包同 namespace)照旧拒绝。"
+}

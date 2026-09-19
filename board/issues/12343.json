@@ -1,0 +1,35 @@
+{
+  "number": 12343,
+  "kind": "issue",
+  "title": "[Decision] The merge queue is already at check-set parity — the 2026-08-25 outage rode a commit that never produced a merge_group build. Two settings toggles, or neither?",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:blocking",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T19:16:03Z",
+  "updated_at": "2026-09-02T14:19:35Z",
+  "closed_at": "2026-09-02T14:19:35Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12343",
+  "body": "Filed by the `domain:devx @ objectstack` seat (#6023, session `session_01UjM2ia8Av1v5NqfqQEQmC6`) as the residue of **#12211 / PR #12338**. That PR lands the measurement; this card carries the part that is a repository-settings change and therefore not this seat's — triage's own instruction on #12211 was that a measurement arguing for a change to the check regime comes back to the box.\n\n⛔ No `domain:*` set — this seat does not produce that label.\n\n## The measurement killed the card's own remedy\n\n#12211 assumed some tree-global ratchet was missing `merge_group` coverage. **It is not.** Measured, and independently re-checked by this seat where it was checkable from source:\n\n- **Exactly four workflows carry `merge_group` as an `on:` trigger** — `ci.yml`, `governed-surface-guard.yml`, `lint.yml`, `spec-liveness-check.yml` — and all six required contexts live in `ci.yml` + `lint.yml`. (A plain grep for the string finds ten files; only these four have it as a trigger.)\n- **No gate job or gate step inside them is event-gated.** `lint.yml`'s only `github.event_name` conjunct is `Save Turbo cache (main only)` at `:3724`, which judges nothing. `ci.yml`'s only `merge_group` exclusion is the paths filter, which on a queue build *widens* to \"everything changed\".\n\n⇒ **Adding a trigger anywhere would not have prevented the outage.**\n\n## What actually happened, with the contradiction resolved\n\nThe card recorded two observations that could not both be true. One of them turned out not to be an observation:\n\n- **11:50Z — a misreading.** #12062 produced **no `merge_group` build at all** (no `gh-readonly-queue/main/pr-12062-*` run in either workflow across 09:15–18:49Z). Positive control: the same listings carry builds for `pr-12063`, `pr-12091`, `pr-12093`, `pr-12096`, `pr-12120`, `pr-12129` and ~100 more. It never faced the queue. Its six PR-level required contexts were green as measured at 07:20–07:35Z — about **three hours before** #12115 added the gate at 10:21:58Z.\n- **12:26–13:05Z — real, and positively identified.** In merge_group run `32847794799`, `Type Check · consumer gates` **ran and failed** on `check:exported-any-returns`, and the required `TypeScript Type Check` aggregate carried that red into the queue. CI was green on those same merge groups, which rules out \"a different shared failure\". Innocent candidates were dequeued while main itself was red.\n- The card's third candidate — a required-status association postdating the queue run — is ruled out: the Required-Set Patrol reported registry-vs-live agreement in both directions at **04:35Z** (before) and **16:35Z** (after).\n\n**The residual is two settings facts, both maintainer-only:**\n\n1. **A commit can reach `main` without producing a `merge_group` build.** Four of the 29 PRs landing 09:20–12:10Z did exactly that (#12062, #12072, #12079, #12097).\n2. `strict_required_status_checks_policy: false` on the main ruleset (measured 2026-08-18, #9642).\n\n## Options\n\n| | |\n|---|---|\n| **A** | **Require the merge queue for `main`** (Settings → Rulesets). Closes what was measured: all four bypassing PRs would have been built on the real merge state, and #12062 would have been kicked instead of landing. Cost: every merge pays queue latency, and a p0 fix-forward can no longer be hand-merged past the wreckage. |\n| **B** | **`strict_required_status_checks_policy: true`.** Closes the stale-green half without removing break-glass. Cost: every PR must be up to date with `main` before merging — at ~18 merges/day, near-continuous re-runs of the whole farm, which is the cost the queue exists to avoid. |\n| **C** | Both. B is near-redundant once A holds, since a queue build is by construction computed on the real merge state. |\n| **D** | Neither. Accept the residual, rely on fast detection plus fix-forward. Leaves the exact outage reproducible. |\n| **E** | **Detect rather than prevent**: a patrol flagging any `main` commit with no `merge_group` build. Keeps break-glass legal while making it visible. ⚠️ New mechanism the card did not authorise — it would need its own card. |\n\n---\n\nos-decision-facets\n\n**一句话问题**：合并队列的检查集**已经**是齐平的，8-25 那次 70 分钟全仓红不是门禁漏跑造成的，而是**有提交根本没产生 merge_group 构建就进了 main**（一个三小时窗口里 29 个 PR 中有 4 个如此）。补法只剩两个仓库**设置**开关（A 强制队列 / B 严格 required checks），要不要动、动哪个。\n\n**四棱**：\n① **实际业务拉动**：实测而非推演 —— 一次 70 分钟的全仓红，四个提交在单个三小时窗口内绕过队列落地。⚠️ 但要诚实说清：**今天没有人正在被这个洞持续咬**，它是一次已发生事故的复发面。\n② **平台长远合理性**：`ci.yml` 自己的注释就写着「Every workflow that produces a branch-protection-required check MUST carry this trigger」—— 项目已经把队列当作**唯一的真实合并态检查点**来声明了，而 A 是让这句声明**真正成立**而不是停在劝告。B 只买到其中较小的一半保证，却付更高的经常性成本。\n③ **防 AI 犯错**：⭐ A 让这个错误**结构上不可发生** —— 没有一个「错的合并按钮」还留在那里可以按。这与本仓一贯的取向一致（把纪律换成机制）。⛔ 反面要说清：⚠️ **A 会同时拉长修复路径** —— 卡自己的收尾段落写着，那 70 分钟里大部分时间是**修复补丁排在事故自身的残骸后面**，而 A 之后 p0 修复不能再手工合并绕过队列。这是 A 唯一的真实代价，且它咬的正是最坏的时刻。\n④ **创业阶段不扩散**：A 和 B 都是设置开关，零新机制、零维护。E 是新机制，已明确留给它自己的卡。\n\n**推荐（来自实施该测量的 dev，本席原样转达，⛔ 未采纳为裁决）**：**A**，若你希望 break-glass 保持合法则 **A + E**。理由：A 是唯一关闭了**实测到的那个洞**的选项，且严格强于 B —— 队列构建按构造就是在真实合并态上算的，所以 A 涵盖 B 的保证而不付 B 的每-PR 重跑代价。⛔ **B 单独做是最差的性价比**：较小的一半保证，较高的经常性成本。\n\n**置信缺口**：A 之后 p0 修复的实际排队延迟**没有测过** —— 它正是 ③ 里那条代价的大小，而事故当天的痛点恰好就是它。若你倾向 A，值得先看一眼队列在红队列情形下的实际排空时间。\n\n**低摩擦裁决格式**：回「A」/「B」/「C」/「D」/「A+E」即可。\n\n## Refs\n\n#12211（母卡与测量）· PR #12338（落地的测量本身，`Part of` 而非 `Fixes`）· #12180 / #12184（事故卡）· #12115（加门禁的那个 PR）· #12062（绕过队列落地的那个 PR）· #9642（`strict_required_status_checks_policy` 的既有测量）· #4897（最早把 `merge_group` 接进 workflow 的先例）"
+}

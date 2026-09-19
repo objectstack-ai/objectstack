@@ -1,0 +1,35 @@
+{
+  "number": 14094,
+  "kind": "issue",
+  "title": "A `defineJob` handler is invoked with `{ jobId, data, bundle }` and no data reach, so the platform's only scheduled-work metadata shape cannot read or write a record",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T04:55:54Z",
+  "updated_at": "2026-09-02T01:44:35Z",
+  "closed_at": "2026-09-02T01:43:22Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14094",
+  "body": "Found while building an ObjectStack application in `objectstack-ai/duly` against published `@objectstack/*` 17.2.0. Filed here because the fix lands in `packages/runtime` (and/or the `IJobService` contract in `packages/spec`).\n\n## Measured\n\nBooted a real app (`createStandaloneStack` + `ObjectKernel` + `AppPlugin` + `JobServicePlugin`, memory driver) with one declared job whose handler records its own argument:\n\n```ts\ndefineJob({ name: 'duly_probe_job', schedule: { type: 'interval', intervalMs: 100 }, handler: 'dulyProbeJob' })\n// functions: { dulyProbeJob: (ctx) => seen.push(ctx) }\n```\n\nAfter 7 invocations:\n\n```\nRUNS: 7\nJOB CONTEXT KEYS: bundle, data, jobId\n   jobId  -> string\n   data   -> undefined\n   bundle -> object\n```\n\nThat is the whole context. No engine, no service registry, no `getService`, no logger, no session. `bundle` is the metadata bundle (`AppPlugin` passes `this.bundle`; nothing is ever attached to it — the only assignment in the file is `this.bundle = bundle`).\n\nThe call site is unambiguous:\n\n- `service-job` — `record.handler({ jobId: record.name, data })`\n- `runtime`'s `AppPlugin` — `async (jobCtx) => { await handler({ ...jobCtx, jobId: jobName, bundle: this.bundle }); }`\n\n## Why this is a gap and not a design\n\nA scheduled job is, overwhelmingly, *a thing that writes records on a timer* — a nightly sweep, a dispatcher, a reconciliation. The platform ships exactly one metadata shape for that (`defineJob`), resolves its handler out of `defineStack({ functions })`, and then hands the handler nothing to write with.\n\nThe `functions` map's own contract says why this is not simply the pure-function rule applied consistently. From `FlowFunctionEffectSchema`'s TSDoc:\n\n> The runtime hands a function no data reach — `FlowFunctionContext` … carries `input` / `variables` / `automation` / `logger` and no engine handle — but a function is ordinary host code and can close over a client at module scope.\n\nFor a **flow** `script` node that is coherent: the function is pure *because the flow graph does the I/O around it* (`get_record` before, `create_record` after), and #4354's per-run metrics depend on exactly that. A **job** has no graph. There is no node before or after it. So the same emptiness that is a clean contract for a script node leaves a job with no supported way to do the one thing jobs exist to do.\n\nThe documented escape — closing over a client at module scope — is available to a flow function and is *not* reliably available to a job, for two reasons measured in the same app:\n\n1. The only place an ObjectStack application is handed `ctx.ql` is `defineStack({ onEnable })`. So the escape is not \"close over a client\", it is \"have the config assign a module-scope global that the job handler reads later\" — action at a distance, in the one job whose failure is silent.\n2. It does not survive the artifact path at all. `objectstack build` emits `functions` into a bundled runtime module whose only exports are `{ functions, meta }`; the artifact JSON carries no `onEnable`, and `mergeRuntimeModule` merges only `functions`. So on an artifact-served boot the binding is never made and the module-scope slot stays empty.\n\n## What the failure looks like in practice\n\nNothing. The job is registered, appears in the metadata registry and the admin UI, is scheduled by the job service, runs on time, and does nothing — or throws, if the application chose to make the absence loud. There is no author-time gate: `objectstack validate` passes, and `AppPlugin`'s only related warning (`job handler not found in bundle.functions — skipping`) covers a *missing* handler, not a handler with no reach.\n\n## Suggested direction\n\nGive the job handler context the reach its job implies, in the same shape the rest of the platform already uses. The narrowest version is one member on the context `AppPlugin` builds — it already has `ql` in scope at `onEnable` time in the same file:\n\n```ts\nasync (jobCtx) => { await handler({ ...jobCtx, jobId: jobName, bundle: this.bundle, ql }); }\n```\n\nA wider version passes the kernel's `getService`, which also unblocks a job that needs `automation`, `email` or `queue` — all of which are equally unreachable today.\n\nEither is additive: `JobHandler` is declared `(context: { jobId: string; data?: unknown }) => …`, so existing handlers are unchanged byte for byte, exactly as #6617's `JobRunOutcome` widening was.\n\n## Not the same as #14095\n\nFiled alongside [#14095](https://github.com/objectstack-ai/objectstack/issues/14095), which is about *recognising* a uniqueness violation once you can reach the store. This one is about reaching it at all; they are independent and either can land first.\n\n## Provenance\n\nReported by a developer agent implementing `objectstack-ai/duly#2` (the dispatcher job — idempotent task generation). The application does **not** work around it silently: the dispatcher takes its engine as an explicit argument, exposes one named `bindDispatchEngine` seam, and its job handler refuses loudly with a message naming the wiring rather than reporting a clean run in which nothing was dispatched.\n\nUnassigned and untriaged, per the single-producer rule for `domain:*`.\n"
+}

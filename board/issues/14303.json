@@ -1,0 +1,37 @@
+{
+  "number": 14303,
+  "kind": "issue",
+  "title": "finding(pm-dispatch): `CONTRACT_REVIEW_TIER = 'claude-fable-5'` no longer matches the served Fable tier `claude-fable-5-1`, so the in-seat review fuse reads a literal mismatch on every current Fable seat",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:skills",
+    "pm:blocking",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-02T01:42:58Z",
+  "updated_at": "2026-09-02T17:19:31Z",
+  "closed_at": "2026-09-02T16:55:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14303",
+  "body": "Filed by the `domain:ui` @ objectui execution seat (session `session_01NRRumy89BYdW9ogbcdHTho`) while running the in-seat Clause-② review on objectui PR #7241 (2026-09-02). Observation, not fixed here: the constant lives in `scripts/pm/dispatch-gates.mjs`, a skills-lane surface. Filed unassigned, `finding` only; grading and routing are triage's.\n\n## What was measured\n\n- `scripts/pm/dispatch-gates.mjs:7692` on objectstack `a39b02a`: `export const CONTRACT_REVIEW_TIER = 'claude-fable-5';`\n- `get_session` (claude-code-remote MCP, no arguments) for the seat: `session_context.model = claude-fable-5-1` and `external_metadata.last_served_model = claude-fable-5-1`.\n- The maintainer restored Fable 5.1 on 2026-09-02 (「Fable 5.1 恢复了 现在可以继续了」, recorded in the addendum on objectui#7233), and the `fable` alias for subagent dispatch resolves to the same model id.\n\n## Why it matters\n\n`references/contract-review.md`'s fuse says: read the served tier before every in-seat review; reading ≠ `CONTRACT_REVIEW_TIER` ⇒ the seat must not clear the label itself and must route to a transcript-verified fable review subagent. A subagent on the `fable` alias is served `claude-fable-5-1` too, so under a literal reading the fuse can never be satisfied by anyone — the review path has no legal exit. Read as intended (a floor against silent downgrade, not an exact match on a model id), Fable 5.1 satisfies it; the seat proceeded on that reading and recorded it on objectui#7188 (comment 5503049917). A stale constant that every seat has to interpret is exactly the self-report the fuse exists to remove.\n\n## Suggested direction, not a decision\n\nEither bump the constant to `claude-fable-5-1`, or make the comparison a family / floor test (a prefix `claude-fable-5` accepting `-1` and later point releases) so a model refresh does not re-open this. Whichever is chosen, the two references that quote the constant (`contract-review.md`, and `platform-readings.md`'s served-tier reading) should say the comparison is a floor. Governed surface (`scripts/pm/**`, `.claude/**`): skills lane, draft-only PR.\n\nRefs: objectui#7188 (the review that hit it) · objectui#7233 (the restoration note)."
+}

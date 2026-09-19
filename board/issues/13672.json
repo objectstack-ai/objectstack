@@ -1,0 +1,34 @@
+{
+  "number": 13672,
+  "kind": "issue",
+  "title": "`EXPRESSION_BINDABLE_TEXT_KEYS_BY_COMPONENT`'s `button` row cites `action-button.tsx`, but the map is keyed on the bare name — `action:button` resolves to the empty set",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-31T06:03:20Z",
+  "updated_at": "2026-09-02T02:56:27Z",
+  "closed_at": "2026-09-02T02:56:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13672",
+  "body": "Found while implementing the objectui half of the expression-bindable text keys (objectui#4795, consuming this module; PR objectstack-ai/objectui#6981). A row-vs-key-spelling mismatch, filed rather than papered over renderer-side.\n\n## The mismatch\n\n`src/ui/expression-bindable-text-keys.zod.ts` documents the `button` row's evidence as **two** files (verbatim from the docblock table):\n\n> | `button` | `schema.label` (`form/button.tsx`, `action/action-button.tsx`) |\n\nBut the map is keyed on the bare registry name:\n\n```js\nEXPRESSION_BINDABLE_TEXT_KEYS_BY_COMPONENT = { statistic: [...], card: [...], button: ['label'] }\n```\n\nand `expressionBindableTextKeysFor` does an own-property lookup on the type string it is handed. In objectui those two files register under **different** type strings:\n\n| file | registration | `expressionBindableTextKeysFor(type)` |\n|---|---|---|\n| `packages/components/src/renderers/form/button.tsx` | `register('button', …, { namespace: 'ui' })` → `ui:button` **and** the bare `button` fallback | `button` → `['label']` ✅ |\n| `packages/components/src/renderers/action/action-button.tsx` | `register('button', …, { namespace: 'action', skipFallback: true })` → `action:button` only | `action:button` → `[]` ❌ |\n\nMeasured against the installed 17.2.0:\n\n```\nfn('button')        -> [ 'label' ]\nfn('action:button') -> []\nfn('ui:statistic')  -> []\n```\n\n`ActionButtonRenderer` reads `schema.label` at the node top level (two sites), exactly like the `ui:button` renderer — so the row's own stated evidence covers it, but the lookup does not reach it.\n\n## Why the consumer will not paper over it\n\nThe objectui memo passes the authored `type` string **verbatim**, deliberately. Prefix-stripping (`action:button` → `button`) is the obvious patch and is wrong: it would in the same motion grant rows to `element:button` and `page:card`, whose renderers read config out of the bag via `readProps()` and never touch these keys on the node — manufacturing the evaluated-but-not-read-back half objectui#4795 exists to close. And the module's docblock forbids exactly that shape of fix (\"never inferred from what a renderer happens to read\").\n\nSo the correct place to resolve it is here.\n\n## Measured impact today\n\nSmall but non-zero: the objectui corpus census (736 JSON documents plus `json` doc fences, 2747 typed nodes) counts **5** `action:button` nodes, against 158 bare `button`, 135 `card`, 42 `statistic`, and **zero** `ui:`-prefixed spellings. None of the 5 currently carries a `${…}` in `label`, so nothing is visibly broken — this is a latent gap, not a live defect.\n\n## Options\n\n1. **Add an `action:button` row** (`['label']`). Faithful to the evidence the docblock already cites, keeps the map's \"key is the type string\" semantics exact and mechanically answerable.\n2. **Declare the map's keys to be bare registry names** and give the lookup a documented normalization rule with an explicit deny-list for the namespaces that read from the bag (`element:`, `page:`). More machinery, and the deny-list is the inference the module is trying to avoid.\n3. **Narrow the docblock** to cite only `form/button.tsx`, recording that `action:button` is deliberately out.\n\nRecommendation: **(1)** — one line, no new concepts, and it makes the declaration say what its own evidence table already claims. (3) is acceptable if `action:button`'s label is considered action-declared rather than author-written, but then the docblock should say so rather than citing the file as evidence for a row that does not cover it.\n\n## Provenance\n\nMeasured on objectui `origin/main` `7a5da1414` with `@objectstack/spec@17.2.0` installed. Registration sites and read points are reproducible from that tree.\n"
+}

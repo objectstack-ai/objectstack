@@ -1,0 +1,37 @@
+{
+  "number": 13537,
+  "kind": "issue",
+  "title": "registerMultiNodeGate is unenforceable by construction: mounted only via one app config (any non-EE-config boot route skips it, default-allow), and defeated by the CJS/ESM dual-instance split (#13365 class) even when mounted",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T17:58:39Z",
+  "updated_at": "2026-09-01T11:40:00Z",
+  "closed_at": "2026-09-01T11:40:00Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13537",
+  "body": "Filed by the repo:cloud execution seat (objectstack#6026, session `session_01EzWYDkwr6WEwDGhMH1Jzuq`, R26) from cloud#1752, which carries the measurements. This is the framework half; the cloud-side disclosure line and the product-level question stay on that card and on cloud#1742's decision respectively.\n\n## The two gaps (from cloud#1752, measured/derived on a real EE thin-extension cluster deployment)\n\n1. **Mount point**: `registerMultiNodeGate` is wired ONLY in `apps/objectos-ee/objectstack.config.ts` (cloud repo). Framework serve's `checkMultiNodeAllowed` **defaults to allow when no gate is registered**. Consequence, measured: a thin-extension route (host app's own config runs, EE config does not) boots `OS_CLUSTER_DRIVER=redis` with a trial license (`maxNodes: 1`) at 3 replicas — no downgrade, no over-limit warning, cluster coordination fully working. The `OS_ARTIFACT_URL` artifact-direct route has the same hole (config never executes). license.maxNodes has contract force only, no runtime force, on both routes.\n\n2. **Dual-instance split**: the gate registry is module-level singleton state, not anchored on `globalThis` — the same shape as the cluster `driverRegistry` in #13365. The EE config registers through bundle-require's ESM instance; serve reads `checkMultiNodeAllowed` through the #4719 hostImporter's CJS condition (`dist/index.cjs`). Registration lands in instance A, the check reads instance B → the gate is inert even on the route that mounts it. Derived + same-mechanism-measured (the driver side is confirmed in #13365); direct verification suggested: boot the EE image multi-replica with a `maxNodes:1` license and look for the downgrade/over-limit signal.\n\n## Suggested direction (from cloud#1752, implementer/maintainer judges)\n\n1. **Sink the mount**: the gate must not depend on one config file executing — register it from a package every licensed route necessarily loads (`@objectstack/organizations` / `security-enterprise` at their own module load, both #4719-declared on licensed routes), or have serve wire it directly when `OS_LICENSE_KEY` is present.\n2. **globalThis anchoring** for the gate registry, together with (or in the same shape as) the #13365 fix — eliminate the dual-instance split for this registry class generally, not one registry at a time.\n\n## Interaction\n\n- cloud#1742 (pending maintainer decision on whether the licensed-clustering path survives at all): if ruled retired, this card's scope shrinks to \"remove the dead gate honestly\"; if ruled kept, this card is what makes the entitlement real. Either ruling needs this card's facts.\n- cloud#1752 keeps the cloud-side action: `docker-entrypoint.sh`'s reduced-surface announcement should name the unmounted gate until the root fix lands.\n\nRefs: cloud#1752 (measurements) · #13365 (dual-instance mechanism, confirmed on the driver registry) · #4719 (hostImporter conditions) · steedos-labs/os-project-titanwind-ehr#1880 (field disclosure)"
+}

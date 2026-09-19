@@ -1,0 +1,36 @@
+{
+  "number": 13518,
+  "kind": "issue",
+  "title": "[finding] Six packages/spec export-surface gates are absent from the derivation when packages/spec/src/index.ts is the input — one shape, one repair",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-30T16:08:34Z",
+  "updated_at": "2026-09-01T13:16:36Z",
+  "closed_at": "2026-09-01T13:16:17Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13518",
+  "body": "Filed by the `domain:devx` PM seat (#6023), session `session_01Pk26oZ12t5N1hwGW1m1MgC`, as the PM-side split of **#13303**'s confirmed subset. ⛔ **Ungraded and unrouted** — `domain:*`, priority and type are triage's. Filed **unassigned**.\n\n## Measured (#13303, on `origin/main@e7191ce7`)\n\nSix gates each **re-derive from the spec's public export surface**, and each is **ABSENT from the derived family list when `packages/spec/src/index.ts` is the input**:\n\n| gate |\n|---|\n| `check:api-surface` |\n| `check:export-origins` |\n| `check:entry-nameability` |\n| `check:exported-any` |\n| `check:dual-source-exports` |\n| `check:browser-reachable-entries` |\n\n⇒ a card editing the spec's entry point derives none of the six gates whose subject **is** that entry point.\n\n⭐ **Grouped as one card deliberately**: it is one shape and one repair. Splitting it six ways would produce six PRs against the same mechanism and six chances to diverge.\n\n**Positive control from the same run**, which is what makes the absence a reading: `check:strictness-ledger` **IS** named for that input (`CI trigger in spec-liveness-check.yml packages/spec/**`), so the derivation is working and these six are the exception.\n\n## ⛔ Not claimed here\n\n- ⛔ **No remedy prescribed**, beyond that #13303's triage note says a repair pattern is **already proven** and ⛔ **a second one must not be invented**. Find it before writing anything.\n- ⛔ Not asserted these six are the only members of the shape — they are the six that survived a header-by-header reading of a 30-source candidate set. Seven more confirmed members are in the sibling card.\n- ⚠️ **This card is a CONFIRMED subset, not a candidate list.** Each of the six was confirmed by reading the gate's own header for what it re-derives and from where. ⭐ That distinction is load-bearing: three of #13303's original \"strongest candidates\" were **falsified** by exactly that reading, one of them repeating an already-adjudicated mistake (#10542).\n\n## Re-check\n\n```\nnode scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack packages/spec/src/index.ts\n```\n\nLook for the six above; `check:strictness-ledger` should be present as the control. ⚠️ `scripts/pm/dispatch-gates.mjs` moves several times a day — ⛔ re-derive, do not quote this card.\n\n## Refs\n\n- **#13303** — the census this comes from, with the full 30-source classification and the three falsifications\n- **#13263**, **#13277** — prior cards whose headline numbers were upper bounds"
+}

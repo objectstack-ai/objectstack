@@ -1,0 +1,36 @@
+{
+  "number": 13612,
+  "kind": "issue",
+  "title": "finding(spec): all six branded identifier schemas in branded-types.zod.ts are declared but unbound — no schema anywhere composes them",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T03:19:21Z",
+  "updated_at": "2026-09-01T10:05:06Z",
+  "closed_at": "2026-09-01T10:04:13Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13612",
+  "body": "Observed while running the per-surface identifier census for #12245. Filed unassigned as a `finding`, not a defect claim.\n\n## What was observed\n\n`packages/spec/src/shared/branded-types.zod.ts` declares six branded identifier schemas:\n\n| Schema | Base | Composed into any other schema? |\n| :--- | :--- | :--- |\n| `ObjectNameSchema` | `SnakeCaseIdentifierSchema` | no |\n| `FieldNameSchema` | `SnakeCaseIdentifierSchema` | no |\n| `ViewNameSchema` | `SystemIdentifierSchema` | no |\n| `AppNameSchema` | `SystemIdentifierSchema` | no |\n| `FlowNameSchema` | `SystemIdentifierSchema` | no |\n| `RoleNameSchema` | `SystemIdentifierSchema` | no |\n\nEvery reference outside the declaring file is either the file's own test\n(`branded-types.test.ts`), the generated reference page\n(`content/docs/references/shared/branded-types.mdx`), or a generated baseline\n(`api-surface/shared.json`, `export-origins/shared.json`,\n`type-alias-convention.pin.test.ts`). Reproduced on `origin/main` at `e2debee6`:\n\n```\ngit grep -n \"\\bObjectNameSchema\\b\\|\\bFieldNameSchema\\b\" -- 'packages/**/*.ts' \\\n  | grep -v branded-types | grep -v \"\\.test\\.ts\"\n# zero lines\n```\n\nand, for the four `SystemIdentifierSchema`-derived ones, the same filter leaves\nonly `branded-types.test.ts` and the docs page.\n\nMeanwhile the surfaces those brands are named for are validated by something\nelse entirely:\n\n- object name — inline `z.string().regex(/^[a-z_][a-z0-9_]*$/)`, `data/object.zod.ts:1574`\n- field name — inline `z.string().regex(/^[a-z_][a-z0-9_]*$/)`, `data/field.zod.ts:841`\n- app name — `SnakeCaseIdentifierSchema`, `ui/app.zod.ts:1288`\n- flow name — inline `z.string().regex(/^[a-z_][a-z0-9_]*$/)`, `automation/flow.zod.ts:616`\n- role/position name — `SnakeCaseIdentifierSchema`, `identity/position.zod.ts:87`\n\n## Why it may matter\n\nThe file's own docblock sells these as compile-time safety (\"you cannot pass an\n`ObjectName` where a `FieldName` is expected\"). Nothing can currently obtain\nthat safety, because no schema in the repo produces or accepts a branded value —\nthe brands exist only for a caller who parses through them by hand. That is the\nADR-0049 declared-but-unenforced shape, and it is also a live hazard for AI-authored\nmetadata: a reader who greps the branded types reasonably concludes object names are\nbrand-checked when they are checked by a hand-written regex three files away.\n\nTwo honest routes, both maintainer-ruled rather than obvious:\n\n1. **Bind them** — replace the inline regexes and the bare `SnakeCaseIdentifierSchema`\n   uses at the five surfaces above with the matching brand. This is an accept-set change\n   at each surface (the inline regexes allow a leading underscore, `SnakeCaseIdentifierSchema`\n   does not), so it needs its own census.\n2. **Retire them** under ADR-0049 enforce-or-remove — the `spec-property-retirement`\n   playbook route, with the ADR-0087 conversion for a published export removal.\n\nNot sized here, and no route recommended: recording the measurement only.\n\nRelated: #12245 (the census that surfaced this) · #12194 · ADR-0049.\n"
+}

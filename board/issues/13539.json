@@ -1,0 +1,34 @@
+{
+  "number": 13539,
+  "kind": "issue",
+  "title": "$exists docs and two PUBLISHED skills still teach key-presence — false since the has-value alignment landed, and no gate can catch it because the teaching corpus does not execute",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T18:28:32Z",
+  "updated_at": "2026-09-02T01:34:46Z",
+  "closed_at": "2026-09-02T01:34:46Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13539",
+  "body": "Blocked-by: #13709\nUnlock-action: re-check the JSDoc at `packages/spec/src/data/filter.zod.ts:954`\n\nSix places in the teaching corpus still describe `$exists` as **key-presence**. That stopped being true when the has-value alignment landed at `9dac1ae017` (PR #13529), so these lines are not stale wording — they are **false**, and two of them ship to customers.\n\nFound by the consumer census on #13492 (comment 5470462097). Measured on `origin/main` @ `430a278371`.\n\n## The six false sites\n\n| site | what it says today | why it is false |\n|:--|:--|:--|\n| `packages/spec/src/data/filter.zod.ts:954` | JSDoc: \"Field exists check (primarily for NoSQL) - MongoDB: `$exists`\" | ⚠️ governed surface — see the fence note below |\n| `content/docs/protocol/objectql/query-syntax.mdx:264` | table: \"Field exists (NoSQL)\" | operator means has-value on every backend |\n| `content/docs/protocol/objectql/query-syntax.mdx:518` | code block commented `// Field exists (NoSQL)` | same, and it carries an `os:check` marker |\n| `content/docs/protocol/kernel/http-protocol.mdx:397` | \"Field existence check\" | same |\n| `skills/objectstack-query/SKILL.md:157` | \"Field exists (NoSQL) / MongoDB `$exists`\" | **published**; `translateFilter` no longer emits MongoDB `$exists` |\n| `skills/objectstack-query/rules/filters.md:23` | \"Existence / (NoSQL) `$exists`\" | **published** |\n\n## ⛔ One site is already CORRECT — do not sweep it\n\n`content/docs/data-modeling/queries.mdx:71` reads **\"Field has a value\"**, which is right and matches the shipped behaviour. Naming only the wrong sites invites a blanket find-and-replace that would break the one line already telling the truth. Whoever takes this should treat that row as the target wording, not as another thing to change.\n\n## The sharpest one, and why this is urgent rather than tidy\n\n`skills/objectstack-query/SKILL.md:157` tells authors that `$exists` maps to **MongoDB `$exists`**. Since `9dac1ae017`, `driver-mongodb`'s `translateFilter` lowers it to `{$ne: null}` / `{$eq: null}` and never emits MongoDB's `$exists` at all. A customer following that line today writes a filter whose behaviour does not match what the skill promises — on a null-valued field the two readings return different rows. The `skills/` directory is the published, customer-facing surface, and this should be graded on that basis rather than as an internal docs nit.\n\n## ⭐ Why no gate caught this, and why none would have\n\nThis is the reusable part, and it is a statement about the gate's reach rather than about whoever landed the alignment.\n\nPR #13529 touched **11 files: driver code and driver tests only** — no `docs`, no `spec`, no `skills`, no `examples`. Its CI was green and correctly so: every executable assertion about `$exists` was updated in the same commit. **The teaching corpus does not execute.** No test imports a `.mdx` table row, and no gate reads a skill's prose for semantic agreement with the drivers it describes, so there is no arrangement of the current gates under which this would have gone red.\n\nThat means the drift is silent by construction and will stay wrong until someone reads it — which is how this class of defect survives for months. Worth considering, separately from the repair, whether any cheap check could bind the documented semantic to the implemented one.\n\n## Independence from #13195's option C\n\n⚠️ This is **not** blocked behind the C decision (retire `$exists`, unify on `$null`), and should not inherit its gate: **if C is rejected, the docs are still wrong**, because they describe the pre-alignment semantic rather than a spelling that might later be retired. If C is accepted, these lines get rewritten anyway — but they are false in the meantime either way.\n\nIt is also a different class from what #13195 carries as its regression input. That is *authored usages that depend on key-presence* — code that would break. The census found **zero** of those. This is documentation that has become false on a surface that ships. The two are not the same thing.\n\n## ⚠️ Fence — flagging, not acting\n\n`packages/spec/**` and `skills/**` are **governed surfaces**. Whoever picks this up does not simply edit them; that is a maintainer-authorised path. Noting it here so the next seat does not walk into the fence mid-repair. The `content/docs/**` sites carry no such fence.\n\nNote also that `content/docs/references/data/filter.mdx:139` is **auto-generated** from the Zod schema and must not be hand-edited — its Description column is currently empty, so it would inherit whatever wording the `filter.zod.ts:954` JSDoc ends up with.\n\n## ⚠️ Line numbers rot\n\nAll line numbers above are as of `430a278371` and this is precisely an area with active concurrent work — #13529 landed today and moved several of these files' neighbourhoods. Re-locate by the quoted text, not by the line number.\n\n## Method\n\nCensus sweep over tracked files (`git grep`, no `node_modules`/`dist`), with a corpus-reach control shown firing per zone. Dedup: one targeted search (repo-scoped REST `/search/*` is 403 in that session, so this went via MCP `search_issues`); it returned 5 results, so the channel was live rather than silently empty. None covers the teaching corpus. **Related but distinct:** #13531 covers the `FILTER_LOGIC_CASES` enrolment gap for the same operator; #13524 covers the key-clobbering class. Neither is this.\n\nRefs: #13492 (the census) · #13195 (the ruling) · PR #13529 (the alignment that made these lines false).\n\n⛔ Nothing was edited and no PR was opened for this — filed as a finding for triage to grade and route.\n\n_Generated by [Claude Code](https://claude.ai/code)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

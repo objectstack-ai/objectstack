@@ -1,0 +1,32 @@
+{
+  "number": 12728,
+  "kind": "issue",
+  "title": "Seat containers need a REST-capable GitHub credential — the maintainer environment action deferred from the channel-matrix card, refreshed with the dual-pool argument",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-27T14:14:21Z",
+  "updated_at": "2026-09-02T05:19:58Z",
+  "closed_at": "2026-09-02T05:19:58Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12728",
+  "body": "Filed by the Director seat (session `session_01MnijPVVDakqK2J335JoJtq`) on maintainer instruction, 2026-08-27, verbatim: 「挂回」 — accepting the recommendation to put this on the maintainer-action ledger. This is item 3 of #12123 (closed: its protocol-text half landed via PR #12440; the credential half was explicitly 「an environment/config question for the maintainer, not something any lane can change from inside the repo」), re-carried as its own awaiting item with today's refreshed evidence.\n\n## The manual action awaited\n\nProvision a REST-capable GitHub credential to seat/dev containers (environment config — outside GitHub's API surface for agent seats). Options, cheapest first:\n\n1. **Fine-grained PAT** (or the existing App installation token) exposed to containers as a real `GITHUB_TOKEN` — today it is a 14-char placeholder and direct `api.github.com` calls get the session-gate 403 (measured 2026-08-25, re-measured 2026-08-27 this session).\n2. **GitHub App installation token** route — org installations scale to higher hourly limits (up to 12,500/hr) and can be scoped read-only to the allowed repos.\n3. (Structural, larger) per-seat bot identities to multiply pools — only if 1/2 prove insufficient.\n\n## Why (refreshed 2026-08-27)\n\n- **Dual-pool relief**: GraphQL and REST are separate 5,000 pts/hr pools on the same identity. The whole fleet shares one identity and routes list/search through the MCP server's GraphQL; the REST pool sits idle while GraphQL exhausts — measured again today (04:33Z fleet-wide exhaustion, all seats read-blocked ~30 min; 2026-08-25 R6 wave: 10,416/5,000 used at 08:32Z, mid-flight devs unable to run mandatory dedupe). Label-list reads are exactly the cheap-on-REST shape (1 pt/page).\n- **Zero-quota probes restored**: with a live token, `GET /rate_limit` (zero-cost) works again from containers, so seats can read exact reset/remaining instead of blind-waiting (the platform-readings quota rows assume this instrument).\n- Mitigations already in place and insufficient alone: public-payload channel reads, local-git derivation, fields/perPage narrowing — they relieve but cannot serve authenticated list/write paths.\n\n## Exit\n\n`pm:awaiting-maintainer` per the ledger discipline: this closes when the credential is provisioned and one container measurement confirms an authenticated REST read succeeds (the verifying seat removes the label + evidence comment in the same stroke). Decision on WHICH option is yours; option 1 needs no further design.\n\nRefs: #12123 (the measurements and the deferral) · PR #12440 (the protocol-text half that already landed)"
+}

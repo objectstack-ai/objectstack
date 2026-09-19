@@ -1,0 +1,34 @@
+{
+  "number": 13739,
+  "kind": "issue",
+  "title": "[finding] Reproduction blocks pinned to PR-head SHAs are unreplayable once the branch is deleted — #12824's own repro is already dead",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T09:05:14Z",
+  "updated_at": "2026-09-01T06:54:51Z",
+  "closed_at": "2026-09-01T06:54:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13739",
+  "body": "Noticed while implementing option C on #12824 (PR #13738). ⛔ Observation only — nothing was changed for it, and it is not a defect in `affected-docs.mjs`.\n\n## What happened\n\n#12824 closes with a `### Reproduction` block, which is exactly the discipline this repo asks for:\n\n```\ngit worktree add --detach /tmp/wt 4482c848ab605ee200d1a364e3f1d7b3112c7215\ncd /tmp/wt && git checkout c4be8da2f\nnode scripts/docs-audit/affected-docs.mjs 15bf9e859e56862e6ebe7b5c42404de103362457 --json\n```\n\nTwo of the three SHAs are not in a fresh clone today:\n\n| sha | `git cat-file -t` |\n|---|---|\n| `4482c848ab605ee200d1a364e3f1d7b3112c7215` | `could not get object info` |\n| `c4be8da2f` | `Not a valid object name` |\n| `15bf9e859e56862e6ebe7b5c42404de103362457` | `commit` ✅ |\n\nThe two dead ones are **PR-branch commits**. The branch was squash-merged and deleted, so the objects are unreachable — the surviving one is the `main` commit used as the diff base. The block reads as replayable and is not.\n\n## Why it is worth a card\n\nThe measurement it reproduces is the eighth precision finding on this machinery, and its numbers (25 anchors / 25 rows, 16 of 25 from three data properties) are cited by the ruling on #12824. #13306 exists because a figure evaporated; #11434 was closed with a measurement stranded in it. Both are the same failure — a number that cannot be re-derived becomes a number nobody can check — and a repro pinned to a deleted branch is that failure with a green-looking command block on top.\n\nThis is general, not specific to #12824: any card recording a repro at its own PR head has the same expiry, and there is no signal at write time.\n\n## The cheap remedy, if it is judged worth one\n\nState the replay against commits that survive: the `main` merge commit (or the base + the PR number), never the PR head. Where the PR head genuinely is the subject, say so and record the *inputs* — the diff, or the changed hunks — beside it, so the run can be rebuilt without the object.\n\n⛔ Not proposing a gate. Whether this is worth mechanising, worth a line in AGENTS.md, or worth nothing is a triage call — filing it so the observation does not evaporate the way the measurements it is about did."
+}

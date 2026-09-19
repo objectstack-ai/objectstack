@@ -1,0 +1,35 @@
+{
+  "number": 13765,
+  "kind": "issue",
+  "title": "[Decision] The triage seat's throughput now equals its intake — \"run the finding box to empty every fire\" is no longer satisfiable by one seat at the stated quality bar",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-31T10:25:33Z",
+  "updated_at": "2026-09-02T02:02:50Z",
+  "closed_at": "2026-09-02T02:02:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13765",
+  "body": "Filed by the triage seat (#6015, session `session_01XVLjap8eh1QjiaPznpW5Ry`, R+69) against its own operating rule. ⛔ Filed as a card rather than left in a shift brief because the SKILL says so in as many words — *\"⛔ 座位贴敲门或裁决评论永不作唯一载体 —— 散文对候选查询、sweep、老化告警全不可见\"* — and R+68 broke that rule by raising this only in chat and in a brief.\n\n## The rule under question\n\nMaintainer ruling, 2026-08-25, verbatim and untranslated:\n\n> 单轮跑数小时没关系啊。不读卡的批量盖章 可以通过每批5张这种约定来解决\n\nwhich the SKILL renders as: the `finding` box is run **to empty every fire**, with no per-round cap, quality held by reading **every card individually in batches of ≤5**.\n\n⚠️ **Nothing here disputes the quality half.** The ≤5-per-batch, read-every-card convention is what produced every result cited below. What is measured is that the **\"to empty\"** half has stopped being reachable.\n\n## Measured — four readings, two independent hourly windows\n\n| moment | `finding` box (open, label-counted) |\n|:--|--:|\n| R+67 close · 08:23Z | 49 |\n| R+68 open · 09:2xZ | **56** |\n| R+68 close (after grading 10) | 46 |\n| R+69 open · 10:2xZ | **53** |\n\n⇒ **intake ≈ 7 cards/hour**, measured twice, one hour apart, agreeing.\n\nAgainst that, **one round grades ~10 cards** at the stated bar — where a card costs: read the full body, read every existing comment (the freshness rule), re-verify every referenced issue/PR/file state as it is **now**, then write a recorded rationale.\n\nAdding the other standing intake the same seat owns — bare, wholly unlabelled cards arrived at **~2.5/hour** over the 16-hour window measured in R+67 (41 in the newest 100 issues) — total intake is **~9.5/hour** against a throughput of ~10/round.\n\n⇒ **The seat is at break-even.** The standing backlog (53 findings + ~28 bare) does not drain, and the hourly round consumes itself keeping level.\n\n## ⭐ The part that makes this a decision rather than a scheduling detail\n\nThe three results worth having from R+68 — a card two seats had recorded as blocked that was **already fixed on main** (#13374), a **domain mislabel** where two seats disagreed and the wrong one held the label (#13433), and a second mis-route (#13390) — **all three came from the two most expensive steps**: reading every prior comment, and re-verifying referenced state rather than quoting it.\n\n⇒ Per-card cost is not padding. Cutting it is the first thing that would go, and it is exactly what produced the round's value.\n\n## Options\n\n**A — Raise the cadence** (e.g. every 30 min). Throughput roughly doubles, quality bar untouched. ⚠️ Doubles the seat's token spend, which is the maintainer's budget line.\n\n**B — Split the seat**: the `finding` box gets its own seat, running in parallel with the bare-card sweep. ⚠️ The SKILL already pre-registers this exact trigger — *\"单轮时长逼近 fire 周期,或某仓在优先级全序下持续断粮 ⇒ 按仓拆回多席\"* — so it is a recorded exit, not a redesign. Also a budget change.\n\n**C — Change the rule** to \"grade N per fire, oldest first\" and drop the \"to empty\" promise. Zero cost; the ledger stops recording a commitment nobody can keep.\n\n**D — Lower the per-card bar** (stop reading prior comments / stop re-verifying references). Zero cost, and ⛔ not recommended — see the section above.\n\n## 四棱分析\n\n| 棱 | 读数 |\n|:--|:--|\n| **实际业务需求** | ⭐ 拉动是实的且已量到:积压 53 + ~28 不会自行下降,而 finding 箱是**队列的出水口** —— 它堵住,可派发库存就断粮。⚠️ 但要诚实:今天**没有用户**因为某张 finding 晚定级一天而受损;受损的是**循环本身的可信度**(台账记着一个做不到的承诺)。 |\n| **项目长远合理性** | ⭐ **指向 C,且 C 与 A/B 不互斥**。一条**结构上无法满足**的规则,比一条较弱但真实的规则更糟:它使「本轮达标了吗」不可判,于是每一轮的简报都得解释为什么又没清空 —— 而那正是本席接手时发现的病(**台账记录一个从未被重测的承诺**)的同一形状。⇒ 无论是否加频率/拆席,**C 都该做**:让规则说真话。 |\n| **防 AI 写错** | ⭐⭐ **本棱最重,且它排除 D**。R+68 的三处收口全部来自「读全部既有评论 + 现验引用面」。⛔ 降标准换来的吞吐,换掉的恰恰是**唯一能发现「卡片上写着的阻塞条件本身已经过期」这类错误**的那两步 —— 而那类错误的代价是一整轮被浪费的 dev 派发。⚠️ 且**分诊是唯一的生产者**:它错标一次,下游整条链按错标执行。 |\n| **创业阶段不扩散需求** | ⚠️ **反对 A 与 B**,两者都动维护者的预算(A 翻倍 token,B 多一个常设席位)。⛔ 而 C 是**零成本**的。⇒ 本棱的建议是:**先做 C,量一轮,再看要不要花钱**。若 C 落地后积压仍单调上升,那时 A/B 有了实测依据,而不是现在凭感觉扩容。 |\n\n**推荐:C 立刻做(零成本、且四棱同向),A/B 暂缓并附解冻判据。**\n\n解冻判据写死,免得又变成一条只被复述的条目:**C 落地后连续 5 轮,若 `finding` 箱存量单调不降(每轮开轮读数 ≥ 上一轮开轮读数),即触发 A 或 B,并把那 5 个读数附在请求里。**\n\n⛔ **D 不列为可选**(防错棱)。\n\n## 人工地板\n\nA 与 B 命中**花费/配额/舰队形态**(动的是维护者的预算);C 修改的是一条**维护者裁定的规则**(2026-08-25),⛔ 座位不得自行改写。⇒ 三者都恒交维护者,四棱是否同向不改变这一点。\n\n## Refs\n\n#6015 (seat post; R+67 / R+68 / R+69 briefs carry the raw readings) · SKILL.md 分诊席职责「发现分诊轮」段 · SKILL.md 多仓协调 4「拆分触发条件预登记」"
+}

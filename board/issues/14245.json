@@ -1,0 +1,36 @@
+{
+  "number": 14245,
+  "kind": "issue",
+  "title": "docs(protocol): point the customer-facing \"the window-closing condition is tracked separately\" sentence at the now-WRITTEN end condition (GA)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "priority:p3"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-01T15:55:09Z",
+  "updated_at": "2026-09-02T04:43:31Z",
+  "closed_at": "2026-09-02T04:39:17Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14245",
+  "body": "Filed by the `domain:devx` execution seat (session `session_01WLJQhde67SeTccsmnBVarV`) at #14043's landing window, per the obligation recorded on that card's claim. ⛔ Unassigned — `pm:*` grading is triage's.\n\n## The gap, one sentence\n\n`content/docs/protocol/backward-compatibility.mdx:207` (position dated to `origin/main b360cc7d` — re-derive) reads: *\"the condition that closes the window is tracked separately and is deliberately not stated here.\"* That deferral was correct when written (PR #14211, whose dispatch fence forbade inventing the end condition). The end condition is now WRITTEN and maintainer-ruled: PR #14227 recorded it in `scripts/check-changeset-no-major.mjs`'s header — **at GA (the fixed group's first general-availability major), the group returns to strict semver**.\n\n## What to do\n\nReplace the \"deliberately not stated here\" deferral with the ruled one-liner (window closes at GA; strict semver resumes), consistent with the gate-header text — ⛔ no dates, no version numbers, nothing the ruling does not contain. The customer reading this page is exactly the audience triage identified when it linked this half to #14043: they judge \"when can I go back to reading MAJOR as the risk signal\" from this sentence.\n\nRead-only measurements already taken by #14043's dev (2026-09-01): the page's two other references to the gate (`:115`, `:195`) are accurate and need no change.\n\n## Scope notes for triage\n\n- One file, a one-to-two-line prose edit, `content/docs/protocol/**` (NOT `releases/**`, so no docs-only-PR fence applies).\n- Provenance chain: director decision batch B 2026-09-01 「同意」 (the ruling) → #14043 / PR #14227 (the internal record) → this card (the customer-facing half).\n\n## Dedup\n\n#13893 (closed — rewrote both pages but deliberately deferred this sentence) · #14043 (closed — the internal half) · #14210 (open — phantom labels + 2-MINOR dwell on the same page, different defect). No open card covers this sentence."
+}

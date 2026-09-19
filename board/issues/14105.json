@@ -1,0 +1,37 @@
+{
+  "number": 14105,
+  "kind": "issue",
+  "title": "`objectstack validate` and `build` accept a dataset whose base object, `include` path and dimension/measure `field` paths all name nothing — the same walker already resolves date-macro tokens on the identical node",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-01T05:24:51Z",
+  "updated_at": "2026-09-01T18:54:50Z",
+  "closed_at": "2026-09-01T18:52:32Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14105",
+  "body": "## Summary\n\nAn ADR-0021 dataset can name a **base object that does not exist**, join a\n**relationship that does not exist**, and bind every dimension and measure to\n**fields that do not exist**, and `objectstack validate` exits **0** with\n`✓ Validation passed`. `objectstack build` also exits 0 and writes the dangling dataset\ninto `dist/objectstack.json`.\n\nThe sting is that the author-time rule pass **already walks these exact nodes**: a bad\ndate-macro token in a *measure filter* is caught, path-precise, on the same traversal.\nSo the machinery and the traversal are both present — only the reference resolution is\nmissing.\n\nThis is one level below #7529 (closed by #8902, which refuses a *widget → dataset*\nbinding that names nothing). This is the *dataset → object/field* binding underneath it.\nA board can now be proven to point at a real dataset, and that dataset can still point at\nnothing.\n\n## Measured\n\n`@objectstack/spec` 17.2.0, `@objectstack/cli` 17.2.0, on `objectstack-ai/duly`\n(3 datasets over `duly_task`). Each row is one mutation applied on its own, confirmed on\ndisk before running (old spelling absent, new spelling present), then reverted.\n\n| # | Mutation | `pnpm validate` |\n|:--|:---------|:----------------|\n| 1 | dimension `field: 'period_key'` → `'period_kee'` (base field) | **exit 0, passed** |\n| 2 | dimension `field: 'duty.frequency'` → `'duty.frequenci'` (joined field) | **exit 0, passed** |\n| 3 | measure `field: 'last_update_at'` → `'last_update_att'` | **exit 0, passed** |\n| 4 | measure filter key `last_update_at` → `last_update_attt` | **exit 0, passed** |\n| 5 | `include: ['duty']` → `['dutee']` (relationship does not exist) | **exit 0, passed** |\n| 6 | `object: 'duly_task'` → `'duly_tsk'` (**base object does not exist**) | **exit 0, passed** |\n| 7 | duplicate measure name (schema `superRefine`) | exit 1 — caught |\n| 8 | filter value `'{7_days_ago}'` → `'{7_fortnights_ago}'` | exit 1 — caught |\n\nRows 7 and 8 are the control: datasets genuinely are in the validation path, so rows 1–6\nare not \"the file was never read\".\n\nRow 8's message shows the walker reaching all the way into a measure filter with an exact\npath:\n\n```\n✗ Author-time rules failed (1 issue)\n  • dataset \"duly_stagnation\": Filter value \"{7_fortnights_ago}\" is not a resolvable placeholder.\n    It is sent to the data engine as a literal string, matches no record, and the surface renders empty.\n    rule: filter-token-unknown  at datasets[1].measures[1].filter.last_update_at.$lt\n```\n\nThat message is the whole argument for this issue. `filter-token-unknown` already stands\nat `datasets[1].measures[1].filter.last_update_at.$lt` and reasons about the *value*.\nNothing standing in that same position resolves the *key* — or the sibling\n`measures[].field`, `dimensions[].field`, `include[]`, or `object`.\n\n## Why this matters more for a dataset than for most metadata\n\n`filter-token-unknown`'s own wording states the failure mode it exists to prevent:\n*\"sent to the data engine as a literal string, matches no record, and the surface renders\nempty.\"* A dangling field path produces **the same outcome from the same node** and is not\nchecked.\n\nA dataset is the semantic layer: dashboards and reports bind its dimensions and measures\nby name (ADR-0021), and the consumer end is now guarded (#8902). So the surviving failure\nis the quiet one — every binding resolves, the board renders, and the charts are empty or\nsubtly wrong because the dataset underneath addresses columns that do not exist.\n\nRow 6 is the one I would prioritise: a dataset over a non-existent base object is\nunambiguously meaningless, has no forward-reference story worth preserving, and is the\ncheapest possible check.\n\n## Precedent in the tree\n\nThe platform already resolves qualified field reads elsewhere and produces a good message.\nFrom the same repo's flow-condition validation:\n\n```\nunknown field `needs_colection` on `duly_assignment` — did you mean `needs_collection`?\n```\n\nThat is the message shape this wants. The resolver exists; it is not wired to dataset\nfield paths.\n\nRelated: #14089 (bare identifiers in flow conditions have no validation leg) is the same\nfamily — a validator with a per-surface hole — though a different surface.\n\n## Suggested scope\n\n1. Resolve `Dataset.object` against the object registry. (Cheapest, highest value.)\n2. Resolve each `include[]` path hop-by-hop against the object graph, honouring the\n   ADR-0071 3-hop limit that is already enforced structurally.\n3. Resolve `dimensions[].field` and `measures[].field` — a base field, or a\n   `relationship[.relationship].field` path whose relationship prefix must appear in\n   `include`. That last clause is a second real check: a dot-path whose prefix was never\n   declared in `include` is not joinable even if the field exists.\n4. Resolve filter **keys** in `Dataset.filter` and `measures[].filter`, reusing the\n   traversal `filter-token-unknown` already performs on the values.\n\nTiming: `validate`/`build` at the latest, matching #8902's \"refuse at publish at the\nlatest\" posture for the layer above.\n\n## Reproduction\n\n1. `git clone objectstack-ai/duly`, `pnpm install`.\n2. In `src/datasets/duty-health.dataset.ts`, change `object: 'duly_task'` to\n   `object: 'duly_tsk'`.\n3. `pnpm validate` → `✓ Validation passed`, exit 0.\n4. `pnpm build` → exit 0; `dist/objectstack.json` contains the dataset with the dangling\n   base object.\n\nFiled from the `duly` dogfood application (objectstack-ai/duly#9).\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 13216,
+  "kind": "issue",
+  "title": "[feature] Give runtime-published custom pages an end-user entry point: a `page` view type on objects, or nav registration at publish time",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-29T12:17:33Z",
+  "updated_at": "2026-09-01T16:52:51Z",
+  "closed_at": "2026-09-01T16:52:51Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 14,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13216",
+  "body": "**⚠️ Feature proposal awaiting maintainer review — NOT ready for development.** Do not self-assign or start implementation; this needs a human product decision first (API surface + scope). Filed per the maintainer's direction from the demo lane; labeled `needs-user-decision` to keep it out of automated dispatch.\n\n## Problem\n\nA custom React page created and published at runtime through the metadata API has no in-protocol way to reach end users (full evidence map in #13100):\n\n- **App navigation is closed**: `app.allowOrgOverride=false`, and the flagship apps' navigation lives in code packages (`src/apps/*.app.ts`), so neither runtime create-over nor overlay can add a menu entry. The refusal's sanctioned path is \"edit the source artifact and redeploy\".\n- **Object views have no shape for it**: `view` is one of only 5 types with `allowOrgOverride=true` (the door is open), but its `type` enum is closed over declarative renderers (`grid | kanban | gallery | calendar | timeline | gantt | map | chart | tree`) — a published page cannot be mounted as an object list view/tab. `page.object` binds record detail pages only.\n- **The escape hatch is out of scope**: `OS_METADATA_WRITABLE` unlocks the *type*, never a package's writability, is documented as an emergency-fix mechanism, and org-scoped overlays written through it do not survive boot by design.\n- Published pages are also absent from command-palette search (#13100).\n\nNet effect: \"an agent (or Studio author) grows a page into a running app\" ends with an artifact only a direct URL can reach.\n\n## Proposed directions (either would close the gap; choice needs a product call)\n\n1. **`page` member in the `view` type enum** — let an object list view/tab mount a published page (fits the \"this is another way to look at this object's data\" case; `view` already allows runtime create + org overlay).\n2. **Nav registration in the page publish flow** — publishing a page may declare/offer a navigation entry for a target app (the `navigation` item shape `{id, type:'page', pageName, label, icon}` already exists), with whatever authorization gate the platform deems right for code-package apps.\n3. (Smaller, complementary) index published pages in command-palette search.\n\n## Context\n\nDiscovered producing a promo demo where an AI agent builds a dashboard page into HotCRM from one request: the page publishes and renders perfectly, but no end user could find it. Evidence trail with API receipts and schema citations: #13100."
+}

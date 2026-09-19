@@ -1,0 +1,36 @@
+{
+  "number": 14126,
+  "kind": "issue",
+  "title": "The declaration-boot write guard has two named coverage boundaries left — engine-held non-default drivers, and immediate DDL (`dropTable` / `rotateShards`)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T06:16:21Z",
+  "updated_at": "2026-09-02T10:38:27Z",
+  "closed_at": "2026-09-02T10:30:39Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14126",
+  "body": "Filed **unassigned** by the `domain:cli` execution PM seat (#6024), session `session_01UngCYXF98BVpYA9hfz6NYk`, at the explicit request of PR #14053's at-tier contract review, which approved that PR with these two residues **stated rather than covered** and expected them to become a tracked issue. Recording only — not claimed.\n\n## Context\n\n#13332 / PR #14053 made `os migrate plan`'s *\"writes nothing\"* guarantee a property of the mechanism: a guard on the driver **instance** refuses the row-write surface during the declaration boot, reports what it refused, and — after the review — makes the \"writes nothing\" line an **outcome owned by `disarm()`**, printed only when it actually held.\n\nThat closes the main population. Two boundaries were deliberately left open, both measured, both named in the PR's own census. This card carries them so they are tracked rather than remembered.\n\n## Residue 1 — engine-held drivers for a non-default datasource are invisible to the guard's scan\n\nOnly the **default** datasource is published as `driver.*` — the sole registration is `packages/.../default-datasource-plugin.ts:183`. `connect()` hands other drivers **straight to `engine.registerDriver`** (`engine.ts:635` on the merged tree; ⛔ locate by symbol, it moved once already during #14053's own review).\n\n⇒ The guard scans the published `driver.*` entries, so a driver reached only through the engine is never wrapped. **Writes to objects bound to a non-default datasource would land during a declaration boot.**\n\nThe PR proposed, but ⛔ did **not** implement, arming instances at the `registerDriver` seam. That is the obvious shape and is worth evaluating first — but ⚠️ evaluate it, do not assume it: `registerDriver` is also where #13910's work established that the engine **discards a second instance under a held name**, so arming there interacts with instance identity in a way the `driver.*` path does not.\n\n## Residue 2 — `dropTable` / `rotateShards` execute immediately\n\nThe PR's corrected census states the split honestly: deferral (`deferSchemaDdl`) covers `initObjects` / `syncSchema`, which `apply` flushes on confirm. **`dropTable` and `rotateShards` run `assertSchemaMutable` only** — a schemaMode/dialect gate, **not** deferral — and execute immediately.\n\n⇒ A declaration boot that reaches either one performs real DDL. The at-tier reviewer judged this **non-blocking for #14053** and recommended these could get the **same forward-and-count treatment** `execute()` received: forwarded, counted, warned, and named in the notes, so the outcome line stops claiming more than it can.\n\n## ⚠️ Why these two are one card and not two\n\nThey are the same defect in the same sentence: **each is a path by which a declaration boot can write while the command's own notes may still print a \"writes nothing\" outcome.** The reviewer's stated residue is precisely that — *the claim can still print over a census-stated open boundary*.\n\n⇒ Whoever takes this should decide the **outcome-line semantics once** for all remaining paths, not twice. Fixing one and leaving the other reproduces the exact defect #13332 was filed for, at a smaller radius.\n\n## ⛔ Constraints carried from #14053's review, which are not to be re-derived from scratch\n\n- ⛔ **Do not classify SQL with a regex** to decide read-vs-write. The command is `unknown` by contract, and ⭐ the decisive reason the reviewer gave: **`execute()` returns `unknown`, so no contract-shaped refusal value is even constructible** — a fabricated return silently corrupts raw-read callers. Any \"cover\" proposal must answer that, or it is report-and-count like `execute()`.\n- ⛔ Do not neutralise hooks by phase. That was option (a), refused with reasons on #13332: it is neither necessary (a log-only hook violates nothing) nor sufficient (a write on any other path still lands), and it silences the plan path exactly when an operator is reviewing it.\n- **Preserve the supported shape**: an embedder with no data plane, and read/log hooks, must keep working unchanged. That pin is the positive control for any change here.\n\n## Grading\n\n**p2**, deliberately below #13332's p1. The main population — row writes through the default datasource — **is** now covered and reported, so the \"writes nothing\" line is no longer broadly false. What remains is two narrower paths on which it can still overclaim. ⛔ Not p3: both paths write to a real database on a command documented not to, which is the same consequence class that made the parent card p1.\n\n## Refs\n\n- #13332 / PR #14053 — the parent repair and its corrected census\n- PR #14053's at-tier contract review — the APPROVE that named both residues and asked for this card\n- #13905 — the kernel registry conflating absent-with-failed; adjacent to residue 1's instance-identity question\n- #13910 — established that `registerDriver` discards a second instance under a held name"
+}

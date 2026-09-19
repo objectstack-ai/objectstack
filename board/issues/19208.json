@@ -1,0 +1,33 @@
+{
+  "number": 19208,
+  "kind": "pull_request",
+  "title": "fix(pm): the clause-2 green line names the LABEL carriers it compared, and says the PR body was not read",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-try-charles",
+    "id": 313893388,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-19T17:20:36Z",
+  "updated_at": "2026-09-19T18:12:36Z",
+  "closed_at": "2026-09-19T18:12:34Z",
+  "closed_by": {
+    "login": "os-try-charles",
+    "id": 313893388,
+    "type": "User"
+  },
+  "merged_at": "2026-09-19T18:12:34Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/19208",
+  "body": "Part of #16770 — **option 3 only**, the one direction that card's triage routing admitted. #16770 is not addressed here as a whole: options 1 and 2 remain open, and both wait on the ruling #16303 is still asking for.\n\n## What the line used to claim\n\n`check-clause2-carriers --pair` closed its exit-0 line with a bare three-word clause about carriers agreeing, in all three of its branches. In this file a **carrier is a LABEL carrier**: `gated()` asks whether a carrier's labels came back readable, C1 compares `needs:contract-review` on the card against the same label on the PR, and the docblock's limb 3 imports the 2026-08-22 dual-carrier ruling for exactly that. The clause was **true about labels**.\n\nBut *carrier* is also this tree's word for the **documents** that carry the clause-2 declaration, and the clause sat one comma from `the clause-② declaration is …`. On a pair whose card declares `no` while its PR body declares `yes`, a careful reader takes that line as a **denial of the split** — a denial this gate cannot make. It reads the declaration from the card only; `declarationFromPullRequest` lives in `scripts/check-changeset-no-major.mjs` and is never imported here.\n\nRe-measured on `origin/main` at `166db3cae`, with a firing control:\n\n```\ngrep -c declarationFromPullRequest  scripts/pm/check-clause2-carriers.mjs   0\ngrep -c declarationFromPullRequest  scripts/check-changeset-no-major.mjs   26   (control: the probe fires)\n```\n\n## What changed\n\nThe green line now states **what it compared** and closes with **what it did not read**:\n\n```\n✓ check-clause2-carriers: PR #N / card #M — the clause-② declaration is readable in the fixed\nspelling, and the `needs:contract-review` LABEL is in the same state on both LABEL carriers (this\ncard and this PR). ⚠️ The clause above compares LABELS, ⛔ never two declarations: this run read\nthe clause-② declaration from the CARD only and did NOT read the PR body, so a PR body declaring\nthe opposite of this card is neither compared nor denied here (#16770).\n```\n\nThe non-read sentence is appended **last**, so the optional review-of-record and widening clauses cannot bury it, and it is shared by every branch rather than paraphrased per branch.\n\n⛔ **No join is built and no detection is added.** Nothing here reads the PR body's declaration. Naming one document authoritative (option 1) or refusing on a disagreement (option 2) both need #16303's answer, and #16303 is unanswered. `scripts/check-changeset-no-major.mjs` is untouched.\n\n## The pin, and the ablation that proves it holds\n\nA reworded sentence drifts back unless something holds it, so the green line moved into `greenPairLine()` — the self-test now pins the sentence **the run prints**, not a copy of it. One new battery, 14 assertions, both directions. The forbidden phrase is assembled at runtime rather than written out, so the pin is not a hit in its own scan.\n\n| leg | mutation, proven on disk | self-test |\n|:--|:--|:--|\n| **GREEN** | none | **EXIT 0**, 1060 cases (base `166db3cae` = 1046; +14, rises only) |\n| **RED · constant** | revert `LABEL_CARRIERS_AGREE` to the old bare clause; blob `a76e4ce0` → `5f4d4cf3`, phrase hits 0 → 1 | **EXIT 1**, 6 of 1060 failed |\n| **RED · bypass** | leave the constant intact, inline the old clause in the plain branch; blob `a76e4ce0` → `fa24a662`, phrase hits 0 → 1 | **EXIT 1**, 3 of 1060 failed |\n| **RESTORE** | `git checkout HEAD -- …` after each leg | blob back to `a76e4ce0c1ce6d57be5a091a7ce10555a368350c`, `git diff HEAD` empty |\n\nThe **bypass** leg is why the negative is pinned on the source and not only on the constants: a revert that never touches `LABEL_CARRIERS_AGREE` still reds.\n\n⚠️ Honest note on method: the first attempt at the constant leg used a `perl -0pi` substitution whose anchor matched **nothing**. It exited 0, the blob was unchanged, and the self-test stayed green — a reading that would have read as \"the pin fires\" if the on-disk proof had not been taken. The legs above were re-run with an anchor asserted to match exactly once before any verdict was read.\n\n## Changeset\n\n`skip-changeset`. The only path in the diff is `scripts/pm/check-clause2-carriers.mjs`; `scripts/pm/**` is shipped by no package's `files[]`, so nothing already published moves. ⚠️ The label is the carrier the PR-scoped `Check Changeset` reads — a local `check:changeset-no-major` pass would not have answered it.\n\n## Acceptance notes\n\n- Clause-2 on the finished diff: **no**. Nothing here widens an accept set, adds a schema key, a closed-set member, a published export or a registry entry. The diff narrows one sentence's claim and adds assertions.\n- `SELF_TEST_BATTERY_FLOOR` 34 → 35 and one roster entry, which is the ordinary cost of a new battery.\n- Noted, not filed: the roster's long success sentence at the end of `selfTest()` enumerates batteries by hand and does not name this one. Nothing reads it and no gate compares it to `SELF_TEST_BATTERIES`, so it is prose drift rather than a defect. Carrier: the next card that adds a battery to this file.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_017ef78bLdybu3AffehKkhfk\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017ef78bLdybu3AffehKkhfk)_"
+}

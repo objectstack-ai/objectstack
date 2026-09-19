@@ -1,0 +1,36 @@
+{
+  "number": 14162,
+  "kind": "issue",
+  "title": "ADR-0130 D5+D7:装载路径按拓扑序注册物内 N 包(复用 resolvePluginOrder)+ 存量产物逐位相同测试",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T09:22:56Z",
+  "updated_at": "2026-09-02T02:03:45Z",
+  "closed_at": "2026-09-02T02:03:45Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14162",
+  "body": "Blocked-by: #14161\n\n实现 ADR-0130 **D5 + D7**,epic #14122 实现面第 2+7 行。依赖 #14161 的 `packages[]` schema 先落地。\n\n## 要求(单源在 ADR-0130 D5/D7)\n\n1. `packages/objectql/src/plugin.ts:405` 的 `ql.registerApp(manifest)` 改为对物内 N 包的遍历,**按依赖拓扑序**注册。\n2. ⛔ **复用 `resolvePluginOrder`**(`packages/core/src/plugin-order.ts:66`,ADR-0116 单一排序器),不写第二排序机制;缺硬依赖与环的抛错行为继承,不重新裁。\n3. **D5 行为性 pin**(⛔ 不是排列断言):一个 `packages[]` 刻意排成\"扩展在前、被扩在后\"的物,装载成功且扩展**在被扩对象上生效**——只断言排序返回值的测试在\"算了序没用上\"的实现上也绿,恰是要抓的静默失效。\n4. **D7 逐位相同测试**:存量单 `manifest` 产物经新装载路径后,注册**状态**(包记录、每个对象 FQN、每个 `_packageId` 戳、命名空间所有者集合)与今日逐位相同——比对 registry 状态,不比对装载返回值。\n\n## Clause-②\n\n预期 no(装载内部重构 + 测试;spec 面不动)。如实从 diff 自报。\n\n## 验收\n\nD5 行为性 pin 红→绿证据(消融:直接 for 数组时 pin 必红);D7 测试独立可跑;全部既有装载测试绿。"
+}

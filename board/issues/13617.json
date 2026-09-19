@@ -1,0 +1,35 @@
+{
+  "number": 13617,
+  "kind": "issue",
+  "title": "automation/approvals: 多副本集群下审批流每级节点(除首级)被重复创建 —— approve 后恢复读到滞后一拍的流运行态,同级要批两次(单副本零重复)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-31T03:26:01Z",
+  "updated_at": "2026-09-02T03:11:20Z",
+  "closed_at": "2026-09-02T03:09:11Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13617",
+  "body": "## TL;DR(人话)\n\n多副本集群(redis 集群驱动 + LB 轮询)下,flow 审批流**每一级审批(除第一级)会被重复创建一次**:核准当前节点后,平台重建了同一个节点(同 flow_run_id、同 flow_node_id 出现 approved + pending 两行),同一审批人要把同一级批两遍才能推进。单副本同库同流零重复。流最终能走完、终态正确,但审批人会看到重复待办。\n\n## 版本与环境\n\n- objectos-ee 镜像 4.1.1(内建 runtime **17.2.0**),`@objectstack/automation` / `@objectstack/service-cluster-redis` 随镜像\n- 拓扑:traefik 轮询 → **3 个 app 副本**,共享 postgres:16 + 共享 redis:7,`OS_CLUSTER_DRIVER=redis`\n- 单副本(停掉 2 个副本,同一库)对照:**零重复** —— 集群特有\n\n## 最小复现\n\n任意 record_change 触发的多级审批流(复现用的流:三级,节点 lv1→lv2→lv3,approvers 分别为 field / position / position):\n\n1. 提交记录触发流 → 建 lv1 审批请求(恰 1 张,这一步正常);\n2. 核准 lv1 → 正常推进,建 lv2;\n3. **核准 lv2 → 平台又建了一个 lv2(pending)**,而不是 lv3;\n4. 再核准 lv2(第二次)→ 建 lv3;核准 lv3 → 又建一个 lv3;再核准 → 流结束。\n\n三级流实际产生 **5 个审批节点**(lv1×1、lv2×2、lv3×2)。`sys_approval_request` 留痕:\n\n```\nlv1_dept_head | approved   (同一 flow_run_id)\nlv2_gm        | approved\nlv2_gm        | approved   ← 重复\nlv3_finance   | approved\nlv3_finance   | approved   ← 重复\n```\n\n时间线特征:重复节点的 created_at 与上一节点的 completed_at 相差 ~60ms(核准的恢复动作当场重建了当前节点)。\n\n## 判别与机理推断\n\n- **单副本对照**(同库、同流定义、新记录):恰好 3 节点零重复 ⇒ 排除流定义/项目侧因素;\n- 每次核准请求经 LB 轮询落到不同副本。现象与「approve 后的流程恢复读到了**滞后一拍**的运行状态(副本内存缓存的 flow run 检查点未跨节点同步)」完全吻合:恢复方以为当前还在上一节点,于是把\"下一节点\"(=其实是刚批完的节点)再建一遍;\n- 同环境启动日志有 `MetadataClusterBridgePlugin: metadata service does not expose attachClusterPubSub(); cross-node cache invalidation disabled` —— 疑与该缓存失效通道缺失同族。\n\n## 期望\n\n集群下核准节点 N 应推进到 N+1,不应重建 N;流运行态的恢复应以共享存储(或跨节点失效后的重读)为准,不受处理副本的内存缓存影响。\n\n## 旁证(同环境其余集群面均正常)\n\nrecord_change 触发本身恰跑一次(1 次提交只建 1 张审批请求);定时任务 redis fence 选主只跑一次;通知每事件恰 1 条 —— 唯独审批流的 approve-resume 链路出现滞后。\n\n## 我们没有做的事\n\n应用侧无 workaround(不吞重复节点)。当前只能接受\"每级多批一次\"或把审批链路收单副本。\n\n---\nPart of steedos-labs/os-project-titanwind-ehr(deploy-ee 集群实测第六轮发现;单副本对照零重复)\n"
+}

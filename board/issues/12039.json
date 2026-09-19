@@ -1,0 +1,34 @@
+{
+  "number": 12039,
+  "kind": "issue",
+  "title": "spec: two ComponentPropsMap entries contradict their ruled authorities — `object-grid.data` vs ViewDataSchema, `element:number.filter` vs the platform filter form (rulings ui#6207-A, ui#6206-B)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-25T06:24:12Z",
+  "updated_at": "2026-09-02T06:53:43Z",
+  "closed_at": "2026-09-02T05:11:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 16,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12039",
+  "body": "Filed by the triage seat from two maintainer rulings (2026-08-25 decision-inbox batch adjudication, objectui batch 4; acceptance verbatim: 「同意」). Family-folded: same file surface (the spec-side `ComponentPropsMap`), same defect class (a props-map entry disagreeing with the authority the platform already ruled), both members ruled — five fold gates pass; per-key criteria below keep them independently checkable.\n\n## Key 1 — `ComponentPropsMap['object-grid'].data` (ruling ui#6207-A)\n\nToday `z.array(z.unknown()).optional()` (\"Static inline rows — bypasses the object query\"), while `ViewDataSchema` — the authority objectui#5090 ruled and pinned the declaration against — is an **object** discriminated on `provider` (`object`/`api`/`value`/`schema`). Measured on `@objectstack/spec@17.2.0`: `{ provider: 'value', items: [] }` is **refused** by the props-map entry while being the pinned-legal form.\n\n**Ruled**: the props-map entry converges onto `ViewDataSchema`. The bare-array form is the deprecated `staticData` shortcut (the #4648 carve-out already refuses to publish it). Migration check before landing: sweep generated artifacts/templates for bare-array `data` authors; if any exist, the change carries their migration note.\n\n## Key 2 — `ComponentPropsMap['element:number'].filter` (ruling ui#6206-B)\n\nToday `record | object` (\"Filter criteria\"), while **every other** `filter` input across the component tree is the platform's array-of-rules form (`ViewFilterRule` entries — object-grid, object-metric, record:related_list, plugin-list, data-list). The registration declares `array`; the renderer passes through to `adapter.aggregate({ filter })` / `adapter.find(object, { $filter })` opaquely.\n\n**Ruled**: one filter orthography platform-wide — the spec entry aligns to the `ViewFilterRule` array form. **Measurement-first (binding)**: verify the adapter/runtime behaviour on array filters for this element's read path before editing; if the runtime genuinely cannot take the array form here, STOP and report the fork back to triage — do not land a declaration the runtime refuses (that would recreate the defect in the opposite direction).\n\n## Acceptance (per key, independently checkable)\n\n- `ComponentPropsMap['object-grid'].safeParse({ data: { provider: 'value', items: [] } })` → success; bare-array authored form handled per the migration note.\n- `ComponentPropsMap['element:number'].filter` accepts the ViewFilterRule array form (with the runtime measurement recorded in the PR).\n- Downstream (objectui, not this card): the #4971 exemption entries `object-grid.data:object` and `element:number.filter:array` in `registry-inputs-spec-parity.test.ts` become deletable — ui#6207/ui#6206 are `pm:blocked` on this card and their unlock re-verification is exactly that deletion, after a released spec version reaches the objectui pin (consumer-installable criterion).\n\nClause-②: **yes** — both keys change the published contract's accept set; contract-review tier applies at dispatch. Serial check at claim: name any in-flight spec cards touching the ComponentPropsMap surface.\n\nRefs: objectui#6207 · objectui#6206 (measurements, reproduce commands, and the ruling comments) · objectui#5090 / PR #5108 · objectui#4971 · objectui#4648.\n\n---\n\n**Status (PM, 2026-08-25, round R6)** — Key 1 landed via PR #12120 (merged 13:45Z). Key 2 forked back under ruling ui#6206-B's own measurement-first clause: the pinned runtime refuses the raw `ViewFilterRule[]` form on this element's aggregate read path (measurement recorded in PR #12120 and the card report above).\n\nBlocked-by: objectstack-ai/objectui#6302\n\nUnblock re-verification: when objectui#6302 lands (adapter lowers rule-arrays on the aggregate path) and a spec-consumable pin bump follows, Key 2 re-enters the queue on this card."
+}

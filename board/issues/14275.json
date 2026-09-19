@@ -1,0 +1,36 @@
+{
+  "number": 14275,
+  "kind": "issue",
+  "title": "[finding] `dashboard-filter-field-unknown` still skips every dotted filter field and resolves against the flat `SYSTEM_FIELDS` union — the seam next to it now answers both",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-01T19:45:47Z",
+  "updated_at": "2026-09-02T08:02:08Z",
+  "closed_at": "2026-09-02T07:59:49Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14275",
+  "body": "Found while implementing #14148 (widget `filter` keys + `options.sortBy`). Not fixed there: it is a behaviour change to a **different**, already-shipped rule, and folding it into that PR would have widened its accept-set narrowing without its own measurement.\n\n## The two gaps\n\n`dashboard-filter-field-unknown` lives in `packages/lint/src/validate-widget-bindings.ts` and resolves a **dashboard-level** filter's effective field against each widget's dataset base object. Two limitations are now visible because the code immediately beside it does neither:\n\n**1. Every dotted path is skipped outright.**\n\n```ts\n// A relationship path (`account.region`) is resolved by the query\n// engine, not a base column, so it can't be checked here -- skip it.\nif (field.includes('.')) continue;\n```\n\nThat comment was accurate when written — nothing in `packages/lint` could walk relationship hops. It is no longer: `resolveFieldPath` (`object-graph.ts`, landed in #14267 for #14105) walks hops through declared relationship fields and returns a discriminated verdict, and `joinablePrefixes` expands a dataset's `include` into the set ADR-0021 actually joins. #14148 uses both at the sibling position (a widget's own `filter` keys) precisely so a dotted path resolves rather than silently passing.\n\nSo a dashboard-level filter re-targeted via `filterBindings: { dateRange: 'account.signed_at' }` is unjudged today whether or not `account` exists, whether or not `signed_at` exists on it, and whether or not `account` is declared in the dataset's `include`.\n\n**2. It resolves against the object-independent `SYSTEM_FIELDS` union rather than the per-object injected set.**\n\n```ts\nif (objectFields.has(field) || SYSTEM_FIELDS.has(field)) {\n```\n\n`object-graph.ts` deliberately does not do this, and states why: the two differ exactly where it matters — on `ownership: 'none'` the platform injects no `owner_id`, so a filter naming it there is a real defect that the union answers as resolvable. `injectedColumnsFor(obj)` is the per-object answer and is already exported.\n\n## Why it matters rather than being tidiness\n\nThe consequence is the one that rule exists to prevent, and it is stated in its own module doc: a dashboard-level filter is ANDed into **every** widget's analytics query (#2501), so a field that does not resolve either crashes the widget at query time or narrows it to nothing. Both gaps are the silent half. A dashboard filter is authored once and broadcast to every widget on the board, so a single unjudged dotted re-target degrades the whole dashboard, not one tile.\n\n## Suggested shape\n\nMigrate the check onto the seam, mirroring what #14148 does one key over: `resolveFieldPath` for existence (skipping `isUnjudgeable` verdicts), then the `joinablePrefixes` clause for a dotted path, keeping `dashboard-filter-field-unknown` as the existence id. Note `dashboard-filter-field-unprovisioned` (#8340) sits on the same branch and reads the resolved-but-unprovisioned case, so the migration has to keep that second question answerable — `FieldPathVerdict`'s `injected` marker is what carries it.\n\n⚠️ This **narrows the accept set** on a shipped gating rule, so it needs its own fixture pass over the shipped dashboards before landing, not just unit tests — the same false-positive budget #14267 paid.\n\n## Not a duplicate\n\n#3365 / #3382 shipped this rule; this is the two limitations it shipped **with**, both now cheaply closable. #14148 closes the sibling position (a widget's own `filter`) and explicitly does not touch this one."
+}

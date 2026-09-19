@@ -1,0 +1,36 @@
+{
+  "number": 14210,
+  "kind": "issue",
+  "title": "[finding] docs(protocol): the Backward Compatibility page's Breaking Change Process names two GitHub labels that do not exist, and a \"2 MINOR releases\" survival guarantee with no mechanism",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "priority:p2"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-01T12:57:54Z",
+  "updated_at": "2026-09-02T04:43:28Z",
+  "closed_at": "2026-09-02T04:39:16Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14210",
+  "body": "Found while implementing #13893 (which corrected the page's MAJOR/MINOR claims and deleted the unsourced \"Minimum 30-day community review period\"). These two are the **same defect class as that 30-day claim** — quantified or procedural promises on a customer-facing policy page with nothing behind them — but a different class from #13893's version-number defect, so they were deliberately left untouched there rather than widened into that PR.\n\n## 1. Two named labels do not exist in this repository\n\n`content/docs/protocol/backward-compatibility.mdx` tells readers to use two labels:\n\n- Breaking Change Process, step 1 — *\"Breaking changes are proposed as GitHub issues with the `breaking-change` label.\"*\n- Reporting Compatibility Issues, step 2 — *\"File a GitHub issue with the `compatibility` label.\"*\n\nMeasured against the live label set (`GET /repos/objectstack-ai/objectstack/labels?per_page=100`, 61 labels): **neither `breaking-change` nor `compatibility` is among them.** The only label matching `/break|compat|rfc/i` is **`protocol:breaking`**.\n\nSo a reader following the page files an issue with a label they cannot apply. The likely fix is mechanical — point step 1 at `protocol:breaking` — but the right target for step 2 is a judgment call (whether compatibility reports get their own label or fold into `protocol:breaking`), which is why this is a card and not a drive-by edit.\n\n## 2. The \"minimum 2 MINOR releases\" survival guarantee has no located mechanism\n\nThe deprecation timeline's summary callout promises:\n\n> **Minimum guarantee:** Deprecated features survive for at least **2 MINOR releases** before they can be removed.\n\nNo enforcing mechanism was located. It is the same shape as the 30-day review claim that triage ruled binary on in #13893 (「找到可指向的真实流程证据并在页上给出出处,或删除该承诺」), and it sits in tension with ADR-0049 enforce-or-remove, whose disposition set is enforce / mark `experimental` / remove — it prescribes no deprecation dwell time before removal.\n\n⚠️ Note this claim was **preserved verbatim** by #13893's PR: that PR changed only which release type a removal lands in (MAJOR to MINOR) and deliberately did not touch the dwell-time promise, so as not to endorse an unverified number while correcting a different one. It is unresolved, not settled.\n\n## Suggested disposition\n\nSame binary triage applied to the 30-day claim: either cite the real mechanism on the page, or delete the guarantee. If a dwell-time rule is genuinely wanted, that is a policy decision for the maintainer rather than a docs edit — ADR-0049 removals appear to ship without one today.\n\n## Scope note\n\nDocs-only, one file: `content/docs/protocol/backward-compatibility.mdx`. Filed unassigned for triage."
+}

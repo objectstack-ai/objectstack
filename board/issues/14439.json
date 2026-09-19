@@ -1,0 +1,35 @@
+{
+  "number": 14439,
+  "kind": "issue",
+  "title": "feat(cli+spec): 从 N 个软件包的作者态编出一个 `packages[]` 发布物 —— `os build` 认识项目级 `composeStacks('preserve')`，装配后的包体有自己的声明（#14242 取 B）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p1"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-09-02T06:53:40Z",
+  "updated_at": "2026-09-02T14:42:43Z",
+  "closed_at": "2026-09-02T13:46:06Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14439",
+  "body": "Part of #14122 · ADR-0130 D4/D5/D7 的**产出侧**。发版前平台侧最后一块：维护者要在平台功能齐全后发版，hotcrm 分拆（epic 的业务目标）在本卡之前无法开始。\n\n## 事实（都在 `main` 上实测）\n\n- **装载链已齐**：#14191（`packages[]` schema）、#14223（`composeStacks` `manifest:'preserve'`）、#14240（拓扑装载）、#14354（D1+D3 闸）都在 `main`。\n- **但没有任何路径能编出 `packages[]` 形态的发布物**：`packages/cli/src/commands/compile.ts`（`build.ts` 只是它的别名）对 `artifact.packages` **零处理**（`git grep '\\.packages\\b' packages/cli/src packages/core/src` 非测试零命中）；`examples/` 下四个例子全是单包；#14242 原文：\"No `packages[]`-shaped artifact is produced anywhere yet\"。\n- **作者态是什么样**：hotcrm `objectstack.config.ts:90-190` 是一个 `defineStack({ manifest: { id, namespace: 'crm', type: 'app' }, objects: Object.values(objects), apps, flows, … })`——定义体直接 import，**不是 glob**。CLI 侧：`loadConfig`（`packages/cli/src/utils/config.ts`）→ 校验 / lint / lower → `buildRuntimeBundle`（`utils/build-runtime.ts`）。\n- **两阶段错配（#14242）**：`ArtifactPackageEntrySchema.manifest = ManifestSchema`，其 `objects` 是 `z.array(z.string())`（作者态 glob）；而装载侧 `resolveArtifactPackageOrder`（`packages/objectql/src/artifact-packages.ts`）把每个 `packages[i].manifest` 交给 `ObjectQL.registerApp`，后者把 `m.objects` 当**定义体**迭代。#14240 因此只把 schema 当 wrapper 门用，并在模块头记录了这个错配。\n- `validateSingleApp`（`stack.zod.ts:948`，在 `:1854` 由 `defineStack` 调用）对 `type:'app'` 强制单应用（ADR-0019）。`composeStacks` 在 `stack.zod.ts:2451`，`'preserve'` 语义见 `:1907-1946`。\n\n## 决定（维护者 2026-09-02 在 PM 会话拍板）\n\n#14242 取 **B**：给装配/注册态的包体一个**独立声明**；作者态 `ManifestSchema.objects` **不加宽**（否决 C）；A 的\"只声明 wrapper 门\"作为过渡状态随本卡终止。\n\n## 要做\n\n1. **spec**：声明装配后的包体 schema（命名由 dev 提，如 `AssembledPackageBodySchema`）：manifest 字段 + 与 `ObjectStackDefinitionSchema` 相同的定义数组键（`objects` / `apps` / `flows` / …，键集从同一处派生，不手抄）。发布物层的 `packages[]` 引用它；作者态入口仍是 `ArtifactPackageEntrySchema`（manifest-only）。装载门从 wrapper-only 改为对装配态声明**完整 parse**，`artifact-packages.ts` 模块头里对错配的记录同步改写。\n2. **作者态形状，不发明第二种写法**：一个项目 = N 个各自合法的 `defineStack`（每个仍受 ADR-0019 单应用约束）+ 一个项目级 config 调 `composeStacks([...], { manifest: 'preserve' })`。⛔ 不放宽 `validateSingleApp`：组合后的项目物按 `packages[]` 迭代，单包路径一字不动。\n3. **CLI `os build` / `compile`**：`loadConfig` 得到的定义带 `packages[]` 时，对**每个包**分别走今天单包的校验 / lint / lower 路径（同一套函数，不复制一份），产出**一个**发布物 JSON，`packages[i]` 为装配后包体；`os dev` 同样能起它。单包输出 **bit-identical**（D7 pin 已有，必须保持绿）。\n4. **夹具**：`examples/app-multi-package/`（名字 dev 定）：两个包共享一个命名空间，一个 `type:'app'`、一个 `type:'module'`（**无** `scope` 键），各一个对象，模块对象 lookup 到应用对象；`pnpm build` 出 `packages[]`；dogfood 测试起服务，断言 `GET /api/v1/packages` 两行（#14430 合并后追加 `writable: false` 两行断言）。\n5. **文档**：作者态页（`content/docs/plugins/packages.mdx` 或 dev 判定的正确页）加一节\"项目 = 多包发布物\"，⛔ 不碰 `content/docs/releases/`。\n6. **消融**：删 CLI 的 `packages[]` 分支 → 夹具构建断言红；删装配态 schema 门 → 错形包体不再被拒（各自预测红集、复原按字节、经 `dist` 的腿要重建并 preflight）。\n\n## 边界\n\n⛔ 不动 marketplace / 安装面（ADR-0019 D2/D3，发布物停在控制面）。⛔ 不做跨发布物共有权（ADR-0130 D8）。⛔ `ManifestSchema.objects` 不加宽。⛔ 不改 ADR；若 ADR-0130 需要补记 D4 的两阶段声明，另开 docs-only 卡给维护者。\n\n## Clause-②\n\n预期 **YES**：编译的接受 / 拒绝面变了（新的装配态 schema 门、CLI 新分支、装载门从 wrapper 变完整 parse）→ 挂 `needs:contract-review`，PR 留 draft，PM 复审。\n\n## 验收\n\n夹具 build + boot 全绿并留 `GET /api/v1/packages` 原文；D7 单包 bit-identity pin 绿；`packages/spec`、`packages/cli`、`packages/objectql` 全量绿；`dispatch-gates` 联合零发现；PR 同时 `Fixes #14242`。changeset：`@objectstack/spec` minor、`@objectstack/cli` minor、`@objectstack/objectql` patch。"
+}

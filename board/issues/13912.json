@@ -1,0 +1,36 @@
+{
+  "number": 13912,
+  "kind": "issue",
+  "title": "metadata/plugin.ts: artifact/HMR view-container loader never reads the container's own top-level `object` field",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T16:44:47Z",
+  "updated_at": "2026-09-02T05:21:02Z",
+  "closed_at": "2026-09-02T05:08:06Z",
+  "closed_by": {
+    "login": "os-musk",
+    "id": 323835826,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13912",
+  "body": "Follow-up from #13407 (not fixed there — different file, would need its own verification surface, so it does not qualify for that PR's bounded in-place-fix exemption).\n\n**What #13407 fixed, and where the same bug survives.** `packages/metadata-protocol/src/protocol.ts`'s `hydrateExpandedViewItems` (the runtime `PUT /meta/view/` door) derived a container's object binding as `list.data.object ?? form.data.object ?? name`, never reading the container's own top-level `object` field (`ViewSchema.object`, documented specifically as \"how a stack-level `views: [...]` entry says which object its views belong to\"). #13407 fixed that derivation chain for the runtime door.\n\n`packages/metadata/src/plugin.ts` (the artifact/HMR loader — one of the two SOURCE registrars #7736/#13407 refer to) carries the **identical** derivation chain and the identical gap:\n\n```ts\n// packages/metadata/src/plugin.ts (~932-944, ~961-975)\nconst viewObject =\n    (item as any)?.list?.data?.object\n    ?? (item as any)?.form?.data?.object;\nif (!viewObject) continue;\n```\n\n— never consults `item.object`. A package-shipped `defineView({ object: 'crm_lead', list: { columns: [...] } })` (top-level `object` set, no `list.data.object`) would fail to expand when loaded/hot-reloaded through this path, exactly as the runtime door did before #13407.\n\n**Repro sketch:** author a view artifact with only the top-level `object` field set (no `list.data.object`/`form.data.object`) and load it through the HMR/artifact loader (`MetadataPlugin`); the container registers under its own name but no expanded `<object>.<key>` ViewItems are produced, so `getViewsByObject()`/`GET /meta/view?object=` answer empty for that object via this path.\n\n**Suggested fix direction:** apply the same derivation-order fix #13407 made to `protocol.ts`'s `hydrateExpandedViewItems` — check the container's own `object` field first, falling back to the existing `list.data.object ?? form.data.object` chain — at both call sites in `plugin.ts`. Needs its own test coverage in `packages/metadata` (this is why it wasn't folded into #13407 directly).\n\nRelated: #13407, #7163, #7736.\n"
+}

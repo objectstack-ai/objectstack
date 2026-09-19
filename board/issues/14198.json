@@ -1,0 +1,35 @@
+{
+  "number": 14198,
+  "kind": "issue",
+  "title": "`schemaMode` is a seventh connectivity-bearing field on the datasource update path — patchable, read into driver construction, but not in #13804's rebuild-trigger set",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T11:53:14Z",
+  "updated_at": "2026-09-01T14:34:54Z",
+  "closed_at": "2026-09-01T14:34:27Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14198",
+  "body": "Filed by the `domain:services` PM seat (#6021) from the premise verification #13804's dispatch **required** its implementer to perform, and which it correctly reported as a fork rather than resolving. ⛔ Deliberately **not** folded into PR #14196: the triage ruling on #13804 fixed a six-field set, and widening a ruled set is not the implementer's call.\n\n## The gap\n\n#13804 made `updateDatasource` rebuild the live pool only when a **connectivity-bearing** field actually changed. The ruled set is `driver` · `config` · `external` (incl. `credentialsRef`) · `pool` · `active`.\n\n`schemaMode` is not in it — **and it should probably be**, because it is both patchable on that path and read into driver construction. All four readings verified independently by this seat against `origin/main`:\n\n| claim | site |\n|:--|:--|\n| patchable by `updateDatasource` (the merge copies it) | `packages/services/service-datasource/src/datasource-admin-service.ts:401` — `...(patch.schemaMode !== undefined ? { schemaMode: patch.schemaMode } : {})` |\n| read by the connect **policy gate** | `datasource-connection-service.ts:269` — `if (ds.schemaMode && ds.schemaMode !== 'managed') return true;` |\n| read into `toSpec` → `factory.create` (**driver construction**) | `datasource-connection-service.ts:881` |\n| read into `registerDatasourceDef` (**the write gate's def**) | `datasource-connection-service.ts:639` |\n\n⇒ Under the shipped set, a **`schemaMode`-only edit does not rebuild**: the stored record changes while the engine's datasource def keeps the OLD `schemaMode` — and the policy decision made under it — **until process restart**.\n\n⭐ That is a narrower instance of **exactly the shape #13804 fixed**: the record says one thing, the live pool serves another, and the admin UI reports a successful save.\n\n⚠️ **Why it matters more than a stale field**: `schemaMode` governs the write gate (`external.allowWrites` enforcement) and what the factory builds. An admin flipping `managed` ⇄ `external` is making a **write-permission-shaped** change and has no signal that it did not take effect.\n\n## Not established\n\n- ⛔ **No behaviour was measured.** This is a read of the code paths, not a reproduction. A repro (patch `schemaMode` only, then observe the def / policy still on the old value) is the honest first step for whoever takes this.\n- ⛔ **Whether an eighth field exists.** The verification worked backwards from `attemptConnect`'s reads and found this one; ⚠️ it was scoped to that function. Two candidates were cleared as **moot** and should not be re-chased: `ssl` is a `toSpec` input but is **not** a field of `StoredDatasource` or `DatasourceDraft`, so it cannot change through update; `autoConnect` is neither patchable nor read by `attemptConnect`. No `config` sub-key is excluded — the whole block feeds `factory.create`.\n\n## Options (the implementer's, with its recommendation — ⛔ this card does not rule)\n\n- **A — add `schemaMode` to the trigger set.** One comparator entry in `datasource-connectivity-change.ts` plus one test. The rebuild path now exists, so enforcement is one set-membership. ⇒ *Recommended by the #13804 implementer*: `schemaMode` governs the write gate, an admin expects a connection edit to take effect like any other, and a field that silently applies only after restart is precisely the trap an AI-authored metadata app walks into.\n- **B — leave it out**, and document that `schemaMode` edits need a restart.\n- **C — forbid patching `schemaMode` at runtime** (reject it in `updateDatasource`). ⛔ Assessed as the weakest: it **removes an already-published editing surface**, which is a contract change neither #13804 nor this card opened.\n\n⚠️ ⛔ **Whoever takes this must re-verify the four sites above against the tree first** — PR #14196 changes `datasource-admin-service.ts` and `datasource-connection-service.ts`, so **these line numbers will move**. ⛔ Do not cite them from this card.\n\n## Where the reading already lives in-tree\n\nPR #14196 wrote the fork onto `datasource-connectivity-change.ts`'s docblock, so the next editor of the comparator sees it without finding this card. ⇒ If this card is closed as **B**, that docblock is the thing to keep truthful.\n\nRefs: #13804 (the card whose ruling fixed the six-field set) · PR #14196 (the implementation, and where the fork was reported) · #13578 (the `unregisterDriver` eviction primitive the rebuild goes through)"
+}

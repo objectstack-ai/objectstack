@@ -1,0 +1,36 @@
+{
+  "number": 14287,
+  "kind": "issue",
+  "title": "drivers(turso): `assertSafeIdentifier` still throws a bare Error with no code/status on the field, object, groupBy and DDL positions — an unsafe identifier on the remote transport is still an opaque 500",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-musk"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-02T00:55:49Z",
+  "updated_at": "2026-09-02T05:03:15Z",
+  "closed_at": "2026-09-02T04:52:56Z",
+  "closed_by": {
+    "login": "os-musk",
+    "id": 323835826,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14287",
+  "body": "Found during contract review of PR #14248 (#14113). Recorded by the review seat rather than folded into that PR, because picking the envelope is a judgement the landed evidence does not pin.\n\n## The gap\n\n#14113 closed the false refusal on the **alias** position of `RemoteTransport.aggregate` (Turso remote mode) by escaping instead of gating. What it deliberately left alone: `RemoteTransport.assertSafeIdentifier` itself still throws a **bare `Error`** — no `code`, no `status` — for every position that still routes through it: the `field` and `object` positions in `aggregate`, the `groupBy` alias position (#14235 carries that one's *gating* question), and the DDL / backfill positions.\n\nSo a genuinely unsafe **field** or **object** identifier on the remote transport still reaches the caller as an opaque 500 out of `mapDataError`. That is the other half of the #11455 / #8931 shape this repo has been closing door by door — the same class #14113's title named, one position over.\n\nMeasured on PR #14248's head `689d223f`: the alias position now refuses nothing (so no un-enveloped refusal remains *there*), and the regression controls in `remote-transport-aggregation-alias-quoting.test.ts` pin that the `field` and `object` positions still refuse — with the bare `Error`.\n\n## Why it is filed rather than patched\n\nThe right envelope is not obvious. An injection refusal is not self-evidently `INVALID_QUERY` / 400 (it is a refusal of the *shape*, not a malformed query), and whatever code is chosen changes the error surface for DDL and backfill callers too, not only `aggregate`. That is a contract choice, not a mechanical edit.\n\n## Suggested direction\n\nGive `assertSafeIdentifier` (or its call sites) a platform error carrying a code from the declared vocabulary and a 4xx status, so `mapDataError` envelopes it. Decide the code once and apply it at the helper, so every position inherits the same answer — the same \"one producer\" argument #14143 / PR #14247 just made about the two action doors.\n\nRefs: #14113 (the alias half, landed) · #14235 (the `groupBy` alias gating question) · #11455 / #8931 (the un-enveloped-500 family).\n\nUnassigned and untriaged, per the single-producer rule for `domain:*`."
+}

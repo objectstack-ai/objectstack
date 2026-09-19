@@ -1,0 +1,34 @@
+{
+  "number": 14575,
+  "kind": "pull_request",
+  "title": "fix(lint): consolidate did-you-mean suggestion helpers into object-graph's shared nearestName",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T12:44:17Z",
+  "updated_at": "2026-09-02T14:13:54Z",
+  "closed_at": "2026-09-02T14:13:52Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-09-02T14:13:52Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/14575",
+  "body": "Fixes #14268\n\n## What changed\n\nFour hand-copied \"Did you mean?\" helpers in `packages/lint/src` are now one shared helper. `object-graph.ts`'s already-exported `nearestName`/`suggestName` gained the containment pre-pass that `validate-widget-bindings.ts`'s private `didYouMean` carried, and the three private copies were deleted:\n\n- `validate-object-references.ts` — deleted its private `suggest`/`distance`, imports `suggestName` from `./object-graph`.\n- `validate-sortable-fields.ts` — same.\n- `validate-widget-bindings.ts` — deleted its private `didYouMean`/`levenshtein`/`suggest`, imports `suggestName` from `./object-graph`.\n- `object-graph.ts` — `nearestName` now checks containment first (matching `c.length`/`target.length` when one contains the other, scored by length delta) before falling back to Levenshtein distance within the existing `max(2, floor(len/3))` budget; `suggestName` and the private `distance` (the one surviving edit-distance body) are unchanged. Docblock rewritten to describe the now-shared behaviour instead of pointing at the \"consolidating the three copies is recorded as a follow-up\" note this card resolves.\n\nThis is the ruling's decision (comment 5502887598 on #14268): the containment pre-pass becomes `nearestName`'s behaviour for **every** caller, including `object-graph.ts`'s own two `describeFieldPathVerdict` call sites (`:325`/`:342`, both already routed through `suggestName`).\n\n## Hints newly supplied\n\nNone. A/B comparison on the same base tree (commit `fed4fa409`, no test file touched): the full `@objectstack/lint` suite run with the four files at their `origin/main` state (93 files / 2812 tests passed, 5 skipped) and again with the port applied — **byte-identical pass/fail results**. No existing suggestion assertion needed a hint text change; the containment pre-pass is additive but none of the three rules' current test fixtures happen to exercise a containment-eligible typo the edit-distance budget didn't already catch. Re-run on the final merged tree (after picking up unrelated upstream commits) also passes clean: 93 files / 2817 tests passed, 0 skipped (the skip-count change is from unrelated upstream work, not this PR).\n\n## Verification\n\n```\n$ git grep -n \"function suggest\\|function distance\\|function levenshtein\\|function didYouMean\" \\\n    packages/lint/src/validate-object-references.ts \\\n    packages/lint/src/validate-sortable-fields.ts \\\n    packages/lint/src/validate-widget-bindings.ts\n# zero hits\n```\n\n- `pnpm --filter @objectstack/lint build` — clean (dist emitted, no dangling references to the deleted functions).\n- `pnpm --filter @objectstack/lint typecheck` — clean (`tsc --noEmit` + `check:test-typecheck`).\n- `pnpm --filter @objectstack/lint test` — 93 files / 2817 tests passed on the final merged tree (commit referenced below).\n- `pnpm lint` narrowed to the 5 touched files (`--format json`): 0 errors, 1 informational warning (`.changeset/*.md` has no ESLint config — expected, not a finding). The repo's `eslint.config.mjs` enables no type-aware linting (no `parserOptions.project` anywhere), so this diff cannot move any untouched file's verdict — the narrowed run is a complete reading of this diff's lint surface, not a partial one.\n- Dispatch-gates union (28 commands derived from the touched-file surface) — all green except two expected `NOT MEASURED` (both require artifacts this local run cannot produce, not repo-scoped to this PR): `check-test-completeness.mjs` (needs a saved `turbo run test` log CI produces) and `check:dual-build-cjs-loads` (needs a full monorepo `pnpm build`, ~78 packages).\n\n## Changeset\n\n`.changeset/lint-suggest-name-consolidation.md` — `@objectstack/lint`: `patch`.\n\n## Out of scope\n\nPer the ruling and the claim comment, the following private \"did you mean?\" copies in `packages/lint/src` are **not** touched by this PR — filed as follow-ups, listed in the report below with file:line for the PM to route:\n\n- `validate-action-name-refs.ts:84` (`distance`) / `:101` (`suggest`)\n- `validate-ai-tool-references.ts:70` (`distance`) / `:87` (`suggest`)\n- `validate-chart-bindings.ts:83` (`distance`) / `:100` (`suggest`)\n- `validate-searchable-fields.ts:275` (`suggest`) / `:289` (`distance`)\n- `validate-translation-references.ts:159` (`distance`) / `:186` (`suggest`)\n- `validate-react-page-props.ts:167` (`nearestKnown`)\n- `validate-rule-schema-formats.ts:266` (`nearestRegisteredFormat`)\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WLJQhde67SeTccsmnBVarV)_"
+}

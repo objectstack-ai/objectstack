@@ -1,0 +1,36 @@
+{
+  "number": 13790,
+  "kind": "issue",
+  "title": "[finding] An INLINE literal ternary at an object-literal `code:` is reached by no vocabulary shape — the third stamp position, censused at zero",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T12:36:43Z",
+  "updated_at": "2026-09-02T17:52:21Z",
+  "closed_at": "2026-09-02T17:21:31Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13790",
+  "body": "Found while running the lower-case-LOCAL census on #13478 (PR #13789). Not fixed there, deliberately: that card's scope was a census of a *different* spelling, and this one is a third position with its own reading.\n\n## The gap\n\n`check-dispatcher-error-vocabulary.mjs` reaches a `code:` in an object literal when the value is a quoted literal (`objlit`), a SCREAMING_SNAKE constant (`objlitconst`), a template (`objlittemplate`), or a helper **parameter** (`objlithelper`). It does not reach an **inline literal expression** — a ternary or a `||`/`??` chain of literals written at the stamp itself:\n\n```ts\nreturn {\n    status: isProvisioning ? 503 : isFailed ? 502 : 404,\n    body: {\n        error: raw,\n        code: isProvisioning\n            ? 'PROJECT_PROVISIONING'\n            : isFailed\n                ? 'PROJECT_PROVISIONING_FAILED'\n                : 'PROJECT_NOT_FOUND',\n    },\n};\n```\n\n- `objlit` needs the quote **immediately** after the colon; here the condition comes first.\n- `objlitconst` needs a SCREAMING_SNAKE identifier after the colon.\n- `objlittemplate` needs backticks.\n- `objlithelper`'s candidate regex captures the **condition's** identifier (`isProvisioning`), which is not a parameter, so it declines.\n- `check:error-code-casing` needs a quoted **lowercase** literal beside the token `code`; these are upper-case, so they are not its business either.\n\nSo: no site **and** no unresolved — the same \"no verdict, no report, and nothing says so\" shape `objlithelper` and the `assignconst` local were each opened to close, in a third position.\n\nThis is distinct from #13478's class. That one is a lower-case LOCAL *holding* the ternary; `resolveConstant` is the machinery for it. This one is the ternary written **at the stamp**, where no resolution is needed at all — every branch is a literal already, and `literalCodeValues` reduces it directly.\n\n## The census\n\nMeasured on the tree at `597020aa5`, with the gate's own primitives (`enclosingOpeners`, `sliceBalanced`, `splitTopLevel`, `literalCodeValues`) and a positive control that a ternary is caught while a bare literal, a runtime call and a type annotation are each correctly excluded:\n\n| | |\n|:--|--:|\n| positions reached by no shape | 2 |\n| distinct values behind them | 5 |\n| **unregistered wire codes hiding** | **0** |\n\nBoth positions come back clean, for different reasons, and both were checked rather than assumed:\n\n- `packages/rest/src/error-response.ts:1250` — `PROJECT_PROVISIONING`, `PROJECT_PROVISIONING_FAILED`, `PROJECT_NOT_FOUND`. All three are in `ERROR_CODE_LEDGER`. Worth noting anyway: this is the REST **door** file, and these are stamped straight into an HTTP error envelope's `body.code`. Registered today, invisible to the gate tomorrow.\n- `packages/runtime/src/domains/automation.ts:1125` — `body.name === undefined ? 'required' : 'invalid_type'`, inside `{ field: 'name', code: ... }`. A D6 field-addressed validation catalog, legitimately not a wire error code, and correctly outside both gates.\n\n⇒ **preventive, not a live defect** — the same disposition the census gave #13478, on the same evidence standard.\n\n## What a round on this would owe\n\nThe discipline the two sibling widenings were held to: census first, then decide. The reconciliation runs in both directions, so any newly admitted value needs a declaration row in `packages/runtime/src/dispatcher-error-vocabulary.ts` and the row cannot land before the widening. The figures above are the census; what is not measured is what a widening would cost in **precision** — the `objlithelper` position already reaches 65 type annotations for every value stamp, and an inline-expression shape would need its own guard against that.\n\nOne cheap observation for whoever takes it: unlike the other two, this position needs no resolver at all. `literalCodeValues` already reduces the expression, so the shape is close to a reduction of the value text between `code:` and the property's terminating comma.\n\n## Family\n\n- #13478 — the lower-case LOCAL feeding an object-literal `code:`. Censused at zero; still open as a declared blind spot.\n- #13430 — `enclosingDeclaration` has no header form for a class PROPERTY holding an arrow. Ended not planned at zero live instances.\n- The ANONYMOUS ARROW declaration form, declared permanently out of reach for a textual scan: no name for a call scan to anchor on.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

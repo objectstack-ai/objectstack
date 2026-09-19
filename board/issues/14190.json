@@ -1,0 +1,35 @@
+{
+  "number": 14190,
+  "kind": "issue",
+  "title": "Publish Smoke's run-list conclusion conflates the weekly registry canary with pack-smoke — a Monday canary green reads as \"the RC smoke passed\" and cost three seats a six-day duration misread",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p3"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-01T11:07:16Z",
+  "updated_at": "2026-09-02T10:38:33Z",
+  "closed_at": "2026-09-02T10:36:52Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14190",
+  "body": "Found while executing the dispatched measurement on #14000. Observation-class instrument gap — no claim on the fix shape; filed unassigned for triage.\n\n## The mechanism\n\n`publish-smoke.yml` multiplexes two jobs with disjoint triggers into one workflow:\n\n- `Packed-tarball smoke (release candidate)` — runs on `workflow_run` after each Release run, iff an open release PR exists.\n- `Registry canary (published latest)` — runs on `schedule` (cron `47 4 * * 1`, Monday 04:47 UTC).\n\nA schedule-triggered run skips `Resolve target` and pack-smoke entirely; when the canary passes, the RUN-LEVEL conclusion is `success`. In the run list this is indistinguishable from \"the release candidate passed its fresh-install smoke\".\n\n## Measured consequence (three independent readers, same misread)\n\n- Run `33358429723` (started 2026-08-31T04:49:46Z, conclusion `success`) is a canary run: its jobs list shows `Packed-tarball smoke: skipped`, `Registry canary: success`, `Resolve target: skipped`.\n- #14000's card body reads that run as \"Last success: 2026-08-31T04:49:46Z\" and derives an outage of ~18h; two triage passes then re-derived ~21.4h and ~22.6h from the same anchor.\n- The last run in which pack-smoke actually RAN and passed is `32844424297` (2026-08-25T11:50:56Z). The first red is `32846258837` (2026-08-25T12:11:42Z). The real outage at filing time is about 7.0 days — the misread hid roughly six days of it.\n\nThe canary green was also SEMANTICALLY misleading in this instance: the canary tests the published packages (plugin-auth 17.2.0, published 2026-08-23), which predate the very change the release candidate is red on — so the one green row in the list was green precisely because it does not test the thing the red rows test.\n\nNote #14000's own trap warning (judge by the commit status on the release-branch head, never by a check-run on a main SHA) does not protect against this one: the commit status answers \"is it red NOW\"; the DURATION question sends every reader back to the run list, where the canary success sits unlabeled.\n\n## Possible directions (triage's call, not pinned here)\n\n- Split the canary into its own workflow file so run-list conclusions are per-surface.\n- Or set a `run-name` that names the executed path (event-conditional), so canary runs are visually distinct in the list.\n- Or answer duration questions from the commit-status history on release heads instead of the run list, and say so in the workflow header comment.\n\nEvidence pointers: runs `33358429723` (canary green, pack-smoke skipped), `32844424297` (last true pack-smoke green), `32846258837` (first red, identical `POST /auth/sign-up/email: expected HTTP 200, got 403` annotation as every red since, sampled through 2026-09-01)."
+}

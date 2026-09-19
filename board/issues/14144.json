@@ -1,0 +1,37 @@
+{
+  "number": 14144,
+  "kind": "issue",
+  "title": "起草 ADR:发布物作为共同所有权边界 —— 一个发布物、物内 N 个包(#14122)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T07:47:26Z",
+  "updated_at": "2026-09-01T09:21:40Z",
+  "closed_at": "2026-09-01T09:21:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14144",
+  "body": "## 裁决(2026-09-01,维护者,逐字)\n\n> 立 ADR 起草卡派发\n\n语境:总监席对 #14122(hotlong,一物 N 包提案)的评估结论为「方案合理,建议接受;应当先写 ADR 再派实现」,维护者以上句批准进入 ADR 起草通道。**终局接受/修订在 ADR draft PR 的人工合并上落定**,本卡只产出 ADR 草案。\n\n## 交付物\n\n`docs/adr/` 新增一篇 ADR(编号取现有最大号 +1,起草时以 `ls docs/adr` 实测为准),主题:**发布物(release artifact)作为共同所有权边界 —— 编译按包、产物一个 JSON、物内保留 N 份 manifest、装载按依赖拓扑序注册 N 个包**。Status: Proposed。\n\n### 必须涵盖(取向已裁,ADR 负责论证与留痕)\n\n1. **Context**:引 #14122 的实测证据(fork 税、Studio 平铺、token 预算无模块边界、CPQ 无可售单元),以及 §2 三条替代路的否决理由(module 标签 = 假模块无边界原语;独立命名空间 = rename-on-install,ADR-0048 明拒;composeStacks = 压平丢身份)。\n2. **Decision 核心原则**:同一发布物内的包由同一发布者原子交付,**物本身即共同所有权声明**——安装闸判据从「同一包 id」修正为「同一物内共同所有者」;⛔ 不新增 manifest owner/publisher 字段(推迟至模块独立成物售卖时,与 ADR-0048 2026-08-08 addendum D2 对齐,记入 Non-goals)。\n3. **对 ADR-0019 的边界记录**:消费者模型一根不动(装一个/开一个/卸一个,D1-D3 原样);发布物停在**控制面**,⛔ 永不成为消费者可浏览/安装/卸载的 suite(D3 苹果论证原样适用);D4「a set of namespaces」原文即容纳本案。按仓内惯例以交叉引用/addendum 记录,⛔ 不改写 0019 原文。\n4. **对 ADR-0048 的闸变更记录**:命名空间独占今天顺带代理着「无两包同名对象」;放宽(§5.4)必须与**安装时逐对象名唯一性检查**(§5.6)同批,且**机器不可拆**——同一 PR 落地 + 一条门测试断言「闸已放宽 ⇒ 唯一性检查存在且拒绝同名对象」。写入 Consequences 作机器判据。\n5. **产物 schema 决策**:`manifest` 单数 → `packages: [...]`,**新增可选键、两种都读**(有 `packages` 遍历,无则把 `manifest` 当单元素列表);前向兼容走既有 `manifest.engines.protocol`;**分段加载的键位在本 ADR 定稿时预留**(不必实现,但格式是最难回头改的决策,#14122 ④)。\n6. **拓扑序为验收条件而非实现细节**:物内包注册必须按依赖拓扑序,**复用 `resolvePluginOrder`**(⛔ 不写第二排序机制);顺序错误静默失效(扩展不生效不报错),必须有测试钉住。\n7. **一物一版**(#14122 ③ 已认):版本矩阵消失、扩展不悬空;代价(不能单独热修模块)如实写入;要单独售卖的模块独立成物。\n8. **兼容性与验收**:存量单 `manifest` 产物经新装载路径**注册结果逐位相同**(包记录、对象 FQN、`_packageId`、命名空间所有者集合)——写成测试的机器判据(#14122 §6.4),不靠 review 判断。\n9. **Consequences 枚举后续实现面**(#14122 §5 表,含 objectui 侧 Studio 选择器另开),实现卡待 ADR 合并后按 ADR 派发,⛔ 本卡不写实现代码。\n\n### 起草纪律\n\n- 先通读 #14122 全文(含修订 1)、ADR-0019、ADR-0048(含 addendum)、必要时 ADR-0003/0005;引用逐字,锚点给文件行号。\n- 总监席已抽查核实的锚点:0019 D4 原文、0048 三处 rename-on-install non-goal、`registry.ts:1456` 多所有者 Map、`registry.ts:3582-3595` 命名空间闸——可直接引用。\n- `docs/adr/**` 是受管面:PR 恒 **draft**,终局为维护者直合或钉头批准入队;⛔ 不入队不转 ready。\n- 遵守 ADR 目录既有格式惯例(读近期两三篇为样);docs-only diff 按仓内惯例决定是否需要 changeset(实测 `--test` 与 lint 门为准)。\n\n## 关联\n\n- 提案与全部实测证据:#14122(hotlong)\n- 总监席评估(四维,长期 ≥50%):见 PM 会话 2026-09-01 记录,结论「合理,建议接受」"
+}

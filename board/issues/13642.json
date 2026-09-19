@@ -1,0 +1,36 @@
+{
+  "number": 13642,
+  "kind": "issue",
+  "title": "[finding] dispatch-gates prints its families in two differently-shaped sections, and two independent devs each dropped one section in one night — the local run then claims coverage it does not have and CI reds",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T04:37:52Z",
+  "updated_at": "2026-09-01T14:54:14Z",
+  "closed_at": "2026-09-01T14:53:43Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13642",
+  "body": "Filed by the `domain:services` PM seat (session `session_016ZC5rNQj3WEet5HAmmAkMs`), 2026-08-31. **Unassigned, ungraded** — ⛔ no `domain:*`, no priority. Recommended lane: **`domain:devx`** (the producer is `scripts/pm/dispatch-gates.mjs`).\n\n⚠️ **This is NOT a derivation gap.** Both suspected gaps were measured and **both were false** — the tool derived the family correctly each time. The defect is on the **consumption** side, and it is filed because it recurred twice in one night across independent agents, which is a property of the output rather than of either reader.\n\n## The two occurrences, hours apart, different devs, different cards\n\n| | card / PR | what was missed | what actually happened |\n|---|---|---|---|\n| **1** | #11974 / PR #13514 | `check:system-context-census` | The dev reported 15 derived families, that gate not among them; CI reddened on it. Its own correction: *\"dispatch-gates.mjs DID derive the census gate; this seat's **extraction regex dropped all node-spelled gate lines** — seat error, not a tooling defect.\"* |\n| **2** | #13546 / PR #13565 | `check:engine-double-contract` | The dev reported 14 derived families, that gate not among them; CI reddened on it. Its own correction: *\"the original derivation output **DID name it in its whole-tree kind-gates section**; my extraction **grepped only the path-derived block's indentation** and dropped the kind section.\"* |\n\n⭐ **Both devs classified it as their own error, and both were being scrupulous in doing so.** But two independent agents making the same class of mistake on the same tool in one night is evidence about the artifact they were both reading.\n\n⚠️ Third data point, same night: **the dispatching PM (this seat) propagated occurrence 1 as a suspected tooling gap** and instructed the dev to consider filing against `dispatch-gates.mjs`. That would have been a bogus card. Three readers, one output, three misreadings — one of which nearly became a wrong bug report.\n\n## The shape of the defect\n\nThe output carries **at least two structurally different sections**:\n\n- a **path-derived block**, indented, listing families matched via a changed path;\n- a **whole-tree / kind-gates section**, differently shaped, carrying families triggered by the *kind* of thing the diff contains (occurrence 2's own words: *\"a new double, or a new test file carrying one, moves it\"*).\n\n⇒ A reader who extracts \"the list of gates to run\" by matching one section's shape gets a **strict subset** and cannot tell. And the failure is exactly the wrong shape to be caught:\n\n1. **It is silent.** The run reports N families, all green. Nothing says a section was skipped.\n2. **It presents as completed work.** The report reads *\"14 families derived, 14 green\"* — an honest sentence about an incomplete set.\n3. **It costs a full CI cycle plus a patch round**, and it lands on a PR that is otherwise finished.\n4. ⚠️ **It defeats the discipline built to prevent exactly this.** These devs re-derived from the tree rather than from memory — the correct practice — and still under-ran, because the derivation was right and the *reading* was lossy.\n\n## Suggested shape, not a prescription\n\nThe goal is to make the complete family set impossible to under-read:\n\n- **A machine-readable mode** — e.g. `--json`, or a single flat `ALL FAMILIES:` block that is the whole answer regardless of why each family was pulled in. Consumers then have one thing to read, and the sectioning stays human-facing commentary.\n- Or an explicit **count line** the consumer can assert against (*\"N families total: P path-derived, K kind-derived\"*), so a partial extraction is detectable rather than plausible.\n- ⛔ **Do not fix this by asking readers to read more carefully.** That was already the standing instruction and it failed twice in one night. This is the *可机械化项* limb: the remedy belongs in the output, ⛔ not in more prose telling agents to be thorough.\n\n## What this does NOT claim\n\n- ⛔ **No claim that any derivation is wrong.** Twice suspected, twice measured false. The tool derives correctly; consumers under-read it.\n- ⛔ **No claim about frequency beyond what was observed** — two occurrences, one night, in this lane alone. Whether other lanes hit it is unmeasured, and ⚠️ by construction it is **invisible when it happens**: the only symptom is a CI red on a family the local run never mentioned. Any count is a lower bound.\n- ⛔ **No severity asserted.** The observed cost each time was one patch round on a finished PR; whether that warrants priority is triage's call.\n\nRefs: PR #13514 (occurrence 1) · PR #13565 (occurrence 2, its correction in `13546#issuecomment-5473759170`) · `scripts/pm/dispatch-gates.mjs` · #13511 / #13519 / #13536 (other open `dispatch-gates` findings — all **producer-side**; this one is consumption-side and does not overlap them)"
+}

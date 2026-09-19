@@ -1,0 +1,36 @@
+{
+  "number": 12311,
+  "kind": "issue",
+  "title": "docs site: frontmatter carries no short sidebar label — one title serves SERP, h1, nav and llms.txt",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:blocking"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T17:24:37Z",
+  "updated_at": "2026-09-01T09:38:10Z",
+  "closed_at": "2026-09-01T02:20:34Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12311",
+  "body": "## One-liner\n\nA doc page's frontmatter `title` is simultaneously the SERP `<title>`, the on-page `h1`, the sidebar/nav label and the `llms.txt` entry — consumers with different length budgets, all served by one string. There is no separate short label for navigation.\n\n> ⚠️ **Body repaired 2026-09-01.** The original text was lost to a sanitizer truncation on write — it ended mid-sentence at ``the SERP ` ``, flagged by triage in `issuecomment-5414435717` and unrepaired for seven days while #12237 sat blocked on this card. The text below is a **re-measurement from `origin/main`, not a recovery of the original**; angle-bracketed tokens are in backticks so the write survives. The filer (@os-zhuang) or the #12243 epic PM should correct anything the original carried that this misses.\n\n## Measured — `origin/main` @ `479ace6`, 2026-09-01\n\nEvery page carries exactly two frontmatter keys, and neither is a nav label:\n\n```\nfrontmatter keys across content/docs/**/*.mdx     n = 405 pages\n  title:        405\n  description:  405\n  (no other key appears on any page)\n```\n\nTitle length on the same tree:\n\n| metric | value |\n|---|--:|\n| pages | 405 |\n| median title length | 14 |\n| titles <= 20 chars | 327 |\n| titles carrying ` — ` | 7 |\n| titles in the 50–60 band | **0** |\n| longest title | 42 |\n\n## The consumers of `page.data.title`\n\n`apps/docs/source.config.ts` uses the stock `pageSchema` from `fumadocs-core/source/schema`, so `title` is the only string any of these can read:\n\n| consumer | site |\n|---|---|\n| SERP `<title>` | `apps/docs/app/[lang]/docs/[[...slug]]/page.tsx:211` (`generateMetadata`) |\n| on-page `h1` | `page.tsx:150` — `<DocsTitle>{page.data.title}</DocsTitle>` |\n| sidebar / nav tree | `apps/docs/lib/source.ts:6` — `loader()` builds the page tree from the same `title` |\n| `llms.txt` | `apps/docs/app/llms.txt/route.ts:10` |\n| OG card image | `apps/docs/app/og/docs/[...slug]/route.tsx:18` |\n| JSON-LD `BreadcrumbList` + `headline`/`name` | `page.tsx:95`, `:123`, `:124` |\n\n⇒ The card's title says four; the measurement says **six**. The two extra — the OG card and the JSON-LD — are the ones a title-lengthening PR would reshape without anyone noticing.\n\n## Why this blocks #12237\n\n#12237 wants 50–60 character titles carrying search intent. **4 of its 180 rows have landed** (PR #12312, commit `e18c870b`), and the commit message names the reason it stopped there: *\"four **sidebar-free** page titles\"*. A page with no sidebar entry can take a long title immediately; the remaining 176 cannot, because the same string is the nav label — lengthening them makes the sidebar unreadable.\n\n⇒ This card is the **enabling half**: give the frontmatter a short nav label and #12237's 176-row table applies on top. #12237 records that dependency as `Blocked-by: #12311`.\n\n## What the work is\n\nThree sub-questions, none pre-judged here:\n\n1. **Where the short label lives** — a new frontmatter key (`navTitle` / `sidebarTitle`), or a per-page override in the 35 existing `content/docs/**/meta.json` files. Both are real; the meta.json route needs no schema change but splits the label away from the page it names.\n2. **How it is wired** — `source.config.ts` already demonstrates the extension pattern in this repo (`blogSchema = pageSchema.extend({ … })`), so a schema extension plus a page-tree transform in `apps/docs/lib/source.ts` is the shape. `fumadocs-core` is pinned at `16.14.4`; check whether it offers a first-class hook before adding a custom transform.\n3. **What happens when the key is absent** — the fallback must be `title`, so all 405 pages keep working on day one and a label is added only where a title has been lengthened.\n\n## Acceptance\n\n- [ ] a doc page can declare a nav label distinct from its `title`, with `title` as the documented fallback\n- [ ] the sidebar renders the short label; SERP `<title>`, `h1`, `llms.txt` and the OG card keep reading `title`\n- [ ] the mechanism is written down somewhere #12237's 176-row rewrite can cite\n- [ ] `pnpm check:doc-anchors` and the link checker stay green\n\n## Parent / downstream\n\nParent: **#12243** (epic — docs-site indexability, p0). Downstream: **#12237** (`pm:blocked`, `Blocked-by: #12311`, p1 — 176 rows waiting on this).\n"
+}

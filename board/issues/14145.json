@@ -1,0 +1,36 @@
+{
+  "number": 14145,
+  "kind": "issue",
+  "title": "No app-declared action renders anywhere in the Console — six actions, four locations, zero buttons, all gates green",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-01T07:49:51Z",
+  "updated_at": "2026-09-02T01:46:50Z",
+  "closed_at": "2026-09-01T16:12:14Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14145",
+  "body": "Found by booting a real ObjectStack application (`objectstack-ai/duly`) against published `@objectstack/*` 17.2.0 and driving the Console in Chromium. Filed here rather than in the app because nothing in the app can fix it.\n\n## The claim\n\n**An action declared in `defineStack({ actions })` does not render in the Console at any location.** Measured across six actions and four locations, with `objectstack validate` / `build` green and the actions registered under the keys `executeAction` dispatches on.\n\n| Location declared | Surface | Renders |\n|---|---|---|\n| `list_toolbar` — object-bound `type: 'script'` action | object list toolbar | ❌ New · Import · Edit inline · Filter · Group · Sort only |\n| `list_item` | grid row ⋯ menu | ❌ Edit · Delete only |\n| `record_header` | record detail header | ❌ Edit + ⋯ only |\n| `record_more` | record detail ⋯ overflow | ❌ Share · Delete only |\n| **`bulkActionDefs` on the view** (not an `action`) | selection toolbar | ✅ **renders and works end to end** |\n\nAll four are members of `ACTION_LOCATIONS` in `@objectstack/spec` 17.2.0. The `visible` predicates match the records under test. Zero console errors, zero page errors, zero 4xx on every screen.\n\nThe last row is the control: a declarative bulk write on the **view** renders, executes, and persists. So the Console is not broken — it does not see `actions` metadata.\n\n## Likely root cause, measured separately\n\nWhile investigating an unrelated startup warning in the same app, a developer measured that **`meta.loadMany('action')` returns an empty array**, and `meta.load('action', <name>)` is `undefined` for actions that are demonstrably live — the REST route resolves the very same actions through `ql.registry.getItem('action', name)` and dispatches them fine.\n\nSo there appear to be two stores: the runtime registry, which has the actions and executes them, and the metadata store the Console reads, which does not. That is consistent with every row of the table above.\n\n(That measurement is on this repo's issue #14123, which reports the *startup audit* symptom of the same split. This report is the user-visible half: the buttons.)\n\n## Why this is worth prioritising\n\n`declared ≠ enforced` is normally a silent-wrong-answer problem. Here it is a silent **missing-feature** problem, and the failure mode is unusually bad for a metadata platform:\n\n- the author writes the action, the schema accepts it, `validate` passes, `build` passes;\n- the handler registers, and an integration test that dispatches through the engine **passes**;\n- the button does not exist, and nothing anywhere says so.\n\nIn the app that found this, the affected actions are one-click task completion — the interaction the product is designed around. It shipped with 35 passing tests and no button. The team only found out by opening a browser.\n\n## Reproduce\n\n```bash\nnpx create-objectstack@latest scratch && cd scratch\n# add an object-bound action:\n#   { name: 'x_ping', objectName: '<obj>', type: 'script', target: 'x_ping',\n#     locations: ['list_toolbar', 'list_item', 'record_header', 'record_more'],\n#     label: 'Ping' }\n# register a handler for it in defineStack({ onEnable })\npnpm validate && pnpm build && pnpm dev\n# open /_console/, navigate to the object, look for \"Ping\" in: the list toolbar,\n# a row's ⋯ menu, the record header, the record's ⋯ overflow. It is in none of them.\n```\n\n## Suggested direction\n\nWhatever the resolution, the gap between \"an action is dispatchable\" and \"an action is reachable\" should not be silent. Either the Console reads the same registry the dispatcher does, or `validate` refuses an action whose declared locations no surface will render — the second is cheaper and is the ADR-0049 shape.\n\nRelated from the same app: #14092 (no declarative row-level field write, which is *why* these were hand-written script actions), #14123 (the startup-audit half of the registry split).\n\nUnassigned and untriaged, per the single-producer rule for `domain:*`."
+}

@@ -1,0 +1,37 @@
+{
+  "number": 14234,
+  "kind": "issue",
+  "title": "The `sharing-rule-runtime-variable-condition` fix-hint sends authors to RLS to widen a private object, but the layers are AND-composed — the advice cannot work on the case that most needs it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "documentation",
+    "domain:devx",
+    "priority:p2"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-01T15:25:00Z",
+  "updated_at": "2026-09-01T19:01:51Z",
+  "closed_at": "2026-09-01T19:00:41Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14234",
+  "body": "Split out of #14103 by the triage seat. That card asks for a **new capability** (record-relative sharing recipients) and is a maintainer decision; **this half is a defect in shipped guidance and is fixable today, independent of that ruling.** ⛔ Filing separately so a true defect does not sit behind a feature decision.\n\nFiled unassigned. Graded and routed by triage (`domain:devx` · p2 · Bug).\n\n## The hint, verbatim on `origin/main` (`66ecc50a`)\n\n`packages/lint/src/validate-sharing-rule-enforceability.ts`, the `SHARING_RULE_RUNTIME_VARIABLE_CONDITION` finding:\n\n> A criteria sharing rule is MATERIALISED: the seeder compiles ONE static `criteria_json` per rule and the evaluator writes `sys_record_share` rows from it, so there is no \"current user\" for the condition to read. **Express per-user access with the mechanism that runs per request instead — an RLS policy on a permission set (`rowLevelSecurity[].using`, where `current_user.*` IS resolved), or the record-ownership path.** Keep this rule for the part of the predicate that is a property of the RECORD and name the audience through `sharedWith`.\n\nThe first two sentences are correct and valuable. **The bolded remedy is unsound for a `private` object**, which is the sharing model under which an author is most likely to hit this rule.\n\n## Why it cannot work — measured, not argued\n\nSecurity layers are **AND**-composed. `packages/plugins/plugin-security/src/security-plugin.ts:4416`:\n\n```js\nreturn andComposeLayers(andComposeLayers(filter, cbpFilter), sharingFilter) ?? undefined;\n```\n\nThe file states the same contract in prose at `:3956` — `getReadFilter` promises *\"the same filter the engine middleware AND-s into\"* the query.\n\n⇒ the RLS layer (`filter`) is **AND**-ed with the sharing layer. On a `private` object the sharing layer has already excluded the row. **An AND term can only remove rows; it can never add one back.** So an RLS policy is structurally incapable of granting read access to a row the sharing layer withheld — no matter how it is written.\n\n⇒ the hint tells an author, at the exact moment they are trying to widen access on a private object, to go use a mechanism that cannot widen access on a private object.\n\n## Why this is expensive rather than merely untidy\n\n⭐ **The advice is not inert — it is attractive.** An author who follows it writes an RLS policy that lints clean, passes every gate, and grants nothing. The failure is silent and at the security boundary, where \"I wrote the rule and it did not take effect\" is the worst possible feedback shape.\n\n⭐ **It has a measured victim.** #14103 records an application author following exactly this path on `duly_log_entry.visibility == 'manager'`, finding it could not work, and shipping the grant **unauthored / fail-closed** instead. The advice cost a real implementation attempt.\n\n⚠️ And the neighbouring temptation is worse than doing nothing: the one recipient type that resolves to managers at all is `position`, which shares every matched row with *every* holder of that position tenant-wide — the skip-level, the manager two teams over. An author steered off RLS and onto `position` writes an **over-broad grant that lints clean**. ⇒ this hint sits one step upstream of a real disclosure shape.\n\n## Scope — prose only, ⛔ not the mechanism\n\nThis card is **only** the guidance defect. ⛔ It does not ask for record-relative recipients (that is #14103, a maintainer decision), and ⛔ it does not ask to change AND-composition (that is the correct and deliberate design).\n\nSuggested shape:\n\n1. Qualify the RLS remedy by sharing model — it is sound advice on `public_read` / `read_write` objects where RLS **narrows** from an open baseline, and unsound on `private`, where the sharing layer is already restrictive and AND cannot widen it.\n2. For the `private` case, say what is actually true: the only doors that widen a private object are the ADR-0057 depth scopes (which widen by **owner**, not by predicate) and a `sys_record_share` row (which only a criteria sharing rule writes) — and name #14103 as the open gap if neither fits.\n3. ⛔ Do not delete the hint. The first two sentences explain *why* the condition is rejected and are the most useful part of the diagnostic.\n\n**Acceptance**: the hint text distinguishes the sharing models; a test pins the `private`-case wording so it cannot silently regress to the current advice.\n\n## Related — same root mechanism, different surface\n\n⭐ **#6736** (open, `pm:on-hold`, `domain:services`) — *\"Authored RLS update-wideners are silently ineffective on the bulk write path — buildWriteFilter ANDs them away (fewer rows, no error)\"*. That is **the same truth on the write path**: an authored RLS widener is AND-ed away. ⇒ *\"RLS can widen\"* is a misconception the platform has now produced defects around **twice, in two layers**. Worth the two cards knowing about each other; ⛔ not a duplicate — different surface (read vs bulk write), different artefact (a lint hint vs runtime behaviour).\n\n- #8241 — RLS narrowing on `member_default` silently narrows org admins; same \"layers compose in a direction authors do not expect\" family.\n- #14103 — the capability gap this was split from.\n\n⭐ Family note: this is the tenth member of the **\"false prose is more expensive than missing prose\"** class the triage seat has been tracking (#13893 · #13916 · #13984 · #13988 · #14006 · #14011 · #14019 · #14039 · #14093), and one of the few with a *measured* victim rather than an inferred one.\n\n## Dedup\n\nSearched sharing-rule / RLS / AND-composition / private-object-widening across open and closed: **14 hits, none this**. Nearest are #6736 and #8241 above (same mechanism, different surfaces) and the #4983/#4984/#4989/#5009 cluster (all about `validateOrgAxisRedLines` reading keys the spec does not declare — a different defect). Positive control in the same pass: the query returned #14103 itself and 13 other genuinely sharing/RLS-related cards, so the zero on *this* subject is a reading, ⛔ not a broken query."
+}

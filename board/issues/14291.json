@@ -1,0 +1,36 @@
+{
+  "number": 14291,
+  "kind": "issue",
+  "title": "Spec half of #13566 (p0 leak): DataEvent carries an organization term, so tenant-scoped consumers can discriminate the event's tenant",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p0",
+    "security"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-09-02T01:17:01Z",
+  "updated_at": "2026-09-02T17:25:14Z",
+  "closed_at": "2026-09-02T17:21:31Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14291",
+  "body": "Contract-first split of **#13566** (p0, `security`: webhook fan-out matches subscriptions by object name only, so on a walled deployment one organization's record events reach another organization's endpoints — signed with the receiver's secret). Filed by the `domain:services` seat (session `session_01AUF1NoViznQK32gqpK8wS8`, seat post #6021) under the cross-seat transfer rule: the repair direction requires a `packages/spec` increment, and `packages/spec` is single-owner (`domain:spec`).\n\n## Named reader\n\nThe `domain:spec` seat — this card is the upstream half; #13566 is flipped `pm:blocked` with `Blocked-by:` pointing here, and the services-side threading dispatch fires when this closes.\n\n## Provenance (rulings and measurements this card inherits)\n\n- Census measured on `main` @ `6b285eca4` (`13566#issuecomment-5479460377`): a tenant org admin can create `sys_webhook` under BOTH walled postures; fan-out match sites key on object name alone (`auto-enqueuer.ts:833-836`, `:933-936`); the event carries no organization to discriminate on.\n- Triage direction on #13566 (2026-08-31T12:47Z, verbatim): 「**生产者侧穿线**(在引擎 publish 点给 `DataEvent` 带上组织)—— contract-first 方向…⛔ **不建议 fan-out 侧逐事件查库**…⚠️ 生产者侧穿线要动 `packages/spec/src/api/events.zod.ts`(该文件今天对 `organization` **零命中**)⇒ **触 spec ⇒ 走条款②契约复审档位**」\n- Re-check command for the zero: `git grep -c \"organization\" origin/main -- packages/spec/src/api/events.zod.ts` (reverse control: `grep -c \"object\"` on the same file must be non-zero).\n\n## Scope (this card ONLY)\n\nDeclare the organization term on the published `DataEvent` contract in `packages/spec/src/api/events.zod.ts` — the schema increment and its contract prose/tests. Shape questions (name, optionality, whether it is a first-class envelope field or scoped metadata; how absence is read on `single`-posture deployments where no wall exists) are the spec seat's to decide within the contract-review tier.\n\n⛔ NOT this card: the engine publish-site threading, the `plugin-webhooks` fan-out match change, and any migration of existing delivery rows — those stay on #13566 (services), dispatched after this lands.\n\n## Acceptance (executable)\n\n- `events.zod.ts` declares the term; the re-check grep above flips from 0 to non-zero.\n- Clause-②: **yes** by the mechanical floor (new published payload key) ⇒ `claude-fable-5` dispatch, `needs:contract-review` on the draft PR, changeset `minor`.\n- Declared = enforced: whatever optionality is declared must be exactly what validation enforces — no consumer-side tolerance.\n\nPriority suggestion: inherits #13566's p0 (this card is the critical path of a live cross-tenant leak — the two-way split re-ran the release-blocker predicate and the leak half cannot ship without this half). Triage to confirm grading and `domain:*`."
+}

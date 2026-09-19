@@ -1,0 +1,37 @@
+{
+  "number": 14108,
+  "kind": "issue",
+  "title": "App navigation `viewName` is never resolved against the target object's `listViews` — a typo silently lands the user on the default view",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-01T05:30:11Z",
+  "updated_at": "2026-09-02T00:49:36Z",
+  "closed_at": "2026-09-02T00:48:42Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14108",
+  "body": "Measured on `@objectstack/cli` 17.2.0 from a real app (`objectstack-ai/duly`).\n\n## Reproduction\n\nA nav entry in `App.create({ navigation })`:\n\n```ts\n{ id: 'nav_schedule', type: 'object', objectName: 'duly_task', viewName: 'schedule', label: 'Schedule', icon: 'gantt-chart' }\n```\n\nMutate `viewName: 'schedule'` → `viewName: 'A4_no_such_view'` (confirmed on disk: injected 1, remaining 0), leaving the object and every view declaration untouched:\n\n```\nos validate --json  →  { \"valid\": true, \"warnings\": [], \"errors\": null }\n```\n\nNo error, no warning. `os build` is green too.\n\n## Why it is not harmless\n\n`AppNavigationItemSchema.viewName` is documented as *\"Default list view to open. Defaults to 'all'.\"* — so an unresolvable name does not fail, it **falls back**. The nav item keeps its authored label and icon and opens a different view: the \"Schedule\" entry opens the plain grid. Nothing anywhere says the named view was not found, and the failure is invisible in review because the label still reads correctly.\n\nThis is the same class the platform already gates one door over: #2554's `lintViewRefs` exists because *\"a `type:'form'` action target naming a missing or LIST view opens a broken form at runtime\"*. Navigation is the other, more-travelled reference into the same `listViews` namespace, and it is unchecked.\n\nIt also bites hardest exactly where views are being added — a rename of a list view leaves every nav entry pointing at it silently degraded, with all four gates green.\n\n## Suggested fix\n\nExtend `lintViewRefs` (`packages/lint/src/lint-view-refs.ts`) to walk `app.navigation` recursively (`type: 'group'` children included) and, for each item with both `objectName` and `viewName`, resolve the pair against the stack's views:\n\n- `objectName` names no object in the stack → error (probably already covered elsewhere; worth confirming);\n- `viewName` names no entry in that object's `listViews` (and is not the `list` default) → error, with the available view names listed the way `REACT_CHART_FIELD_UNKNOWN` lists object fields.\n\nSame treatment for the `runAction` / `recordId` variants if they carry equivalent unresolvable references.\n\n## Workaround in the meantime\n\n`objectstack-ai/duly`'s `test/views.test.ts` asserts every nav `viewName` resolves against the declared `listViews`. Written to be deleted when this ships.\n"
+}

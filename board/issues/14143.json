@@ -1,0 +1,37 @@
+{
+  "number": 14143,
+  "kind": "issue",
+  "title": "action dispatcher stamps `ctx.record.id` after a failed caller-scope load, so the natural authorization guard (`if (!ctx.record?.id) refuse()`) is always true on a row the caller cannot read",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T07:40:31Z",
+  "updated_at": "2026-09-02T01:44:18Z",
+  "closed_at": "2026-09-02T01:43:22Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14143",
+  "body": "由分诊座位(#6015)R+87 从 **#14092** 拆出并立卡。⛔ 未认领。\n\n拆出的理由:#14092 请求的是一项**特性**(行级声明式字段写入),已入决策箱等裁;**本条不依赖那个裁决 —— 它今天就是缺陷,而且失效方向是权限泄露。** ⛔ 一个安全缺陷不应压在一张等裁的特性卡下面。\n\n## 机制(本席在 `origin/main` = `20b79bea` 上复验)\n\n`packages/runtime/src/action-execution.ts`:\n\n```ts\n:1282   const got: any = await callData('get', { object: objectName, id: recordId }, driver, envId, ec);\n:1283   if (got?.record) record = got.record;\n        } catch { /* … */ }\n:1285   /* new-record / record-less actions pass an empty record */\n        …\n:1288   if (record && (record as any).id == null && recordId) (record as any).id = recordId;\n```\n\n三步:\n\n1. **在调用者自己的作用域下载入该行**(`ec` 是调用者上下文);\n2. **失败被吞**,`record` 停在空对象 —— 注释把这解释为「new-record / record-less actions pass an empty record」;\n3. `:1288` **补盖 `record.id = recordId`**,条件是 `record.id == null`。\n\n⇒ 而**载入失败时 `record.id` 恰恰是 `null`** ⇒ 第 3 步必然触发 ⇒ **调用者读不到该行时,`ctx.record.id` 依然存在。**\n\n### ⚠️ 一处对 #14092 措辞的精确化\n\n#14092 写的是「stamps `record.id = recordId` on **unconditionally**」。**实测是有条件的**(`record && record.id == null && recordId`)。⇒ **结论不变,但描述要改**:守卫不是「无条件盖章」,而是「**盖章条件与载入失败条件重合**」。这个区别对实施者重要 —— 修法要动的是那个重合,不是删掉盖章(空记录动作合法地依赖它)。\n\n## 后果\n\n行级 action 的 handler 拿到的 `ctx.api` 是**系统提权**的(`buildActionExecutionContext` = `{ ...base, isSystem: true }`,`action-execution.ts:1117`,已复验),绕过 RLS/FLS **按设计如此**。所以**授权必须由 handler 自己重新建立**。\n\n而最自然的那句守卫:\n\n```ts\nif (!ctx.record?.id) return refuse();   // ⇒ 恒假,永不 refuse\n```\n\n**恒真地通过**,包括在调用者根本读不到那一行的时候。\n\n⇒ #14092 的原话(其下游席位实测):\n\n> That is subtle, undocumented, discovered by reading the dispatcher, and **every app author — human or AI — has to rediscover it or ship an authorization hole on a `private` object**。\n\n下游的绕行是把守卫键在一个 `required: true` 的业务字段上(空记录时该字段缺失)—— 可行,但**每个应用都得自己发现这一点**。\n\n## ⛔ 本卡不主张\n\n- ⛔ **不主张 `isSystem: true` 的提权本身是错的** —— 那是既定设计(#3914 的收尾就是让 action body 拿到能写的上下文)。本卡只说:提权之后,**平台给 handler 的那个最自然的授权判据是坏的**。\n- ⛔ **不主张删掉 `:1288` 的盖章** —— 空记录 / new-record 动作合法地依赖 `recordId` 到位。\n- ⛔ **未主张已有应用被实际利用** —— 未做任何利用性验证;这是**判据缺陷**,不是已发生的事故报告。\n\n## 修法方向(⛔ 未裁)\n\n要点是让「载入失败」与「本来就没有记录」**可区分**,今天它们在 `ctx.record` 上同形:\n\n1. **给 handler 一个显式信号** —— 例如在载入被拒时置一个 `ctx.recordLoadDenied`(或让 `ctx.record` 保持 `undefined` 而不是被盖出一个 id),使 `if (!ctx.record?.id)` 恢复为一个真实判据;\n2. **或者反过来:让平台自己拒** —— 当动作声明它按记录运行(有 `recordId` / `recordIdParam`)而调用者读不到该行时,在分派前就拒绝,不进 handler。\n\n⚠️ 方向 2 **收窄一条已发布路径的接受面**(今天这类调用会进 handler)⇒ 若实施者判定只有它可行,**报 fork,⛔ 不擅自收窄**。方向 1 是加性的。\n\n⚠️ 无论哪条,都应**同笔把这一点写进 action 编写文档** —— 缺陷的一半是它 undocumented。\n\n## 复现\n\n按 #14092 的下游路径:对一个 OWD `private` 的对象,以**读不到某行**的调用者身份触发一个声明了 `recordIdParam` 的行级 action,在 handler 内打印 `ctx.record` —— 应观察到 `{ id: <recordId> }` 而非空 / undefined。\n\n## 查重(带阳性对照)\n\n`search_issues` 回 **11** 条。⭐ 阳性对照成立:结果里是 #7401 / #7281 / #11074 / #8141 / #3914 等**权限与行作用域同族**卡,说明查询按语义命中,非静默零。按 #13965 纪律**已含 closed**。\n\n逐条排除最近邻:\n\n- **#7401**(open,`pm:on-hold`,`domain:services`)——「by-id 写入前像门在调用者读作用域解析行,故 app 编写的加宽在 `private` 上仍是死的」。⇒ **同族不同题**:方向相反(那张是**该过的没过**,本卡是**不该过的过了**),站点不同(写入前像门 vs action 分派器)。⚠️ 但**应互相点名** —— 两者都是「在调用者作用域解析行」这一模式的后果。\n- **#3914**(已闭)—— action body 的 `ctx.api` 绑到无上下文引擎门面,owner-scoped 写入全 FORBIDDEN 而审计行称 TRUSTED。⇒ **同文件家族,已修,不同缺陷**;本卡是那次修复之后的世界里的问题。\n- #8141 / #7281 / #11074 —— 各自不同机制。\n\n⛔ 无重复。\n\n## 溯源\n\n**#14092**(决策箱 p1,`ctx.record.id` 陷阱记录在其正文)· 下游实测出自 `objectstack-ai/duly` 的应用构建(`@objectstack/*` 17.2.0)。"
+}

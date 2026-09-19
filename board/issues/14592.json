@@ -1,0 +1,34 @@
+{
+  "number": 14592,
+  "kind": "pull_request",
+  "title": "fix(ci): make the diagnostics-only run-summary upload non-fatal",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T13:51:53Z",
+  "updated_at": "2026-09-02T14:57:26Z",
+  "closed_at": "2026-09-02T14:57:24Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-09-02T14:57:24Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/14592",
+  "body": "Fixes #14469\n\n## What\n\n`.github/workflows/ci.yml` — the `Publish this shard's turbo run summary` step (`:602`) now\ncarries `continue-on-error: true`, and its docblock gets a new paragraph explaining why, so\nthe next reader does not \"tidy\" it back.\n\nPer the triage's ⭐ sentence:\n\n> ✅ **Queue the diagnostics half.** Give the `:602` step `continue-on-error: true` (or the\n> equivalent) so a 403 on a 313-byte summary upload cannot abort a shard ahead of its\n> attestation. ⭐ This **cannot weaken #6082**: the credential steps come after, still run,\n> and still must succeed — the gate's reading is unchanged. It removes one path by which a\n> fully green shard is evicted, and nothing else.\n\n## Why\n\nShard 2/6 was lost on a diagnostics-only upload (`if: always()` + `if-no-files-found:\nignore`, i.e. not load-bearing) that was still, being unguarded, on the shard's pass/fail\npath: a failed *finalize* on the artifact service (`FinalizeArtifact` 403 on this build, the\ncontent already stored) aborted the job before the attestation pair ever ran, so the\nfail-closed aggregator correctly read a missing credential and evicted a fully green shard\nfrom the merge queue.\n\n## What is unchanged (verified)\n\n- `git diff --stat` is exactly one file:\n  ```\n  .github/workflows/ci.yml | 15 +++++++++++++++\n  1 file changed, 15 insertions(+)\n  ```\n- The attestation pair (`Attest this shard ran and passed` + `Publish this shard's\n  attestation`, the job's last two steps, `:717-724`) — byte-for-byte unchanged, no `if:`,\n  no `continue-on-error`, still the job's LAST TWO steps.\n- `scripts/check-shard-attestation.mjs` — byte-for-byte unchanged (`git diff origin/main --\n  scripts/check-shard-attestation.mjs` is empty; it has zero references to\n  `continue-on-error` and does not read this step).\n- No retry was added anywhere (the attestation upload's 403 is reported `non-retryable` by\n  the action, and the lint forbids a step appended below it — out of scope for this card\n  per the triage's ⛔ fence).\n- No step reordering.\n\n## Not in scope (per triage fences)\n\n- ⛔ Not touching `check-shard-attestation.mjs` or the aggregator (`test-gate` /\n  `Verify test shard results`) — fail-closed on a missing credential is the designed and\n  correct reading.\n- ⛔ Not \"fixing\" shard 5/6's failure (the attestation upload itself) — that is the half\n  deliberately left alone here; #14469 is not addressed for that shard, only for the\n  diagnostics-upload eviction path.\n\n## Gates\n\n`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --commands` derives\n27 commands for this path (`.github/workflows/ci.yml`) at merge-base f60ab90ae; all 27 run\nagainst head abbf1687c (working tree confirmed byte-identical to HEAD before running — `git\ndiff HEAD` empty). `--ran` reconciliation: 27 derived, 27 run, 0 UNRUN (exit 0).\n\n25 RAN-PASS, 2 NOT-MEASURED (both PREREQUISITE-NOT-MET, not red — evidence below):\n\n```\nnode scripts/check-aggregator-roster.mjs            RAN-PASS\nnode scripts/check-ci-filter-parity.mjs              RAN-PASS\nnode scripts/check-cross-package-test-inputs.mjs     RAN-PASS\nnode scripts/check-position-name-fold-loaders.mjs    RAN-PASS\nnode scripts/check-required-contexts.mjs             RAN-PASS\nnode scripts/check-self-test-wired.mjs               RAN-PASS\nnode scripts/check-self-test-workflow-commands.mjs   RAN-PASS\nnode scripts/check-shard-attestation.mjs             RAN-PASS\nnode scripts/check-step-collectors.mjs               RAN-PASS\nnode scripts/check-test-completeness.mjs             NOT-MEASURED (no saved test log to grade — CI tees one; local run has none)\nnode scripts/check-whole-set-label-write.mjs         RAN-PASS\nnode scripts/docs-audit/check-drift-comment.mjs      RAN-PASS\nnode scripts/pm/ci-failure.mjs --self-test           RAN-PASS\npnpm check:agent-test-spelling                       RAN-PASS\npnpm check:console-injection                         RAN-PASS\npnpm check:console-sha                                RAN-PASS\npnpm check:declared-population-live                  RAN-PASS\npnpm check:dual-build-cjs-loads                      NOT-MEASURED (reads dist/ — full monorepo build out of scope for a workflow-only diff)\npnpm check:node-version                              RAN-PASS\npnpm check:pm-dispatch-gates                          RAN-PASS (1240 cases pass; run via os-verify-lock.sh, detached, ~14m11s held)\npnpm check:pnpm-acquisition                           RAN-PASS\npnpm check:pnpm-filter-targets                        RAN-PASS\npnpm check:required-contexts                          RAN-PASS\npnpm check:shard-attestation                          RAN-PASS\npnpm check:stall-guard-budget                         RAN-PASS\npnpm check:stall-guard-headroom                       RAN-PASS\npnpm check:workflow-status-functions                  RAN-PASS\n```\n\nskip-changeset: no package publishes — diff is `.github/workflows/ci.yml` only (label\nrequested on this PR).\n\nNote: `origin/main` advanced 7 commits during this run (to 7085f9053) but none touched\n`.github/workflows/ci.yml`, `scripts/check-shard-attestation.mjs`, or the dispatch-gates\ntooling — `git log f60ab90ae..origin/main -- .github/workflows/ scripts/check-shard-\nattestation.mjs scripts/pm/dispatch-gates.mjs` is empty, so this card's file surface and\nderived gate set are unaffected; not rebased.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01WLJQhde67SeTccsmnBVarV\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WLJQhde67SeTccsmnBVarV)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 14370,
+  "kind": "pull_request",
+  "title": "fix(lint): inspect runAs:'system' flows on the readonlyWhen branch (#14201)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T03:20:44Z",
+  "updated_at": "2026-09-02T04:29:58Z",
+  "closed_at": "2026-09-02T04:29:56Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-09-02T04:29:56Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/14370",
+  "body": "Fixes #14201\n\n## What changed\n\n`packages/lint/src/validate-readonly-flow-writes.ts` carried the `runAs:'system'`\nexemption as a single **flow-level** early return, so an elevated flow left the walk\nbefore either branch of the rule could judge it. That skip now gates the **static\n`readonly` branch only**; the `readonlyWhen` branch inspects a `runAs:'system'` flow\nlike any other, at its existing `warning` severity. Rule ids and severities are\nuntouched.\n\n```diff\n-    if (flow.runAs === 'system') return;\n     const runAs = flow.runAs === 'user' || flow.runAs === 'system' ? flow.runAs : 'user';\n+    const isSystemRun = runAs === 'system';\n...\n-        if (meta.readonly) {\n+        if (meta.readonly && !isSystemRun) {\n```\n\nA field declaring **both** flags therefore falls through to the conditional branch\nunder `runAs:'system'` — which is the truth about that write: the static strip is\nskipped, the conditional one is not.\n\n## Engine authority (verified on `origin/main`, not recalled)\n\n`packages/objectql/src/engine.ts`, the by-id update path — the conditional strip runs\nwith no guard, and the note at the call site says so:\n\n```\n// [#9107] ... The API-boundary lock is unchanged - a caller cannot make its own\n// value look hook-written (see `ReadonlyWhenStripOptions`) - and `isSystem`\n// is still NOT an exemption here, unlike the static strip below.\nhookContext.input.data = stripReadonlyWhenFields(updateSchema as any, preRoWhen, priorRecord, this.logger, roWhenParent, { supplied: suppliedValues }) as any;\n```\n\nThe static strip, twenty lines below, is the one an elevated caller really does bypass:\n\n```\nif (!opCtx.context?.isSystem) {\n    const preRo = hookContext.input.data as Record...;   // elided: a generic type argument, spelled out here to keep angle brackets out of this body\n    hookContext.input.data = stripReadonlyFields(updateSchema as any, preRo, suppliedValues, this.logger, { ... }) as any;\n```\n\nThe bulk path (`stripReadonlyWhenFieldsMulti` / `stripReadonlyFields`) is split the\nsame way, so the asymmetry is not a by-id accident. Pinned from both sides:\n`engine-readonly-when-derived-writes.test.ts` line 195, *\"LOCK 2 - isSystem does NOT\nexempt a caller-supplied value (Option B stays rejected)\"*, and\n`engine-readonly-strict-writes.test.ts`.\n\nThe rule's own header already recorded this gap (\"the skip above is therefore WIDER\nthan the conditional lock warrants ... Left as-is deliberately\") — that paragraph is\nnow rewritten to describe the split it documents. The action sibling\n`validate-readonly-action-writes.ts` was born with exactly this shape: an action body\nis system-elevated by design, so it carries the conditional half and only that half.\n\n## Tests\n\n`packages/lint/src/validate-readonly-flow-writes.test.ts` — 5 new cases, existing ones\nkept:\n\n- **positive**: a `runAs:'system'` flow whose `update_record` writes a `readonlyWhen`\n  field ⇒ one `warning` on `flow-update-readonly-when-field`, message naming the run\n  identity it was judged under;\n- **negative kept and re-titled**: a `runAs:'system'` flow writing a static\n  `readonly:true` field ⇒ still silent;\n- a system node writing both kinds plus a plain field in one payload ⇒ the conditional\n  half only, no error;\n- a field declaring `readonly` **and** `readonlyWhen` ⇒ warning under system, error\n  under user;\n- nested-region reach and `create_record` exemption, both under `runAs:'system'`.\n\n## Commands run (all at head `8b99b5c2d`, exit codes captured before any pipe)\n\n| command | exit |\n|---|---|\n| `pnpm --filter '@objectstack/lint^...' build` | 0 |\n| `pnpm --filter @objectstack/lint test` | 0 — 93 files, 2720 passed / 5 skipped |\n| `pnpm --filter @objectstack/lint typecheck` | 0 |\n| `node scripts/pm/dispatch-gates.mjs --commands` union (33 families) | 30 exit 0, 3 exit 3 |\n| `node scripts/pm/dispatch-gates.mjs --ran` | 0 — 33 derived, 33 run, 0 UNRUN |\n\nThe three exit-3 rows are prerequisite-not-met, i.e. NOT MEASURED locally and not\nfindings, each saying so in its own verdict text: `check-test-completeness.mjs` (grades\na saved `turbo run test` log CI tees), `check:dual-build-cjs-loads` and\n`check:type-check-debt` (both need the whole workspace built).\n\n**Reverse verification**: with the flow-level `return` re-injected and the rest of the\nchange left in place, the rule test file goes **4 failed / 20 passed** — exactly the\nfour new `runAs:system` cases — and back to **24 passed** restored. The mutation was\nconfirmed on disk (unique anchor asserted, injected-marker `grep -c` = 1, mutated\n`git hash-object` differs from the `HEAD` blob) and the restore proved by hash equality\nwith the `HEAD` blob plus an empty `git diff HEAD`; no build was involved because the\ntest imports the rule module by relative source path, not through `dist/`.\n\n**ESLint** was run narrowed rather than repo-wide, and the narrowing is measured: this\nrepo runs one `eslint.config.mjs` that never enables type-aware linting for any file\n(no `parserOptions.project`, no typed `@typescript-eslint` rules — stated and measured\nin that config's own header), so no file's verdict depends on a file outside itself and\na two-file diff cannot move an untouched file's result. `eslint --no-inline-config\n--format json` over the diff reports 3 result entries: 0 errors / 0 warnings on both\n`.ts` files, and the changeset `.md` reported as ignored (no matching configuration),\nso 2 lintable files, both clean. The repo-wide sweep is CI's `Lint & Repo Gates` run.\n\n## Not in scope\n\nThe `readonlyWhen` hint text is left exactly as #14202 landed it. It reads correctly\nunder an elevated run too — \"the conditional lock is NOT waived by a system context\" is\nprecisely what a `runAs:'system'` author needs told — and message text is that card's\nfence, not this one's.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WLJQhde67SeTccsmnBVarV)_"
+}

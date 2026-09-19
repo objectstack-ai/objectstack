@@ -1,0 +1,36 @@
+{
+  "number": 13331,
+  "kind": "issue",
+  "title": "runtime: TS-config boot registers a 'metadata' service without attachClusterPubSub — cross-node invalidation disabled; new object gives OBJECT_NOT_FOUND on non-writing replicas, never heals",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p0"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T03:40:39Z",
+  "updated_at": "2026-09-01T14:14:21Z",
+  "closed_at": "2026-09-01T14:07:42Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 17,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13331",
+  "body": "## Symptom\n\nOn a 3-replica objectos-ee cluster (framework pin `502ff8b5`, redis cluster driver active — see #13330 for getting it active at all), every replica logs at boot:\n\n```\nWARN MetadataClusterBridgePlugin: metadata service does not expose attachClusterPubSub(); cross-node cache invalidation disabled\n```\n\nMeasured consequence — create a new object through the load balancer, then immediately write data to it through the LB:\n\n```\nPUT /api/v1/meta/object/gadget            → Saved (seq=3)\n12 × POST /api/v1/data/gadget via LB      → 3 ok, 9 OBJECT_NOT_FOUND\n60s later, 9 more POSTs                   → 3 ok, 6 OBJECT_NOT_FOUND   (no self-heal)\n```\n\nOnly the replica that handled the metadata write registers the object with its ObjectQL engine; the other two keep answering `OBJECT_NOT_FOUND` **indefinitely** (no TTL/poll fallback on this path). Restarting the replicas is the only recovery. `GET /api/v1/meta/*` list/read stays fresh everywhere (store-backed reads), which makes the drift worse to spot: the metadata API says the object exists while the data API on two of three nodes refuses it.\n\nRelated earlier fix #5109 addressed peer-side `listCache`/registry invalidation **once the broadcast arrives** — here the broadcast never starts, because the bridge never attaches.\n\n## Root cause direction\n\n`MetadataClusterBridgePlugin` (service-cluster) resolves `ctx.getService('metadata')` at `kernel:ready` and requires `attachClusterPubSub` on it (metadata-cluster-bridge-plugin.ts:53-59). `NodeMetadataManager extends MetadataManager` **does** carry that method (metadata-manager.ts:2969), and `@objectstack/metadata`'s `MetadataPlugin` registers exactly that manager (plugin.ts:303).\n\nBut on this boot (objectos-ee, `objectstack.config.ts` via `os start`→`serve`), the kernel's plugin lineup contains **no MetadataPlugin at all** (boot banner lists ObjectQL, PlatformObjects, Dispatcher, … — no MetadataPlugin, and plugin.ts:304's registration log line never prints). Whatever registers the `'metadata'` service on the TS-config path (runtime dispatcher/domain facade) does not expose `attachClusterPubSub`, so the bridge warns and bails — exactly the \"protocol omission → stale caches\" case `content/docs/kernel/cluster.mdx` §1 predicts. serve.ts:2296+ composes an artifact-sourced MetadataPlugin only on artifact boots.\n\nSecond-order effect, same neighborhood: a `record_change` flow saved at runtime (`PUT /api/v1/meta/flow/…`) is registered (`[Registry] Registered flow: …`) but its trigger only **arms** after a replica restart, and then only on that replica's local hooks — runtime-authored automation is effectively single-node too.\n\n## Repro\n\n1. Boot `cloud/apps/objectos-ee/docker-compose.yml` at 3 replicas with the redis driver active (needs the #13330 workaround).\n2. `PUT /api/v1/meta/object/<new>` through the LB.\n3. Loop `POST /api/v1/data/<new>` through the LB — two thirds fail `OBJECT_NOT_FOUND`, and keep failing.\n\n## Expected\n\nWhatever object the TS-config boot registers as the `'metadata'` service either exposes `attachClusterPubSub()` (delegating to the real manager underneath), or the bridge knows how to reach the manager behind the facade — so `metadata.changed` fans out and #5109's peer-side invalidation actually runs. Until then, the EE multi-node compose (ADR-0018) is safe only for deployments whose metadata is fixed at deploy time and whose replicas restart together after any schema change.\n\nFound during a 3-replica EE cluster deployment verification (2026-08-30); companion report in cloud branch `claude/enterprise-cluster-deployment-qxiexe`."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 13842,
+  "kind": "issue",
+  "title": "finding: sys_license is used repo-wide as the canonical tenancy-opt-out fixture but is absent from platform-object-names.ts",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T14:37:26Z",
+  "updated_at": "2026-09-02T11:15:27Z",
+  "closed_at": "2026-09-02T11:14:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13842",
+  "body": "Found incidentally while running the #13564 census of the SQL driver's `orWhereNull` tenant-wall carve-out. Not filed against #13564 — out of that card's scope (a read-side census, not a registry-hygiene question) and left unassigned per the finding-filing convention.\n\n## What's inconsistent\n\n`sys_license` is cited repeatedly, by name, as *the* canonical example of the driver's tenancy opt-out pattern (`tenancy: { enabled: false }`):\n\n- `packages/drivers/driver-sql/src/sql-driver.ts` — two doc-comment references (ADR-0066, #2734) using it as the motivating example for why an opted-out object must not be silently tenant-scoped.\n- `packages/drivers/driver-sql/src/sql-driver-tenant-scope.test.ts` — a full describe block exercising create/find/re-registration against `sys_license` as a live fixture (lines ~307-385).\n- `packages/drivers/driver-sqlite-wasm/src/sqlite-wasm-driver-tenant-scope.test.ts` — the same fixture, mirrored.\n- `packages/drivers/driver-memory/src/memory-tenancy-guard.test.ts`, `packages/objectql/src/engine.test.ts`, `packages/plugins/plugin-security/src/security-plugin.test.ts` — further uses as a live fixture/permission-check example.\n- `packages/spec/src/data/object.zod.ts`, `packages/spec/src/data/object.test.ts` — `isTenancyDisabled({ name: 'sys_license', tenancy: { enabled: false } })` used as the canonical positive-case example in a spec-level test.\n\nDespite that, `sys_license` **does not appear anywhere in `packages/spec/src/system/constants/platform-object-names.ts`** — neither in `PLATFORM_OBJECTS_BY_PACKAGE` (objects registered in this repo) nor in `CLOUD_PROVIDED_OBJECT_NAMES` (objects acknowledged to live in the `cloud` repo). There is also no `sys-license.object.ts` (or any `.object.ts` declaring `name: 'sys_license'`) anywhere in this repo — confirmed by a repo-wide `git ls-tree` scan of every `*.object.ts` file at `origin/main`.\n\nThat registry's own docstring states the maintenance contract plainly: *\"adding an object to a platform package means adding its name here... an out-of-date registry is worse than the heuristic it replaced, because consumers now trust it.\"*\n\n## Why this is worth a look\n\nOne of two things is true, and both are worth a small fix:\n\n1. `sys_license` is a real object that exists only in the `cloud` repo (plausible — licensing/billing is a natural cloud-runtime concern, and the shape closely parallels `sys_package_installation`, which *is* listed in `CLOUD_PROVIDED_OBJECT_NAMES`). If so, it's simply missing from that list — a one-line registry fix.\n2. `sys_license` was never actually shipped as a real object (removed, renamed, or aspirational) and the repo's own driver/spec tests have been carrying a fixture name for an object that no longer exists anywhere. If so, the tests still pass (they register a synthetic schema under that name at test time — they don't require a real declaration), but the driver's own doc comments citing it as \"the\" real-world example are citing something unverifiable in-tree, which is a bit of a trap for the next reader trying to confirm the pattern against a real object.\n\n## Suggested next step\n\nA maintainer/dev with `cloud` access confirms whether `sys_license` exists there. If yes: add it to `CLOUD_PROVIDED_OBJECT_NAMES`. If no: consider whether the driver's doc comments and test fixtures should cite a real, currently-shipped object instead (e.g. `sys_permission_set`, which is both real and already the maintainer-named canonical example per the 2026-08-31 #13491 ruling).\n\nNot urgent, not a security defect on its own — filing as `finding` per the census-dispatch convention rather than guessing which repair is correct."
+}

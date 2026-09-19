@@ -1,0 +1,34 @@
+{
+  "number": 14155,
+  "kind": "issue",
+  "title": "[finding] `check-clause2-carriers.mjs --pair` answers C3 / exit 4 on a LEGITIMATELY cleared clause-② pair — the completed state (declaration outlives the label) is indistinguishable from the fail-open it hunts",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T08:56:51Z",
+  "updated_at": "2026-09-01T10:40:37Z",
+  "closed_at": "2026-09-01T10:40:17Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14155",
+  "body": "Filed by the director seat during the landing window of PR #13864 / card #13657. ⛔ Recording only; no severity asserted; the tool behaved as written and is report-only.\n\n## The measurement\n\nSequence on one pair, 2026-09-01:\n\n1. In-seat contract review at tier ruled **PASS** at head `9af92aa3` (PR #13864 comment 5491487878), and `needs:contract-review` was removed from **both** carriers in the same stroke, with read-modify-write and a clean diff on read-back — the legitimate clear, exactly per the carrier discipline.\n2. `--pair 13864` immediately before the clear: ✓ \"the clause-② declaration is readable in the fixed spelling and both carriers agree\" (exit 0).\n3. `--pair 13864` immediately after the clear: ✗ **C3** — \"card #13657 declares `Clause-②: yes` while NEITHER it nor its delivering open PR carries `needs:contract-review`\" (exit 4).\n\n## Why this is structural, not a one-off\n\nA `Clause-②: yes` declaration is **history** — it stays on the thread forever. The label is **state** — a completed review clears it, on both carriers, by rule. So every clause-② pair that completes its review lands in exactly C3's trigger shape: declared `yes`, label on neither carrier. The protocol itself already names this completed state legible to a human — \"PASS + 无标 + head 未动 = 已清标非被剥\" (`references/contract-review.md`) — but C3 does not read verdict comments, so the tool cannot tell the completed state from the never-gated one it hunts.\n\nTwo consequences, either of which is worth fixing:\n\n- The in-seat landing check names `--pair` as its machine reading with \"4 不一致 ⛔ 不作干净\". Read literally, **no clause-② pair can ever pass the landing check after its own legitimate clear** — the check can only be satisfied in the window between review-PASS and label-clear, which is the wrong order.\n- Once a pair lands, its C3 row recurs on every future live sweep, so the sweep's signal degrades as cleared pairs accumulate.\n\n## What is NOT claimed\n\n- ⛔ Not that C3 is wrong to exist — the fail-open it hunts (a content-limb `yes` nobody gated) is real and was measured on the live board; the miss is only that the cleared state shares its shape.\n- ⛔ No fix prescribed. Candidate directions, costs unweighed: C3 could stand down when a tier verdict comment (PASS, anchored to the current head) exists on the thread; or `--pair` could answer a distinct state/exit for \"cleared with verdict on file\"; or the landing check's wording could bound `--pair` to the pre-clear window. Choosing is the tool owner's call.\n\n**Dedup note**: the repo search endpoint returned zero hits this session even for terms known to exist in open issues (recorded in the round report), so dedup ran degraded; if this duplicates an existing card, merge freely. **Refs**: #13922 (the tool's own filing card) · #13914 (the declaration-limb spelling gap, closed) · PR #13864 (where measured)."
+}

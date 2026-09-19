@@ -1,0 +1,36 @@
+{
+  "number": 12800,
+  "kind": "issue",
+  "title": "[finding] `.claude/agents/os-dev.md` rule 1 lists the verify lock's four guarantees and no non-guarantee, one line above a wall-clock absolute — every dev agent reads exclusivity the brief never promised",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-27T20:32:48Z",
+  "updated_at": "2026-09-02T01:52:19Z",
+  "closed_at": "2026-09-02T01:43:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12800",
+  "body": "Filed unassigned and **ungraded** by the `domain:devx` lane PM (session `session_01PfaSTikked61BkcsB5Rn69`, round 15), on behalf of the **#12528 dev**, which found it while writing PR #12796 and ⛔ **correctly did not edit it** — `.claude/**` is governed surface, so a hunk there would have parked the whole PR for a human. It handed the exact wording up instead. ⛔ Not graded, not routed, severity not judged.\n\n## What was found\n\n#12528 established that `scripts/pm/os-verify-lock.sh` guarantees *\"no concurrent **locked heavy job**\"* while every reader takes it to mean *\"an idle box\"*. PR #12796 makes the **script** say so at four surfaces. This card is about the place a dev agent actually reads the rule from.\n\n`.claude/agents/os-dev.md`, 资源纪律 rule 1, states the entry point's guarantees:\n\n> 入口点保证:等待预算钉死在一次前台调用之内(更长表达不出来)· 按到达顺序授予 · 99 仍专指「没排到」· 收尾打印持锁时长,过长自己喊。\n\n⭐ **Four guarantees, no non-guarantee.** The omission is the finding — not a wrong sentence, a missing one. A reader completing that list in the obvious direction concludes the lock excludes concurrent work, which is what #12528 measured it does not do.\n\nRule 6, one line further on, carries the reading in a form that is **defensible as written**:\n\n> 重活走规则 1 的锁 —— 串行化后不再与并行 build 抢 CPU,争用下顶到上限的命令轻载只要 ~2 分钟\n\n⚠️ It says *parallel **build***, and builds **are** routed through the lock, so the clause is literally true. What makes it load-bearing is its position: it sits immediately above a **wall-clock absolute** (`~2 分钟`), so the two read as one claim about a quiet machine — and that absolute is exactly the kind of figure #12528 showed is taken on a shared box.\n\n## The dev's own recommendation, carried unchanged\n\n> ⛔ Do **not** rewrite rule 6; add one clause to rule 1's list — the lock excludes only what comes through it, and `check:*` gate runs are not routed there.\n\n⭐ That is the smaller and more durable edit: rule 6's sentence is true, and the list is where a reader forms the belief. It also stays short now that PR #12796 makes the script state the boundary on **every acquisition** — the brief can point rather than explain.\n\n⚠️ Also checked by that dev and reported as **needing nothing**: `.claude/skills/pm-dispatch/references/true-green.md` — its three lock bullets claim no exclusivity.\n\n## ⛔ Governed surface — what that means for whoever takes this\n\n`.claude/**` is governed surface. A PR touching it is **recorded as ACCEPT but stays `draft`, is never armed and never enqueued**, and is left for the maintainer to merge. ⛔ No PM seat lands it. Scope it so the whole PR is that one file, rather than riding on a code change.\n\n## Refs\n\n- #12528 / PR #12796 — the coverage boundary and its disclosure half (`scripts/**`, lands normally)\n- #12795 — the throughput half: whether `check:*` should be routed through the lock at all, ⛔ unmeasured\n- #12538 / PR #12788 — the wait-budget change that makes older affordability arithmetic stale\n\n## ⚠️ Dedup — declared narrow, because the instrument is broken on this seat\n\nChecked against the open `domain:devx` board by label listing (101 open) and against the three sibling lock cards #12782 / #12783 / #12795; none names this file or this rule. The #12528 dev separately pulled 337 open items over REST and grepped locally, finding only #12528 itself on the routing axis.\n\n⛔ **This was NOT verified by free-text search, and the reason is worth recording:** `search_issues` with `in:body` returns `total_count: 0` from this seat *even for a term demonstrably present in an open issue's body* — the positive control `\"os-verify-lock\"` returned 0 while #12795, which contains it, was returned by the very next `label:` query. ⇒ Free-text search here is a **refusal to measure**, not a zero, and any dedupe resting on it is unsupported. Declared rather than implied."
+}

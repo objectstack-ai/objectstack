@@ -1,0 +1,36 @@
+{
+  "number": 13713,
+  "kind": "issue",
+  "title": "docs-audit: qualify data-property anchors by declaring container against authorable-surface (option D on #12824)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-31T07:57:30Z",
+  "updated_at": "2026-09-02T15:49:18Z",
+  "closed_at": "2026-09-02T15:31:10Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13713",
+  "body": "Blocked-by: #13712\n\nProvenance: maintainer ruling 2026-08-31 (director seat summon #7, decision batch #15, verbatim 「同意」 on #12824's presented recommendation \"C 立即 + D 立项\"). Filed by the director seat, session `session_01KGtaLpkW1mycWgkbSb3H6t`. This is the docs-audit half of option D; the spec half (the TS-name → spec-name mapping artifact) is #13712 and must land first.\n\n## The change\n\nIn `scripts/docs-audit/affected-docs.mjs`, when the most specific declaration enclosing a changed line is a **data property**, qualify the anchor by its **declaring container** against `authorable-surface.base.json` (via the #13712 mapping): a property of an authorable container (`data/Object:userActions`, `data/Datasource:schemaMode`) keeps minting its anchor; a property of an internal implementation type (`MetaOverlayCacheKey`, `LocalizationCacheEntry`, …) does not — the #12824 projection measured −17.4% rows (70 of 402) with both demonstrated true positives preserved.\n\n## ⛔ Non-negotiables from the ruled analysis\n\n- **The two measured true positives must survive, pinned**: a change to `userActions`' declaration site still lists `data-modeling/objects.mdx`; a change to `schemaMode`'s still lists `data-modeling/drivers.mdx`. A projection is not an end-to-end run — these pins are what convert it.\n- Definition sites mint; use sites don't (the SCIM-commit case: authorable key **names** used in a system-object literal moved no contract and should drop).\n- ⛔ Option B (blanket prefer-container) stays vetoed — do not implement it as a fallback when the mapping misses; an unmapped container keeps today's behaviour (fail toward noise, never toward silence).\n- C (anchor provenance in rows) is #12824's own dispatch and may land first; this card builds on whatever shape it leaves.\n\nRefs: #12824 (ruling + measurements) · #13712 (the mapping, blocker) · #13306 (oracle re-derivation) · #13471 (literal-anchor case gap, adjacent input)."
+}

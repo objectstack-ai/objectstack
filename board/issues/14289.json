@@ -1,0 +1,36 @@
+{
+  "number": 14289,
+  "kind": "issue",
+  "title": "dispatch-gates: the READ edge inherits NO population, while the fourth-edge docblock states that all three program follows do",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-02T01:05:17Z",
+  "updated_at": "2026-09-02T08:45:40Z",
+  "closed_at": "2026-09-02T08:39:18Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14289",
+  "body": "Found by the per-edge audit on #14013 (provenance; that card is an audit, ⛔ not a fix, so this is filed separately per its triage fence). Measured on `a39b02a6b`.\n\n## The claim and the code disagree\n\n`scripts/pm/dispatch-gates.mjs`, in the fourth-edge docblock above `packageManifestTargets` (around line 5273), opens:\n\n> The three follows above all end at a PROGRAM — a module the gate imports, a file whose program text it opens, a program it spawns — and inherit that program's declared population.\n\nThe middle one does not. `readProgramTargetsInSource` fills `entry.reads` / `entry.readOrigin`, and nothing ever feeds those into `hintsOfModule`. `discoverFamilies` runs three population follows — `entry.imports` (label `import`), `entry.runs` (label `run`), `entry.manifests` (label `manifest`) — and there is no fourth loop over `entry.reads`. `coveringKey`'s edge-label map is literally two entries, `run` and `manifest`.\n\nThe read edge reaches a card only through the LAST key in `coveringKey`, which is an identity claim about a single FILE (#13000), never a population.\n\nMeasured on this tree:\n\n```\nEDGE import: 27 famil(ies), 37 (family,target) pairs\nEDGE run: 1 famil(y), 1 pair\nEDGE manifest: 10 famil(ies), 10 pairs\nEDGE read: 12 famil(ies), 16 pairs, 15 distinct targets\n\nINHERITED HINTS BY EDGE LABEL:\n  import: 369 hint(s) across 13 famil(ies)\n  manifest: 7 hint(s) across 7 famil(ies)\n  run: 1 hint across 1 famil(y)\n  read: 0\n```\n\nThe two numberings inside the one file also disagree, which is the second half of the evidence: `discoverFamilies` calls the spawn follow the SECOND edge and the manifest follow the THIRD (a numbering in which the read edge is not a follow at all), while the docblock above `packageManifestTargets` calls the manifest one the FOURTH (a numbering in which it is).\n\n## ⛔ The repair is the PROSE, not the behaviour — that half is measured too\n\nFollowing the read edge for population the way `run` and `manifest` are followed would add **54 hints across 6 families**; **12** of those come from targets that are themselves discovered gate files and would be refused by the rule both other follows already make, leaving **42 across 4 families**. Those 42 are fabrication-shaped, not leads:\n\n- **29** come from `packages/runtime/src/dispatcher-error-vocabulary.ts` into `check:dispatcher-error-vocabulary`. That gate PARSES the file for a vocabulary; it does not perform its work, so the file's own imports are not the gate's inputs.\n- `apps/docs/source.config.ts` contributes `fumadocs-mdx/config` and `fumadocs-core/source/schema` — both already marked dead leads by today's `--residue` sweep.\n- `scripts/bump-objectui.sh` contributes `packages/console/dist` (a build output) and one specific `.changeset/console-*.md`.\n\nThe #14012 precedent — let the followed program declare what a follower inherits — is the shape that would make this safe, and it is also measured: **0 of the 15 read-edge targets carry an `inherited-population` marker** (against 1 of 1 run-edge targets and 2 of 15 import-edge targets). So a declaration-gated read follow adds exactly **0** leads today; it would be an instrument that cannot demonstrate itself on the live tree, which is the shape `readProgramTargetsInSource`'s own docblock prices as \"a restriction measured only through itself\".\n\n⇒ Reading a program's TEXT is not performing its work. Identity-only is the correct behaviour; the sentence claiming otherwise is the defect.\n\n## Suggested repair\n\nCorrect the fourth-edge docblock so it names what the read edge actually contributes (an identity key, #13000) rather than a population, and reconcile the two edge numberings so a reader is not told there are three population follows when there are three follows and one identity key. No behaviour change.\n\n## Re-check\n\n```\nnode scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --residue scripts/pm/dispatch-gates.mjs\n```\n\n⚠️ `scripts/pm/dispatch-gates.mjs` changes several times a day — re-derive rather than quoting any figure above."
+}

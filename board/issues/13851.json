@@ -1,0 +1,36 @@
+{
+  "number": 13851,
+  "kind": "issue",
+  "title": "[finding] driver-sql / driver-mongodb 的 docblock 断言「reference_to is a REJECTED ALIAS, not a normalised one」在 #13847 后半陈旧——存量/migrate 路径现已归一化,编写面才仍是纯拒绝",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:engine",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-musk"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-31T14:48:21Z",
+  "updated_at": "2026-09-02T10:14:31Z",
+  "closed_at": "2026-09-02T10:13:14Z",
+  "closed_by": {
+    "login": "os-musk",
+    "id": 323835826,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13851",
+  "body": "Found during #13700(PR #13847)收口移交,pre-existing 文档漂移的镜像面;filed unassigned 供分诊。无严重度断言。\n\n## The shape\n\n两处驱动 docblock 逐字断言 `reference_to` 是「REJECTED ALIAS, not a normalised one」:\n\n- `packages/drivers/driver-sql/src/sql-driver.ts`(#11567 现场)\n- `packages/drivers/driver-mongodb/src/mongodb-schema.ts:114`(#13222 现场)\n\nPR #13847 落地 `field-reference-to-alias` conversion(`retiredFromLoadPath`)后,这句话**只对编写面为真**:FieldSchema 仍命名拒绝,但存量 `sys_metadata` 再水化与 `os migrate meta` 现在**归一化**该键。两处 docblock 需要补半句(编写面拒绝 / 存量归一化的分割),否则下一个读者会从驱动注释推出「存量 reference_to 永远原样」的错误结论。\n\n## 修复方向\n\n纯注释对齐,S 机械;跨包(drivers),#13847 尊重文件面申报未顺手改。措辞可引 conversion registry 里 `fieldReferenceToAlias` docblock 的分割表述。\n\n## Refs\n\n- #13700 / PR #13847 — conversion 落地现场(其 registry docblock 已写清双面分割)\n- #11567 · #13222 — 两句断言各自的引入现场"
+}

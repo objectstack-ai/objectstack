@@ -1,0 +1,37 @@
+{
+  "number": 14107,
+  "kind": "issue",
+  "title": "No field reference on a list view is checked at author time — columns, filter, sort, grouping and every binding block accept a misspelt field name through both `os validate` and `os build`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-01T05:29:53Z",
+  "updated_at": "2026-09-01T23:02:15Z",
+  "closed_at": "2026-09-01T23:01:08Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14107",
+  "body": "Measured on `@objectstack/cli` 17.2.0 from a real app (`objectstack-ai/duly`). Every reading below has the mutation confirmed on disk before the command ran, and the tree restored after.\n\n## What is unchecked\n\nA list view names fields in at least five places. **None of them is resolved against the bound object** — not by `os validate`, and not by `os build`, which is the publish gate:\n\n| surface | mutation | `os validate` | `os build` |\n|:--|:--|:--|:--|\n| `columns[].field` | `'period_key'` → `'B2_no_such_field'` | `valid: true`, `warnings: []` | exit 0, `✓ Build complete` |\n| `filter[].field` | `'visible_from'` → `'A8_no_such_field'` | `valid: true`, `warnings: []` | — |\n| `grouping.fields[].field` | `'business_unit'` → `'A7_no_such_field'` | `valid: true`, `warnings: []` | — |\n| `kanban.groupByField` | `'status'` → `'A9_no_such_field'` | `valid: true`, `warnings: []` | — |\n| `gantt.startDateField` | `'visible_from'` → `'B1_no_such_field'` | `valid: true`, `warnings: []` | exit 0, `✓ Build complete` |\n\nThe object (`duly_task`) is defined in the same stack and resolves fine; the field names simply do not exist on it.\n\n## Why this matters more than a normal typo\n\nEvery one of these fails **silently at render**, in the way ADR-0078 and the `view/layout-without-binding` rule already treat as the failure worth gating:\n\n- a bad `columns[].field` renders a column of blanks;\n- a bad `filter[].field` is sent to the engine and matches nothing — an empty list that looks like a true zero;\n- a bad `gantt.startDateField` makes every row's start unparseable, and the gantt renderer keeps only rows whose mapping resolved — a blank chart;\n- a bad `kanban.groupByField` collapses every card into the uncolumned bucket.\n\nThe irony is that the platform already ships the *harder* half of this check. `view/layout-without-binding` warns when a binding block is **absent** — precisely because \"the renderer falls back to literal default field names … and the view renders empty while authoring reports success\". A block that is present but points at a field that does not exist reaches the identical end state, and gets nothing.\n\nIt is also strictly easier to check than the cases that already are: the object is named right there in `data.object`, and `validateReferenceIntegrity` already walks the stack with the object universe in hand.\n\n## Suggested fix\n\nOne rule, `view/field-ref-unknown`, over every field-naming position on a `ListViewSchema`, keyed off `data.object` (skip when the provider is not `object`, and skip dotted paths, as the chart rule already does). The `<field> is not a field on object <object>` message and the `Object fields: …` suffix from `REACT_CHART_FIELD_UNKNOWN` are the right precedent — that rule does exactly this job for `<ObjectChart aggregate>` and shows the shape works.\n\nPositions to cover: `columns[]` (both the bare-string and `{ field }` forms), `filter[].field`, `sort[].field`, `grouping.fields[].field`, `searchableFields[]`, `filterableFields[]`, `hiddenFields[]`, `fieldOrder[]`, `rowColor.field`, `userFilters.fields[].field`, and every `*Field` / `fields[]` / `columns[]` key inside the `kanban` / `calendar` / `gantt` / `timeline` / `gallery` / `map` / `tree` blocks.\n\nSeverity: `error` matches the consequence, but `warning` first would already close the gap for authors and AI authors, who currently get no signal from any of the four gates.\n\n## Workaround in the meantime\n\n`objectstack-ai/duly` carries a repo-local stopgap test (`test/views.test.ts`) that walks `dulyViews` and resolves every field reference against `dulyObjects`. It is written to be deleted when this lands, not maintained — the same shape as the `test/flow-predicates.test.ts` stopgap for #14089.\n"
+}

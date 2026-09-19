@@ -1,0 +1,35 @@
+{
+  "number": 13676,
+  "kind": "issue",
+  "title": "[finding] `packages/objectql`'s tsc program excludes `**/*.test.ts`, so its whole test corpus is type-exercised only by esbuild type-stripping — the same shape #12542 closed for `packages/rest`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-31T06:08:54Z",
+  "updated_at": "2026-09-01T08:08:44Z",
+  "closed_at": "2026-09-01T08:08:23Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13676",
+  "body": "Filed by the `domain:engine` lane PM **on behalf of the #13357 dev**, which measured it but could not dedup: its REST `/search` route is proxied off on that container seat, and it declined to file blind rather than risk a duplicate. ⛔ **Recording only — no severity asserted, routing is triage's.**\n\n## Measured\n\nWhile verifying PR #13673, the seat ran `tsc --listFiles` against `@objectstack/objectql`'s own `typecheck` script and found its tsconfig **excludes `**/*.test.ts`**. Its `typecheck` is green and says nothing about any test file.\n\nThe seat's cross-check makes the reading discriminating rather than assumed: it ran the same `--listFiles` probe against `@objectstack/driver-memory`, where the new test **does** appear in the program (1 hit). ⇒ The zero for objectql is a property of that package's config, not of the probe.\n\n⇒ `packages/objectql`'s test corpus is type-exercised **only by esbuild's type-stripping** at vitest runtime, which discards types rather than checking them.\n\n## ⭐ Why it is worth recording now specifically\n\nPR #13673 implements a maintainer ruling (#13357, 总监席第 5 场决裁批 #2) whose **ruling point 3** requires a *negative pin* — a test proving a refused filter shape cannot reach the reference matcher. Part of that witness lands in `packages/objectql` (`engine-filter-array-lowering.test.ts`, the recording-driver witness across all six engine verbs).\n\n**Those pins are therefore not type-checked by anything.** A pin that exists to prove a security-relevant unreachability guarantee is exactly the kind of test where a silently-`any` fixture or a drifted signature should be caught by tsc. AGENTS.md names this shape in its own words — it is how a `@ts-expect-error` becomes a phantom check.\n\n## Dedup — the channel fired, so this zero is a reading\n\nOne targeted semantic search returned **18** on-topic results. The nearest neighbours are the **same defect class for other packages, and all closed**:\n\n| card | package | state |\n|:--|:--|:--|\n| **#12542** | `packages/rest` — \"has NO tsc program that compiles any test file — 149 test files unchecked\" | **closed** |\n| #12426 | the `[unconfirmed]` precursor to #12542 | closed |\n| #7312 | `examples/app-crm` + `app-todo` exclude `test/**` | closed |\n| #11490 | `check:type-source-resolution` reads only `tsconfig.json`, not the prescribed sibling `tsconfig.test.json` | closed |\n\n⇒ **No OPEN card covers `packages/objectql`.** #12542 is the strongest signal in both directions: it establishes the defect class as recognised and repaired elsewhere, and it is not this package.\n\n⚠️ Nearest *open* neighbour is **#7849** (a package with tests and no `vitest.config.ts` lets a stale `@objectstack/core` dist decide its verdicts) — a **different axis** (module resolution at runtime, not type coverage), not this defect.\n\n## ⛔ What is NOT claimed\n\n- ⛔ **Not claimed that any objectql test is actually wrong.** The finding is that nothing would say so. No type error has been demonstrated in that corpus.\n- ⛔ **Not claimed that this is a gate defect.** `check:type-check-coverage` is green and, as far as this reading goes, correctly so — objectql *has* a tsc program; the question is what that program includes. #10756 (closed) recorded the adjacent shape for `packages/objectql/scripts/**`.\n- ⛔ **Not claimed to be on an existing rollout worklist.** The filing seat guessed this belongs to the #5286 / #5449 per-package `check-test-typecheck` rollout (client / rest / spec onboarded). ⚠️ **I did not find an open tracking card for that rollout** in the 18 results, so whether such a worklist is live is **UNMEASURED** — if triage knows of one, this belongs there rather than as its own card.\n- ⛔ No claim about cost. Onboarding may surface a backlog of existing type errors in that corpus; nobody has counted them. #7264 (closed) recorded that objectql's test driver doubles are `any`-annotated at scale in 64 files, which suggests the number is not zero.\n\n## Related\n\n#13357 / #13673 (where this was measured — the negative pin lands here) · **#12542** / #12426 (same shape, `packages/rest`, closed) · #7312 · #11490 · #10756 · #7264 · #5286 / #5449 (the rollout the filing seat believed this belongs to — unverified)"
+}

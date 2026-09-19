@@ -1,0 +1,36 @@
+{
+  "number": 5536,
+  "kind": "issue",
+  "title": "settings 消费缝丢弃 ResolvedSettingValue.source —— 服务无法区分「管理员写过的值」和「schema 默认值」",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T16:12:45Z",
+  "updated_at": "2026-09-01T09:57:08Z",
+  "closed_at": "2026-09-01T09:57:08Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 15,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5536",
+  "body": "> ⚠️ **本卡 2026-09-01 从 `pm:on-hold` 解除并重述范围。** 原 `Restart-when` 已**触发**,且卡体原来的中心事实**已被证伪**。下面的正文已按今天的树重写;历史读数保留在评论里。\n\n**触发的原条件**(原文):*「any consumer reads `ResolvedSettingValue.source`(the admin-written vs schema-default distinction — settings UI, config export)」*。\n\n⇒ **已有消费者在读,而且正是用来做那个区分**。实测于 `origin/main`:\n\n```\npackages/plugins/plugin-email/src/email-plugin.ts:424   if (v?.source) sources[k] = String(v.source);\npackages/plugins/plugin-email/src/email-plugin.ts:1379  if ((sources.queue_delivery ?? 'default') !== 'default') {\npackages/plugins/plugin-email/src/email-plugin.ts:1424  const selected = (sources.provider ?? 'default') !== 'default';\npackages/services/service-settings/src/settings-service.ts:2154\n        if (v.source === 'global' || v.source === 'tenant' || v.source === 'user') {\n```\n\n`email-plugin.ts` 的就地注释把判据说得比本卡当初还准:*\"the manifest default (`source: 'default'`) is not a decision anyone made, and treating it as one would let a settings page nobody opened silently switch off a mode the deployment declared.\"* —— 这就是本卡要的那条语义,已经有人独立地实现了一次。\n\n## ⇒ 卡体原来的两句话现在是**假**的,不要照着它动手\n\n1. ❌ 「**每一个**消费缝都只取 `.value`,把 `source` 丢掉」 —— 现在是 **2 读 / 2 丢**。\n2. ❌ 「`plugin-email` 走 `createClient`,因此经由 `snapshotOf` 同样看不到 `source`」 —— `plugin-email` 已改为自己读 payload,不再受 `snapshotOf` 的裁剪。\n\n**反向对照(让上面的读数可读)**:同一形状的 grep 仍然命中两处**未改**的丢弃缝 ——\n\n```\npackages/services/service-storage/src/storage-service-plugin.ts:471   values[k] = v?.value;\npackages/services/service-sms/src/sms-plugin.ts:230                   values[k] = v?.value;\n```\n\n且 `sms-plugin.ts:236` 就地注释按编号点名 #5536 并**刻意**声明不取 `source`。⇒ 命中是读数,不是 grep 假阳性。\n\n## 今天真正剩下的是什么\n\n⭐ 不再是「没有人读」,而是**四个消费缝对同一条平台语义各行其是**:两个已经按 `source !== 'default'` 判定,两个仍按「值非空」判定,而后者正是 #4968 已证实的受害形状 ——\n\n```ts\nconst hasAny = Object.values(values).some((v) => v !== undefined && v !== null && v !== '');\nif (!hasAny) return;   // 注释写 \"No persisted values yet\",代码测的却是 present\n```\n\n**范围**(供派发时定):\n1. 把「被授权过的值」判据在 settings-bound 服务间**收敛成一件东西** —— `source` 直读,或派生一个 `authored: boolean`。⭐ `plugin-email` 已有的写法是仓内既有的正确形状,**优先照抄,⛔ 不发明第三种**。\n2. `snapshotOf`(`settings-service.ts:472`)仍在裁掉 `source`,所以任何走 `createClient` 的消费者今天**拿不到**它 —— `plugin-email` 是绕开它才拿到的。这条是上一条能不能低成本做成的前提。\n3. ⛔ **`sms-plugin.ts:236` 的刻意声明要当作待答问题,不是待改代码**:它显式引用本卡编号并选择不取 `source`。派发时必须先读那条注释的理由,若仍成立就把它记成**已声明的例外**,⛔ 不许无声改掉。\n\n## ⛔ 不在本卡\n\n- ⛔ #4968 已处理的 storage `--fresh` 受害路径本身(根因分析与维护者的两个选项在那张卡)。\n- ⛔ ADR-0049 的 enforce-or-remove 退役路线 —— 原 `Restart-when` 里那条 2027-08-07 一年钟是**给「无人读」准备的**,前提已不成立,该条随本次重述作废。\n\n---\n\n以下为立卡时的原始记录,保留以便追溯(⚠️ 其中的「每一个消费缝」表已被上文证伪):\n\n分诊来源:核对 #4968 时的诊断副产物(该单的根因分析见 #4968 的核对评论)。**observation-class**:除 storage 一处已有具体受害路径(在 #4968 里处理)外,其余消费者当时没有已证实的用户可见故障。\n\n`SettingsService.get()` 解析出的 `ResolvedSettingValue` 带三个字段:`value`、`source`(`'env' | 'global' | 'tenant' | 'user' | 'default'`)、`cascadeChain`。`source` 是 spec 里的一等字段:\n\n- `packages/spec/src/system/settings-manifest.zod.ts:461` — `source: z.enum(['env','global','tenant','user','default']).describe('Resolution source')`\n- `packages/spec/src/system/settings-client.zod.ts:51` 的注释明说它的用途:\"tells the consumer which scope row was actually mutated; this allows finer-grained reaction\"\n\n丢掉 `source` 之后,消费者无法回答一个它必须回答的问题:**这个值是有人真的配过,还是根本没人配、它只是 manifest 的 schema 默认值?** 两者在 `.value` 上完全不可区分(schema 默认值同样非空),于是「没人配过」被当成「配成了这个值」,一个从未被授权的默认值就能覆盖宿主在构造期显式给出的配置。\n\n这条语义是平台级的(storage / sms / email 吃同一套),值得先定清楚再落地 —— 见 #4968 里给维护者的两个选项与三轴分析。"
+}

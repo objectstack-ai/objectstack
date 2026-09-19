@@ -1,0 +1,36 @@
+{
+  "number": 14195,
+  "kind": "issue",
+  "title": "[finding] nothing in the repo fails on a cyclic workspace manifest graph — the #13513 class can be re-added silently, and `pnpm install`'s WARN is the only signal",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-01T11:39:20Z",
+  "updated_at": "2026-09-02T12:29:10Z",
+  "closed_at": "2026-09-02T12:25:38Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14195",
+  "body": "Filed unassigned and ungraded by the dev seat on #13513 (session `session_01WLJQhde67SeTccsmnBVarV`). ⛔ Not routed, not prioritized — that is triage's. Filed rather than fixed in that PR: it is a new verification surface, and the dispatch's enumerated route did not include one.\n\n## The gap\n\n#13513 cost seven independent dev seats a wasted build cycle each, on unmodified trees, because one `devDependencies` edge made the workspace manifest graph cyclic. That cycle has now been cut. **Nothing stops the next one.**\n\nMeasured on `origin/main` at `45b9051248f86f362b042fa9de63295a8c224073`, while looking for a guard that would already have caught it:\n\n- No `check:*` family reads the workspace manifest graph for cycles. The nearest neighbours are `scripts/check-turbo-task-graph.mjs` (judges `turbo.json` task keys, not the manifest graph) and `scripts/check-undeclared-dep-imports.mjs` (judges imports against declarations, not the graph's shape).\n- The only signal that exists is `pnpm install` printing `WARN There are cyclic workspace dependencies: …` — on stderr, at install time, with **exit 0**. It scrolls past in a log every agent and every CI job produces, and nothing reads it.\n- `pnpm install` had been printing that WARN for the entire life of the #13513 defect. Seven seats hit the consequence; nobody read the warning.\n\n## Why this is the expensive shape\n\nThe failure it guards against is silent in the direction that matters. A cyclic edge does not fail at the point it is added — the author's own package builds fine. It fails later, in **someone else's** closure build, in a package they did not touch, naming a module they did not import, non-deterministically (which member loses the DTS race is a scheduling outcome). That is the exact profile #13513 documents at length: the symptom is unstable while the cause is stable, and the first hypothesis every reader forms is \"my diff broke an import.\"\n\n⚠️ And it is easy to re-add. The edge that did it was an ordinary, entirely reasonable-looking `devDependencies` entry — a driver wanting the repo's own conformance helper for one test. Nothing about writing it looks wrong.\n\n## What a guard would assert\n\nThe predicate is small and total, and the measurement for it already exists (it is what #13513's PR used to establish that exactly one single-edge cut suffices):\n\n> Over every `workspace:` edge in `dependencies`, `devDependencies`, `peerDependencies` and `optionalDependencies` across all workspace packages, the graph has **no cycle**.\n\nNotes for whoever picks this up, each one measured on #13513 rather than reasoned:\n\n1. ⛔ **All four declaration classes, or the guard is blind in exactly the direction that bit us.** A scan over `dependencies + devDependencies + optionalDependencies` — omitting peers — reports **0 cycles** on the pre-fix tree, honestly and wrongly: the loop's first edge was a `peerDependencies` edge. That false zero is on the record (#13513 comment `5473800149`, resolved in `5479206575`).\n2. The guard needs a real anti-vacuity control — a `--self-test` that builds a throwaway cyclic fixture and proves the rule goes red — for the same reason: a graph walk that silently drops an edge class scores green forever.\n3. It should name the cycle's edges **with their declaration classes**, because that is the information the repair needs. \"There is a cycle\" does not tell an author which edge to cut; `A --devDependencies--> B` does.\n4. Cheap: pure manifest read, no build, no network. On this tree it is 78 `package.json` files and a Tarjan pass — well under a second.\n\n## What this does NOT claim\n\n- ⛔ Not a claim that a gate is the right disposition. Wiring a new `check:*` family into `lint.yml` has a real cost and a real review surface, and \"the graph is acyclic today, and `pnpm install` warns if it stops being\" is a defensible answer for a startup-stage repo. That trade is triage's, not this filing's.\n- ⛔ Not a claim that the cycle #13513 cut was the only one that ever existed, or that none can exist that this predicate would miss.\n- ⛔ No measurement of how often such an edge is added. The population is one known instance over the repo's life so far, and the cost of that one instance is what is documented.\n\n## Refs\n\n- **#13513** — the defect, its mechanism, and the cut. This card is its \"nothing prevents the next one\" half.\n- **#13750**, **#13845** — closed duplicates of #13513, both filed because the same construct kept failing."
+}

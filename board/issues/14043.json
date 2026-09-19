@@ -1,0 +1,35 @@
+{
+  "number": 14043,
+  "kind": "issue",
+  "title": "Record the launch-window versioning convention's end condition — post-GA the fixed group returns to strict semver",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T00:51:46Z",
+  "updated_at": "2026-09-01T15:55:16Z",
+  "closed_at": "2026-09-01T15:54:03Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14043",
+  "body": "Maintainer-approved follow-up from the director decision batch B (2026-09-01, verbatim 「同意」 on the #13829 grade item, which carried this card as its companion).\n\n## What to record\n\nThe repo's launch-window convention — breaking changes on the lockstep `17.x` fixed group ship as `minor` with a mandatory `**BREAKING**` banner and ADR-0087 disposition, never as `major` — is deliberate and consistently applied (12+ changesets, 3-for-3 precedent on `IObjectQLEngine`). What it lacks is a **written end condition**: without one, a window-period convention erodes into a permanent exception.\n\nOne paragraph, wherever the convention's home is judged to be (AGENTS.md's versioning guidance, or the changeset-gate header that already polices banners):\n\n- The convention applies during the launch window only.\n- **End condition: at GA (the group's first general-availability major), the fixed group returns to strict semver** — a required member on a published interface, an accept-set narrowing, or any compile-breaking change to implementers then grades `major`.\n- Until then, the banner + ADR-0087 disposition are the mandatory information carriers for breaking-ness.\n\n## Notes for triage\n\n- Routing by landing spot: if it lands in AGENTS.md this is a governed-face edit (draft-only, human merge); if in a gate header, `domain:devx`. Suggested: wherever `check-changeset-*` documents the convention today, so declared = enforced stays one place.\n- S-mechanical once the landing spot is chosen; the substance above is ruled, not to be re-litigated.\n\nFiled by the director seat, session `session_015adLit3ZYASJiXwxKG78Wi`. Grading/routing is triage's."
+}

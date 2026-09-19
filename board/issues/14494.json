@@ -1,0 +1,35 @@
+{
+  "number": 14494,
+  "kind": "pull_request",
+  "title": "fix(lint): wire test layer into check:test-typecheck (#14173)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T09:26:39Z",
+  "updated_at": "2026-09-02T10:42:59Z",
+  "closed_at": "2026-09-02T10:42:57Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-09-02T10:42:57Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/14494",
+  "body": "Fixes #14173\n\n## What\n\n`packages/lint`'s `typecheck` script was a bare `tsc --noEmit` against a\n`tsconfig.json` that `exclude`d `**/*.test.ts` and `**/*.spec.ts`, so no gate\nanywhere read a lint test file with a type checker (vitest transpiles through\nesbuild, types stripped, never resolved). `src/validate-expressions.test.ts`\nalone is ~2,700 lines built almost entirely out of compile-time and meta pins\n(the #5017 receiver scan, the `TRACKED_UNDECLARED_READS` shrink-only list, the\nresidual-root table) — none of it type-checked by anything.\n\nWired per the triage ruling (comment 5502888897) to the mechanism #14062 (PR\n#14420) landed on: `scripts/check-test-typecheck.mts`, per package, with a\nsibling `tsconfig.test.json` the `typecheck` script NAMES.\n\n## Measurement\n\n`--listFiles` on `origin/main` `6aea1f559` (workspace closure built first):\n\n```\nvalidate-expressions.test.ts -> 0\nvalidate-expressions.ts      -> 1\n```\n\nNew `packages/lint/tsconfig.test.json` (module semantics only — `esnext` /\n`bundler` / `lib: [\"ES2022\"]` — matching how vitest actually executes these\nfiles; strictness and `rootDir` untouched, inherited):\n\n```\nerrors under BUILD semantics (NodeNext, tests included)  22  (11 TS7006 + 5 TS2835 + 6 TS6059)\nerrors under THIS config (test tsconfig)                  6  (6 TS6059)\n```\n\nThe TS7006/TS2835 pile (16 errors — exactly the coverage gate's recorded\n`@objectstack/lint` TEST_DEBT total) dissolves under `bundler` resolution, the\nsame \"config tier, not the tests\" effect `packages/spec`/`packages/rest`/the\n`packages/plugins/**` family measured. The 6 residual TS6059 are\n`rootDir`-violation errors from two test files importing example-app fixtures\noutside this package (`examples/app-showcase`) — pre-existing, and (per the\ncoverage gate's own historical note on this exact entry) never this package's\ndebt; `rootDir` is inherited untouched here, so they surface rather than being\nsuppressed.\n\n**Authority boundary:** this is a CONVERSION of the coverage gate's existing\n`@objectstack/lint` TEST_DEBT entry (`errors: 16`) to per-file/per-signature\nform, not a new debt-opening decision — legitimate while the measured total\nstays ≤ 16. Measured: **6 ≤ 16.** Within bounds.\n\n`check:type-check-coverage`: GREEN with the `'@objectstack/lint'` TEST_DEBT\nentry deleted and the `#14062` graduation docblock carrying lint's line (68/78\npackages type-checked, no `lint` exception listed). The RECONCILED rule this\ngate documents (\"a TEST_DEBT entry ONLY where no tsconfig the typecheck script\ninvokes reads the tests\") is what forces the entry's removal once `typecheck`\nnames a test program — I attempted to capture the RED reading directly (entry\nrestored on top of the already-wired `typecheck` script, via a temporary `git\ncheckout HEAD --`/`git apply` round-trip, nothing left uncommitted) but three\nattempts under heavy shared-box contention each hit `os-verify-lock`'s\nqueue-timeout (one holder alone held the lock 12+ minutes on an unrelated\ncommand) without ever acquiring; I did not keep retrying past that and report\nthis one specific reading as NOT MEASURED rather than fabricate it. The final\nGREEN state (below) is measured, and re-confirmed again after merging\n`origin/main` (ledger re-regenerates identically: 2 files / 6 errors / 2\nsignatures, unchanged by the concurrent PR #14437 that also touches\n`packages/lint/src/**`).\n\n## Not in scope\n\nPer the file-surface constraint, no edits to `packages/lint/src/**` — the 6\n`TS6059` errors are ledgered, never fixed here.\n\n## Gates\n\n`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --ran RUN_RECORD_PATH`\nat `0a2b43d11` (post-merge, no staleness warning): **46 derived, 46 run, 0\nNOT-MEASURED, 0 UNRUN.** Of those 46, three exit 3 (documented PREREQUISITE\nNOT MET, not a red): `check:dual-build-cjs-loads` and `check:type-check-debt\n--re-measure` (both need a full `pnpm build` workspace closure this run never\nbuilt) and `check:test-completeness` (needs a saved `turbo run test` log CI\nproduces). Everything else passed. Also ran (touched `scripts/**`):\n`check:ratchet-remedy-authority`, `check:declared-population-live`,\n`check-self-test-wired.mjs`, `check-self-test-workflow-commands.mjs`,\n`check-type-check-coverage.mjs --self-test` — all green.\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01WLJQhde67SeTccsmnBVarV)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 13890,
+  "kind": "issue",
+  "title": "skills/objectstack-ui \"Navigation Item Types\" documents 7 of the 9 live NavItemVariant members — `action` and `component` have no row",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-31T16:01:54Z",
+  "updated_at": "2026-09-01T07:54:23Z",
+  "closed_at": "2026-09-01T07:54:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13890",
+  "body": "Measured while building the #13678 liveness gate, on `1d84cf3b4`. Filed unassigned for triage; the gate LEDGERS this gap rather than fixing it, per that card's brief (zero `skills/**` edits).\n\n## The finding\n\n`NavItemVariant` (`packages/spec/src/ui/app.zod.ts:122`) has **nine** members:\n\n```\nobject · dashboard · page · url · report · action · component · group · separator\n```\n\nThe `### Navigation Item Types` section of `skills/objectstack-ui/SKILL.md` documents **seven**. `action` and `component` have no row, and neither appears anywhere else in that section.\n\nThis is the flight ⑧ class exactly — a live schema member with no doc row, in an enumeration a reader has every reason to take as complete (the heading names the catalog, and the other seven are there). An AI author reading this catalog cannot reach either variant.\n\n## Reproduce\n\n```\nnode scripts/check-skill-identifier-liveness.mjs --list      # after #13678 lands\n```\n\nprints `navigation-item-types: ... GAP 2: action, component`. Before that lands:\n\n```\nsed -n '/^### Navigation Item Types/,/^## /p' skills/objectstack-ui/SKILL.md | grep -c '^| `'\ngrep -n -A 3 'type NavItemVariant' packages/spec/src/ui/app.zod.ts\n```\n\n## Disposition once fixed\n\nThe gap is recorded in `scripts/skill-identifier-liveness-ledger.json` under `leg2Gaps.navigation-item-types`. That ledger is shrink-only: when the two rows are written, the gate reports the improvement and asks for `node scripts/check-skill-identifier-liveness.mjs --update`, which prunes the entry. Adding the rows without running `--update` leaves budget behind — the gate says so and names the command.\n\nTwo things a fix should check, because the gate cannot: whether `children` is legal on either variant (`NAV_VARIANTS_ACCEPTING_CHILDREN` is `object` and `group` only), and what each variant's required properties are. This gate catches existence, never semantics.\n\nPart of #13658."
+}

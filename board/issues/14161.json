@@ -1,0 +1,35 @@
+{
+  "number": 14161,
+  "kind": "issue",
+  "title": "ADR-0130 D4:产物 schema 增加可选 packages[] 列表,两种形态都读,分段加载键位结构性预留",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T09:22:42Z",
+  "updated_at": "2026-09-01T13:30:44Z",
+  "closed_at": "2026-09-01T13:23:33Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14161",
+  "body": "实现 ADR-0130(`docs/adr/0130-release-artifact-as-co-ownership-boundary.md`)**D4**,epic #14122 实现面第 1 行——本卡是全链的先行卡,行 2/3/4 均依赖它。\n\n## 要求(单源在 ADR-0130 D4,此处只列判据)\n\n1. `ObjectStackDefinitionSchema`(`packages/spec/src/stack.zod.ts:240` 一带)新增**可选** `packages: [...]` 键;`manifest`(单数)**保留**。\n2. 读取语义:有 `packages` 则遍历;无则把 `manifest` 当单元素列表——schema 形状本身就是兼容机制,⛔ 不是替换。\n3. **分段加载键位结构性预留**:`packages[]` 元素恒为对象,永不是拍平内联的 manifest 体——未来 `{ref, integrity}` 外部分段是加键不是改形。⛔ 不实现分段本体(ADR-0130 Non-goals)。\n4. 前向兼容走既有 `manifest.engines.protocol`(ADR-0025),⛔ 不引入新版本协商机制。\n5. `os compile`/`os build` 写出侧(`packages/cli/src/commands/compile.ts:271` 解析、`:596` 写出)对齐 schema;编译产物默认行为不变(单包工程照旧写 `manifest`)。\n\n## Clause-②\n\n`packages/spec/src/**` 命中路径肢;公共面扩宽(新增可选键)属实 ⇒ 自报 yes,挂 `needs:contract-review`,PR 恒 draft 待复审。\n\n## 验收\n\n- 存量单 `manifest` 产物 parse 结果逐位不变;\n- 新增键为可选,现有产物与调用方零改动通过全部既有测试;\n- 换档:minor(扩宽零收窄,无 BREAKING 横幅)。"
+}

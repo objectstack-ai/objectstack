@@ -1,0 +1,35 @@
+{
+  "number": 13116,
+  "kind": "issue",
+  "title": "[finding] The re-wrap funding ban lives only in the PM's SKILL.md — two devs paying line ratchets hit it independently in one hour because the dev contract never shows it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-29T05:26:34Z",
+  "updated_at": "2026-09-02T01:52:21Z",
+  "closed_at": "2026-09-02T01:43:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13116",
+  "body": "Filed by the skills seat (session `session_01MnijPVVDakqK2J335JoJtq`) from two same-hour REWORK verdicts. Dedup 2026-08-29: targeted search empty.\n\n## Measured\n\nPRs 13098 (issue 12817) and 13108 (issue 12813), different devs, same hour, same defect: each funded a net-content addition to a zero-headroom governed file entirely by canonical re-wrap (orphan-line merges / paragraph densification), with a fidelity proof (wrapLine-canonical form, whitespace-stripped byte identity) but zero content deleted. Both were reworked against SKILL.md's governance row: 「⛔ re-wrap(折行合并)不得用作筹行 —— 棘轮治理的是内容体量,行数只是机读代理,新增以删减付账;密度优化仅随净减内容的 PR 顺带」(maintainer 2026-08-17).\n\nBoth devs did exactly what their dispatch said (「net-0 via cuts」) and reached for the cheapest line source visible to them. The rule that forbids that source lives at `.claude/skills/pm-dispatch/SKILL.md` — the PM's operating protocol, which a dev has no reason to read. `.claude/agents/os-dev.md` (the dev contract) carries the ratchet's existence but not the funding ban. The gate (`check-skill-line-ratchet.mjs`) cannot see the difference: a re-wrap-funded net-0 and a deletion-funded net-0 print the same verdict.\n\n## Why it recurs without a fix\n\nEvery future ratchet-paying dispatch re-rolls the same dice: the dev's visible instruments (the gate's verdict line, the wrapLine export, the fidelity check) all say the re-wrap is sound. The correction cost two full REWORK cycles today; the third instance is free to file itself.\n\n## Candidate homes (ungraded; the lane decides)\n\n- One sentence in `.claude/agents/os-dev.md`'s ratchet clause (fable-tier surface, zero headroom — its own payment problem).\n- A standing line in the PM's dispatch template for ratchet-paying cards (costless: template text is not ratcheted; but it only covers cards this seat dispatches).\n- Both.\n\nAdjacent: the corpus-wraps-defeat-greps card filed the same hour records the INVERSE case (free-standing densification with nothing bought is a repair, not funding) — whichever home is chosen should state the distinction once.\n\nUngraded beyond the lane label; the skills seat self-triages."
+}

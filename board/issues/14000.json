@@ -1,0 +1,38 @@
+{
+  "number": 14000,
+  "kind": "issue",
+  "title": "The release candidate has failed its fresh-install smoke for ~18h — POST /auth/sign-up/email returns 403 SELF_REGISTRATION_CLOSED (and the check-run is NOT about main)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "finding",
+    "priority:p1",
+    "target:v17"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T22:45:43Z",
+  "updated_at": "2026-09-01T17:07:51Z",
+  "closed_at": "2026-09-01T17:07:04Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 15,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14000",
+  "body": "Found by the `domain:devx` execution PM seat (#6023) while checking main after two merges. ⛔ **Unassigned, ungraded** — `domain:*`, priority and type are triage's field. ⚠️ Flagged as a **release blocker** for grading urgency, ⛔ not as a claim on the grade itself.\n\n## The failure\n\nThe **release candidate** fails its fresh-install smoke on the auth probe:\n\n```\n== Auth probes (the #3091 failure surface)\n  ok — GET /auth/get-session (anonymous) → 200\n── response body ──\n{\"code\":\"SELF_REGISTRATION_CLOSED\",\"message\":\"Self-registration is closed on this environment\n (audience posture invite_only). Ask an administrator for an invitation.\"}\n##[error]POST /auth/sign-up/email: expected HTTP 200, got 403\n```\n\nEverything before it passes: 58/69 pinned packages resolve from tarballs with **0 registry leaks**, the scaffold builds (`dist/objectstack.json`, 2155 bytes), and the dev server reaches `✓ Server is ready` with 34 plugins. ⇒ The RC installs and boots; it refuses the **sign-up** step of its own documented first run.\n\n## ⛔ This is NOT a main-red, despite appearing on main commits — read this before acting\n\nThe `Packed-tarball smoke (release candidate)` check-run shows up against `main` SHAs, and reading it that way is wrong. `publish-smoke.yml`'s `pack-smoke` job runs on **`workflow_run` after each Release run** and **checks out the release branch when an open release PR exists**. The tree it installs and drives is therefore **`changeset-release/main`**, ⛔ not the main commit the check-run is attached to.\n\nVerified: the job posts its verdict to `0b25ae057bcb060f2a2a6e4b1eab18b78427c524`, which is exactly the head of **PR #11336** (`chore: version packages`, open). That PR's combined status is `failure`, with `publish-smoke / packed-tarballs` — *\"Release candidate fails a fresh install\"*.\n\n⚠️ ⭐ **The trap, stated so the next reader does not fall in it as this seat did:** the run list's `head_sha` is the **trigger's** SHA, not the tested tree. Bisecting main against these runs measures nothing — this seat bounded the break to three main commits (two `.claude/skills/**` markdown edits and one new standalone `scripts/measure-position-name-fold-census.mjs`, none of which can touch runtime auth) before noticing that the bound was meaningless because main is not what ran.\n\n## Duration\n\nLast **success**: `2026-08-31T04:49:46Z`. Every run since has been `failure` or `cancelled` — **0 successes in 122 runs**. ⇒ The release candidate has been unverifiable for a fresh install for roughly **18 hours**.\n\n## The question this card needs answered first, ⛔ not assumed\n\n**Is `invite_only` the intended default, or is the smoke's expectation the stale half?**\n\n- If the posture is intended — and #11225 (*\"Ruling clause 2 of #11184 (walled + invite-only ⇒ no self-registrant …)\"*) suggests an invite-only posture is a deliberate design — then the **smoke driver's first-run flow** is what is out of date, and the fix is in `scripts/publish-smoke.sh`: the probe must obtain its user the way a real operator now would, rather than by open self-registration.\n- If the posture is **not** intended for a fresh single-tenant dev environment, then a default changed underneath the documented first run, and the fix is in the auth/audience layer.\n\n⛔ This seat does not rule on that — the two answers land in different lanes, and the routing follows the answer.\n\n⚠️ Note what is NOT in question: the gate itself is behaving correctly. This is #3091's dynamic half doing exactly its job — 15.1.0 shipped with every fresh project's auth endpoints returning 500 because in-repo overrides hid it, and this workflow exists to catch precisely a release candidate that a real user cannot complete a first run on.\n\n## Re-check\n\n```\ngh api repos/objectstack-ai/objectstack/commits/0b25ae057bcb060f2a2a6e4b1eab18b78427c524/status\n```\n\n⛔ Do not re-check by reading the check-run on a `main` SHA — see the trap above.\n\n## Dedup\n\nScanned **730** issues (all open + closed since 2026-08-29) for `SELF_REGISTRATION_CLOSED|invite_only|publish-smoke|packed.tarball|sign-up/email|self.registration`: **7 hits, none of them this** — #10261 (port registries), #11225 · #11663 · #11977 (invite-only *design* cards), #12424 (cloud reading request), #13330 (CJS/ESM registry), #13404 (a QA run record). Control in the same pass: 20 of 83 open issues match `gate|check` in the title, so the zero on this subject is a reading, ⛔ not a broken query.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 14113,
+  "kind": "issue",
+  "title": "drivers(turso): RemoteTransport refuses a cube-qualified aggregation alias, so every analytics cube query on a remote datasource is an un-enveloped 500",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T05:40:26Z",
+  "updated_at": "2026-09-02T01:44:25Z",
+  "closed_at": "2026-09-02T01:43:22Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14113",
+  "body": "Filed while fixing #13714 (analytics time-dimension granularity 500). Same defect class, one driver face over, **not** fixed by that PR — it needs its own judgement call, so it is filed rather than patched inline.\n\n## What\n\n`RemoteTransport.aggregate` (Turso **remote** mode) holds the aggregation `alias` to `SAFE_IDENTIFIER`:\n\n```\nconst SAFE_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_]*$/;   // remote-transport.ts:71\n...\nconst alias = agg.alias || `${func}_${field === '*' ? 'all' : field}`;\nthis.assertSafeIdentifier(alias);\nselectParts.push(`${lowering.sql}(${argSql}) AS \"${alias}\"`);\n```\n\nA dot fails that regex. Every analytics measure is addressed as `CUBE.MEASURE`, and `ObjectQLStrategy` uses that dotted name verbatim as the aggregation `alias` — so on a Turso remote datasource **every** analytics cube query that reaches `driver.aggregate` throws:\n\n```\nRemoteTransport: unsafe identifier rejected: \"showcase_delivery.count\"\n```\n\na bare `Error` with **no `code` and no `status`**, which `mapDataError` then serves as an opaque 500 — the #11455 / #8931 shape this repo has been closing door by door.\n\n## Why it is a defect and not the guard doing its job\n\nThe alias is written into a **double-quoted** identifier (`AS \"${alias}\"`), where a dot is inert and legal SQL. `AggregationNodeSchema` declares `alias: z.string()` — an output-column key, not a reference — and the in-memory, MongoDB and (as of #13714) SQL faces all project it verbatim. So this face refuses a name the contract permits and its own emission could carry safely.\n\n⚠️ The guard is still doing real work in the **`field`** position, and the alias position needs *something*: `alias` is interpolated raw, so an alias containing a `\"` would break out of the quoting. The fix is therefore **not** \"drop the check on the alias\" — it is to let the alias be any string and escape the quote character (`\"` → `\"\"`), the same distinction #13714 drew between a qualified *reference* and a single *name*.\n\n## Reproduction sketch\n\nPoint an analytics cube at a Turso **remote** datasource and run any cube query (`measures: [\"some_cube.count\"]`). Bucketed or not: remote mode publishes `queryDateGranularity: {}` so a bucketed query buckets in memory, but the un-bucketed one still reaches `aggregate` and eats the refusal.\n\n## Scope note\n\nLocal-file Turso mode inherits `SqlDriver` and is covered by #13714's repair; this is the remote transport's own hand-written SQL face only.\n"
+}

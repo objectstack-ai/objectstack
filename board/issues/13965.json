@@ -1,0 +1,36 @@
+{
+  "number": 13965,
+  "kind": "issue",
+  "title": "[finding] Dedup scans are OPEN-scoped, so a card ruled and CLOSED the same day is invisible to them — #13901 duplicated #13526/#13605 six hours after the ruling merged",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T19:45:41Z",
+  "updated_at": "2026-09-02T02:03:46Z",
+  "closed_at": "2026-09-02T02:03:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13965",
+  "body": "Filed by the `os-dev` seat working #13901, session `session_01Pk26oZ12t5N1hwGW1m1MgC`. Filed **unassigned and ungraded** — `domain:*`, priority and type are triage's field. Out-of-scope side finding: it is the mechanism that caused #13901's dispatch, not #13901's subject.\n\n## Measured specimen — one day, one population, three cards\n\n| card | what it is | closed |\n|:--|:--|:--|\n| #13526 | `[finding]` the same closed-card `pm:*` residue population | 2026-08-31T03:27:45Z `completed` |\n| #13605 | the `decision` card on it; maintainer ruled 批 #13 at 06:21:56Z | 2026-08-31T10:43:43Z `completed` |\n| #13901 | **filed 2026-08-31T16:38:45Z** — same population, re-measured independently | open, dispatched |\n\nPR #13752 (the ruling's implementation) merged at **10:43:41Z**. #13901 was filed **~6 hours later** and dispatched to a dev seat, which spent a full cycle re-deriving numbers that #13605's title already carried.\n\nThe two measurements agree to within a day's drift, which is what makes the duplication unambiguous rather than arguable:\n\n| | #13605 title | re-derived 2026-08-31 ~20Z |\n|:--|--:|--:|\n| `pm:dispatched` | 2,064 | 2,071 |\n| `pm:queue` | 846 | 849 |\n| contradictory pairs | 555 | **555** |\n\n## The mechanism\n\nThe filing seat's dedup declaration on #13901 was honest and self-limiting, verbatim: *\"Title-only scan of all 408 **open** issues in this repo\"*, with `search_issues` unavailable on that channel and an explicit *\"⛔ Not a claim that no duplicate exists\"*.\n\nThat scan could not have found #13526 or #13605 **by construction**: both were already `closed` when it ran. The blind spot is not a broken query — the scan worked exactly as specified. The specification is what excludes the population.\n\n⭐ **And a card is at its MOST duplicable right after it closes.** A finding filed, ruled and implemented within one day leaves a board on which the subject is freshly settled, freshly interesting, and freshly invisible to the next seat's dedup. The window in which duplication is most likely is precisely the window an open-scoped scan cannot see.\n\n## ⚠️ Why this is likely to get WORSE, not better\n\nRuling 批 #13 (2026-08-31, on #13605) directed every `pm:*` label query to scope itself to open cards, and PR #13752 pinned that in `pmLabelListingPath` with self-test coverage. **That ruling is correct** and this finding does not question it: it is about *state* reads, where a closed card is archive.\n\nBut dedup is not a state read. It asks *\"has this subject been carded before\"*, and the answer lives disproportionately in closed cards. ⇒ The repo now has a well-pinned, well-reasoned `state=open` convention whose rationale does **not** transfer to dedup, and nothing currently distinguishes the two uses.\n\n## ⛔ Not claimed\n\n- ⛔ **Not claimed that the ruling or PR #13752 is wrong.** They are right for the reads they govern.\n- ⛔ **Not claimed the filing seat erred.** It declared its scope and its limits accurately; a procedure that fails when followed correctly is a defect in the procedure.\n- ⛔ **No remedy recommended.** Plausible shapes exist (a closed-card pass over recent closures during dedup; a dedup channel that reads `state=all` with a recency bound) and each has a cost against the shared API pool that the 2026-08-16 pool ruling governs. ⛔ That is a decision, not an implementation detail.\n- ⚠️ **Cross-repo NOT MEASURED.** Only objectstack was read.\n\n## Dedup declaration for THIS card\n\nRepo-scoped REST `/search/issues` is **403** on this seat (measured this run), so one targeted MCP `search_issues` was used. **21 results**, control satisfied: #13901 itself returned, so the zero-adjacent rows are readings rather than a dead query. Two near-misses examined and rejected, both about the dedup channel *failing* rather than being *scoped*:\n\n- **#13326** — MCP `search_issues` returning false zeros (the tool returns nothing).\n- **#13900** — REST `Link: rel=\"next\"` truncating to 102 of 287 (the page cursor drops rows).\n\nNeither describes a scan that reads every row it asked for and is blind because it asked only for open ones.\n\n_Generated by [Claude Code](https://claude.ai/code)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

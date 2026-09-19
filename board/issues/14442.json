@@ -1,0 +1,36 @@
+{
+  "number": 14442,
+  "kind": "issue",
+  "title": "`GET /api/v1/packages` / `/api/v1/packages/:id` / `/api/v1/meta/package` 全部 500「Converting circular structure to JSON」—— 栈里带插件实例（showcase）时，包记录存的是含实例的原始摊平 bundle",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T07:08:45Z",
+  "updated_at": "2026-09-02T12:26:49Z",
+  "closed_at": "2026-09-02T12:26:49Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14442",
+  "body": "在 #14375（PR #14430）做真实启动取证时撞到，先在 PR 分支上出现，再在 **`origin/main` 6aea1f55**（dist 里 `withWritableVerdict` 计数为 0，即不含 #14430 的任何改动）上**逐字复现**。既有缺陷，与 #14430 无关；单独立卡。\n\n## 复现（实测，`os dev`）\n\n```\ncd examples/app-showcase && ./node_modules/.bin/objectstack dev --seed-admin -p 4377 -d file:/tmp/x/data.db\n# 登录 POST /api/v1/auth/sign-in/email → set-auth-token\nGET /api/v1/packages                       → HTTP 500\nGET /api/v1/packages/com.example.showcase  → HTTP 500\nGET /api/v1/meta/package                   → HTTP 500 {\"error\":\"Internal server error\",\"code\":\"INTERNAL_ERROR\"}\nGET /api/v1/packages?type=plugin           → HTTP 200（把 showcase 这条应用记录过滤掉就正常）\n```\n\n信封原文：\n\n```\nConverting circular structure to JSON\n    --> starting at object with constructor '_ObjectQL'\n    |     property 'actionActivation' -> object with constructor 'ActionActivationProjection'\n    |     property 'store' -> object with constructor 'ObjectStoreActionActivationStore'\n    --- property 'engine' closes the circle\n```\n\n同一进程里 `POST /api/v1/packages/com.example.showcase/duplicate` 也在 `service-package` 的 `publish`（`JSON.stringify(manifest)` 持久化到 `sys_packages`）处以同一错误失败：\"sys_packages persist FAILED for 'com.acme.dupbase'\"。\n\n**对照**：`examples/app-todo`（栈定义里没有任何插件 / 数据源实例）同一流程 `GET /api/v1/packages` 200、23 行，复制 base 也正常。\n\n## 根因（源码锚点）\n\n- `examples/app-showcase/objectstack.config.ts:134-162`：`plugins: [new ConnectorOpenApiPlugin(), new ConnectorMcpPlugin(...), …]`，`datasources: [ShowcaseExternalDatasource]` —— 栈定义里带**运行时实例**。\n- `packages/runtime/src/app-plugin.ts:263-266`：`servicePayload = { ...this.bundle.manifest, ...this.bundle }` 后直接 `manifest.register(servicePayload)` —— 实例原样进了注册载荷。\n- `SchemaRegistry.installPackage` 把 `manifest` **原样**存进包记录（`registry.ts`，D7 位一致性也依赖\"原样\"）。启动后这些插件实例持有 `engine`，于是任何对包记录做 `JSON.stringify` 的门（两条 `GET /packages` 门、`getMetaItems({type:'package'})`、`sys_packages` 持久化）都被循环引用炸掉。\n\n## 影响\n\nStudio 包选择器读的就是 `GET /api/v1/packages`：凡栈定义里带插件实例的应用（showcase 这一类），Studio 的包列表整体不可用；纯元数据应用（hotcrm、app-todo）不受影响。`?type=` 过滤掉应用记录时能过，说明只有那一条记录不可序列化。\n\n## 待决定的修法方向（不在本卡拍板，给 dev / 维护者）\n\n- **A.** 注册时把不可序列化的运行时键（`plugins` / `datasources` 实例）从进包记录的 `manifest` 上剥掉，只留可声明部分；D7 单包 bit-identity pin 要一起看（它比的是什么就得说清）。\n- **B.** 包记录照存，但所有服务包行的门统一经一个\"可序列化视图\"出去（去掉实例键）。\n- 两者都要有一条 pin：带插件实例的栈启动后 `GET /api/v1/packages` 200 且行数正确。\n\n## 关联\n\n- 发现于 #14375 / PR #14430 的真实启动取证；该 PR 的证据改用 `app-todo`，并把本卡记为既有缺陷。\n- 与 epic #14122 无直接关系；但发版前 Studio 在 showcase 上的包选择器是坏的，是否挡发版请维护者定。"
+}

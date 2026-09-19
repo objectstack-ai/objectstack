@@ -1,0 +1,36 @@
+{
+  "number": 13823,
+  "kind": "issue",
+  "title": "finding(spec): `RestApiEndpointSchema.handlerStatus` is authorable but has zero runtime consumers — the 501 it is documented to cause comes from somewhere else",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T14:02:35Z",
+  "updated_at": "2026-09-02T11:36:55Z",
+  "closed_at": "2026-09-02T11:35:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13823",
+  "body": "Filed out-of-scope from the published-skills factual sweep, flight ⑦ (`skills/objectstack-api`, card #13814, program #13658). Recording only — unassigned.\n\n## The measurement\n\n`handlerStatus` (`implemented` / `stub` / `planned`) is an authorable key on `RestApiEndpointSchema` (`packages/spec/src/api/plugin-rest-api.zod.ts`). A repo-wide search for the identifier, excluding `skills/**` and test files, returns **three hits and all three are in the declaring file itself**:\n\n- `plugin-rest-api.zod.ts:177` — the declaration on `RestApiEndpointSchema`\n- `plugin-rest-api.zod.ts:1415` — the same enum re-declared on `RouteCoverageEntrySchema`\n- `plugin-rest-api.zod.ts:1431` — a docblock saying adapters SHOULD warn when `handlerStatus !== 'implemented'`\n\nPlus one CHANGELOG row. No consumer in `packages/runtime`, `packages/rest`, or anywhere else reads the key.\n\n## Why it is worth a card rather than a shrug\n\nThe key's documented effect is a specific runtime behaviour, and that behaviour has a different cause. `DispatcherErrorCode.enum.NOT_IMPLEMENTED` is emitted from exactly four sites — `runtime/src/endpoint-executor.ts` (three) and `runtime/src/api-mapping.ts` (one) — and every one of them is the declarative-endpoint executor refusing a target or a mapping it cannot serve. None consults `handlerStatus`. So an author who sets `handlerStatus: 'stub'` expecting the dispatcher to answer 501 gets an ordinary served route, and the declaration reports progress to nobody: `RouteCoverageReportSchema` is the only shape that would carry it outward and nothing constructs one.\n\nThis is the ADR-0049 enforce-or-remove class, and the same shape as #13613: a declared surface whose semantics no code implements. It is also a `declared = enforced` gap on the endpoint vocabulary — the same surface `ApiEndpointSchema` closed strictly in #5384 precisely so a typo could not parse green and configure nothing.\n\n## Two routes, for triage\n\n- **Remove.** Retire the key from `RestApiEndpointSchema` with a tombstone, and either retire `RouteCoverageReportSchema` alongside it or keep it as the report-only vocabulary it already is. Cheapest, and it matches the startup-scope posture for a key with no pull.\n- **Enforce.** Have the route registrar consult `handlerStatus` and mount a 501 stub for `stub` / `planned`. That is a real capability — a declared-but-unbuilt route answering an honest 501 instead of 404 — but it is new behaviour needing its own ruling, not a repair.\n\nRecommendation: **remove**, unless someone can name a consumer that wants the coverage report. The evidence for \"no pull\" is that the key has shipped since the CHANGELOG row and nothing has grown to read it.\n\n## Provenance\n\nFound while verifying the skill sentence \"The dispatcher returns `501 NOT_IMPLEMENTED` for `stub` and `planned` handlers\", which flight ⑦ corrects in the skill text. Fixing the skill stops the false teaching; it does not close the declared-but-inert key, which is why this is a separate card."
+}

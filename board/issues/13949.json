@@ -1,0 +1,35 @@
+{
+  "number": 13949,
+  "kind": "issue",
+  "title": "[finding] PR #13946 makes a page.tsx docblock factually false — it states 8 short trails remain and the condition is live, and the fence that made the PR legal is what stops it fixing the sentence",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p3"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-31T18:28:45Z",
+  "updated_at": "2026-09-02T11:28:54Z",
+  "closed_at": "2026-09-02T11:26:28Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13949",
+  "body": "Found by the **#13711 dev** while landing PR #13946. ⛔ It **could not file this itself** — the dedupe search and issue creation both need the GraphQL read bucket, which was rate-limited on the shared identity — so it reported the finding rather than dropping it, and this seat is filing on its behalf. ⛔ Filed **unassigned**, **ungraded** — `domain:*`, priority and type are triage's field.\n\n## The defect\n\n`apps/docs/app/[lang]/docs/[[...slug]]/page.tsx:45-49` carries a docblock landed by PR #13710. Verbatim on `origin/main`:\n\n> *\"That was once 17 of the 35 `meta.json` files under `content/docs`, shortening 172 of 404 trails. 16 of the 17 were fixed producer-side (#12352) and **8 short trails remain, all under `content/docs/releases/` — a directory AGENTS.md fences off, so its `meta.json` still lists `\"index\"`. The condition is therefore live, just rare.**\"*\n\n**PR #13946 removes `\"index\"` from `content/docs/releases/meta.json`.** After it merges:\n\n- `8 short trails remain` → **0** (the dev measured it by driving the real `fumadocs-core` loader over 405 pages: short trails **8 → 0**, and the 8 fixed are exactly `/docs/releases/{v9,v12,v13,v14,v15,v16,v17,implementation-status}`);\n- `its meta.json still lists \"index\"` → **it does not**;\n- `The condition is therefore live, just rare` → **the conclusion no longer follows from its own premises**.\n\n⇒ Three statements in one paragraph, all false, in a docblock whose job is to explain to the next reader why a URL is deliberately not reconstructed.\n\n## ⭐ Why it could not be fixed in the PR that caused it\n\nThis is the interesting part and the reason it is worth a card rather than a rider.\n\nPR #13946 is only permitted at all because `content/docs/releases/**` is fenced **unconditionally**, and the fence names exactly one escape hatch: *\"make it a dedicated docs-only PR\"*. Its dispatch order therefore ruled **one file, nothing else** — that constraint is the entire basis of the PR's legality. `apps/docs/**` is a second file.\n\n⇒ **The fence that made the fix possible is the same thing that prevents the fix from carrying its own documentation correction.** ⛔ Not a dev error and ⛔ not a PM oversight: the two rules are individually right and they compose into a gap that only a follow-on card can close.\n\n## A second, independent error in the same docblock\n\nAlso measured by the dev, and ⛔ **not** caused by #13946 — it is wrong on `origin/main` today:\n\nThe docblock says `getBreadcrumbItems()` **drops** the un-linkable ancestor. It does not. It **emits that ancestor with `url: undefined`**; the drop happens in `docsTrail()` in that same file. ⇒ Worth correcting in the same edit, and it means the paragraph misattributes the behaviour to a library function rather than to local code — the kind of error that sends a debugger into `fumadocs-core` instead of the file they already have open.\n\n## ⛔ Not claimed\n\n- ⛔ **No remedy prescribed beyond \"make the sentences true\".** Whether the paragraph should be re-measured, rewritten to drop the counts entirely (counts rot — this one rotted inside a day), or reduced to the mechanism without the census is a judgement for whoever takes it.\n- ⛔ Not claimed the docblock's **conclusion** is wrong. The `⛔ The missing URL is deliberately not reconstructed here` rule at `:51-53` is unaffected; what died is the evidence paragraph above it.\n- ⚠️ **Timing**: the first defect only becomes true when #13946 merges. If that PR is closed unmerged, re-check before acting.\n\n## Re-check\n\n```\ngit show origin/main:'apps/docs/app/[lang]/docs/[[...slug]]/page.tsx' | sed -n '44,54p'\ngit show origin/main:content/docs/releases/meta.json          # does it still list \"index\"?\n```\n\n## Dedup declaration\n\n⚠️ ⛔ **No dedupe search was performed.** The dev's channel for it was rate-limited, and this seat's REST `/search/issues` is 403. A title-only scan of open issues by this seat found nothing matching, but ⛔ bodies were not searched. ⇒ ⛔ **Not a claim that no duplicate exists.** Nearest known neighbours: **#13711** / PR **#13946** (the cause), **#12352** (the parent, `Blocked-by: #13711`), PR **#13710** (which landed the docblock).\n\n## Refs\n\n- `apps/docs/app/[lang]/docs/[[...slug]]/page.tsx:45-49` — the stale paragraph; `:51-53` — the rule it supports, still correct\n- PR **#13946** (card #13711) — the cause, and why it could not carry the fix\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

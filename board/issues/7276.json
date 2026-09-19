@@ -1,0 +1,32 @@
+{
+  "number": 7276,
+  "kind": "issue",
+  "title": "#6162's anchor-body half never took: #5810's Routine prompt clause 6 still carries the pre-#6162 hint-comment-only wording",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T04:30:43Z",
+  "updated_at": "2026-09-02T05:20:06Z",
+  "closed_at": "2026-09-02T05:20:06Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 13,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7276",
+  "body": "Found while verifying #6906 deliverable 2 (see #7275 for the main verdict). Filed separately because the remedy is different: #7275 asks for a **new** producer at the release cut; this card is about an **already-decided** change that is not on the anchor.\n\n## Measured\n\n#6162 (closed `completed` 2026-08-07T07:02Z) lists two implementation targets:\n\n> - `.claude/skills/pm-dispatch/SKILL.md`: new paragraph in 「入队与落地 B」 + the steward duty-table row + the 现役两例 enumeration (PR to follow; Fixes this issue).\n> - #5810 body: revise prompt clause 6 (currently says hint-comment only) to match, so the copy-block stays canonical.\n\nand its claim comment scopes both explicitly:\n\n> File surface: `.claude/skills/pm-dispatch/SKILL.md` only (plus a body revision on anchor #5810, which is an issue edit, not a file)\n\n**The first landed. The second did not.** Read from #5810's live body today (2026-08-10, body `updated_at` 2026-08-09T22:21Z), clause 6 of the copy-block prompt is verbatim:\n\n> 6. **跨仓 pin 链观测**(三仓总管独有职责):objectui 落地是否被 spec pin 陈旧卡住、objectstack 的 console pin bump 是否在等 objectui 终版——发现 pin 链停滞时在简报点名并在相关 issue 留一行提示,⛔ 不自行执行 bump。\n\nThat is exactly the wording #6162 called out as \"currently says hint-comment only\". It contains no file-or-refresh instruction, no window-settled predicate (`.objectui-sha` behind objectui main **and** the merge queue empty), and no #6159 template pointer — i.e. none of the mechanical output #6162 was opened to add.\n\nMeanwhile the SKILL half is present on `origin/main` (section 「入队与落地」 B, 「Pin 链观测的机械产出 —— 窗口收口即立单」), so the two documents disagree about what the seat's duty is.\n\n## Why it matters\n\n#6162 itself states the dependency and the degraded mode:\n\n> **Maintainer follow-through (UI-only)**: the live Routine's prompt was pasted from #5810; after the SKILL PR merges, re-copy the revised clause 6 into the Routines UI prompt. Until then the duty still activates weakly via the prompt's standing instruction to read SKILL 「入队与落地」 A/B each fire.\n\nThe maintainer's UI re-copy was always gated on the anchor body being revised first. With the anchor unrevised, that follow-through has nothing to copy, and the whole mechanical-output duty rests on the prompt's generic \"read the SKILL each fire\" instruction — the weak activation #6162 accepted as a temporary state, now nine calendar days old.\n\n## Two hypotheses, same remedy\n\nI cannot separate these from the API surface available here, and state both rather than guess:\n\n1. the body revision was simply never applied (the PR landed, the issue edit was dropped); or\n2. it was applied and later **silently reverted** by a whole-body PATCH from a stale snapshot — the exact failure mode the SKILL's 座位贴协议 documents (「issue 正文更新是**全文覆盖**…从过期快照出发编辑 = 静默回滚其它座位的行」). #5810's body has been edited since #6162 closed (`updated_at` 2026-08-09T22:21Z vs. close at 2026-08-07T07:02Z), so hypothesis 2 is not idle.\n\nEither way the fix is the same: bring clause 6 in line with the SKILL paragraph on `origin/main`, then the maintainer re-copies it into the Routines UI prompt per #6162's follow-through line. If hypothesis 2 is what happened, that is worth a line in the anchor as a second measured instance of the whole-body-PATCH hazard.\n\nRefs: #6162 (the ruling) · #5810 (the anchor) · #7275 (the release-cut gap this was found next to) · #6906 (the card that triggered the verification) · #6159 (the hand-filed template instance).\n\nNo `domain:*` label applied — routing is the triage seat's single-producer territory. Unassigned."
+}

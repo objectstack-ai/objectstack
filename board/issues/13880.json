@@ -1,0 +1,36 @@
+{
+  "number": 13880,
+  "kind": "issue",
+  "title": "[finding] The singular `section:` census is 4, not 3 — concept.mdx carries a 4th nameless one, plus two more in an unjudged JSON fence",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "priority:p3"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-31T15:50:13Z",
+  "updated_at": "2026-09-02T14:20:47Z",
+  "closed_at": "2026-09-02T14:18:55Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13880",
+  "body": "Found while implementing #13759 (the three singular `section:` sites in `layout-dsl.mdx`).\nFiled separately, not folded in: the triage ruling on #13759 fenced the population question\nout of that PR, and this finding is exactly that question wearing a concrete example.\n\n## The measurement\n\nRe-running the #13759 census with the same `yaml` parser and the same `classifyYamlFence`\nthe #11887 arm uses, on `8c6a7fc0b`, over all of `content/docs/**`, with **no marker filter**:\n\n```\nyaml fences scanned : 148   (judged 145, skipped 3 on a syntax error)\nsingular `section:` mappings : 4\n  NAMELESS content/docs/protocol/objectui/concept.mdx:426     label=\"Billing Info\"          keys=label|fields\n  NAMELESS content/docs/protocol/objectui/layout-dsl.mdx:235  label=\"Contact Information\"   keys=label|columns|fields\n  NAMELESS content/docs/protocol/objectui/layout-dsl.mdx:263  label=\"Product Details\"       keys=label|columns|fields\n  NAMELESS content/docs/protocol/objectui/layout-dsl.mdx:295  label=null                    keys=columns|fields\n```\n\nThe population is **4**, not the 3 the #13759 card recorded. #13759 fixed its three; the\n`concept.mdx` one is untouched and still live.\n\n## Why the card counted 3 — the census was scoped by MARKER, not by shape\n\nNot drift, and not a fourth that appeared since: `- section:` is present at `concept.mdx:425`\nin `af01080e3` itself, the commit the card measured on. Two control runs separate the\nhypotheses:\n\n- re-running the census **with** the gate's own `YAML_SECTIONS_KEY` pre-filter\n  (`/(^|[^A-Za-z0-9_$.])sections\\s*:/m`) yields **0**, not 3 — so the card did not use it;\n- `grep` for the marker yields exactly the card's 3:\n  `os:check-yaml FormSectionSchema key=section` appears 3 times in `content/docs/**`, all in\n  `layout-dsl.mdx`.\n\nSo the card's population was \"fences carrying the singular `key=section` marker\", and it was\nreported as \"the singular population across all of `content/docs/**`\". `concept.mdx` carries\n**no `os:check-yaml` markers at all** (`check:yaml-examples` reports it as `0 tagged / 10\nuntagged`), so it is invisible to that scoping.\n\n## Why it is not a copy of the #13759 edit\n\nThe `concept.mdx` site is a different enclosing shape and needs a decision #13759 did not take:\n\n```yaml\ncustomizations:\n  - field: phone\n    required: true\n  - section:              # <- the 4th nameless singular section\n      label: Billing Info\n      fields: [payment_terms, credit_limit]\n```\n\n1. **The enclosing shape has no schema.** This is the page's \"Layer 2: Admin Customization\"\n   example. A `customizations:` **sequence of `{ field | section }` overlay entries** is\n   declared nowhere in `packages/spec` — the only `customizations` in the authorable surface\n   is `tenant.zod.ts`'s `z.record(z.string(), z.unknown())`, a free-form record. Whether this\n   fence teaches a real shape at all is the prior question; giving it a `name` polishes an\n   example that may want removing or rewriting instead. Compare the `steps:` callout already\n   on `layout-dsl.mdx`, which removed a phantom rather than repairing it.\n2. **Its sibling fence is unjudged too, and is not YAML.** The \"Final Merged Layout\" block\n   directly below (`concept.mdx:440`) is a ```json fence carrying **two more** nameless\n   sections (`\"label\": \"Contact Information\"`, `\"label\": \"Billing Info\"`) inside a real\n   `\"sections\": [ ... ]` array. `json` is in neither `TS_FENCE_LANGS` nor `YAML_FENCE_LANGS`,\n   so both arms of `check-docs-section-name` pass over it. Fixing the YAML half alone would\n   teach an anchor that vanishes from the merged output shown two paragraphs later.\n\n## Why the population question is the real subject\n\n`check-docs-section-name` judges `sections:` **sequences** in both arms. This finding adds two\nmore shapes that carry form sections and that neither arm reaches — a singular `section:`\nmapping, and a `sections:` array in a `json` fence — which is the same drift #10830 and #11887\neach closed one selector at a time. Deciding the gate's population means deciding which keys\nand which fence languages introduce a form section, together with how the `os:check-yaml`\nmarker vocabulary is read. That is a triage call, not a dev call, and it is the one #13759\ndeliberately deferred.\n\nSites, for whoever picks this up:\n\n| site | fence | shape |\n|:---|:---|:---|\n| `content/docs/protocol/objectui/concept.mdx:426` | ```yaml, untagged | `- section:` under `customizations:`, `label: Billing Info` |\n| `content/docs/protocol/objectui/concept.mdx:444` | ```json, unjudged by both arms | `\"label\": \"Contact Information\"` |\n| `content/docs/protocol/objectui/concept.mdx:452` | ```json, unjudged by both arms | `\"label\": \"Billing Info\"` |\n\n⛔ Not a schema change either way: `FormSectionSchema.name` stays `.optional()` (#10709,\nreaffirmed #10830).\n\nBack-links: #13759, #11887, #10830, #10709"
+}

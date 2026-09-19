@@ -1,0 +1,37 @@
+{
+  "number": 14315,
+  "kind": "issue",
+  "title": "Skills optimization flight — skills/objectstack-i18n: DIET (≈ −1,685 tok, −27%) — \"Core Concepts\" restated in full four sections later, a per-namespace layout with zero real usages, `os i18n check` taught in six places, and the #1 real pattern (a package shipping its own generated bundle) dead-ends",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "pm:blocking",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T01:48:37Z",
+  "updated_at": "2026-09-02T16:45:29Z",
+  "closed_at": "2026-09-02T15:50:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14315",
+  "body": "Member card of the skills catalog optimization program #14292 (maintainer mandate 2026-09-02, verbatim: 「审核所有的 skills，进行全面的优化。」). Filed by the skills lane seat (session `session_01LraLgQVGq8egUwfYZpbYt1`). Read-only audit at objectstack `origin/main` a59f78d. Full findings table = audit record: the dev posts `audit/objectstack-i18n/findings.md` (seat scratchpad) verbatim as the first comment at claim time.\n\n## Audit summary\n\n3 files, 7,296 tok shipped: `SKILL.md` 6,337 (headroom 1) · `evals/README.md` 410 (headroom 1) · generated 549. Real usage: 6 patterns — object/field labels + `pluralLabel` (3 apps, 40/37 sites), option label maps (23), `_sections` (10), `_views` + `emptyState` (12/2), `apps`/`navigation`/`messages` (6/3/5), stack registration (3) — and the biggest by far, **a package shipping its own generated bundle** (8 packages, 36 `*.objects.generated.ts` across 4 locales, 11 `withSourceFallback` sites, 5 `kernel:ready` `loadTranslations` sites), which is the package's main hole. Enumeration check: 12 of 14 presented-as-exhaustive enumerations complete; two stale (`_tabs` missing from the lint-surface list `:300-302`; `--objects-only` missing from the extract flag list `:546-547`). Retired-spelling residue: none. Verdict **DIET** (28.8%).\n\n## Top findings\n\n| id | span | proposal | Δ |\n|:--|:--|:--|--:|\n| I18N-B-01 | `SKILL.md:44-66` | DELETE \"Core Concepts\" — each item restated in full at `:252-278`, `:151-248`, `:399-415`, `:308-354` | −301 |\n| I18N-D-02 | `SKILL.md:99-148` | REWRITE-AS-CONSTRUCT (3-row table) — per-namespace layout 0 real usages; `localesDir` 0 | −280 |\n| I18N-H-01 | `evals/README.md:1-45` | planned-eval stub, 6 named files that don't exist (DEFERRED, #14296 item 2) | −267 |\n| I18N-B-02 | `SKILL.md:646-688` | DELETE \"Quick-Start Template\" — strict subset of `:157-245`; its own preamble says so | −245 |\n| I18N-B-04 | `SKILL.md:28-41` | DELETE \"When to Use\" | −243 |\n| I18N-F-03 | `SKILL.md:308-362` | `defineTranslation(` has 0 usages outside the schema's own file → ONE schema-pointing row (live surface: never delete the last mention) | −250 |\n| I18N-C-01 | `SKILL.md:506-530` | DELETE hand-wired \"Plugin Setup\" — `os serve` auto-registers it (`serve.ts:2850-2895`), stated in objectstack-platform `:442` | −150 |\n| I18N-D-05 | `SKILL.md:569-585` | REWRITE-AS-CONSTRUCT — \"CRM Blueprint\" restates `:89-93`, `:234-244`, `:292` | −150 |\n| I18N-D-07 | `SKILL.md:608-638` | DELETE two pitfalls that restate `:292` and `:294-297` | −151 |\n| I18N-D-01 | `SKILL.md:455-469` | DELETE \"AI-Powered Translation Suggestions\" — the \"no shipped adapter\" fact appears 4× | −147 |\n| I18N-A-01 | `SKILL.md:35-39` | DELETE the locale-formatting trigger — body teaches zero formatting | −103 |\n| I18N-B-03 | `SKILL.md:19-25` | DELETE preamble | −89 |\n| I18N-D-04 | `SKILL.md:356-362` | MERGE-INTO `:588-606` — the `o.*` retirement stated twice | −87 |\n| I18N-D-06 | `SKILL.md:270-274` | REWRITE — `validationMessages` removal narration → one redirect line | −45 |\n\n## Hazards short of falsehood (fix in this flight)\n\n1. `SKILL.md:513` — `kernel.use(new I18nServicePlugin({…}))` is not awaited; `ObjectKernel.use` is async (`packages/core/src/kernel.ts:192`); platform's own examples write `await kernel.use(...)`.\n2. `SKILL.md:535-560` — the extract → translate → check workflow cannot converge: extract defaults to `--objects-only` while `os i18n check` demands `app`/`navigation`/`dashboard`/… keys (`packages/cli/src/utils/i18n-coverage.ts:190-220`). One clause naming `--objects-only` makes it terminate.\n\n## Three funded additions\n\n1. Canonical \"package ships its own generated bundle\" block (+180, paid by I18N-D-01 + I18N-D-05) — the real shape: `const enSource: TranslationData = { objects: enObjects }` → `withSourceFallback({objects: zhCNObjects}, enSource, undefined, zhCNGeneratedSourceHashes)` (public `@objectstack/platform-objects/apps`) → `i18n.loadTranslations` at `kernel:ready`; fold `--source-hashes`' purpose in (I18N-F-04).\n2. One clause naming `--objects-only` (+25, paid by I18N-B-03).\n3. `translation` metadata item in the frontmatter description (+12) and \"tab, \" in the lint-surface list (+3), paid by I18N-A-01.\n\n## Flight scope\n\n**IMPLEMENT** (same-file, shrink-only): every row above and in the findings file at HIGH or MED except the deferred ones; the two stale enumerations; the two hazards; the three funded additions; the description edits (regenerate the README index only if the drift gate requires it — report which).\n\n**ANCHOR RULINGS**: plugin wiring / `os serve` auto-registration → objectstack-platform (I18N-C-01: delete + pointer). Field/view labels stay here (data and ui point here for translation of what they declare).\n\n**DEFER**: I18N-H-01 (eval stub, #14296 item 2); I18N-C-03 (generator-owned `_index.md` transitive pointers → out-of-scope card for the spec lane's `build-skill-references.ts`); I18N-A-03 (a routing bullet in `skills/README.md` → \"follow-up for skills/README.md\" in the PR body).\n\n## Flight constraints (binding)\n\n- ONE draft PR, first line `Fixes #<this card>`; governed ⇒ stays draft; review requests are the seat's step.\n- Token ratchet: `SKILL.md` may not grow; additions paid by deletions in the same file; ⛔ re-wrap is not payment; ⛔ no ceiling raise; ⛔ no new files; ⛔ do not touch the ratchet script.\n- ⛔ Never edit another package's files; follow-ups in the PR body. Generated files untouched.\n- Live surface with zero measured usage ⇒ one row pointing at its schema; retired/tombstoned ⇒ delete. A false claim matching a spec `.describe()` string ⇒ spec-side twin card.\n- Gates: `node scripts/check-skills-token-ratchet.mjs`, `pnpm --filter @objectstack/spec check:skill-examples`, `pnpm check:skill-compatibility`, `pnpm check:skill-identifier-liveness`, `pnpm --filter @objectstack/spec check:skill-docs`, plus `node scripts/pm/dispatch-gates.mjs --commands <changed paths>`; record the head sha.\n- PR body: per-item 落点 | before | after keyed by finding id; per-file token delta; `needs:contract-review` on both carriers (the generated-bundle block and the `--objects-only` semantics are contract claims).\n\nRefs: #14292 · #14296 · #13658."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 14116,
+  "kind": "issue",
+  "title": "[Decision] Sequencing: landing #13537's fail-closed multi-node gate downgrades ENTITLED deployments until a cloud-repo carrier registers a gate — no package in either repo does today",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:on-hold",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T05:54:47Z",
+  "updated_at": "2026-09-01T08:29:12Z",
+  "closed_at": "2026-09-01T08:29:12Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14116",
+  "body": "Filed by the `domain:services` PM seat (#6021) at the landing gate for **PR #14114** (#13537). The PR is **complete, green and correct against its card** — ⛔ this is not a defect in it. The question is **whether it may land alone**, and that is a deployment-visible ruling, not a review call.\n\n⛔ Held: PR #14114 stays **draft**, ⛔ not enqueued, pending this ruling.\n\n## The measurement\n\n`registerMultiNodeGate` has **no production caller in this repository**. Measured on `origin/main`:\n\n```\n$ grep -rn \"registerMultiNodeGate\" --include=*.ts . | grep -v node_modules | grep -v /dist/ | grep -v '\\.test\\.'\npackages/services/service-cluster/src/index.ts:77      ← barrel re-export\npackages/services/service-cluster/src/multi-node-gate.ts:169  ← the definition\n```\n\n⇒ Two hits, both structural. **Nothing registers a gate.**\n\n⚠️ **Reverse control, so the zero is a reading and not a blind spot**: the same-shaped search for `registerDriver` returns real production call sites (`packages/objectql/src/plugin.ts:625`). The grep is live.\n\nThe only caller anywhere is `apps/objectos-ee/objectstack.config.ts` — **in the cloud repo** — which is precisely the single mount point #13537 exists to stop depending on.\n\n## What landing #14114 alone actually does\n\nThe PR is right about the direction. Today `checkMultiNodeAllowed` **fails OPEN**: with no gate registered it returns \"allowed\", so a deployment that never executes the EE app config runs multi-node **unentitled and unchecked**. The PR flips that to fail CLOSED, which is what the card asked for and what an entitlement gate must do.\n\nBut the mount half can only load carriers; it cannot make them register. So on the two boot routes that skip the EE config (thin-extension, and `OS_ARTIFACT_URL` artifact-direct):\n\n| | today | after #14114 alone | after cloud lands its half |\n|:--|:--|:--|:--|\n| unentitled multi-node | **runs** (fail open) | refused | refused |\n| **entitled** multi-node | runs | ⚠️ **refused — loud single-node downgrade** | runs |\n\n⇒ The trade is real in both directions: it closes \"unentitled gets it free\" and simultaneously opens \"**entitled loses it**\", until a cloud-repo carrier calls `registerMultiNodeGate` at its own module load.\n\n⭐ To the PR's credit the failure is **loud, not silent** — the attempt reports \"loaded without gate\" honestly and `serve` downgrades rather than bricking. That is the difference between a bad afternoon and a bad outage. It is not a reason to treat the downgrade as free.\n\n## What needs ruling\n\n1. **Land #14114 now, accepting the temporary downgrade** for licensed multi-node on those two routes — on the argument that fail-open on a paid capability is the worse of the two, and the window is short.\n2. **Hold #14114 until the cloud carrier registration lands**, and sequence the two as one change across repos.\n3. **Land a narrower #14114** — mount sink only, keeping today's default — and flip the direction in a second PR sequenced with cloud. ⚠️ PM note: this is available but it splits the card the ruling deliberately kept whole, and it leaves fail-open standing meanwhile.\n\nWhichever way it goes, ⛔ **the cloud-side carrier registration is required regardless** and does not exist yet. It is out of this session's reach — this session is repo-bound to `objectstack-ai/objectstack` — so it needs filing by a seat with cloud access. That is a task for someone, under every option.\n\n## Not established\n\n- ⛔ **Whether any real deployment currently runs multi-node on those two boot routes.** Not answerable from this repo; it needs the deployment inventory. ⚠️ Under option 1 that number IS the blast radius, so ⛔ do not size the decision from an in-repo zero.\n- ⛔ How long the cloud-side change would take, or whether it is already in flight there.\n\nRelated: #13537 (the card) · PR #14114 (held) · #13330 (the CJS/ESM dual-instance split, still open — the second, unaddressed reason a registered gate can be missed) · cloud#1741, cloud#1742 (multi-node is a paid EE capability, ruled KEEP)\n\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

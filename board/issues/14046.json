@@ -1,0 +1,37 @@
+{
+  "number": 14046,
+  "kind": "issue",
+  "title": "[finding] Four more sites still name the retired platform-admin elevation gate — two are test TITLES, which a comments-only card cannot take",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:services",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T00:56:57Z",
+  "updated_at": "2026-09-01T14:51:55Z",
+  "closed_at": "2026-09-01T14:51:55Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14046",
+  "body": "Found while implementing #13903, whose table scopes seven comment sites. Same dead premise as #13661 and #13903: the #11663 platform-admin re-anchor (leg L4) retired the walled platform-admin **elevation gate** — under a walled posture `bootstrapPlatformAdmin` writes no grant row and elevates nobody, it reports, and standing is derived per request at `resolve-authz-context.ts` §6b-config from a config-anchored verified email or the legacy unscoped grant row.\n\nMeasured on the #13903 branch at `312a60d22`, `git grep -n -i 'elevation gate\\|elevation refusal' -- packages`: **20 hits before that change, 14 after**. Ten of the fourteen survivors are correct — they say \"retired\", or are past tense, or are the corrections #13903 and #13661 wrote. **Four are not**, and they split into two classes that cost different things to fix.\n\n## A. Two comment sites #13903's table did not scope\n\n| Site | Quote (verbatim) | Note |\n| --- | --- | --- |\n| `packages/core/src/security/platform-admin.ts:19-21` | \"`OS_PLATFORM_OWNER_EMAIL` ({@link PLATFORM_OWNER_EMAIL_ENV}), the name plugin-auth's walled boot refusal and plugin-security's **elevation refusal** already quote.\" | The module header of the very file whose `:117` and `:287` #13903 corrects. plugin-auth's boot refusal is still a refusal; plugin-security's is not an *elevation* refusal any more — `bootstrap-platform-admin.ts:424` is the fail-closed backstop for an undeclared/refused config (`reason: 'walled_owner_email_undeclared'`), and `:457` is the config-derived standing log. This is the same sentence #13903 corrects one file over in `packages/types/src/env.ts` |\n| `packages/plugins/plugin-security/src/walled-platform-bucket-diagnostic.test.ts:105` | \"`error: (_m: string, _meta?: any) =` ... `/* the walled elevation refusal; not this card's subject */`\" | Names what the `error` sink receives on a walled boot. What it actually receives is the \"ZERO config-derived platform administrators\" backstop, which refuses over configuration, not over elevation |\n\n## B. Two test TITLES — the reason this cannot ride #13903\n\n| Site | Quote (verbatim) |\n| --- | --- |\n| `packages/plugins/plugin-auth/src/walled-owner-operator-stamp.test.ts:270` (`:257` at `46b53a25b`) | `it('the email comparison MIRRORS the elevation gate: trimmed, case-insensitive, both sides', ...)` |\n| `packages/plugins/plugin-security/src/platform-owner-wall-bypass.test.ts:320` | `describe('[#12974] the shared row predicate (the elevation gate's twin)', ...)` |\n\nThe first of those two **is** on #13903's table (its row for `walled-owner-operator-stamp.test.ts` lists line 257 among eight). It was deliberately left untouched there, and that is the finding worth recording:\n\n- A `describe`/`it` title is a **string literal**, not a comment. #13903 is graded `Clause-②: no` on the strength of \"the whole diff is comments\", and its own acceptance criterion is that the **non-comment diff is empty** — measured by transpiling each file with `removeComments: true` and diffing. Editing a title breaks that measurement by construction: it survives the strip and shows up as a changed executable line.\n- Corroboration from the same measurement run: applying #13903's comment filter to an unrelated real code commit (`c54d4d3d7`) left 279 non-comment lines, and the first of them is exactly an `it(...)` title rename. The filter treats titles as substance because they are.\n\nSo the two titles need a card that is priced for a non-comment diff — a trivially small one, but not `Clause-②: no` by the same argument, and one whose verification shape is \"the suite still passes with the renamed titles\" rather than \"the stripped output is byte-identical\".\n\n## Suggested shape\n\nEither one comment-only PR for class A plus a separate title-rename PR for class B, or one PR graded for the title change. Class A is mechanical and its correct shape is already pinned by `platform-admin-service.ts:21`, `email-verified.ts:15` and the corrections #13903 landed. Class B is a rename with no behaviour: vitest matches on the reported name only, and neither title is referenced by `-t` anywhere (`git grep` for either string finds only its own definition).\n\nNot urgent. A good rider for whichever leg next edits `platform-admin.ts` or `plugin-security`.\n\n## Scope note\n\nDeliberately not fixed inside #13903: that card's dispatch ruling is that its table is the scope, one row no more and no less, precisely because a blanket search-and-replace is the way it gets done wrong.\n\n⚖️ **PM ruling, 2026-09-01 (`domain:services` seat, on #13903 comment 5487038800):** #13903 is **not** left open to re-grade that row. Its own \"Suggested shape\" defines it as *\"One comment-only PR … a non-comment diff that is empty\"*, so the card is self-defined as the comment class — and a test title is not a comment. ⇒ **line 257 / `:270` was MIS-LISTED on #13903's table**; it was never that card's to take, so #13903 is complete at its seven comment sites and closes when PR #14049 merges.\n\n⇒ **This card carries that line**, together with its sibling title and the two class-A comment sites. Recording the provenance so it is not lost with the closure: **`walled-owner-operator-stamp.test.ts:257` (now `:270`) appeared on #13903's row-7 table and could not be taken there, because it is an `it()` string literal rather than a comment and taking it would have falsified that card's own acceptance criterion.**\n\n⚠️ **This card is NOT comment-only** — class B changes executable lines. ⛔ Do not copy #13903's `Clause-②: no` grade or its byte-identity acceptance criterion; price and verify it for a non-comment diff.\n\nContext: #11663 (design), #11970 (L2), #11974 (L4), #13661, #13903, PR #14049."
+}

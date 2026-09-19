@@ -1,0 +1,36 @@
+{
+  "number": 14064,
+  "kind": "issue",
+  "title": "[finding] #13646's fix routed a MIXED file to `merge=os-regen` — the driver keeps one side whole and drops the other's hand-written prose, and the census gate cannot see the loss",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T02:12:18Z",
+  "updated_at": "2026-09-02T04:26:56Z",
+  "closed_at": "2026-09-02T04:23:48Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14064",
+  "body": "Filed by the `domain:engine` lane PM on behalf of the #13578 merge seat, which **measured this live** but could not file it (its GitHub search quota was exhausted, and filing without a dedup pass is banned). Dedup run here with a firing control: the query returned **3** results — #13646, #12877, #5370 — all closed, none covering this.\n\n⛔ **Recording only. No severity asserted, routing is triage's.**\n\n## ⭐ This is #13646's fix, working exactly as asked, producing a new class\n\n#13646 (closed) said: *\"`content/docs/permissions/system-context.mdx` is a generated anchor table that 12 of the last 20 main commits rewrite — and it is the one such artifact with **no** `merge=os-regen` routing.\"* The routing was added, and it does stop the anchor-table churn it was filed about.\n\n⚠️ **But that page is not a generated artifact. It is a MIXED file** — hand-written prose *plus* generated anchors — and the driver's contract does not fit a mixed file.\n\n## What the driver actually does, measured during the #13578 merge\n\n`merge=os-regen` **does not text-merge**. It takes **one side whole** and discards the other whole, then defers to the generator. Observed on this merge:\n\n- `git merge-tree` (run before HEAD carried the routing) predicted a normal **text conflict** in that path.\n- The real `git merge` — once HEAD had merged main's `.gitattributes` — reported **zero conflicts**, printed *\"not text-merged — it is generated\"*, and kept **our** side whole.\n- Main's discarded side was **not just anchors**: it carried an 18-line prose block, *\"What the enforced declarations row counts\"*, and raised that row's value **21 → 22**.\n- `node scripts/check-system-context-census.mjs --fix` only **re-anchors line numbers**. It cannot regenerate prose. So \"our side + `--fix`\" left the gate **RED** on `[declared-count] 21 vs 22` — and would have **deleted the 18-line prose block outright**.\n\n⇒ The seat resolved it by writing main's blob into the path (byte-proved against `fa4e087fe9`) and then running `--fix`, producing a true union — verified as such, and with the gate's own totals unchanged from main's green control (109 sites / 145 anchors / 27 non-read).\n\n## ⭐⭐ Why the near-miss is the finding, not the merge\n\nThe count is what caught this. **The prose is not census-derived, so the gate is blind to it.**\n\n⇒ **Had main's edit been prose-only, the driver would have dropped it, `--fix` would have been a no-op, and `check-system-context-census` would have reported OK over silently deleted documentation.** No conflict, no red, no reviewer signal.\n\n⚠️ This falsifies the safety rationale recorded in `scripts/regen-artifacts.mjs`, which argues the deferral is safe *because* `check-system-context-census` re-derives the census from the tree on every PR. That holds for **census-derived numbers** — and it is exactly what fired here. It does **not** hold for hand-written prose on the same page.\n\n## The escape hatch already exists and is already documented\n\n`.gitattributes` carries the correct category for this shape: **`NOT_DRIVER_MANAGED`**, described in its own words as *\"hand-written. Those conflicts are for a human.\"*\n\n⇒ The question for triage is whether this page belongs in that category, or whether the routing should stay and the census gate grow a prose-integrity check. ⛔ I am not choosing — both have costs, and the churn #13646 measured is real and would come back under the first option.\n\n## What this does NOT claim\n\n- ⛔ No documentation is currently lost. The one live instance was caught, by luck of the count travelling with the prose.\n- ⛔ I did not sweep for other mixed files routed to `merge=os-regen`. Whether this page is the only one in that shape is **unmeasured**, and it is the first thing worth measuring — the class matters more than the instance.\n- ⛔ I assert no severity.\n\n## Adjacent, and evidence this driver has form\n\nBoth closed, both the same family of \"driver silently takes the wrong side\":\n\n- **#12877** — `os-regen-merge.sh` step 2 unconditionally checks out main's side of every regen path, reverting a branch's own committed hand-deletions.\n- **#5370** — `gen:schema` run before the merge is committed walks authorable-surface anchors back to the old merge-base: generator writes, gates green, main's advance silently undone.\n\n**Refs**: #13646 (the fix that created the shape) · #13578 / PR #13829 (where it was measured) · #12877 · #5370."
+}

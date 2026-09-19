@@ -1,0 +1,34 @@
+{
+  "number": 14454,
+  "kind": "issue",
+  "title": "ADR-0130 跨包规则矩阵补全：9 类命名对象的元数据、`navigationContributions[].group` 语义、权限集的模块归属、dashboard/report → dataset 跨包绑定（hotcrm 分拆方案挖出的 4 个上游缺口）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-02T07:31:17Z",
+  "updated_at": "2026-09-02T12:48:32Z",
+  "closed_at": "2026-09-02T12:48:32Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14454",
+  "body": "Part of #14122。来源：hotcrm 分拆方案 objectstack-ai/hotcrm#1448 / PR hotcrm#1449，`docs/architecture/module-split-plan.md` §「上游缺口 / Upstream gaps」。方案严格只用 #14122 §4 已实测的四条跨包规则判边（73 条边：54 允许、19 拒绝），凡四条规则没覆盖的都**没有给判定**，而是记在这里。四项都是平台侧的事实缺口或决定，**不挡本次发版**（发版清单见 #14122），但挡 hotcrm 的代码分拆设计定稿。\n\n## 1. ACCEPT / REFUSE 矩阵只测了 2 类命名对象的元数据，分拆需要 9 类（测量工作）\n\n#14122 §4 实测了 `hooks[].object` 与 `app.navigation[].objectName`。没测的：action 的 `objectName`、view 的 `data.object`、page 的记录对象与 related-list 对象、dataset 的 `object`、sharing rule 的 `object`、permission set 的 `objects`、seed dataset 的 `object`、import mapping 的 `targetObject`、flow 节点的 object。HotCRM 里有 19 个 action、9 个 flow、5 个 page、6 个权限集、3 个 dashboard 会一边在某模块、另一边点名别的模块的对象。\n\n**要做**：按 §4 同样的方法（真实 `installPackage` 两包、共享命名空间、逐类一条 pin），把这 9 类的接受 / 拒绝各测一遍，结论写回 #14122 §4 的矩阵与 ADR-0130 的 Consequences（ADR 改动 docs-only 另开卡给维护者）。\n\n## 2. `navigationContributions[].group` 语义未钉（测量 + pin）\n\n方案把 17 个 R3 拒绝的导航节点全部转成 owning module 的 `navigationContributions`，依赖三件事：`group` 按目标 app 声明的 group 节点 id 解析；贡献进一个不存在的 group 要**可见地失败**而不是静默消失；多个包贡献进同一 group 的顺序由 `priority` 决定而非注册顺序。**要做**：三条 pin。任何一条不成立，转换就不能保信息架构不变。\n\n## 3. 权限集没有模块归属 —— ADR-0130 §1.3(a) 点名的痛点分拆后**没有**被消掉（需维护者决定）\n\nADR-0130 §1.3(a) 把 30 行 × 9 列 × 6 套的权限矩阵列为无边界的三个可量化后果之一，并把包边界作为 Studio 一直缺的分组。但权限集天然跨域授权——HotCRM 6 套里 4 套横跨 5–6 个模块——它不能住在某个模块里，分拆后矩阵依旧是平的。\n\n**待决定**：A. 允许权限集按包**组合**（模块把自己对象的授权贡献进 app 拥有的角色，类似 `navigationContributions`）；B. 明确记录\"权限矩阵不在 ADR-0130 创造的边界范围内\"，Studio 的分组收益不含它。两者都要写回 ADR-0130（docs-only 卡）。\n\n## 4. dashboard / report → dataset 的跨包绑定未测（测量）\n\n3 个 dashboard 与 1 个 report 绑定的 dataset 会住在别的模块。这是第 1 项在分析面的特例，它决定\"一个模块能不能自带自己的 dashboard\"。**要做**：一条 pin，接受或拒绝都行，但要有结论。\n\n## 边界\n\n⛔ 不在 hotcrm 侧绕（AGENTS.md 规定平台缺口等平台修）。⛔ 不改 ADR 正文（另开 docs-only 卡）。第 1、2、4 项是测量与 pin，可以直接派 dev；第 3 项先等维护者拍板再派。"
+}

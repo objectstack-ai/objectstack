@@ -1,0 +1,32 @@
+{
+  "number": 2702,
+  "kind": "issue",
+  "title": "[plugin-approvals] 审批 {type:'role'} 审批人只查 sys_member.role,解析不到权限集业务角色且静默回退字面量",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-09T03:48:09Z",
+  "updated_at": "2026-09-01T14:44:21Z",
+  "closed_at": "2026-07-10T02:35:10Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2702",
+  "body": "## 概述\n审批 Flow 节点 `approvers: [{ type: 'role', value: '<业务角色>' }]` **静默路由到无人**:Flow 正常触发,但目标审批人「审批中心」显示「暂无待审批事项」。\n\n## 根因\n- `packages/plugins/plugin-approvals/src/approval-service.ts:380-389` —— `expandRoleUsers()` 解析 `role` 审批人时查 `sys_member.role = <value>`,而 `sys_member.role` 是 better-auth 组织角色(仅 `owner|admin|member`),**不认权限集实现的业务角色**。\n- `:306-316` —— 解析为空时引擎**静默回退**成把字面量 `role:<value>` 存进审批人(`pending_approvers` / `sys_approval_approver`),没有任何会话身份能匹配 → 落不到人。\n\n## 影响\n`{type:'role'}` 对权限集业务角色形同失效,且**静默无报错**(最难排查)。\n\n## 期望(任一)\n- `role` 审批人也解析权限集角色(`sys_user_permission_set` / `sys_permission_set.name`);或\n- 至少解析为空时**报错/告警**,不要回退成永不匹配的字面量;\n- 文档明确 `{type:'role'}` 仅指组织角色。\n\n## 已知规避\n改用 `{ type: 'team', value: '...' }`(`expandTeamUsers()` 走 `sys_team_member` 解析真实 user id)。\n\n---\n来源(项目 dogfood):steedos-labs/os-tianshun-mtc#35\n"
+}

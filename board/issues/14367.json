@@ -1,0 +1,36 @@
+{
+  "number": 14367,
+  "kind": "issue",
+  "title": "finding(objectql): `registerObject`'s cross-package ownership refusal throws a bare `Error`, so no rejection test on that path can assert an ADR-0112 envelope",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-musk"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-02T03:17:12Z",
+  "updated_at": "2026-09-02T09:41:56Z",
+  "closed_at": "2026-09-02T09:28:11Z",
+  "closed_by": {
+    "login": "os-musk",
+    "id": 323835826,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14367",
+  "body": "Found while implementing ADR-0130 D1+D3 (#14163 / PR #14354). Out of that card's scope, filed rather than fixed.\n\n## The site\n\n`SchemaRegistry.registerObject` refuses a second code package claiming an object name another package already owns:\n\n```ts\n// packages/objectql/src/registry.ts — registerObject, ownership: 'own'\nthrow new Error(\n  `Object \"${fqn}\" is already owned by package \"${existingOwner.packageId}\". ` +\n  `Package \"${packageId}\" cannot claim ownership. Use 'extend' to add fields.`\n);\n```\n\nIt is a real refusal on a real path — the metadata load path reaches it through `registerApp` — but it carries no `code` and no `status`, so it is not an ADR-0112 envelope like the sibling refusals around it (`resolveArtifactPackageOrder`'s `DUPLICATE_ARTIFACT_PACKAGE` / `INVALID_ARTIFACT_PACKAGE_ENTRY`, and the `DUPLICATE_ARTIFACT_OBJECT_NAME` refusal PR #14354 adds one layer up).\n\n## Why it matters, measured rather than argued\n\nWhile reverse-verifying #14163 I ablated the new install-time object-name check and re-ran the pairing suite. The assertion `expect(refused).toBeDefined()` **stayed green** through that ablation — because this bare `Error` fires one step later and looks, to a throw-shaped assertion, exactly like the refusal that had just been deleted. Only the envelope assertion (`code` + `status`) went red.\n\nSo any rejection test written against this ownership rule today can only be a bare `toThrow()`, which is precisely the assertion ADR-0112 and ADR-0130 D3 rule out by name: it stays green against an unrelated `Error` from anywhere else in the path.\n\n## Suggested shape (not prescriptive)\n\nGive the refusal an envelope — an error class with `code` (SCREAMING_SNAKE, registered in the dispatcher error-code vocabulary with a reachability verdict, the way `DUPLICATE_ARTIFACT_OBJECT_NAME` is) and `status: 422` — keeping the message text as-is so existing message-substring assertions are unaffected. Worth checking at the same time whether any current test asserts only that this path throws.\n\nNote the neighbouring late-install branch (ADR-0029 D9 §6.1, tenant-authored sitting owner) is not a refusal and is not part of this."
+}

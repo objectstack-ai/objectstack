@@ -1,0 +1,37 @@
+{
+  "number": 14416,
+  "kind": "issue",
+  "title": "A gated select option logs one WARN per seeded row: `option visibleWhen … failed to evaluate — allowed through` on every system write, where `current_user` can never bind",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p2",
+    "security"
+  ],
+  "assignees": [
+    "os-musk"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-02T05:11:05Z",
+  "updated_at": "2026-09-02T09:54:33Z",
+  "closed_at": "2026-09-02T09:52:00Z",
+  "closed_by": {
+    "login": "os-musk",
+    "id": 323835826,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14416",
+  "body": "Measured on `@objectstack/objectql` 17.2.0 / `@objectstack/runtime` 17.2.0, booting a real app with a declarative seed (`objectstack-ai/duly`, `pnpm demo`).\n\n## What happens\n\n`SelectOptionSchema.visibleWhen` is the one authoring surface whose predicate scope binds the caller, and the spec is explicit that the server must enforce it (\"Client-side hiding is UX, not authorization … the server MUST also reject writes of its value\"). So an option gated for access-control reasons is written as, e.g.:\n\n```ts\n{ label: 'Approved', value: 'approved', visibleWhen: P`record.owner != current_user.id` }\n```\n\nA **system** write — the declarative seed loader, an in-process job, anything with no acting user — has no `userId` on the execution context, so `buildEvalUser` returns `undefined`, `buildScope` never mounts `current_user`, and the predicate cannot evaluate:\n\n```\nUnknown variable: current_user\n```\n\n`evaluateOptionVisibility` treats an unevaluable predicate as \"allowed through\" and logs a warning. That admission is **correct and load-bearing** — it is what lets a seed carry rows in a gated state, and what keeps in-process jobs working. The finding is only about the log.\n\n## Measured\n\nOne boot of a seeded demo (465 rows, 27 duty rows carrying a gated option value):\n\n```\n2026-09-02T04:48:41.595Z WARN option visibleWhen for 'review_status=approved' failed to evaluate — allowed through\n2026-09-02T04:48:41.596Z WARN option visibleWhen for 'review_status=approved' failed to evaluate — allowed through\n… ×27\n```\n\n`grep -c \"option visibleWhen\" boot.log` → `27`, one per seeded row.\n\n## Why it is worth a look\n\nThe message says *failed* and *allowed through*, which reads as \"a security predicate did not run and the write went in anyway\" — the exact sentence an operator should escalate. Here it is the expected steady state of every system write against every gated option, on every boot. A signal that fires on the correct path this often stops being read, and takes the genuine case with it: a predicate that fails to evaluate for an authenticated caller (a typo'd field, a missing root) produces the *identical* line, and that one really is a hole.\n\nThe two cases are distinguishable at the call site — `opts.currentUser === undefined` means there is no user to bind and no rule to apply, as opposed to a user being present and the expression still faulting.\n\nNot proposing a specific fix; the ones that come to mind are (a) skip evaluation entirely when there is no acting user, with no log, (b) demote that case to debug and keep WARN for the authenticated fault, or (c) keep the warning but say which case it is. Any of them separates \"expected on system writes\" from \"a live predicate is not running\".\n\n## Not a report about behaviour\n\nThe admission itself should stay: a seed that could not write a gated value would have to walk every row through the state machine, and a job with no acting user would be unable to write at all.\n\nFound while implementing objectstack-ai/duly#107 (a confirmation/approval pipeline whose two verdict options are gated this way). Filed from there; no fix attempted in the application."
+}

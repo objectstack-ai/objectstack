@@ -1,0 +1,36 @@
+{
+  "number": 14268,
+  "kind": "issue",
+  "title": "[finding] `suggest` / `distance` (\"did you mean?\") is hand-copied four times across packages/lint — the same shape #4330 already fixed for SYSTEM_FIELDS",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-01T18:09:32Z",
+  "updated_at": "2026-09-02T14:18:33Z",
+  "closed_at": "2026-09-02T14:13:53Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14268",
+  "body": "Recorded while implementing #14105 (PR #14267). Not fixed there: consolidating it touches rules that card does not otherwise change, so it is filed rather than ridden along.\n\n## What was measured\n\nFour independent copies of the same Levenshtein \"did you mean?\" helper live in `packages/lint/src`, none of them exported, each re-deriving the same edit-distance budget:\n\n| file | shape |\n|:--|:--|\n| `validate-object-references.ts` | `suggest(target, known)` + `distance(a, b)`, budget `max(2, floor(len/3))` |\n| `validate-sortable-fields.ts` | `suggest(target, known)` + `distance(a, b)`, byte-for-byte the same budget |\n| `validate-widget-bindings.ts` | `didYouMean(input, candidates)` + `levenshtein(a, b)` + `suggest(...)`, with an extra containment pre-pass for the ADR-0021 `amount` to `sum_amount` drift |\n| `object-graph.ts` (added by #14267) | `nearestName(target, known)` + `suggestName(...)` + `distance(a, b)`, the same budget again |\n\nThe fourth copy is mine, and I wrote it as a copy deliberately rather than importing one of the three: none of them exports its helper, and widening one rule's private function into a cross-rule dependency was outside #14105's declared file surface. The copy is annotated at its definition in `object-graph.ts` pointing here.\n\n## Why this is worth a card rather than a shrug\n\nThis is exactly the shape #4330 recorded and fixed one constant over — *\"five hand-copied `SYSTEM_FIELDS` lists in packages/lint should derive from the spec's declarations\"* — and the argument carries: with N copies, the next author improves one of N and the survivors keep the old behaviour. That is not hypothetical here, because the copies have **already diverged**: `validate-widget-bindings.ts` scores containment ahead of edit distance, so it suggests `sum_amount` for `amount` (11 edits apart, obvious to a human) where the other three suggest nothing at all. Whether that pre-pass is right is a real question — but it is currently a per-rule accident rather than a decision, and an author gets a different quality of suggestion depending on which position they typo'd.\n\nTwo more copies exist and were checked rather than assumed to be the same question: `@objectstack/formula`'s unknown-function suggestion and the spec's strict-object alias map are keyed on curated tables, not edit distance, so they are deliberately out of this finding's scope.\n\n## Shape of the fix\n\n`object-graph.ts` already exports `nearestName` / `suggestName` on the package barrel, so the mechanical route is to point the other three at it and delete their private copies — plus one decision the consolidation forces into the open: whether the containment pre-pass becomes everyone's behaviour or stays declared as a widget-binding-specific one. Each rule's existing suggestion assertions are the regression net; `validate-widget-bindings.test.ts` in particular pins the `sum_amount` suggestion, so a naive merge that drops the pre-pass fails loudly rather than silently degrading messages.\n\nNo behaviour is wrong today; this is drift-shaped, so it is filed as an observation and left unassigned for triage rather than graded here."
+}

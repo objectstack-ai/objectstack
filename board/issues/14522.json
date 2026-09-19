@@ -1,0 +1,37 @@
+{
+  "number": 14522,
+  "kind": "issue",
+  "title": "SCIM provisioning writes run outside any engine transaction on @better-auth/scim 1.7.2 — the #3653 `scimRequestScope` stamped in `verifyBearerToken` is not observed at write time (0 `engine.transaction` calls across POST + PATCH /Users)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T10:01:38Z",
+  "updated_at": "2026-09-02T17:21:16Z",
+  "closed_at": "2026-09-02T17:21:03Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14522",
+  "body": "Filed by the #14360 dev seat (session `session_01AUF1NoViznQK32gqpK8wS8`, worktree `objectstack-issue-14360`, scratchpad key `issue-14360`) — out of scope for that card; recording only, unassigned. Measured on `origin/main` at `00ff228fe` with `@better-auth/scim@1.7.2` / `better-auth@1.7.2` installed.\n\n## What was measured\n\n`packages/plugins/plugin-auth/src/objectql-adapter.ts` (the `#3653` block above `transaction:` in the adapter factory config) declares that SCIM provisioning multi-writes run inside a REAL `engine.transaction()` — \"the real transaction opens exactly where upstream's assertion demands it — inside an authenticated SCIM protocol request, marked by the auth manager's `verifyBearerToken` via `scimRequestScope`\". The marker is `scimRequestScope.enterWith({ scim: true })` in `auth-manager.ts` (inside the `verifyBearerToken` callback handed to `scim()`), and the adapter's `transaction` config reads it with `inScimRequestScope()` — when false it runs the callback on the same adapter with NO engine transaction.\n\nOn 1.7.2 that scope is not observed at write time. Probe (a vitest file in `packages/plugins/plugin-auth/src`, since deleted; real `ObjectQL` over `@objectstack/driver-sql` + better-sqlite3 `:memory:`, real `AuthManager` with `plugins: { scim: true, organization: true }`, a credential minted by `mintScimConnectionCredential`, requests through `manager.handleRequest`):\n\n- `vi.spyOn(engine, 'transaction')` — **0 calls** during `POST /scim/v2/Users`, **0** during `PATCH /scim/v2/Users/{id}` (`active: false`);\n- `vi.spyOn(driver, 'beginTransaction')` — **0 / 0** (the driver has the method; the degrade branch is not what fired);\n- `inScimRequestScope()` sampled inside every `engine.update` on `sys_user` / `sys_scim_user` during the PATCH — `[false, false, false]`.\n\nBoth requests answered 201 / 200. The vendor does call the seam: `@better-auth/scim` 1.7.2 wraps every User/Group mutation in `runIdentityMutationTransaction` → `@better-auth/core`'s `runWithTransaction(adapter, fn)` → `adapter.transaction(trx => als.run({ adapter: trx, isTransactionActive: true }, fn))` (`@better-auth/core/dist/context/transaction.mjs`). It is this repo's `transaction` config that hands the callback back without opening one, because the AsyncLocalStorage store stamped inside the verifier is not the store the handler continuation runs under. The exact async-context boundary (better-auth's own `runWithEndpointContext` / `runWithRequestState` wrappers around the middleware are the suspects) is NOT diagnosed here.\n\n## Consequences\n\n1. **SCIM provisioning is not atomic on `main`.** `POST /Users` writes `sys_user`, `sys_scim_subject`, `sys_scim_user` (and bindings) as separate autocommits; a failure between them leaves a partial identity. This is exactly the shape the #3653 comment says the scoping exists to prevent, and the mount-time `assertNativeSCIMTransactions` check the vendor performs is satisfied by the config being a function, not by it opening anything.\n2. **A refused deactivation half-lands (observed while implementing #14360).** With `identity.reconcileUser` routed to the platform ban write, deactivating the LAST administrator is refused by the break-glass guard (ADR-0024 D5.2) and the IdP gets the SCIM 403 — but the vendor's own `scimUser.active = false` write, made BEFORE the callback inside what it believes is a transaction, stays committed. The SCIM resource then reports `active: false` while the account is still enabled and signing in. The #14360 suite pins that residual explicitly (`scim-deactivation-reconcile-user.test.ts`, face (c)) so the fix for THIS card flips that line deliberately.\n\n## What was NOT measured\n\n- Whether the scope ever propagated on `1.7.0-rc.1` (the version the #3653 note was written against) — not re-measured; the note may have been true then.\n- Postgres / MySQL: measured on better-sqlite3 only. The mechanism is adapter-side, not driver-side, so the reading should carry, but it was not run there.\n\n## Remedy direction (not decided here)\n\nOpen the engine transaction from a place the handler continuation actually inherits — e.g. stamp the scope in a better-auth `hooks.before` matcher on `/scim/v2` (which runs in the endpoint's own context) rather than inside the verifier callback, or read the endpoint context (`getCurrentAuthEndpointContext().path`) in the adapter's `transaction` config instead of a separate ALS. Either way `credential-at-rest-posture.test.ts`'s note that the vendor \"refuses to mount on an adapter whose `transaction` is the factory's sequential fallback\" should gain a runtime pin: a SCIM mutation observed to call `engine.transaction` at least once.\n\nRefs: #3653 (the scoping's origin) · #14360 (where the half-landed refusal is pinned) · #11632 (the stable-SCIM migration epic this belongs under).\n\n_Generated by [Claude Code](https://claude.ai/code)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 9465,
+  "kind": "issue",
+  "title": "Migrate the release toolchain to @changesets/cli v3 — one atomic PR carrying the bump, the pre-mode restructure, and the gates that model v2's semantics",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:epic"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-18T03:10:25Z",
+  "updated_at": "2026-09-01T13:02:47Z",
+  "closed_at": "2026-09-01T13:02:47Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 23,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9465",
+  "body": "**Epic — coordination node. Never dispatched itself; the work lives in its sub-issues.**\n\nDependabot #9217 proposes `@changesets/cli` 2.31.1 → 3.0.0. It is a devDependency bump on paper and a **release-machinery migration** in fact. The maintainer decided on 2026-08-17 to do it deliberately rather than take or drop the raw bump, and on 2026-08-18 to run it as an epic.\n\n## Delegation\n\n- Epic PM session: `session_01HDA9nN6nXQngoQUAAzRdMb`\n- **Declared file territory** (other lanes: treat these as claimed for the duration; this epic does not claim anything else):\n  `.changeset/**` · `scripts/check-changeset-no-major.mjs` · `scripts/check-empty-changeset.mjs` · `scripts/check-changeset-fixed.mjs` · `scripts/objectui-changeset-digest.mjs` · `.github/workflows/cut-rc.yml` · `.github/workflows/release.yml` · `.github/workflows/pr-automation.yml` (changeset-related steps only) · root `package.json` (the `@changesets/cli` range and the `version` script)\n- Nothing here touches `packages/spec`. If a sub-issue turns out to, it goes to the `domain:spec` seat rather than staying in this subtree.\n\n## Why do it — benefits are repo-specific, not generic\n\n1. **v3 removes the root cause of our RC-window pollution.** Under v2, pre-mode `changeset version` does not delete the changesets it consumes; they pile up in `.changeset/`. Measured on the last window: **1552 changeset files, 1279 consumed-but-undeleted**. That pollution is why `check-changeset-no-major.mjs` carries ~88 lines of pre/RC exemption reasoning, whose own header records the absurd consequence — a typo-sized PR shown 171 major-declaring files it never touched, with `allow-major` as its only exit, a label whose message then means something false. v3 (changesets#2190) moves consumed prerelease changesets into `.changeset/pre/`.\n2. **v3 makes a no-op `changeset version` exit 1** (changesets#1860) instead of exiting 0 silently. We have paid for that failure mode: #4898 stalled `17.0.0-rc.2` while every check stayed green.\n3. **A chance to drop `___experimentalUnsafeOptions_WILL_CHANGE_IN_PATCH.onlyUpdatePeerDependentsWhenOutOfRange`** — a key whose own name is upstream reserving the right to change it in a patch release.\n4. Maintenance line: 2.x gets fixes only; our `.changeset/config.json` `$schema` is still pinned at `@changesets/config@3.1.2`.\n\nExplicitly **not** worth effort: `changeset tag` → `git-tag` (never invoked here), `prettier` → `format` (unset), Yarn Classic / Bolt removal, the `@clack/prompts` interactive rewrite.\n\n## Rulings that bind every sub-issue\n\n1. **The bump and the migration land as ONE PR.** Both half-states are broken and each is broken *silently* until the next release: bump alone leaves v3 installed against v2-shaped gates; migration alone leaves gates expecting `.changeset/pre/` that v2 never creates.\n2. **Measurement outranks the changelog.** No sub-issue may act on \"v3 is documented to…\" where it could instead run the thing and read the output.\n3. **The allowlist follows the measurement, never the reverse.** If a v3 `changeset version` produces a file set `cut-rc.yml` would reject, the allowlist changes — the tool's output is not massaged to fit a list written under v2.\n4. **A self-test still asserting v2 semantics is a failed run**, not a passing one.\n5. **Perform no release.** No `changeset publish`, no version tags, no release-workflow dispatch, no merging of a Version Packages PR, and no pre-mode entry or exit on `origin`. Releases are human-only in this repo and this epic does not change that.\n\n## Timing\n\n`.changeset/pre.json` is **absent** as of 2026-08-17: not in pre mode, 143 changesets in the root rather than 1552. That makes now the cheapest window for the migration itself. Each sub-issue re-verifies this at start; if a cut has begun, the migration reschedules rather than forcing.\n\n## Sub-issues\n\n| # | Card | State |\n|---|---|---|\n| 1/4 | #9497 — rehearse v3 in a throwaway clone, answer U1–U6 with measurements, no repo changes | queued, dispatched first |\n| 2/4 | #9498 — land the migration as one atomic PR | blocked by #9497 |\n| 3/4 | #9499 — decide #9208 (`changesets/action` v1 → v2) against `release.yml`'s pinned rationale (#6170) | blocked by #9497 |\n| 4/4 | #9500 — verify the migrated release path inside the next real RC window | blocked by #9498; `Restart-when:` the next pre-mode entry |\n\nThe six unknowns (U1–U6) are stated in full on #9497, which is the only card allowed to answer them.\n\n## Downstream\n\n#9217 closes itself once `main` carries `^3.0.0`. #9208 is held and resolved by #9499 — two open PRs mutating one release machine is the shape this epic exists to prevent.\n"
+}

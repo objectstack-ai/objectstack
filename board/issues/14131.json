@@ -1,0 +1,36 @@
+{
+  "number": 14131,
+  "kind": "issue",
+  "title": "[finding] check-system-context-census declares 29 literals but never the packages/** subtree it censuses — a diff that SHIFTS a cited line derives green and reds in CI",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T06:34:38Z",
+  "updated_at": "2026-09-02T03:36:55Z",
+  "closed_at": "2026-09-02T03:36:18Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14131",
+  "body": "Measured while doing a CI-only repair on PR #14119 (card #14083). Filed **unassigned**.\n\n## What happened\n\nPR #14119 adds **one import line** at `packages/metadata-protocol/src/protocol.ts:30`. Every line below shifts `+1`, including the elevation read `if (context?.isSystem) return data;` in `stripReadonlyForInsert` — `1736` on `origin/main`, `1737` on the branch. `content/docs/permissions/system-context.mdx` anchors `1736`, so `check-system-context-census` reds in `Lint & Repo Gates` with both halves of one rot:\n\n```\n[site-without-a-row]        packages/metadata-protocol/src/protocol.ts:1737 reads `context.isSystem`\n                            and NO row on the page anchors it\n[anchor-is-not-a-read-site] the page anchors packages/metadata-protocol/src/protocol.ts:1736\ncheck-system-context-census: 2 problem(s) over 145 anchors and 109 census sites.\n```\n\nThe dev seat that authored the PR ran its derived gate family locally and reported it green. **Both readings were true of the same tree.** `check-system-context-census` was simply not in the derived family.\n\n## The measurement\n\nAt the PR base head `7417c3c469`, tree clean:\n\n```\nnode scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack\n  -> 31 matched famil(ies); grep -i 'census|system-context' over the whole output: ZERO hits\n\nnode scripts/check-system-context-census.mjs   # exit captured before any pipe\n  -> EXIT 1, the two errors above\n```\n\n`--residue` over the same eight paths places it in the **Silent** bucket (\"source names paths, none of which cover yours — the weakest verdict\"), one of 127:\n\n```\n- node scripts/check-system-context-census.mjs   [lint.yml]   names:\n    content/docs/permissions/system-context.mdx,\n    packages/spec/src/kernel/execution-context.zod.ts,\n    packages/spec/src/data/object.zod.ts, ...\n  (29 declared literals, 3 of which reach nothing tracked)\n```\n\n## The cause, visible in the two scripts' own sources\n\nThe gate declares **29 literals** — the page it maintains, plus a handful of spec seed files. Its **real** population is not any of them:\n\n- `scripts/isystem-census.mjs:141` builds the census from `git ls-files packages examples` — the whole of `packages/**` and `examples/**`, today 109 elevation read sites in **20 packages across 45 files**, held by **145 anchors**.\n- `scripts/check-system-context-census.mjs` declares **no** subtree for that walk.\n\nSo a diff touching any of those 45 cited files derives *silent*, and a diff that merely **shifts a cited line** — an added import, a widened comment — reds a gate no local family run named.\n\n⭐ Note the class it is NOT. This is not #13813's shape (a gate that declares *no* path population at all and lands in `undetermined`); this gate declares 29 literals and lands in `silent`, which reads as a clearance and is not. It is also not #13518's shape (spec export-surface gates re-deriving from the entry point). The residue text warns about exactly this reading in its own words — *\"a gate that computes its own population and names only its baseline artifact scores silent for every card in the tree\"* — but a dispatch brief prints the **matched** list, and that caveat is in a section nobody pastes.\n\n## Positive control, which is what makes the absence a reading\n\nTwo controls from the same runs, both firing:\n\n1. **The derivation works.** Re-derived after the fix commit, which edits the page itself, the gate **is** named: `matched via content/docs/permissions/system-context.mdx ⇢ gate source 'content/docs/permissions/system-context.mdx'`. It matches on the page, never on the code the page cites.\n2. **The remedy already exists in-repo.** The sibling census gate `scripts/check-tenant-audit-census.mjs:146` declares `ROOT_DIR_WATCH_HINTS = ['packages/services/**', 'packages/plugins/**', ...]`, and the derivation reads it: `names: packages/services/**, packages/plugins/**, content/docs/permissions/tenant-audit-census.mdx, ...`.\n\n## Remedy shape\n\nDeclare the subtree the census really walks beside the literals, using the `ROOT_DIR_WATCH_HINTS` idiom `scripts/check-watch-hint-literal.mjs` already gates and `check-tenant-audit-census.mjs` already uses. ⛔ **Do not invent a second pattern** — one is proven next door. ⚠️ The honest cost is that `packages/**` + `examples/**` is wide, so nearly every card would then derive this gate; whether that is the right price, or whether the population should be narrowed to the 45 cited files, is a judgement for whoever takes this, not a decision made here.\n\n## Why it is worth a card\n\nThis explains a whole class of \"green locally, red in CI\" rounds, and the cost is asymmetric: the gate is cheap to run (about a second) while the round it costs is a full CI lap plus a dispatch. #14119's own repair was one anchor, `1736` to `1737`, produced by the gate's own `--fix`.\n\n## Re-check\n\n```\nnode scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --residue packages/metadata-protocol/src/protocol.ts\n```\n\nThe gate should be under `Silent`. ⚠️ `scripts/pm/dispatch-gates.mjs` moves several times a day — re-derive, do not quote this card.\n\n## Refs\n\n- #14119 / #14083 — where this was measured; its CI repair is the one-anchor commit `6b45e0c404`\n- #13813 — the `undetermined` sibling shape, and the same `ROOT_DIR_WATCH_HINTS` remedy\n- #13518 — a different absent-from-derivation shape (spec export surface)\n- #13774 — nothing reconciles the families a dev DERIVED against the ones it RAN\n\n_Generated by [Claude Code](https://claude.ai/code)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

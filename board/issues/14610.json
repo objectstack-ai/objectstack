@@ -1,0 +1,34 @@
+{
+  "number": 14610,
+  "kind": "pull_request",
+  "title": "fix(release): cut-rc.yml's hotcrm smoke warning no longer claims pre-exit re-arms the gate",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T14:56:27Z",
+  "updated_at": "2026-09-02T16:31:25Z",
+  "closed_at": "2026-09-02T16:31:24Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-09-02T16:31:23Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/14610",
+  "body": "Fixes #9828\n\n## What changed\n\n`.github/workflows/cut-rc.yml`'s `Downstream backward-compat smoke` step — the step comment (`:868-873`), the `::warning::` string (`:882`) — is the only edit. `release.yml` is untouched.\n\n### Before\n\n```\n      # Pre-publish gate #2035, kept in step with release.yml's publish job rather\n      # than dropped for speed. In pre mode (which the guard step proved is active,\n      # so ALWAYS on this lane) the #3600 amendment makes it advisory: a major\n      # train exists to ship deliberate surface removals, and a migrated hotcrm\n      # cannot exist until the rc artifacts it would migrate against are published.\n      # It reports; it cannot block.\n      - name: Downstream backward-compat smoke (live hotcrm, advisory in pre mode)\n        ...\n            echo \"::warning::hotcrm@${HOTCRM_REF} is incompatible with the pre-release train — expected for this window's deliberate removals. Ship a migrated hotcrm release and bump HOTCRM_REF in release.yml before 'changeset pre exit' re-arms that gate.\"\n```\n\n### After\n\n```\n      # Pre-publish gate #2035, kept in step with release.yml's publish job rather\n      # than dropped for speed. This step is advisory by construction — it has no\n      # BLOCKING switch — because this lane only ever runs in pre mode (the guard\n      # step above proved it active). It reports; it cannot block. For why the\n      # equivalent gate in release.yml is currently advisory too, and what re-arms\n      # it, see that step's own comment.\n      - name: Downstream backward-compat smoke (live hotcrm, advisory in pre mode)\n        ...\n            echo \"::warning::hotcrm@${HOTCRM_REF} is incompatible with the pre-release train — expected for this window's deliberate removals. Ship a migrated hotcrm release, bump it, and set BLOCKING=1 in .github/workflows/release.yml to re-arm this gate.\"\n```\n\n## Why\n\nThe old text told a release curator that `changeset pre exit` re-arms the gate. `release.yml`'s own comment (`:1153-1178`) records that this was superseded: pre-exit fired (#8643, 2026-08-14) and the deadlock persisted anyway, because a migrated hotcrm release did not exist yet — the keying was the bug, not the event. `release.yml`'s gate now keys re-arm on shipping a migrated hotcrm release + bumping `HOTCRM_REF` (+ `BLOCKING=1`), and its own `::warning::` (`:1199`) already says so. This PR mirrors that wording into `cut-rc.yml`'s warning so both lanes state the same condition in the same words, and points the step comment at `release.yml`'s comment as the single record of *why* the gate is advisory, rather than restating an outdated reason.\n\nThe step comment also dropped the \"#3600 amendment\" keying, which is the same superseded fact. This lane's step is advisory for a different, still-true reason than `release.yml`'s: it carries no `BLOCKING` switch at all, and this lane only ever runs in pre mode. That's now what the comment says.\n\n`name:` (`advisory in pre mode`) is unchanged — it's literally true on this lane (the rc lane only ever runs in pre mode), so it stays; the reasoning is now spelled out in the comment above it rather than in the name itself.\n\nNo logic change: `if:`, `env:` (`HOTCRM_REF: v2.1.0`), and the `run:` control flow (`if bash scripts/downstream-smoke.sh; then … else … fi`, the `::notice::` branch) are untouched. This step stays advisory and keeps emitting `::warning::` on failure, same as before.\n\n## Verification\n\n- `git diff --stat` — exactly one file: `.github/workflows/cut-rc.yml`, 6 insertions / 6 deletions.\n- `git diff origin/main -- .github/workflows/release.yml` — empty (untouched).\n- `git grep -n \"re-arms that gate\\|advisory in pre mode\\|Downstream backward-compat smoke\" -- scripts content docs .github` — after the change, `re-arms that gate` has zero hits anywhere in the tree; `advisory in pre mode` and `Downstream backward-compat smoke` each hit only the two workflows' step names, confirming nothing under `scripts/`, `content/`, or `docs/` reads or tests this warning string or step name (the \"check whether anything tests the claim\" item from PM comment 5337063017).\n\n## Gates\n\nDerived via `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --commands .github/workflows/cut-rc.yml` on this branch — 21 commands (11 pnpm, 10 direct node); reconciled `21 derived, 21 run, 0 NOT-MEASURED, 0 UNRUN` via `--ran`. All 21 ran green, including the heavy `pnpm check:pm-dispatch-gates` self-test (1240/1240 cases). Re-verified the 10 direct-node gates and (separately, contention permitting) the fast pnpm ones after two `origin/main` merges during the run (final tree `a5b95ee6e` merged in); the derived union stayed identical (same 21 commands) at each re-derivation, and neither merge touched `.github/workflows/cut-rc.yml` or `release.yml`. `check-nul-bytes` clean.\n\nThis is `.github/**`-only with no package publish — `skip-changeset` label applied.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01WLJQhde67SeTccsmnBVarV)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WLJQhde67SeTccsmnBVarV)_"
+}

@@ -2,8 +2,8 @@
   "number": 18253,
   "kind": "issue",
   "title": "finding: the security `explain` decision has an engine and an API but no UI anywhere — \"why can this user see this record\" is unanswerable from the product, while docs promise \"audit and explain\"",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "yinlianghui",
@@ -12,18 +12,21 @@
   },
   "labels": [
     "domain:services",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-15T04:03:27Z",
-  "updated_at": "2026-09-17T14:09:35Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-19T19:58:16Z",
+  "closed_at": "2026-09-19T19:57:12Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18253",
   "body": "## What was observed\n\nWhile recording a permissions walkthrough against objectstack @ `ad217b1`, the nine-layer\n`explain` decision was found to be **API-only**:\n\n- `GET /api/v1/security/explain` returns a high-quality layered verdict (grants / narrows /\n  widens across nine layers, with the deciding rule named at each layer).\n- A repo-wide search across `console/`, `studio/` and `ui/` restricted to `--include=*.tsx`\n  returns **zero hits for `explain`**. There is no panel, drawer, tooltip, inspector or\n  developer affordance that renders that verdict.\n\nSo the question the feature exists to answer — *\"why can this user see this record?\"* — cannot\nbe answered by anyone working inside the product. It can only be answered by someone who knows\nthe endpoint exists and can issue an authenticated HTTP request by hand.\n\n## Why this is being filed as a product finding\n\nThe capabilities documentation describes the permission model as **\"audit and explain\"**. A\nreader takes that as a product surface, not as an undocumented endpoint. The gap is therefore\neither:\n\n1. a **feature gap** — the explain verdict should be reachable from the UI (most likely from\n   a record page, for an admin or a user holding the relevant admin permission); or\n2. a **docs wording issue** — \"audit and explain\" should say that explain is an API-level\n   capability.\n\nFiling it as one issue because the right resolution is a product decision, not a reporter's\nguess. This report registers the observation only; it prescribes no implementation.\n\n## Impact\n\n- Admins debugging \"why can/can't this person see this\" have no in-product path.\n- The strongest part of the permission model is invisible to the people it was built for.\n- Anything that wants to *show* the model (documentation, onboarding, a walkthrough) has to\n  build its own renderer. That is exactly what happened here: the walkthrough had to render\n  the raw API response as a graphic card, with an explicit\n  `GET /api/v1/security/explain` provenance line and a \"Rendered from live API response\"\n  footnote, because there was nothing in the product to point a camera at.\n\n## Related observation (separate, smaller)\n\nWhen an object's API name is misspelled, `explain` reports `denies` rather than an\n\"unknown object\" error — a wrong object name and a genuine denial are indistinguishable in the\nresponse. Recorded here for context; happy to split it into its own issue if preferred.\n\n## Provenance\n\nRegistered during production of steedos-labs/video-studio#3 (permissions walkthrough) on\n2026-08-20 as finding **P-1**, marked \"registered, pending transfer\". The transfer was never\nmade; this issue closes that loop. No duplicate was found in this repository\n(searched for explain / permission-decision / UI-surfacing issues before filing)."

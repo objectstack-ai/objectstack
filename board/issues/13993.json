@@ -1,0 +1,36 @@
+{
+  "number": 13993,
+  "kind": "issue",
+  "title": "service-queue: the publish idempotency window never expires on Postgres/MySQL — `String(row.created_at) >= windowStart` compares a `Date.toString()` against ISO text",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T22:43:16Z",
+  "updated_at": "2026-09-01T14:30:15Z",
+  "closed_at": "2026-09-01T14:13:38Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13993",
+  "body": "Found by the driver-materialisation consumer census on #13973 (class (c) — genuinely wrong on one side). That sweep is not addressed by this card and does not close it.\n\n## The site\n\n`packages/services/service-queue/src/db-queue-adapter.ts:250-263`, in `DbQueueAdapter#publish`:\n\n```ts\nconst windowStart = new Date(now.getTime() - this.opts.idempotencyWindowMs).toISOString();\nconst existing = await this.engine.find(QUEUE_TABLE, { where: { queue, idempotency_key: opts.idempotencyKey }, ... });\nconst blocking = (existing ?? []).find((row: any) => {\n  if (row.status === 'pending' || row.status === 'running') return true;\n  return String(row.created_at ?? '') >= windowStart;   // <-- here\n});\nif (blocking) return String(blocking.id);\n```\n\n`windowStart` is canonical ISO-8601 text: `\"2026-08-30T10:19:25.947Z\"`.\n\n## Why it is wrong on the production default driver\n\n`created_at` is a builtin audit column. It is not in `datetimeFields`, so no declared-field coercion reaches it, and `SqlDriver#formatOutput` repairs it only inside its `if (this.isSqlite)` arm. Pinned in `packages/drivers/driver-sql/src/sql-driver-13567-audit-stamp-materialisation.test.ts`: the live dialects hand `updated_at`/`created_at` out of the record read door as a JS `Date`; SQLite hands back canonical ISO-Z text.\n\nSo on Postgres and MySQL the left side of that comparison is\n\n```\nString(new Date()) === \"Sun Aug 30 2026 18:19:25 GMT+0800 (China Standard Time)\"\n```\n\nand the comparison is a lexicographic string compare of a value beginning with an ASCII **letter** against a value beginning with an ASCII **digit**. `'S' (0x53) >= '2' (0x32)` — and the same holds for every weekday name and every ISO year this century. **The predicate is unconditionally true.**\n\nEffect: on Postgres/MySQL every terminal (`completed` / `dlq`) row matching the idempotency key blocks a re-publish **forever**, instead of only while it is inside `idempotencyWindowMs`. `publish()` returns the old message id and silently enqueues nothing. The window the ADR-0057 retention comment at the top of this file is built around (`the declared retention ... is measured on the very same created_at axis and is >= this window`) does not exist on those dialects.\n\nOn SQLite both sides are canonical ISO-Z text, lexicographic order equals chronological order, and the check is correct. Every test this seam has drives SQLite or memory, which is why it has stayed green.\n\n## Why this is not a `??` fallback\n\nPer #13973's standing prohibition, the open question is which side owes the canonical spelling, not how to make the consumer tolerant. Two candidate shapes:\n\n- **A — normalise at the consumer with an instant compare**, the shape #13382 landed at the OCC seam (`canonicalVersionInstant`): compare instants, not strings. Local, no contract change.\n- **B — normalise at the producer**, i.e. teach the read door to present the builtin audit columns in one shape on every dialect. Fixes this site and every sibling in one place, but it reverses a deliberate driver decision (`withPostgresCalendarDayAsText`: *\"`timestamptz` / `timestamp` are deliberately untouched: those are instants, a `Date` is the right materialisation for them\"*) and is therefore a maintainer call, not an implementer's.\n\nA regression pin for either needs a `Date` on the read side; that discriminating input exists in CI only inside `@objectstack/driver-sql` today (see #13973's point-4 measurement), so the pin most likely belongs in this package driving a hand-made `Date`, the same split `sql-driver-13567-audit-stamp-materialisation.test.ts` documents.\n\n## Re-run\n\n```\nrg -n 'String\\(row\\.created_at' packages/services/service-queue/src/\n```\n\nBacklink: #13973 (census), #13382 (the OCC seam, the same shape). Neither is addressed here."
+}

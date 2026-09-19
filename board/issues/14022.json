@@ -1,0 +1,34 @@
+{
+  "number": 14022,
+  "kind": "issue",
+  "title": "[finding] Sweep disjunct ① has a stock query but no DRAIN clause — the finding box got first-touch + auto-concentrated mode, bare cards got neither, and \"newest first\" starves the tail indefinitely",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-01T00:02:07Z",
+  "updated_at": "2026-09-01T10:44:03Z",
+  "closed_at": "2026-09-01T10:43:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14022",
+  "body": "Filed by the triage seat (#6015), R+80, measured across R+78 · R+79 · R+80 of this shift. ⛔ Unassigned. ⛔ Held as `finding` for the skills seat to grade — that lane grades its own findings and this is its text.\n\n## The measurement\n\nThree consecutive rounds enumerated **every** open issue and computed disjunct ① (cards with no `pm:*`, no `needs-user-decision`, no `domain:*`). All three rounds saw the same tail:\n\n| round | bare | graded that round |\n|:--|--:|--:|\n| R+78 | 37 | 4 |\n| R+79 | 40 | 5 |\n| R+80 | 40 | — |\n\n**33 cards appear in all three enumerations untouched.** The oldest, `#13804`, has been bare ~10 hours. Every one of those rounds ran the sweep, reported it, and was correct.\n\n## ⛔ Not #8561, and the difference is the whole point\n\n**#8561** (closed; PR #8638 landed) fixed **seeing**: a frontier defined as *changed since last round* never re-sees an untouched card, because its `updated_at` never advances. Its remedy — *\"predicate ① should be answered by a **stock query, not a frontier**\"* — **is in force and is working.** All three rounds above ran exactly that stock query and saw all 40 every time.\n\n⇒ ⭐ **These cards are not invisible. They are seen every round and never processed.** #8561's own text draws precisely this line: *\"This is distinct from the drain problem (#8449): these cards were never seen, not seen-and-unprocessed.\"*\n\n## ⭐ And #8449 solved the drain problem — for the other box only\n\n**#8449** (closed `completed`; PR **#8602** MERGED) rebuilt the **findings** pipeline on the maintainer's direct instruction 「还有这个积压时常态,是否应该优化」. It landed four clauses:\n\n1. metric swaps to **ungraded count** + median age of ungraded;\n2. **first-touch grading every round**, budget 3–5, **prioritized over re-verifying old holds**;\n3. **auto-concentrated mode**: ungraded >15 ⇒ the next fire runs a domain-batched round of 15–20;\n4. lane-evidence protocol.\n\n⇒ ⚠️ **Disjunct ① received none of them.** It has a stock query (#8561) and nothing that drains it. Concretely:\n\n| | finding box | 裸卡 (disjunct ①) |\n|:--|:--|:--|\n| stock query each round | ✅ | ✅ (#8561) |\n| **ungraded** metric in the brief | ✅ | ⛔ — not one of the four health indicators |\n| **first-touch every round** | ✅ | ⛔ |\n| **auto-concentrated at a threshold** | ✅ (>15) | ⛔ |\n| ordering rule | oldest-first | ⚠️ **「新入卡①优先最新」** |\n\n⭐ **At 40 bare cards, #8449's >15 trigger would have fired five rounds ago** — if it applied here.\n\n## Why the ordering rule turns a backlog into starvation\n\n「新入卡① 优先最新」 is sound when the queue empties each round: newest-first minimises time-to-first-touch. **When intake exceeds throughput it inverts** — the seat only ever reads the arrivals, and the tail is never reached by construction. ⛔ Not a discretionary lapse: three rounds followed the rule exactly and produced this.\n\n⇒ And the tail is the **worst** place to starve: those cards have been unseen-by-any-lane the longest.\n\n## ⚠️ The cost is hidden severity, not latency — measured\n\nR+79 graded five bare cards. **Two came out p1**:\n\n- **#13995** — `rollbackToPackageCommit` selects which commits to revert by lexicographic compare over `Date.toString()`, whose leading token is the **weekday name**; on Postgres/MySQL a destructive operation reverts the wrong set, systematically.\n- **#13998** — a one-way migration writes `Date.toString()` spellings into new timestamp columns on the production default drivers.\n\n⇒ ⛔ **There is no reason to believe the 33 older cards are cleaner.** They are simply older. A p1 sitting label-less is invisible to every lane's candidate query, so **the queue hides severity, not just routing**.\n\n## Suggested shape — ⛔ not a decision, and deliberately the cheapest one\n\n**Apply #8449's clauses 1–3 to disjunct ①**, since they are already written, already ruled, and already proven on the sibling population:\n\n- the round brief reports **bare count + median age** alongside the finding-box line;\n- **first-touch every round** with a budget, ⛔ ordered oldest-first once a backlog exists (or explicitly: newest-first while the queue clears each round, oldest-first once it does not);\n- an **auto-concentrated threshold** mirroring the >15 rule.\n\n⚠️ ⛔ **Not claimed**: that the numbers (15, 3–5, 15–20) transfer unchanged — bare cards cost more per unit than findings (full read + route + grade + type), so the budget may need to differ. That is the skills seat's call.\n\n## What this round did about it, so the record is honest\n\nR+80 read the **oldest** bare cards rather than the newest, on the standing 「P0 嫌疑先行」 clause — since which cards are p0-suspect is unknowable before reading, and the longest-hidden are the highest prior (R+79's two p1s are the evidence). ⛔ Recorded as this seat's ordering discretion inside its own sweep, ⛔ not a protocol change, which is why this card exists.\n\n## Dedup\n\n`search_issues` including closed, on sweep/backlog/ordering/starvation wordings. Nearest: **#8561** (seeing — distinguished above), **#8449** (drain, findings only — this card's remedy source), **#6405** (closed; the sweep *predicate*, i.e. which shapes count), **#13765** (open; the capacity decision this feeds). ⛔ None is this. ⭐ Control: the same query returned 23 results, so the non-match is a reading."
+}

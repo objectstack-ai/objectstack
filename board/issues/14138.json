@@ -1,0 +1,34 @@
+{
+  "number": 14138,
+  "kind": "pull_request",
+  "title": "docs(skills): document the action and component nav item types",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T07:12:01Z",
+  "updated_at": "2026-09-01T07:54:14Z",
+  "closed_at": "2026-09-01T07:54:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-09-01T07:54:12Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/14138",
+  "body": "Fixes #13890\n\nThe published `skills/objectstack-ui` \"Navigation Item Types\" table listed 7 of the 9 live\n`NavItemVariant` members: `action` and `component` had no row, in a section whose heading\nnames the catalog and whose other seven rows are present — so an AI author reading it\ncould not reach either variant.\n\nPart of #13658. The objectstack twin of the fix the objectui sweep landed in that repo's\n`skills/objectui/guides/app-composition.md`; the rows here are written in this table's own\n`Type | Properties | Purpose` idiom rather than copied.\n\n## Member set, verified against the schema\n\nThe live set is read out of the schema at runtime — hand the discriminated union a bogus\n`type` and print the options it names, rather than trusting the card's \"9\" or the\n`NavItemVariant` type alias:\n\n```\nDISCRIMINATOR OPTIONS (from the schema): [\"object\",\"dashboard\",\"page\",\"url\",\"report\",\"action\",\"component\",\"separator\",\"group\"]\nCOUNT: 9\nISSUE: invalid_union | Invalid discriminator value. Expected 'object' | 'dashboard' | 'page' | 'url' | 'report' | 'action' | 'component' | 'separator' | 'group'\n```\n\nNine members; the two absent from the table are exactly `action` and `component`.\n`packages/spec/src/ui/app.zod.ts` backs each row: `ActionNavItemSchema` requires\n`actionDef`, itself a strict object of `actionName` plus an optional open `params`;\n`ComponentNavItemSchema` requires `componentRef` (a `ComponentRegistry` key such as\n`metadata:resource`) with an optional open `params` passed to the component as props.\nNeither variant accepts `children` — `NAV_VARIANTS_ACCEPTING_CHILDREN` is `object` and\n`group` only — so neither row lists it.\n\n`pnpm --filter @objectstack/spec exec vitest run --maxWorkers=2 src/ui/app.test.ts` —\n102 passed (1 file), including the pin that parses all nine variants with their full\ndeclared payloads.\n\n## Rows added\n\n```\n| `action`    | `actionDef` (`{ actionName, params? }`), `label`, `icon` | Run an action instead of navigating |\n| `component` | `componentRef`, `params?`, `label`, `icon`    | Built-in platform component; `componentRef` is a colon-joined registry key (`metadata:resource`), `params` become props |\n```\n\n## Token budget — funded by deletion in the same file, no ceiling raise\n\nThe file sat at its ceiling with headroom 0, so the two rows are paid for by removing text,\nnot by moving a ceiling. Verdict lines from `node scripts/check-skills-token-ratchet.mjs`:\n\n```\nbefore: ✓ check-skills-token-ratchet: skills/objectstack-ui/SKILL.md is 25445 tokens (ceiling 25445; headroom 0).\nafter:  ✓ check-skills-token-ratchet: skills/objectstack-ui/SKILL.md is 25441 tokens (ceiling 25445; headroom 4).\n```\n\nFunding source — two `Common Pitfalls` entries deleted, neither of which carries a fact the\nfile does not state better elsewhere (a real deletion, not a re-wrap; the ceiling constant\nis untouched):\n\n- **\"Using `provider: 'api'` when `provider: 'object'` is available\"** — a strict subset of\n  the Data Source best-practice block a thousand lines above, which is the richer of the two\n  (it also names automatic CRUD).\n- **\"Not setting quick filters … always add a 'My Records' filter\"** — superseded by the\n  ADR-0047 `userFilters` section in the same file, which prescribes the opposite default:\n  *\"Omit `userFilters` when unsure … most views need no filter elements at all.\"* Keeping\n  both left the skill teaching two contradictory defaults.\n\nRequired `skills/**` readings, lines and tokens (token unit is the ratchet's own\n`ceil(utf8 bytes / 4)`):\n\n| Reading | Before | After | Delta |\n|:--|--:|--:|--:|\n| `skills/objectstack-ui/SKILL.md`, whole file — lines | 2111 | 2105 | -6 |\n| `skills/objectstack-ui/SKILL.md`, whole file — tokens | 25445 | 25441 | -4 |\n| Whole published package, all 11 `SKILL.md` — lines | 10533 | 10527 | -6 |\n| Whole published package, all 11 `SKILL.md` — tokens | 118696 | 118692 | -4 |\n\nBoth readings are net negative: the catalog gets two missing rows and gets shorter.\n\n## Ledger\n\n`scripts/check-skill-identifier-liveness.mjs` records this gap in\n`scripts/skill-identifier-liveness-ledger.json` under `leg2Gaps.navigation-item-types`, and\nrefuses an improvement that does not ratchet it down. Second commit does exactly that; the\ngate now reports `Leg 2: 9 registered exhaustive section(s), 0 ledgered gap(s)`.\n\n## Gates\n\nFull derived union at HEAD `c587bd7ff`, from\n`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --commands` run\nagainst that same commit (21 commands over the 2 changed paths), plus `check:nul-bytes`.\nExit codes captured before any pipe. 21 green; one NOT MEASURED:\n\n- `node scripts/check-test-completeness.mjs` exits 3 with no argument by design — it parses\n  a saved `turbo run test` log, which a local family run has none of. Its own text says this\n  is not a red and there is nothing here to fix.\n- `pnpm --filter @objectstack/lint run check:doc-formula-expressions` first exited 3\n  (PREREQUISITE NOT MET) because `@objectstack/formula` and `@objectstack/lint` were not\n  built in this fresh worktree; after building both it exits 0 at the same HEAD.\n\nNo changeset: the diff publishes nothing from any package, so the PR carries\n`skip-changeset`.\n\n## Landing\n\n`skills/**` is a governed surface — this PR stays a **draft** and is merged by the\nmaintainer, by hand. No auto-merge, no queue.\n\nSession: `session_01Msg17tAHJ3jVTYFgHydCm2`.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01Msg17tAHJ3jVTYFgHydCm2)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Msg17tAHJ3jVTYFgHydCm2)_"
+}

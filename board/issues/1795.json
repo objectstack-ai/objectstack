@@ -1,0 +1,32 @@
+{
+  "number": 1795,
+  "kind": "issue",
+  "title": "ADR-0048: Semantic-reference metadata embeds in package docs (flow:// / view:// / dashboard:// / object://)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T21:00:01Z",
+  "updated_at": "2026-09-01T14:44:18Z",
+  "closed_at": "2026-06-13T01:40:56Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1795",
+  "body": "Tracks **[ADR-0048: Semantic-reference metadata embeds in package documentation](https://github.com/objectstack-ai/framework/blob/docs/adr-0048-semantic-metadata-embeds/docs/adr/0048-semantic-metadata-embeds-in-docs.md)** (Status: Proposed).\n\nADR PR: https://github.com/objectstack-ai/framework/pull/1794\nBuilds on: ADR-0046 (package docs as metadata, §3.4 reserved semantic links, §3.5 derived-content-is-rendered), ADR-0025 (trust boundary), ADR-0033 (AI as author).\n\n## Problem\n\nA package's prose wants to *point at the thing it documents* — \"here is the routing flow,\" \"this is the pipeline dashboard,\" \"these are the lead's fields.\" ADR-0046 bans MDX (code in the platform origin = ADR-0025 violation) but §3.4 reserved semantic links and §3.5 ruled that a diagram of an existing flow is **derived** metadata, rendered live, never committed. That describes a feature without specifying it. This is the specification.\n\n## Design (the inversion)\n\n> The author supplies only a **NAME (data)**; the platform supplies the **COMPONENT (code)**.\n\nThe opposite of embedding author-written MDX/SDUI (SDUI is worse — its nodes bind actions/data/server-calls). A name is inert data a sanitizer already trusts; the component is first-party code the platform already trusts. The trust boundary never moves.\n\n- **Syntax** — extend §3.4's protocol-link family: `flow://<name>`, `view://<name>`, `dashboard://<name>`, `object://<name>`. Markdown-native link → graceful GitHub/editor degradation, parse-only lint. Resolves renderer-side to a **read-only** `SchemaRenderer` scoped to that one metadata item, accepting **no author props**.\n- **Guardrail (a)** — read-only + permission-scoped: non-interactive projection (no \"run this flow\" in a doc), resolved against the current viewer's permissions + the same `sys_package_grant` that delivered the package. No access bypass; previews show the viewer's own RLS rows.\n- **Guardrail (b)** — cross-package references degrade to a render-time \"not found\" notice; never couple into install-time dependency resolution.\n- **Boundary, one line** — in-metadata → live embed (this ADR); not-in-metadata conceptual → Mermaid (deferred); author-written component code → never.\n\n## Phasing (P3+ on ADR-0046)\n\n- [ ] **Prereq A** (spec/cli): §3.4 semantic-link resolution layer (scheme→type, name lookup under viewer perms + grant) — *not built*.\n- [ ] **Prereq B** (objectui): read-only embeddable metadata-view components — flow viewer, view preview, dashboard preview, object summary — usable inline in `plugin-markdown`, not just full-page — *not built*.\n- [ ] **P3a** (lint): publish lint recognizes the protocol-link family, requires it parses (no metadata resolution).\n- [ ] **P3b** (renderer): `plugin-markdown` intercepts protocol-scheme links → read-only `SchemaRenderer` projection with both guardrails.\n- [ ] **P3c** (authoring + AI): Studio \"insert reference\" affordance; AI authors embeds when documenting an existing item.\n- [ ] Deferred (separate ADR): Mermaid / conceptual text-diagrams.\n\n## Rejected alternatives\n\nInline SDUI component JSON, MDX/author React, author-supplied `<iframe>`, custom fenced blocks, publish-time baking, lint-time metadata resolution."
+}

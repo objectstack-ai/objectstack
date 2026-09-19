@@ -1,0 +1,36 @@
+{
+  "number": 14095,
+  "kind": "issue",
+  "title": "An application told to rely on a unique index cannot recognise the violation: ObjectQL rethrows the raw driver error and `isUniqueViolationError` is not reachable from an app",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T04:56:29Z",
+  "updated_at": "2026-09-02T07:02:28Z",
+  "closed_at": "2026-09-02T06:52:02Z",
+  "closed_by": {
+    "login": "os-musk",
+    "id": 323835826,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 13,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14095",
+  "body": "Found while building an ObjectStack application in `objectstack-ai/duly` against published `@objectstack/*` 17.2.0. Filed here because the fix lands in `packages/objectql` (wrap) or `packages/spec` (re-export) — either closes it.\n\n## The pattern the platform recommends\n\nDeclare a unique index, attempt the insert, swallow the uniqueness violation. It is the right shape: it is what lets an idempotent writer be an ordinary job instead of needing a distributed lock, and `packages/objectql`'s own autonumber-resync doc argues at length against the read-then-write alternative (\"a probe costs a query on every insert … and is still racy\").\n\nAn application cannot complete that pattern, because it cannot tell the violation from anything else.\n\n## Measured\n\nReal booted app, `duly_task` carrying `{ name: 'duly_task_dispatch_identity', fields: ['duty','owner','period_key'], unique: 'organization' }`, two identical inserts:\n\n| driver | rows after 2 identical inserts | threw | what the app sees |\n|---|---|---|---|\n| `memory` | **2** | **no** | nothing — a silent duplicate |\n| `sqlite` | 1 | yes | `name=SqliteError`, `code=\"SQLITE_CONSTRAINT_UNIQUE\"`, `errno=undefined`, `cause=undefined`, `Object.keys(err) = ['code']`, message = the full compiled INSERT statement |\n\nSo on the driver that enforces it, the **raw driver error propagates**. ObjectQL does not wrap it: `grep` for `DUPLICATE_RECORD` / `DUPLICATE_VALUE` / `RESOURCE_CONFLICT` in `@objectstack/objectql/dist` returns nothing, and the two hits for `isUniqueViolationError` are both inside the autonumber-resync path, which rethrows anything that is not its own collision.\n\n## Why the app cannot close it locally\n\nThree options, all bad:\n\n1. **Test `err.code === 'SQLITE_CONSTRAINT_UNIQUE'`.** Couples the application to one dialect. On Postgres it is `23505`, on MySQL `ER_DUP_ENTRY`, on Mongo `E11000`. The app silently stops being idempotent the day it is deployed on a different store — no error, just duplicate rows.\n2. **Pattern-match the message.** A consumer growing tolerance for a producer that will not answer. The message here is the compiled SQL statement.\n3. **Use the platform's own predicate.** `isUniqueViolationError` exists, is dialect-independent, reads `code`/`errno`/`message` plus one step down the `cause` chain, and is exactly right — and it lives in `@objectstack/types`, which is **not reachable from an application**:\n\n```\nNOT FOUND  @objectstack/types  ERR_MODULE_NOT_FOUND\n```\n\nNeither `@objectstack/spec` nor `@objectstack/runtime` re-exports it (grep across both `dist/**/*.d.ts`: no hits). An app would have to add an internal package described as \"Shared interfaces describing the ObjectStack Runtime environment\" to its dependencies to get a predicate the platform already wrote.\n\n## The declarative path has the same hole, worse\n\nA scheduled flow doing this shape (`get_record` → `loop` → `create_record`) has two error-handling primitives, `try_catch` and a `fault` edge, and both swallow **every** failure identically — because the `create_record` executor collapses the engine error to a string before either can see it:\n\n```js\n} catch (err) {\n  return { success: false, error: `create_record(${objectName}) failed: ${err.message}` };\n}\n```\n\nNo `code`, no `errorClass`, no structured cause. So a declarative author's only expressible reading of \"swallow the duplicate\" is \"swallow everything\", which turns a missing required field, a refused write or an unreachable store into a run recorded as successful that created nothing. That is the failure mode a nightly writer can least afford.\n\n## Suggested direction\n\nEither one closes it; the first is better.\n\n1. **Wrap it in ObjectQL.** Raise a platform error carrying an existing code from the declared vocabulary (`DUPLICATE_RECORD` is already in it) with the driver error as `cause`, so `insert` has one contract across every driver. Then surface that code on `create_record`'s node result — `NodeResult` already carries `errorClass`, so the declarative half becomes expressible too, and a catch region can distinguish \"already there\" from \"the store is down\".\n2. **Or re-export `isUniqueViolationError`** (and `uniqueViolationColumn`) from `@objectstack/spec`, making the predicate the platform already maintains part of the application-facing surface.\n\nWorth stating either way, because it is a separate promise: `driver-memory` enforces no uniqueness at all, so a declared unique index is inert there. `packages/objectql`'s own driver census already says so. It means an app whose correctness rests on a unique index is silently unprotected in every test suite booted on the memory driver — which is the default in the app templates.\n\n## Meanwhile\n\nThe consuming application does not hard-code a dialect and does not read messages. On the failure path only, it re-reads the identity triple and asks the *data* whether the row is there: present means the obligation exists exactly once and the run's work on it is done; absent means the insert failed for some other reason and the error is re-thrown so the run fails. That is correct and driver-independent, but it costs a query on every collision and, more to the point, every ObjectStack application relying on a unique index will have to invent it.\n\n## Related\n\n- [#14094](https://github.com/objectstack-ai/objectstack/issues/14094) — a `defineJob` handler has no data reach at all. Independent; came out of the same card.\n- #6543 closed a *fourth* private unique-violation vocabulary inside `driver-sql` by migrating it onto the shared `@objectstack/types` predicate. This is the same consolidation one layer further out, for consumers.\n\n## Provenance\n\nReported by a developer agent implementing `objectstack-ai/duly#2` (the dispatcher job), whose entire idempotency story is this index.\n\nUnassigned and untriaged, per the single-producer rule for `domain:*`.\n"
+}

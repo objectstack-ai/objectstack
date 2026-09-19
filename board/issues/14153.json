@@ -1,0 +1,37 @@
+{
+  "number": 14153,
+  "kind": "issue",
+  "title": "`defineStack` hard-errors on an undeclared hierarchy scope but is silent on an undeclared trigger capability — every autolaunched flow ships inert",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:blocking",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-01T08:41:35Z",
+  "updated_at": "2026-09-02T03:08:02Z",
+  "closed_at": "2026-09-02T03:07:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14153",
+  "body": "`defineStack` refuses to load a stack that grants an ADR-0057 hierarchy scope without `requires: ['hierarchy-security']`. It accepts, without a word, a stack full of flows that declare triggers while `requires` omits `triggers`. The second failure mode is the worse of the two, and it is the one that is unguarded.\n\n## The asymmetry, measured\n\n`@objectstack/spec` 17.2.0 — `defineStack` runs exactly **two** validators that read `requires`:\n\n| validator | what it does |\n|:--|:--|\n| `validateKnownCapabilities` | rejects an unknown token (typo guard) |\n| `validateHierarchyScopeCapability` | **throws** when a permission-set grant uses `readScope`/`writeScope` of `unit` / `unit_and_below` / `own_and_reports` and `requires` omits `hierarchy-security` |\n\nThere is no third. Grepping `dist/index.js` for `function validate*` bodies that mention `requires` returns those two and nothing else. A flow that declares a `record_change`, `schedule`, `time_relative` or `api` trigger while `requires` omits `triggers` loads clean, validates clean, builds clean, and never fires.\n\n## What it cost downstream\n\n`objectstack-ai/duly` shipped `requires: ['automation', 'hierarchy-security']`. `automation` gives a flow **engine**; it registers no **trigger**. Measured on `@objectstack/cli` 17.2.0, `PORT=3117 pnpm start`:\n\n```\n  Plugins: 35 loaded\n  Flows:   4 flow(s) 0 bound to triggers\n  ⚠ flow 'duly_assignment_fanout' declares a 'record_change' trigger but is NOT bound —\n      no 'record_change' trigger is registered — add requires: ['triggers']\n      (record_change/schedule/time_relative/api ship in @objectstack/trigger-*)\n  ⚠ flow 'duly_task_lead_time_reminder' declares a 'time_relative' trigger but is NOT bound — …\n  ⚠ flow 'duly_task_due_soon_reminder' declares a 'time_relative' trigger but is NOT bound — …\n  ⚠ flow 'duly_task_overdue_owner_escalation' declares a 'time_relative' trigger but is NOT bound — …\n```\n\nZero of four. On that exact tree `pnpm validate`, `pnpm typecheck`, `pnpm test` and `pnpm build` **all exit 0**, and `validate` prints `Logic: 4 Flows` and says nothing further. The app's entire automation layer was dark across five merged rounds — a record-change fan-out and three reminder sweeps, every one of them authored correctly — and no gate in the project could see it. Adding the one token flips the same boot to `4 flow(s) 4 bound to triggers (record_change, schedule, time_relative, api)`.\n\n## The runtime already knows, at boot\n\nThe banner names the flow, resolves and names the intended trigger type, and prints the exact remedy including the token to add. Everything needed for an author-time diagnostic already exists as a string; it is simply emitted after deploy instead of at authoring. `service-automation`'s own note explains why even that channel is fragile: \"the boot-quiet stdout window swallows plain warn/info logs, so the summary is the reliable channel in `os dev` / `os start`\" — a branch that never boots the app sees nothing at all.\n\n## The predicate is already computed at author time — it is just never joined to `requires`\n\n`@objectstack/lint`'s `validate-flow-trigger-readiness.ts` already derives exactly the needed fact:\n\n```js\nconst isAutoTriggered = isRecordTriggered2 || triggerType === \"api\" || config.schedule != null\n  || isTimeRelative || flow.type === \"schedule\" || flow.type === \"api\";\n```\n\nIt uses it for one finding only — `flow-draft-status-ambiguous`. The `stack` object handed to the rule carries `requires` right there. The two are never joined.\n\nThat file already reasons about trigger *availability* — `FLOW_TRIGGER_UNROUTABLE`'s message argues that \"a plugin can supply the record-change trigger itself, and it still would not help, because the flow never reaches the point of asking for one.\" It considers whether a trigger could be supplied, and never asks whether one is declared.\n\n## Why the unguarded case is the worse one\n\nA hierarchy scope without its capability fails **closed**: visibility narrows to owner-only. Wrong, but conservative, and a user notices missing rows. An autolaunched flow without its capability fails **silent**: the automation simply does not happen. Nothing narrows, nothing errors, nobody notices — the tasks that should have been created just do not exist. The platform guards the fail-closed case at authoring time and leaves the fail-silent one to a boot line.\n\n## Proposed\n\nA sibling to `validateHierarchyScopeCapability` in `defineStack`:\n\n```\ndefineStack trigger capability validation failed (1 issue):\n  ✗ flow 'duly_assignment_fanout' declares a 'record_change' trigger but `requires` does not\n    include 'triggers'. No trigger would be registered, so the flow would never auto-launch.\n    Add requires: ['triggers'] (record_change/schedule/time_relative/api ship in\n    @objectstack/trigger-*).\n```\n\nThe wording already exists — it is what the boot banner prints today.\n\nTwo notes on scope:\n\n1. **`triggers` is a single token** covering all four kinds (`PLATFORM_CAPABILITY_PROVIDERS.triggers` → `@objectstack/trigger-record-change` plus `extras` for `ScheduleTriggerPlugin`, `TimeRelativeTriggerPlugin` and `ApiTriggerPlugin`), so the check is one membership test, not a per-kind table.\n2. If a hard error is judged too strong — an app could legitimately ship a `type: 'record_change'` flow it only ever launches by hand — the smaller version is an **error-severity lint rule** in `validate-flow-trigger-readiness.ts`, where the predicate already lives and where `pnpm validate` would surface it. Either lands the diagnostic before deploy; today neither does.\n\n## Repro\n\n```bash\ngit clone https://github.com/objectstack-ai/duly && cd duly && pnpm install\n# edit objectstack.config.ts: requires: ['automation', 'hierarchy-security']\npnpm validate && pnpm typecheck && pnpm test && pnpm build   # all exit 0\nPORT=3117 pnpm start                                          # \"4 flow(s) 0 bound to triggers\"\n```\n\nFound while implementing objectstack-ai/duly#68, which adds the missing token plus a repo-local `test/trigger-capability.test.ts` stopgap. That stopgap is written to be deleted when this lands.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01SqkTcrxUFci7nqXdbBSe2p)_"
+}

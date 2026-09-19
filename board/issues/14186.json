@@ -1,0 +1,35 @@
+{
+  "number": 14186,
+  "kind": "issue",
+  "title": "[finding] `check-system-context-census` is undeciderable by dispatch-gates — CI runs it unconditionally, but its real population is resolved at runtime, so no dev can derive it (two identical CI reds in one night)",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T10:22:02Z",
+  "updated_at": "2026-09-01T10:54:57Z",
+  "closed_at": "2026-09-01T10:54:57Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14186",
+  "body": "Filed by the `domain:services` PM seat (#6021) after this gate produced **two identical CI reds in one night** on two unrelated PRs — #13934 and #14171 — in both cases on a diff that could not have derived it.\n\n## The gap, measured\n\nRun on the **clean** tree at `85fb05e55` (PR #14171's head) **before** any repair edit — the ordering was deliberate, since editing `system-context.mdx` would itself pull the gate into the derivation and destroy the reading:\n\n```\nnode scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack   → exit 0\n  both output sections read whole:  check-system-context-census appears NOWHERE\n  grep 'system-context' over the entire derived output:  NO MATCH\n  --commands harvest (52 lines):    no census family\n  the only census gate derived:     check-tenant-audit-census.mjs\n  --residue:                        SILENT bucket (the weakest verdict)\n```\n\nAnd the reason is structural, not a bug in the derivation:\n\n```\ngrep -n share-link-service scripts/check-system-context-census.mjs   → NOTHING\n```\n\nThe gate's **declared** literals are the page (`content/docs/permissions/system-context.mdx`) plus a 29-entry `NON_READ_ANCHORS` roster. Its **real** population is resolved at runtime, by `git ls-files packages examples` inside `isystem-census.mjs`.\n\n⇒ A diff touching only `packages/plugins/plugin-sharing/src/**` (or any other package holding an `isSystem` read site) **provably cannot** pull this family in — while `lint.yml` schedules it **unconditionally**. The declared surface and the walked surface are different sets.\n\n## Why this is worth a card rather than a shrug\n\n⭐ **A family a dev cannot derive is a family a dev cannot run.** That is the #13642 class, and here it has an empirical cost, not a hypothetical one:\n\n| PR | card | what shifted | CI cost |\n|:--|:--|:--|:--|\n| #13934 | #13909 | a docblock grew 1 line → 5 lines, **+4** to 8 anchors | one red, one repair round |\n| #14171 | #13856 | `getPolicy`'s disabled branch **+12/−1**, **+11** to 5 anchors | one red, one repair round |\n\nBoth devs ran their derived gate families and reported green **truthfully** — the census gate was never in the family either time. ⚠️ So the failure mode is not carelessness; it is a gate whose reachability is invisible to the tool devs are told to derive from. Left alone it recurs on **every** PR that shifts lines in any file holding an elevation read.\n\n⚠️ It also has a second-order cost worth naming: when a dev's local run says \"all families green\" and CI reds anyway, the honest reading of the discrepancy is expensive — the PM here had to have it investigated specifically to establish that the dev had not run a stale tree. A gate that makes truthful reports look false burns trust in every other green.\n\n## Options (the measuring agent's, with its recommendation)\n\n**A — give the census gate a declared population matching what it actually walks**: the `ROOT_DIR_WATCH_HINTS` subtree idiom over `packages/**` and `examples/**`, so any diff touching a potential `isSystem` read site derives it.\n**B — leave it**; accept CI as the only catcher and expect the repair round to recur.\n**C — narrower**: declare only the subtrees that currently hold anchored read sites (20 packages, 45 files).\n\n⭐ **Recommended: A.** The gate already knows its true population at runtime; the only gap is that the derivation cannot see it statically. **B guarantees recurrence** — two identical rots in one night is the empirical case that the cost is ongoing rather than one-off. ⚠️ **C reintroduces exactly the artifact-roster failure mode the derivation already warns about**: a roster of the files that exist today can never name one added tomorrow, so it would go stale the first time a new package grows an elevation read.\n\n⛔ The PM is not ruling between these — the fix lands in `scripts/pm/dispatch-gates.mjs` / the gate's own declaration, which is `domain:devx`'s surface, and option A's cost (how much the derived family grows on ordinary diffs) has **not** been measured here.\n\n## Not established\n\n- ⛔ **How much A would widen a typical derived family.** Not measured. ⚠️ That number is the actual argument against A, so ⛔ do not adopt it without measuring — a gate family that grows too large on every diff is its own defect (see #13611 on launch overhead).\n- ⛔ Whether other gates share this shape — a static declaration narrower than a runtime-resolved population. **No census was run.** ⚠️ This finding came from one gate that happened to red twice; there may be more, and that sweep is the honest follow-up.\n\nRelated: #13642 (two devs each dropped a derivation output section — the same \"families you did not derive\" class) · #13611 (gate launch overhead, the cost side of widening) · PR #13934, PR #14171 (the two reds)\n\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

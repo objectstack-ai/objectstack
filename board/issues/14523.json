@@ -1,0 +1,33 @@
+{
+  "number": 14523,
+  "kind": "pull_request",
+  "title": "fix(pm): let a SPELLINGS entry hold a list of segment arrays for multi-hint rows",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T10:02:05Z",
+  "updated_at": "2026-09-02T11:00:14Z",
+  "closed_at": "2026-09-02T11:00:12Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-09-02T11:00:12Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/14523",
+  "body": "Fixes #14233\n\n## What\n\n`scripts/pm/bare-root-worklist.mjs`'s `SPELLINGS` self-test harness held exactly\none hint per entry, so a `DECLARED-NARROWER` row whose gate declares its\npopulation as more than one glob could not record a spelling at all, and its\ndeclaration went re-measured by nothing in this file. Five rows were in that\nstate: `check:logger-receiver-detach`'s three `SCAN_ROOTS` rows (`packages`,\n`examples`, `apps`), `check:dual-build-cjs-loads SCAN_ROOT packages` and\n`check:ratchet-remedy-authority SCRIPTS_DIR scripts`.\n\nThis extends `SPELLINGS` so an entry's `segments` may hold either one hint (a\nflat segment array — unchanged for the nine existing entries, kept readable) or\na LIST of segment arrays — the narrow remedy the card sketched. The pin loop\nasks `hintCovers` and `holds` of the UNION of an entry's hints. Five multi-hint\n(or, for `examples`, single-hint) entries were added, matching each gate's own\n`ROOT_DIR_WATCH_HINTS` declaration exactly:\n\n| entry | hints | covered / root files |\n|:--|:--|:--|\n| `packages TypeScript source` | `packages/**/*.ts`, `packages/**/*.tsx`, `packages/**/*.mts` | 5240 / 5796 |\n| `examples TypeScript source` | `examples/**/*.ts` | 206 / 243 |\n| `apps TypeScript source` | `apps/**/*.ts`, `apps/**/*.tsx` | 29 / 41 |\n| `dual-build manifests and configs` | `packages/**/package.json`, `packages/**/tsup.config.ts` | 94 / 5796 |\n| `scripts top-level script files` | `scripts/*.mjs`, `scripts/*.mts` | 183 / 310 |\n\nEach of the five `DECLARED-NARROWER` rows now carries `spelling:` naming its\nentry, and each row's `why` prose is corrected — the `check:ratchet-remedy-authority`\nrow previously stated in as many words that \"SPELLINGS holds ONE hint per entry\nand this population needs one per extension\"; that sentence is now false and is\nrewritten to describe the new pin instead.\n\nNo verdict changes. No gate under `scripts/check-*.mjs` is edited — their\ndeclarations are read, never written. This is not a new gate: the pin lives\nentirely inside `bare-root-worklist.mjs --self-test`, which already ran on\nevery PR (`lint.yml:766`).\n\n## Decision recorded, not built\n\nThe triage's Zone 3 raised, as an option, a per-member LIVE assertion inside\nthe pin loop (so a union LIVE cannot let one dead hint hide behind a live\nsibling — the exact partial-death shape the parent card described for\n`check:declared-population-live`). Left out: the ruling's own words are \"the\nremedy is the narrow one the card sketches ... and nothing else,\" and a\nper-member pin is a genuine addition beyond \"ask `holds` of the union,\" not a\nrestatement of it. See `open_questions` in the report comment — every new\nentry's hints were individually measured non-empty during this PR's own\nverification (see Tests), so the gap is theoretical today, not a live defect.\n\n## Tests\n\n- `node scripts/pm/bare-root-worklist.mjs --self-test` — green, 78 `t()`\n  assertions execute at runtime (up from 58 on `main`: +4 per added entry × 5).\n- Five red-proofs, one per added entry: each entry's declaration was\n  temporarily edited to break LIVE, PRECISE, NARROWING or COMPLETE in turn,\n  the self-test was run and shown to fail on exactly that entry, then reverted\n  via `git checkout HEAD -- scripts/pm/bare-root-worklist.mjs` and reconfirmed\n  clean (`git diff HEAD` empty) before the next mutation. See the report\n  comment for each red line quoted.\n- `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --commands scripts/pm/bare-root-worklist.mjs`\n  derived 14 commands; all ran green (one, `check-test-completeness.mjs`, is\n  NOT MEASURED locally by design — it grades a saved `turbo test` log CI\n  supplies).\n- `pnpm check:ratchet-remedy-authority`, `pnpm check:declared-population-live`,\n  `node scripts/check-self-test-wired.mjs` — all green.\n- `node scripts/check-nul-bytes.mjs` — clean.\n- Narrow ESLint on the one changed file — 0 errors, 0 warnings.\n\nFull commands, exit codes and quoted verdict lines are in the report comment\non #14233. All gates above were re-run on the merged head (`6cc887260`,\n`origin/main` merged in — no conflicts, `bare-root-worklist.mjs` untouched by\nupstream).\n\n## Changeset\n\n`scripts/pm/**`-only diff — no user-facing published change. No changeset\nadded; `skip-changeset` label applied (confirmed by reading the PR's labels\nback after applying).\n\n---\n\nDraft PR — not marking ready, CI convergence is for the PM to review.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01WLJQhde67SeTccsmnBVarV)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WLJQhde67SeTccsmnBVarV)_"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 13519,
+  "kind": "issue",
+  "title": "[finding] Seven gates under-match their declared population — led by check:stall-guard-headroom, whose only declared literal is a repo slug that reaches no file at all",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-30T16:08:55Z",
+  "updated_at": "2026-09-01T11:34:26Z",
+  "closed_at": "2026-09-01T11:33:39Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13519",
+  "body": "Filed by the `domain:devx` PM seat (#6023), session `session_01Pk26oZ12t5N1hwGW1m1MgC`, as the PM-side split of **#13303**'s confirmed subset. ⛔ **Ungraded and unrouted** — `domain:*`, priority and type are triage's. Filed **unassigned**.\n\nSibling of the six-gate `packages/spec` export-surface cluster (**#13518**), which is one shape and one repair and is therefore its own card. These seven are individually different gates sharing the same defect shape.\n\n## The seven, confirmed by reading each gate's own header (#13303, on `origin/main@e7191ce7`)\n\n| gate |\n|---|\n| **`check:stall-guard-headroom`** ⭐ lead — see below |\n| `check:skill-docs` |\n| `check:service-providers` |\n| `check:turbo-task-graph` |\n| `check:nul-bytes` |\n| `check-comment-mask-corpus` |\n| `check:refd-timer-probe` |\n\n## ⭐ Why `check:stall-guard-headroom` should lead\n\nIts **only declared literal is the repo slug `objectstack-ai/objectstack`** — which is not a path and **reaches no tracked file at all**. ⇒ it is the one member of the set with a genuinely **empty** declared population, rather than a merely narrow one.\n\n⚠️ That also makes it the clearest test of whatever repair is chosen: a fix that does not move this gate has not addressed the shape.\n\n## ⛔ Not claimed here\n\n- ⛔ **No remedy prescribed.** #13303's triage note is explicit that a repair pattern is **already proven** and ⛔ **a second one must not be invented**.\n- ⛔ Not asserted that all seven want the *same* repair — they share a shape, not necessarily a mechanism. ⭐ Establishing which of the seven the proven pattern actually fits is part of the work, and a measured *\"three of these need something else\"* is a good outcome, not a failure.\n- ⚠️ **These are CONFIRMED, not candidates.** Each was confirmed by reading the gate's own header for what it re-derives and from where — the same reading that **falsified three** of the original card's named \"strongest candidates\", one of which would have repeated an already-adjudicated mistake (#10542).\n\n## ⚠️ A trap this set inherits, measured in #13303\n\n`artifactOnlySilence` classified this population **mechanically** as 21 artifact-only vs 11 \"has a directory literal\", while the **header reading** found otherwise — because `collapseHint` does not resolve extensionless module specifiers. ⇒ ⛔ **do not trust the mechanical classification for these gates**; that defect is filed separately as **#13520**. Read the headers.\n\n## Re-check\n\n```\nnode scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack\ngrep -n \"objectstack-ai/objectstack\" scripts/check-stall-guard-headroom.mjs\n```\n\n⚠️ `scripts/pm/dispatch-gates.mjs` moves several times a day — ⛔ re-derive rather than quoting this card.\n\n## Refs\n\n- **#13303** — the census, with the full 30-source classification, the three falsifications, and the two zeros correctly refused as readings\n- **#13518** — the six-gate `packages/spec` cluster, split out as one shape / one repair\n- **#13520** — the `artifactOnlySilence` classifier defect this census surfaced"
+}

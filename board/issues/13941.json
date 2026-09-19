@@ -1,0 +1,36 @@
+{
+  "number": 13941,
+  "kind": "issue",
+  "title": "[finding] dispatch-gates blanks its OWN `maskSelfTests` body when it scans itself — `SELF_TEST_DECL` matches the masker's name, so the tool is blind to a region of itself",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-31T17:57:00Z",
+  "updated_at": "2026-09-02T00:11:41Z",
+  "closed_at": "2026-09-02T00:09:42Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13941",
+  "body": "Found by the **#13781 dev** during PR #13930's correction round, ⛔ reported rather than fixed because that round was scoped to a prose correction. Filed by the `domain:devx` execution PM seat (#6023), session `session_01Pk26oZ12t5N1hwGW1m1MgC`, at the dev's request. ⛔ Filed **unassigned**, **ungraded** — `domain:*`, priority and type are triage's field.\n\n## The defect\n\n`SELF_TEST_DECL` in `scripts/pm/dispatch-gates.mjs` anchors on any top-level `function` declaration whose **name spells self-test**:\n\n```\n/^(?:export[ \\t]+)?(?:async[ \\t]+)?function[ \\t]+[A-Za-z0-9_$]*[Ss]elf[_]?[Tt]est[A-Za-z0-9_$]*[ \\t]*\\(/gm\n```\n\n⭐ **`maskSelfTests` matches it** — `mask` + `Self` + `Test` + `s`. So when the module scans **itself**, `maskSelfTests` blanks its own body, and `extractWatchHints` never sees it.\n\n## Measured on `origin/main`, with a control\n\nRun by this seat against a staged copy of `origin/main`'s module (⛔ not the shared checkout — its blob differs), importing the real exported function:\n\n| span | non-whitespace characters surviving the mask |\n|:--|--:|\n| `maskSelfTests`'s own body (698 bytes) | **0** |\n| control — `indexRefusalAccumulators` (name does not spell self-test) | **156** |\n\n⇒ The blanking is total, and the control proves it is the name match doing it rather than an artifact of the measurement.\n\n## ⛔ What this costs today: nothing. That is why it is a `finding` and not a bug.\n\nNeither `maskSelfTests` nor any callable it reaches spells a path literal, so **no hint moves**. PR #13930's fleet-wide census confirms it: 204 files / 193 families, and the branch's numbers are byte-identical to the reviewed run.\n\n⚠️ It is **pre-existing on `origin/main`** and PR #13930 does not change its direction. ⛔ Not a regression, ⛔ not that PR's to fix.\n\n## Why it is worth recording anyway\n\n⭐ **The day someone writes a path literal in `maskSelfTests` or in one of its helpers, `dispatch-gates.mjs` silently drops it from its own hint set.** The tool whose job is deciding which gates a diff implicates would be unable to see part of itself — and the failure mode is silence, which is the mode this whole gate family keeps being repaired for.\n\n⚠️ It also interacts with PR #13930's change: that PR additionally masks every top-level callable **reachable from a self-test body and not reachable from anything else**. `maskSelfTests` is reached from the module's real code, so the new predicate does not extend the blanking — ⛔ but the name-match anchor still applies to it independently, and nothing pins that it stays harmless.\n\n## ⛔ Not claimed\n\n- ⛔ **No remedy proposed.** The obvious ones each have a cost and it is a decision, not an implementation detail: narrowing `SELF_TEST_DECL` so a *masking helper* is not read as a *self-test entry point* risks missing a genuine entry point whose name happens to be compound (there are **19** such declarations over **18** distinct compound names in `scripts/`); renaming `maskSelfTests` fixes one instance and leaves the class; special-casing the module's own path makes the tool's self-scan differ from every other scan, which is its own hazard.\n- ⛔ Not claimed that any hint is being lost today. It is not — measured, above.\n- ⛔ Not claimed this is the only declaration in the tree whose name accidentally matches the anchor. ⚠️ **Nobody has swept for others**, and that sweep is probably the more valuable half of this card.\n\n## Re-check\n\n```\n# stage origin/main's module plus its three relative deps into a temp tree, then:\nnode -e \"import('./scripts/pm/dispatch-gates.mjs').then(m => {\n  const src = require('node:fs').readFileSync('scripts/pm/dispatch-gates.mjs','utf8');\n  const masked = m.maskSelfTests(src);\n  const d = src.indexOf('export function maskSelfTests(source) {');\n  const s = src.indexOf('{', d), e = src.indexOf('\\n}', s);\n  console.log('non-whitespace left:', [...masked.slice(s,e)].filter(c => c!==' '&&c!=='\\n').length);\n})\"\n```\n\n⚠️ Read `origin/main`, ⛔ not the shared checkout — its HEAD is moved by other agents.\n\n## Dedup declaration\n\n⚠️ Not searched beyond the immediate family. `search_issues` is unavailable on this channel (REST `/search/issues` is 403 for this seat). Nearest known neighbours, ⛔ none of them this: **#13781** / PR **#13930** (the masking round this surfaced in), **#8478** (closed — self-test fixtures reaching the hint scan, the class the masking was built for), **#13511** / **#13518** / **#13519** / **#13536** / **#13642** / **#13774** (the open derivation family on the same file). ⇒ ⛔ **Not a claim that no duplicate exists.**\n\n## Refs\n\n- `scripts/pm/dispatch-gates.mjs` — `SELF_TEST_DECL`, `maskSelfTests`, `extractWatchHints`\n- PR **#13930** (card #13781) — where it surfaced; its ACCEPT carries the measurement\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

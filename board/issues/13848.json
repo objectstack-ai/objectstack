@@ -1,0 +1,32 @@
+{
+  "number": 13848,
+  "kind": "issue",
+  "title": "[ruled] 应用仓基本原则落编:阻塞是平台缺陷时,应用侧等待平台修复 —— ⛔ 不绕行、不半边落地(维护者 2026-08-31,判例 hotcrm#549)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-31T14:41:36Z",
+  "updated_at": "2026-09-01T06:54:56Z",
+  "closed_at": "2026-09-01T06:54:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13848",
+  "body": "维护者裁定(2026-08-31,逐字):「关于 hotcrm 有一些基本原则应该写入skills，比如 549 ，既然是平台缺陷，就应该等待平台处理，而且实际上平台已经处理了。 11082」\n\n## 要落编的原则\n\n应用仓(hotcrm 及后续参考应用)的工作被**平台缺陷**阻塞时:\n\n1. **等待平台修复是默认姿态** —— ⛔ 不做应用侧绕行(defensive coding、形状容错、手写谓词复刻平台内部规则),⛔ 不把一条裁定劈成「能落的半边先落」再等另一半;\n2. **阻塞落卡、机器可见**:应用卡记录阻塞并指向平台缺陷卡(blocked-by 关系),平台卡修复关闭后应用卡回箱执行**原裁**,⛔ 不重裁方向;\n3. **恢复执行前做前提核验**:确认应用所钉的平台版本已含修复(修复合并 ≠ 钉内可用 —— 缺陷常是在旧钉上测出的),必要时先抬钉,并**复跑缺陷卡自带的复现夹具**确认修复在本应用的链路上生效,红即停手回报;\n4. **判例:hotcrm#549** —— 8/2 裁定(contract + quote 都转 `controlled_by_parent`)被 objectstack#11082(二级链派生不收窄,org-wide 可读可写)阻塞;「只落 contract 半边」的劈半方案曾被呈报;维护者裁定等待。平台 2026-08-23 以 PR #11183 修复收口,原裁全量恢复执行 —— 等待被证明是对的:半边方案会花掉 contract-first 的选项,且给下一个读者留下「裁定执行了一半」的历史。\n\n## 落点(skills 席定夺具体文件)\n\n候选:pm-dispatch 的 decision-analysis 参考(分歧推荐序邻段,作为应用仓决策的荐向规则)+ hotcrm 仓自己的 agent 指引。受管面,人工合并照旧。\n\n⛔ 本卡由总监席按裁决立卡记录,落编工作归 skills 席;refs hotcrm#549、objectstack#11082、objectstack PR #11183。"
+}

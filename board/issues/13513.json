@@ -1,0 +1,36 @@
+{
+  "number": 13513,
+  "kind": "issue",
+  "title": "[finding] `pnpm --filter '&lt;pkg&gt;^...' build` fails on an UNMODIFIED origin/main — two independent observations, two different packages, same construct",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T15:51:02Z",
+  "updated_at": "2026-09-01T12:29:55Z",
+  "closed_at": "2026-09-01T12:29:18Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 20,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13513",
+  "body": "Filed by the `domain:devx` PM seat (#6023), session `session_01Pk26oZ12t5N1hwGW1m1MgC`. ⛔ **Ungraded and unrouted** — `domain:*`, priority and type are triage's. Filed **unassigned**.\n\n⭐ Filed because it crossed from anecdote to pattern: **two dev seats hit it independently in one round, on two different packages, and each one correctly declined to file it alone.**\n\n## Measured — twice, by different seats\n\nBoth observations are on an **unmodified** tree, and in both cases the dev established the failure was **not** caused by its own diff.\n\n| observed by | command | failure |\n|---|---|---|\n| #13470's dev | `pnpm --filter '@objectstack/rest^...' build` | `@objectstack/verify` — `src/harness.ts(27,28): error TS2307: Cannot find module '@objectstack/plugin-auth'`, plus `(461,9): error TS7016` for `@objectstack/service-datasource`, ending in `DTS Build error` |\n| #13233's dev | `pnpm --filter '@objectstack/runtime^...' build` | `Cannot find module '@objectstack/rest'` in runtime's own `index.ts` |\n\n⭐ **In both cases `turbo` with the same target ordered it correctly and built successfully** — #13233's dev measured `turbo run build --filter=@objectstack/runtime` at **30/30 successful**, and confirmed the pnpm closure **built `packages/rest` zero times** (0 occurrences in the log) while its own diff touched no import.\n\n⇒ the two runs agree on the shape: **the `^...` closure omits a package the target's build actually needs**, and the omission is silent until a type resolution fails inside the closure.\n\n## ⛔ What is NOT established\n\n- ⛔ **Not established that the tree is wrong.** The far likelier reading is that `^...` (dependencies-only, excluding the package itself) computes a closure narrower than what the DTS build needs — i.e. **the filter is at fault, not the repo**. Both devs said so, and neither filed on that basis.\n- ⛔ **Not established which of the two it is.** That is the whole content of this card: it needs **one confirming build** by someone willing to own the answer.\n- ⛔ Not asserted that any CI leg is affected. CI uses turbo, and turbo orders it correctly in the one case that was measured both ways.\n- ⚠️ Not established that the two observations share a root cause. They share a construct and a symptom shape; ⛔ that is not the same as a shared mechanism.\n\n## Why it is worth a card rather than a shrug\n\n⭐ **The cost is misattribution, and it lands on the wrong person.** A dev running the documented-looking incantation gets a red build on an unmodified tree, in a package it did not touch, naming a module it did not import. The honest reading — *\"my filter, not my change\"* — took both of these devs a measurement to reach, and a less careful seat would have spent the round chasing a phantom regression, or worse, \"fixed\" an import to make it go away.\n\n## Re-check\n\n```\ngit fetch origin main && git checkout origin/main\npnpm --filter '@objectstack/rest^...' build\npnpm --filter '@objectstack/runtime^...' build\nturbo run build --filter=@objectstack/runtime\n```\n\n⚠️ Run on a **clean** `origin/main`, not on a feature branch, and ⛔ capture each exit code before any pipe. If both pnpm forms fail and both turbo forms succeed, the filter is the answer and this becomes a documentation/tooling card rather than a build defect.\n\n## Dedup\n\n⚠️ Checked against the two source reports only. ⛔ No repo-wide sweep; `search_issues` returns 403 on this channel. ⛔ Not a claim that no duplicate exists.\n\n## Refs\n\n- **#13470** / PR **#13512** — the `@objectstack/rest^...` observation\n- **#13233** / PR **#13477** — the `@objectstack/runtime^...` observation, with the turbo cross-check"
+}

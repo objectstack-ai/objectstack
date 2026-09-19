@@ -1,0 +1,33 @@
+{
+  "number": 14417,
+  "kind": "pull_request",
+  "title": "fix(devx): prune stale objectui worktree registrations before build-console.sh adds one (#14177)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T05:21:42Z",
+  "updated_at": "2026-09-02T06:13:32Z",
+  "closed_at": "2026-09-02T06:13:31Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-09-02T06:13:31Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/14417",
+  "body": "Fixes #14177\n\n## What\n\n`scripts/build-console.sh` resolution mode 2 (sibling `../objectui` checkout)\ncreates a git worktree under this repo's `.cache/`, registered in the\n**shared** `objectui/.git`. The documented cleanup (`rm -rf` on the framework\nworktree, or the script's own `worktree remove --force || rm -rf` fallback at\n`:85`) deletes that directory without ever telling objectui, so the\nregistration survives as `prunable`. The next `worktree add` at the same path\nthen dies with `fatal: ... is a missing but already registered worktree`,\nexit 128 — which reads like a lock or git fault, not a leftover of a previous\nrun's cleanup.\n\n## Fix\n\nRun `git -C \"$SOURCE_ROOT\" worktree prune` immediately before the\n`worktree add` at (former) `:89`, inside the `if [[ ! -d \"$BUILD_ROOT\" ]]`\nbranch — the only path in the script that reaches `worktree add` in\nresolution mode 2, whether the directory is missing because a previous run\nnever created it or because the force-remove-or-`rm -rf` fallback above just\nstranded it. `prune` only drops registrations whose directory is already\ngone, so it is safe by construction.\n\n**Option 2** (an exit trap removing the script's own worktree) is\ndeliberately **not** taken: the script reuses `BUILD_ROOT` across runs when\nthe pinned SHA already matches (`:82-87`) — that's what backs the\n`console-dist` CI cache keyed in `.github/workflows/ci.yml:1827`. A trap that\nremoved the worktree on every exit would defeat that reuse unconditionally,\nwhich is a bigger behavior change than \"one line\" for a plain win. Route 1\nalone repairs the state regardless of which run stranded it, matching the\nruling's rationale.\n\n## Fixture proof (before / after)\n\nReal sibling `objectui` checkout not required to prove this — the defect and\nfix are pure `git worktree` mechanics. Reproduced with a throwaway fixture\nrepo (not the real `objectui`):\n\n```\n$ git init -q source && cd source && git commit -q -m init   # SHA=97b070f...\n\n=== BEFORE (no prune) — reproduce the strand ===\n$ git -C source worktree add --detach build-root <SHA>\nPreparing worktree (detached HEAD 97b070f)\nHEAD is now at 97b070f init\n\n$ rm -rf build-root   # simulate documented cleanup / the script's own rm -rf fallback\n\n$ git -C source worktree list\n.../source      97b070f [master]\n.../build-root  97b070f (detached HEAD) prunable      # <- registration survives\n\n$ git -C source worktree add --detach build-root <SHA>   # second add, no prune\nPreparing worktree (detached HEAD 97b070f)\nfatal: '.../build-root' is a missing but already registered worktree;\nuse 'add -f' to override, or 'prune' or 'remove' to clear\nEXIT_WITHOUT_PRUNE=128\n\n=== AFTER (with prune, matching the fixed script's sequence) ===\n$ git -C source worktree list\n.../source      97b070f [master]\n.../build-root  97b070f (detached HEAD) prunable\n\n$ git -C source worktree prune\n\n$ git -C source worktree list\n.../source  97b070f [master]                          # <- stale registration gone\n\n$ git -C source worktree add --detach build-root <SHA>\nPreparing worktree (detached HEAD 97b070f)\nHEAD is now at 97b070f init\nEXIT_WITH_PRUNE=0\n```\n\nExit 128 without the fix, exit 0 with it, on the exact `worktree add`\ninvocation the script uses.\n\n## Syntax / lint\n\n- `bash -n scripts/build-console.sh` — OK.\n- `shellcheck` — not installed in this environment (no system binary, `pnpm\n  exec shellcheck` reports `Command \"shellcheck\" not found`); not run.\n\n## Gates\n\n`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack\n--commands` at head `98b80532` (merge-base `79b6a22a5` of `origin/main`) names\n14 families for `scripts/build-console.sh` — all RAN, all PASS:\n\n| Gate | Result |\n|---|---|\n| `node scripts/check-ci-filter-parity.mjs` | PASS |\n| `node scripts/check-cross-package-test-inputs.mjs` | PASS |\n| `node scripts/check-shard-attestation.mjs` | PASS |\n| `node scripts/check-test-completeness.mjs` | NOT MEASURED (exit 3 — needs a saved `turbo run test` log; no `PREREQUISITE NOT MET`) |\n| `pnpm check:agent-test-spelling` | PASS |\n| `pnpm check:bash32-floor` | PASS |\n| `pnpm check:cli-command-ids` | PASS |\n| `pnpm check:console-injection` | PASS (no local console dist; check no-ops by its own design) |\n| `pnpm check:console-sha` | PASS (same) |\n| `pnpm check:cross-package-test-inputs` | PASS |\n| `pnpm check:entry-guard` | PASS |\n| `pnpm check:parse-guard` | PASS |\n| `pnpm check:pnpm-filter-targets` | PASS |\n| `pnpm check:watch-hint-literal` | PASS |\n\nAlways-run for `scripts/**` dispatches (per dispatch order):\n\n| Gate | Result |\n|---|---|\n| `pnpm check:ratchet-remedy-authority` | PASS |\n| `pnpm check:declared-population-live` | PASS |\n\n`check:pm-dispatch-gates` (~11.5 min): not in the derived 14-family list for\nthis file surface — not run.\n\n## Changeset\n\nScripts-only change, no package surface (`scripts/build-console.sh` is not\ninside any published package's `files`). Following the precedent for the\nsame class of change (#14178 / PR #14391, and `0079e2585`): no\n`.changeset/*.md` added, `skip-changeset` label applied.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WLJQhde67SeTccsmnBVarV)_"
+}

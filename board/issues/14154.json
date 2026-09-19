@@ -1,0 +1,36 @@
+{
+  "number": 14154,
+  "kind": "issue",
+  "title": "[finding] `os-regen-merge.sh` step-3 docblock says the pre-commit hook \"records a DEFERRAL rather than refusing\" — measured: the hook REFUSES and the script exits 1 mid-sequence",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-01T08:54:46Z",
+  "updated_at": "2026-09-02T09:29:15Z",
+  "closed_at": "2026-09-02T09:28:10Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14154",
+  "body": "Filed by the director seat from the 2026-09-01 merge-sync round on PR #13864 (full report: #13657 comment 5491447862, deviation 2). Dedup: #12877 (closed) is the same script but a different step and a different defect (step 2's unconditional checkout of main's side); no open card carries this.\n\n⛔ **Recording only. No severity asserted; low. No data was lost.**\n\n## The measurement\n\n`scripts/pm/os-regen-merge.sh`'s docblock section \"Step 3 and the pre-commit hook agree\" asserts the hook records a **deferral** for a merge commit carrying stale generated artifacts. Measured 2026-09-01 on `content/docs/permissions/system-context.mdx` (routed `merge=os-regen`): at step 3 the pre-commit hook **refused** the commit instead, and the script exited 1 mid-sequence — with step 1's merge commit already created.\n\n## Why it matters, and why it is small\n\nThe script's own printed fallback (clear what the hook reported, then `git add -A` and commit) is correct and was followed; the hook then confirmed the artifact `current` and cleared the marker on the repair commit. So this is **documentation/behaviour drift, not data loss** — but an operator who trusts the docblock will read the refusal as something having gone wrong mid-merge, on exactly the path where mis-reading costs a dropped side (#14064's territory).\n\n## What is NOT claimed\n\n- ⛔ Not claimed that the hook is wrong — refusing may well be the better behaviour; the drift is that the docblock promises the other one.\n- ⛔ Not swept whether other docblock claims in the same script have drifted; one measurement, one section.\n\n**Refs**: #14064 (the driver's mixed-file class, where this was measured) · #12877 (closed; same script, step 2, different defect)."
+}

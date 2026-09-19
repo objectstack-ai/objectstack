@@ -1,0 +1,36 @@
+{
+  "number": 14123,
+  "kind": "issue",
+  "title": "Startup `[action-governance]` reports every OBJECT-LESS declared action as \"registered handler with NO declaration — REFUSED at dispatch\", and the route contradicts it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-musk"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-01T06:06:55Z",
+  "updated_at": "2026-09-02T07:02:20Z",
+  "closed_at": "2026-09-02T06:48:47Z",
+  "closed_by": {
+    "login": "os-musk",
+    "id": 323835826,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14123",
+  "body": "Found while giving an object-less action a UI home in the `duly` app (objectstack-ai/duly#27). Reported rather than worked around.\n\nMeasured on `@objectstack/runtime` 17.2.0 / `@objectstack/spec` 17.2.0, booting the app the way the CLI does (`new AppPlugin({ ...stackConfig, onEnable })` → `kernel.bootstrap()`).\n\n## What happens\n\nTwo actions are declared with `defineAction` and `locations: []` (the honest headless declaration the spec prescribes for an object-less action), and their handlers are registered under the canonical `global` key. Bootstrap logs:\n\n```\nWARN [action-governance] registered handlers with NO declaration — these are REFUSED at\ndispatch (ADR-0110 D3) and there is no opt-out; declare each one with `defineAction`, or\ndrop the registration if nothing should invoke it over HTTP\n{\"count\":2,\"handlers\":[\"global:duly_catalog_apply\",\"global:duly_catalog_sync\"]}\n```\n\nBoth **are** declared with `defineAction`, and both are in the stack's `actions` collection. An object-BOUND action registered in the same function, in the same boot, is not reported.\n\n## Why the audit cannot see them\n\n`collectActionDeclarations` builds its declaration set from two sources:\n\n- `meta.listObjects()` → each object's embedded `obj.actions[]`\n- `meta.loadMany('action')` → standalone actions\n\nProbed in that same boot:\n\n```\nql.registry.getItem('action','duly_catalog_apply')          = FOUND  objectName=(none)\nql.registry.getItem('action','duly_catalog_apply_to_people') = FOUND  objectName=duly_catalog_item\nql.getSchema('duly_catalog_item').actions                    = [\"duly_catalog_apply_to_people\"]\nmeta.loadMany('action')                                      = []\nmeta.load('action','duly_catalog_apply')                     = undefined\nmeta.load('action','duly_catalog_apply_to_people')           = undefined\n```\n\nThe metadata plane holds no action rows at all. Object-bound actions survive the audit only because they ride `listObjects()`'s embedded array; every object-less action falls through the empty `loadMany('action')` and reads as undeclared. So the audit's verdict tracks whether an action happens to be object-bound, not whether it is declared.\n\n## The claim in the message is not true\n\nThe message states these are \"REFUSED at dispatch (ADR-0110 D3) and there is no opt-out\". The REST route does not agree. `resolveRouteActionDeclaration` tries, in order:\n\n1. `ql.getSchema(objectName).actions` — the embedded array\n2. **`ql.registry.getItem('action', actionName)`**, accepted when `ownsRoute(action)` — which is true for an object-less owner via `isObjectLessActionKey`\n3. `meta.loadDiagnosed('action', name)` / `meta.load('action', name)`\n\nRung 2 finds these actions (probe above). So `POST /api/v1/actions/global/duly_catalog_apply` resolves its declaration, passes the ADR-0066 D4 gate, and dispatches — while startup told the author it is dead.\n\n## Why it is worth fixing rather than tolerating\n\nThe remedy the message offers is actively harmful. \"Declare each one with `defineAction`\" is already done and cannot clear the warning. The other branch — \"drop the registration if nothing should invoke it over HTTP\" — would break a working path, and it is the branch an author reaches for after the first one fails. In our case those two actions are the product's onboarding path; deleting their registration on the strength of this line would have been a silent regression with a green `pnpm validate`.\n\nIt is also the inverse of the class ADR-0078 exists for: not a declaration nothing reads, but a *true* declaration an audit reports as absent. An audit that cries wolf on a correct, common shape trains authors to skip the whole `[action-governance]` block, including the other warning in it that is real (`declared script actions with NO handler`).\n\n## Suggested direction\n\nHave the audit resolve declarations through the same path the route uses, rather than a second source of truth — `ql.registry.getItem('action', name)` as the fallback rung, so audit and dispatch cannot disagree. Failing that, the audit should at minimum not assert a dispatch outcome it has not checked.\n\nAdjacent, both closed: #3913 (global actions unreachable — registered under `global`, REST probing `*`), #3935 (REST resolving declarations by `name` only).\n\nFiling unassigned for triage.\n\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

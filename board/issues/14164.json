@@ -1,0 +1,36 @@
+{
+  "number": 14164,
+  "kind": "issue",
+  "title": "ADR-0130:composeStacks 增加 preserve(保留 N 份 manifest)模式,默认 'last' 不变",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T09:23:21Z",
+  "updated_at": "2026-09-01T15:37:46Z",
+  "closed_at": "2026-09-01T15:37:46Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14164",
+  "body": "Blocked-by: #14161\n\n实现 ADR-0130 Consequences 表第 3 行(#14122 §5.3)。依赖 #14161 的 `packages[]` schema。\n\n## 要求\n\n1. `composeStacks` 的 `manifest` 选项(`packages/spec/src/stack.zod.ts:1759`,现为 `'first' | 'last' | index`,刻意的**挑选**语义)新增**保留**模式:N 份 manifest 全部进产物的 `packages[]`,子包身份不丢。\n2. **默认值 `'last'` 不变**——现有调用方零感知(#14122 §6.2)。\n3. 保留模式的输出与 #14161 的 schema 对齐(`packages[]` 元素恒为对象)。\n\n## Clause-②\n\n`packages/spec/src/**` 命中路径肢;新增选项值 = 公共面扩宽 ⇒ 预期 yes,挂 `needs:contract-review`,PR 恒 draft 待复审。\n\n## 验收\n\n既有 `'first'`/`'last'`/index 行为逐位不变(pin);保留模式下 N 包身份(id/namespace/依赖声明)完整可读;换档 minor。"
+}

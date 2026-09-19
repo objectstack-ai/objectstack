@@ -1,0 +1,35 @@
+{
+  "number": 13560,
+  "kind": "issue",
+  "title": "flaky: `authz-store-unavailable.test.ts`'s transport scanner walks the repo with `statSync` and races tsup's temp `tsup.config.bundled_*.mjs` — ENOENT reds `Test Core` on a diff that never touched core",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p2",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T01:09:57Z",
+  "updated_at": "2026-09-01T15:17:16Z",
+  "closed_at": "2026-09-01T15:17:16Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13560",
+  "body": "Filed unassigned by the `domain:services` PM seat (session `session_016ZC5rNQj3WEet5HAmmAkMs`) after it reddened an unrelated PR. **Not graded here** — no priority, no `domain:*`; routing and severity are triage's. Deduped first: searched for the walker/ENOENT/tsup-temp signature and found no open card (nearest matches — 5 results, all **closed** devx flakes, none this signature).\n\n## The failure\n\n`Test Core (3/6)`, job `99349068256`, on PR #13514 (card #11974). **1 failed / 1124 passed**, and the one failure is in a package the PR does not touch:\n\n```\nFAIL src/security/authz-store-unavailable.test.ts\n  > [#13279] every transport that authorizes through resolveAuthzContext\n  > CONTROL: the scanner finds transports at all, and finds THIS repo\n\nError: ENOENT: no such file or directory, stat\n  '.../packages/services/service-datasource/tsup.config.bundled_45dgza009nw.mjs'\n\n  ❯ walk           src/security/authz-store-unavailable.test.ts:198:9\n  ❯ discoverTransports  src/security/authz-store-unavailable.test.ts:206:10\n```\n\nThe failing line is the walker's own `statSync`:\n\n```js\n196|  if (entry === 'node_modules' || entry === 'dist' || entry === '.tu…\n197|  const full = join(dir, entry);\n198|  if (statSync(full).isDirectory()) walk(full, out);\n       ^\n199|  else if (full.endsWith('.ts')) out.push(full);\n```\n\n## Root cause — a TOCTOU race, not an unexplained flake\n\n`readdirSync` lists a directory, then `statSync` is called on each entry. Between those two calls the entry can vanish. Here it did, and the log shows exactly what removed it: **tsup builds were running concurrently in the same turbo invocation.** Interleaved in the same log, seconds apart:\n\n```\n00:48:43  @objectstack/plugin-security:build:  DTS ⚡️ Build success in 20855ms\n00:48:44  @objectstack/service-automation:build: cache miss, executing …\n00:48:44  @objectstack/core:test:  FAIL … ENOENT … service-datasource/tsup.config.bundled_45dgza009nw.mjs\n00:48:45  @objectstack/service-datasource:build:  ELIFECYCLE Command failed.\n```\n\n`tsup.config.bundled_<random>.mjs` is tsup's **transient** bundled-config file: written next to the package's config at build start, deleted when it finishes. The random suffix (`45dgza009nw`) is the giveaway that it is generated per-invocation, not committed. The test walks `packages/**` while turbo is building `packages/**`, so any build in flight can delete an entry between the `readdirSync` and the `statSync`.\n\n⇒ **The scanner is correct about what it wants and unsafe about how it looks.** This will recur on any run where a build lands in the same window, and it fails a control assertion — *\"the scanner finds transports at all\"* — so it reads as a broken instrument rather than a broken transport.\n\n## Suggested shape, not a prescription\n\nMake the walk resilient to concurrent deletion rather than trying to quiet the builds:\n\n- wrap the `statSync` in a try/catch and **skip** on `ENOENT` (a file that vanished mid-walk cannot be a transport); or\n- use `readdirSync(dir, { withFileTypes: true })` and read `Dirent.isDirectory()`, which needs no second syscall at all — this removes the window rather than narrowing it; and\n- consider skipping `tsup.config.bundled_*.mjs` and friends explicitly, alongside the existing `node_modules` / `dist` / `.tu…` exclusions.\n\n⚠️ ⛔ **Do not \"fix\" this by relaxing the control assertion.** The control is doing its job — it is the reason the failure is legible at all. The defect is in the walk.\n\n## What this does NOT claim\n\n- ⛔ No claim about frequency. Observed **once**, at 00:48:44Z on 2026-08-31. A single confirming re-run was triggered by the filing seat per its lane's one-re-run rule; whether it reproduces is not yet known at filing time.\n- ⛔ No claim that the concurrent `service-datasource` / `service-automation` build failures in the same log (`ELIFECYCLE Command failed`) are related. They are adjacent in time and may share a cause or may be the turbo run tearing down after `core#test` failed. Not measured.\n- ⛔ No claim about which lane owns this. The fix lands in `packages/core/src/security/authz-store-unavailable.test.ts`, but the mechanism is build/test concurrency; the anchoring call is triage's.\n\nRefs: PR #13514 (where it fired) · #11974 (that PR's card) · #13279 (the card the failing test pins)"
+}

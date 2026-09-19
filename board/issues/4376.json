@@ -1,0 +1,30 @@
+{
+  "number": 4376,
+  "kind": "issue",
+  "title": "[permissions] 行级读可见范围无法按业务字段收窄:viewAllRecords 全有/全无两档之间缺共享规则",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T09:38:12Z",
+  "updated_at": "2026-09-01T14:44:14Z",
+  "closed_at": "2026-07-31T10:09:01Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4376",
+  "body": "## 现象\n\n行级「读」可见范围无法按业务字段收窄:权限集只有 `viewAllRecords` 全有/全无两档,行级门只认 `created_by`,没有「按 executor / manager 等业务字段的共享规则」元数据。\n\n## 实测证据(17.0.0-rc.0,真人 UI)\n\n现场工人账号登录 console 打开「派工单」列表 → 看到全部 8 条,其中 7 条的执行责任人是别人。而执行链对象为了让「Hook 建单后执行人可写」必须配 `*_ALL`(含 viewAllRecords),读范围随之全开——写侧可用应用层 Hook 守住(400 拦截),**读侧应用层无手段**。\n\n## 影响\n\n「执行责任人仅可见本人的派工单/排班计划」类需求无法交付;与列表导出叠加后,越权可见还能成批带走。\n\n## 建议\n\n提供按字段的行级共享规则(如 owner-field 声明或 criteria-based sharing:`record.executor == current_user.id || record.manager == current_user.id` 之类的读谓词),让 viewAllRecords 之下有中间档。#2776(Permission Model v2 parking lot)如已覆盖此项可并入。\n\n下游登记:os-project-titanwind-ehr PLAT-DEF-022。\n"
+}

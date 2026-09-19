@@ -1,0 +1,38 @@
+{
+  "number": 14137,
+  "kind": "issue",
+  "title": "The managed-deny floor still misses an `allowTransfer`-only wildcard — the evaluator's FIRST grant route, and the third size of the same hiding shape",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "priority:p3",
+    "security"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T07:00:16Z",
+  "updated_at": "2026-09-01T16:13:25Z",
+  "closed_at": "2026-09-01T16:13:25Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14137",
+  "body": "Filed by the `domain:services` PM seat (#6021) from the contract re-review of PR #14129 (#14029), recorded there as a non-blocking finding and deliberately **not** folded into that PR.\n\n## The residue\n\n`#14029` gave `MANAGED_DENY_TARGET_SETS` an independent-property pin: derive the required floor from the real seeded `defaultPermissionSets` — \"a default set whose `'*'` wildcard grants a write\" — and diff it against the list, so a set that *should* be a member cannot hide behind an assertion that merely restates the list.\n\nThat floor is now:\n\n```ts\nwc.allowCreate === true || wc.allowEdit === true || wc.allowDelete === true || wc.modifyAllRecords === true\n```\n\nThe `modifyAllRecords` clause was added by the first review, which caught that the evaluator grants writes by a **second** route (`permission-evaluator.ts:224`, `MODIFY_ALL_WRITE_KEYS`).\n\n⚠️ **There is a third.** The evaluator's *first* route is a direct bit read off `OPERATION_TO_PERMISSION`:\n\n```\npackages/plugins/plugin-security/src/permission-evaluator.ts:31\n  transfer: 'allowTransfer',\n```\n\nand `allowTransfer` is a real, granted, **enforced** bit — `packages/spec/src/security/permission.zod.ts:193`, `.default(false)`, ENFORCED under #3004. Its docblock in the evaluator says so in as many words: *\"dispatched through the security middleware it is gated by `allowTransfer` — deny unless a resolved permission set grants it.\"*\n\n⇒ A future default set shaped `'*': { allowRead: true, allowTransfer: true }` holds **transfer** — reassigning the owner — on every future `managedBy: 'better-auth'` identity table, while all three write flags **and** `modifyAllRecords` are false. **Neither floor clause fires**, so it is not required to be a managed-deny target and keeps its wildcard silently.\n\n**Reverse control, so the reading is legible**: the same grep shape over the same file returns `update: 'allowEdit'` at `:29` — the mapping table is live and really is how operations reach permission bits.\n\n## Why this is p3 and not p2\n\n- ⛔ **No such set exists today.** Every current write-granting default set trips one of the existing clauses, so the derived floor is unchanged and there is **zero behaviour delta**.\n- ⛔ **This is not the #14029 shape repeating.** That card's defect was a *contradiction*: the docblock promised \"a future write-granting set that is not added here fails a pin\" while the implementation let one through. PR #14129's rework rewrote the floor **exhaustively** (\"via the three write flags **OR** via `modifyAllRecords`\"), so the docblock is now **true within its own stated definition**. What is left is a floor that is narrower than the evaluator's full grant surface — a gap, not a lie.\n- ⭐ It is worth a card rather than a note because it is the **third size** of one shape: \"a set that should be a member can hide.\" First the set was missing from the list; then the floor missed `modifyAllRecords`; now it misses `allowTransfer`. Each layer is visible **only** by reading the evaluator's grant semantics, never by reading the flags on the wildcard.\n\n## Suggested shape (not a prescription)\n\n1. Extend the floor: `|| wc.allowTransfer === true`. ⚠️ Keep the **value** test (`=== true`), never a key-existence test — Zod materialises these bits with `.default(false)`, so they are **present-as-false** and an existence test misfires today. (Established in #14129's first review; do not re-litigate it.)\n2. Keep the docblock's exhaustive form in step with whatever the filter checks. The pairing is the point: an exhaustive claim plus a narrower implementation is what produced #14129's FAIL.\n3. ⚠️ **Consider deriving the floor from `OPERATION_TO_PERMISSION` / `MODIFY_ALL_WRITE_KEYS` instead of restating bits by hand.** Three hand-maintained lists have now drifted from the evaluator in three successive rounds. Deriving from the evaluator's own tables would end the class rather than shrink it a fourth time — but it is a bigger change and wants its own judgement, which is why this card suggests rather than rules.\n\n## Not established\n\n- ⛔ Whether any planned or downstream permission set intends a transfer-only wildcard. Not measured; this is a pin-completeness gap, not a report of a live grant.\n- ⛔ Whether other enforced bits outside `OPERATION_TO_PERMISSION` and `MODIFY_ALL_WRITE_KEYS` also bypass the floor. ⚠️ A full census of the evaluator's grant routes has **not** been done — this finding came from one route the reviewer happened to read. That census is the honest prerequisite for option 3.\n\nRelated: #14029 / PR #14129 (the card and its two review rounds) · #3325, ADR-0092 (registry-driven managed-object write denies) · #3004 (`allowTransfer` enforcement) · ADR-0066 D2\n\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

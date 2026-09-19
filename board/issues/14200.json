@@ -1,0 +1,35 @@
+{
+  "number": 14200,
+  "kind": "pull_request",
+  "title": "fix(service-queue): compare the publish idempotency window as instants, not strings",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T11:57:19Z",
+  "updated_at": "2026-09-01T15:12:39Z",
+  "closed_at": "2026-09-01T14:13:37Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-09-01T14:13:37Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/14200",
+  "body": "Fixes #13993\n\n## What\n\n`DbQueueAdapter#publish` deduped terminal (`completed`/`dlq`) rows with a lexicographic compare — `String(row.created_at) >= windowStart` — of the raw driver value against canonical ISO text. On Postgres/MySQL the builtin audit column `created_at` comes out of the record read door as a JS `Date` (pinned in `driver-sql`'s `sql-driver-13567-audit-stamp-materialisation.test.ts`), whose `String()` begins with a weekday letter (0x41–0x5A), unconditionally above the ISO window-start's leading digit `'2'` (0x32). The predicate was therefore always true: any terminal row with the same idempotency key blocked re-publish forever, and `publish()` returned the old id having enqueued nothing — silent message loss on the production default drivers. SQLite hands ISO-Z text to both sides, so the check was correct there and every existing test stayed green.\n\nShape A per the triage ruling (comment 5486943842): normalise at the consumer and compare INSTANTS — the #13382 `canonicalVersionInstant` shape. `createdAtInstantMs` reads the measured materialisation domain (JS `Date` on PG/MySQL/Mongo; canonical ISO text on the SQLite family and memory; epoch-ms number on legacy columns) and the predicate compares epoch milliseconds. A `created_at` that denotes no instant cannot be inside a window measured on the `created_at` axis and does not block (decision documented on the helper). The `pending`/`running` arm — which blocks regardless of age — is untouched. No `??` tolerance fallback (#13973 standing prohibition); shape B (read-door normalisation of builtin audit columns) not taken — that is a maintainer floor.\n\nOut of scope, deliberately: the #13973 census and #13994 (the packages/rest sibling) are not addressed here; #13973 remains open.\n\n## Files\n\n- `packages/services/service-queue/src/db-queue-adapter.ts` — the instant compare + `createdAtInstantMs`\n- `packages/services/service-queue/src/db-queue-adapter-13993-idempotency-window-materialisation.test.ts` — the pin: 8 directional tests (out-of-window Date terminal row no longer blocks; in-window Date terminal row still blocks; ISO controls both directions; epoch-ms both directions; pending/running block regardless of age on both materialisations; non-instant does not block)\n- `scripts/engine-double-contract.pinned.json` — the double gate's RETAINED ledger learning the new fake's update/delete pins (the gate's own `--write` remedy)\n- `.changeset/queue-idempotency-window-instant-compare.md` — patch for `@objectstack/service-queue`\n\n## Verification\n\n- `pnpm --filter @objectstack/service-queue test`: 4 files, 64/64 green at `51b3804a0` (verify-lock VERDICT: command-exit 0).\n- Package `tsc --noEmit` exit 0; `--listFiles` shows the new test file inside the tsc program (1 hit) — measured, not excluded.\n- Gate union derived live (`node scripts/pm/dispatch-gates.mjs`, change set taken by the script itself, re-derived after the ledger file joined the diff, which added 7 families): **41 families exit 0 at `51b3804a0`**; `scripts/check-test-completeness.mjs` exits 3 = PREREQUISITE NOT MET (CI-only shard summaries) = NOT MEASURED — neither pass nor red; CI owns that run.\n- **Ablation** (expected direction declared before the run): with the fix reverted on disk, predicted red on the Date-side out-of-window pin, the epoch-ms pin and the opaque pin; green on the Date in-window pin (true-by-defect), both ISO controls and both reverse controls. Observed: exactly 3 red / 5 green. Mutation proven ON DISK before the run (blob `85f0e450` to `aceb87be`; injected-anchor grep count 0 to 1, deleted-call anchor 1 to 0); restore proven BY STATE (`git hash-object` equals the HEAD blob `85f0e450`, `git diff HEAD` empty), with an absolute-path trap as crash-path convenience only. The test subject resolves through a same-package relative src import — no dist in the resolution path — so neither leg needed a rebuild.\n\n## Clause-② declaration\n\n`Clause-②: no` — path limb: nothing under `packages/spec/src/**`. Content limb, argued in the claim comment (5492835648): the PG/MySQL behaviour shift is the restoration of the already-declared window semantics (`QueuePublishOptions.idempotencyKey` declares suppression \"within the dedup window\"; the adapter option doc declares \"how long the same key blocks re-publish\"; the ADR-0057 retention comments measure retention against that same bounded window) — not a movement of the contract. No published surface widens, and SQLite verdicts are byte-identical.\n\nSession: session_016ZC5rNQj3WEet5HAmmAkMs\n\n_Generated by [Claude Code](https://claude.ai/code/session_016ZC5rNQj3WEet5HAmmAkMs)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016ZC5rNQj3WEet5HAmmAkMs)_"
+}

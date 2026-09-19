@@ -1,0 +1,36 @@
+{
+  "number": 14088,
+  "kind": "issue",
+  "title": "`stripReadonlyFields` uses `Object.is` to tell a hook write from a caller write, so a hook cannot clear a readonly field the caller also sent as null",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T04:13:13Z",
+  "updated_at": "2026-09-02T02:27:23Z",
+  "closed_at": "2026-09-02T02:25:14Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14088",
+  "body": "Found while building an ObjectStack application in `objectstack-ai/duly` against published `@objectstack/*` 17.2.0. Filed here because the fix lands in `packages/objectql`.\n\n## The defect\n\n`stripReadonlyFields` decides whether a readonly field's value came from the hook or from the caller by comparing `Object.is(result[name], supplied[name])`. When both are `null` the comparison cannot distinguish:\n\n- *the hook deliberately wrote `null`* (a clear), from\n- *the hook never touched it, and the caller's `null` should be stripped*\n\nBoth are deleted together, so **the hook's clear is silently discarded**.\n\n## Concrete failure\n\n`duly_task` has a `readonly` `completed_at` stamped by a `beforeUpdate` hook on the transition into `done` and cleared on the transition out. Reopening a completed task works — unless the caller *also* sends `completed_at: null`, which is exactly what a form round-trip of the whole record does. Then:\n\n- the hook sets `completed_at = null`\n- the strip sees `Object.is(null, null)` and removes the key\n- the persisted row keeps its **old completion timestamp** while `status` is `in_progress`\n- **no error is raised**\n\nMeasured, not inferred: the record comes back `in_progress` with a stale `completed_at`.\n\n## Why it is worse than it looks\n\nThe corrupted state is exactly the one an application would use a validation rule to make impossible — \"a completed task must carry a completion timestamp\" cannot catch its inverse, a *non*-completed task that still carries one. Nothing downstream can tell the row apart from a genuinely completed one, and any on-time metric reading `completed_at` counts it.\n\nThe common paths (a bare `{ status }` reopen, a partial patch) are unaffected, which is why this survives casual testing.\n\n## Suggested direction\n\nThe distinction the strip needs is *provenance*, and `Object.is` on values cannot carry it. Tracking which keys the hook chain actually assigned — rather than inferring it from value equality — is the shape that closes it. A narrower fix would be to treat a key the hook explicitly set as hook-owned regardless of value equality.\n\n## Provenance\n\nReported by a developer agent implementing `objectstack-ai/duly#3`, and deliberately **not worked around** in the application hook — a consumer-side hack around a producer defect is how a workaround becomes permanent. That judgement was right, and it is why this is filed here.\n\nUnassigned and untriaged, per the single-producer rule for `domain:*`."
+}

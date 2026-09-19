@@ -1,0 +1,36 @@
+{
+  "number": 13919,
+  "kind": "issue",
+  "title": "The #12981 swallow census has controls that nothing ever runs — wire the families the repair programme cannot destroy, or leave the instrument a measurement?",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-31T16:55:23Z",
+  "updated_at": "2026-09-02T06:03:41Z",
+  "closed_at": "2026-09-02T05:58:37Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13919",
+  "body": "Filed by the `domain:devx` execution PM seat (#6023), session `session_01Pk26oZ12t5N1hwGW1m1MgC`, on behalf of the **#13785 dev**, which surfaced this while landing PR #13915 and ⛔ deliberately did not take it. ⛔ Filed **unassigned** and **ungraded** — `domain:*`, priority and type are triage's field.\n\n⚠️ **Routed here rather than taken as a rider** because it changes the entry-point shape of an instrument that sits under the **#12981 maintainer ruling of 2026-08-29** (verbatim 「同意」). ⛔ A PM seat does not re-shape a ruling's instrument inside an unrelated fix.\n\n## The gap\n\n`scripts/measure-durability-swallow-family.mjs` declares four control families, all asserted by `--self-test`:\n\n| family | what it pins |\n|:--|:--|\n| `POSITIVE_CONTROLS` | known members that must be found at their declared tier |\n| `NEGATIVE_CONTROLS` | non-members that must yield nothing |\n| `REGRESSION_CONTROLS` | the two prior **resolution** defects in this same resolver |\n| `RESOLUTION_CONTROLS` | new in PR #13915 — six sites pinning the scope-aware resolution |\n\n⛔ **Nothing runs any of them.** Measured on `origin/main`: zero references to `measure-durability-swallow-family` anywhere in `package.json` or `.github/**`. ⭐ Counter-checked against a control that must return non-zero — `measure-stall-guard-headroom` returns 2 hits (`package.json:150` plus a `lint.yml` note) — so the zero is a reading, ⛔ not a broken query.\n\n⇒ The controls are green only when a human or an agent runs them by hand.\n\n## ⭐ Why it matters, in the dev's own words\n\n> the same resolver has now been repaired **three times** — #13459, PR #13915, and the sibling's #13474 — and each time the previous fix had no gate holding it.\n\nThe census's numbers also feed #12981's repair worklist, so a wrong denominator propagates into that programme with nobody watching. That is a live consumer, ⛔ not a speculative surface.\n\n## ⛔ Why the obvious fix is refuted — by the file's own record, not by opinion\n\nWiring the **whole** `--self-test` as a `check:*` would make CI red **when the repair programme succeeds**. `POSITIVE_CONTROLS` are tier-1 dark members of the #12981 worklist — precisely what the programme exists to remove. The file records this already happening:\n\n> This control used to name `bootstrap-system-capabilities.ts` … and **#12981 batch 2 repaired it, which turned this self-test red for doing exactly what the ruling asked.** ANY tier-1 DARK member of the worklist is a control the repair programme is designed to destroy, so repointing at another one only moves the breakage to the batch that repairs THAT file.\n\n⇒ ⛔ A gate that reddens on success is not a gate. The current dark control was chosen for **stability** (batch 1 judged its site out of the programme on the merits), which is a workaround for this exact hazard, not a solution to it.\n\n## The three options, as the dev framed them\n\n- **A — wire the full `--self-test` as a `check:*`.** Two lines, and the precedent is real and sanctioned: `check:stall-guard-headroom` runs `measure-stall-guard-headroom.mjs --self-test` from `lint.yml`. ⛔ Cost: the hazard above, promoted from a local surprise to a merge blocker.\n- **B — split the self-test** (the dev's recommendation): wire `RESOLUTION` + `NEGATIVE` + `REGRESSION`, none of which the repair programme is designed to destroy; leave `POSITIVE_CONTROLS` to manual runs. Cost: a new flag, and it splits an instrument whose single-entry-point shape the ruling sanctioned.\n- **C — leave unwired**, as today. Zero risk to the repair programme. ⛔ Cost: it is what produced this card.\n\n⭐ **This seat's reading, offered as evidence and ⛔ not as a grading:** the instability the dev names is specific to `POSITIVE_CONTROLS`, and the other three families are exactly the ones the programme cannot destroy — which is an argument *for* B on the merits. ⛔ Not a recommendation: whether an instrument that prints *\"a MEASUREMENT, not a gate\"* on every run should acquire a CI entry point at all is the ruling's question.\n\n## ⚠️ What this card is NOT\n\n- ⛔ **Not the handover step.** The file reserves the ruling's LAST step for adding `tryInsert` / `tryUpdate` to the real gate's `DURABILITY_CRITICAL_CALLEES` with zero reds, gated on `outstanding == 0`. This card is about the census's own controls and ⛔ must not be folded into that step or used to bring it forward.\n- ⛔ Not a claim that the census is wrong today. PR #13915's ablation exercised all four families by hand and they behaved as declared.\n- ⛔ Not an argument for adding an entry to `durability-degradation.baseline.json`, nor for widening the gate vocabulary — both explicitly refused by the ruling.\n- ⛔ **Not established** that a split (option B) can be built without duplicating the self-test's reporting; nobody has tried it.\n\n## Re-check\n\n```\n# the absence (must be empty), then the control that proves the query works (must not be):\ngit grep -n measure-durability-swallow-family origin/main -- package.json .github\ngit grep -n measure-stall-guard-headroom      origin/main -- package.json .github\nnode scripts/measure-durability-swallow-family.mjs --self-test\n```\n\n## Dedup declaration\n\n⚠️ Title-only scan of the repo's open issues for the census / wiring / `check:*` wording; nothing matching. ⛔ Bodies not searched, and `search_issues` is unavailable on this channel (REST `/search/issues` is 403 here). ⇒ ⛔ Not a claim that no duplicate exists. Nearest known neighbours, ⛔ none of them this: **#12981** (the programme and its ruling), **#13459** / **#13474** / **#13785** (three repairs of the resolver this card wants held), **#13246** (cited in `lint.yml` beside the precedent).\n\n## Refs\n\n- `scripts/measure-durability-swallow-family.mjs` — the four control families, the handover section, and the recorded batch-2 breakage\n- PR **#13915** (card #13785) — where it surfaced; its ACCEPT carries this seat's reasoning\n- `package.json:150` — the sanctioned wiring precedent\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

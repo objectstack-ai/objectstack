@@ -1,0 +1,36 @@
+{
+  "number": 13440,
+  "kind": "issue",
+  "title": "Nothing stops an in-repo caller from calling `isMissingTableError` without its read-table argument — and the silent result is the wide verdict #13324 just removed",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T11:59:52Z",
+  "updated_at": "2026-09-02T10:26:54Z",
+  "closed_at": "2026-09-02T10:25:08Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13440",
+  "body": "Filed by the `domain:engine` PM seat out of #13324's review (PR #13437). **Unassigned, ungraded — recording the residual, not claiming it.**\n\n## The residual\n\n#13324 repaired `isMissingTableError` by giving it the object the caller was reading, so a fault naming a *different* relation can no longer be answered \"this table is not provisioned yet\". PR #13437 ships that as an **optional** parameter:\n\n```ts\nexport function isMissingTableError(error: unknown, readObject?: string, depth = 0): boolean\n```\n\nOptional was the right call and is not in question here: `@objectstack/metadata` is published (`v17.2.0`, `private: false`, `./errors` in `exports`), so a required parameter is a breaking change needing a major bump. Verified on `origin/main`, not assumed.\n\n**The residual is the enforcement half.** All 17 in-repo call sites pass the argument today. Nothing keeps them doing it, and nothing stops the next one from omitting it — in which case it **silently receives the pre-#13324 wide verdict**, which is a false \"benign\" on a read whose failure named some other relation. The PR's JSDoc states this; prose is the mechanism #13324 exists to show is insufficient.\n\n⇒ This is the same **declared-but-not-enforced** shape the parent card repaired, one level up.\n\n## Why now, and not \"later\"\n\n⚠️ **#13399 (`domain:services`, `needs-user-decision`) proposes creating a NEW consumer of this predicate in a package that has never called it.** Its option B re-exports `isMissingTableError` from `@objectstack/types` so `plugin-auth` can reach it, to discriminate \"plugin-audit not installed\" from \"the row did not land\".\n\nThat use case is a **fixed-table read** (`sys_audit_log`) — exactly the shape where the read-table argument matters, and exactly the shape where omitting it reintroduces the defect. So the first consumer added after #13437 lands is, by construction, a consumer that needs the argument and has no mechanism telling it so.\n\n⛔ Note #13399's body quotes the **pre-#13437 signature** (`isMissingTableError(error, depth = 0)` at `:325`); after #13437 it is `(error, readObject?, depth)` at `:479`. That is flagged on #13399 itself — this card does not depend on how #13399 is ruled, and does not presume it will be.\n\n## Shape of a fix (not decided here)\n\nA repo gate that fails any **in-repo** single-argument call — the \"C\" option surfaced in #13437's report. Enforcement without a major bump, because it binds only callers inside this repository; external consumers keep the optional form the published API promises them.\n\nWhether that is worth one more gate to own is a grading call. The two alternatives on record:\n\n- **A** — accept the residual as documented in the JSDoc (status quo).\n- **B** — make the parameter required in a follow-up, accepting a **major bump** of `@objectstack/metadata`. Human-floor: it breaks a published API, and its enforcement gain over the gate reaches only external consumers — precisely the parties the optional form protects.\n\n## Re-check\n\n```\ngit grep -n \"export function isMissingTableError\" -- packages/metadata/src/utils/schema-sync-errors.ts\ngit grep -n \"isMissingTableError(\" -- packages/ | grep -v \"readObject\\|schema-sync-errors\"\n```\n\nThe second command is the gate's population: today it should print only prose mentions and the definition. ⚠️ Both are against the tree **after PR #13437 lands** — before that, the parameter does not exist and the first command shows the old signature.\n\nRefs: #13324 (the repair) · PR #13437 (ships the optional parameter) · #13399 (would add the first new consumer) · #13438 (a separate residual of the same repair, on federated objects)"
+}

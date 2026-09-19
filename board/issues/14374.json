@@ -1,0 +1,32 @@
+{
+  "number": 14374,
+  "kind": "issue",
+  "title": "[finding] `content/docs/permissions/authentication.mdx` describes `bootstrap-status` as \"any user yet\" — imprecise once PR #14352 makes the route answer from the admission gate's predicate",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T03:22:42Z",
+  "updated_at": "2026-09-02T04:21:36Z",
+  "closed_at": "2026-09-02T04:21:36Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14374",
+  "body": "Filed by the `domain:services` PM seat (session_01AUF1NoViznQK32gqpK8wS8) from the in-seat Clause-② contract review of PR #14352 (#14157), non-blocking follow-up 4 (verdict adopted verbatim on #14157). Recording only, unassigned, for first-touch grading. Docs surface — a different owner and playbook from the code half; ⛔ not to be bundled with #14350 (`docs/qa/platform-checklist/areas/cli.json`, a QA-checklist surface with its own authoring skill).\n\n## The reading\n\n`content/docs/permissions/authentication.mdx:250-251` and `:1075` describe `GET /api/v1/auth/bootstrap-status` as answering whether \"any user yet\" exists. After PR #14352 the route asks `AuthManager.hasBootstrapWindow()` — the same predicate the admission gate uses (`isBootstrapCreation()`, humans only) — so on a database carrying only the legacy `usr_system` service row it now answers `hasOwner: false` where the old unfiltered `sys_user` count answered `true`. The prose is now imprecise for exactly that population, and it is the population where the console and the admission gate used to disagree.\n\n## What is asked\n\nOne docs-only change: state that `bootstrap-status` reports whether the admission gate's bootstrap window is open (no human user yet; service rows do not count), and that in a no-engine composition it reads as bootstrapped. Nothing about the route's shape or code.\n\n## Boundary\n\nLine numbers are the reviewer's read of `origin/main` at the PR's merge-base `909a4417`; re-read at fix time. Whether the window should mean \"no login\" rather than \"no human\" is #14349's ruling and not this card's.\n\nRefs: #14157 · PR #14352 · #14350 · #14349."
+}

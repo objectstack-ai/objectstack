@@ -1,0 +1,36 @@
+{
+  "number": 13330,
+  "kind": "issue",
+  "title": "cli: serve's cluster-driver load registers into the CJS registry while the ESM Runtime reads the ESM one — OS_CLUSTER_DRIVER=redis silently downgrades to \"not registered\" (post-#10645)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T03:40:15Z",
+  "updated_at": "2026-09-01T18:31:50Z",
+  "closed_at": "2026-09-01T05:51:32Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13330",
+  "body": "## Symptom\n\nOn the objectos-ee image (framework pinned at `502ff8b5`), a 3-replica boot with `OS_CLUSTER_DRIVER=redis` + `OS_REDIS_URL` dies at kernel init:\n\n```\n✗ Cluster driver \"redis\" is not registered. Did you forget to import @objectstack/service-cluster-redis or call registerClusterDriver()? See content/docs/kernel/cluster.mdx §6.\n```\n\n`@objectstack/service-cluster-redis` IS declared by the app and IS resolvable — a bare `import('@objectstack/service-cluster-redis')` from the app root succeeds. #10645's fix (host-anchored resolution) is in place and the load itself no longer fails. Something else eats the registration.\n\n## Root cause — module-instance split at the `importFromHost` seam\n\n`serve.ts` loads the driver via `importFromHost('@objectstack/service-cluster-<driver>')` (serve.ts:1919). For a **declared** package, `createHostImporter` (packages/types/src/node.ts) resolves it with `hostRequire.resolve(pkg)` — a **CommonJS** resolution that returns the package's `main`, i.e. `dist/index.cjs` — then does `import(pathToFileURL(resolved).href)`.\n\nSo the driver executes as its **CJS** build, and its self-registration `registerClusterDriver('redis', …)` runs against the **CJS copy** of `@objectstack/service-cluster`'s module-scope registry.\n\nMeanwhile `packages/cli` is `\"type\": \"module\"`: `serve` → `new Runtime(...)` → `@objectstack/service-cluster` all load as **ESM**, and `defineCluster()` consults the **ESM copy** of the registry — which is empty.\n\nMeasured inside the running image (same process, both instances probed):\n\n```\nESM instance: redis REGISTERED       ← after a bare import('@objectstack/service-cluster-redis')\nCJS instance: NOT registered: Cluster driver \"redis\" is not registered…\n```\n\nThe silent `catch { /* may already be registered by the loaded config */ }` around the serve-side load (serve.ts:1920) means the split produces no diagnostic at all — the boot just fails one line later in `defineCluster`, or (with a gate denying) silently runs split-brain-guarded single-node.\n\n## Impact\n\n- `OS_CLUSTER_DRIVER=redis` cannot activate on any config-boot app whose driver package ships a CJS `main` (every tsup dual build does). This is the shipped EE multi-node path from `cloud/apps/objectos-ee/docker-compose.yml` (ADR-0018).\n- The same seam presumably affects any `importFromHost`-loaded package whose *side effect* must land in a module-scope registry read by the ESM chain (`registerMultiNodeGate` from a CJS-evaluated config has the mirror-image problem — the EE licence gate registered from config is invisible to an ESM-side reader, and vice versa).\n\n## Repro\n\n1. Build the EE image at this pin, run `cloud/apps/objectos-ee/docker-compose.yml` with `--scale app=3` (redis driver env preset there).\n2. `migrate` exits 1 with the \"not registered\" error above.\n\n## Workaround (verified)\n\nRegistering from the app config lands in the ESM registry the Runtime actually reads (the config is evaluated as ESM):\n\n```ts\n// objectstack.config.ts\nimport '@objectstack/service-cluster-redis';\n```\n\nWith this line, the same 3-replica compose boots, the redis driver activates, and cross-node locks (`os:lock:*` / `os:fence:*`) appear in redis.\n\n## Possible fixes\n\n- In `createHostImporter`'s declared leg, resolve with ESM semantics (`import.meta.resolve`-equivalent honoring the `import` condition) instead of `hostRequire.resolve`, so the same build of a package is loaded on both sides; or\n- have the driver packages register into a registry that is instance-split-proof (e.g. keyed on `globalThis`), which also hardens every other module-scope registry against dual-build loading; or\n- at minimum, drop the silent catch: log the load error and, after the load, verify the driver is visible to the registry the Runtime will read, so the split reports itself instead of surfacing as \"not registered\" one line later.\n\nFound during a 3-replica EE cluster deployment verification (2026-08-30); companion report in cloud branch `claude/enterprise-cluster-deployment-qxiexe`."
+}

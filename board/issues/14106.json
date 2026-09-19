@@ -1,0 +1,36 @@
+{
+  "number": 14106,
+  "kind": "issue",
+  "title": "`view/layout-without-binding` covers only 3 of the 6 view types that have a binding block — `timeline`, `tree` and `map` fall through the same trapdoor",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-01T05:29:26Z",
+  "updated_at": "2026-09-02T03:06:36Z",
+  "closed_at": "2026-09-02T03:06:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14106",
+  "body": "Measured on `@objectstack/cli` 17.2.0 / `@objectstack/spec` 17.2.0, from a real app (`objectstack-ai/duly`), while adding kanban / gantt / timeline lenses over one object.\n\n## The rule\n\n`checkViewCompleteness` (`spec/dist/kernel` — `functional-completeness.ts`) drives the `view/layout-without-binding` warning off this table:\n\n```js\nvar VIEW_BINDING_BLOCKS = {\n  kanban: \"kanban\",\n  calendar: \"calendar\",\n  gantt: \"gantt\"\n};\n```\n\n`ListViewSchema.type` has **nine** members, and **six** of them carry a type-specific binding block: `kanban`, `calendar`, `gantt`, `timeline`, `map`, `tree`. The table names three.\n\n## Why the other three are the same defect, not a lesser one\n\nThe rule's own message is *\"the renderer falls back to literal default field names … the view renders empty while authoring reports success.\"* That is literally what the uncovered three do. From the console's ListView adapter (`plugins-views-*.js`, 17.2.0), the fallbacks are hard-coded strings:\n\n| view type | renderer fallback when the block is absent | gate |\n|:--|:--|:--|\n| `calendar` | `startDateField \\|\\| 'start_date'`, `endDateField \\|\\| 'end_date'` | ✅ warns |\n| `gantt` | `startDateField \\|\\| 'start_date'`, `endDateField \\|\\| 'end_date'`, `progressField \\|\\| 'progress'`, `dependenciesField \\|\\| 'dependencies'` | ✅ warns |\n| `kanban` | `groupBy = groupByField \\|\\| groupField \\|\\| <inferred>` | ✅ warns |\n| **`timeline`** | `startDateField \\|\\| 'created_at'`, `titleField \\|\\| 'name'` | ❌ silent |\n| **`map`** | `locationField \\|\\| 'location'` | ❌ silent |\n| **`tree`** | `labelField \\|\\| titleField \\|\\| 'name'` | ❌ silent |\n\n`timeline` is the sharpest of the three: `'created_at'` is a plausible-looking name that many objects do **not** declare, and the timeline renderer drops every row whose start date does not parse — so the view is blank, not merely mis-titled.\n\n## Reproduction (measured, both directions)\n\nIn a stack with a `duly_task` object that declares neither `created_at` nor `start_date`:\n\n1. `listViews.recent` = `{ type: 'timeline', … }` **with** its `timeline: { startDateField: 'last_update_at', titleField: 'subject', … }` block → `os validate --json` → `warnings: []`.\n2. Delete the `timeline` block (confirmed on disk: `startDateField` occurrences 1 → 0, marker present) → `os validate --json` → **`warnings: []` again, `valid: true`**. No diagnostic at all.\n3. Same ablation against the sibling `gantt` view → `view/layout-without-binding` warning fires as designed.\n\nSo the gate is working; the table it reads is short.\n\n## Suggested fix\n\nExtend `VIEW_BINDING_BLOCKS` to the full set and give each the same shaped `fix` hint the existing three carry:\n\n```js\nvar VIEW_BINDING_BLOCKS = {\n  kanban: \"kanban\", calendar: \"calendar\", gantt: \"gantt\",\n  timeline: \"timeline\", map: \"map\", tree: \"tree\",\n};\n```\n\nHints, matching the required keys in each block's schema:\n\n- `timeline: { startDateField: '<date_field>', titleField: '<text_field>' }` (both required by `TimelineConfigSchema`)\n- `map: { latitudeField: '<number_field>', longitudeField: '<number_field>' }` or `{ locationField: '<field>' }`\n- `tree: { labelField: '<text_field>', parentField: '<self_lookup_field>' }`\n\n`tree` is the one worth a second look: `TreeConfigSchema`'s keys are all optional, so \"has a `tree` block\" is a weaker assertion there than for the others — see the sibling issue on `tree` having no value-grouped mode.\n\n## Related\n\n- #14074 asks whether the switcher-whitelisted visualizations share the #13748 shape. This is the authored-`type` half of the same root cause; I have posted the renderer measurements there.\n"
+}

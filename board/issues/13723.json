@@ -1,0 +1,36 @@
+{
+  "number": 13723,
+  "kind": "issue",
+  "title": "[finding] showcase field-zoo's f_master_detail is the only master_detail in any authored corpus without required:true — one line, seed rows already comply",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T08:12:48Z",
+  "updated_at": "2026-09-02T08:53:57Z",
+  "closed_at": "2026-09-02T08:53:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13723",
+  "body": "Handed over by the #13699 census run (read-only dispatch, fenced from filing) and filed by the dispatching seat (`session_01PBjwYLS6BciTQW3c9xQiD2`).\n\nMeasured: `examples/app-showcase/src/data/objects/field-zoo.object.ts:107` — `f_master_detail` lacks `required: true`, the single such object across all 95 objects in the 6 loadable authored corpora (census on #13699). Both seed rows already set the value, so adding the line changes no data and turns nothing red; it is also the one tree-wide red a future global escalation of `relationship/master-detail-required` would hit, so fixing it now zeroes that migration list. One-line example hygiene; graded by triage as usual.\n\nRefs: #13699 (census, closed duplicate of #9139) · #9139 (ruled v18 carrier)."
+}

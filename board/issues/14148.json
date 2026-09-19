@@ -1,0 +1,37 @@
+{
+  "number": 14148,
+  "kind": "issue",
+  "title": "A dashboard widget's OWN `filter` keys and `options.sortBy` are not resolved at author time — validate/build exit 0, widget renders empty",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-01T08:14:55Z",
+  "updated_at": "2026-09-01T20:32:41Z",
+  "closed_at": "2026-09-01T20:30:16Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14148",
+  "body": "Measured on `@objectstack/cli` / `@objectstack/spec` **17.2.0** while building a manager dashboard in the `duly` app (objectstack-ai/duly#10). Each mutation was applied to a real, shipping dashboard, confirmed on disk, and both gates re-run.\n\nThe interesting part is how **narrow** the remaining gap is: almost everything on this surface is already checked, including the sibling of one of the two misses.\n\n## What IS caught (no action needed — recorded so the gap below is precise)\n\n| mutated reference | `validate` | `build` | rule |\n| :--- | :--- | :--- | :--- |\n| `widgets[].dataset` → `duly_stagnatoin` | 1 | 1 | `widget-dataset-unknown` (+ \"did you mean\") |\n| `widgets[].dimensions[]` → `business_unitt` | 1 | 1 | `widget-dimension-unknown` |\n| `widgets[].values[]` → `untouched_over_14` | 1 | 1 | `widget-measure-unknown` |\n| `{token}` inside `widgets[].filter` → `{14_days_hence}` | 1 | 1 | `filter-token-unknown`, path-precise at `dashboards[0].widgets[4].filter.due_date.$lte` |\n| dashboard-level `dateRange.field` → `nonexistent_column` | 1 | 1 | `dashboard-filter-field-unknown` (#3365 / #3382) |\n| nav `dashboardName` → `duly_ghost` | 1 | 2 | `defineStack` cross-reference validation |\n\n## A — `widgets[].filter` keys are not resolved\n\n```ts\n// widget bound to dataset `duly_workload`, base object `duly_task`\nfilter: { due_daet: { $gte: '{today}', $lte: '{14_days_from_now}' } },\n//        ^^^^^^^^ no such column on duly_task\n```\n\n`validate` → **0**. `build` → **0**. The condition reaches the engine, matches nothing, and the widget renders **empty**.\n\nTwo things make this sharper than a generic missing check:\n\n1. **On the same node, the TOKEN is checked and the COLUMN is not.** `filter-token-unknown` fires with the exact path `…widgets[4].filter.due_date.$lte`, so the traversal already walks into the filter tree and already knows the widget's dataset. Only the key resolution is missing.\n2. **The identical resolution already exists one key over.** `dashboard-filter-field-unknown` (#3365, shipped in #3382) resolves a *dashboard-level* filter's field against **each widget's dataset base object**, and its message even prints that object's field list:\n\n   > dashboard \"duly_duty_health\" › widget \"not_moving_14d\": inherits dashboard filter `dateRange(nonexistent_column)`, but object `duly_task` (dataset \"duly_stagnation\") has no field `nonexistent_column`. … Object fields: subject, duty, owner, business_unit, …\n\n   So dataset → base object → field set is already computed per widget at that point. `widgets[].filter` is the same field-existence invariant on the filter an author is *more* likely to write by hand, and it was simply not fed through the same rule.\n\n## B — `options.sortBy` is not checked against what the widget selects\n\n```ts\ndimensions: ['business_unit'],\nvalues: ['untouched_over_14d'],\noptions: { sortBy: 'not_selected', sortOrder: 'asc' },\n```\n\n`validate` → **0**. `build` → **0**. The spec states the contract in its own words — *\"Order rows by this dimension or measure name — must be one this widget actually selects\"* (`DashboardWidgetOptionsSchema.sortBy`) — and `DashboardWidgetOptions` is one of the four keys deliberately declared *because* they reach the analytics query (framework#3588). The runtime falls back to ordering by the selected dimensions, so the authored order silently does not happen.\n\nWhy it matters beyond tidiness: for us the authored order **is** a product rule. A per-unit chart must be ordered by the unit dimension and never by the count, because ordering units by a count turns a workload chart into a league table. Today nothing but a hand-written repo test keeps that from silently degrading into \"whatever the runtime picked\".\n\n## Why silent-empty is the expensive failure here\n\nThe dashboard this came from leads with a \"not moving\" tile — open work untouched >14 days. **An empty tile is indistinguishable from a healthy team**: a missing number reads as zero, and zero is the answer the manager is hoping for. Every other class of authoring mistake on this surface already fails loudly at build; these two are the ones that ship.\n\n## Suggested fix\n\nBoth are one pass at the same site that already emits `widget-dataset-unknown` / `widget-dimension-unknown` / `dashboard-filter-field-unknown`:\n\n- **A** — for each widget with a `filter`, walk the condition's field KEYS (descending `$and` / `$or` / `$not`, skipping `$`-prefixed operator keys) and resolve each against the widget's dataset base object plus the platform system columns. Suggested rule id `widget-filter-field-unknown`, message shaped like `dashboard-filter-field-unknown` so the two read alike. A dotted path through a declared `include` should resolve or be explicitly out of scope, not silently pass.\n- **B** — error unless `options.sortBy` is in `dimensions[] ∪ values[]` for that widget. Suggested `widget-sortby-unselected`, listing what the widget does select.\n\nAcceptance: both fail `validate` and `build` naming dashboard, widget, key and object; fixture coverage for the failing and the clean shape.\n\nHappy to take either one if useful — the shape is mechanical and mirrors #3382.\n\nRepo-local stopgap meanwhile: `test/dashboard.test.ts` in objectstack-ai/duly resolves both against the datasets barrel, and is written to be deleted when this lands.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01SqkTcrxUFci7nqXdbBSe2p)_"
+}

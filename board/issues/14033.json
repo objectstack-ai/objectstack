@@ -1,0 +1,36 @@
+{
+  "number": 14033,
+  "kind": "issue",
+  "title": "[Decision] What does turning `publicSharing.enabled` off mean for an ALREADY-MINTED share link? — the parent switch is mint-only while its own child predicate is now a standing policy",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T00:42:50Z",
+  "updated_at": "2026-09-02T16:13:18Z",
+  "closed_at": "2026-09-02T16:12:33Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14033",
+  "body": "Split out of #13856 by the `domain:services` PM seat (#6021) at dispatch. #13856 keeps the unambiguous half (the `redactFields` fail-OPEN, wrong under either answer here) and is dispatched; **this card is the policy question that half cannot answer**.\n\n⛔ Not mine to rule: it is a deployment-visible behaviour change on tokens already handed out, which is the same class the maintainer ruled explicitly for #13608 (ruling comment 5478574829) rather than letting a dev infer.\n\n## The question\n\n`ShareLinkService.getPolicy()` returns an empty policy when the object's `publicSharing` block is absent or `enabled !== true`. **Nothing in `resolveToken()` reads `policy.enabled`** — the opt-in is checked only at mint (`createLink` refuses with `SHARING_NOT_ENABLED`).\n\n⇒ **Turning the object-level opt-in OFF does not stop anonymous serving of tokens already handed out.**\n\nTwo defensible answers, and #13856's filer named both:\n\n**A — de-opt-in is a standing policy (links die).** Symmetric with what #13608 just landed for `eligibility`.\n**B — de-opt-in is an authoring-surface switch (stops NEW mints only; existing links live on).**\n\n## ⭐ Why this is now sharper than when #13856 filed it\n\n#13608 shipped on 2026-09-01 (PR #13857, `fc9ba76a5`). Its maintainer ruling made `publicSharing.**eligibility**` a **standing policy**, re-evaluated on every redemption, on the stated reasoning that the alternative is *\"a declared policy the platform does not hold\"*.\n\n`eligibility` is a **child key inside the `publicSharing` block**. So the platform now holds this shape:\n\n| declaration | when enforced |\n|:--|:--|\n| `publicSharing.eligibility` (the predicate **inside** the block) | mint **and every redemption** |\n| `publicSharing.enabled` (the switch that **governs the whole block**) | mint only |\n\n⇒ Tightening a predicate inside the block kills existing links, while **turning the entire block off does not**. An author who wants to stop anonymous serving would have to *narrow the predicate* rather than *switch the feature off* — the opposite of what the surface reads like.\n\n⚠️ Stated as the argument it is, not as a ruling: this asymmetry is a **reason to look**, not proof that A is right. B is defensible on its own terms (an opt-out that silently breaks live links a customer is relying on is its own kind of harm, and unlike a predicate edit there is no per-record signal that anything changed).\n\n## Independent corroboration that the switch is load-bearing\n\nThe #13857 contract review reached the same seam from the contract side, unprompted, and recorded it as a scoped observation:\n\n> enforcement is governed by the parent `publicSharing.enabled` master switch — `resolveToken` applies no policy gate when the block is disabled, so a link minted through the documented system/permissive bypass (system-context.mdx ledger row 37), or minted while enabled and later orphaned by the author disabling the whole block, redeems without the eligibility re-check. This is pre-existing `resolveToken` structure, uniform across all sibling policy keys (`redactFields` likewise).\n\n⭐ Two independent readings — the #13608 implementer and the contract reviewer — landed on the same structure from different directions. That is what makes it worth a ruling rather than a note.\n\n⚠️ It also names a **second reachable path** worth deciding at the same time: a link minted through the system/permissive bypass carries no eligibility re-check either, because that too runs with the block treated as not-in-force.\n\n## What a ruling needs to settle\n\n1. **A or B** for `enabled`.\n2. If **A**: is it retroactive (every existing token on a disabled block stops resolving at deploy) or forward-only? #13608 chose retroactive-and-immediate, and said so in its changeset as a breaking runtime change — the precedent exists but is not automatic.\n3. Whether the **system/permissive-bypass mint path** is in or out of whatever is decided.\n4. ⛔ **Uniformity across sibling keys is part of the answer, not a rider.** The reviewer measured that `redactFields` sits under the same switch. #13856 is fixing `redactFields` specifically because it is wrong under **either** answer; the ruling should say whether the remaining sibling keys follow `enabled` or their own rule, so the next key does not need its own card.\n\n## Not established\n\n- ⛔ No behavioural measurement. #13856's filer read this from source and said so; nothing was run. **Whoever implements the ruling measures first.**\n- ⛔ No claim any deployment has been bitten.\n- ⛔ Not established how many live links sit on disabled blocks in any real deployment — that is a deployment query (`sys_share_link` joined against the objects' current `publicSharing.enabled`), not answerable from this repo. ⚠️ Do not size the remedy from an in-repo zero.\n\nRelated: #13856 (the `redactFields` half, dispatched) · #13608 / PR #13857 (the `eligibility` half, ruled and landed) · system-context.mdx ledger row 37 (the bypass path)\n\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

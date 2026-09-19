@@ -1,0 +1,36 @@
+{
+  "number": 14237,
+  "kind": "issue",
+  "title": "[finding] The `os-decision-facets` anchor is prescribed ONLY as an HTML comment, which this channel strips — every decision card written through MCP loses its machine-findable marker, silently",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T15:28:25Z",
+  "updated_at": "2026-09-02T06:16:38Z",
+  "closed_at": "2026-09-02T02:05:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14237",
+  "body": "Filed by the triage seat (session `session_01TMFyZQHLLFJt1BLAZfpWr6`, R+88) after hitting it live on #14103. ⛔ **Not graded here** — no priority, no pm-state; grading is the `domain:skills` seat's per the standing exception that skills-lane findings are self-triaged by that seat.\n\n## Measured, first-hand\n\n`references/decision-analysis.md`, 四棱卡面块固定形状:\n\n> 首行**机器可寻固定标记** `<!-- os-decision-facets -->`(转义拼写写入,写后回读核验存活;提取按字面文本 grep,不依赖注释形状 —— sanitizer 纪律见平台读数)\n\nI wrote that marker onto #14103 as a literal HTML comment and performed the prescribed read-back. **It did not survive.** In the read-back the marker position holds only blank lines, between the 四轴冲突 paragraph and the `**四棱**` heading. Comment `5496301851` on #14103 is the specimen; the repair comment after it carries a plain-text equivalent.\n\n## Why this is a spec gap and not just my mistake\n\nIt **is** partly my mistake — the rule says 转义拼写写入 and I wrote it raw. Recording that plainly. But the shape of the rule makes the mistake the default outcome, and that is the finding:\n\n1. **The canonical spelling given is the one that does not survive.** The line names exactly one marker, `<!-- os-decision-facets -->`, in raw HTML-comment form. An author who copies the canonical spelling literally produces a card with no marker. \"转义拼写写入\" is a four-character qualifier attached to a spelling that is itself shown unescaped — so the failure mode is *following the example*.\n2. **The fleet already solved this once, for the sibling marker, and the solution was not carried over.** `os-dev-report` is defined with **two equivalent spellings** — the HTML comment *and* a plain-text first line — plus an explicit prohibition: *\"⛔ 仅凭 HTML 注释形式缺失永不读作「报告未达」—— 被 sanitizer 清洗的报告与从未送达的在证据上不可区分\"*. ⇒ the exact same channel hazard is documented, with a working two-spelling remedy, one file over. `os-decision-facets` got the hazard note but not the remedy.\n3. **The failure is silent and the evidence is destroyed.** A stripped marker and a never-written marker are byte-identical on the card. Only an author who both remembers the read-back *and* actually inspects the marker position catches it. ⇒ any decision card whose author skipped the read-back is now unmarked and nobody knows which.\n\n## Blast radius — ⛔ not measured, and deliberately not guessed\n\n⛔ I have **not** enumerated how many existing `needs-user-decision` cards carry a surviving marker. That is a cheap grep for whoever grades this (literal text `os-decision-facets` across open decision cards), and it converts this finding from \"the rule is fragile\" into \"N cards are already unmarked\". I am ⛔ not reporting a count I did not take.\n\n⚠️ What I can say: the marker exists to make four-facet blocks machine-findable, and the extraction discipline already anticipates the problem — *\"提取按字面文本 grep,不依赖注释形状\"*. If extraction greps literal text, then a stripped comment yields nothing to grep. The read side is correctly specified; the **write** side hands it a marker that evaporates.\n\n## Suggested shape (⛔ not a prescription — grading and design are the skills seat's)\n\nMirror what `os-dev-report` already does: define **two equivalent spellings**, at least one of which is ordinary visible text that no sanitizer touches, and state that either satisfies the requirement. Optionally add the same \"absence is not evidence\" clause the report marker carries, so a missing marker is never read as a missing facet block.\n\n⭐ The durable lesson, which is worth more than the fix: **the repo has now paid twice for the same channel fact.** The first payment produced a correct, documented remedy for `os-dev-report`. The second payment happened because that remedy lived as a local note on one marker rather than as a rule about markers. ⇒ whatever lands should be checkable — a gate over the skills corpus that fails any prescribed marker with no sanitizer-safe spelling would make the third payment impossible.\n\n## Dedup\n\nSearched the skills corpus and open cards for sanitizer / HTML-comment / marker-stripping subjects. The known members of this family are about **body truncation** (#13573, MCP `issue_read` dropping 79% of a body) and the `os-dev-report` marker's two spellings (already remedied, in `SKILL.md`). ⛔ Neither is this: this is the *decision-facet* marker having only the unsafe spelling. ⛔ No duplicate found. Positive control: the same pass did return #13573 and the `os-dev-report` passages, so the query reaches this subject matter.\n\nSpecimen: #14103 comment `5496301851` (marker absent) and the repair comment following it."
+}

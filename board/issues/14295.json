@@ -1,0 +1,37 @@
+{
+  "number": 14295,
+  "kind": "pull_request",
+  "title": "chore(console): bump the objectui pin d8ec8d6d → 67dadd602a3a",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "protocol:data",
+    "protocol:ui",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T01:33:36Z",
+  "updated_at": "2026-09-02T15:00:34Z",
+  "closed_at": "2026-09-02T15:00:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-09-02T15:00:31Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/14295",
+  "body": "## Summary\n\nMoves `.objectui-sha` from `d8ec8d6d4f01` to `67dadd602a3a` (objectui `origin/main` tip, 24 commits / 16 releasing changesets). The generated `@objectstack/console` changeset lists the range; its ADR-0087 disposition is `not-required (no-migration-prescription)` — both declared-breaking entries (`DataTableSchema.toolbar` retired in `@object-ui/types`, objectui#6881; form-view section `className`/`gridClassName` reads retired in `@object-ui/plugin-form`, objectstack#13626) are objectui-internal and touch no `packages/spec` surface.\n\n## Pin citations re-measured (check:objectui-pin-citations)\n\nThe eight asserting citations in `packages/spec` were re-READ at objectui@`67dadd602`, never sha-swapped:\n\n- `plugin-grid/src/ObjectGrid.tsx` changed across the move (7 commits, 461 lines): the bulk-selection block cited at `d8ec8d6d4:3187-3202` sits byte-identical at `3436-3451`, shifted only by insertions above it. `hooks/useBulkExecutor.ts` is unchanged; `284-289` re-read and still ends on `label = 'bulk delete'`.\n- `components/src/renderers/layout/containers.tsx` changed (164 lines) from `:995` on, below every cited anchor: the tabs icon block `729-735` / registration input `788` and the accordion icon block `918-924` / input `965` are unmoved, text re-read.\n- `button.tsx`, `action/resolve-icon.ts`, `lib/lazy-icon.tsx`, `plugin-dashboard/src/index.tsx`, `ObjectMetricWidget.tsx`, `MetricWidget.tsx`, `MetricCard.tsx` are byte-identical at both pins; every anchor (`button.tsx:36/57/59`, `resolve-icon.ts:14-24/30-35`, `lazy-icon.tsx:66-92`, `index.tsx:194/204`, `ObjectMetricWidget.tsx:142/474`, `MetricWidget.tsx:312-321/373-382`, `MetricCard.tsx:83`) re-read, none moved.\n\n## Verification\n\n- `pnpm objectui:build` at the new pin: bundle canary present, injected spec verified, dist 50660 KB.\n- `pnpm sdui:manifest` (the pin bump's second half, ADR-0082 D4): **no new declaration divergence vs the accepted baseline** (90 pre-existing spec-only divergences, 0 blocks missing from the registry).\n- `pnpm --filter @objectstack/spec build && check:generated`: all 15 generated artifacts up to date after the docblock edits; `check:objectui-pin-citations` green locally (8 asserting, 13 historical); `component.test.ts` + `api-methods-batch-conformance.test.ts` pass (234 tests).\n- `node scripts/check-adr-0087-registration.mjs --base origin/main` passes.\n- Browser dogfood of the showcase on the rebuilt console (records CRUD, all 7 list visualizations, dashboards/reports, approvals inbox, Studio, Setup, i18n switch): findings tracked separately; none is a regression introduced by this range.\n\n## Not in this PR\n\n`.claude/launch.json` (local dev-server entry used for the dogfood run) is deliberately left out — governed surface.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n## Lockstep record\n\n`check:sdui-lockstep` refuses a pin move whose parity record names the old pin; `pnpm gen:sdui-lockstep` was run against the objectui tree at `67dadd602a3a` (the `.cache/objectui-67dadd602a3a` build worktree — the shared sibling checkout sits at an older HEAD and does not carry the ported block): 214 grammar lines byte-identical, 24 diagnostic codes agree, no port owed."
+}

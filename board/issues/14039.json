@@ -1,0 +1,36 @@
+{
+  "number": 14039,
+  "kind": "issue",
+  "title": "v17 release notes: the #4366 entry states the `svc:flow:` audit label unqualified, and the #5494 entry later in the same page supersedes it — nothing connects them",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "priority:p2"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T00:49:46Z",
+  "updated_at": "2026-09-02T05:49:39Z",
+  "closed_at": "2026-09-02T05:47:09Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14039",
+  "body": "Docs-only finding, filed unassigned. **Surfaced by the Docs Drift Check on #14035, not ignored** — that bot flagged a release-owned page, the guardrail says such a page is read-only and a genuine error should become an issue rather than an edit, so this is that issue.\n\n`content/docs/releases/` is release-owned and I did not touch it.\n\n## The two entries\n\nBoth are in **`content/docs/releases/v17.mdx`**, i.e. the same release:\n\n**Line 2072-2073** (#4366, under *New capabilities (backend)*):\n\n> …and a `runAs: 'system'` flow's writes are audited as `svc:flow:<flowName>` instead of \"Unknown user\" (#4366).\n\n**Line 2860-2861** (#5494):\n\n> **`runAs: 'system'` `create_record` stamps all three ADR-0118 columns** (#5494) — organization, owner and creator are non-`NULL`.\n\n## Neither is false on its own — the problem is what they say together\n\nThey describe two different things and each is accurate in isolation: #4366 is about the **actor label**, #5494 is about the **stamped columns**.\n\nBut the first is stated **unqualified** — \"a `runAs: 'system'` flow's writes are audited as `svc:flow:<flowName>`\" reads as the general rule for every system-elevated run. What actually ships (and what #5494 settled, later in the same release) is that the triggering user is **carried through**; `svc:flow:` is the **fallback** for a run that genuinely resolves no user, such as a schedule.\n\n`packages/services/service-automation/src/runtime-identity.ts:189` says it in as many words:\n\n> `#5494 — elevation is not anonymity. When the trigger resolved a user …`\n\nSo a reader working through v17's notes front to back meets the unqualified version ~800 lines before the entry that refines it, with **nothing linking the two**. A reader who stops at the first one comes away believing system elevation costs you the operator in the audit trail.\n\n## Why this is worth a card and not a shrug\n\nThis is the same false belief #14011 is fixing in the contract prose, in a page with considerably more readers than a `.d.ts`.\n\n#14011 exists because that belief is **load-bearing in the wrong direction**: downstream it got written into a security adjudication as the explicit stop-condition — *\"if elevation erases the operator, stop and report a fork, because the requirement demands 谁修改了什么都要有日志可查\"*. The correct design was one measurement away from being abandoned on a false premise. It survived only because the investigating agent measured instead of reading.\n\nThe contract-prose half is being corrected on #14035. This is the other place the same concept lives.\n\n## Suggested handling\n\nThe release page is a historical record, so the fix is **not** to rewrite the #4366 entry into what #5494 later made true — that would falsify what #4366 shipped. Two options that keep the record honest:\n\n1. **Add a qualifier plus a pointer** to the #4366 entry — that `svc:flow:` is what a run resolving no user falls back to, and that #5494 (later in this same page) carries the triggering user through. Smallest change, keeps both entries accurate as written.\n2. **Leave both and rely on the corrected contract prose** now landing via #14035, on the view that release notes are per-change records and cross-linking them is not their job.\n\nI lean to 1 because these two sit in the **same release** — this is not old notes describing an older behaviour, it is one page whose earlier row a later row on the same page supersedes. But release-note policy is the release process's call, not a downstream reporter's, so I am not proposing a PR.\n\n## Not a defect, for the record\n\nThe other row the drift check flagged on #14035 — `content/docs/releases/v15.mdx:863` (*\"Flow-type actions now receive the caller's identity as a real `AutomationContext` (`runAs: 'user'` flows evaluate RLS as the caller)\"*) — I checked and it is **correct as written**. It was listed because it names the `AutomationContext` symbol, which is precisely the precision-first behaviour the bot advertises. No action there.\n\nContext: #14011, #14035. Filed from the downstream `steedos-labs/hotcrm-heimao` seat."
+}

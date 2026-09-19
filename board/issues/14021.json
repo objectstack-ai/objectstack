@@ -1,0 +1,35 @@
+{
+  "number": 14021,
+  "kind": "issue",
+  "title": "[finding] `MetadataClusterBridgePlugin` logs \"bridged metadata.changed → cluster.pubsub\" on the in-process `memory` driver, which fans out to nobody — its sibling `AuthzClusterBridgePlugin` guards exactly this, and the metadata bridge has no test file at all",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T00:00:30Z",
+  "updated_at": "2026-09-02T01:18:08Z",
+  "closed_at": "2026-09-02T01:11:25Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14021",
+  "body": "Found while producing the boot-path reading for #13331. Filed unassigned; recording only. This is **not** the #13331 defect and fixing it would not move that card's numbers — it is the observability gap next door.\n\n## Two halves\n\n### 1. \"bridged\" is logged for a bus that crosses no process boundary\n\n`packages/services/service-cluster/src/metadata-cluster-bridge-plugin.ts:61-71` attaches and then logs unconditionally:\n\n```\nMetadataClusterBridgePlugin: bridged metadata.changed → cluster.pubsub (node=${cluster.nodeId})\n```\n\nThere is no driver check. Its sibling in the same directory, `authz-cluster-bridge-plugin.ts:78-84`, does have one, and its comment states the reason in exactly the terms that apply here:\n\n> A cluster service IS registered — `Runtime` registers the memory driver by default — but it fans out to nobody. Reporting this as \"bridged\" is the exact misreading the posture statement exists to prevent.\n\n`isInProcessClusterDriver` already exists (`./split-brain-guard.js`) and is already imported by the authz bridge, so the guard is available; the metadata bridge simply does not ask.\n\nThe tree does deliberately hold the two bridges to different bars — the authz bridge's own header says the metadata bridge \"may return at `debug` when no `cluster` service exists, because a missed `metadata.changed` costs a stale schema and loses no data\". That argument covers **silence when absent**. It does not cover **asserting \"bridged\" when present-but-in-process**, which is a false positive rather than a quiet negative.\n\n### 2. The plugin has no test file\n\n```\npackages/services/service-cluster/src/\n  authz-cluster-bridge-plugin.ts\n  authz-cluster-bridge-plugin.test.ts     <-- sibling has one\n  metadata-cluster-bridge-plugin.ts\n  (no metadata-cluster-bridge-plugin.test.ts)\n```\n\nBoth of the bridge's branches — the attach and the `attachClusterPubSub`-missing warn — are reachable from a small harness. I exercised both against a real `ObjectKernel` while reading #13331 and they behave as written (warn with no attach when the slot holds the kernel's memory fallback; attach called once with `(pubsub, nodeId)` when the slot exposes the method), so the coverage is cheap to add — it just does not exist.\n\n## Suggested repair\n\nAdopt the sibling's shape: consult `isInProcessClusterDriver(cluster.driver)` before claiming `bridged`, and say the in-process case out loud in the terms the authz bridge already uses. Add the missing test file covering attach / warn / in-process.\n\nRelated: #13331 (whose reading surfaced this), #11968 (the ruling that produced the authz bridge's posture statement)."
+}

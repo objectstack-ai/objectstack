@@ -1,0 +1,35 @@
+{
+  "number": 14514,
+  "kind": "issue",
+  "title": "cloud-connection：runtime config 载荷声明可选的「升级/计费入口」绝对 URL 键（cloud#1850 裁 A 的 framework 半边）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T09:45:07Z",
+  "updated_at": "2026-09-02T14:35:34Z",
+  "closed_at": "2026-09-02T14:35:33Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14514",
+  "body": "## 背景（cloud#1850 裁 A 的 framework 半边；维护者 2026-09-02 在场裁定）\n\n租户运行时的 SPA 在 AI 额度耗尽时给出「升级」入口，但 `/api/v1/runtime/config` 只下发 cloud 的 origin，没有任何控制面声明的升级/计费页 URL。objectui（objectstack-ai/objectui#7273）已把消费侧改为「只用 origin、不再客户端拼路径；有键则渲染、无键不渲染」。控制面自己两处对这个 URL 的拼法都不一致（`billing.ts` vs `environment-lifecycle.ts`），证明消费侧推导不可能稳定。\n\n## 裁决 A：`/api/v1/runtime/config` 下发绝对 URL\n\n1. `packages/cloud-connection`（`@objectstack/cloud-connection`）在 runtime config 载荷上声明一个**可选**键，值为控制面升级/计费入口的绝对 URL（命名按该载荷既有键风格，PR 正文说明；缺省不下发）。\n2. 类型与（若有）zod/契约测试同步；README/文档中该载荷的字段表加一行。\n3. cloud 侧子类填值（cloud#1850 的另一半）在 pin bump 后落地，⛔ 不在本卡做；本卡 PR 正文写明 cloud 侧要填的键名与语义。\n\n## 契约面\n\n扩大公开载荷 ⇒ **Clause-②: yes**（契约复审档）。本卡是 epic objectstack-ai/cloud#1841 的 sub-issue。\n\n## 验收\n\n新键可选、缺省不出现在响应里；类型导出；一条契约测试覆盖「声明了就原样透传、没声明就不出现」；changeset minor。\n"
+}

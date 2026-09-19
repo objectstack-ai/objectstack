@@ -1,0 +1,36 @@
+{
+  "number": 10667,
+  "kind": "issue",
+  "title": "Burn down the 35 scripts/ modules that run on import — the KNOWN_IMPORT_UNSAFE ledger from PR #10665",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-21T08:09:48Z",
+  "updated_at": "2026-09-02T17:52:19Z",
+  "closed_at": "2026-09-02T17:21:31Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 16,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10667",
+  "body": "Parent: #10631. Split out from PR #10665, which landed the rule and left this half deliberately undone.\n\nPR #10665 taught `check:entry-guard` a second rule — a `scripts/**` file that **exports a binding**\nmust have every top-level statement that *runs something* behind the guard — and recorded the files\nthat already violate it in a **⛔ SHRINK-ONLY** `KNOWN_IMPORT_UNSAFE` list so the gate is green on\nthe tree as it stands. Nothing new can join the list; these 35 are the standing debt.\n\nThe burn-down was kept out of that PR because its claim declared `scripts/check-entry-guard.mjs`,\nand 35 gate scripts is the file surface other seats work in. It is safe to do in any number of\nsittings: each file is independent, and the gate itself tells you when a line is ready to go.\n\n## Why each one matters\n\nMeasured by importing every exporting `scripts/` file in a child process for its exports alone:\nof the 39 unguarded exporters, **8 ended the importer mid-import and five of those exit 0**, and 14\nmore ran the whole tool loudly. Three further leaks live in files that *do* carry a guard and leak\n**conditionally on the importer's argv** (`qa/qa-rollup.mjs`, `objectui-range.mjs`) or on an env var\n(`ts-parse.mjs`) — invisible to any clean-argv probe. Full table in PR #10665.\n\n## The remedy is mechanical, and needs no re-indentation\n\nFive files here already use the inverted idiom, which wraps a trailing dispatch chain with a 4-line\ninsert and zero re-indentation of the existing branches:\n\n```js\nimport { isEntrypoint } from './invoked-as.mjs';   // '../invoked-as.mjs' from a subdir\n\nconst invokedDirectly = isEntrypoint(import.meta.url);\n\nif (!invokedDirectly) {\n  // imported as a module — expose the exports and do nothing else\n} else if (process.argv.includes('--self-test')) {\n  ...\n```\n\nThe plain form `if (isEntrypoint(import.meta.url)) { ... }` is equally accepted, as is storing the\npredicate in a `const` under any name.\n\nRoughly five of the 35 have their whole gate body at top level rather than a trailing dispatch\nchain (`check-error-status-conformance.mjs`, `checklist-select.mjs`,\n`check-query-options-erasure-ratchet.mjs`, `check-release-page-status.mjs`,\n`pm/check-governed-prose.mjs`) and need a real `main()` extraction rather than a wrap. Those are\nworth their own sitting.\n\n⚠️ `pm/check-governed-prose.mjs` additionally mutates `process.argv` at module scope to filter\n`--self-test` out before importing a sibling. That workaround is a scar from exactly this class and\nlooks stale now that `pm/check-governed-merges.mjs` carries the guard — worth checking rather than\npreserving.\n\n## Per file: verify, then delete its line\n\nFor each one: add the guard, then `node scripts/check-entry-guard.mjs` — it fails with the file\nnamed as a **STALE** `KNOWN_IMPORT_UNSAFE` entry, which is the signal to delete that line. Confirm\nwith an import probe (the importer must survive silently) and by running the file as a CLI\nunchanged. Demonstrated end to end on `check-nul-bytes.mjs` in PR #10665.\n\n## The 35\n\n- [ ] `scripts/ablation-dist-preflight.mjs`\n- [ ] `scripts/check-changeset-no-major.mjs`\n- [ ] `scripts/check-dispatcher-error-vocabulary.mjs`\n- [ ] `scripts/check-driver-memory-census.mjs`\n- [ ] `scripts/check-empty-changeset.mjs`\n- [ ] `scripts/check-engine-split-ratio.mjs`\n- [ ] `scripts/check-error-code-casing.mjs`\n- [ ] `scripts/check-error-status-conformance.mjs`\n- [ ] `scripts/check-examples-live-imports.mjs`\n- [ ] `scripts/check-filter-alias-parity.mjs`\n- [ ] `scripts/check-nul-bytes.mjs`\n- [ ] `scripts/check-org-identifier.mjs`\n- [ ] `scripts/check-query-options-erasure-ratchet.mjs`\n- [ ] `scripts/check-quick-reference-counts.mjs`\n- [ ] `scripts/check-ratchet-remedy-authority.mjs`\n- [ ] `scripts/check-release-page-status.mjs`\n- [ ] `scripts/check-required-contexts.mjs`\n- [ ] `scripts/check-route-envelope.mjs`\n- [ ] `scripts/check-runtime-services-index.mjs`\n- [ ] `scripts/check-shard-attestation.mjs`\n- [ ] `scripts/check-spec-parsed-alias.mjs`\n- [ ] `scripts/check-startup-registry-verdict.mjs`\n- [ ] `scripts/check-tenant-chokepoint.mjs`\n- [ ] `scripts/check-test-completeness.mjs`\n- [ ] `scripts/check-workflow-status-functions.mjs`\n- [ ] `scripts/checklist-select.mjs`\n- [ ] `scripts/docs-audit/check-audit-scope.mjs`\n- [ ] `scripts/measure-test-shard-timings.mjs`\n- [ ] `scripts/objectui-range.mjs`\n- [ ] `scripts/pm/check-governed-prose.mjs`\n- [ ] `scripts/pm/check-label-desc-cap.mjs`\n- [ ] `scripts/pm/check-skill-id-lint.mjs`\n- [ ] `scripts/pm/check-skill-line-ratchet.mjs`\n- [ ] `scripts/qa/qa-rollup.mjs`\n- [ ] `scripts/ts-parse.mjs`\n\n`node scripts/check-entry-guard.mjs --list` prints this live, with the offending line in each file.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

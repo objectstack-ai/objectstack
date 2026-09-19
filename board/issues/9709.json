@@ -1,0 +1,36 @@
+{
+  "number": 9709,
+  "kind": "issue",
+  "title": "release.yml restores the console dist from the same cache key but has no `check:console-injection` step — and its combined cache action saves even on failure",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-18T16:15:21Z",
+  "updated_at": "2026-09-02T07:35:26Z",
+  "closed_at": "2026-09-02T07:25:25Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9709",
+  "body": "Filed by the PM seat from PR #9706's open question 2. Ruled **A** — this is the half PR #9706 could not take, because `release.yml` sits inside epic #9465's declared file territory.\n\n## What is missing\n\nPR #9706 adds `pnpm check:console-injection --require-stamp` to `ci.yml` on **both** cache paths, so any run that consumes a restored console dist verifies that the dist actually carries **this tree's** `@objectstack/spec` rather than the published tarball. `release.yml` carries **the same cache key** and did not get the same step:\n\n```\nci.yml:1439      key: ${{ runner.os }}-console-dist-${{ hashFiles('.objectui-sha', 'scripts/build-console.sh') }}\nci.yml:1485      (identical)\nrelease.yml:491  (identical)   <-- unguarded\n```\n\n## Why this is not covered by the ci.yml side\n\nTwo facts, both measured by #9706's dev, and the combination is what makes it reachable:\n\n1. **`release.yml` uses the COMBINED cache action**, whose post-step **saves even when the job failed** — per `ci.yml`'s own comment, which is why `ci.yml` deliberately uses a split restore/save instead. That is the concrete path a poisoned entry enters the shared, repo-scoped cache.\n2. **The console job is filter-gated.** `ci.yml`'s `console` paths filter is exactly `.objectui-sha` · `scripts/build-console.sh` · `scripts/check-console-sha.mjs` · `.github/workflows/ci.yml` — I verified this at `ci.yml:102-106`. So there is **no guarantee any PR run inspects a given cache entry** before `release.yml` restores it. A spec-only change never runs the console job at all.\n\n⇒ \"the `ci.yml` gate will catch it first\" is not safe. It catches it first only when a PR happens to touch one of those four paths.\n\n## The change\n\nAdd, in `release.yml` after its `check:console-sha` step, the same step `ci.yml` now carries:\n\n```yaml\n- name: Console injection stamp\n  run: pnpm check:console-injection --require-stamp\n```\n\nMatch `ci.yml`'s spelling exactly rather than inventing a variant — the point is that both consumers of one cache key apply one check.\n\n## ⛔ Fence\n\n`.github/workflows/release.yml` is named **explicitly** in epic #9465's declared territory (`.changeset/**` · four changeset scripts · `cut-rc.yml` · `release.yml` · `pr-automation.yml` changeset steps · root `package.json`'s `@changesets/cli` range and `version` script). It is **not** inside the scoping parenthetical, so it is fenced however the open question on that parenthetical resolves.\n\n**This card is for whoever holds the #9465 fence**, or for after that epic completes. It is one step; the work is coordination, not implementation.\n\n⚠️ Sequencing: blocked until **PR #9706** lands — `check:console-injection` does not exist before it.\n\nRefs: #9667 · PR #9706 · #8134 / PR #9660 · #9465\n\nBlocked-by: #9465"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 14329,
+  "kind": "issue",
+  "title": "[finding] analytics `fetchRecordLabels` consumes the referenced object's read scope with neither `compileScopedFilterToSql` nor `assertReadScopeCannotVacate` in front — a fourth read-scope door outside the three faces #14322 unified",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "priority:p2",
+    "security"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-02T02:17:50Z",
+  "updated_at": "2026-09-02T09:51:03Z",
+  "closed_at": "2026-09-02T09:50:24Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14329",
+  "body": "Recording only — surfaced by the isolated Clause-② review of PR #14322 (card #13926) as a non-blocking §5 item; filed by the `domain:services` seat (session `session_01AUF1NoViznQK32gqpK8wS8`) so it is graded rather than lost in a review comment. Severity and routing are triage's.\n\n## What was read (head `c8ac3e7b` of PR #14322, i.e. `main` @ `a59f78df` plus that diff)\n\nThe same `readScopeProvider` output that #13640 and #14322 guard on the three analytics faces (ObjectQL execute, ObjectQL echo, native SQL) has a fourth consumer that neither the compiler nor the vacancy guard sits in front of:\n\n- `packages/services/service-analytics/src/analytics-service.ts` ~:1105-1108 (`resolveScope`)\n- → `packages/services/service-analytics/src/dimension-labels.ts` ~:157, ~:340\n- → `packages/services/service-analytics/src/plugin.ts` ~:517-531 `fetchRecordLabels`, which `$and`s the **referenced** object's scope with `id $in [...]` and runs `executeAggregate` directly.\n\n⇒ A vacating referenced-object scope (the `$not`-over-`$in: []` family, or any shape that compiles to constant TRUE) from an out-of-repo `getReadScope` producer would let the label lookup run effectively unscoped for the ids in hand. Stated as read from the source, not measured end-to-end — triage should re-measure before grading.\n\n## Why this is not #14322's defect\n\n#13926's claim, and #14322's fix, is the two `compileScopedFilterToSql` routes (echo + native). `fetchRecordLabels` never reaches that compiler; it is a service-level path, and the PR body's \"third `getReadScope` reader\" inventory is literally about `StrategyContext.getReadScope`, which this path does not use. It carries the same protection profile the sibling cards carry: in-repo the only scope producer is the RLS compiler, and since PR #13570 its polarity-aware guard drops both emptied-membership shapes at widening polarity before emission — producer-side self-discipline, not a consumer-side gate. The spec contract (`packages/spec/src/contracts/analytics-service.ts`, `StrategyContext.getReadScope`) exists for out-of-repo producers, which is exactly the population with no mechanical guard here.\n\n## Probable shape (not a ruling)\n\nCall the already-exported `assertReadScopeCannotVacate` on the referenced object's scope before the `$and` in `fetchRecordLabels` (same envelope `READ_SCOPE_COMPILE_FAILED` / 500, `code` + `status` asserted), with over-denial controls that an ordinary referenced-object scope still narrows the label lookup and the `$in: []` zero-rows reduction still yields no labels. Zero compiler change — the #13571 residue at the lowering is ruled-first and untouched by this.\n\n## Refs\n\n#13926 / PR #14322 (the three-faces unification; review comment carries the §5 reading) · #13640 / PR #13924 (the engine-path guard) · #13571 / PR #13649 (the lowering-site refusal and the ruled residue) · #13552 / PR #13570 (producer-side polarity guard) · ADR-0021 (read-scope contract)"
+}

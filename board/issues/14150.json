@@ -1,0 +1,36 @@
+{
+  "number": 14150,
+  "kind": "issue",
+  "title": "[measurement] better-auth admin 插件能否按动作粒度挂载(SCIM 只要 ban)——并同时评估是否需要升级 better-auth",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-01T08:19:35Z",
+  "updated_at": "2026-09-02T03:23:10Z",
+  "closed_at": "2026-09-02T03:23:10Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14150",
+  "body": "由 #13816 的维护者裁决派生(2026-09-01,项目总监席批 #21)。维护者逐字:「13816 还要同时评估是否需要升级 better-auth」。\n\n⛔ **这是一张只读测量卡,不写产品代码,不做升级** —— 交付物是本卡上的一份读数报告。它的答案决定 #13816 的形状 2(三态 + 构造期响亮冲突拒绝,已排队)是终态还是过渡态。\n\n## 背景(一句话)\n\nSCIM 开启会静默强制挂上 better-auth 的 `admin` 插件(`impersonate-user` / `set-user-password` / `ban-user`),耦合有 ADR-0071 背书:SCIM 的 `active:false` 停用路径经由 admin 的 ban。真修复(形状 1)是把依赖收窄到 SCIM 真正需要的动作 —— 可行性取决于 better-auth 插件的实际形状,没人测过。\n\n## 要交付的三个读数\n\n1. **当前钉住版本的 admin 插件形状**:better-auth 的 admin 插件能否按动作粒度挂载或裁剪?(插件 options 能否禁用端点子集?ban 能否脱离完整 admin 动作集单独获得?server-side API(`auth.api.banUser` 类)是否可以在不 mount HTTP 端点的情况下调用?)以源码/类型为准,不以文档想象。\n2. **升级评估**(维护者点名追加):当前 monorepo 钉住的 better-auth 版本 vs 最新发布版 —— admin / SCIM / organization 插件区域的 changelog 差异;新版本是否提供更细的挂载粒度或解耦手段;若需升级,破坏面与迁移成本的量级读数(peer 依赖、schema 迁移、API 变名)。\n3. **结论分叉(具名、可证伪)**:\n   - **可行**(现版或升级后可只拿 ban)⇒ 立形状 1 实施卡 + ADR-0071 修订卡,#13816 的形状 2 降为过渡态;\n   - **不可行** ⇒ 形状 2 即终态,#13816 落地后本链关闭。\n\n⚠️ 若结论是「升级才可行」:升级本身回决策箱裁(成本读数随卡附上),⛔ 本卡不自行升级。\n\n**Refs**: #13816(裁决与形状 2 实施卡)· #13439(已裁姊妹卡:三键声明)· ADR-0071 · objectstack-ai/cloud#1451。"
+}

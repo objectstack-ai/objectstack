@@ -1,0 +1,35 @@
+{
+  "number": 14524,
+  "kind": "pull_request",
+  "title": "Gate the workspace manifest dependency graph against cycles",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "size/l",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T10:07:38Z",
+  "updated_at": "2026-09-02T12:25:39Z",
+  "closed_at": "2026-09-02T12:25:37Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-09-02T12:25:37Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/14524",
+  "body": "Fixes #14195\n\n## What\n\nAdds `check:workspace-manifest-cycles` — a new gate family that walks every\n`workspace:` edge in `dependencies`, `devDependencies`, `peerDependencies` and\n`optionalDependencies` across all 78 workspace packages and refuses on any\ncycle, naming each edge with its declaration class\n(`A --devDependencies--> B`). Before this, nothing in the repo read the\nmanifest graph for cycles — the only signal was `pnpm install`'s\n`WARN There are cyclic workspace dependencies: …` on stderr, exit 0, which had\nbeen printing for the entire life of the #13513 defect before anyone read it.\n\n`peerDependencies` is walked deliberately, not as an afterthought: a scan\nomitting it reports 0 cycles on the pre-fix #13513 tree, honestly and\nwrongly — that cycle's first edge was a `peerDependencies` edge (#13513\ncomment `5473800149`, resolved in `5479206575`). The `--self-test` battery\ndrives that exact adversarial shape (a cycle whose ONLY closing edge is\n`peerDependencies`, and the same for `optionalDependencies`) so a future edit\nthat narrows the walked classes back to three reddens the self-test.\n\nWired into `lint.yml` immediately after `check:turbo-task-graph`, the repo's\nexisting collector idiom for this kind of manifest sweep.\n\n## File surface (exactly three files, per the claim)\n\n- NEW `scripts/check-workspace-manifest-cycles.mjs` — the gate. Resolves edges\n  by package NAME (never directory) via the shared\n  `scripts/workspace-enumerator.mjs`. A `workspace:` spec naming a package no\n  member declares is recorded as an informational note, never a refusal (a\n  separate defect this gate does not judge). A self-edge counts as a cycle of\n  length 1. Cycle detection is Tarjan SCCs + a deterministic DFS walk per\n  cyclic component, so every disjoint cycle is reported, not just the first\n  one found. Exit 0 green, 1 cycle found, 2 usage/read error.\n- `package.json` — one new `scripts` key,\n  `\"check:workspace-manifest-cycles\": \"node scripts/check-workspace-manifest-cycles.mjs --self-test && node scripts/check-workspace-manifest-cycles.mjs\"`,\n  the `check:turbo-task-graph` idiom.\n- `.github/workflows/lint.yml` — one new step in the same job, immediately\n  after `check:turbo-task-graph`, with a header comment stating what it\n  judges, why, and that `--self-test` runs first.\n\nNo other file touched: no existing `scripts/check-*.mjs` edited, nothing\nunder `scripts/pm/**` (held by #14233 in flight), no workspace `package.json`,\n`turbo.json` or `pnpm-workspace.yaml` edits.\n\n## Proof on the real tree\n\nGreen on `origin/main` before this change (nothing reads the graph for\ncycles):\n```\n$ git grep -i cycl origin/main -- scripts/check-*.mjs   # prose only, no gate\n```\n\nGreen with the new gate:\n```\n$ node scripts/check-workspace-manifest-cycles.mjs\nOK: 78 workspace package(s), 470 `workspace:` edge(s) (dependencies=343,\ndevDependencies=121, peerDependencies=5, optionalDependencies=1) — the\nmanifest graph has no cycle.\n```\n\nRed-proof (temporarily added `packages/spec`'s `peerDependencies` a\n`workspace:*` edge back onto `apps/docs`, which already has a\n`devDependencies` edge onto `packages/spec` — the two form a 2-cycle whose\nonly closing edge is a peer, the #13513 shape):\n```\n$ node scripts/check-workspace-manifest-cycles.mjs\nFAIL: the workspace manifest graph has 1 cycle over `workspace:` edges in\ndependencies, devDependencies, peerDependencies and optionalDependencies.\n\n  - @objectstack/docs --devDependencies--> @objectstack/spec --peerDependencies--> @objectstack/docs\n```\nReverted with `git checkout HEAD -- packages/spec/package.json`, confirmed\nclean with `git diff HEAD` (0 lines) before committing.\n\nSelf-test: `node scripts/check-workspace-manifest-cycles.mjs --self-test` —\nacyclic green; a 2-cycle via `devDependencies` red with both edges named;\nthe peer-only and optional-only false-zero controls both red; a 3-node cycle\nred with all three edges in cycle order; a self-edge as a length-1 cycle; two\ndisjoint cycles both reported; a non-`workspace:` spec is not an edge; all\nfour `workspace:*` / `^` / `~` / `<range>` spellings count; an unresolved\n`workspace:` spec is recorded, not a refusal; both read-error refusals fire.\nAll cases pass, on the base commit and again on the merged tree.\n\n## Gates\n\nDerivation: `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --commands scripts/check-workspace-manifest-cycles.mjs package.json .github/workflows/lint.yml`\n→ 37 commands. All ran green except three that need a full `pnpm build` first\n(`check-test-completeness.mjs`, `check:dual-build-cjs-loads`,\n`check:type-check-debt` — all exit 3, \"Run `pnpm build` first ... nothing was\nmeasured\", unrelated to this diff's surface). `check:pm-dispatch-gates` ran\ndetached (~11 min): `dispatch-gates self-test: 1240 cases pass.`\n`check:declared-population-live --list` shows the new family LIVE:\n`live check:workspace-manifest-cycles -- pnpm-workspace.yaml/**, packages/**/package.json, apps/**/package.json, examples/**/package.json`.\n`node scripts/pm/bare-root-worklist.mjs --self-test` — `OK self-test: 57 live\nrow(s), 49 unreachable as spelled, 49 recorded verdict(s) — none stale, none\nmissing, none contradicted...` — the new gate entered no unjudged row.\n`node scripts/check-nul-bytes.mjs` — clean. Re-ran the full union after\n`git fetch origin main && git merge origin/main` (clean, no conflicts) on\n`85e8fc3f5` — same result.\n\n## Changeset\n\nNone — scripts + workflow + a root `scripts` key only, no package publishes\nanything here. `skip-changeset` label applied on open, confirmed by reading\nthe PR's labels back.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WLJQhde67SeTccsmnBVarV)_"
+}

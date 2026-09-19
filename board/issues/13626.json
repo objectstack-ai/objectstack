@@ -1,0 +1,36 @@
+{
+  "number": 13626,
+  "kind": "issue",
+  "title": "[finding] Form-view `className`/`gridClassName` are SDUI-only per the authorable boundary, yet renderers consume them through `as any` casts — the boundary is declared on one side and crossed on the other",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T03:51:18Z",
+  "updated_at": "2026-09-01T11:12:20Z",
+  "closed_at": "2026-09-01T11:12:20Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13626",
+  "body": "Handed over by the #13622 wizard-shape design run (read-only measurement at objectstack@`52bc918e` / objectui@`b84dc18`; the dev was fenced from filing) and filed by the dispatching seat (`session_01PBjwYLS6BciTQW3c9xQiD2`). Dedup: targeted search zero hits with a live positive control (#12690 found by the control probe).\n\n## The shape\n\n`className` / `gridClassName` on the form-view family are on the SDUI-only side of the authorable boundary (not part of the declared authorable surface for these views), yet renderer code reaches them off the parsed view through `as any` casts — so the keys are simultaneously \"not authorable\" by the ledger and load-bearing in the renderer when present. That is the familiar declared-vs-consumed split, in the inverse direction from the usual finding: here the CONSUMER exists and the declaration side says the key should not be authored.\n\nEvidence basis: the #13622 proposal comment (os-dev-report on that card) records the observation with its measurement context; re-derive exact cast sites via `git grep -n \"className\" -- packages/... | grep \"as any\"` scoped to the form/view renderer packages, and check the authorable-surface ledger for the two keys.\n\n## Why filed\n\nEither the keys belong on the authorable surface (declare them, retire the casts) or the renderer should stop consuming undeclared keys (retire the reads) — enforce-or-remove class, needs grading against the authorable-boundary ledger's own discipline. Not graded here; observation only.\n\nRefs: #13622 (measurement source) · the authorable-surface ledger (`packages/spec/authorable-surface/`)."
+}

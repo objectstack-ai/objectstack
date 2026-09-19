@@ -1,0 +1,34 @@
+{
+  "number": 14375,
+  "kind": "issue",
+  "title": "feat(runtime): `GET /packages` 与 `GET /packages/:id` 每行携带服务端自己的可写判定 `writable`（`isWritablePackage`），Studio 不再用 `scope` 启发式反推",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T03:24:06Z",
+  "updated_at": "2026-09-02T09:52:29Z",
+  "closed_at": "2026-09-02T07:59:49Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14375",
+  "body": "Part of #14122 · ADR-0130 Consequences 表第 6 行（Studio 按包分组）的**服务端半边**\nBlocks: objectstack-ai/objectui#7177\n\n## 业务需求\n\n多包物（ADR-0130，#14240 装载路径 + #14354 安装闸已落地）把一个产品拆成 `type: app` + 若干 `type: module` 子包。Studio 的包选择器要正确显示每个子包**能不能在里面写元数据**——这是 Studio 决定给作者哪一套控件（可写 / 🔒 只读 + \"duplicate into a writable base\"）的唯一依据。今天这个判定在客户端用 `scope` 反推，而服务端的权威规则根本不看 `scope` 的这一维，两边在多包物上**必然分叉**。\n\n## 实测：两条规则不是同一条\n\n**服务端权威**——`isWritablePackage(engine, id)`（`packages/metadata-protocol/src/package-writability.ts:73`，ADR-0070 D2；`requireWritablePackage` 与 `SysMetadataRepository.assertAllowed` 都引用它，#8146 维护者裁定\"一个可写答案、徽标说真话\"的落点）：\n\n```ts\nif (e?.manifests?.has?.(packageId)) return false;          // ① 启动时经 registerApp 注册的代码包 → 只读（不看 scope）\nconst scope = e?.registry?.getPackage?.(packageId)?.manifest?.scope;\nif (typeof scope === 'string' && READ_ONLY_PACKAGE_SCOPES.includes(scope)) return false; // ② system / cloud → 只读\nreturn true;                                              // ③ 其余（project 或缺省 scope 的 DB base）→ 可写\n```\n\n**客户端启发式**——objectui `packages/app-shell/src/views/studio-design/packages-io.ts:38-42`：\n\n```ts\nconst scope = typeof m.scope === 'string' ? m.scope : '';\nif (scope === 'system' || scope === 'cloud') continue;\nout.push({ id, name, writable: scope !== 'project', namespace });\n```\n\n分叉点在 ①：服务端判\"代码包\"的信号是 **`engine.manifests`**（`ObjectQL.registerApp` → `engine.ts:4784` `this.manifests.set(id, manifest)`；#14240 的装载路径对物内每个子包都调 `registerApp`，所以每个子包都进这张表），客户端没有这张表，只能拿 `scope` 猜。\n\n链条（每环已对 `origin/main` 核实）：\n\n| 环 | 事实 | 位置 |\n| --- | --- | --- |\n| a | `ManifestSchema.scope` 默认 `'project'` **只在 parse 时施加** | `spec/src/kernel/manifest.zod.ts:263` |\n| b | 装载路径刻意把**原始 body** 交给 `registerApp`（D7 逐位相同） | `objectql/src/artifact-packages.ts` 模块头 |\n| c | `installPackage` 原样存 `InstalledPackage.manifest` | `objectql/src/registry.ts` |\n| d | `GET /packages` 直接返回 `registry.getAllPackages()`，只有 `?status=` / `?type=` 过滤，**没有可写判定** | `runtime/src/domains/packages.ts:269-277` |\n| e | 一个省略 `scope` 键的 module 子包（常态——作者依赖默认值）→ 客户端 `scope=''` → **`writable: true`**；服务端 ① → **只读** | — |\n\n结果：Studio 给一个服务端必拒的包画上\"可写\"徽标，作者写到 `WRITABLE_PACKAGE_REQUIRED` 422 才知道。这正是 #8146 裁定要消灭的形状（\"两面回答同一个问题不一致，其中一面在说谎\"），方向相反而已。\n\n⛔ **客户端不能自己修。** 直觉修法\"缺省 scope 视为 project → 只读\"会把 **Studio 自建的 DB base** 一并翻成只读：它们同样缺省 `scope`（服务端 ③ 判可写），客户端靠 `scope === ''` 才把它们显示为可写。区分二者的唯一信号 `engine.manifests` 只在服务端。所以修法落在平台。\n\n## 方案\n\n`GET /packages` 与 `GET /packages/:id` 的每个包记录**附加**一个字段：\n\n```ts\nwritable: isWritablePackage(qlService, pkg.manifest?.id ?? pkg.id)\n```\n\n- 用**同一个**导出函数，不重拼规则（与 `requireWritablePackage` 同源，`packages.ts:184` 已 import）。\n- 纯加法：在响应组装处 spread 一份带 `writable` 的副本，⛔ 不改写 registry 里的 `InstalledPackage` 对象，⛔ 不改 `isWritablePackage` 自身，⛔ 不动 `READ_ONLY_PACKAGE_SCOPES`。\n- `engine` 参数就是现有路由已解析的 `qlService`（与 `requireWritablePackage` 的传法一致）。\n\n## Pins（runtime 域测试，四态一个不少）\n\n1. 经 `registerApp` 注册、`scope: 'project'` 的代码包 → `writable: false`\n2. 经 `registerApp` 注册、**省略 `scope`** 的代码包（模拟多包物 module 子包）→ `writable: false` ← 本卡的正题\n3. `scope: 'system'` / `'cloud'` → `writable: false`\n4. 经 `installPackage`（不经 `registerApp`）、省略 `scope` 的 DB base → `writable: true` ← 保护 Studio 自建 base\n5. 负向：`writable` 之外，每行其余字节与今日响应逐位相同（不改 `manifest`、`status`、`installedAt` 等既有键）\n6. 消融：把 ① 那一行的 `manifests.has` 改成恒 false，pin 2 必须红（证明 `writable` 真的读了服务端的表，不是又一份 `scope` 启发式）\n\n## 边界\n\n- ⛔ 不动 `isWritablePackage` 的语义；有争议走 ADR-0070。\n- ⛔ 不动消费者市场面（ADR-0019 D2/D3）。\n- ⛔ 不在本卡改 objectui；objectui#7177 消费这个字段（有则用，无则回落今日启发式以兼容旧服务端）。\n- changeset：`@objectstack/runtime: patch`（响应加法）。Clause-② 预期 **NO**：接受/拒绝面不动，只多一个只读字段；若 route ledger / 响应形状快照有门，按门的要求更新。\n\n## 验收\n\n- 上述 6 条 pin 绿；`check:dispatcher-error-vocabulary` 等 dispatch-gates 重推导后全绿。\n- 真实启动：用 #14240/#14354 之后的 `main` 起一个含 `app` + 缺省 `scope` 的 `module` 两包物，`curl /api/v1/packages` 读回两行的 `writable` 均为 `false`；同一服务上经 Studio 复制出的 DB base 读回 `true`。截 curl 输出为证。"
+}

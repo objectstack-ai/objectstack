@@ -1,0 +1,34 @@
+{
+  "number": 14349,
+  "kind": "issue",
+  "title": "A deployment that seeds a people directory and no credentials is locked out for good: bootstrap-status and the audience bootstrap bypass both count HUMANS, not LOGINS",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:services",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-09-02T02:52:40Z",
+  "updated_at": "2026-09-02T09:26:47Z",
+  "closed_at": "2026-09-02T09:26:47Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14349",
+  "body": "Found while implementing #14157. Filed unassigned. The development-lane half is fixed there; this card is the part that needs a ruling, because it moves a PUBLIC door.\n\n## The measured facts\n\nMeasured on a real `ObjectQL` over `better-sqlite3`, with 13 seeded `sys_user` rows and zero `sys_account` rows, default audience posture:\n\n- `api.signUpEmail(...)` is refused `SELF_REGISTRATION_CLOSED` — `isBootstrapCreation()` reads 13 humans and answers \"populated\", so the bootstrap carve-out does not fire.\n- `count('sys_user', {})` = 13, which is what `GET /api/v1/auth/bootstrap-status` used to answer `hasOwner: true` from.\n\nIn DEVELOPMENT #14157 closes this: the dev-admin seed now provisions on that population, so a login exists and everything downstream is consistent. Outside development the seed is hard-gated off by `NODE_ENV`, and then:\n\n- nobody can sign in (no `sys_account` row at all);\n- self-registration is refused by the default `invite_only` posture;\n- there is no administrator to issue an invitation, because there is no administrator;\n- so the deployment cannot be recovered from inside. That is exactly the outcome the bootstrap carve-out exists to prevent — \"a fresh install must never lock its operator out\" — and it does not fire, because the population it counts is people rather than logins.\n\n## Why #14157 did not simply fix it\n\nBoth predicates would have to move together, and moving them widens a public door. Today, on that population, an unknown visitor hitting `/sign-up/email` is refused. If `isBootstrapCreation` counted LOGINS instead of humans, that visitor would be admitted as the bootstrap account — not promoted (plugin-security still sees 13 older humans), but admitted into a walled deployment. Moving only `bootstrap-status` is worse in a different way: the console would offer a first-run setup flow that the admission gate then refuses 403.\n\n#14157 therefore made `bootstrap-status` AGREE with the admission gate rather than diverge from it (it now asks `AuthManager.hasBootstrapWindow()`, which also closed a real disagreement: the handler used to count every `sys_user` row including the legacy `usr_system` service row, so a database carrying only that row reported an owner while the admission gate and plugin-security's first-user detection both stood ready to admit and promote the first human). What is left is one question, and it is a posture question.\n\n## The decision\n\nShould the bootstrap carve-out mean \"no human users\" or \"no LOGIN\"?\n\n- **A. Keep \"no human users\" (status quo).** No public door moves. A production install that seeds a people directory and nothing else stays unrecoverable from inside; the operator must provision an account out of band. The cost is a silent dead end whose only symptom is a 401 on credentials nobody has.\n- **B. Count logins instead.** The carve-out then fires exactly when nobody can sign in, which is what it says it protects against, and both surfaces flip together. The cost: on a directory-seeded, publicly reachable deployment the first stranger to reach `/sign-up/email` is admitted (role `user`, unpromoted) instead of refused.\n- **C. Keep the population predicate and make the dead end LOUD instead.** At `kernel:ready`, when human rows exist and no `sys_account` does, report it at error level naming the consequence and the remedy (provision an account out of band, or open the posture). No admission semantics change; the operator is told rather than left to find a 401.\n\nNo recommendation is offered here, because option B changes who may create an account on a walled deployment — a posture ruling rather than an implementation choice. C is cheap, moves nothing, and composes with either of the others.\n\n&lt;!-- os-decision-facets --&gt;\n① 项目长远合理性(权重 ≥50%):C 既不扩大接受集、也不增生谓词 —— 今天「引导期」这个名字说的是「没人能登录」,做的却是「没有人类行」,名实不符会被一再重新发现(平台内已有三处按人口作答:`isBootstrapCreation`、`probeWalledOwnerAccountState`,以及按全部行数作答的 `bootstrap-status` 处理器)。A 单独留着这个名实缺口;B 想用「打开一扇门」去买名实一致 —— 按本轴本义(缩小而非扩大特例)读,⛔ 不构成对 B 的背书。\n② 实际业务拉动:零 —— 本形态是 #14157 的实现者构造出来的,不是哪位运营商报的障,今天没有一位客户撞上。按零拉动默认走 ④ 不扩散。\n③ 防 AI 犯错:今天这台部署静默死掉,运营商能看见的唯一症状是「没人持有的那副凭据上的一个 401」;C 把沉默换成开机时的响亮拒绝(响亮拒绝优于静默容忍)。B 的失败面反过来同样静默:一台围墙部署被路过的陌生人抢到第一个账号,而代价记在别人的数据上。\n④ 创业阶段不扩散:C 只加一条开机诊断,不新增任何长期声明义务;B 新增一条永久姿态承诺(「什么时候允许陌生人自助开户」),每一条这种已声明的键都是永久维护义务。\n推荐:C(已拆为 #14353,与本裁无关可立即执行)+ A 暂留现状待裁;B 恒交维护者 —— 它动的是「围墙部署上谁可以开户」,属安全/权限边界,⛔ 席位不代裁,四棱同向也不改这一点。\n置信缺口(本分析看不见什么):看不见是否已有真实部署处于这个形态 —— 平台无此遥测,卡上那 13 行是构造出来的;也没有量出 B 若落地需同时移动几处谓词才不制造新的分歧(已数出三处读同一人口,未逐处验证)。\n\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

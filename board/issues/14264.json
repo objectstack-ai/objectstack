@@ -1,0 +1,34 @@
+{
+  "number": 14264,
+  "kind": "pull_request",
+  "title": "fix(pm-dispatch): give the decision-facets marker a sanitizer-safe spelling",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T17:46:06Z",
+  "updated_at": "2026-09-02T02:05:43Z",
+  "closed_at": "2026-09-02T02:05:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-09-02T02:05:42Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/14264",
+  "body": "Fixes #14237\n\nThe 四棱 block's machine-findable marker was prescribed in exactly ONE spelling, and that spelling is the one the seats cannot read back.\n\n⚠️ Spelling note for this description: the raw HTML-comment form is written below as the placeholder words `CMT-OPEN os-decision-facets CMT-CLOSE`, because writing the real angle-bracket shape into a GitHub body is exactly the hazard this PR is about — the body sanitizer would eat it and this description would misreport its own subject.\n\n## The broken prescription — before\n\n> 首行**机器可寻固定标记** `CMT-OPEN os-decision-facets CMT-CLOSE`(转义拼写写入,写后回读核验存活;提取按字面文本 grep,不依赖注释形状 —— sanitizer 纪律见平台读数)\n\nOne spelling, shown raw. An author copying the canonical example produces a card whose marker no seat can find, and the four-character 转义拼写写入 qualifier is attached to an example that is itself unescaped — so the failure mode is *following the example*.\n\n## After\n\n> 首行**机器可寻标记** `os-decision-facets`:纯文本单行与其 HTML 注释形**等价,任一即满足**;写后回读,提取按字面 grep;⛔ 注释形读不到永不读作无四棱块(2026-09-01 实测)\n\nThree things land, mirroring what the sibling `os-dev-report` marker has carried all along and that was never carried across:\n\n1. **Two equivalent spellings, either one satisfying the rule.** The plain-text form is a bare line carrying the **same literal token**, so literal-text grep extraction is unchanged and every already-marked card stays marked.\n2. **The absence clause.** Not being able to read the comment form is never read as \"no facet block\" — the plain-text form or the block's own shape decides.\n3. **The read-back survives**, and so does extraction by literal grep.\n\nThe now-obsolete 转义拼写写入 qualifier is dropped, because the measurement below shows escaping was never what decided survival.\n\n## Measured 2026-09-01 — the mechanism in the card is not what happens\n\nBoth channels, same specimen comment (`5496301851` on #14103 — that card is referenced for evidence only and is **not** addressed by this PR; it remains open), same minute:\n\n| channel | what it returns for the marker line |\n|---|---|\n| page embedded JSON payload (raw stored body) | the marker line **intact**, between the 四轴冲突 paragraph and the `**四棱**` heading |\n| MCP `issue_read get_comments` | that line's **text gone, newline kept** — the body reads `投不翻它。` then two blank lines then `**四棱**` |\n\n⇒ the bytes survived the write and are in GitHub's storage. The **read path** drops them. So the filed diagnosis (\"the write channel strips it\") is falsified, and the defect is worse than filed rather than better: a seat that performs the mandated read-back sees absence and cannot distinguish it from a real strip. That is not hypothetical — it produced a repair comment for a marker that had never been lost. The absence clause is the rule that makes that misreading impossible in either direction, which is why it lands whichever way the byte-level story goes.\n\nReproduced on a second card: #12911's marker was written in the entity-escaped spelling, is ordinary literal text, and survives both channels intact.\n\n## Line budget — line-neutral, measured with the gate's own counter\n\nThe file is ratchet-pinned at 54 lines, headroom 0. This is a correction of a measured-broken prescription, and it fits by rewriting the prescription in place:\n\n- final: `check-skill-line-ratchet: .claude/skills/pm-dispatch/references/decision-analysis.md is 54 lines (ceiling 54; headroom 0).`\n- widest table row: `0 bytes (pin 0; headroom 0)` — unchanged, no table added.\n- The replacement paragraph is 809 bytes against 794 before, and wraps to the same 7 lines under the gate's exported `wrapLine`. 809 is the measured ceiling for this paragraph shape: 812 and 815-byte variants both spill to 8 lines, so the wording was chosen against the gate's own wrapper rather than by eye.\n- ⛔ No edit to `scripts/pm/check-skill-line-ratchet.mjs` (held by another in-flight PR). No ceiling was raised.\n\n## Frame-sync pre-check — cleared, and checked before the first edit\n\n`check:skill-frame-sync` compares four declared COPIES across `.claude/skills/pm-dispatch/SKILL.md`, `.claude/agents/os-dev.md` and two entries in `skills/objectstack-pm-dispatch/SKILL.md`. `references/decision-analysis.md` is **not** a declared copy; it is reached only by the anti-dormancy sweep, which reds an undeclared file matching a frame FINGERPRINT. It matched none before this change and matches none after. The marker line does not sit inside a frame-enforced isomorphic block, so this is not a frame-copy change.\n\n## Gates — union re-derived and re-run on the final commit `fc8caa2a`\n\n`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` (paths derived by the script from the merge base, not hand-built) named 7 families before and after the commit — no family appeared or vanished. All 7 green, each exit captured by redirect **before** any pipe:\n\n| gate | exit |\n|---|---|\n| `check:pm-skill-ratchet` | 0 |\n| `check:pm-skill-id-lint` | 0 — `23 file(s) clean` |\n| `check:skill-frame-sync` | 0 — `4 copies ... structurally isomorphic across 3 files` |\n| `check:doc-authoring` | 0 |\n| `check:agent-test-spelling` | 0 |\n| `check:pm-governed-merges` | 0 |\n| `check:doc-formula-expressions` | 0 |\n\n⚠️ `check:doc-formula-expressions` first returned **exit 3 — PREREQUISITE NOT MET**, twice, naming `@objectstack/formula` and then `@objectstack/lint` as unbuilt. Recorded here because it is NOT a finding and was NOT read as one: the gate's own text says nothing was measured. It was re-run to a real 0 only after both packages were built.\n\nNo control characters: `grep -naP` over the changed file returns nothing beyond the gate.\n\n## Governance\n\nGoverned face (`.claude/**`) ⇒ **draft, human merge**. ⛔ Auto-merge is not armed and this seat does not flip it ready or enqueue it. `skip-changeset`: the diff is `.claude/**` only and publishes nothing from any package.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01Whev4BkZ4BRcgiXYo4muWP)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Whev4BkZ4BRcgiXYo4muWP)_"
+}

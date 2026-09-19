@@ -1,0 +1,35 @@
+{
+  "number": 14464,
+  "kind": "pull_request",
+  "title": "fix(spec): the `@module` marker line is machinery, not the opening line of a reference page",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T08:06:38Z",
+  "updated_at": "2026-09-02T09:04:15Z",
+  "closed_at": "2026-09-02T09:04:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-09-02T09:04:13Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/14464",
+  "body": "Fixes #13796\n\nThe `@module PATH` tag tells `findModuleDocBlock` which doc block describes the\nmodule. It is machinery for the **selector** — but `renderFileDescription` emitted\nit like any other prose line, so it became the opening line of every published\nreference page whose source carries it. `content/docs/references/ui/sharing.mdx`\nopened on the literal text `@module ui/sharing` instead of on\n`Sharing & Embedding Protocol`.\n\n## Emit site\n\n`packages/spec/scripts/lib/file-description.ts`, in `renderFileDescription` — the\nprose-line filter applied to the gutter-stripped block before the render\nclassification. Selection is untouched: `findModuleDocBlock` and\n`hasModuleMarker` still read the marker, and the marker stays in the source.\n\n## Mechanism mirrored, not invented\n\nThe same function already drops one machinery line at exactly this point: the\n`check:skill-examples` opt-in marker (`SKILL_EXAMPLE_MARKER`). This adds\n`MODULE_MARKER` beside it and routes both through one `isMarkerLine` predicate, so\nthere is one convention and one call site, not two. The sibling surface has never\nhad the defect — `packages/spec/scripts/build-skill-references.ts` filters\n`@`-opening lines before taking a module's one-line description, which is why the\nskill index already reads `Sharing & Embedding Protocol` for the same file.\n\nThe marker is judged with the same **untrimmed** `^@module\\b` test the selector\nuses, and only on lines classified as prose, so a mid-sentence mention and one\nshown inside a fenced example both survive.\n\n### Scope: `@module` only, deliberately\n\nNot `^@\\w+` at large. The two other block tags that reach a page carry a payload\na reader needs — `@example Basic field mapping` is the caption of the fence\nbeneath it, `@category Security` is a classification — so a blanket line-drop\nwould take that prose off the page, which is the one thing this fix may not do.\n`@see` shows the shape those two want instead: `renderProse` rewrites it into\n`See also: …` rather than dropping it. Those two leaks are filed separately as\n#14455 (not addressed here).\n\n## Page count, before and after\n\nThe issue body says 16 pages; the measured number on `origin/main` is **14**.\n\n```\n# before\ngrep -rn '^@module' content/docs/references/ | wc -l   ->  14\n# regenerate\npnpm --filter @objectstack/spec run gen:schema   # json-schema/ is gitignored; gen:docs refuses without it\npnpm --filter @objectstack/spec run gen:docs\n# after\ngrep -rn '^@module' content/docs/references/ | wc -l   ->   0\n```\n\nThe two-page delta is not a page that kept the marker: 16 spec sources carry the\ntag, and two of them — `shared/retry-policy.zod.ts` and\n`shared/metadata-collection.zod.ts` — publish no reference page at all, so they\nnever leaked and nothing about them changes here.\n\n**Every changed page is `0 added, 2 deleted`** — the marker line and the blank\nline under it — and the union of all removed lines across the 14 pages is exactly\nthe 14 `@module` lines, with zero added lines. No page loses non-tag prose:\n\n```\ngit diff --numstat -- content/docs/references/    # 14 files, each 0 / 2\ngit diff -U0 -- content/docs/references/ | grep -E '^\\+[^+]'   # empty\n```\n\n`shared/mapping` and `system/cache` are on the list because PR #13794 added the\nmarker to those two sources; the other twelve carried it already.\n\n## Tests\n\n`packages/spec/scripts/file-description.test.ts` — a unit block pinning both\nhalves together (selection still reads the marker, the page never shows it), the\nbare `@module` with no path, the fenced and mid-sentence negatives, and a scope\ncase asserting `@example` / `@category` survive; plus a corpus invariant\nre-derived from the real `packages/spec/src` tree, so a source that acquires the\nmarker tomorrow cannot re-acquire the defect with it.\n\nReverse verification (renderer reverted to its pre-fix bytes from `HEAD~1`,\nmutation confirmed on disk by blob hash before the run, restored by\n`git checkout HEAD -- PATH` and confirmed byte-identical afterwards): **4 failed,\n89 passed** — the three drop-asserting unit cases and the corpus invariant, with\nthe two scope negatives green in both legs by design. Restored: **93 passed**.\n\n## Gates\n\nDerived union at `b0e155aa7` — `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`,\n63 commands, all run:\n\n- **57 green**, including `check:docs` (229 generated files in sync),\n  `check:generated` (all 15 artifacts up to date), `check:skill-refs`,\n  `check:docs-single-h1`, `check:doc-anchors`, `check:corpus-claim-drift`,\n  `check:cross-package-test-inputs`, `check:test-source-alias`,\n  `check:empty-changeset`.\n- `check:skill-examples` needed `@objectstack/client-react` built first; with the\n  closure built it is green — **263 prose examples type-check across 3 surfaces**.\n- 5 gates return their own exit code 3 (NOT MEASURED, closure not built here, not\n  a finding): `check-test-completeness`, `check:doc-formula-expressions`,\n  `check:doc-security-posture`, `check:dual-build-cjs-loads`,\n  `check:type-check-debt`. `check-dev-prereqs` exits 1 for the same reason and\n  says so in its own words (\"1 unmet precondition, not a list of problems\").\n- `pnpm --filter @objectstack/spec typecheck` green, and `--listFiles` confirms\n  its program really includes both edited files.\n\nAn earlier `check:generated` run reported `api-surface/` stale; that was the\nphantom the gate itself warns about (it reads a dist that did not exist yet in a\nfresh worktree). Re-run after `pnpm --filter @objectstack/spec build`: green.\n\n## Changeset\n\nA `@objectstack/spec` patch changeset, not the `skip-changeset` label — matching\nPR #13794, the immediate predecessor on this same file, which shipped the same\n\"no schema behavior changes\" shape with a patch changeset.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01GDA48PuRFrHyRfdkBz8m21\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01GDA48PuRFrHyRfdkBz8m21)_"
+}

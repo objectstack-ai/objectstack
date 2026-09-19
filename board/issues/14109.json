@@ -1,0 +1,33 @@
+{
+  "number": 14109,
+  "kind": "issue",
+  "title": "`type: 'tree'` can only nest by a self-parent pointer — a value-grouped tree is inexpressible, and on an object with no self-reference the view renders flat with no diagnostic",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-09-01T05:30:34Z",
+  "updated_at": "2026-09-02T09:34:59Z",
+  "closed_at": "2026-09-02T09:34:59Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14109",
+  "body": "Found while building a \"what does this team owe\" lens in `objectstack-ai/duly` (issue #12): duties grouped by business unit, then by owner, as a collapsible tree. Measured on `@objectstack/spec` 17.2.0 and `@objectstack/console` 17.2.0.\n\n## What `tree` actually does\n\n`TreeConfigSchema` documents it plainly: *\"Renders a self-referencing object as an indented, expand/collapse tree-grid. Flat records are nested via a single-parent pointer field (`parentField`).\"* The renderer agrees — `plugin-tree` reads exactly four keys (`parentField`, `labelField`, `fields`, `defaultExpandedDepth`) and builds the hierarchy by matching `record[parentField]` against the **ids of sibling records of the same object**.\n\nThat is the org-chart / BOM / category shape. It cannot express the other, at least as common, tree: **nest records under synthesized levels derived from field VALUES** — unit → owner → duty. Those two levels are not records of the object being listed.\n\n## The gap has two halves\n\n**1. Inexpressible.** `grouping: { fields: [...] }` is the platform's multi-level value grouping and it works — the grid's grouping hook recurses through `grouping.fields` building nested `subgroups` with per-level collapse, which is exactly the wanted behaviour. `plugin-tree` never reads `grouping`. So the capability exists in the product; it just is not reachable from the view type whose name promises it.\n\n**2. Silent when misapplied.** On an object with no self-reference, a `type: 'tree'` view is not an error and not empty — it is **flat**. `parentField` is undefined, the renderer's auto-detect (`fields[].type === 'tree'`, or a lookup whose reference equals the object's own name) finds nothing, every record resolves to a root at depth 0, and you get an ordinary table with an expand gutter that never expands. `os validate` says nothing: `view/layout-without-binding` does not cover `tree` (filed separately), and even if it did, every key in `TreeConfigSchema` is optional so a present-but-empty `tree: {}` would satisfy it.\n\nReproduced on `duly_duty`, whose lookups point at `sys_business_unit`, `duly_catalog_item` and a user — no self-reference. All four gates green.\n\n## What we shipped instead\n\n`type: 'grid'` + `grouping: { fields: [{ field: 'business_unit' }, { field: 'owner' }] }`. It renders the two-level collapsible hierarchy the card asked for. The cost is that the view type no longer says what the view is, and the tree renderer's indent/expand affordances are not available.\n\n## Suggested direction\n\nEither of these closes it; the first is smaller:\n\n- **A — let `tree` consume `grouping`.** When `grouping.fields` is present and `parentField` resolves to nothing, `plugin-tree` synthesizes one level of parent nodes per grouping field, leaf records at the bottom. The authored shape becomes `{ type: 'tree', grouping: { fields: [...] }, tree: { labelField } }` and reads correctly.\n- **B — declare the mode.** Add `groupByFields: string[]` to `TreeConfigSchema` as the explicit alternative to `parentField`, and make the two mutually exclusive so a view cannot half-declare both.\n\nWhichever way it goes, the silent-flat half wants a gate on its own: a `type: 'tree'` whose `parentField` is neither declared nor auto-detectable on the bound object should warn at author time, because the render is a plausible-looking table rather than an obvious blank.\n\n## Related\n\n- The `view/layout-without-binding` table omitting `tree` (and `timeline`, `map`) is filed separately.\n"
+}

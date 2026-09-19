@@ -1,0 +1,33 @@
+{
+  "number": 14242,
+  "kind": "issue",
+  "title": "ArtifactPackageEntrySchema's body half cannot describe the payload the load path actually registers",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T15:48:02Z",
+  "updated_at": "2026-09-02T13:46:07Z",
+  "closed_at": "2026-09-02T13:46:07Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14242",
+  "body": "Found while implementing #14162 (PR #14240). Filed rather than worked around there: widening a spec surface is not a loader's decision.\n\n## The fact\n\n`ArtifactPackageEntrySchema` (`packages/spec/src/stack.zod.ts`, landed by #14161) wraps the package body as `manifest: ManifestSchema`. `ManifestSchema.objects` is `z.array(z.string())` — **glob patterns**, the authoring-time shape.\n\nWhat actually reaches the ADR-0130 load path is an **assembled** payload whose `objects` are object **definitions**: `AppPlugin` flattens an artifact into `{ ...bundle.manifest, ...bundle }` before calling `manifest.register()`, and `ObjectQL.registerApp` iterates those bodies as definitions.\n\nSo a full parse of a real artifact entry refuses it. Measured on `cfa99f3d` against the landed schema:\n\n```\nArtifactPackageEntrySchema.safeParse({ manifest: assembledPackageBody })\n  → success: false\n  → manifest.objects.0: Invalid input: expected string, received object\n```\n\nThe entry schema therefore describes the **authoring-time** manifest, while the key it was added for (`packages[]` on `ObjectStackDefinitionSchema`) is read at **load** time, where the body has a different shape. One schema is being asked to describe two different lifecycle stages of the same noun.\n\n## Why it matters\n\nAny consumer that reaches for the obvious `ArtifactPackageEntrySchema.safeParse(entry)` as its gate will refuse exactly the artifacts the path exists to register — and it will look correct while doing so, because the schema is the surface's one declaration and the refusal names a real key.\n\nPR #14240 works within it deliberately and narrowly: it applies the schema as a gate on the **wrapper only** (issues at the entry root or on `manifest` itself), and hands `registerApp` the caller's original body rather than a parsed clone. That is written down in the module header with this measurement, so the next reader does not discover it again. But it is a local accommodation of a surface-level mismatch, and the accommodation is the kind of thing that quietly becomes convention if the surface is never revisited.\n\n## What the decision is\n\nNot obvious, hence a card rather than a patch. Roughly:\n\n- **A.** Leave the schema authoring-shaped and make \"the wrapper is the only part this schema gates at load time\" an explicit, documented property of the surface — the status quo PR #14240 assumes, but stated on the schema instead of in one consumer.\n- **B.** Give the assembled/registered form its own declaration, so both stages are describable and a load-time consumer has something correct to parse against.\n- **C.** Widen `ManifestSchema.objects` to accept both spellings — cheapest to write, and the one that most deserves scrutiny: a union that accepts both stages makes neither stage checkable, which is the tolerance-at-the-consumer shape this repo generally refuses.\n\nNo `packages[]`-shaped artifact is produced anywhere yet, so nothing is broken in the field today and there is time to decide this properly rather than under a deadline.\n"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 14110,
+  "kind": "issue",
+  "title": "`gantt.colorField` is passed raw into `backgroundColor`, so pointing it at a select field un-colours every bar — while OMITTING the key colours them correctly",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T05:30:56Z",
+  "updated_at": "2026-09-02T01:47:36Z",
+  "closed_at": "2026-09-02T01:47:36Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14110",
+  "body": "Measured on `@objectstack/console` 17.2.0 (`plugin-gantt`, `plugin-timeline`, `plugin-calendar`), found while giving one object a kanban / gantt / timeline set that must colour consistently by `status` (`objectstack-ai/duly` #12).\n\n## The inversion\n\n`GanttConfigSchema.colorField` is described as *\"Field that drives the bar color\"*. The renderer's task mapping does this:\n\n```js\nlet re = a ? n[a] : void 0;                      // a = colorField, n = the record\nif (!re) {                                        // ← only when colorField is ABSENT\n  let e = n.status ?? n.state ?? n.priority ?? n.severity;\n  if (e != null && e !== \"\") { let t = cnt(void 0, e); t && (re = unt(t)); }\n}\n…\nstyle: { …, backgroundColor: n.color || \"#3b82f6\", … }\n```\n\nSo with `colorField: 'status'`, `color` becomes the **raw stored value** — `\"open\"` — and lands in `backgroundColor: \"open\"`. That is not a colour; the browser drops the declaration and every bar falls back to the `bg-primary` class. **All bars identical.**\n\nWith the key **absent**, the fallback branch runs, maps the status value through the semantic-token helpers (`cnt` → `unt`) and produces a real hex per state. **Bars separate by status.**\n\nDeclaring the documented key is strictly worse than omitting it, and there is no error, no warning, and no console message either way.\n\n## The same key means three different things across the three renderers\n\n| renderer | `colorField: '<select field>'` resolves to |\n|:--|:--|\n| `plugin-timeline` | the **authored option colour** — it builds `{value → option}` from `objectSchema.fields[colorField].options` and reads `option.color` |\n| `plugin-calendar` | not a hex, so a **stable hash** of the string into a fixed palette — consistent per value, unrelated to the authored colour |\n| `plugin-gantt` | the **raw value**, straight into `backgroundColor` — invalid CSS, no colour at all |\n\nAn author who colours three lenses by one field to keep them reading as one system gets three unrelated results, one of which is \"no colour\". Nothing at author time distinguishes them; the key has one name and one `.describe()`.\n\n## Suggested fix\n\nMake gantt resolve `colorField` the way `plugin-timeline` already does — it has `objectSchema` in hand (it fetches it for labels and tooltip formatting), so the option lookup is available:\n\n1. if the field has `options` and the record's value matches one with a `color`, use that colour;\n2. else if the value already looks like a colour or a known palette token, use it (today's behaviour, which is the only one the current code supports);\n3. else fall through to the existing semantic-token derivation instead of emitting an invalid CSS value.\n\nAligning calendar onto the same ladder would make the three agree; timeline is already the reference implementation, so it is a matter of lifting that resolver into somewhere all three can call.\n\nWorth stating in `GanttConfigSchema`/`CalendarConfigSchema`'s `.describe()` afterwards whether the key means \"field holding a colour\" or \"field to derive a colour from\" — right now the name reads as the second and gantt implements the first.\n\n## What we shipped meanwhile\n\nThe gantt view in `duly` deliberately declares **no** `colorField`, with the measurement written into the source comment so nobody \"fixes\" it back. The timeline view does declare it, because there it does the right thing.\n"
+}

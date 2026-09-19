@@ -1,0 +1,36 @@
+{
+  "number": 13913,
+  "kind": "issue",
+  "title": "metadata-manager: getViewsByObject() reads a separate backing store never touched by the #13407 runtime-container-expansion fix",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T16:44:59Z",
+  "updated_at": "2026-09-01T13:16:29Z",
+  "closed_at": "2026-09-01T13:15:24Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13913",
+  "body": "Follow-up from #13407 (not fixed there — materially larger, separately-scoped change with its own package/verification discipline; the card's own repro and pin go through `GET /meta/view?object=` → `getMetaItems`, not this exit).\n\n**Background.** The `hydrateExpandedViewItems` doc comment (`protocol.ts`) has long named **two independent object-bound readers**: the REST route (`GET /meta/view?object=`), which reads through `ObjectStackProtocolImplementation.getMetaItems` (`sys_metadata` DB rows, org/environment-scoped), and `MetadataManager.getViewsByObject()` (`packages/metadata/src/metadata-manager.ts:~1583`), which reads `this.list('view')` — `MetadataManager`'s **own** loader-based registry (`this.registry`, populated via `registerLoader`/`readList`), a completely separate store from `sys_metadata`/the ObjectQL SchemaRegistry.\n\n**What #13407 fixed, and why it doesn't reach this exit.** #13407 made `getMetaItems` expand a runtime-authored aggregated view container inline, into that request's own response, for org-scoped and environment-scoped reads — but only inside `protocol.ts`'s `getMetaItems`. `MetadataManager.getViewsByObject()` never calls `getMetaItems` and has no equivalent inline-expansion step, so a runtime-authored container that #13407 now makes visible via `GET /meta/view?object=` can still answer empty when read via `getViewsByObject()` directly (whatever internal/SDK caller uses that entry point rather than the REST route).\n\n**Suggested next step:** determine whether `MetadataManager`'s `dbLoader` (registered in its constructor) already surfaces `sys_metadata` overlay rows the same way `getMetaItems`'s `overlays` merge does, and if so add the equivalent registry-free inline expansion there (reusing `expandRuntimeViewContainer`'s logic/shape from `protocol.ts` if these two packages can share it, or a `packages/metadata`-local equivalent). This is a `packages/metadata` change with its own test suite — out of `packages/metadata-protocol`'s lane and #13407's PR.\n\nRelated: #13407, #7163, #7736.\n"
+}

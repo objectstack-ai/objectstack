@@ -1,0 +1,36 @@
+{
+  "number": 13816,
+  "kind": "issue",
+  "title": "[finding] SCIM forces the better-auth `admin` plugin on (`pluginConfig.admin ?? scimEffective`) and a deployment has no declared way to decline it — split from #13439 by the 2026-08-31 ruling",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-31T13:39:51Z",
+  "updated_at": "2026-09-02T03:22:19Z",
+  "closed_at": "2026-09-01T16:49:56Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13816",
+  "body": "Split out of #13439 by the maintainer's ruling (2026-08-31, director batch #19; the approved recommendation for #13439 was A for the three keys, with the admin amplification split to its own card). #13439 now carries only the three-key half — declare `scim` / `sso` / `ssoDomainVerification`, explicit config outranks env. This card records the amplification half so it does not evaporate with that fix.\n\n## The mechanism\n\n`packages/plugins/plugin-auth/src/auth-manager.ts`:\n\n- `:2426` — `const scimEffective = scimFromEnv ?? (pluginConfig as any).scim ?? false;`\n- `:2439` — `admin: pluginConfig.admin ?? scimEffective,`\n- `:5064` — the advertised-feature surface mirrors the same resolution.\n\nAny deployment where SCIM ends up enabled — including via `OS_SCIM_ENABLED` alone — gets better-auth's `admin` plugin mounted as a side effect: `impersonate-user`, `set-user-password`, `ban-user`. A deployment that never asked for the admin surface has the same non-existent means of declining it that #13439 documented for `scim` itself. This is a larger permission surface than the three keys.\n\n## Why it was split rather than ridden on #13439\n\nThe coupling is NOT an accident. The comment block above `:2426` records it explicitly: SCIM's `active:false` deprovisioning path runs through the admin plugin (ban), and org-scoped tokens need the organization plugin — see ADR-0071. So \"declare `admin` tri-state and let a host decline it while SCIM is on\" is not a config-reading fix: declining admin under SCIM plausibly breaks SCIM deprovisioning semantics. Deciding it needs an ADR-0071 revisit, which would have widened the p1 fix that objectstack-ai/cloud#1451 is parked on.\n\n## The question this card carries\n\nShould a host be able to decline the admin surface in a SCIM-enabled deployment — and if so, what happens to SCIM's `active:false` → ban path? Candidate shapes, neither costed:\n\n1. scope the admin dependency internally to what SCIM actually needs (ban), instead of mounting the full admin action set;\n2. declare `admin` tri-state with a documented conflict refusal at construction time when SCIM is on and `admin` is explicitly false — a loud conflict instead of silent forcing.\n\nRefs: #13439 (ruled sibling), ADR-0071, objectstack-ai/cloud#1451, objectstack-ai/cloud#1265.\n\n⛔ Filed unassigned — recording only, for the finding box to grade."
+}

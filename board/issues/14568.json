@@ -1,0 +1,33 @@
+{
+  "number": 14568,
+  "kind": "issue",
+  "title": "[Decision] Skills optimization program — batch 2 (1 item): does #14296 item 1's \"≥10% off the package in the same PR\" bind the split PR arithmetically, or is it the anti-growth guard? (ui split measured at −0.16%)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T12:26:20Z",
+  "updated_at": "2026-09-02T16:46:46Z",
+  "closed_at": "2026-09-02T16:46:44Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14568",
+  "body": "Decision batch 2 of the skills catalog optimization program #14292 (maintainer mandate 2026-09-02, verbatim: 「审核所有的 skills，进行全面的优化。」). Filed by the skills lane seat (session `session_01LraLgQVGq8egUwfYZpbYt1`). One item; a one-line reply (e.g. `1A`) executes it. Nothing else in the program waits on this: the other flights, the stub deletions and the seam card #14559 proceed.\n\nMeasured by the #14298 round-2 dev at objectstack `origin/main` `310dd01a` (report on #14298, comment `os-dev-report`, 12:2xZ). No file was edited; the branch carries no commits.\n\n---\n\n## 1. 拆分 PR 的「同一 PR 内整包净减 ≥10%」是算术门槛,还是防增长护栏?\n\n**一句话问题**:#14296 第 1 项裁定 A 的条件 (a) 写的是「同一 PR 内整包 token 净减 ≥10%」。实测 objectstack-ui 的拆分 PR **做不到**:包总量 33,957 tok(SKILL.md 22,856 + 生成物 9,710 + evals 1,391),10% = 3,396;而拆分按条件 (c) 是**逐字搬运**(rules/ 里每句都必须来自 SKILL.md),本身不减字;第 1 轮 PR #14338 已把审计里所有 HIGH/MED 的删除项落地(−2,585);拆分时还能再删的重述只剩 345 tok,减去指针与标题开销 289 tok,**本轮授权面上的最大净减 = −56 tok(−0.16%)**。唯一能跨过 10% 的行是生成物 `contracts/react-blocks.contract.json`(−5,352 = −15.8%),但那是第 3 项裁给 spec 车道的缝卡 #14559,明令 ui 飞行不碰生成物。同一算术也将落在 pm-dispatch 的拆分(#14300 第二轮):第 1 轮 #14444 已合并,拆分同样逐字搬运。\n\n**选项 × 真实代价**\n- **A** 条件 (a) 按**程序级**读:拆分 PR 以 token 中性落地(实测 −56,不得为正),包的算术由本程序在该包上的全部飞行承担 —— ui:第 1 轮 −2,585 + 拆分 −56 + #14559 −5,352 = −7,993,对程序前 36,542 为 **−21.9%**。每项改动留在自己的车道、由自己的 owner 评审。代价:拆分 PR 本身不再有「≥10%」这条可机械核验的数字,靠 PR 正文的程序级账目代替。\n- **B** 把拆分与 #14559 的生成物删除**合进一个 PR**,字面满足 (a):−5,408 = −15.9%。代价:一个 PR 跨两个域(生成器 `packages/spec/scripts/build-react-blocks-contract.ts`、`scripts/regen-artifacts.mjs`、`scripts/pm/check-governed-merges.mjs`、棘轮自检的排除集都随之动),两个 owner 审一个 PR;#14559 已立卡归 `domain:spec`。\n- **C** 等 #14559 落地后再派拆分。代价:拆分 PR 自身的测量仍是 −56,(a) 在 PR 级仍不成立 —— C 塌缩为 A 加延迟。\n- **D** 不拆(第 1 项的回退 B)。代价:入口仍是 22,856 tok 单文件,客户每个 UI 任务都全额装载;pm-dispatch 同理。\n\n**业务含义**:A = 客户的 agent 建列表页只装列表页那一节(入口 ≈3.8k,按需再装 2.1k–6.3k 的一个 rules 文件);D = 每建一个视图都把仪表盘、报表、页面、动作全装一遍。\n\n**四维**:① 长远合理性 —— rules/ 是目录已定义的结构(README「Skill anatomy」),data(7 个 rules)、platform(4)、query(3)已在其上;ui/pm-dispatch 迁上去是收敛不是增生 —— 与第 1 项裁 A 时的轴 ① 同一论证。「没有 10% 可删」恰恰是第 1 轮做对了的证据;② 实际拉动 —— 不受算术影响:`defineAction` 34 / `definePage` 29 / `defineView` 10 次真实用法散在四个互不相关的节,今天每次都付 22,856;③ 防 AI 犯错 —— 入口短、相邻无关例子少(第 1 项轴 ③);要申报的一项反向代价:`check:skill-identifier-liveness` Leg 2 有三条绑定按路径钉在 `skills/objectstack-ui/SKILL.md`(`## Report Types`、`### Action Types`、`### Navigation Item Types`),这三个标题必须留在入口而正文外移,形成三处「一题分两文件」;④ 不扩散 —— A 只加指针不加字;B 让一个 PR 横跨两个域;D 不花钱也不存钱。\n\n**推荐 A**;回退 C(实为 A 加延迟)。置信缺口:「同一 PR」当初由本席位起草、维护者照单采纳 —— 起草意图是轴 ④ 的防增长护栏(「把拆分钉死为瘦身手段」),但字面是逐 PR 算术;哪一种读法有效,只能由维护者定,本席位不重裁。\n\n**裁后执行**:A ⇒ #14298 第二轮按原简报续飞(同一 dev、同一分支),PR 正文列程序级账目与 −56 的实测,棘轮新增行钉在落地计数、入口行重锁;#14300 第二轮同读法。B ⇒ #14559 并入 ui 拆分,缝卡关闭为 duplicate,PR 加请 spec 车道评审。D ⇒ #14298 / #14300 第二轮关闭为 not planned,棘轮上限各自重锁。\n\n① 长远:收敛到已定义的 rules/ 结构,「无 10% 可删」是第 1 轮成功的证据 · ② 拉动:四类用法散四节、每次付全额,不受算术影响 · ③ 防错:入口短;三条 Leg 2 路径绑定是要申报的反向代价 · ④ 不扩散:A 只加指针 · 推荐 **A** · 置信缺口:「同一 PR」的字面 vs 起草意图,维护者定\n\n---\n\nRefs: #14292 (program anchor) · #14296 (batch 1, ruled `1A 2A 3A 4A`) · #14298 (the measurement) · #14300 (same question, second split) · #14559 (seam card, item 3)."
+}
