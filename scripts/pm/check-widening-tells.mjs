@@ -1387,7 +1387,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#18640 — an inline closed set RE-SPELLED at the same binding is not a set that gained a value': 20,
   '#18702 — a declaring factory PRIVATE to one file, resolved through its own DEFINITION': 54,
   "#18721 — a hunk's LEADING CONTEXT is not a reason to abandon the parameter reading": 14,
-  '#19099 — a member BOUNDED inside a bag the block re-declared out of a universal acceptor': 30,
+  '#19099 — a member BOUNDED inside a bag the block re-declared out of a universal acceptor': 32,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -5160,6 +5160,8 @@ export function selfTest() {
   t('⭐ `declaresUniversalAcceptorKey` reads its own RUN forward — #18234’s overturn condition, met by the wrapped spelling #19095 removes', declaresUniversalAcceptorKey('  pagination: z.unknown().optional()', ["    .describe('Pagination config'),"]) === 'pagination' && declaresUniversalAcceptorKey('  pagination: z.unknown().optional()') === null);
   t('⛔ …and declines a NARROWING step on the continuation line, which is the direction that must never be certified', declaresUniversalAcceptorKey('  p: z.unknown()', ['    .refine(isThing),']) === null && declaresUniversalAcceptorKey('  p: z.unknown()', ['    .pipe(z.string()),']) === null);
   t('⛔ …and stops at the first line that is not a chain step — a second KEY is not a continuation of the first value', declaresUniversalAcceptorKey('  p: z.unknown()', ['  q: z.string(),']) === null);
+  t('⭐ …and a narrowing step SKIPPED OVER is the same refusal: the run reading stops at the first line it cannot read and does NOT hunt on for a terminator', declaresUniversalAcceptorKey('  p: z.unknown()', ['    .refine(isThing)', '    .optional(),']) === null);
+  t('⭐ …measured through the gate — a removed acceptor whose `.refine()` sits ABOVE its terminating `.optional()` certifies nothing, so its members keep telling', bagTells(BAG_REMOVED, '-    .refine(isPaginationish)', '-    .optional(),', BAG_REMOVED_FLAT, ...BAG_ADDED).length === 2);
   t('⛔ …and out of run is out of evidence: the value never ended, so nothing is certified', declaresUniversalAcceptorKey('  p: z.unknown()', []) === null && declaresUniversalAcceptorKey('  p: z.unknown()', ['    .optional()']) === null);
   t('…a trailing COMMENT is not a step, on the key line or on a continuation line', declaresUniversalAcceptorKey('  p: z.unknown() // wrapped below', ['    .optional(),']) === 'p');
   t('`replacesUniversalAcceptorKey` certifies the wrapped pair out of the block’s own removed run', replacesUniversalAcceptorKey('  pagination: z.looseObject({', ['  pagination: z.unknown().optional()', "    .describe('x'),"]) === true);
