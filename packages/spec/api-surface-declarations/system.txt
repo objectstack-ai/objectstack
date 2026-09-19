@@ -12,8 +12,8 @@
 # excluded: documentation drift is `check:docs`'s axis, not this one.
 #
 # entry: ./system
-# exported names: 805
-# declarations: 844
+# exported names: 808
+# declarations: 847
 #
 # GENERATED — ⛔ never hand-edited. Regenerate after a real build:
 #   pnpm --filter @objectstack/spec build && pnpm --filter @objectstack/spec gen:api-surface-declarations
@@ -32579,6 +32579,19 @@ declare const DeployValidationResultSchema: z.ZodObject<{
     warningCount: z.ZodDefault<z.ZodNumber>;
 }, z.core.$strip>;
 
+// ── DevLogin (type) ──
+type DevLogin = z.input<typeof DevLoginSchema>;
+
+// ── DevLoginParsed (type) ──
+type DevLoginParsed = z.infer<typeof DevLoginSchema>;
+
+// ── DevLoginSchema (const) ──
+declare const DevLoginSchema: z.ZodObject<{
+    email: z.ZodString;
+    password: z.ZodOptional<z.ZodString>;
+    label: z.ZodOptional<z.ZodString>;
+}, z.core.$strict>;
+
 // ── DisasterRecoveryPlan (type) ──
 type DisasterRecoveryPlan = z.input<typeof DisasterRecoveryPlanSchema>;
 
@@ -54799,6 +54812,12 @@ declare const EnvironmentArtifactSchema: z.ZodObject<{
             main: z.ZodOptional<z.ZodString>;
             integrity: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
         }, z.core.$strict>, z.ZodString]>>>;
+        devHint: z.ZodOptional<z.ZodString>;
+        devLogins: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            email: z.ZodString;
+            password: z.ZodOptional<z.ZodString>;
+            label: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>>>;
         runtimeModule: z.ZodOptional<z.ZodString>;
         manifest: z.ZodOptional<z.ZodObject<{
             id: z.ZodString;

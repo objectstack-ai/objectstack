@@ -6468,11 +6468,11 @@ declare const FeedItemType: z.ZodEnum<{
     email: "email";
     system: "system";
     sharing: "sharing";
+    note: "note";
     task: "task";
     approval: "approval";
     event: "event";
     comment: "comment";
-    note: "note";
     field_change: "field_change";
     call: "call";
     record_create: "record_create";
