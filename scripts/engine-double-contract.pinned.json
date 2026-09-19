@@ -2947,6 +2947,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-security/src/platform-admin-standing-audit.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-security/src/record-share-tenant-wall.test.ts",
       "verb": "update",
       "pinned": 1

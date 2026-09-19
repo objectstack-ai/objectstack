@@ -196,9 +196,12 @@ async function recordPlatformAdminStandingChange(
   const serialized = serializePlatformAdminStandingSnapshot(snapshot);
   const previousSerialized = readRecordedStandingSnapshot(previousRows[0]);
   if (!platformAdminStandingChanged(previousSerialized, serialized)) {
+    // ⛔ The card id stays in this comment and out of the STRING: a runtime
+    // line reaches operators, who have no tracker to resolve `#NNNN` against
+    // (#18412; `check:doc-authoring`).
     logger?.debug?.(
       '[security] platform-admin standing is unchanged since the last recorded entry — no ' +
-        'audit row written. One entry per CHANGE of standing is the recorded shape (#18412).',
+        'audit row written. One entry per CHANGE of standing is the recorded shape.',
     );
     return;
   }

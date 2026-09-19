@@ -18,6 +18,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { bootstrapPlatformAdmin } from './bootstrap-platform-admin.js';
 import {
   buildPlatformAdminStandingRow,
@@ -83,7 +84,14 @@ function makeQl(
       }
       const where = q?.where ?? {};
       const rows = (tables.get(object) ?? []).filter((r) =>
-        Object.entries(where).every(([k, v]) => r[k] === v),
+        Object.entries(where).every(([k, v]) => {
+          // ⛔ REFUSE what this double does not implement. A matcher that reads
+          // `$or` as a field name answers `[]` for a query it never ran, and on
+          // the standing read `[]` means "no record has ever been written" —
+          // it would pass a suite that cannot see the query it is pinning.
+          if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+          return r[k] === v;
+        }),
       );
       // The read is ordered IN THE QUERY (`orderBy`), so the double honours it
       // rather than handing back insertion order — a double that ignored the
@@ -107,7 +115,12 @@ function makeQl(
       tables.get(object)!.push({ ...data });
       return { id: data.id };
     },
-    async update() {
+    // Opens with the PRODUCER's own dispatch predicate rather than a
+    // hand-mirrored guard (`check:engine-double-contract`): a fixture drifting
+    // to a call shape ObjectQL.update would refuse fails loudly here. Nothing
+    // in this file updates, and that is exactly why the refusal must be real.
+    async update(object: string, data: any, options?: any) {
+      assertEngineUpdateDispatch(data, options);
       return null;
     },
     auditRows(): any[] {
