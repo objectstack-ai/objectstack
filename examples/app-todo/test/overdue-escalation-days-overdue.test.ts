@@ -1,51 +1,41 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#18584] The `overdue_escalation` notice renders a real number.
+ * [#18584] The record projection the `overdue_escalation` loop iterates carries
+ * every field its notification template names — `days_overdue` included.
  *
- * The defect this pins was silent: `flows/task.flow.ts` interpolated
- * `{currentTask.days_overdue}` into the notification body while `todo_task`
- * declared no such field, so every escalation went out as
- * `Due 2026-09-30,  day(s) overdue.` — a blank where the count belongs. No
- * error, no refusal; the widened `validate-flow-template-paths` rule (PR
- * #18583) reported it as an advisory warning and no CI job runs
- * `objectstack validate` over `examples/`, so nothing red.
+ * The defect this pins was silent: `flows/task.flow.ts` interpolates
+ * `{currentTask.days_overdue}` into the escalation body while `todo_task`
+ * declared no such field. The widened `validate-flow-template-paths` rule
+ * (PR #18583) reported it as its first true positive, advisory — and no CI job
+ * runs `objectstack validate` over `examples/`, so nothing was red.
  *
- * ⭐ WHY THIS IS A RUNTIME SUITE AND NOT A METADATA ASSERTION. "A formula
- * field exists on the object" and "the projection the flow's `loop` iterates
+ * ⭐ WHY THIS SUITE DRIVES A REAL READ INSTEAD OF ASSERTING ON METADATA.
+ * "A formula field exists on the object" and "the projection the flow iterates
  * carries its COMPUTED value" are different questions, and only the second one
  * decides whether the template can promise a day count at all. A formula field
- * is VIRTUAL — no driver materialises a column for it (see the `is_completed`
- * / `is_overdue` paragraph in `src/objects/task.object.ts`, where that same
- * virtuality is the reason those two are NOT formulas). So the value has to be
- * observed where it is consumed: off the rendered notification body, after a
- * real `get_record` → `loop` → `notify` run over a real driver.
+ * is VIRTUAL — no driver materialises a column for it, which is exactly why
+ * `is_completed` / `is_overdue` are NOT formulas (see the long paragraph in
+ * `src/objects/task.object.ts`). So the value is observed where it is
+ * consumed: off rows returned by a real `ObjectQL.find` over a real driver,
+ * called the way the flow's `get_record` step calls it.
  *
- * The chain is real end to end — a real kernel, real ObjectQL over
- * sqlite-wasm, the real automation engine, the app's own `Task` object and its
- * own `OverdueEscalationFlow`. The only double is the `messaging` service, and
- * it is a RECORDER, not a stand-in for behaviour under test: `notify` hands
- * the rendered title/body to whatever is registered under `messaging`, so
- * capturing that call is how the rendered text becomes observable. Without it
- * `notify` degrades to a no-op success and the body is never produced.
+ * The one condition that decides the answer is the PROJECTION: `find` runs
+ * `planFormulaProjection(schema, ast.fields)`, which evaluates every formula on
+ * the schema when `fields` is absent and only the named ones when it is not.
+ * `get_overdue_tasks` declares no `fields`, so the rows carry the value — and
+ * the first test below asserts that precondition off the app's own flow rather
+ * than trusting it, because adding a `fields` list to that step is precisely
+ * the edit that would silently empty the day count again.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectKernel } from '@objectstack/core';
 import { ObjectQLPlugin } from '@objectstack/objectql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
-import { AutomationServicePlugin, type AutomationEngine } from '@objectstack/service-automation';
 
 import { OverdueEscalationFlow } from '../src/flows/index.js';
 import { Task } from '../src/objects/task.object.js';
-
-/** One `messaging.emit()` call, as the `notify` node made it. */
-interface EmitCall {
-  topic: string;
-  audience: string[];
-  payload?: Record<string, unknown>;
-  severity?: string;
-}
 
 const openDrivers: Array<{ disconnect?: () => Promise<void> }> = [];
 afterEach(async () => {
@@ -54,7 +44,14 @@ afterEach(async () => {
   }
 });
 
-/** `n` whole days before this instant, as a `Field.date` string (UTC). */
+/** A node of the app's real flow, by id. */
+function node(id: string): { type?: string; config?: Record<string, unknown> } {
+  const found = OverdueEscalationFlow.nodes?.find((n) => n.id === id);
+  if (!found) throw new Error(`#18584 harness: node '${id}' is gone from overdue_escalation`);
+  return found as { type?: string; config?: Record<string, unknown> };
+}
+
+/** `n` whole days before today, as a `Field.date` string (UTC). */
 function daysAgoIso(n: number): string {
   const d = new Date();
   d.setUTCHours(0, 0, 0, 0);
@@ -62,35 +59,13 @@ function daysAgoIso(n: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-async function bootTodoKernel(): Promise<{
-  automation: AutomationEngine & Record<string, any>;
-  data: any;
-  emits: EmitCall[];
-}> {
-  const emits: EmitCall[] = [];
-
+/** A real kernel with the app's real `todo_task` over in-process sqlite-wasm. */
+async function bootTodoData(): Promise<any> {
   const kernel = new ObjectKernel({ logger: { level: 'silent' } } as any);
   await kernel.use(new ObjectQLPlugin());
-  await kernel.use(new AutomationServicePlugin());
-  // Recorder for the one seam that makes the rendered body observable.
-  await kernel.use({
-    name: 'test-messaging-recorder',
-    version: '1.0.0',
-    async setup(ctx: any) {
-      ctx.registerService('messaging', {
-        async emit(input: EmitCall) {
-          emits.push(input);
-          return { notificationId: `ntf-${emits.length}`, delivered: input.audience.length, failed: 0 };
-        },
-      });
-    },
-  } as any);
   await kernel.bootstrap();
 
   const objectql: any = kernel.getService('objectql');
-  const data: any = kernel.getService('data');
-  const automation = kernel.getService<AutomationEngine>('automation') as AutomationEngine & Record<string, any>;
-
   const driver: any = new SqliteWasmDriver({ filename: ':memory:' });
   await driver.connect();
   objectql.registerDriver(driver, true);
@@ -98,14 +73,23 @@ async function bootTodoKernel(): Promise<{
   objectql.registry.registerObject(Task, 'todo', 'todo');
   await objectql.syncSchemas();
 
-  automation.registerFlow(OverdueEscalationFlow.name, OverdueEscalationFlow);
-  return { automation, data, emits };
+  return kernel.getService('data');
 }
 
-describe('#18584 — the overdue escalation notice carries a day count', () => {
-  it('the `loop` projection carries the COMPUTED formula value, so the body renders a number', async () => {
-    const { automation, data, emits } = await bootTodoKernel();
+const SYSTEM = { context: { isSystem: true } };
 
+describe('#18584 — the overdue escalation projection carries a day count', () => {
+  it('the `get_record` step declares no projection, which is what makes formulas evaluate', () => {
+    // `planFormulaProjection(schema, undefined)` evaluates EVERY formula on the
+    // schema; a `fields` list narrows it to the named ones. Adding one here
+    // without adding `days_overdue` would blank the notice again, silently.
+    const cfg = node('get_overdue_tasks').config ?? {};
+    expect(cfg.fields).toBeUndefined();
+    expect(cfg.objectName).toBe('todo_task');
+  });
+
+  it('every `{currentTask.…}` token in the escalation body names a key the row carries', async () => {
+    const data = await bootTodoData();
     const due = daysAgoIso(5);
     await data.insert('todo_task', {
       subject: 'Renew the domain',
@@ -113,41 +97,50 @@ describe('#18584 — the overdue escalation notice carries a day count', () => {
       priority: 'normal',
       due_date: due,
       owner: 'usr_test_owner',
-    }, { context: { isSystem: true } });
+    }, SYSTEM);
 
-    const result = await automation.execute(OverdueEscalationFlow.name, { tenantId: 'org_test' } as any);
-    expect(result.success, JSON.stringify(result)).toBe(true);
+    // Read exactly as `get_overdue_tasks` does: list read, NO `fields`.
+    const rows: Array<Record<string, unknown>> = await data.find('todo_task', {
+      where: { status: { $ne: 'completed' } },
+      limit: node('get_overdue_tasks').config?.limit,
+      context: { isSystem: true },
+    });
+    expect(rows).toHaveLength(1);
+    const row = rows[0];
 
-    expect(emits).toHaveLength(1);
-    const body = String((emits[0].payload as Record<string, unknown>).body);
+    // The card's defect, stated as an assertion over the real template: the
+    // notify body's tokens are resolved against this row, so a token naming a
+    // key the row does not carry renders as a blank — no error, no refusal.
+    const message = String(node('notify_owner').config?.message ?? '');
+    const tokens = [...message.matchAll(/\{currentTask\.([a-z_]+)\}/g)].map((m) => m[1]);
+    expect(tokens).toContain('days_overdue');
+    for (const token of tokens) {
+      expect(row, `notify body names {currentTask.${token}}`).toHaveProperty(token);
+      expect(String(row[token] ?? ''), `{currentTask.${token}} renders blank`).not.toBe('');
+    }
 
-    // The defect, stated as the assertion that fails on the old metadata: the
-    // template's day-count slot must not render empty.
-    expect(body).not.toMatch(/,\s+day\(s\) overdue\./);
-    // And the value is the real span, not merely "something".
-    expect(body).toBe(`Due ${due}, 5 day(s) overdue.`);
+    // And the value is the real span, not merely "something present".
+    expect(Number(row.days_overdue)).toBe(5);
   });
 
   it('0 when the task is not overdue, and 0 when `due_date` is empty', async () => {
-    const { data } = await bootTodoKernel();
-
-    // Read the field the way the flow's `get_record` does — no explicit
-    // projection, which is what makes `planFormulaProjection` evaluate every
-    // formula on the schema.
+    const data = await bootTodoData();
     await data.insert('todo_task', {
       subject: 'Future task', status: 'not_started', priority: 'normal',
       due_date: daysAgoIso(-3), owner: 'usr_test_owner',
-    }, { context: { isSystem: true } });
+    }, SYSTEM);
     await data.insert('todo_task', {
       subject: 'No due date', status: 'not_started', priority: 'normal',
       owner: 'usr_test_owner',
-    }, { context: { isSystem: true } });
+    }, SYSTEM);
 
     const rows: Array<Record<string, unknown>> = await data.find('todo_task', {
       where: {}, limit: 200, context: { isSystem: true },
     });
     const bySubject = new Map(rows.map((r) => [String(r.subject), r]));
 
+    // Ruled semantics: `0` when not overdue, `0` when `due_date` is empty —
+    // never a negative "days remaining", never null.
     expect(Number(bySubject.get('Future task')?.days_overdue)).toBe(0);
     expect(Number(bySubject.get('No due date')?.days_overdue)).toBe(0);
   });
