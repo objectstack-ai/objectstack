@@ -132,6 +132,85 @@ export function declaredRegion(steps) {
   return { declared, postIndex };
 }
 
+/** The two conclusions that PROVE a step executed. Everything else does not. */
+const EXECUTED = new Set(['success', 'failure']);
+
+/**
+ * Find the step to measure the tail FROM, without trusting the one field that
+ * is still in flight when this runs.
+ *
+ * Three cases, in order, and the third is a REFUSAL rather than a pick:
+ *
+ *   1. A declared step carries `conclusion: "failure"`. Final, unambiguous,
+ *      and the only case this file had before -- unchanged.
+ *
+ *   2. No step carries it, but the step named by `OS_TAIL_REPORT_STEP` -- this
+ *      reporter -- is itself recorded `in_progress`, and exactly ONE other
+ *      declared step is too. Then that step is the failure, by position:
+ *
+ *        * this reporter's step declares `if: failure()` in the workflow, so
+ *          its running at all is the runner's own statement that a step in
+ *          this job failed. That wiring is not assumed -- `wiringVerdict()`
+ *          reads it out of `.github/workflows/lint.yml` and the self-test
+ *          fails when it drifts;
+ *        * steps in a job do not overlap, so while this reporter runs, no
+ *          other step is executing. A step the API still shows `in_progress`
+ *          has in fact finished and its completion record has not landed yet;
+ *        * the runner went from that step to the `if: failure()` epilogue
+ *          instead of to the next gate, which is what failing means.
+ *
+ *      ⭐ This reads `status` and position, never `conclusion`. It is the same
+ *      move `declaredRegion()` already makes for the post block, and the same
+ *      one the count makes behind the failure.
+ *
+ *   3. Anything else -- no evidence that the job failed at all (a green job
+ *      has exactly this shape), or evidence that it did but no single
+ *      unfinished step to anchor on (the failing step's START has not landed
+ *      either, so it is indistinguishable from a step never reached). ⛔ Both
+ *      answer NOT MEASURED with a distinct code. Zero and NOT MEASURED are
+ *      different answers, and a guessed position would be worse than the
+ *      honest refusal this file already made.
+ *
+ * @param {Array<Record<string, unknown>>} declared the declared region
+ * @param {string} [selfStepName] the name of the step running THIS script
+ * @returns {{ idx: number, via?: string, code?: string, reason?: string }}
+ */
+export function anchorFailure(declared, selfStepName = '') {
+  const list = Array.isArray(declared) ? declared : [];
+  const nameOf = (s) => String(s?.name ?? '(unnamed step)');
+  const statusOf = (s) => String(s?.status ?? '');
+
+  const byConclusion = list.findIndex((s) => String(s?.conclusion ?? '') === 'failure');
+  if (byConclusion !== -1) return { idx: byConclusion, via: 'conclusion' };
+
+  const selfRunning =
+    selfStepName !== '' &&
+    list.some((s) => nameOf(s) === selfStepName && statusOf(s) === 'in_progress');
+  if (!selfRunning) {
+    return {
+      idx: -1,
+      code: 'no_failure_recorded',
+      reason:
+        'no step in this job reported conclusion "failure", and this reporter is not ' +
+        'recorded as running either, so nothing here says the job failed at all',
+    };
+  }
+
+  const unfinished = list
+    .map((s, i) => ({ s, i }))
+    .filter(({ s }) => nameOf(s) !== selfStepName && statusOf(s) === 'in_progress');
+  if (unfinished.length === 1) return { idx: unfinished[0].i, via: 'status' };
+
+  return {
+    idx: -1,
+    code: 'failure_unstamped',
+    reason:
+      'this reporter runs only on failure() and it is running, so a step in this job failed, ' +
+      'but the jobs API carries neither a "failure" conclusion nor exactly one unfinished ' +
+      `step to anchor on (${unfinished.length} found), so the tail has no measurable start`,
+  };
+}
+
 /**
  * Count the tail, from one job's `steps[]`.
  *
@@ -166,6 +245,26 @@ export function declaredRegion(steps) {
  * which is the one step in `in_progress` while this executes). A step the runner
  * has not reached yet is not evidence of anything, and is not read as one.
  *
+ * ## The ANCHOR had the same disease, and it is the field that heals last
+ *
+ * ⚠️ Measured over this instrument's whole lifetime (issue #18874; the census
+ * is comment 5737448141 on that card): of the 42 failing `Lint & Repo Gates`
+ * jobs that carried this reporter, 24 disclosed NOT MEASURED, and 4 of 4 logs
+ * read verbatim gave one reason -- no step carried `conclusion: "failure"` at
+ * the instant of the read. The rule above had been applied to the COUNT and
+ * written down twice, while the one `conclusion` the anchor still trusted was
+ * the least likely of all to be final: the step that exited non-zero a
+ * fraction of a second earlier. The quantity that separates a job that
+ * measured from one that did not is how many declared steps remain BEHIND the
+ * failure (Fisher exact, two-sided, p = 0.00099) -- ⛔ NOT the gap between the
+ * failure and this read, whose smallest value in the timing sub-sample belongs
+ * to a job that did not measure. So waiting longer is not the repair; not
+ * depending on that field is.
+ *
+ * `anchorFailure()` therefore takes the position from whichever surface can
+ * carry it, and REFUSES rather than picking one when neither can. It never
+ * widens what counts as measured on its own: see the three cases there.
+ *
  * @param {Array<Record<string, unknown>>} steps a job's `steps[]` from the API
  * @param {string} [selfStepName] the name of the step running THIS script, so
  *   that it never reports itself as a gate that never ran. Supplied by the
@@ -175,7 +274,8 @@ export function declaredRegion(steps) {
  *   quietly. Measured first, in run 34584689309: without it the report ended
  *   `- Report how many gates never ran`, while that step was the one printing.
  * @returns {{
- *   measured: boolean, reason?: string, total: number, failedNumber: number|null,
+ *   measured: boolean, reason?: string, code?: string, anchoredBy: string|null,
+ *   total: number, failedNumber: number|null,
  *   failedName: string|null, ran: number, skippedByCondition: string[],
  *   neverRan: string[], alsoFailed: string[], inFlight: string[],
  * }}
@@ -183,6 +283,7 @@ export function declaredRegion(steps) {
 export function judge(steps, selfStepName = '') {
   const empty = {
     measured: false,
+    anchoredBy: null,
     total: 0,
     failedNumber: null,
     failedName: null,
@@ -195,28 +296,26 @@ export function judge(steps, selfStepName = '') {
 
   const list = Array.isArray(steps) ? steps : [];
   if (list.length === 0) {
-    return { ...empty, reason: 'the jobs API returned no steps for this job' };
+    return { ...empty, code: 'no_steps', reason: 'the jobs API returned no steps for this job' };
   }
 
   const { declared } = declaredRegion(list);
   if (declared.length === 0) {
-    return { ...empty, reason: 'the jobs API returned no declared steps for this job' };
-  }
-
-  const failedIdx = declared.findIndex((s) => String(s?.conclusion ?? '') === 'failure');
-  if (failedIdx === -1) {
     return {
       ...empty,
-      total: declared.length,
-      reason:
-        'no step in this job reported conclusion "failure", so there is no point to measure the tail from',
+      code: 'no_declared_steps',
+      reason: 'the jobs API returned no declared steps for this job',
     };
   }
 
+  const anchor = anchorFailure(declared, selfStepName);
+  if (anchor.idx === -1) {
+    return { ...empty, total: declared.length, code: anchor.code, reason: anchor.reason };
+  }
+  const failedIdx = anchor.idx;
+
   const nameOf = (s) => String(s?.name ?? '(unnamed step)');
   const conclusionOf = (s) => String(s?.conclusion ?? '');
-  /** The two conclusions that PROVE a step executed. Everything else does not. */
-  const EXECUTED = new Set(['success', 'failure']);
 
   const before = declared.slice(0, failedIdx);
   const after = declared
@@ -230,6 +329,7 @@ export function judge(steps, selfStepName = '') {
 
   return {
     measured: true,
+    anchoredBy: anchor.via,
     total: declared.length,
     failedNumber: Number(declared[failedIdx]?.number ?? 0) || null,
     failedName: nameOf(declared[failedIdx]),
@@ -245,9 +345,28 @@ export function judge(steps, selfStepName = '') {
   };
 }
 
-/** The one machine-readable line. Stable key=value, one line, easy to grep. */
+/**
+ * The one machine-readable line. Stable key=value, one line, easy to grep.
+ *
+ * Both halves name WHICH of their several shapes they are, appended so that the
+ * `measured=no never_ran=NOT_MEASURED` and `measured=yes never_ran=N` prefixes
+ * every existing reader greps for are unchanged:
+ *
+ *   `reason=` on a refusal, because the annotation surface otherwise collapses
+ *   four different refusals into one string and only the job log keeps them
+ *   apart -- so a census taken from annotations alone cannot tell the race from
+ *   an unreadable API. It could not, when this card was measured.
+ *
+ *   `anchored_by=` on a measurement, because a fix whose effect cannot be
+ *   counted on the surface the census reads is a fix nobody can confirm.
+ */
 export function machineLine(v) {
-  if (!v.measured) return 'unmeasured-gate-tail: measured=no never_ran=NOT_MEASURED';
+  if (!v.measured) {
+    return (
+      'unmeasured-gate-tail: measured=no never_ran=NOT_MEASURED' +
+      ` reason=${v.code ?? 'unclassified'}`
+    );
+  }
   return (
     'unmeasured-gate-tail: measured=yes' +
     ` never_ran=${v.neverRan.length}` +
@@ -255,7 +374,8 @@ export function machineLine(v) {
     ` ran=${v.ran}` +
     ` skipped_by_condition=${v.skippedByCondition.length}` +
     ` declared=${v.total}` +
-    ` failed_at_step=${v.failedNumber ?? 'unknown'}`
+    ` failed_at_step=${v.failedNumber ?? 'unknown'}` +
+    ` anchored_by=${v.anchoredBy ?? 'conclusion'}`
   );
 }
 
@@ -288,6 +408,12 @@ export function renderReport(v) {
   }
 
   out.push(`  failed at step #${v.failedNumber}: ${v.failedName}`);
+  if (v.anchoredBy === 'status') {
+    out.push('    (that step was not stamped "failure" yet when this read the API. It');
+    out.push('     is the one step the API still showed unfinished, and steps in a job');
+    out.push('     do not overlap, so it is where this job stopped -- found by POSITION,');
+    out.push('     not by its conclusion. The tail below is unaffected either way.)');
+  }
   out.push(`  declared steps in this job:            ${v.total}`);
   out.push(`  ran before the failure:                ${v.ran}`);
   out.push(`  turned off by their own condition:     ${v.skippedByCondition.length}`);
@@ -339,6 +465,14 @@ export function renderSummary(v) {
     `| **never ran (unmeasured tail)** | **${v.neverRan.length}** |`,
     '',
   );
+  if (v.anchoredBy === 'status') {
+    lines.push(
+      'The failing step was not stamped `failure` yet at the instant of this read; it was' +
+        ' located by position (the one step the API still showed unfinished) rather than by' +
+        ' its conclusion.',
+      '',
+    );
+  }
   if (v.neverRan.length > 0) {
     lines.push('<details><summary>The gates that never ran</summary>', '');
     for (const name of v.neverRan) lines.push(`- ${name}`);
@@ -420,6 +554,7 @@ async function main() {
   let verdict;
   if (missing.length > 0) {
     verdict = judge([]);
+    verdict.code = 'env_missing';
     verdict.reason = `${missing.join(', ')} not set, so this run's steps could not be read`;
   } else {
     try {
@@ -427,6 +562,7 @@ async function main() {
       const own = pickOwnJob(jobs, runnerName);
       if (own === null) {
         verdict = judge([]);
+        verdict.code = 'job_unidentified';
         verdict.reason =
           `none of the ${jobs.length} job(s) in run ${runId} could be identified as this one ` +
           `(runner ${runnerName || 'unnamed'})`;
@@ -435,6 +571,7 @@ async function main() {
       }
     } catch (err) {
       verdict = judge([]);
+      verdict.code = 'api_error';
       verdict.reason = `the jobs API could not be read: ${err instanceof Error ? err.message : String(err)}`;
     }
   }
@@ -465,13 +602,21 @@ async function main() {
 // -- self-test --------------------------------------------------------------
 
 /**
- * `OS_TAIL_REPORT_STEP` must be the literal `name:` of the step that sets it.
+ * `OS_TAIL_REPORT_STEP` must be the literal `name:` of the step that sets it,
+ * and that step must declare `if: failure()`.
  *
  * Read as plain text on purpose: the assertion is about two LINES of the
  * workflow agreeing, it needs no schema, and a text read works before
  * `pnpm install` has put a YAML parser on disk -- which matters, because the
  * step this file backs is the one that reports on a job that may have died at
  * the install step.
+ *
+ * ⭐ The condition half is not decoration. `anchorFailure()` case 2 reads this
+ * reporter's own `in_progress` record as the runner's statement that a step in
+ * this job failed, and that inference is licensed by `if: failure()` and by
+ * nothing else. Loosen the condition and the positional anchor would start
+ * answering on jobs that never failed -- so the loosening fails HERE, in a
+ * gate that runs on every red job, rather than silently in production.
  *
  * @param {string} source the text of `.github/workflows/lint.yml`
  * @returns {{ ok: boolean, note: string }}
@@ -483,14 +628,17 @@ export function wiringVerdict(source) {
     const env = /^\s*OS_TAIL_REPORT_STEP:\s*(.+?)\s*$/.exec(lines[i]);
     if (env === null) continue;
     let declared = null;
+    let condition = null;
     for (let j = i - 1; j >= 0 && j > i - 40; j--) {
+      const when = /^\s*if:\s*(.+?)\s*$/.exec(lines[j]);
+      if (when !== null && condition === null) condition = when[1];
       const name = /^\s*- name:\s*(.+?)\s*$/.exec(lines[j]);
       if (name !== null) {
         declared = name[1].replace(/^['"]|['"]$/g, '');
         break;
       }
     }
-    found.push({ env: env[1].replace(/^['"]|['"]$/g, ''), declared });
+    found.push({ env: env[1].replace(/^['"]|['"]$/g, ''), declared, condition });
   }
   if (found.length === 0) {
     return { ok: false, note: 'no step sets OS_TAIL_REPORT_STEP, so this reporter would list itself' };
@@ -502,7 +650,20 @@ export function wiringVerdict(source) {
       note: `OS_TAIL_REPORT_STEP does not match its own step name: ${JSON.stringify(wrong)}`,
     };
   }
-  return { ok: true, note: `${found.length} step(s) set OS_TAIL_REPORT_STEP to their own name` };
+  const unconditioned = found.filter((f) => !/failure\(\)/.test(String(f.condition ?? '')));
+  if (unconditioned.length > 0) {
+    return {
+      ok: false,
+      note:
+        'the step that sets OS_TAIL_REPORT_STEP no longer declares `if: failure()`, so this ' +
+        'reporter running is no longer evidence that the job failed and the positional ' +
+        `anchor would answer on green jobs: ${JSON.stringify(unconditioned)}`,
+    };
+  }
+  return {
+    ok: true,
+    note: `${found.length} step(s) set OS_TAIL_REPORT_STEP to their own name, under \`if: failure()\``,
+  };
 }
 
 /** This repo's root, resolved from this file rather than from the cwd. */
@@ -566,7 +727,35 @@ function fixtures() {
     step(340, 'Post Checkout repository', 'success'),
     step(341, 'Complete job', 'success'),
   ];
-  return { lintFailedEarly, lintFailedLast, green, midRun };
+  // ⭐ The shape the recorded fixtures above could NOT express, and the one
+  // this reporter meets on more than half of the jobs it runs on: at the
+  // instant of the read the failing step has no final conclusion yet. The
+  // runner has already moved on to the `if: failure()` epilogue -- the
+  // self-test step below ran and passed -- but the jobs API still answers with
+  // the last state that step was recorded in, `in_progress`, and has written
+  // nothing at all for the gates behind it. Every fixture above hands the
+  // anchor a stamped `failure`, which is why 32 green assertions were
+  // compatible with a reporter that disclosed NOT MEASURED in production.
+  const failureNotYetStamped = [
+    step(1, INJECTED_HEAD, 'success'),
+    step(2, 'Checkout repository', 'success'),
+    step(3, 'Install dependencies', 'success'),
+    step(4, 'Slot-lookup ratchet', 'skipped'),
+    step(5, 'Docs anchors resolve to real headings', 'success'),
+    step(6, 'Doc/skill authoring guard', null, 'in_progress'),
+    step(7, 'Docs frontmatter parses', null, 'queued'),
+    step(8, 'One `<h1>` per docs page', null, 'queued'),
+    step(9, 'Unmeasured-gate-tail reporter self-test', 'success'),
+    step(10, 'Report how many gates never ran', null, 'in_progress'),
+    step(340, 'Post Checkout repository', 'success'),
+    step(341, 'Complete job', 'success'),
+  ];
+  // One propagation step earlier still: the failing step's START has not landed
+  // either, so from this surface it is indistinguishable from a gate the runner
+  // never reached. There is a position here, but no evidence for it.
+  const failureNotYetStarted = failureNotYetStamped.map((x) =>
+    x.name === 'Doc/skill authoring guard' ? { ...x, status: 'queued' } : x);
+  return { lintFailedEarly, lintFailedLast, green, midRun, failureNotYetStamped, failureNotYetStarted };
 }
 
 function selfTest() {
@@ -579,7 +768,10 @@ function selfTest() {
     if (a !== e) failures.push(`${label}: expected ${e}, got ${a}`);
   };
 
-  const { lintFailedEarly, lintFailedLast, green, midRun } = fixtures();
+  const { lintFailedEarly, lintFailedLast, green, midRun, failureNotYetStamped,
+    failureNotYetStarted } = fixtures();
+  /** The literal `.github/workflows/lint.yml` passes through OS_TAIL_REPORT_STEP. */
+  const REPORTER = 'Report how many gates never ran';
 
   // -- the boundary: the post block is not part of the population ------------
   t('declaredRegion drops the runner head and the whole post block',
@@ -645,18 +837,71 @@ function selfTest() {
     [last.measured, last.neverRan.length], [true, 0]);
   t('...and says so in words', renderReport(last).includes('The tail is empty'), true);
 
+  // -- the anchor: at the instant of the read the failure has no conclusion ---
+  // The defect this battery could not previously express (#18874). Every
+  // fixture above hands `judge()` a failing step already stamped `failure`;
+  // this one is the live shape, where it is not. The card's mechanism was read
+  // verbatim out of 4 of 4 production logs, and the census of all 42 jobs the
+  // instrument ever ran on is comment 5737448141.
+  t('the race fixture carries NO stamped failure at all -- which is why the old anchor refused it',
+    failureNotYetStamped.some((x) => x.conclusion === 'failure'), false);
+  const racing = judge(failureNotYetStamped, REPORTER);
+  t('a failing step the API has not stamped yet is still found', racing.measured, true);
+  t('...by position, and the verdict says so rather than implying a final conclusion',
+    [racing.anchoredBy, racing.failedNumber, racing.failedName],
+    ['status', 6, 'Doc/skill authoring guard']);
+  t('...and the tail is the unreached gates ONLY: the `if: failure()` epilogue ran, so it is not in it',
+    racing.neverRan, ['Docs frontmatter parses', 'One `<h1>` per docs page']);
+  t('...while everything before the failure is read exactly as before',
+    [racing.ran, racing.skippedByCondition], [3, ['Slot-lookup ratchet']]);
+  t('...and the machine line carries the anchor it used, for a census to count',
+    machineLine(racing),
+    'unmeasured-gate-tail: measured=yes never_ran=2 failed=1 ran=3 skipped_by_condition=1 ' +
+      'declared=9 failed_at_step=6 anchored_by=status');
+
+  // ⛔ The positional anchor is licensed by this reporter's own `if: failure()`
+  // and by nothing else. Unnamed, it must NOT fire -- otherwise the repair
+  // would invent a failure on a job that never had one.
+  t('without the reporter named, the position is not licensed and the answer stays NOT MEASURED',
+    [judge(failureNotYetStamped).measured, judge(failureNotYetStamped).code],
+    [false, 'no_failure_recorded']);
+
+  // ⛔ And it refuses rather than guessing when the position is not evidenced.
+  const notStarted = judge(failureNotYetStarted, REPORTER);
+  t('a failing step whose START has not landed either is NOT MEASURED, never a guessed position',
+    [notStarted.measured, notStarted.code, notStarted.neverRan.length],
+    [false, 'failure_unstamped', 0]);
+  t('...and its reason says a failure DID happen, so the number is missing rather than zero',
+    notStarted.reason.includes('a step in this job failed'), true);
+  const twoUnfinished = failureNotYetStamped.map((x) =>
+    x.name === 'Docs anchors resolve to real headings'
+      ? { ...x, conclusion: null, status: 'in_progress' } : x);
+  t('two unfinished steps are an ambiguity, and an ambiguity is NOT MEASURED, not a pick',
+    [judge(twoUnfinished, REPORTER).measured, judge(twoUnfinished, REPORTER).code],
+    [false, 'failure_unstamped']);
+  t('a stamped failure still wins over any position, so nothing above changes the settled case',
+    [judge(lintFailedEarly, REPORTER).anchoredBy, judge(midRun).anchoredBy],
+    ['conclusion', 'conclusion']);
+
   // -- NOT MEASURED is never rendered as zero --------------------------------
   const noFailure = judge(green);
   t('a job with no failed step is NOT MEASURED, not a tail of 0', noFailure.measured, false);
   t('...and its machine line says NOT_MEASURED rather than 0',
-    machineLine(noFailure), 'unmeasured-gate-tail: measured=no never_ran=NOT_MEASURED');
+    machineLine(noFailure),
+    'unmeasured-gate-tail: measured=no never_ran=NOT_MEASURED reason=no_failure_recorded');
+  t('...for the reason that nothing says it failed, not for the race reason',
+    noFailure.code, 'no_failure_recorded');
   t('an empty steps array is NOT MEASURED too', judge([]).measured, false);
   t('a null steps value is NOT MEASURED too', judge(null).measured, false);
+  t('...and each refusal names which shape it is, rather than collapsing into one string',
+    [judge([]).code, judge([{ name: 'Post x', conclusion: 'success' }]).code],
+    ['no_steps', 'no_declared_steps']);
 
   // -- the machine-readable line ---------------------------------------------
   t('the machine line carries every count',
     machineLine(early),
-    'unmeasured-gate-tail: measured=yes never_ran=2 failed=1 ran=3 skipped_by_condition=1 declared=8 failed_at_step=6');
+    'unmeasured-gate-tail: measured=yes never_ran=2 failed=1 ran=3 skipped_by_condition=1 ' +
+      'declared=8 failed_at_step=6 anchored_by=conclusion');
 
   // -- the report never truncates the list it is about ------------------------
   const manyNames = Array.from({ length: 120 }, (_, i) => `gate ${i}`);
@@ -695,7 +940,20 @@ function selfTest() {
   t('a missing wiring is caught too, not read as clean',
     wiringVerdict('      - name: Report how many gates never ran\n        run: node x.mjs\n').ok, false);
   t('a quoted step name matches its unquoted env value',
-    wiringVerdict("      - name: 'A name'\n        env:\n          OS_TAIL_REPORT_STEP: A name\n").ok, true);
+    wiringVerdict(
+      "      - name: 'A name'\n        if: failure()\n        env:\n          OS_TAIL_REPORT_STEP: A name\n",
+    ).ok, true);
+  // ⛔ The condition is what licenses `anchorFailure()` case 2. Dropped or
+  // widened, the positional anchor would start answering on jobs that never
+  // failed -- so it fails here instead.
+  t('a reporter step that no longer declares `if: failure()` is caught',
+    wiringVerdict(
+      '      - name: A name\n        env:\n          OS_TAIL_REPORT_STEP: A name\n',
+    ).ok, false);
+  t('...and so is one whose condition was widened to always()',
+    wiringVerdict(
+      '      - name: A name\n        if: always()\n        env:\n          OS_TAIL_REPORT_STEP: A name\n',
+    ).ok, false);
 
   // -- picking this job out of the run ---------------------------------------
   const jobs = [
@@ -717,7 +975,8 @@ function selfTest() {
   console.log(
     `+ report-unmeasured-gate-tail --self-test: ${checked} assertions over recorded jobs-API shapes ` +
       '(real judge()/renderReport() path; the two "skipped" populations, the empty tail, ' +
-      'NOT MEASURED vs zero, and the no-truncation rule)',
+      'NOT MEASURED vs zero, the no-truncation rule, and the live shape in which the ' +
+      'failing step carries no final conclusion yet)',
   );
   return SELF_TEST_VERDICT;
 }
