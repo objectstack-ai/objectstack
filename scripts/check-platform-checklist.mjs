@@ -127,11 +127,107 @@ function familyFiles(dir, prefix = '') {
   return out;
 }
 
-const STATUSES = new Set(['active', 'draft', 'retired']);
+const STATUSES = new Set(['active', 'draft', 'planned', 'retired']);
+
+// ── Which statuses CARRY coverage ───────────────────────────────────────────
+// The capability-coverage ratchet below asks "does the checklist test this
+// governed metadata kind?". `planned` is the ledger's answer to "the definition
+// requires this capability and nothing verifies it yet" — a promise, not a
+// test. So a planned item is a legal MAP TARGET (that is how a capability-gap
+// card gets somewhere to point) and contributes ZERO coverage: a kind whose
+// only items are planned is UNMAPPED, exactly as if the entry were empty.
+// ⛔ Folding `planned` in here is the one edit that would turn this ratchet
+// into a way to green a kind by promising to test it.
+const COVERAGE_BEARING_STATUSES = new Set(['active', 'draft']);
+
 const PRIORITIES = new Set(['P0', 'P1', 'P2']);
 const SURFACES = new Set(['browser', 'api', 'cli', 'build', 'mixed']);
 const ORACLES = new Set(['api', 'network', 'screenshot', 'dom', 'log', 'test', 'build']);
 const BLOCKED_BY = new Set(['fixture', 'environment', 'dependency', 'product-bug']);
+
+const RELEASE_RE = /^v\d+(\.\d+)?$/;
+
+/**
+ * The field rules an item's `status` implies, as a pure function so the battery
+ * can drive every status through it with no tree to read.
+ *
+ * `planned` is the only status that RELAXES anything, and it relaxes exactly
+ * the three fields that cannot honestly exist before the capability does:
+ * `since` (no release has introduced it), `steps` (nothing to drive) and
+ * `acceptance` (no oracle to consult — handled at its own site below). In
+ * exchange it REQUIRES `personas`: who the capability is for is what makes a
+ * gap readable to the next sweep, and it is knowable the day the gap is found.
+ *
+ * @param {{status?: string, since?: unknown, steps?: unknown, personas?: unknown}} item
+ * @returns {string[]}
+ */
+function statusFieldProblems(item) {
+  const problems = [];
+  const isRelease = typeof item.since === 'string' && RELEASE_RE.test(item.since);
+  const hasSteps = Array.isArray(item.steps) && item.steps.length > 0;
+
+  if (item.status === 'planned') {
+    if (!(item.since === null || isRelease)) {
+      problems.push('"since" on a planned item must be null (no target release chosen yet) or the TARGET release, e.g. "v18" — never a release that already shipped without it');
+    }
+    if (hasSteps) {
+      problems.push('a planned item carries NO "steps" — there is nothing to drive yet. Steps arrive in the PR that implements the capability, in the same edit that promotes it to "active"');
+    }
+    if (!Array.isArray(item.personas) || item.personas.length === 0) {
+      problems.push('a planned item must name its "personas" — who the capability is for is what makes the gap readable before anything exists to run');
+    }
+    return problems;
+  }
+
+  if (!isRelease) problems.push('"since" must be the release that introduced the capability, e.g. "v16" or "v16.0"');
+  if (!hasSteps) problems.push('"steps" must be a non-empty array of strings');
+  return problems;
+}
+
+/**
+ * One `coverage.json` entry's `items` list, judged. Pure, and the ONE place the
+ * ratchet decides what counts — so the battery can drive both directions of the
+ * planned rule without a tree, and so there is no second opinion to drift from.
+ *
+ * The two directions that matter, and why the second is the load-bearing one:
+ *
+ *   - a kind mapped to an ACTIVE item is covered, and stays covered when a
+ *     planned item is listed beside it (the planned id is where the next
+ *     capability-gap card points; it must not turn a green kind red);
+ *   - a kind whose ONLY items are planned is UNMAPPED. The platform has the
+ *     capability on its definition list, the checklist records that nothing
+ *     verifies it, and the ratchet must say so — otherwise `planned` becomes
+ *     the cheapest way to green an untested kind, and the ratchet measures
+ *     intentions instead of tests.
+ *
+ * @param {string[]} ids the entry's `items`
+ * @param {(id: string) => string|undefined} statusOf item id -> status, undefined when unknown
+ * @returns {{problems: string[], bearing: number}} `bearing` = items that CARRY coverage
+ */
+function coverageEntryProblems(ids, statusOf) {
+  const problems = [];
+  let bearing = 0;
+  for (const id of ids) {
+    const status = statusOf(id);
+    if (status === undefined) {
+      problems.push(`maps to unknown item id "${id}"`);
+      continue;
+    }
+    if (status === 'retired') {
+      problems.push(`maps to retired item "${id}" — point at its successor or re-waive the kind`);
+      continue;
+    }
+    if (COVERAGE_BEARING_STATUSES.has(status)) bearing += 1;
+  }
+  if (bearing === 0) {
+    problems.push(
+      'UNMAPPED — nothing here CARRIES coverage: every item mapped to this kind is `planned` (or does not resolve).'
+        + ' A planned item records that the definition requires the capability and that nothing verifies it yet — it is a promise, not a test,'
+        + ' and counting it would let any kind go green by promising to cover it. Add an item that RUNS, or waive the kind with a reason.',
+    );
+  }
+  return { problems, bearing };
+}
 
 const errors = [];
 const err = (file, id, msg) => errors.push(`${file}${id ? ` · ${id}` : ''}: ${msg}`);
@@ -775,6 +871,7 @@ let unreferencedReachedVerdict = false;
 let metaCallReachedVerdict = false;
 let lineCitationsReachedVerdict = false;
 let symbolAnchorsReachedVerdict = false;
+let plannedStatusReachedVerdict = false;
 
 // ── The self-test's own battery roster and floor (#13489, adopted here) ────
 //
@@ -805,6 +902,7 @@ const BATTERY_UNREFERENCED_RECIPES = 'selfTestUnreferencedRecipes: the reverse d
 const BATTERY_META_CALL_SPELLING = 'selfTestMetaCallSpelling: the folded `/meta` plural, read from the live contract';
 const BATTERY_LINE_CITATION_BINDING = 'selfTestLineCitationBinding: the corpus declaration, the absent fork, and the binding driven both ways';
 const BATTERY_SYMBOL_ANCHORS = 'selfTestSymbolAnchors: the corpus registration, the binding to the shared resolver, the residual and the floor';
+const BATTERY_PLANNED_STATUS = 'selfTestPlannedStatus: the `planned` accept set, the fields it relaxes, and the coverage ratchet driven BOTH ways';
 
 const SELF_TEST_BATTERIES = Object.freeze({
   [BATTERY_TRAP_VOCABULARY]: 22,
@@ -828,8 +926,15 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // exclusion in both directions, and every re-judged #16898 case, which
   // ⛔ survives the transplant unchanged in verdict.
   [BATTERY_SYMBOL_ANCHORS]: 42,
+  // New with the `planned` status. Set at its landed count (headroom 0, the
+  // convention every entry above uses). The load-bearing third of it is the
+  // coverage direction: the live ledger carries ZERO planned items today, so
+  // nothing but these fixtures can tell a working ratchet rule from a deleted
+  // one — the unreferenced-recipe argument, applied to a rule whose subject
+  // population is empty on purpose rather than by luck.
+  [BATTERY_PLANNED_STATUS]: 28,
 });
-const SELF_TEST_BATTERY_FLOOR = 6;
+const SELF_TEST_BATTERY_FLOOR = 7;
 
 /**
  * @param {Record<string, number>} ran battery name -> assertions it reported
@@ -2005,6 +2110,121 @@ function selfTestSymbolAnchors() {
   return { checked, failures };
 }
 
+/**
+ * The `planned` status, both of its halves, and the ratchet direction that is
+ * the whole point of it.
+ *
+ * ## Why this battery exists at all
+ *
+ * `planned` RELAXES an authored surface: an area JSON carrying it is refused by
+ * the landed gate and accepted by this one. Every relaxation buys a way to be
+ * wrong, and here the dangerous one is not the schema — it is the coverage
+ * ratchet. If a planned item ever counted as coverage, "凡是有的能力, 都要测试"
+ * would become "凡是有的能力, 都要打算测试", and the ratchet would go green on
+ * a kind nothing runs against. So the ratchet direction is pinned BOTH ways,
+ * on fixtures, not on the tree: the live ledger carries zero planned items and
+ * is expected to for a while, which means the real data cannot tell "this rule
+ * works" from "this rule was deleted" — the same silent-success argument the
+ * unreferenced-recipe battery above makes.
+ */
+function selfTestPlannedStatus() {
+  const failures = [];
+  let checked = 0;
+  const t = (what, ok, note = '') => {
+    checked++;
+    if (!ok) failures.push(`${what}${note ? ` — ${note}` : ''}`);
+  };
+
+  // ── the accept set ────────────────────────────────────────────────────────
+  t('S1 `planned` is an accepted status — the widening this rule is', STATUSES.has('planned'));
+  t('S2 the statuses that were accepted before still are — a widening that narrowed something else is a different change',
+    ['active', 'draft', 'retired'].every((s) => STATUSES.has(s)));
+  t('S3 the set is still CLOSED — a typo like `planed` is refused, not read as a fourth status', !STATUSES.has('planed'));
+
+  // ── the field rules `planned` relaxes, and the one it adds ────────────────
+  const planned = (over = {}) => statusFieldProblems({ status: 'planned', since: null, personas: ['admin'], ...over });
+  const active = (over = {}) => statusFieldProblems({ status: 'active', since: 'v16', steps: ['do a thing'], ...over });
+
+  t('F1 a planned item with `since: null`, no steps and personas is clean', planned().length === 0, planned().join('; '));
+  t('F2 `since` may instead name the TARGET release', planned({ since: 'v18' }).length === 0);
+  t('F3 a `since` that is neither null nor a release is refused', planned({ since: 'someday' }).length === 1);
+  t('F4 and that message names the two legal spellings rather than only the release one',
+    planned({ since: 'someday' })[0]?.includes('null') && planned({ since: 'someday' })[0]?.includes('TARGET release'));
+  t('F5 steps on a planned item are refused — nothing is implemented to drive', planned({ steps: ['open the page'] }).length === 1);
+  t('F6 and that message sends them to the promotion edit, not to a workaround',
+    planned({ steps: ['open the page'] })[0]?.includes('promotes it to "active"'));
+  t('F7 an empty steps array is not steps — a planned item may carry the key', planned({ steps: [] }).length === 0);
+  t('F8 a planned item with no personas is refused — the gap must say who it is for', planned({ personas: undefined }).length === 1);
+  t('F9 an empty personas array is refused the same way', planned({ personas: [] }).length === 1);
+
+  t('F10 an ACTIVE item is judged exactly as before — release `since`, non-empty steps', active().length === 0, active().join('; '));
+  t('F11 an active item may NOT use `since: null` — the relaxation is scoped to planned', active({ since: null }).length === 1);
+  t('F12 an active item still owes steps', active({ steps: [] }).length === 1);
+  t('F13 an active item owes NO personas — this battery did not widen a requirement onto the 264 live items',
+    active({ personas: undefined }).length === 0);
+  t('F14 a planned item is never asked for steps AND a release at once — the two relaxations compose',
+    planned({ since: null, steps: undefined }).length === 0);
+
+  // ── the coverage ratchet, both directions ────────────────────────────────
+  // A miniature ledger: one kind's worth of ids, each with a status.
+  const LEDGER = new Map([
+    ['area.runs', 'active'],
+    ['area.drafted', 'draft'],
+    ['area.promised', 'planned'],
+    ['area.promised-two', 'planned'],
+    ['area.gone', 'retired'],
+  ]);
+  const cov = (ids) => coverageEntryProblems(ids, (id) => LEDGER.get(id));
+
+  const activeOnly = cov(['area.runs']);
+  t('C1 DIRECTION A — a kind mapped to an active item is covered, silently', activeOnly.problems.length === 0 && activeOnly.bearing === 1,
+    activeOnly.problems.join('; '));
+  const mixed = cov(['area.runs', 'area.promised']);
+  t('C2 a planned item listed BESIDE an active one changes nothing — that is where a capability-gap card points, and it must not red a covered kind',
+    mixed.problems.length === 0 && mixed.bearing === 1, mixed.problems.join('; '));
+
+  const plannedOnly = cov(['area.promised']);
+  t('C3 DIRECTION B — a kind whose ONLY item is planned is UNMAPPED', plannedOnly.problems.length === 1 && plannedOnly.bearing === 0);
+  t('C4 and it is reported as UNMAPPED, in the vocabulary the unclassified-kind message already uses',
+    plannedOnly.problems[0]?.startsWith('UNMAPPED'));
+  t('C5 the message says WHY, so the cheap fix (promote it) is visibly not the fix',
+    plannedOnly.problems[0]?.includes('promise, not a test'));
+  const plannedTwo = cov(['area.promised', 'area.promised-two']);
+  t('C6 two planned items are not one active item — coverage does not accumulate from promises',
+    plannedTwo.problems.length === 1 && plannedTwo.bearing === 0);
+
+  t('C7 a draft item still carries coverage — this change moved ONE status, not the ratchet\'s meaning',
+    cov(['area.drafted']).problems.length === 0 && cov(['area.drafted']).bearing === 1);
+  const retiredOnly = cov(['area.gone']);
+  t('C8 a retired-only mapping keeps its own message AND is now also reported as uncovered',
+    retiredOnly.problems.length === 2 && retiredOnly.problems.some((p) => p.includes('retired item')) && retiredOnly.bearing === 0);
+  const unknown = cov(['area.never-existed']);
+  t('C9 an unresolvable id is still named as unknown', unknown.problems.some((p) => p.includes('unknown item id')) && unknown.bearing === 0);
+  t('C10 ⛔ the bearing set does not contain `planned` — folding it in is the ONE edit that turns this ratchet into a way to green an untested kind',
+    !COVERAGE_BEARING_STATUSES.has('planned') && !COVERAGE_BEARING_STATUSES.has('retired'));
+
+  // ── the live control ──────────────────────────────────────────────────────
+  // The fixtures above prove the rule; this reads the ledger the gate actually
+  // validates and proves the rule is pointed at IT. Every assertion above would
+  // pass just as well against a `planned` no area file could ever carry.
+  // ⛔ Read here rather than from the item walk below: this battery runs before
+  // that walk on every invocation, and behind `--self-test` the walk never runs.
+  const liveStatuses = new Set();
+  let liveItems = 0;
+  for (const f of readdirSync(AREAS_DIR).filter((n) => n.endsWith('.json'))) {
+    for (const it of JSON.parse(readFileSync(join(AREAS_DIR, f), 'utf8')).items ?? []) {
+      liveItems += 1;
+      liveStatuses.add(it.status);
+    }
+  }
+  t('L1 every status on the live ledger is one this gate accepts — the control that says the assertions above are about THIS ledger',
+    liveItems > 0 && [...liveStatuses].every((s) => STATUSES.has(s)),
+    `${liveItems} items, statuses: ${[...liveStatuses].sort().join(', ')}`);
+
+  plannedStatusReachedVerdict = true;
+  return { checked, failures };
+}
+
 if (process.argv.slice(2).includes('--self-test')) {
   const trap = selfTestTrapVocabulary();
   const prov = selfTestProvisioningUse();
@@ -2012,12 +2232,14 @@ if (process.argv.slice(2).includes('--self-test')) {
   const metaCall = selfTestMetaCallSpelling();
   const cites = selfTestLineCitationBinding();
   const anchors = selfTestSymbolAnchors();
+  const plannedStatus = selfTestPlannedStatus();
   requireReachedVerdict('selfTestTrapVocabulary', trapReachedVerdict);
   requireReachedVerdict('selfTestProvisioningUse', provisioningReachedVerdict);
   requireReachedVerdict('selfTestUnreferencedRecipes', unreferencedReachedVerdict);
   requireReachedVerdict('selfTestMetaCallSpelling', metaCallReachedVerdict);
   requireReachedVerdict('selfTestLineCitationBinding', lineCitationsReachedVerdict);
   requireReachedVerdict('selfTestSymbolAnchors', symbolAnchorsReachedVerdict);
+  requireReachedVerdict('selfTestPlannedStatus', plannedStatusReachedVerdict);
   const rosterFailures = batteryRosterFailures({
     [BATTERY_TRAP_VOCABULARY]: trap.checked,
     [BATTERY_PROVISIONING_USE]: prov.checked,
@@ -2025,16 +2247,18 @@ if (process.argv.slice(2).includes('--self-test')) {
     [BATTERY_META_CALL_SPELLING]: metaCall.checked,
     [BATTERY_LINE_CITATION_BINDING]: cites.checked,
     [BATTERY_SYMBOL_ANCHORS]: anchors.checked,
+    [BATTERY_PLANNED_STATUS]: plannedStatus.checked,
   });
-  const failures = [...trap.failures, ...prov.failures, ...unref.failures, ...metaCall.failures, ...cites.failures, ...anchors.failures, ...rosterFailures];
+  const failures = [...trap.failures, ...prov.failures, ...unref.failures, ...metaCall.failures, ...cites.failures, ...anchors.failures, ...plannedStatus.failures, ...rosterFailures];
   if (failures.length === 0) {
     console.log(
-      `✓ check-platform-checklist --self-test: ${trap.checked + prov.checked + unref.checked + metaCall.checked + cites.checked + anchors.checked} assertions — the trap-table extractor reads a good table and REFUSES an empty/renamed/reshaped one;` +
+      `✓ check-platform-checklist --self-test: ${trap.checked + prov.checked + unref.checked + metaCall.checked + cites.checked + anchors.checked + plannedStatus.checked} assertions — the trap-table extractor reads a good table and REFUSES an empty/renamed/reshaped one;` +
         ' `fixtures.provisioning.use` resolves both spellings (own-area key and `<area>:<recipe>`) and fires on all three dangling shapes;' +
         ' the unreferenced-recipe direction fires on a recipe nobody uses while leaving a cross-area consumer, a retired consumer and a `$`-annotation alone;' +
         ' and the `/meta` call-spelling refusal reads its vocabulary out of the live generated contract, fires on every folded spelling a `call` can instruct, and stays silent on the canonical singular, on parameter placeholders, and on the `why`/`expect`/`source`/`requires` prose that narrates the fold;' +
         ' and the line-citation limb DETECTS NOTHING ITSELF EITHER: the last forked grammar in this file went into the shared core at #18592, so what is pinned here is the BINDING — the corpus declaring `pathlessLineCitations`, a source read finding no citation regex and no detector while the same read DOES find the declaration, the binding driven ON and OFF against ONE text so the green is the declaration working rather than a text that would have matched anyway, the DARK case that a citation both grammars already agreed on keeps its verdict either way, the refusal to over-fire on this ledger\'s own HTTP statuses, config literals, URL ports, clock times and quoted JSON, and the live zero with the control that says it is a reading;' +
-        ' and the symbol-anchor limb DETECTS NOTHING AND RESOLVES NOTHING ITSELF: it is a registered corpus (#18107), so the grammar, the walk and the verdict are all `scripts/symbol-anchors.mjs`\'s, pinned here by a source read that finds no local extension set, no anchor regex and no detector while the same read DOES find the registration, by the anchorable-extension vocabulary being the shared OBJECT rather than a copy of it, by the `runs/` exclusion driven three ways on the live corpus (the subtree holds files, none is swept, the areas beside it still are, and dropping the exclusion puts them back), and by the #16898 binding re-taken through the registration — a call site / import / local parameter / string-substring all reading ABSENT, the positive control that a declaration and a complete quoted token still resolve, a `.json` key resolving where a `.json` value does not, an INLINE object-literal key reading absent where one at the start of a line resolves — with the closed, grow-never residual and the per-file anchor floor held in both directions beside it.',
+        ' and the symbol-anchor limb DETECTS NOTHING AND RESOLVES NOTHING ITSELF: it is a registered corpus (#18107), so the grammar, the walk and the verdict are all `scripts/symbol-anchors.mjs`\'s, pinned here by a source read that finds no local extension set, no anchor regex and no detector while the same read DOES find the registration, by the anchorable-extension vocabulary being the shared OBJECT rather than a copy of it, by the `runs/` exclusion driven three ways on the live corpus (the subtree holds files, none is swept, the areas beside it still are, and dropping the exclusion puts them back), and by the #16898 binding re-taken through the registration — a call site / import / local parameter / string-substring all reading ABSENT, the positive control that a declaration and a complete quoted token still resolve, a `.json` key resolving where a `.json` value does not, an INLINE object-literal key reading absent where one at the start of a line resolves — with the closed, grow-never residual and the per-file anchor floor held in both directions beside it;' +
+        ' and the `planned` status is driven on fixtures rather than on a ledger that carries none of it — the accept set widened without losing its closure, `since: null`/no-steps/personas relaxed for planned alone while the 264 live items are judged exactly as before, and the coverage ratchet held BOTH ways: a planned item beside an active one is silent, a kind whose only items are planned is UNMAPPED, and the bearing set is pinned NOT to contain `planned`.',
     );
     process.exit(0);
   }
@@ -2113,6 +2337,18 @@ if (symbolAnchorControl.failures.length) {
   for (const f of symbolAnchorControl.failures) console.error(`  ✗ ${f}`);
   process.exit(1);
 }
+// And for the `planned` status. Its schema half is exercised by the tree the
+// moment anyone authors a planned item; its COVERAGE half is not, and will not
+// be for as long as the ledger's planned count is the 0 this gate prints. A
+// deleted ratchet rule and an honest ledger print the same green, so the
+// fixtures below it are the only thing that can tell them apart.
+const plannedStatusControl = selfTestPlannedStatus();
+requireReachedVerdict('selfTestPlannedStatus', plannedStatusReachedVerdict);
+if (plannedStatusControl.failures.length) {
+  console.error("check-platform-checklist: the `planned` status check's own positive control FAILED — a metadata kind whose only checklist items are PLANNED would report as covered, which turns this ratchet from 'the platform tests what it has' into 'the platform intends to'.\n");
+  for (const f of plannedStatusControl.failures) console.error(`  ✗ ${f}`);
+  process.exit(1);
+}
 const inlineRosterFailures = batteryRosterFailures({
   [BATTERY_TRAP_VOCABULARY]: trapControl.checked,
   [BATTERY_PROVISIONING_USE]: provisioningControl.checked,
@@ -2120,6 +2356,7 @@ const inlineRosterFailures = batteryRosterFailures({
   [BATTERY_META_CALL_SPELLING]: metaCallControl.checked,
   [BATTERY_LINE_CITATION_BINDING]: citationControl.checked,
   [BATTERY_SYMBOL_ANCHORS]: symbolAnchorControl.checked,
+  [BATTERY_PLANNED_STATUS]: plannedStatusControl.checked,
 });
 if (inlineRosterFailures.length) {
   console.error('check-platform-checklist: the self-test battery roster FAILED — assertions stopped running, and every leg below would read the smaller count as a pass.\n');
@@ -2219,9 +2456,7 @@ for (const { file, stem, doc } of parsed) {
     if (!STATUSES.has(item.status)) where(`"status" must be one of ${[...STATUSES].join('|')}`);
     if (!PRIORITIES.has(item.priority)) where(`"priority" must be one of ${[...PRIORITIES].join('|')}`);
     if (!SURFACES.has(item.surface)) where(`"surface" must be one of ${[...SURFACES].join('|')}`);
-    if (typeof item.since !== 'string' || !/^v\d+(\.\d+)?$/.test(item.since)) {
-      where('"since" must be the release that introduced the capability, e.g. "v16" or "v16.0"');
-    }
+    for (const msg of statusFieldProblems(item)) where(msg);
 
     if (!Number.isInteger(item.revision) || item.revision < 1) where('"revision" must be an integer >= 1');
     if (!Array.isArray(item.history) || item.history.length === 0) {
@@ -2238,8 +2473,6 @@ for (const { file, stem, doc } of parsed) {
         }
       }
     }
-
-    if (!Array.isArray(item.steps) || item.steps.length === 0) where('"steps" must be a non-empty array of strings');
 
     for (const msg of trapProblems(item, TRAPS)) where(msg);
 
@@ -2262,7 +2495,12 @@ for (const { file, stem, doc } of parsed) {
       if (typeof item.retiredReason !== 'string' || !item.retiredReason) where('retired items must carry "retiredReason"');
     } else {
       if (!Array.isArray(item.acceptance) || item.acceptance.length === 0) {
-        where('active/draft items must have at least one acceptance clause');
+        // A planned item has no oracle to consult yet — that is what `planned`
+        // MEANS. Requiring a clause here would buy one written against a
+        // capability nobody has implemented, which is the ticking-on-vibes this
+        // ledger exists to refuse. Clauses it DOES carry are still validated
+        // below, so an early draft of the acceptance cannot rot unchecked.
+        if (item.status !== 'planned') where('active/draft items must have at least one acceptance clause');
       } else {
         item.acceptance.forEach((c, i) => {
           if (typeof c.clause !== 'string' || !c.clause) where(`acceptance[${i}] missing "clause"`);
@@ -2443,16 +2681,10 @@ if (!existsSync(COVERAGE_FILE)) {
         continue;
       }
       if (hasItems) {
-        mappedCount++;
-        for (const id of entry.items) {
-          if (!allIds.has(id)) err('coverage.json', kind, `maps to unknown item id "${id}"`);
-          else {
-            const mapped = allItems.find((r) => r.item.id === id);
-            if (mapped?.item.status === 'retired') {
-              err('coverage.json', kind, `maps to retired item "${id}" — point at its successor or re-waive the kind`);
-            }
-          }
-        }
+        const statusOf = (id) => allItems.find((r) => r.item.id === id)?.item.status;
+        const { problems, bearing } = coverageEntryProblems(entry.items, statusOf);
+        for (const msg of problems) err('coverage.json', kind, msg);
+        if (bearing > 0) mappedCount++;
       } else {
         waivedCount++;
       }
@@ -2605,18 +2837,23 @@ if (errors.length) {
 
 const total = allItems.length;
 const active = allItems.filter(({ item }) => item.status === 'active').length;
+// Printed beside `active` so the ledger's implementation status is visible from
+// the gate itself, not only from `pnpm gen:checklist-status`. A planned count
+// that climbs while `active` stands still is the ledger doing its job; one that
+// climbs while coverage stays green would be this gate failing at its.
+const planned = allItems.filter(({ item }) => item.status === 'planned').length;
 // Counted, not inferred. On this path it necessarily equals `recipeTotal` —
 // an unreferenced recipe would have exited above — but a line that RESTATES a
 // constant reports nothing, and this direction's whole risk is a green that
 // looks the same whether it ran or not.
 const recipesReferenced = [...recipesByArea].reduce((n, [area, keys]) => n + keys.filter((k) => referencedByArea.get(area)?.has(k)).length, 0);
 console.log(
-  `check-platform-checklist: OK — ${files.length} areas, ${total} items (${active} active); coverage: ${mappedCount} kinds mapped, ${waivedCount} waived;` +
+  `check-platform-checklist: OK — ${files.length} areas, ${total} items (${active} active, ${planned} planned); coverage: ${mappedCount} kinds mapped, ${waivedCount} waived;` +
     ` traps: ${TRAPS.size} documented, ${usedTraps.size} in use;` +
     ` provisioning: ${recipeTotal} area recipes, ${recipeRefs} item references resolved (${qualifiedRefs} area-qualified), ${recipesReferenced}/${recipeTotal} recipes referenced;` +
     ` meta-URL spelling: ${metaCallsScanned} \`call\` strings scanned against ${FOLDED_META_SPELLINGS.size} folded spellings;` +
     ` line citations: 0 survive across ${sweep.counts.docs} swept documents — \`file:line\`, a bare \`:NNN\` continuation and an \`L\` pin are all judged by \`symbol-anchors.mjs\`, through the same registration;` +
     ` symbol anchors: ${anchorsResolved}/${anchorsScanned} resolved by \`symbol-anchors.mjs\` (the ONE resolver, reached as a REGISTERED corpus) across ${sweep.counts.docs} swept documents against ${sweep.counts.citedSources} cited sources` +
     `, ${anchorsResidual} on the named #16898 residual, ${Object.keys(anchorFloors).length} file floors held;` +
-    ` (self-checks: ${trapControl.checked} trap-vocabulary + ${provisioningControl.checked} provisioning-resolve + ${unreferencedControl.checked} unreferenced-recipe + ${metaCallControl.checked} meta-call-spelling + ${citationControl.checked} line-citation-binding + ${symbolAnchorControl.checked} symbol-anchor assertions).`,
+    ` (self-checks: ${trapControl.checked} trap-vocabulary + ${provisioningControl.checked} provisioning-resolve + ${unreferencedControl.checked} unreferenced-recipe + ${metaCallControl.checked} meta-call-spelling + ${citationControl.checked} line-citation-binding + ${symbolAnchorControl.checked} symbol-anchor + ${plannedStatusControl.checked} planned-status assertions).`,
 );
