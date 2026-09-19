@@ -169,23 +169,46 @@ const CASE_SETS_DIR = join(ROOT, 'packages', 'spec', 'src', 'data');
  * among them. The literal `'packages'` here is such a component and nothing
  * more. Declaring the top-level root would be the fabrication one level up:
  *
- *   packages/**            259 files this gate reads, of 4903 tracked — 5.3%,
+ *   packages/**            names this gate for the whole monorepo to reach a
+ *                          population that lies entirely inside one subtree,
  *                          pasted into every packages/** prompt in the repo.
- *   packages/drivers/**    259 of 291 — 89%, over a subtree 17x smaller.
+ *   packages/drivers/**    names that subtree, which is where the walk starts.
  *
- * The remaining 32 files under `packages/drivers/` are the per-package
- * manifests, licences and changelogs; adding or removing a driver package moves
- * `discoverDrivers` through exactly those, so 89% is a floor rather than an
- * estimate.
+ * ⛔ The ratio is deliberately NOT written here, and this paragraph carries no
+ * digits. Both of its terms grow with the monorepo and mean nothing unless read
+ * together on ONE tree, so a pair copied into this docblock is a second home to
+ * refresh — and the copy that went unrefreshed is exactly what #15313 closed:
+ * the digits this paragraph used to carry had been superseded WHOLE, both terms
+ * at once, while still reading here as current. The dated reading has ONE home:
+ * the DECLARED-NARROWER row keyed
+ * `scripts/check-driver-conformance.mjs DRIVERS_DIR packages` in
+ * `scripts/pm/bare-root-worklist.mjs`, which records both terms together with
+ * the date and base commit they were taken at, the walk they were taken under,
+ * and the DIRECTION the declaration errs. That row is the authority; this
+ * paragraph is subordinate to it and states only what does not move.
+ *
+ * What does not move: every file the walk opens is under `DRIVERS_DIR` — the
+ * walk starts there and never climbs out — so the subtree hint cannot under-name
+ * the population and the top-level root can only dilute it. The declaration errs
+ * WIDE, never narrow: the residue inside the subtree is the per-package
+ * manifests, licences, changelogs and the configuration sitting beside them, and
+ * adding or removing a driver package moves `discoverDrivers` through exactly
+ * those.
  *
  * ## Why CASE_SETS_DIR is deliberately NOT declared
  *
  * The instrument can only express a SUBTREE — `collapseHint` strips globs, so
  * `packages/spec/src/data/*-conformance.ts` collapses to a path that names
- * nothing, and the only spellable claim is the whole directory. That directory
- * holds 143 tracked files of which this gate reads 7 (4.9%): a subtree
- * declaration there would name this gate for every Zod schema and unit test
- * beside the case sets. A missing lead costs one card one CI round; a
+ * nothing, and the only spellable claim is the whole directory. What this gate
+ * reads there is a FILENAME pattern — the `*-conformance.ts` case sets — and a
+ * minority of a directory that also holds the data domain's Zod schemas and
+ * their unit tests: a subtree declaration there would name this gate for every
+ * one of them. ⛔ No ratio is written here either, for the reason above and one
+ * more: the numerator grows with every case set added and the denominator with
+ * every schema beside it, so a pair written here goes stale with nothing having
+ * gone wrong — and unlike the drivers root this population has no worklist row
+ * to defer to, being absent from the array rather than a declared hint the
+ * bare-root sweep passes over. A missing lead costs one card one CI round; a
  * fabricated one is pasted into every prompt whose surface brushes it. So the
  * case-set side stays undeclared, and the refusal is pinned in the self-test
  * rather than left in this paragraph.
@@ -2061,10 +2084,11 @@ function selfTest() {
     driversRel.includes('/') && !ROOT_DIR_WATCH_HINTS.includes(driversRel));
   // The REFUSALS, pinned. Neither is an oversight to be tidied up later.
   expect('the bare top-level root is deliberately NOT declared -- `packages` is a path COMPONENT '
-    + 'here, and a subtree hint on it would name this gate for 4903 files to reach 259',
+    + 'here, and a subtree hint on it would name this gate for the whole monorepo to reach a '
+    + 'population that lies entirely inside one subtree',
     !ROOT_DIR_WATCH_HINTS.some((h) => h.replace(/\/\*+$/, '') === 'packages'));
   expect('CASE_SETS_DIR is deliberately NOT declared -- its population is a FILENAME pattern '
-    + '(*-conformance.ts, 7 of 143 files) and a subtree hint cannot express one',
+    + '(*-conformance.ts, a minority of that directory) and a subtree hint cannot express one',
     !ROOT_DIR_WATCH_HINTS.some((h) => CASE_SETS_DIR.slice(ROOT.length + 1).startsWith(h.replace(/\/\*+$/, ''))));
   // Provenance, never a lookup key: assertRootsResolvable stats both roots, so
   // the glob form appearing in either constant is a hard red on a dead root.
