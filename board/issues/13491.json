@@ -1,0 +1,35 @@
+{
+  "number": 13491,
+  "kind": "issue",
+  "title": "design: `isSystem` 写入是否在租户审计控制范围内?——#13178 类级装置(A/B/C)的共同前置,从未被裁过",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "security"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T14:42:23Z",
+  "updated_at": "2026-08-31T06:54:13Z",
+  "closed_at": "2026-08-31T06:53:08Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13491",
+  "body": "由维护者 2026-08-30 决裁批 #7 对 #13178 的裁定(verbatim「批 #7 同意」)同笔立卡:#13178 收窄到 4 处半修复先行,类级控制装置(CI 门禁 / 测试下抛 / 启动报告)**暂缓于本卡裁出范围之后**。\n\n## 待裁的问题\n\n**`isSystem` 写入到底该不该在「写入未带租户上下文」控制的范围内?**\n\n代码注释写着 \"unscoped by design\"——那是**声明,不是裁过的决定**(#13178 普查核实:无任何裁决记录)。而这个从未裁过的默认,决定了整个控制的有效人口。\n\n## 输入(#13178 普查,AST 级、带反例证明字面扫描漏一半)\n\n- 分母:**175 个写调用点**;其中 **24 个**真没带租户上下文;\n- **135 个(77%)在 posture 门(guard 4)之前就被 `bypassTenantAudit` 的 `isSystem` 门(guard 2)静音**——即使在唯一让告警放行的已围墙生产部署里,77% 的写入也到不了该控制;\n- 该控制历史上**从未发现过任何一例**——已知四例(#12745 · #12928 · #10673 · #8617)全部由人读调用点发现;\n- 控制形状自不自洽:最大静音门排在适用条件之前。\n\n## 悬而未决的定级输入(企业版 stamper 缺口)\n\n企业版 Middleware A(树外)在围墙部署上**会** stamp `organization_id` ⇒「调用点没带」≠「行落 NULL」。这个缺口决定伤害是 p1 还是 p3——**未定级,须在本卡内测清或由维护者判**。\n\n## 裁出范围后的下游(#13178 暂缓的三候选,各自的已测代价)\n\n- A(CI 门禁):能判 127/175,对 48 个运行时参数名站点结构性盲——73% 覆盖读起来像全覆盖,假保证风险;\n- B(测试下抛):最响亮,但会炸多少套件未测;\n- C(启动报告):dogfood 跑 single posture,报告放 posture 门后永远为空。\n\nRefs: #13178(普查与四例)· #12745 · #12928 · #10673 · #8617。"
+}

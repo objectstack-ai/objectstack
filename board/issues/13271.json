@@ -1,0 +1,37 @@
+{
+  "number": 13271,
+  "kind": "issue",
+  "title": "The MCP tool bridge never forwards `parameters` — bridged tools reach MCP clients with no input schema, and the docblock says it does forward one",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-29T16:39:34Z",
+  "updated_at": "2026-08-30T04:42:10Z",
+  "closed_at": "2026-08-30T04:42:10Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13271",
+  "body": "Found while re-closing the `tool.json` liveness ledger (refs #13042); unrelated to that card's file surface, so filed rather than fixed.\n\n## Measured at `74049254`\n\n`packages/mcp/src/mcp-server-runtime.ts`, `registerToolFromDefinition` — the method that turns each `AIToolDefinition` into an MCP tool — calls the SDK like this:\n\n```ts\nthis.mcpServer.registerTool(\n  tool.name,\n  {\n    description: tool.description,\n    annotations: {\n      destructiveHint: this.isDestructiveTool(tool.name),\n      readOnlyHint: this.isReadOnlyTool(tool.name),\n      openWorldHint: false,\n    },\n  },\n  async (extra) => { /* reads extra.arguments */ },\n);\n```\n\n`tool.parameters` is never read. `git grep -nE \"\\.(outputSchema|objectName)\" -- 'packages/mcp/src/**/*.ts'` returns nothing, and the only `tool.` reads in the file are `tool.name` (5 sites) and `tool.description` (1 site).\n\nSo a tool bridged by `bridgeTools` reaches an MCP client with a name and a description and **no input schema at all** — the client has to guess the argument shape. The handler then reads whatever arrived via `extra.arguments` without validating it against the schema the definition carries.\n\n## Why this reads as a defect rather than a design choice\n\nThe docblock immediately above the call says the opposite of what the code does:\n\n> Convert JSON Schema parameters to Zod-compatible format for MCP SDK. The MCP SDK registerTool with inputSchema expects a Zod raw shape or AnySchema. Since our tools use JSON Schema, we use the low-level .tool() with a raw callback and **pass the JSON Schema as annotations metadata**.\n\nThe `annotations` object that is actually passed carries only `destructiveHint` / `readOnlyHint` / `openWorldHint`. Nothing hands the JSON Schema anywhere. The comment describes a workaround that is not implemented, which is why this survived: a reader checking \"is `parameters` handled here?\" finds a sentence saying yes.\n\n`bridgeTools` is live wiring, not dead code — `packages/mcp/src/plugin.ts`, `start()`, duck-types `aiService.toolRegistry` and calls it when an AI service is mounted.\n\n## Not a liveness re-grade\n\n`tool.parameters` stays `live`: the cloud LLM path reads it (`cloud packages/service-ai/src/adapters/vercel-adapter.ts`, `buildVercelOptions`, wraps it with `jsonSchema` and passes it as the Vercel SDK `inputSchema`). This card is about the framework MCP surface only, where the same key is dropped. The asymmetry is now recorded in the `parameters` note in `packages/spec/liveness/tool.json`.\n\n## What a fix would need to decide\n\n1. Whether the MCP SDK version in use accepts a raw JSON Schema for `inputSchema`, or needs a JSON-Schema-to-Zod conversion at the boundary.\n2. Whether dropping the schema was ever deliberate (in which case the docblock is the thing to correct, and the drop should be stated as a known limitation of the bridge).\n\nEither way the docblock and the code should stop disagreeing."
+}

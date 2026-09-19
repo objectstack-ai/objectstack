@@ -1,0 +1,35 @@
+{
+  "number": 12971,
+  "kind": "issue",
+  "title": "metadata-core's CJS entry point is unloadable since #12843 — import.meta emitted verbatim into dist/index.cjs is a parse-time error, so the guarding try/catch never runs",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-28T11:28:20Z",
+  "updated_at": "2026-08-28T12:56:55Z",
+  "closed_at": "2026-08-28T12:56:07Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12971",
+  "body": "`@objectstack/metadata-core`'s CJS entry point is unloadable since #12843 — `import.meta` is emitted verbatim into `dist/index.cjs`, which is a PARSE-time error, so the guarding try/catch never runs.\n\n## Measured\n\nAt `fc8a33935` (current `main` tip), from a clean `pnpm turbo run build --force`:\n\n```\n$ node -e \"require('./dist/index.cjs')\"     # in packages/metadata-core\nWarning: Failed to load the ES module: .../packages/metadata-core/dist/index.cjs.\nREQUIRE FAILED: SyntaxError - Cannot use 'import.meta' outside a module\n```\n\n`dist/index.cjs:810`:\n\n```js\n    const req = _module.createRequire.call(void 0, import.meta.url);\n```\n\nSource: `packages/metadata-core/src/artifact-forward-conversion.ts:229`, in `resolveInstalledSpecVersion()`.\n\n## Why the existing guard does not hold\n\nThe function is written to be safe in both module systems, and its comment states the intended posture:\n\n> ESM build: anchor a require at this module's own URL. In the CJS build this branch is only reachable when the branch above already failed, and its transformed `import.meta.url` is `undefined` there — `createRequire` then throws and the catch below answers `null`, the documented posture.\n\nThat assumes the bundler **rewrites** `import.meta.url` in the CJS output. It does not — the identifier is emitted verbatim. And `import.meta` outside an ES module is a **syntax error at parse time**, not a runtime `undefined`: the module never begins executing, so neither the `typeof require === 'function'` fast path nor the `try/catch` around `createRequire` is ever reached. The whole CJS entry point of the package is unloadable, for every consumer and every code path — not just callers of `resolveInstalledSpecVersion()`.\n\n## Bisect\n\n- `b489d3c725e8` (the SHA cloud pinned before this): `git grep import.meta -- packages/metadata-core/src/` → **0 hits**.\n- `fc8a33935`: 1 live hit, at the line above. Introduced by `54e2d3692` — feat(metadata): versioned ADR-0087 forward conversion at the artifact-ingestion door (#12843).\n\n`packages/metadata-core/package.json` declares `\"type\": \"module\"` with a dual `exports` map (`require` to `./dist/index.cjs`), so the CJS condition is a published, supported entry point.\n\n## Downstream blast radius (measured in cloud)\n\nFiled from cloud#1712, the consumer bump that cannot land because of this. On a cloud worktree pinned at `fc8a33935`, the enterprise runtime refuses to boot: `@objectstack/organizations` is resolved through the CJS condition, fails to load, and the ADR-0093 D5 fail-closed tenancy wall then correctly refuses to serve:\n\n```\n✖ FATAL: tenancy posture 'isolated' was requested but @objectstack/organizations could not be loaded,\n  so the organization wall is INACTIVE. Refusing to boot ...\n  cause: Cannot use 'import.meta' outside a module\n```\n\nConsequences in `objectstack-ai/cloud`'s only required check (`build-and-test`):\n\n| suite | result at `fc8a33935` |\n|---|---|\n| `apps/objectos-ee` `test/signup-membership-policy.e2e.test.ts` | **3 failed / 2 passed (5)** — every case that boots the walled posture |\n| `apps/objectos-ee` `test:hotcrm-acceptance` | **2 files failed, 12 of 13 tests skipped** — collection-level, same cause |\n| `apps/cloud` | 284/284 passed (does not boot the walled EE runtime) |\n| `packages/service-cloud` | 1579/1579 passed (likewise) |\n\nThe break is not dodgeable by picking an earlier consumer pin: `54e2d3692` is an ancestor of `fc8a33935`, and cloud#1712 needs a SHA at or past `fc8a33935` (the `os migrate` host-composition fix, #12938 / #12952).\n\n## Suggested direction, not a prescription\n\nThe contract question is how `resolveInstalledSpecVersion()` should anchor its resolution in the CJS build at all. Two shapes worth weighing:\n\n1. Keep the dual-build and stop emitting `import.meta` into CJS — e.g. resolve the ESM anchor behind the bundler's own define/shim so the CJS output carries a real `undefined`, which is what the current comment already documents as the intended behaviour. Smallest change; keeps the documented posture true instead of aspirational.\n2. Drop the ESM branch and anchor only on the ambient `require` plus an explicit caller-supplied version, so there is one resolution path rather than two that must agree.\n\nWorth a gate either way: nothing currently asserts that each dual-built package's `require` entry point actually loads. A `require()` smoke over the CJS conditions in the build would have caught this at the commit that introduced it, and would hold the class rather than this one line.\n"
+}

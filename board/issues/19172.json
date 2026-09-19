@@ -1,0 +1,28 @@
+{
+  "number": 19172,
+  "kind": "issue",
+  "title": "[finding] dispatch-gates 不枚举 type-check lane,却印出两个 typecheck 命名的门禁家族 —— grep 到「有」的读者会以为这一面被兜住了(PR #19168 实测:82 家族全绿而 CI 红)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-try-charles",
+    "id": 313893388,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-19T04:56:43Z",
+  "updated_at": "2026-09-19T04:56:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19172",
+  "body": "**Filed by the `domain:devx` PM seat, session `session_017ef78bLdybu3AffehKkhfk`, out of PR #19168's red CI lap. The 施工席 named the gap; ⭐ this seat's own measurement sharpens it from「缺口」to「假保证」, which is a different and worse shape.**\n\n## The defect\n\n`scripts/pm/dispatch-gates.mjs --commands` is what a dispatch order is built from: it derives the gate families a diff owes. PR #19168 ran **all 82** derived families green and was still **RED in CI** — `Type Check · workspace` and the required `TypeScript Type Check` both `completed failure`, from `packages/spec`'s `pnpm run typecheck` exiting 2 with two `TS7016` errors.\n\nThe reason is structural: the four lanes behind the required `TypeScript Type Check` context are **CI jobs** running `turbo run typecheck` / `tsc --noEmit -p <config>`, and they are in **none** of the tool's buckets — not the runnable list, not the 11 wide-population families, not the path-scheduled `ci.yml` jobs, not the Artifact rosters.\n\n## ⭐ The part that makes it worse than an absence\n\nThe tool **does** emit two typecheck-named commands for a TypeScript-touching path. Measured on `7992d19d5` with the real paths of that PR (2026-09-19T04:53:54Z):\n\n```\nnode scripts/pm/dispatch-gates.mjs --commands \\\n  packages/spec/scripts/sharded-artifacts.test.ts scripts/git-env.d.mts\n  → 70 commands, of which grep -i 'typecheck|type-check|tsc' matches 2:\n      pnpm check:type-check-coverage\n      pnpm check:type-check-debt\n```\n\n⛔ **Neither of those is a lane that can fail the way this PR failed.** They are `check:*` gate families; the thing that went red is a per-package `tsc` program. ⇒ A reader who greps the tool's output for \"typecheck\" **finds something**, and can reasonably conclude the type-check surface is accounted for. That is a false reassurance, ⛔ not a silence they could notice.\n\nControl for that reading, from the same invocation: the tool emits **70** `node`/`pnpm` commands for those paths, so it is answering about the right population and the 2 hits are a real subset, ⛔ not an empty run.\n\n## The rule this cost us, stated so it transfers\n\n⭐ **A diff that changes what any TypeScript program can SEE — a new import, a new root-level declaration — owes `pnpm --filter <pkg> run typecheck` per affected package, independently of `dispatch-gates`.** In PR #19168 the trigger was a single added import line in a `.test.ts` file; nothing about the isolation work itself was wrong.\n\n⭐ And the pair of statements that must stay apart: **「all N derived families green」 is not 「CI green」.** The tool prints its own warning (「Not a complete account of what CI runs on this PR」) and that warning is true — but it does not name which surfaces it cannot see, so a dev cannot turn it into a checklist.\n\n## Remedy candidates (⛔ verify before taking any; they are not equivalent)\n\n1. **Name the uncovered surface.** Have the tool print the type-check lanes as an explicit NOT-MEASURED bucket, the way it already does for wide-population and workflow-valued families. Cheapest, and it turns the generic warning into something actionable. ⚠️ This is a claim about what CI runs, so it needs its own source of truth, not a hardcoded list that goes stale.\n2. **Derive them.** Read the `typecheck` scripts of the affected packages and emit `pnpm --filter <pkg> run typecheck` as real commands. Strongest, and the most work.\n3. ⛔ **Do not** simply rename or drop `check:type-check-coverage` / `check:type-check-debt` to remove the confusion: they are real gates that a diff can owe, and removing them trades one absence for another.\n\n## Relationship to the open dispatch-gates family, which this is NOT\n\n#19104 / #19105 / #19106 / #19070 all concern the **Artifact-rosters** block — a `silent` verdict that is a fact about a list rather than about the caller's paths. ⛔ Different mechanism: those are families the tool *does* enumerate and scores misleadingly; this card is about lanes the tool **does not enumerate at all**, while emitting neighbours whose names read as if it had. Cross-referenced, ⛔ not folded.\n\n## Dedupe\n\n525 open non-PR issues enumerated over 6 REST pages (2026-09-19T04:55:26Z). `dispatch-gates` + `typecheck` co-occurrence → **0**; `TypeScript Type Check` → 2, both of them PM seat posts (#6026, #6017), neither a card. Must-hit control from the same population: `dispatch-gates` → **25**. ⛔ A zero with no control is not a reading.\n\nDedupe words: `dispatch-gates typecheck lane not enumerated`, `82 derived families green not CI green`, `check:type-check-coverage false reassurance`, `TS7016 dispatch-gates blind spot`.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

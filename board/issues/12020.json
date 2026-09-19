@@ -1,0 +1,36 @@
+{
+  "number": 12020,
+  "kind": "issue",
+  "title": "Extend the packaged-permission-set lock to the `restore` leg of the write-through — the one write point it does not guard",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "security"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T05:08:18Z",
+  "updated_at": "2026-08-30T14:24:22Z",
+  "closed_at": "2026-08-30T14:24:22Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12020",
+  "body": "Filed unassigned by the `domain:services` execution seat while running the #11725 probe. **No `pm:queue`** — grading is triage's field. Triage on #11725 was explicit that this fix \"wants its own review, do not fold it into the probe PR without reporting first\", so it is recorded here rather than implemented there.\n\n## What the probe measured\n\n`createPermissionSetWriteThrough` has four write legs. `insert` and `update` open with `assertPermissionSetNotPackageDeclared` (the 2026-08-24 \"lock the base, clone to customize\" ruling, PR #11702). The `restore` leg does not: it re-authors the restored record's body into metadata with no provenance check, and it **catches rather than throws**, because it runs after the engine has already un-trashed the row.\n\nThat gap was named by #11702's own author and accepted as a residual, not a defect. The probe confirms both halves:\n\n- **The residual is real.** On an identical fixture the `update` leg refuses and the `restore` leg re-authors. Measured, not read.\n- **It has no producer today.** `restore` is not a member of the engine's middleware dispatch vocabulary (objectql's #7809 weld, which drives a real engine through every public method), and it never derives as an API operation (`API_METHOD_DERIVATION.restore.flag` is permanently `false` since `enable.trash` was retired in #2377 / ADR-0049). A real recycle bin is parked at #3146.\n\n## Why it is worth closing anyway rather than leaving fenced\n\nTwo gates would sit in front of this leg if `restore` ever dispatched, and **each has a documented blind spot on exactly the shape the lock exists for**:\n\n1. `security-plugin.ts`'s `assertPackageManagedWriteGate` admits `restore` into its package-row refusal, but keys on the `managed_by` **column** — which `packaged-permission-set-lock.ts`'s own header records as measurably the wrong fact, too narrow in precisely the `provenance_skip` direction (`permission-set-drift.ts`): a genuinely package-declared set whose column does not read `'package'`.\n2. The producer's ADR-0005 tier gate inside `saveMetaItem` is what the documented `OS_METADATA_WRITABLE=permission` operator hatch switches off — the same hatch that motivated #11513 / #11702 in the first place.\n\nSo \"something else already covers it\" is not an answer, and the coverage question should be settled while it is cheap rather than on the day #3146 lands.\n\n## The shape of the work, and the reason it is not a copy-paste\n\n⚠️ #11702's author gave the reason the lock is not simply repeated here: a throw **after** the record is restored strands the caller with a healthy-looking row and no signal, which is why this leg and its neighbours catch rather than throw. So the fix has a real design question in it — refuse before the un-trash, refuse after and compensate, or report on the durability channel — and that is what wants a review rather than a mechanical edit.\n\n## Tripwire already in place\n\nPR for #11725 lands `packages/plugins/plugin-security/src/packaged-permission-set-restore-leg.test.ts`, whose MEASURED RESIDUAL case pins today's behaviour deliberately. **Whoever takes this card inverts that case in the same PR** — that inversion is the signal that the lock actually reached this leg, and the file's header says so.\n\nRefs: #11725 (the probe, and where this was measured) · #11513 / PR #11702 (the ruling and the save-door lock) · #3146 (the parked recycle bin that would make this reachable) · #7809 (the dispatch-vocabulary weld) · #11843 stays open and asks a different door."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 13100,
+  "kind": "issue",
+  "title": "[finding] Page published via metadata API is unreachable for end users: no navigation entry, absent from command palette search",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "needs-user-decision",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-29T05:11:02Z",
+  "updated_at": "2026-08-29T12:51:40Z",
+  "closed_at": "2026-08-29T12:51:40Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13100",
+  "body": "Product discovery from an internal demo production run (video-studio #151), recorded here unassigned per repo convention — not claiming, not proposing a specific fix.\n\n**Observed** (HotCRM carrier app, dev server, 2026-08-29): a custom React page created and published through the metadata API renders correctly at its direct URL, but:\n\n- it appears in **no navigation group** — all 26 app navigation links were scanned with every group expanded;\n- the **command palette search cannot find it** (searching by page name returns nothing);\n- the only way to reach it is a direct link.\n\n**Root cause established (code-level evidence, 2026-08-29 follow-up)** — an agent *cannot* register the nav entry itself, even if asked to:\n\n1. `GET /api/v1/meta/types` — the `app` type carries `allowRuntimeCreate=true`, **`allowOrgOverride=false`**, `supportsOverlay=true`.\n2. `GET /api/v1/meta/app/crm_enterprise` — this app's `packageId` is `app.objectstack.hotcrm`, i.e. a code package.\n3. Overlay writes are gated on `OVERLAY_ALLOWED_TYPES` = types whose `allowOrgOverride` is true — **`app` is not among them**.\n4. Platform's own refusal text: `[not_overridable] … is provided by a code package and the type has not opted into per-org overlay writes (allowOrgOverride=false). Edit the source artifact and redeploy, or set OS_METADATA_WRITABLE …`\n5. Second gate behind it: `namedBase && !isWritablePackage(engine, packageId)` → `readOnlyBaseOverrideError`.\n\nSo `app` can be **created** at runtime but its **code-package instance cannot be overlaid**. HotCRM's navigation lives in `src/apps/crm.app.ts` (code package), so the only sanctioned path is \"edit source and redeploy\". The nearest runtime-only approximation is for the agent to create *its own* app and put the page in that app's `navigation` (`{id, type:'page', pageName, label, icon}` is a valid shape; `nav_account_workbench` is an existing example) — but that is a *different application* in the launcher, not an entry in the CRM the team already uses.\n\n**Why it matters**: in the \"AI builds a page into your running app\" flow, the page an agent publishes is unreachable for end users, and the agent has no in-protocol way to fix that. Either publishing should be able to register a nav entry for the target app, or published pages should at least be findable in palette search.\n\n⚠ Evidence level, stated honestly: the above is **code-level** (platform decision functions and verbatim refusal text). A live confirmation — one `?mode=draft` overlay write against `crm_enterprise`, which would prove the refusal without taking effect — was **blocked by the session permission gate and not worked around**, so there is no live receipt.\n\nRelated but distinct: #3371 covered palette record-search hits; this is about published **pages** being undiscoverable and un-registerable."
+}

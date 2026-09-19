@@ -1,0 +1,36 @@
+{
+  "number": 13310,
+  "kind": "pull_request",
+  "title": "docs(spec): pin the derived related-list sort-inheritance rule in relatedList's describe",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "protocol:data",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T02:45:12Z",
+  "updated_at": "2026-08-30T05:42:19Z",
+  "closed_at": "2026-08-30T05:42:18Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-30T05:42:18Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/13310",
+  "body": "Fixes #13294\n\n## What\n\nPins the derived related-list sort-inheritance rule as contract text on `relatedList`'s `.describe()`, the same way `relatedListFilter` was pinned by #8704. The behaviour is already landed and browser-verified — #11345's 2026-08-29 acceptance run — this PR only makes the rule readable in the spec's own contract text instead of living solely in comments/PR history.\n\nThe pinned text states:\n\n- **Inheritance source**: a derived related list (`relatedList: 'primary'`) inherits its row order from the child object's DEFAULT list view `sort` — the `isDefault` expanded view, or the first declared list item when none is marked default (resolver `expandViewContainer`, `ui/view.zod.ts`).\n- **Wire spelling**: the REST shorthand `sort=FIELD` / `sort=-FIELD` (objectui's `serializeOrderBy` lowers `QueryParams.$orderby` to this on the wire) — never the OData `$orderby` token.\n- **Negative half**: a child object with no list-view sort emits no ordering parameter at all, and rows fall back to record-id order.\n\nText-only change — the `relatedList` accept-set (`z.union([z.boolean(), z.literal('primary')]).optional()`) is byte-identical before and after; only the `.describe()` string and the JSDoc block above it grew.\n\n## Describe text — before / after\n\n**Before:**\n```\nShow this child collection as a related list on the parent's detail page (read-side mirror of inlineEdit). false = suppress; true/absent = shown (stacked under the shared \"Related\" tab); 'primary' = core relationship, promoted to its own tab. Prominence intent, not a layout switch (ADR-0085).\n```\n\n**After** (appended sentence, following the #8704 `relatedListFilter` pattern):\n```\n… Prominence intent, not a layout switch (ADR-0085). A derived related list (relatedList: 'primary') inherits its row order from the child object's DEFAULT list view sort — the isDefault view, or the first declared list item when none is marked default; wire spelling is sort=FIELD / sort=-FIELD, never $orderby. A child object with no list-view sort emits no ordering parameter, and rows fall back to record-id order.\n```\n\n## Pin test\n\nAdded two tests in `packages/spec/src/data/field.test.ts` (immediately before the `relatedListFilter` family, same structural spot the #8704 precedent sits in), asserting both halves of the contract text — a one-directional assertion would leave the other half free to drift silently:\n\n- `relatedList contract text states DEFAULT-list-view sort inheritance and its wire spelling`\n- `relatedList contract text states the negative half: no list-view sort ⇒ no ordering parameter`\n\n## Regenerated reference pages\n\n`pnpm --filter @objectstack/spec check:generated` reported `content/docs/references/**` stale after the describe edit (1 of 14 artifacts); regenerated with `pnpm --filter @objectstack/spec gen:docs` (the only stale one — never the whole set). Three pages embed the `Field` schema table and all three moved identically (same one-line describe update, no unrelated drift): `content/docs/references/data/field.mdx`, `content/docs/references/data/object.mdx`, `content/docs/references/system/migration.mdx`. Re-ran `check:generated` after — all 14 generated artifacts up to date.\n\n## Changeset\n\n`.changeset/relatedlist-sort-inheritance-pin.md` — `@objectstack/spec: patch` (text face, per the card's landing note).\n\n## Tests\n\nAt commit `3865d2c7` (this branch's HEAD):\n\n- `pnpm --filter @objectstack/spec build` — clean, all 34 declared `.d.ts` present.\n- `pnpm --filter @objectstack/spec exec vitest run --maxWorkers=2 src/data/field.test.ts` — **203 passed (203)**, including the 2 new pin tests.\n- `pnpm --filter @objectstack/spec check:generated` — **all 14 generated artifacts up to date** (after `gen:docs`).\n- `pnpm --filter @objectstack/spec typecheck` — clean (`tsc --noEmit`, `check:scripts-typecheck`, `check:test-typecheck` all pass; test-typecheck debt ledger unchanged at 54 files / 262 errors).\n- `pnpm check:nul-bytes` — OK (7360 text files scanned, no raw ASCII control bytes).\n\n## Clause-② / draft status\n\nPath limb fires (`packages/spec/src/**`) even though the content limb doesn't (pure describe prose, no accept/reject change) — per the card's own landing note, this PR stays **draft** with `needs:contract-review` on both the PR and the card; the contract-review chain owns enqueue, not me.\n\nRefs: #11345 (verified behaviour + close condition) · #8704 (the pin pattern) · objectui#6088 (the implementation)\n\nSession: https://claude.ai/code/session_01KX8wnyjStaZcuMyAMNsy3N"
+}

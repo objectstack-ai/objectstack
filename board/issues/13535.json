@@ -1,0 +1,33 @@
+{
+  "number": 13535,
+  "kind": "pull_request",
+  "title": "Price the coveringKey refusal's miss with its exception, not as a flat average",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T17:53:50Z",
+  "updated_at": "2026-08-30T18:26:08Z",
+  "closed_at": "2026-08-30T18:26:07Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-30T18:26:07Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/13535",
+  "body": "Fixes #13467\n\n`coveringKey`'s refusal docblock priced every missed import-edge lead at **\"the miss costs one CI round.\"** That sentence is its own named witness's price — `scripts/pm/bare-root-worklist.mjs --self-test`, whose family `lint.yml` runs on every PR — and an **average** over the class. The next reader quotes it as the price of every individual lead. For a minority it is wrong.\n\n## What changed\n\nOne paragraph in the `coveringKey` docblock, plus three `--self-test` assertions that re-derive it. Nothing else: the refusal itself (fifth key, fan-in threshold) is untouched, and so are the five paths-filtered patrol workflows.\n\nThe docblock now states the **shape** and the self-test prints the **sizes**, because this figure has already been measured at three different values on three different days:\n\n- the large majority of novel pairs sit in a family at least one **unfiltered** workflow runs — CI opens that module on this PR whatever the derivation said, so one round really is the whole price;\n- the rest sit in families **no every-PR workflow runs**, where nothing on the PR repays the miss and the family next executes on its own cadence, detached from the change.\n\n## Re-derived, not quoted\n\nThe card's numbers are deliberately not carried over. Re-derived on this tree at `90705ffa0`, printed live by the new pins:\n\n```\nthe \"one CI round\" price is an average, not a uniform one - 9 of 244 novel\npair(s) sit in families no every-PR workflow runs (cut-rc.yml,\nhalf-state-patrol.yml, prerelease-pin-watch.yml, release-coverage-patrol.yml,\nrelease.yml, required-set-patrol.yml, validate-deps.yml)\n...and the deferred pair(s) concentrate on the heads rather than the tail:\n8 of 9 land on a module more than 3 families import\n```\n\nThe card said 231/10 of 241; today it derives **235/9 of 244**. Two things the re-derivation corrected, both now reflected in the prose rather than the card's wording:\n\n1. ⚠️ **The deferral is of the LEAD, not of the load break.** The card says a load break in those four helpers \"goes green on the PR\". Measured, it does not: `invoked-as.mjs` is imported by 122 families, **118 of which run on every PR** (`import-prerequisite.mjs` 44, `workspace-enumerator.mjs` 10, `check-shard-attestation.mjs` 2). A module that fails to *load* reddens the PR through a sibling. What actually defers is the narrower break — one only the deferred consumer would have seen. This is now a pinned assertion, so the docblock cannot drift back into the stronger claim.\n2. The deferring workflow set is wider than the card's five: `cut-rc.yml` and `release.yml` also carry deferred families. The pin prints the live set rather than freezing a list. ⛔ No workflow was edited.\n\n## Why pins rather than numbers in prose\n\nThe docblock already says its staleness alarms are re-derived every `--self-test` run. Three assertions were added in that same block:\n\n- the split itself — green while the deferred half exists and stays a small minority; red if it vanishes (paragraph stale) or grows large (framing understates);\n- the anti-over-read half — every module carrying a deferred pair is also imported by an every-PR family;\n- the concentration — most deferred pairs land on a module more than 3 families import (the tail boundary the aggregate paragraph already uses).\n\nA red in any of them re-prices the paragraph; it does not fault the derivation. That is stated in the comment above them.\n\n## Verification\n\n`node scripts/pm/dispatch-gates.mjs --self-test`: 976 cases before, **979 pass** after.\n\nReverse-verified by two ablations, each mutating the derivation input, each confirmed on disk by blob hash and restored to the exact HEAD blob:\n\n| ablation | pins reddened |\n|---|---|\n| classify no workflow as every-PR | split pin ✗ (`244 of 244`), load-break pin ✗ |\n| fan-in threshold raised past every module | concentration pin ✗ (`0 of 9`) |\n\nBoth restored: `git diff HEAD` empty, blob back to `6d10cec9`.\n\nGate family derived from the diff by `dispatch-gates.mjs --changed --repo objectstack-ai/objectstack` (14 families), all run at `90705ffa0`, all EXIT=0 with the exit captured before any pipe: `check:pm-dispatch-gates` · `bare-root-worklist.mjs --self-test` (this tool's only real static importer — verified: the two `.test.ts` files mentioning it do so in prose only) · `check-self-test-wired` · `check:agent-test-spelling` · `check:bash32-floor` · `check:cli-command-ids` · `check:cross-package-test-inputs` · `check:entry-guard` · `check:parse-guard` · `check:pnpm-filter-targets` · `check:watch-hint-literal` · `check-ci-filter-parity` · `check-shard-attestation` · `check:nul-bytes`.\n\n`check-test-completeness.mjs` exits **3 = NOT MEASURED** (neither red nor green).\n\n## Changeset\n\nNone owed — the diff is one file under `scripts/pm/**`, internal PM tooling that publishes nothing from any package. `skip-changeset` applied.\n\n## Out of scope, deliberately\n\n⛔ The refusal itself is not touched. ⛔ The five paths-filtered patrol workflows are not touched. The card's escalation measurement — whether such a deferred break has ever actually shipped — was **not commissioned and was not run**; see the report comment for what the fan-in reading above implies about it.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Pk26oZ12t5N1hwGW1m1MgC)_"
+}

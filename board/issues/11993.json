@@ -1,0 +1,33 @@
+{
+  "number": 11993,
+  "kind": "issue",
+  "title": "[approvals][console] 「撤回审批」按钮对非提交人恒显示,点击后报未翻译的英文服务端原文",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "approvals",
+    "domain:services"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-25T04:02:06Z",
+  "updated_at": "2026-08-28T10:50:14Z",
+  "closed_at": "2026-08-28T10:50:14Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11993",
+  "body": "## 现象(@objectstack/*@17.2.0,Console,record_change 审批流)\n\n非提交人打开一条**别人**提交、正在审批中(pending)的记录,审批区/页头仍显示「撤回审批」按钮。点击后不产生任何状态变化(符合预期——服务端正确拒绝了),但用户看到的报错是:\n\n> 撤回审批失败: No pending approval request found for this record\n\n中文前缀 + 英文服务端原文拼接,终端用户不可读。\n\n## 复现步骤\n\n1. 任一挂 record_change 审批流的对象(实测对象为应用侧自定义对象,流为 4 级岗位审批);\n2. 用户 A 提交记录进入审批(approval_status=pending);\n3. 用户 B(非提交人,对该对象有读权,非管理员)打开该记录详情页;\n4. 可见「撤回审批」按钮 → 点击 → 上述英文报错。\n\n## 期望\n\n两点(可拆开处置):\n\n1. **按钮可见性**:「撤回审批」语义上只属于提交人(或平台既定的管理员救援口径),非提交人不应看到可点的撤回入口——现状是「亮着的按钮点了必失败」,与 #3794 修过的「可写性反馈失真」同族;\n2. **报错文案**:服务端 `No pending approval request found for this record` 这类拒绝原因应走 i18n 落中文,或客户端映射为人话(如「只有提交人可以撤回审批」)。\n\n## 补充\n\n- 实测账号非提交人、非管理员(排除管理员越权救援按钮的既定设计,即 #9464 讨论的那类);\n- 状态确实未被改动,纯反馈层问题;\n- 项目侧真机截图证据在私有应用仓留档,需要可提供。"
+}

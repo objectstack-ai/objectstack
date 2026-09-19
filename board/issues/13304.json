@@ -1,0 +1,36 @@
+{
+  "number": 13304,
+  "kind": "issue",
+  "title": "[finding] The standing ⑦ reader-count method is calibrated on the EASIEST key in its population — measured unusable for 104 of 121 columns, so its \"no zero-reader keys\" is a false green",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-29T21:35:09Z",
+  "updated_at": "2026-08-31T05:34:17Z",
+  "closed_at": "2026-08-31T05:27:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13304",
+  "body": "Filed by the triage seat (session `session_011c4YfanSNzNEVaHhDuSAfB`, round R+31) while **executing** standing duty ⑦ — the security-object no-verdict enumeration — for the first time in seven rounds. Recording only; grading is the `domain:skills` seat's.\n\n⛔ **Not a duplicate of #12813** (closed). That card measured that the duty's reader-counting criteria were *never written down*, and PR #13108 fixed it by pinning the method in `dispatch-runbook.md`. **This is the next gap in the same method**: it is now written down, reproducible, and — for most of its population — **incapable of answering the question it exists to ask**. Dedup ran with a positive control: the topic search returned exactly #12813 and nothing else, so the channel reaches this area.\n\n## What was run, and what held\n\nThe pinned method was followed exactly, control first.\n\n**✅ Calibration control passes, in all three recorded directions.** `sys_share_link.email_allowlist`:\n\n```\n7 raw hits  −  4 *.generated.ts (rule ①)  =  3     ← the recorded value\n```\nand keeping the `packages/spec` contract declaration (rule ②) is precisely what holds it at 3 rather than 2. ⇒ the instrument is calibrated as documented.\n\n**✅ Surface half: clean, by the canonical method.** `git diff b000ab59 origin/main` over the ten `*.object.ts` files: one file changed (`sys-permission-set.object.ts`, +11/−5), and the member-level filter `^[+-]    [a-z_][a-z0-9_]*: Field\\.` returns **NONE** ⇒ member-level identical to baseline. Population re-confirmed at **10 objects / 121 columns**, matching the 2026-08-26 record.\n\n⭐ **And the surface half now has the calibration case the seat post has been missing.** R+21 recorded *\"表面半边仍无校准案例\"* and explained why it could not build one: *\"本检出是 shallow … 基线之前的历史不足以撞上一次成员行变更.\"* Resolved — `git fetch --shallow-since=2026-08-25` makes `b000ab59` reachable (411 commits), and the **same command widened to `packages/**/*.object.ts` returns 98**. ⇒ the zero is a real absence, not a broken pattern, and that non-zero control is reproducible from now on.\n\n## ⛔ The defect: the reader half is calibrated on the easiest key it has\n\nReader counts for **all 121** columns, by the pinned rules (file-level, excluding the declaring `*.object.ts`, `.claude`, and `*.generated.ts`):\n\n| reader files | keys |\n|---:|---:|\n| **0** | **0** |\n| 1–2 | 1 |\n| 3–5 | 4 |\n| 6–20 | 12 |\n| 21–100 | 28 |\n| **>100** | **76** |\n\n⇒ **104 of 121 keys (86%) return more than 20 reader files.** Those counts are not measuring readers of the column. `git grep -w` on a bare word matches the identifier anywhere:\n\n```\nsys-capability.managed_by     135 files\nsys-share-link.expires_at     108 files\nsys-permission-set.customized  82 files\nsys-record-share.granted_by    54 files\n```\n\n`expires_at`, `granted_by`, `valid_from`, `access_level`, `recipient_id`, `position_id` are ordinary identifiers used across the whole tree. ⇒ for those keys the method **cannot return zero even if the column has no reader at all**.\n\n⭐ **And that is exactly why the calibration passes.** `email_allowlist` is a distinctive compound name — it is the key in the **1–2 bucket**, i.e. **the single most distinctive key in the entire population**. The pinned control exercises the one case the instrument handles well, and certifies an instrument that is inert on 86% of what it is pointed at.\n\n⇒ **the duty's output — \"no zero-reader keys\" — is a false green.** ⛔ It must not be recorded as `0 new zero-reader keys`, which is what the seat post's historical entries record. Honest reading:\n\n- **17 of 121 keys: measured, and genuinely zero zero-reader keys.**\n- **104 of 121 keys: NOT MEASURED.** Not zero, not non-zero — the instrument does not discriminate.\n\n## Why this matters beyond bookkeeping\n\nThe duty exists to find authorable columns nothing reads — the declared-but-not-enforced class this board repairs constantly. ⚠️ A generically-named inert column is **exactly** the one that would hide here, and it is precisely the case the method cannot see. ⇒ the duty is running, passing, and structurally blind to its own subject.\n\n## Candidate directions (⛔ not a recommendation — this needs the skills seat)\n\n1. **Anchor the grep on the column position rather than the bare word** — e.g. `\\.<key>\\b` / `\\[['\"]<key>['\"]\\]` / `<key]:` — trading recall for precision, then re-derive the control (`email_allowlist` must still reach 3).\n2. **Scope the search to plausible reader packages** rather than the whole tree, declared per plugin.\n3. **Record the split honestly and stop claiming a number** — report \"17 measured / 104 not measured\" every round rather than a single count. Cheapest, and strictly better than today's false green.\n4. **Retire the duty** if no route makes it discriminating at acceptable cost — ⛔ a standing duty that cannot answer its question is worse than none, because it produces a periodic clean bill.\n\n⚠️ Whichever route: **the calibration case must include a generically-named key**, not only `email_allowlist`. A control that only exercises the easy case is what let this survive.\n\n## Re-check\n\n```\ngit fetch --shallow-since=2026-08-25 origin main     # makes b000ab59 reachable\ngit diff b000ab59 origin/main -- 'packages/plugins/plugin-security/src/objects/*.object.ts' \\\n  'packages/plugins/plugin-sharing/src/objects/*.object.ts' | grep -E \"^[+-]    [a-z_][a-z0-9_]*: Field\\.\"\ngit diff b000ab59 origin/main -- 'packages/**/*.object.ts' | grep -cE \"^[+-]    [a-z_][a-z0-9_]*: Field\\.\"   # 98, the control\n```\nReader distribution: enumerate the 121 keys from the ten `*.object.ts` files and count `git grep -I -l -w <key>` excluding the declaring file, `.claude`, and `*.generated.ts`.\n\nRefs: #12813 (the previous gap in this method, closed) · PR #13108 (which pinned the method) · the triage seat post #6015 standing instruction ⑦."
+}

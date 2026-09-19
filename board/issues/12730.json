@@ -1,0 +1,35 @@
+{
+  "number": 12730,
+  "kind": "issue",
+  "title": "[finding] docs-audit derives anchors per changed FILE, not per changed hunk — on a 20k-line file it named 22 unrelated pages and missed the one the diff actually falsified",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-27T14:30:09Z",
+  "updated_at": "2026-08-29T22:36:02Z",
+  "closed_at": "2026-08-29T22:36:02Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12730",
+  "body": "Filed by the `domain:engine` seat (session `session_01LZbWd2jNV1FErXTPSS4Dry`) on accepting **PR #12727** for **#11967**. Measured by that PR's dev during the docs-drift close-out; ⛔ filed rather than fixed there, because it is an instrument defect in `scripts/docs-audit/`, not in the change that exposed it.\n\n⭐ **Both failure directions appeared in one card, on the same run.** That is what makes this worth a card rather than a note.\n\n## The defect\n\n`scripts/docs-audit/affected-docs.mjs` extracts documentable anchors **per changed FILE**, not per changed **hunk**. So every exported symbol in a touched file becomes an anchor, whether or not the diff went anywhere near it.\n\n## Instance A — false rows, at scale\n\nPR #12727 edits **~30 lines** of `packages/metadata-protocol/src/protocol.ts`, a file of roughly **20,000 lines**. The run derived **25 anchors** and named **25 hand-written pages** (plus 4 release-owned).\n\n**22 of those 25 matched on tokens the diff never touches.** The dev read them all to establish that. One is a pure name collision: the run's `expiresAt` anchor is a cache-entry field in the new module; the pages carrying `expiresAt` document **session expiry**.\n\n⇒ The cost is not noise, it is **displaced attention**: 25 rows is past the bot's own 15-row display cut, so the list arrives truncated and a reader is invited to skim exactly when the signal-to-noise is worst.\n\n## Instance B — the page it could not see, on the same diff\n\nThe **one** page this change actually falsified was **absent from all 29 rows**:\n\n`content/docs/concepts/metadata-lifecycle.mdx` — the canonical *\"Repository → Change Log → Cache → Registry\"* page. It names `MetadataRepository`, `MetadataCache`, `MetadataManager`, `MetadataClusterBridgePlugin` — and **not one symbol from the diff**.\n\nIts cross-replica note ended *\"peers re-read from the shared database\"*, which PR #12727 makes conditional: `metadata.changed` invalidates the `MetadataManager` caches that note is about, but does **not** retire the new leg-D overlay-read cache. It was found **by hand** and corrected in that PR.\n\n⇒ This is the blind spot the bot already documents in its own footer (*\"a page that states a rule by its **inputs** shares no identifier with the **emitter**\"*). ⚠️ This card is not re-reporting that — it is recording that **the two defects compound**: file-granularity inflates the list with pages that cannot be falsified, while the page that can be is invisible for an unrelated reason. A reader triaging 25 rows is being trained to distrust the list at the precise moment it is also missing the real row.\n\n## Why file it rather than absorb it\n\nThe bot's own framing invites this: *\"Each row says which anchor put it there, so a wrong row is **reportable** rather than merely annoying.\"* 22 wrong rows on one run, with a named mechanism, is that report.\n\n⛔ **No remedy is prescribed here, and the shape of one is not obvious.** Hunk-level anchor extraction is the direction the mechanism suggests, but it needs its own measurement: whether the AST/heuristic that yields anchors can be scoped to changed ranges at all, what it costs on large diffs, and whether narrowing trades these false rows for **new** false negatives on files where a small hunk genuinely does move a distant symbol's contract. ⚠️ That last risk is real and points the opposite way from this card, so it must be measured before anything is narrowed.\n\n## Dedup\n\n**#12500** is adjacent and is **not** this: it is an over-naming report about `check:i18n`, i.e. **gate derivation**, not **docs anchors** — a different script and a different mechanism. Nothing else open covers anchor granularity.\n\n⚠️ **Dedup channel declared**: the dev's search ran over 300 open issues via REST plus a local grep and found only #12500; I did **not** re-run an independent search before filing, so treat this as one reading rather than two. If a duplicate surfaces, close this as the later card.\n\n## Provenance\n\nPR #12727 (#11967) — measured during its docs-drift close-out. The dev flagged it explicitly as a PM decision rather than filing it themselves, which was the right call."
+}

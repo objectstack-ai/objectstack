@@ -1,0 +1,34 @@
+{
+  "number": 12888,
+  "kind": "issue",
+  "title": "The dequeue-remedy verification still reads queue-ref ABSENCE as proof the PR left the queue — two rows and one SKILL.md sentence outlive the corrected membership reading",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-28T07:04:44Z",
+  "updated_at": "2026-08-28T13:02:15Z",
+  "closed_at": "2026-08-28T13:01:45Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12888",
+  "body": "Found while landing the queue-membership correction into `.claude/skills/pm-dispatch/references/platform-readings.md` (the corrected row now states: `gh-readonly-queue/*` answers about queue BUILDS, is meaningful only when PRESENT, and its absence is a reading in NEITHER direction). Three standing sites still depend on the half that was just retired, and the card that corrected the rule had a net-0 line budget on two zero-headroom ceilinged files, so they could not travel with it.\n\n## The sites\n\n1. `.claude/skills/pm-dispatch/references/platform-readings.md`, the draft-flip dequeue row: the prescribed remedy check is to flip to draft, disable auto-merge, then verify the queue ref and non-landing. That verification is a NEGATIVE one — it concludes \"the entry is gone\" from an absent ref — and absence is exactly what the correction removed from the evidence set. Failure direction: a remedy reported as successful on a PR still in the queue, which is the worst direction on a governed surface (the queue then lands it).\n2. Same file, the arming-effect row: the closed enumeration \"the only effect readings are the queue branch, the timeline enqueue event, and the final landing\" no longer holds — the two positive probes (the update-branch refusal text, the merge-call 405) are effect readings too, and the queue-branch entry survives only as a positive.\n3. `.claude/skills/pm-dispatch/SKILL.md`, the governed-surface ACCEPT fork: \"already queued when you read this ⇒ do both the draft flip and the disable, then verify the queue ref\" — the same negative, in the operative text a PM reads at the moment it matters.\n\n## What the corrected instrument prescribes instead\n\nVerify a dequeue with the POSITIVE probes, read in the direction that can actually fail: `update_pull_request_branch` no longer refusing with the queued-branch text, and `merge_pull_request` no longer answering 405 with the in-the-merge-queue text (it answers the merge-commits-not-allowed 405 instead when the PR is not queued). An absent ref may still be quoted as corroboration; it may not carry the conclusion.\n\n## Why it is its own card\n\nBoth files sit at ceiling with headroom 0 in `check:pm-skill-ratchet`, so rewording either row is a line-budget transaction, not a wording tweak — the correcting card spent its whole net-0 budget on the general rule. Sizing note for whoever takes it: the SKILL.md sentence and the two reference rows can likely be paid for by collapsing the draft-flip remedy row's two-way narration, but that needs measuring, not assuming.\n\n## Boundary\n\nNo script quotes the retired rule: `scripts/pm/check-governed-queue-guard.mjs` and `scripts/check-merge-queue-triage-outcome.mjs` parse `gh-readonly-queue/...` head refs out of `merge_group` webhook payloads, which is a queue-BUILD question and stays correct under the correction. Grepped at claim time; this is prose only."
+}

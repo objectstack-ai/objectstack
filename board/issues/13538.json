@@ -1,0 +1,37 @@
+{
+  "number": 13538,
+  "kind": "issue",
+  "title": "A PARTIAL permission-store outage can still fabricate an org-unscoped 200 on the meta doors, and only a source-text pin stands against it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T18:08:50Z",
+  "updated_at": "2026-08-31T03:50:09Z",
+  "closed_at": "2026-08-31T03:50:09Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13538",
+  "body": "Found while implementing the contract-review corrections on #13279 (PR #13475, head `cfe54c80d0`); out of that card's scope, filed unassigned for triage. The 条款② reviewer and the implementing seat reached this residual independently, which is why it is being tracked here rather than only in a docblock.\n\n⚠️ Line numbers below are as of `cfe54c80d0` and WILL rot. That is not incidental — line-number rot in this exact area is what hid the defect this card is about. Re-derive before acting.\n\n## What already landed, so this is not re-litigating it\n\nPR #13475 converted every `this.resolveExecCtx(environmentId, req)` swallow in `packages/rest/src/rest-server.ts` to re-raise a permission-store outage: 21 guarded sites (20 resolver call sites — 16 inline, 4 continuation — plus `computeExecCtx`'s own blanket catch). Contract review found the last four, which had been missed because their `.catch(` sits on the CONTINUATION line, and they are converted.\n\nTwo pins landed with it, in `packages/rest/src/execctx-consumer-census.test.ts`:\n\n- **§7** re-derives the catch ARGUMENT at every site from source, in both layouts, and fails on any `() => undefined` survivor or any local re-spelling of the shared guard.\n- **§8** drives the doors: with the resolver REJECTING, no route touching a continuation site answers `200`.\n\n## The gap\n\n**A PARTIAL outage, where only the FIRST read fails, is pinned by spelling and by nothing else.**\n\nThat is precisely where the harm appears. When the first resolver call swallows, `listCtx` is `undefined`, so `organizationIdForMetaRead(...)` receives no tenant and the handler reads **env-wide**. The door then answers an org-unscoped `200` — a fabricated success carrying data from outside the caller's organization. It is not a refusal, so nothing downstream notices. That is the harm the contract review named, and it is exactly the behaviour the four conversions removed.\n\nAfter the fix, what stops it coming back is **§7 alone** — an assertion about the *text* at each site.\n\n## Why §8 cannot reach it — measured, not assumed\n\n§8 drives a **total** outage: the resolver rejects on every call. Under that, the `GET ${metaPath}/:type` handler cannot reach the fabricated `200`, because it resolves the context **three times**:\n\n| line (at `cfe54c80d0`) | layout |\n|:--|:--|\n| 4387 | continuation site (the one that used to swallow) |\n| 4486 | guarded, single-line |\n| 4593 | guarded, single-line |\n\nThe handler is registered at line 4332 and runs to 4794, so all three are inside it. Revert the site at 4387 alone and the door **still refuses**, because 4486 throws. Confirmed by ablation: reverting one converted site turns **§7 red and leaves §8 green**.\n\n⇒ §7 pins what each **site spells**; §8 pins what a **door answers**; neither pins the case in between.\n\n## Why this matters more than it looks\n\n§7 catches a **re-spelling**. It does not catch a **refactor that reintroduces the behaviour without changing any spelling**, and there are at least two ordinary ways to do that:\n\n- **Reorder the resolves** so the swallowing read is no longer followed by a guarded one.\n- **Collapse them** so the first read is the only one — a reasonable-looking tidy-up, since the context is memoised per request and a reviewer may well read three resolves as redundant.\n\nIn either case every site still spells `rethrowAuthzStoreUnavailable`, §7 stays green, §8 stays green, and the org-unscoped `200` is back. The guard rail that exists is the one that measures text; the property anyone actually cares about is behavioural.\n\n## What it would take\n\nA **per-read fault injector** — a fake engine whose `find` fails for a chosen read (say the first, or a named `sys_*` table) and succeeds for the rest — driven against the meta doors, asserting the answer is not an org-unscoped `200`. §8's harness is most of the way there: it already registers the metadata endpoints under the ISOLATED mount, drives every route, and records which site lines each route touched. What is missing is fault selection per read rather than a resolver that rejects unconditionally.\n\n⛔ **I deliberately did NOT add it, and that is a decision rather than an omission.** It is new test machinery on a security surface, it was not part of the ruling or the review, and adding it unasked would have widened a PR that was mid-review and about to enter the merge queue. Recording it here is the alternative to building it quietly.\n\n## Severity, honestly\n\nBounded, and stated so triage can grade it rather than inherit a number from me. Today the tree is correct: all four sites are converted and §7 holds them there. This is a **missing guard rail**, not a live defect — the risk is a future refactor, and its cost if realised is an org-unscoped read on the metadata list/get doors, which is a tenancy-isolation failure rather than a capability bypass.\n\n## Refs\n\n- #13279 — the parent card (permission-store read failure fails loud); PR #13475 is where the four sites and both pins landed\n- #13255 — the older finding on `resolveExecCtx`'s `.catch(() => undefined)` degrading a resolution failure into \"no context\"; this card is a residual of the repair, not a restatement of that question\n- The reach of both pins is written into `packages/rest/src/execctx-consumer-census.test.ts` §7 and §8, including the ablation that established it\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

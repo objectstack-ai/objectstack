@@ -1,0 +1,35 @@
+{
+  "number": 12009,
+  "kind": "issue",
+  "title": "[finding] `AUTH_SSO_PROVIDER_SCHEMA` is the same shape #11777 retired — a publicly exported mapping with no code consumer, and the ruling that kept the sso *bridge* never ruled on the exported copy",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T04:48:27Z",
+  "updated_at": "2026-08-30T14:42:12Z",
+  "closed_at": "2026-08-30T14:42:12Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12009",
+  "body": "Found while implementing #11777 (deleting `AUTH_SCIM_PROVIDER_SCHEMA`), out of that card's scope, not fixed there. Filed unassigned, no `pm:queue`. Observation-class: **nothing is broken today**.\n\n## What was measured\n\n`packages/plugins/plugin-auth/src/auth-schema-config.ts:952` exports `AUTH_SSO_PROVIDER_SCHEMA`, an `ssoProvider` model + column mapping. Measured on `origin/main` at `497ded7801`:\n\n```\n$ git grep -n \"AUTH_SSO_PROVIDER_SCHEMA\" origin/main -- .\norigin/main:packages/platform-objects/CHANGELOG.md:8403:    `domainVerified` documented in `AUTH_SSO_PROVIDER_SCHEMA`.\norigin/main:packages/plugins/plugin-auth/CHANGELOG.md:9166:    `domainVerified` documented in `AUTH_SSO_PROVIDER_SCHEMA`.\norigin/main:packages/plugins/plugin-auth/src/auth-manager.ts:2964:      // AUTH_SSO_PROVIDER_SCHEMA).\norigin/main:packages/plugins/plugin-auth/src/auth-schema-config.ts:952:export const AUTH_SSO_PROVIDER_SCHEMA = {\n```\n\nFour hits: its own declaration, two frozen CHANGELOG lines, and **one comment**. No code reads it, and it is never handed to `sso()` as a `schema` option. The channel was controlled against a symbol known live in the same file (`buildOrganizationPluginSchema`, 15 hits across README, `auth-manager.ts` and four test files), so the low count is a measurement rather than a broken grep.\n\nIts sibling `AUTH_JWKS_SCHEMA` looks similar on a per-file hit count and is **not** dead — it is consumed in-file at `auth-schema-config.ts:868`. `AUTH_SSO_PROVIDER_SCHEMA` has no such in-file use.\n\n## Why this is not already covered by the closed cards\n\nThis is the question the existing cards route around rather than answer, which is why it is filed rather than assumed handled:\n\n- **#8224** (closed `completed` by PR #10072) swept the *stale claim* that `@better-auth/sso` accepts no `schema` option. It changed comments only.\n- **#10074** (closed `not_planned`) asked whether the `ssoProvider` mapping should **move onto** `schema.ssoProvider`, and landed on option **A — do not rewire**, on strong reasoning: the adapter's camelCase-to-snake_case rule is mechanical and total, while a hand-maintained per-field list is covered only if someone remembers. That ruling stands and this card does not reopen it.\n\nRuling A settles the **seam**: the adapter layer (`AUTH_MODEL_TO_PROTOCOL` + mechanical field resolution) owns the column names, and the plugin option is deliberately not used. What it does not settle is what should happen to the **exported constant** that copies those names alongside the seam it lost. A comment recording a deliberate choice is exactly the right artifact; a publicly exported `as const` object is a different thing, and it is the thing #11777 names.\n\n## Why it may be worth the same treatment as #11777\n\n1. **It is public API.** `packages/plugins/plugin-auth/src/index.ts:69` does `export * from './auth-schema-config.js'`, so it ships from the published package and a downstream consumer can read it as authoritative.\n2. **It can drift silently.** If the adapter-side names ever change, nothing fails when this copy does not follow — there is no consumer to break. Under ruling A the adapter is authoritative by construction, which makes the exported copy a strictly second source of truth for the same four-plus column names.\n3. It is the shape ADR-0049 enforce-or-remove and Prime Directive #10 name: one contract, two declarations, only one load-bearing.\n\n## Why it is NOT one of the easy answers\n\nRecording the genuine differences from #11777, since they may change the disposition:\n\n- Unlike scim, **the sso option is real** — `SSOOptions.schema.ssoProvider.{modelName,fields,additionalFields}` exists on `@better-auth/sso@1.7.1` and the runtime honours it (measured on #10074). So this constant is not inert *by construction* the way the scim one was; it is unused *by choice*.\n- The `domainVerified` entry carries a real explanatory comment (ADR-0024 ②) that has value independent of the constant, and any removal should keep that knowledge as prose.\n- #10074 named the one thing that would change its answer: sso needing `additionalFields`, which has no adapter-layer equivalent. If that ever arrives, this constant is the natural seed for it — an argument for keeping it that the scim one did not have.\n\nSo the plausible dispositions are: **delete it** and keep the reasoning as a NOTE (what #11777 did for scim, following this file's own sso NOTE convention); or **keep it and say so in writing** — a short line recording that it is deliberately retained against a possible `additionalFields` need, which turns a silent orphan into a declared one. Both are cheap; what is not cheap is leaving the next reader unable to tell which of the two copies is authoritative.\n\nNot urgent, not a runtime defect: no behaviour depends on it today.\n\nRefs: #11777 (the scim sibling, retired) · #10074 (ruling A, do not rewire the seam) · #8224 (the stale-claim sweep) · ADR-0049 (enforce-or-remove) · ADR-0024\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01APWX2AwT3a4xDcjPCe8bk4)_"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 13382,
+  "kind": "issue",
+  "title": "rest/OCC: postgres 驱动下乐观锁必现假冲突 409 —— normaliseVersionToken 对 Date 做 String() 丢毫秒后与 ISO 字符串严格比较",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p1"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T07:30:09Z",
+  "updated_at": "2026-08-31T03:09:47Z",
+  "closed_at": "2026-08-31T03:08:53Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13382",
+  "body": "## TL;DR(人话)\n\n在 postgres 生产库上,Console 记录编辑弹窗**每次保存都弹「保存冲突/记录已被其他人修改」**,PATCH 恒 409 `CONCURRENT_UPDATE`——哪怕库里这条记录从建出来就没人碰过。sqlite 开发环境完全无感,所以一直没人发现。\n\n## 版本与环境\n\n- objectos-ee 镜像 4.1.1(内建 runtime **17.2.0**,builtAt 2026-08-24),`@objectstack/rest` / `@objectstack/driver-sql` 随镜像\n- postgres:16-alpine,`OS_DATABASE_DRIVER=postgres`,`TZ=Asia/Shanghai`\n- 单节点即可复现(与集群/副本数无关,已用 1 副本对照验证)\n\n## 最小复现(不依赖任何应用包)\n\n任意开 timestamps 的对象,postgres 驱动:\n\n1. `GET /api/v1/data/<object>/<id>` → 响应里 `updated_at: \"2026-08-30T10:19:25.947Z\"`(ISO,带毫秒)\n2. `PATCH /api/v1/data/<object>/<id>`,body 带 `expectedVersion: \"2026-08-30T10:19:25.947Z\"`(即第 1 步读到的值,Console 编辑弹窗就是这么发的)\n3. → **409**,永远:\n\n```json\n{\n  \"error\": \"Record os_tianshun_ehr_project/kAE91j_gPi7CscPW was modified by another user (current version Sun Aug 30 2026 18:19:25 GMT+0800 (China Standard Time), expected 2026-08-30T10:19:25.947Z)\",\n  \"code\": \"CONCURRENT_UPDATE\",\n  \"currentVersion\": \"Sun Aug 30 2026 18:19:25 GMT+0800 (China Standard Time)\"\n}\n```\n\n注意:报错里的 current 与 expected 是**同一瞬间**(18:19:25+08:00 == 10:19:25.947Z),却被判为冲突。库里该行 `created_at == updated_at == 2026-08-30 18:19:25.947+08`,审计日志只有一条 create——不存在并发写。\n\n## 根因(已读 dist 定位)\n\n`packages/rest` 的 OCC 门:\n\n- `normaliseVersionToken(v)` 对版本令牌做 `String(v)`。postgres 驱动返回的 `updated_at` 是 JS `Date`,`String(Date)` 产出 `\"Sun Aug 30 2026 18:19:25 GMT+0800 (China Standard Time)\"` —— **毫秒被丢弃、格式随进程时区漂移**;\n- `assertVersionOf()` 拿它与客户端回传的 ISO 字符串做**严格字符串比较** `currentVersion !== expected` → 同一瞬间恒不等 → `ConcurrentUpdateError`。\n\nsqlite 驱动把 `updated_at` 以 ISO 字符串存取,两边字符串恰好相同,所以 dev 从不复现——这是个只在 Date 型驱动(至少 postgres)上暴露的驱动相关缺陷。\n\n## 违反的契约\n\n`assertVersionOf` 自己的 docblock:\"When the caller passes a non-empty `expectedVersion` token (**typically the `updated_at` value they read**), a mismatch throws\"——按此契约,客户端原样回传它读到的 `updated_at` 必须判为匹配。现实现对 Date 型驱动必判不匹配。\n\n## 建议修法(仅供参考)\n\n两边令牌先尝试 `Date.parse`,可解析则**按时间值(epoch ms)比较**,不可解析再退回字符串比较;或 `normaliseVersionToken` 对 `Date` 实例统一转 ISO。\n\n## 我们没有做的事\n\n应用侧**没有加任何 workaround**(不吞 409、不禁用 OCC)。终端用户目前只能每次在「保存冲突」弹窗点「覆盖保存」强行通过——所有 postgres 生产部署的所有对象编辑都受影响,爆炸半径是整个 Console 编辑链路。\n\n---\nPart of steedos-labs/os-project-titanwind-ehr (deploy-ee 集群可行性实测中发现;单节点复现)\n"
+}

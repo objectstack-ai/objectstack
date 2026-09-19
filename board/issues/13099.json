@@ -1,0 +1,34 @@
+{
+  "number": 13099,
+  "kind": "pull_request",
+  "title": "docs(os-dev): name the slot before the first lock attempt, in the queueing clause itself",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-29T05:10:42Z",
+  "updated_at": "2026-08-29T09:36:14Z",
+  "closed_at": "2026-08-29T09:36:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-29T09:36:13Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/13099",
+  "body": "Fixes #12784\n\n## What\n\nOne-sentence contract-side addition to the verify-lock queueing clause of `.claude/agents/os-dev.md` (资源纪律 rule 7): the slot name must be set BEFORE the first lock attempt, and coming back is done with the same stable name — a slot named only after a call exits starts a NEW queue place rather than recovering the lost one. The wrapper side already tells every queued no-slot call this at second zero (`scripts/pm/os-verify-lock.sh`, the arrival notice: \"Set it NOW, not after this call exits: a slot named later starts a NEW place\"); #12538 landed that wrapper-side notice and could not reach the contract. This lands the same fact where a dev following the written discipline actually reads it — inline with the \"spend the interval on lock-free work and come back\" instruction, no new section.\n\n## Before / after (clause lines 112-115)\n\nAngle-bracket placeholders are spelled as bare words below (sanitizer discipline); the diff carries the exact bytes.\n\nBefore: \"…⇒ 再跑一次;循环全程设 OS_VERIFY_LOCK_SLOT=NAME —— 没排到的调用把排位**寄存**,同名再来续原到达戳;不设它,每次离开都从队尾重排(该机制只在 --help 与 99 的出错文本里自我介绍,读到那里已经丢过一次位)。\"\n\nAfter: \"…⇒ 带同名再跑一次;OS_VERIFY_LOCK_SLOT=STABLE-NAME 在**第一次尝试之前**就设好 —— 没排到的调用把排位**寄存**,同名再来续原到达戳;不设它,每次离开都从队尾重排,事后补名开的是新排位,救不回已丢的那个。\"\n\n## Ratchet (net-0)\n\n| metric | before | after | ceiling |\n|---|---|---|---|\n| `.claude/agents/os-dev.md` line count | 466 | 466 | 466 (headroom 0) |\n| widest table row (bytes) | 0 | 0 | 0 (pin) |\n| queueing clause (rule 7) line count | 9 | 9 | n/a |\n| longest line in the edited region (bytes) | 119 | 120 | 120 |\n\n## Cut ledger\n\n| cut | why it could go | surviving home |\n|---|---|---|\n| 「循环全程设」 (loop-scope framing of when to set the slot) | subsumed: \"带同名再跑\" plus \"同名再来续原到达戳\" already carry the loop-wide use; the replacement pins the sharper timing fact | the new sentence itself; wrapper help \"SET THIS BEFORE YOU QUEUE, NOT AFTER YOU TIME OUT\" |\n| 「(该机制只在 --help 与 99 的出错文本里自我介绍,读到那里已经丢过一次位)」 | measurably stale since the wrapper-side second-zero notice landed: a queued no-slot call is now told the mechanism at second zero, not only in help/exit-99 text | `scripts/pm/os-verify-lock.sh` arrival notice + its help text |\n\nAlso: placeholder NAME → STABLE-NAME (the card's \"stable name\"), and the come-back instruction now carries the slot (\"带同名再跑一次\").\n\n## Gates\n\nUnion derived at commit 328629e63 (working tree clean) via `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` — repo assertion held, 10 matched families, all run at that head. Changeset families N/A: docs-only `.claude/**` diff, `skip-changeset` applied at PR-open.\n\n| gate | verdict line (quoted from the gate's own output) |\n|---|---|\n| check:pm-skill-ratchet | \"✓ .claude/agents/os-dev.md is 466 lines (ceiling 466; headroom 0).\" · \"widest table row is 0 bytes (pin 0; headroom 0).\" |\n| check:pm-skill-id-lint | \"✓ check-skill-id-lint: 23 file(s) clean\" |\n| check:agent-test-spelling | \"✓ check-agent-test-spelling: 0 violations — 398 file(s) · 4573 bare separator token(s) · 9 separator(s) JUDGED\" |\n| check:agent-model-declared | \"os-dev.md → declared tier · 0 justified inherit(s); no definition leaves its tier to the dispatching session.\" |\n| check:nul-bytes | \"check-nul-bytes: OK (scanned 7281 text file(s) … no raw ASCII control bytes).\" |\n| check:doc-authoring | \"✓ doc authoring guard: 48 published skill files clean — no internal issue-id references.\" |\n| check:doc-formula-expressions | \"✓ check:doc-formula-expressions: 22 record-scoped formula example(s) across 425 files / 1453 TS blocks judged clean\" (after building the lint and formula packages under the verify lock) |\n| check:pm-governed-merges | \"✓ check-governed-merges --self-test: 206 assertions\" |\n| check:skill-frame-sync | \"✓ check-skill-frame-sync: 4 copies of the decision frame are structurally isomorphic across 3 files\" |\n| check-governed-queue-guard | offline: \"✓ check-governed-queue-guard self-test: 113 cases pass\"; the event-payload leg is CI-owned (declared narrowing — it reads the workflow event payload, absent locally) |\n\n## Governance\n\nGoverned instruction surface: stays DRAFT, human merge only — no ready flip, no auto-merge, not for the merge queue.\n\nSession: https://claude.ai/code/session_01MnijPVVDakqK2J335JoJtq\n\n_Generated by [Claude Code](https://claude.ai/code)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01MnijPVVDakqK2J335JoJtq)_"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 13077,
+  "kind": "issue",
+  "title": "Two docs pages and one lint gate epilogue still teach the retired \"no `current_user` at section level\" claim (prose half, split from #13072)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-29T03:25:09Z",
+  "updated_at": "2026-08-30T17:41:24Z",
+  "closed_at": "2026-08-30T17:41:06Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13077",
+  "body": "Blocked-by: #12914\n\n分诊拆卡：本卡是 **#13072 的 section 2 + section 3**，由分诊席位按该卡自己的请求拆出（*「Section 1 is a real card on its own … Sections 2 and 3 are prose trims of the same retired claim and can ride together. Splitting at triage is expected」*）。\n\n⛔ 测量、证据与结论**全部来自 #13072**，本卡不新增任何断言；⛔ 未复核，未改写。原卡的 dev 席位是 os-trump（实施 #12914 时发现）。\n\n## 为什么拆\n\n两半落在**不同车道**：\n\n| | 落点 | 车道 |\n|:--|:--|:--|\n| #13072 section 1 | `packages/metadata-core/src/form-predicate-root-policy.ts`（活的运行时检测器 + 一个 per-surface 拆分是否存续的设计问题） | `domain:engine` |\n| **本卡** section 2+3 | `content/docs/**` 与 `packages/lint/scripts/` | **`domain:devx`** |\n\n不拆就会逼一个车道的席位去动另一个车道的文件。#13072 保留 section 1，现定 `domain:engine`。\n\n## Section 2 —— 两份手写文档仍在教已退休的 section 主张\n\n#11740 扫过 objectui#6010 的 **FIELD** 半边并已关闭；**SECTION** 半边当时正确，现在不是了。\n\n- `content/docs/ui/views.mdx:431` —— 列出「still evaluate it unbound, where the predicate faults open」的表面时，把 *「section-level predicates (objectui#6111)」* 列为其中之一，⚠️ 而 #6111 正是把它绑定了的那个 PR。\n- `content/docs/protocol/objectui/layout-dsl.mdx:808 / :818 / :824` —— 一条注释写着「on a FormSection, `current_user` is not」，一行表格把 section 词表拼成「`record` + `previous` —— **not** `current_user`」，以及其下的正文。\n\n## Section 3 —— lint 门禁的收尾文案带着 #12914 前的因果主张\n\n`packages/lint/scripts/check-doc-formula-expressions.mjs:2018`，文档语料作者读到的失败文案：\n\n> A field-level `visibleWhen` that faults is fail-OPEN — the renderer falls back to VISIBLE — so a wrong example does not merely not work, it shows the thing it was written to hide to everyone who copies it.\n\n与 #12914 的 site 4 同一种陈旧，只是换了文件：在发布作用域的宿主下该谓词会**解析**而非 fault，于是一个错误示例交付的是**静默的强制缺口**，而不是可见的 fail-open。\n\n⚠️ 原卡记录：改这里**同时欠该脚本自己的测试套件**，所以当时留下未扫。\n\n## ⛔ 排序：本卡阻塞于 #12914\n\n原卡写明这一点，本卡沿用：这些消费者是 #12914 契约文本的**下游**。在 #12914 落地**之前**改它们，会让消费者朝**另一个方向**与已发布的正文不一致 —— 同一个缺陷反着来。\n\n⇒ 唤醒条件：**#12914 落地**（现 `pm:dispatched`）。\n\n## 测量基线（原卡记录）\n\n`origin/main` @ `9e8adf3f6`，objectui 固定在本仓当前构建所用的 `9602dc820450`。\n\nRefs：#13072（母卡，section 1 留在那里）· #12914（阻塞源）· #11740（FIELD 半边的既有清扫，已关闭）· objectui#6111 / objectui#6010"
+}

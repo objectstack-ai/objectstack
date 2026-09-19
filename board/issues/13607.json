@@ -1,0 +1,33 @@
+{
+  "number": 13607,
+  "kind": "pull_request",
+  "title": "docs(qa): retarget readonly-package-locks-studio writable contrast at duplicate route",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T03:04:06Z",
+  "updated_at": "2026-08-31T03:36:07Z",
+  "closed_at": "2026-08-31T03:36:06Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-31T03:36:06Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/13607",
+  "body": "Fixes #9788.\n\n## What\n\nRetargets `access-security.readonly-package-locks-studio`'s writable-package\ncontrast side (step 5, acceptance clause 3, `docs/qa/platform-checklist/areas/access-security.json`)\nat the platform's supported runtime path, per the maintainer ruling on #9788\n(2026-08-19, verbatim: 「接受你的所有建议」; reaffirmed 2026-08-25, 「其他接受」):\nthe stock showcase does **not** boot with a project-scoped writable package.\nThe runner instead clones the showcase base into a writable target via\n`POST /packages/:id/duplicate` (ADR-0070 D4 \"duplicate base\") to get the\nwritable object this item's contrast clause needs, then repeats the packaged\nobject's PUT against it.\n\nThis is the second and last of the two mechanical retargets the ruling\ncalls for — the first (`automation.rollup-summary-filter`) already landed\nas PR #11913. With both items retargeted, #9788's full scope is done.\n\nChanges to the item:\n- `steps` — step 5 now names the duplicate-route call instead of the\n  unqualified \"a WRITABLE (draft/app-local) object.\"\n- `acceptance` clause 3 — retargeted wording; **oracle stays `api`** on both\n  sides of the gate, unchanged.\n- Added a `fixtures` block (the item had none before) with a `requires` entry\n  citing the duplicate route explicitly.\n- Added `source` entries citing the duplicate route\n  (`packages/runtime/src/domains/packages.ts`) and ADR-0070 §D4.\n- `revision` 2 → 3, with a `history` entry recording the retarget and its\n  rationale.\n\n**Deliberately NOT copied from the sibling half (PR #11913, `bb62d4d08`):**\nthis item never carried a `blocked: {by: \"fixture\", ...}` block or a matching\n`fixtures.knownGaps` line — those exist only on the automation item, which\nhad been explicitly fixture-blocked since #3358. This item's writable side\nwas instead left as an unqualified phrase (\"a WRITABLE (draft/app-local)\nobject\") with no fixture blocker to remove. So this PR adds a `fixtures`\nblock rather than editing one, and there is no `blocked`/`knownGaps` pair to\nstrip.\n\n## Verified before writing\n\n- `POST /packages/:id/duplicate` exists (`packages/runtime/src/domains/packages.ts:819`,\n  `protocol.duplicatePackage`) and is the same route PR #11913 verified and\n  cited — re-confirmed here rather than taken on faith.\n- Re-read `access-security.json` on `origin/main` first: the item's step 5 /\n  acceptance clause 3 were exactly as the dispatch card described (generic\n  \"WRITABLE (draft/app-local) object,\" no fixture blocker) — premise held.\n- Confirmed PR #11780 (`359e497f8`, merged) only renamed ADR citations\n  (ADR-0057 D10 → ADR-0124 D1) in this file and did not touch this item's\n  revision or the writable-contrast wording — nothing here was already done.\n\n## Scope\n\nOnly `docs/qa/platform-checklist/areas/access-security.json`. The design\nquestion (\"should the stock showcase boot with a writable package?\") is\n**not reopened** — it was ruled NO on 2026-08-19 and reaffirmed 2026-08-25;\nthis PR is the mechanical retarget the ruling calls for. No writable package\nprovisioned, no seed fixtures added, `content/docs/**` untouched.\n\n## Local gates\n\n`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` (run\nagainst the final commit `2821d5d08`) names two matched families for this\ndiff, both green:\n\n- `pnpm check:doc-authoring` — \"393 files clean — no bare metadata literals.\"\n- `pnpm --filter @objectstack/lint run check:doc-formula-expressions` —\n  self-test 58/58, \"22 record-scoped formula example(s) … judged clean,\"\n  \"9 @example(s) judged clean,\" \"14 predicate(s) … judged clean; 6 skipped as\n  undeterminable\" (documented, pre-existing, unrelated to this diff).\n\n`check:platform-checklist` is not CI-wired (manual cadence by maintainer\ndecision — README), so `dispatch-gates.mjs` does not name it, but the area\nREADME asks for it whenever the checklist itself is touched, so it was run\nanyway: `check-platform-checklist: OK — 15 areas, 221 items (221 active);\ncoverage: 31 kinds mapped, 0 waived; traps: 19 documented, 19 in use;\nprovisioning: 5 area recipes, 8 item references resolved (1 area-qualified),\n5/5 recipes referenced.`\n\nAlso ran `pnpm check:nul-bytes` (any edit) — green: \"scanned 7539 text\nfile(s) … no raw ASCII control bytes.\"\n\nNo changeset — QA-checklist-only change, nothing user-visible or published\n(same precedent as PR #11913). `skip-changeset` label applied and confirmed\npresent on read-back.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Pk26oZ12t5N1hwGW1m1MgC)_"
+}

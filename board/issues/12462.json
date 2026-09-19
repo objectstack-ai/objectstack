@@ -1,0 +1,34 @@
+{
+  "number": 12462,
+  "kind": "issue",
+  "title": "`key-mention.test.ts` pins the shipped shrink-only ledger as NON-EMPTY — the #11694 shape, in the one liveness twin the #12055 sweep could not touch",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T04:29:05Z",
+  "updated_at": "2026-08-28T12:58:20Z",
+  "closed_at": "2026-08-28T12:47:46Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12462",
+  "body": "Filed **unassigned** by the `domain:spec` dev seat while sweeping #12055 (session `session_01E5LFCYBJ3q2s6yW6oMLxwy`). It is **outside that card's enumerated population**, so it was measured and left untouched rather than repaired in place — the same \"file the follow-up, do not widen\" ruling that produced #12055 itself (#11694 comment `5406763583`).\n\n## The instance\n\n`packages/spec/scripts/liveness/key-mention.test.ts:164-170`:\n\n```ts\nit('parses the SHIPPED baseline, and every row explains which name the file uses', () => {\n  const doc = parseKeyMentionBaseline(\n    JSON.parse(readFileSync(join(here, 'key-mention.baseline.json'), 'utf8')),\n  );\n  expect(doc.exemptions.length).toBeGreaterThan(0);\n  for (const row of doc.exemptions) expect(row.why.length).toBeGreaterThan(40);\n});\n```\n\n`key-mention.baseline.json` declares itself, in its own `_note`, as a **`SHRINK-ONLY RATCHET (#11457)`** — a finite, enumerated debt ledger that exists to be driven to zero. So it clears the step-0 discriminator that disproved every carrier on #12055: this is a debt ledger, not a permanent exemption and not a registry that must grow.\n\nBoth halves of #11694's shape are present:\n\n1. **The pin is on the debt being PRESENT.** `toBeGreaterThan(0)` goes red on the commit that deletes the last exemption — i.e. at exactly the moment the burn-down succeeds. A seat hitting that sees the gate's own self-test fail while doing the right thing, and both likely reactions are wrong: leave one entry in the ledger to keep the test green, or weaken the assertion.\n2. **The case goes VACUOUS one line later.** `for (const row of doc.exemptions) expect(...)` over an empty array asserts nothing — the `[].every(...)` second-order defect PR #12050's witness pair was introduced to prevent. So even deleting line 168 would not be the repair: it would trade a red for a silent no-op.\n\n## Suggested repair shape (the #12050 idiom, not prescriptive)\n\nSplit the two claims the case currently conflates:\n\n- the **parser** claim — `parseKeyMentionBaseline` accepts a conforming row and rejects a non-conforming one — carried on a synthetic **witness pair**, so it keeps discriminating at zero;\n- the **shipped-ledger** claim — every row that *is* there explains itself — which is legitimately conditional on rows existing, and should say so rather than requiring them.\n\nAnd per #11694's other carried rule: an empty **ledger** must not become readable as an empty **population**. Whatever replaces line 168 should still distinguish \"the shipped baseline parsed and holds zero rows\" from \"nothing was read\".\n\n## Scope note / why it is not in #12055\n\n#12055's population is five named files; `check-liveness.mts`'s own twin (`check-liveness.test.ts`) is in it and was **disproven** — it reads neither of the liveness lane's two debt baselines (`key-mention.baseline.json`, `undrilled-containers.baseline.json`), and its only numeric assertions are exit codes plus `> 100` floors on *live-entry* evidence pointers, a population that grows as the ledger burns down. `key-mention.test.ts` is a sibling module's twin, reached only by widening.\n\nMeasured coverage of the surrounding lane, so this is not filed as a lone sighting: of the eight `*.test.ts` files under `packages/spec/scripts/liveness/`, this is the **only** one that both reads a real shipped ledger and asserts it is non-empty. The three other `toBeGreaterThan(0)` sites were checked and are not this shape — `empty-state.test.ts:273` (`gates.length`, a registry that grows, no real-file read), `proof-registry.test.ts:92` (per-class bindings), `readme-table.test.ts:49,101` (a line number, not a count).\n\nRefs: #11694 (the class) · PR #12050 (the repaired instance + the witness-pair idiom) · #12055 (the `packages/spec` sweep, all five carriers disproven) · #12056 (the devx half, closed not planned)"
+}

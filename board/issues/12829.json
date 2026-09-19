@@ -1,0 +1,35 @@
+{
+  "number": 12829,
+  "kind": "issue",
+  "title": "[finding] `human_s` renders every duration in minutes, so the verify lock prints an 8-hour span as `504m05s` — on a number a reader has to scale against a date",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-28T01:30:19Z",
+  "updated_at": "2026-08-28T11:15:48Z",
+  "closed_at": "2026-08-28T11:00:49Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12829",
+  "body": "Filed unassigned and ungraded by the #12783 dev (session `session_01PfaSTikked61BkcsB5Rn69`). Observation-class polish, recorded rather than folded into that card's diff.\n\n## Measured\n\n`scripts/pm/os-verify-lock.sh`:\n\n```sh\nhuman_s() {\n  local s=\"$1\"\n  if ((s >= 60)); then printf '%ss (%dm%02ds)' \"$s\" $((s / 60)) $((s % 60)); else printf '%ss' \"$s\"; fi\n}\n```\n\nThere is no hour branch, so every duration past an hour is rendered in minutes. Read from the live `--report` on 2026-08-28:\n\n```\nrecords: 75, spanning 30245s (504m05s)\n  ⇒ it reaches back to its first record and no further: 2026-08-27T16:51:12Z, 30841s (514m01s) ago.\n```\n\n`504m05s` is 8h24m. `514m01s` is 8h34m.\n\n## Why it matters\n\nMild everywhere it was used before, and slightly less mild now. Until PR #12827 the minute-scale figures this formatter produced were mostly hold and wait times, where minutes are the natural unit and the values are small (the long-hold warning fires at 900s = `15m00s`, which reads fine).\n\nThe two call sites above are different: they are the **population's width and floor**, and the question a reader brings to them is a calendar question — *\"does this cover my 19-minute hold from the 26th?\"* Answering it from `514m01s` needs a division the report is otherwise careful to hand over rather than leave as arithmetic (cf. the arrival-depth block, which prints `⇒ waiters already ahead = this minus 1` precisely so nobody has to do it).\n\n⚠️ This is cosmetic, not a correctness defect: the seconds figure is printed alongside and is exact. Nothing is wrong, it is just harder to read than it needs to be.\n\n## Candidate shapes (⛔ suggestions, not a ruling)\n\n1. Add an hour branch to `human_s` past some threshold — one place, every call site benefits. ⚠️ It changes the text of several existing outputs, so the pin tests that quote them need re-reading; the change is presentation-only but it is not zero-diff.\n2. Leave `human_s` alone and let only the two population figures carry an hour rendering. Smaller blast radius, at the cost of two duration formats in one report.\n\n⛔ Note the file has a **bash 3.2 floor** (`pnpm check:bash32-floor`), so whichever shape is chosen stays inside plain arithmetic and `printf`.\n\n## Refs\n\n- #12783 / PR #12827 — where the two calendar-scale call sites came from"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 11971,
+  "kind": "issue",
+  "title": "authz caching leg B: grants cache — coarse invalidation, default TTL=0 (off), expiry-boundary expiry, bypass list",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-25T03:31:11Z",
+  "updated_at": "2026-08-30T14:44:31Z",
+  "closed_at": "2026-08-30T14:44:31Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11971",
+  "body": "Leg **B** (ship third — the leg the design is really about) of the accepted #11633 cross-request caching design. Provenance: design document = #11633 comment 5394942824 (§4 leg B, §10.4); maintainer acceptance = #11633 comment 5404681591 (2026-08-25, verbatim 「接受你的建议，继续」, forks 1A / 2B / 3A / TTL-0). Filed by PM session `session_01KWRU3s15AJz7PGW7a7wdCh`.\n\nBlocked-by: #10348\nBlocked-by: #11968\n\n(#10348 per the design's dependency disclosure; #11968 is the invalidation substrate this leg consumes.)\n\n**Ruled shape (⛔ not re-litigable here)**:\n- **Fork 1A — coarse invalidation**: any write to a watched object retires the whole leg-B cache. Keyed invalidation is ⛔ not a scheduled follow-up; it needs a write-heavy-tenant measurement first.\n- **Fork 4 — default TTL `0` (cache off by default)**, supported low-seconds range; enabling it is the deployment's explicit acceptance of a staleness window.\n- **Expiry-boundary rule** (accepted as part of the ruling): entries expire at `min(ttl, nextBoundary)` — ADR-0091 validity windows see **no write** at their boundary, so write-invalidation is structurally blind there and the timer is the only mechanism for that class.\n- **Bypass list**: `explain-engine.ts:473` and `service-automation/src/plugin.ts:812` read uncached — an explainer answering from cache explains a state that no longer exists at exactly the moment an admin verifies a revocation.\n- **Keying traps (measured)**: `sys_session` stays **out** of the watched set (`last_activity_at` writes every minute would destroy the cache); a `sys_member` write retires the **organization's** entries, not the writing user's (`org_user_ids` depends on other users' rows).\n\n**Test plan**: carries pins 1–7 and 9 from the design §7, plus the required **ablation of write-invalidation** (prove the TTL bound alone is insufficient for the read-after-write pins — i.e. the invalidation is load-bearing).\n\n**Discipline**: Clause-②: **yes** (authorization answers); `needs:contract-review` at review; contract-review tier mandatory.\n\n**Acceptance criterion**: with the cache ON (TTL>0), grant/revoke/role/session mutations are observed by the next request on the writing node (write-invalidation, not TTL); with default config the cache is OFF and behaviour is bit-identical to today; \"cached answer ≡ uncached answer\" identity pins green."
+}

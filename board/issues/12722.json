@@ -1,0 +1,34 @@
+{
+  "number": 12722,
+  "kind": "issue",
+  "title": "The corrected broken-sweep claim is still stated unqualified in `packages/spec` TSDoc — same false predicate, a surface #12685 was fenced away from",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-27T14:03:16Z",
+  "updated_at": "2026-08-28T13:32:15Z",
+  "closed_at": "2026-08-28T13:31:02Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12722",
+  "body": "Filed unassigned by the dev on #12685 (PR #12721). Dedupe search run: no existing card (targeted search, control hits returned).\n\n#12685 established — with a measured A/B, now pinned in `run-summary.test.ts` — that `selected > 0 AND acted = 0 AND unmeasured = 0` cannot separate a healthy idempotent sweep from a dead gate: both match, on every run, so \"over N consecutive runs\" does not rescue it either. #12721 corrects `sys_automation_run`'s field descriptions and `content/docs/automation/flows.mdx` accordingly.\n\nThat card's dispatch fenced `packages/spec` out explicitly (\"zero `packages/spec`\"), which was the right call for a description-only fix — but it leaves the identical unqualified claim standing in shipped TSDoc:\n\n- `packages/spec/src/automation/execution.zod.ts` — `FlowRunSummarySchema`'s doc block: \"`selected > 0 && acted == 0` over consecutive runs is the broken-sweep signal\", and the `unmeasured` field's doc block: \"the broken-sweep query is `selected > 0 AND acted = 0 AND unmeasured = 0`\".\n- `packages/spec/src/integration/connector.zod.ts` (around the effect-declaration rationale) — \"the broken-sweep alert is `selected > 0 AND acted = 0 AND unmeasured = 0`\".\n\nThese ship in `.d.ts`, so a consumer reading the type gets the sentence #12685 disproved. The `unmeasured` clause's own point (an uncountable effect makes `acted` incomplete, not zero) stays correct and should survive any rewording — what needs qualifying is only the claim that the three-clause query *is* the detector.\n\nSuggested shape, mirroring what landed in #12721 so the two surfaces agree: state it as the first filter, and point at the per-node fold (`nodes[]` / `gates[]`) as the discriminator. No behaviour, no schema, no accept-set change — TSDoc text only. Worth checking whether the spec gate families (`check:api-surface`, the liveness/strictness ledgers) treat these doc blocks as pinned text before writing.\n\nWhy it is worth a card rather than a shrug: the failure mode #12685 names is that an operator wires an alert to the documented predicate, it fires during normal operation, and the alert gets muted — leaving a dead sweep silently unmonitored while looking monitored. A correct sentence in the object description and a wrong one in the schema doc is the state most likely to reproduce that, because the schema doc is what a platform author reads.\n\nRelated: #12685, PR #12721, #4354 (shipped the measurement), #4347 (the original silent no-op)."
+}

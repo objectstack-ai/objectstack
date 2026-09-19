@@ -1,0 +1,36 @@
+{
+  "number": 13434,
+  "kind": "issue",
+  "title": "[finding] four JSDoc sites still say saveMetaItem stamps the environment_id column and loadMetaFromDb filters on it — the code carries zero non-comment occurrences",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:engine",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T11:38:19Z",
+  "updated_at": "2026-08-31T06:54:21Z",
+  "closed_at": "2026-08-31T06:53:08Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13434",
+  "body": "Surfaced by the persistence-layer census that #13368 / PR #13431 required (root `AGENTS.md` line 8's DB-column item). ⛔ Filed unassigned — recording only, not claimed. ⛔ No `domain:*` set — triage's field.\n\n## The reading\n\nFour JSDoc sites still document `saveMetaItem` stamping the `environment_id` column and `loadMetaFromDb` filtering on it. Measured on `origin/main` at `c813e7ac7`, the code they sit on carries **zero non-comment occurrences of `environment_id`**.\n\n| Site | What the prose says |\n|:--|:--|\n| `packages/objectql/src/plugin.ts:63-69` | \"`protocol.saveMetaItem` stamps `environment_id = environmentId` on new sys_metadata rows, and `protocol.loadMetaFromDb` filters by the same column\" |\n| `packages/metadata-protocol/src/plugin.ts:50-56` | \"`saveMetaItem` stamps `environment_id` on new sys_metadata rows, `loadMetaFromDb` filters by it\" |\n| `packages/metadata-protocol/src/protocol.ts:3976-3988` | \"every saveMetaItem insert/update and loadMetaFromDb query is filtered by `environment_id = environmentId`\" … \"This key keeps every one of its other jobs — the `environment_id` stamp/filter …\" |\n| `packages/metadata-protocol/src/protocol.ts:19488-19490` | \"Scope filter (`environment_id = this.environmentId ?? null`) keeps tenants isolated\" |\n\n## What contradicts them\n\n- **The column count, comment-stripped.** `environment_id` non-comment occurrences: `protocol.ts` **0**, `metadata-protocol/src/plugin.ts` **0**, `objectql/src/plugin.ts` **0**. ⭐ Reverse-checked against a live spelling in the same files with the same filter — `organization_id` answers **44** non-comment in `protocol.ts` — so the zero is a reading, not a broken grep.\n- **The loader's own contract.** `packages/metadata/src/loaders/database-loader.ts:75-85` marks the `environmentId` option `@deprecated` and states it is \"accepted for back-compat but ignored — writes do not set `environment_id` and filters do not constrain on it.\"\n- **The declaration.** `packages/metadata-core/src/objects/sys-metadata.object.ts:138-148`: \"`environment_id` is no longer written by saveMetaItem and not consulted by overlay reads.\"\n- **A pin test, so this is enforced and not merely documented.** `packages/metadata/src/loaders/database-loader.test.ts:403-425` asserts the create call carries `organization_id` and **not** `environment_id`, and that no `findOne` where-clause has the property.\n\n## ⚠️ What is NOT claimed\n\n- ⛔ **Not claimed that the `environmentId` option is dead.** It is very much alive in `protocol.ts` (44+ non-comment `environmentId` sites: the overlay-whitelist gate, the local metadata-storage provisioning decision, and more). Only the **column stamp/filter** job described in these four comments is gone. A fix that deletes the option would be wrong.\n- ⛔ Not claimed which way the fix goes. Correcting the prose is the obvious route; whether any of the four should instead regain the behaviour is a call for whoever owns ADR-0006 v4 / ADR-0008.\n\n## Why it is worth a card\n\nSame defect class as #13368, one layer down: prose that teaches a column write the platform has retired. These sites are the docstrings on the **plugin options interfaces** — the first thing a reader configuring per-environment scoping meets — so they are read exactly by the people deciding whether to write `environment_id`.\n\n## Re-check\n\n```\ngit grep -n \"environment_id\" -- packages/metadata-protocol/src packages/objectql/src/plugin.ts\ngrep -n \"environment_id\" packages/metadata-protocol/src/protocol.ts | grep -vcP '^[0-9]+:\\s*(\\*|//|/\\*)'\n```\n\n⛔ Reverse-check the zero against `organization_id` in the same file with the same filter before believing it.\n\n## Duplicate check\n\nFull enumeration of all **360** open non-PR issues via the REST list endpoint (4 pages, page 5 empty — complete, not a truncated scan), grepped locally. Positive control in the same pass: **33** open cards contain \"AGENTS.md\", so the instrument is not returning false zeroes. Nearest neighbour naming `saveMetaItem` is #12004 (its request schema declaring 3 of ~11 members) — a different subject. ⛔ No open card covers this stale prose.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

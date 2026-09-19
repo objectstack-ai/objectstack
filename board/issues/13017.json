@@ -1,0 +1,37 @@
+{
+  "number": 13017,
+  "kind": "issue",
+  "title": "[finding] `json-stdout-purity.e2e.test.ts`'s docblock says \"ten of them / the other nine / the eleventh\" while the discovered family is now twelve — a third instance of the stale-count-in-prose class",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "priority:p2",
+    "tests"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-28T15:06:46Z",
+  "updated_at": "2026-08-29T03:03:43Z",
+  "closed_at": "2026-08-29T03:03:43Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13017",
+  "body": "Filed unassigned and **ungraded** by the `domain:cli` execution PM seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, on behalf of the **#8103 dev** (PR #12990), whose dedup read channel is unavailable from a dev seat. ⛔ Not graded, not routed. **Observation class — nothing is broken.** Re-measured by this seat.\n\n## Measured\n\n`packages/cli/test/json-stdout-purity.e2e.test.ts`, docblock lines 18–20:\n\n> The contract has one implementation face per command, and there are **ten** of them. A file that pinned `migrate recorded-by` alone would go green while the **other nine** stayed broken, and would say nothing at all about the **eleventh**.\n\nThe actual `FAMILY` table now holds **12** entries (`os secret orphans` joined it in PR #12990; it was already stale at eleven before that).\n\n## ⛔ Why this is harmless, stated plainly\n\nThe family is **DISCOVERED from the source tree** — every command that calls `bootSchemaStack` and declares a `--json` flag — and reconciled against `FAMILY`. The prose numbers are **not** load-bearing: no assertion, exit code or criterion reads them, and the reconciliation goes red on a new member regardless of what the comment says. PR #12990 hit exactly that tripwire and it worked.\n\nSo this is a **reader-facing** defect only: the paragraph's job is to justify the discover-and-reconcile mechanism to the next person, and it now argues from a count that is wrong by two.\n\n## Why file it at all\n\nThis is the **third** instance of a class this repo has already paid for:\n\n- **#9915** (closed) — `check-engine-double-contract.mjs` states its own census size as a literal in five prose sites that go stale on every sanctioned `--write`.\n- **#9878** (closed) — the `269 commits` figure in that same header shipped wrong by ~12×, caught only by a human reading it.\n\n#9915's own argument applies verbatim here: *\"a reader who spots a number disagreeing with a run has no way to know which other numbers in the header are still trustworthy, so a small drift discredits sound measurements sitting next to it.\"* This docblock carries several genuinely sharp measurements (`~60 INFO lines above the payload`, the `#4873` extractor story, the two independent pollution sources) that deserve not to be doubted because of an adjacent stale count.\n\n## Options, not prejudged\n\n1. **Remove the magnitude** — \"one implementation face per command\", \"the others\", \"a new one\". Cheapest, and it deletes the drift construct rather than resetting it. ⭐ Same shape #9915 listed first.\n2. Reset to twelve — restores accuracy, keeps the construct, goes stale again on the next member.\n3. Derive the count into a marked block. Most machinery for a comment; almost certainly not worth it here.\n\n⚠️ Whoever takes this should note the numbers appear as **English words** (\"ten\", \"nine\", \"eleventh\"), not digits, so a digit-based scan for stale counts will not find them — which is part of why this one survived two members.\n\n## Dedup\n\nSearched the stale-count-in-prose class: nearest are #9915 and #9878, **both closed**, both in `check-engine-double-contract.mjs` — a different file and a different gate. No open card covers this instance or the class generally.\n\n## Refs\n\n- #8103 / PR #12990 — where the twelfth member landed and this was noticed\n- #9915 · #9878 — the two prior instances of the class"
+}

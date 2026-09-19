@@ -1,0 +1,36 @@
+{
+  "number": 13090,
+  "kind": "issue",
+  "title": "Ratchet bookkeeping: pm-dispatch SKILL.md widest-table-row pin can follow the paid-down row (765 to 642 bytes) once PR #13085 lands",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-29T04:44:50Z",
+  "updated_at": "2026-08-30T07:28:07Z",
+  "closed_at": "2026-08-30T07:27:46Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13090",
+  "body": "Blocked-by: #13085\n\nPR #13085 (the #12672 fix) shrank the widest table row of `.claude/skills/pm-dispatch/SKILL.md` — the `domain:engine` row, which seeded the pin — from 765 to 642 bytes. `pnpm check:pm-skill-ratchet` now prints the standing opportunistic-tighten hint on every run:\n\n\"ℹ️ .claude/skills/pm-dispatch/SKILL.md: max-table-row-bytes headroom is 123 — every pin is seeded at 0 headroom, so a row has been paid down; lower the pin to 642 (shrink-only ratchets tighten opportunistically).\"\n\nThe pin lives in `MAX_TABLE_ROW_BYTES` in `scripts/pm/check-skill-line-ratchet.mjs` (the `.claude/skills/pm-dispatch/SKILL.md` entry, currently 765). The gate's own doc says the pin should follow any paid-down row. Not ridden on PR #13085 because it is a gate-script edit: per the os-dev standing terms it adds a verification surface (the ratchet script's own test suite becomes mandatory for the touching PR), which the #12672 dispatch scope did not cover.\n\nOne-line change + the script's self-test/vitest suite; must land only after (or with a rebase past) PR #13085, since a 642 pin is red against the pre-shrink row. Until then the hint is informational — the gate stays green."
+}

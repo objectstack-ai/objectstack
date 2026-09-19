@@ -1,0 +1,37 @@
+{
+  "number": 13027,
+  "kind": "issue",
+  "title": "os migrate plan/apply never exit once a host config is composed — the process outlives its own \"Graceful shutdown complete\" (78 min, measured)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "priority:p0"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-28T16:26:04Z",
+  "updated_at": "2026-08-29T02:26:29Z",
+  "closed_at": "2026-08-29T02:26:29Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13027",
+  "body": "Follow-up to objectstack#12938 / PR objectstack#12952, found while running the\nconsumer acceptance that PR named (objectstack-ai/cloud#1710).\n\n## Measurement\n\nObjectStack Cloud's `migrate-control-db.yml`, plane=staging, apply=false, against\nthe real Neon staging control plane, framework pinned at `15d55fb2430f` (carries\n`fc8a33935`). Run: objectstack-ai/cloud actions run `33182129326`.\n\nThe command is `os migrate plan` inside `docker run --rm`, cwd\n`/repo/cloud/apps/cloud` (an `objectstack.config.ts` is present, so the host\nstack is composed). The CLI finished and said so:\n\n```\n15:03:52.522   17 change(s): 0 safe, 0 needs-confirm, 17 destructive\n15:03:52.522   Apply with: os migrate apply (add --allow-destructive for drops / tightenings)\n15:03:52.522   4316ms\n15:03:52.517 INFO Graceful shutdown started\n15:03:52.555 INFO OK Graceful shutdown complete\n```\n\nThen **nothing**. The next line in the log is `16:22:40 The operation was\ncanceled.` — the run was cancelled by hand after **78 minutes**. The shell step's\nvery next statement is an `echo`, and it never printed, so the shell was still\nblocked on that one `docker run`: **the process printed its own graceful-shutdown\nline and then did not exit.**\n\nElapsed inside the CLI was 4.3 seconds. Everything after that is a process that\nwill not die.\n\n## Why this is a fix-here defect, not a workflow defect\n\nThe composition objectstack#12952 introduced runs host plugins for their\nDECLARATIONS: `init()` runs, `start()` is replaced with a no-op, `destroy()` is\nforwarded. A host plugin that acquires a resource in `init()` — a pg pool, an\ninterval, a socket, a watcher — and releases it from something registered inside\n`start()` now has no release path at all, because the thing that would have\nregistered the release never ran. The event loop stays alive; `process.exit` is\nnever reached; the kernel has already reported a clean shutdown, so nothing looks\nwrong.\n\nThat is a direct consequence of the declaration-only composition and it is\ninvisible to the CLI's own test suite, which does not assert that the process\nexits. The measured shape — 36 host plugins composed, clean shutdown logged,\nprocess alive 78 minutes later — is the first real deployment this composition\nhas been run against.\n\n## Consequence\n\n`os migrate plan` and `os migrate apply` never return on a project with a host\nconfig. For cloud's operator workflow that means the job hangs until the job\ntimeout (six hours by default) after the plan has already been computed and\nprinted, and any consumer that reads the `--json` payload — cloud's coverage gate\nis one — never gets to run at all.\n\n## Suggested shape\n\nTwo candidates, not adjudicated here:\n\n- Make the declaration-only composition symmetric: if `start()` is suppressed,\n  the composition owes the teardown its suppression removed. `destroy()` is\n  already forwarded, so the seam exists.\n- Have `plan` / `apply` exit deliberately once the document is written, rather\n  than relying on the event loop draining. That is a smaller change and it also\n  covers host code this repo cannot audit, which is the same argument\n  objectstack#12952 used for declaration-only composition in the first place.\n\nFiled without an assignee.\n"
+}

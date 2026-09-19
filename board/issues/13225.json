@@ -1,0 +1,37 @@
+{
+  "number": 13225,
+  "kind": "issue",
+  "title": "The MongoDB lookup-index divergence is pinned only in an opt-in suite that runs on no CI lane — the pin cannot fail, in either direction",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p2",
+    "tests"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-29T13:47:51Z",
+  "updated_at": "2026-08-30T03:39:45Z",
+  "closed_at": "2026-08-30T03:34:12Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13225",
+  "body": "Reported by the #12252 dev as a judgement call beyond its instruction, and filed here by the `domain:engine` PM seat. Small, mechanical, and independent of #13222's disposition.\n\n## The gap\n\nPR #13224 inverts the assertion in `packages/drivers/driver-mongodb/src/mongodb-driver.test.ts` to pin the divergence #13222 owns: a canonically-spelled `lookup` gets **no** `idx_<field>_lookup` on MongoDB.\n\n⚠️ That suite is `describe.skipIf(!sharedMongod)` — gated on `OS_TEST_MONGODB_MEMORY_SERVER_ENABLED=1`, which is opt-in because of the ~123 MB binary download #5517 retired from default runs. **It runs on no ordinary CI lane.**\n\nSo the pin is inert in both directions:\n\n- if #13222 is fixed and lookups start getting indexed, nothing goes red — the pin's own \"flips back to `toContain` deliberately\" instruction has no mechanism to remind anyone;\n- if the divergence widens, nothing goes red either.\n\nA pin that cannot fail records a fact for human readers but enforces nothing. That is materially weaker than what the inverted-in-place convention assumes: its whole justification is that *from `main`, a pin's disappearance and the divergence silently reopening must not look identical* — which only holds if something runs it.\n\n## The fix\n\n`packages/drivers/driver-mongodb/src/mongodb-schema-declared-indexes.test.ts` tests the same function, is driven by a fake `Db` recorder with no server at all, and **does run on every lane**. Its own header states the function under test runs verbatim.\n\nAdd the equivalent assertion there: a `{ type: 'lookup', reference: '…' }` field produces no `idx_<field>_lookup`, with the `type: 'user'` positive control alongside it so the day the arm is removed entirely, the case fails loudly rather than passing vacuously.\n\n⚠️ **The positive control is the load-bearing half.** Without it, `not.toContain` passes just as happily against a function that produces no indexes at all, a renamed index, or a harness that never called the function — the exact vacuity that makes a negative assertion worthless.\n\nCross-reference the two pins so a future editor of either finds the other.\n\n## Scope\n\nOne test file, additive. ⛔ Do not change the driver — that is #13222. ⛔ Do not un-skip or re-enable the opt-in suite; #5517's merge-queue hazard is the reason it is opt-in and this card does not reopen it.\n\n## Why it is worth its own card\n\nIt holds whichever way #13222 goes, and it is what makes #13222's eventual outcome *observable*: if the lookup arm is ever taught to read `reference`, this is the assertion that turns red and tells someone to retire the divergence note rather than leaving a stale \"disposition open\" comment behind.\n\n## Related\n\n#13224 (the PR that creates the pin) · #13222 (owns the divergence) · #12252 · #5517 (why the covering suite is opt-in)"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 11757,
+  "kind": "issue",
+  "title": "Retire `sys_scim_provider` — consumer sweep first, no data migration (leg 1a of #11632, ruled on #11693)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T15:37:15Z",
+  "updated_at": "2026-08-28T14:15:33Z",
+  "closed_at": "2026-08-28T14:15:21Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 16,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11757",
+  "body": "Cut out of the **#11632** SCIM epic by its owning `domain:services` seat, on the maintainer's ruling at **#11693** (`5396402751`). The epic's scope item 1 called this *\"decided INSIDE this epic\"*; it is now decided, so this is the implementation leg.\n\n## The ruling\n\nMaintainer, 2026-08-24, live PM chat, verbatim: 「11700 11693 不需要考虑历史数据，其他按照你的建议继续」\n\n**Ruled: A — retire `sys_scim_provider`**, with the explicit amendment that **historical/existing data is not a consideration**.\n\nTwo consequences, both load-bearing for whoever takes this:\n\n1. ⛔ **No data-migration path is owed** for existing `sys_scim_provider` rows. Do not write one. Do not add a backfill, a reaper, or a \"migrate your providers\" command.\n2. ⭐ **The census-first gate is struck as a *blocker*, but the consumer sweep is not optional — it moved.** It is **step 1 of this implementation**, as normal retirement discipline, not a separate measurement card that must land first.\n\n## Why the disposition went this way\n\nPR #11429 (merged, fixes #11380) repaired the SCIM parity gate so it reaches its model diff on the stable line. Its output against published `@better-auth/scim@1.7.1` includes:\n\n> `expected [ 'user', 'session', 'account', …(9) ] to include 'scimProvider'`\n\n⭐ **The upstream `scimProvider` model does not exist on stable.** So there is nothing left to mirror — B (facade) would have been a brand-new mapping for a table ruled disposable, and C (managed-catalog adoption) bundles a `managedConnections` posture decision nobody has asked for.\n\n⇒ Note for leg scoping generally: **`managedConnections` is not adopted.** The stable surface is the **seven** models, not ten.\n\n## Step 1 — the consumer sweep, as retirement discipline\n\nFind **every** reader of the platform object, repair or delete each with evidence, and **pin the absence** so it cannot come back.\n\n⭐ **Pin identities, not counts** — a sweep that reports \"0 readers remain\" without naming what it found and what it did to each is not a sweep. And ⚠️ **a zero-hit needs a positive control first**: prove the search instrument finds a known reader of some other platform object before concluding this one has none.\n\n⚠️ The census the ruling struck was struck as a **blocker on the decision**, not as work. \"Is any shipped deployment relying on it\" is answered by fiat. \"What in this repo reads it\" is still yours to measure and repair.\n\n## Fences\n\n- ⛔ **Zero `packages/spec` ownership** in this lane. If retirement needs a spec edit, that is the spec seat's — name it and stop.\n- ⛔ Never edit `content/docs/releases/` — your release-notes input is the changeset.\n- ⚠️ **Clause-② is likely YES** and must be assessed against the tree at claim time, not inherited from this line: retiring a platform object can remove an authorable/queryable surface. Re-read `CONTRACT_REVIEW_TIER` **live** at `scripts/pm/dispatch-gates.mjs` rather than recalling it.\n- ⚠️ **ADR-0087 registration** applies if this is a declared-breaking removal — check the gate's own verdict, do not assume either way.\n\n## Not measured\n\n- **Which in-repo readers exist.** That is step 1 of this card, deliberately not pre-measured here so the implementer does it with a live instrument rather than inheriting a stale list.\n- Whether any objectui or cloud surface reads it. Out of this repo's reach — name it if the sweep suggests one, do not guess at it.\n\n## Sequencing inside #11632\n\n- **#11697** (spec parity, `domain:spec`) is FIRST in the epic's chain and does **not** block this — different object, different seat.\n- This leg unblocks the **Setup surface** leg, whose backend seam was scoped by exactly this disposition.\n- ⚠️ Riding the same migration and **NOT a dev card**: every SCIM-enabled deployment's IdP must reissue its token on migration day (unsalted SHA-256 → keyed HMAC; digests are not portable on any path). Scheduled operational action, human owner.\n\nRefs: #11632 (epic) · #11693 (the ruled disposition) · #3653 (decision anchor + seven-model measurements) · #11380 / PR #11429 (the gate repair that produced the diff) · ADR-0071"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 13157,
+  "kind": "issue",
+  "title": "[finding] the boot sweep is the last caller still on whole-farm `validateAll()` — so `checkOnBoot: false` suppresses the verdict but the remote round-trip has already happened",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-29T06:41:32Z",
+  "updated_at": "2026-08-29T15:25:45Z",
+  "closed_at": "2026-08-29T15:25:45Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13157",
+  "body": "Measured by the #13037 dev (PR #13149) while implementing the ruled `checkOnBoot` gate. Filed by the `domain:cli` execution seat (#6024, session `session_01UjujZN219uFzBhSYfMykCd`) on its behalf — that seat's filing channel returns HTTP 403, so it recorded the observation in the code and the PR body and handed it over rather than silently widen its card. **I ran the dedupe search and re-verified the readings below against `origin/main` before filing.**\n\n## What was measured\n\nOnce #13037 lands, `external.validation.checkOnBoot: false` makes the boot sweep drop that datasource's rows before any verdict is drawn from them. But the gate runs **after** `ExternalValidationPlugin.runValidation` has already called:\n\n```\npackages/runtime/src/external-validation-plugin.ts:266\n  report = await svc.validateAll();\n```\n\n`validateAll()` is the service's whole-farm entry and **takes no datasource argument** (`:29`), so the live remote introspection for every federated datasource — including the one that opted out — has already happened by the time anything is filtered.\n\n⇒ An author who writes `checkOnBoot: false` on a slow or unreachable remote gets the *abort* removed, which is what the key promises and what the ruling delivers. They plausibly also wanted **the cost** gone, and that half is untouched.\n\n## ⭐ Why this is a known family with two already-closed members — and why it is still not a duplicate\n\nThe same \"post-filter a whole-farm sweep\" shape has been found twice before and fixed both times:\n\n- **#10537** — `POST /datasources/:name/external/validate` introspected every federated datasource, not only `:name`; the route filtered `validateAll()` output *after the work was done*.\n- **#10961** — the background drift check did the same for the datasource it was armed for.\n\n**The remedy already exists in-tree**, and the REST route already uses it. `packages/rest/src/external-datasource-routes.ts`:\n\n```\n:372   validateDatasource(datasource: string): Promise<SchemaValidationReport>;\n:379   return typeof svc?.validateDatasource === 'function' ? (svc as ScopedValidation) : undefined;\n:517   const report = await scoped.validateDatasource(req.params.name);\n```\n\nwith the fallback documented in place: absent the twin, it goes back to `validateAll()` and post-filtering — *\"which is precisely the behaviour\"* the earlier cards named.\n\nThe boot sweep is the **one caller that was never converted**. `validateDatasource` is declared **optional** on the plugin's own service interface (`external-validation-plugin.ts:44`) and the sweep never reaches for it.\n\n⇒ Not a duplicate: different call site, and the two siblings' closure is the precedent for what to do here, not a reason to skip it.\n\n## Why the #13037 dev correctly did NOT do it\n\nComposing the boot sweep out of `validateDatasource` changes behaviour when the twin is **absent** (fallback shape) and changes the **row set** when it is present. Both are excluded by that card's ruling — *\"`true`/default ⇒ today's behaviour, byte-identical\"* and *\"no contract face change\"*. ⇒ It recorded the observation in the `bootCheckEnabled` docblock and the PR body instead of quietly widening its scope. That is the right call and this card exists because of it.\n\n## Not decided here\n\nWhether the saving is worth the change at all. The honest statement of the pull: it matters only for a deployment that actually sets `checkOnBoot: false`, and today the repo-wide authoring population of that key is **one example app, which sets it to `true`** (`examples/app-showcase/src/system/datasources/showcase-external.datasource.ts:40`). ⇒ ⚠️ **no measured demand**, and that should be weighed before anyone spends the change. The cost of leaving it is bounded and invisible; the cost of doing it is a fallback branch the two sibling fixes already show how to write.\n\n⛔ Severity not judged. ⛔ This card asks for no change to `checkOnBoot`'s ruled semantics — the boot **verdict** gate is settled by #13037 and is not reopened here.\n\nRelated: #10537 / #10961 (same shape, both closed, the pattern to copy), #13037 / PR #13149 (where this was measured), #11166 (an unreachable remote is reported as `missing_table` — the case where the round-trip cost bites hardest)."
+}

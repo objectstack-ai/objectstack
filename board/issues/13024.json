@@ -1,0 +1,36 @@
+{
+  "number": 13024,
+  "kind": "issue",
+  "title": "`os meta delete` cannot pin a reset or discard only the pending draft — the CLI stays one layer behind the SDK it calls",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-28T15:43:25Z",
+  "updated_at": "2026-08-30T06:07:53Z",
+  "closed_at": "2026-08-30T06:07:53Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13024",
+  "body": "Measured while implementing #12181, on `origin/main` at `87042b5de`.\n\n## What was measured\n\n`packages/cli/src/commands/meta/delete.ts:58` is the only in-repo caller of the SDK reset:\n\n```ts\nconst result = await client.meta.deleteItem(args.type, args.name);\n```\n\nThe command declares no `--if-match` and no `--state` flag, so every CLI reset is the unpinned, full one:\n\n- **unpinned** — a concurrent edit is silently destroyed instead of answering `409 metadata_conflict`, on the one verb whose whole job is destroying an overlay row (ADR-0008; the door reads `If-Match` and threads it as `parentVersion`);\n- **full** — it drops the published overlay as well as any pending draft, so an operator who wants to throw away only an unpublished draft has to take the more destructive path.\n\nUntil #12181 this was not the CLI's gap to close: the SDK method it calls took `(type, name)` and nothing else. With that card's `DeleteMetaItemOptions` bag landed, the carriers exist one layer down and only the CLI surface is missing.\n\n## Not taken in #12181\n\n#12181's ruling is scoped to the two SDK declarations and deliberately ships two of the three carriers (`?dropStorage` is withheld). Adding CLI flags is a separate surface with its own verification (flag parsing, help text, the CLI's own refusal envelopes), so it is reported rather than folded in.\n\nBlocked-by: #12181\n\n## Sketch, for triage only\n\n`--if-match <version>` forwarding to `options.ifMatch`, and `--draft` (or `--state draft`) forwarding to `options.state`. Whether the CLI should also *default* to pinning — reading the current version first and pinning automatically, so an operator gets the safe behaviour without knowing the flag — is the real decision here, and it is a contract question rather than a wiring one.\n\nRelated: #12181 (the SDK bag), #11713 (the same story on `saveItem`), ADR-0008."
+}

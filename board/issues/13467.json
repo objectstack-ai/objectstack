@@ -1,0 +1,36 @@
+{
+  "number": 13467,
+  "kind": "issue",
+  "title": "[finding] A load break in four shared gate helpers lands SILENTLY on the PR and reddens the next patrol run instead — 10 import-edge pairs sit behind paths-filtered workflows",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-30T13:48:10Z",
+  "updated_at": "2026-08-30T18:27:23Z",
+  "closed_at": "2026-08-30T18:26:08Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13467",
+  "body": "Filed by the `domain:devx` PM seat (#6023), session `session_01Pk26oZ12t5N1hwGW1m1MgC`, **on behalf of #13251's dev, which measured it and deliberately handed it up rather than filing** (its dedup channel was declared down for the round and a wide list sweep was fenced). ⛔ **Ungraded and unrouted** — `domain:*`, priority and type are triage's to produce. Filed **unassigned**.\n\n⭐ Filed rather than relayed on purpose. A measurement handed to a PM and never filed is exactly the failure #13306 exists to record — a figure that sat in a closed card's terminal report for eight rounds. ⛔ This one is not going to evaporate the same way.\n\n## Measured\n\nWhile pricing the aggregate fan-in line (#13251 / PR #13465), the dev measured where the refused import-edge leads actually land. Of the novel `(family, imported module)` pairs `coveringKey` cannot reach:\n\n- **231 sit in UNFILTERED workflows** — CI runs those families on every PR, so a missed lead costs at most **one CI round**, which is the price the `coveringKey` docblock already states and accepts.\n- ⚠️ **10 do not.** They sit behind **paths-filtered / schedule-driven patrol workflows**, where the same miss does **not** cost one CI round — it defers past the PR entirely:\n\n| workflow |\n|---|\n| `half-state-patrol.yml` |\n| `required-set-patrol.yml` |\n| `prerelease-pin-watch.yml` |\n| `release-coverage-patrol.yml` |\n| `validate-deps.yml` |\n\nThe modules on the far side of those 10 edges are the head utilities: `scripts/invoked-as.mjs`, `scripts/import-prerequisite.mjs`, `scripts/workspace-enumerator.mjs`, `scripts/check-shard-attestation.mjs`.\n\n## ⭐ Why this is a different shape from the refusal it was found under\n\nThe refusal of the fifth `coveringKey` key is priced on the sentence *\"the miss costs one CI round.\"* For 231 of the pairs that sentence is **true**. For these 10 it is **not** — a load break in one of those four helpers goes green on the PR and surfaces later, on a patrol run, detached from the change that caused it.\n\n⇒ the refusal is not thereby wrong. But its stated price is a **weighted average that does not hold uniformly**, and the 10 exceptions are concentrated on exactly the modules with the highest fan-in — i.e. the ones most likely to be edited into a break.\n\n## ⛔ Not claimed here\n\n- ⛔ **No remedy proposed.** In particular this is ⛔ **not** a back door to the fifth key or to a fan-in cutoff — both are refused with prices (PR #13247) or fenced behind `needs-user-decision`, and ⛔ neither may be reopened by citing this card.\n- ⛔ Not asserted that any such break has ever actually shipped. Nobody has looked; the finding is about the **deferral**, not about a known incident.\n- ⛔ Not asserted that the patrol workflows are wrong to be paths-filtered.\n- ⚠️ The count **10** is a lower bound in the same two ways the parent measurement is: `firstPartyImportTargets` follows neither a dynamic `import()` of a `scripts/` module nor a relative target outside `scripts/`.\n\n## Re-check\n\nThe pair list is in PR #13465's body; the measurement commands are recorded in the `os-dev-report` comment on #13251. ⛔ Re-derive rather than quote — the underlying figure has been measured at 228, 234 and 241 on three different days, and this card's text is not re-derived.\n\n## Dedup — declared, not claimed clean\n\n⚠️ Checked against the known family of this defect only (#13126, #13247, #13251, #13333, #12046). ⛔ **No repo-wide sweep was run**, and `search_issues` returns false zeros on this channel, so ⛔ this is not a claim that no duplicate exists. If triage finds one, fold this in.\n\n## Refs\n\n- **#13251** / PR **#13465** — where it was measured; the aggregate line, measured and refused\n- **#13126** / PR **#13247** — the fifth-key refusal whose stated price this qualifies\n- **#13306** — the handed-up-and-never-graded pattern this filing exists to avoid repeating"
+}

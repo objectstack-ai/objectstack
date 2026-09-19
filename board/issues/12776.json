@@ -1,0 +1,34 @@
+{
+  "number": 12776,
+  "kind": "issue",
+  "title": "finding: `StrategyContext.executeAggregate` declares `aggregations[].method` as `string` while the engine contract declares the six-value `AggregationFunction`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-27T18:40:24Z",
+  "updated_at": "2026-08-28T13:32:18Z",
+  "closed_at": "2026-08-28T13:31:03Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12776",
+  "body": "Found while carrying out the analytics half of #11833 (deriving `service-analytics/src/plugin.ts`'s consumer-local structural engine type from the declared contracts). Filed unassigned and ungraded as an observation; measured on `origin/main` at `87d3f9a0a`.\n\n## The observation\n\nTwo spec-declared surfaces describe the same value and disagree about its type:\n\n- `packages/spec/src/contracts/data-engine.ts:230` — `IDataEngine.aggregate(objectName, query: EngineAggregateOptions, …)`, whose `aggregations[].function` resolves to `AggregationFunction`, the closed six-value enum `count | sum | avg | min | max | count_distinct` (`packages/spec/src/data/query.zod.ts:149`, via `AggregationNodeSchema` at `:262`).\n- `packages/spec/src/contracts/analytics-service.ts:300` — `StrategyContext.executeAggregate`'s `aggregations?: Array of objects with field, method: string, alias, filter`.\n\n`method` and `function` are the same slot: the analytics bridge renames one to the other and forwards it to `engine.aggregate`. One side is a closed enum and the other is `string`, so nothing on the analytics side of that seam is compile-checked against the engine's vocabulary.\n\n## Why it is visible now\n\nUntil the analytics half of #11833 landed, `service-analytics/src/plugin.ts` named the engine through a consumer-local structural type that also declared `function: string`, so the two `string`s agreed and the seam looked closed. Deriving that local type from `IDataEngine` turns the forward into a compile error — measured, TS2322, `Type 'string' is not assignable to type '\"min\" | \"max\" | \"count\" | \"sum\" | \"avg\" | \"count_distinct\"'`.\n\nThat PR closes the gap at runtime, inside the bridge, by parsing the incoming `method` with the spec's own `AggregationFunction` enum and refusing anything else. That is a runtime narrowing standing in for a type that could have been exact: the producer side is still `string`, so the compiler cannot prove the bridge is handed a legal method, and every other consumer of `StrategyContext.executeAggregate` gets no help at all.\n\n## What was verified, and what was not\n\n- VERIFIED: both declarations, at the lines above, on `origin/main` at `87d3f9a0a`.\n- VERIFIED: the values that actually flow are already narrow. `ObjectQLStrategy.resolveMeasureAggregation` (`packages/services/service-analytics/src/strategies/objectql-strategy.ts:1262`) returns either a metric type that survived the #12209 custom-SQL refusal or one of a hard-coded six-element alias list, so no known producer emits a method outside the enum today.\n- NOT VERIFIED: whether narrowing `StrategyContext.executeAggregate`'s `method` to `AggregationFunction` is safe for every implementor of the analytics strategy contract, in this repo and outside it. That is the whole question, and it is a public-surface narrowing on a published contract, so it is a spec-seat call rather than a consumer-side one.\n\n## Why it may deserve a card, and why it is filed rather than fixed\n\n`#11833`'s standing rule is that a consumer never widens a contract to fit, and the mirror of that is that a consumer does not narrow one either. The repair, if it is wanted, is one line in `packages/spec/src/contracts/analytics-service.ts` plus whatever the accept-set narrowing breaks in implementors — an accept/reject change on a published contract, which is a different tier from the consumer refactor that surfaced it.\n\nRefs: #11833 (the sweep that surfaced it) · #12209 and PR #12318 (the custom-SQL refusal that keeps the reachable producers legal today) · #4157 (this class biting before, in its silent-wrong-answer variant) · #4251 B3 and #11493 (the declared-contract sweep pattern)."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 12509,
+  "kind": "issue",
+  "title": "[Decision] Is ADR-0112's `declaredCode` channel in scope for 5xx sanitisation at all — and the answer must be applied to all three doors at once",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T06:36:38Z",
+  "updated_at": "2026-08-29T13:17:45Z",
+  "closed_at": "2026-08-29T13:17:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12509",
+  "body": "Filed by the `domain:cli` seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, as option **C** of the fork the **#12405 dev** raised on [PR #12508](https://github.com/objectstack-ai/objectstack/pull/12508) and correctly reported rather than decided. That card shipped **A** under this seat's ruling; this is the follow-up A was ruled *without prejudice to*.\n\n## The question\n\nWhen a 5xx has its **prose** withheld, should the producer's demoted `declaredCode` be withheld with it?\n\nToday the answer is \"no\" at every door, and at none of them is that a decision anyone made — it is what each door's structure produces.\n\n## Measured (on `origin/main`, by the #12405 dev)\n\nA bare driver error (`code: 'SQLITE_ERROR'` or `'42P01'`, **no declared status**) resolves to status 500 / code `INTERNAL_ERROR` with `demotedDeclaredCode` = the driver's own string. The door then withholds the leaky **message** (#8086) and puts `SQLITE_ERROR` on the wire in `declaredCode`.\n\n⚠️ **The flat `/data` door does not produce that combination — but for a structural reason, not a decision.** Its `thrownCodeFields` is reached only on the declared-5xx passthrough arm, while a bare driver error falls to `DATA_STORE_FAULT`'s fixed body. `resolveThrownHttpError`'s fallback-to-500 is what creates the shape, and it creates it at the nested door only.\n\n⇒ Three doors, one of which can emit a driver **dialect** on the wire in a channel the other two cannot reach — and the difference is an accident of control flow.\n\n## Why it is a decision card and not a fix\n\nThe disclosure is real but narrow: `SQLITE_ERROR` vs `42P01` names the backend, which is one of the two things the message withhold exists to protect (the other, identifiers, is already covered). Against that:\n\n- ⛔ Withholding at **one** door invents a third rule and re-creates the divergence #12405 just closed.\n- ⛔ Withholding at **all** doors silently drops the author-authored channel for exactly the metadata-app 5xx refusals ADR-0112's amendment wrote it for.\n\nThat is a scope question about the ADR's channel, not a bug in any one registrar.\n\n## ⭐ Sequencing note — this is the CODE axis of a question already open on the PROSE axis\n\n**#12281** asks whether `errorResponseBase` should adopt `/data`'s \"withhold every declared 5xx\" rule for the **message**. This card asks the same shape of question one channel over, for **`declaredCode`**. Both are cross-door 5xx-sanitisation scope questions; both carry `needs:contract-review`; and an answer to either that ignores the other is how the doors end up disagreeing on a *new* axis. **They should be read together, and probably ruled together.**\n\n## Not established here\n\n- Whether a driver errno can reach a producing seam at all. ⭐ At #12405's four seams it **cannot**: `PackageService` discriminates on the **status** channel, never `.code`, precisely so driver faults are not re-thrown as refusals. That measurement is what makes today's `no` safe rather than merely consistent — ⚠️ and it is a premise that can rot. The other doors' seams are **unmeasured**.\n- Severity not judged.\n\n## Region\n\n`packages/rest/src/package-routes.ts` (`sendThrownError`) · `packages/rest/src/error-response.ts` (`thrownCodeFields`, the declared-5xx arm) · `packages/runtime/src/http-dispatcher.ts` (`errorFromThrown`) — and `packages/types/src/thrown-http-error.ts`, which owns the fallback-to-500 that creates the shape.\n\n⚠️ `packages/rest/src/rest-server.ts` is held by open [PR #12421](https://github.com/objectstack-ai/objectstack/pull/12421) (#11926).\n\n## Refs\n\n- #12405 / PR #12508 — where the fork was raised, and where option A is pinned as a live case\n- #12281 — the prose axis of the same cross-door question\n- #8086 · #5811 — the message withhold and why it was made structural\n- ADR-0112 · #9106 · #9232 — the channel and the two doors that already emit it"
+}

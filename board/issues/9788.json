@@ -1,0 +1,33 @@
+{
+  "number": 9788,
+  "kind": "issue",
+  "title": "showcase: the rollup filter-editor half needs a writable-package summary field — a showcase design call, not a seed addition",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T23:46:41Z",
+  "updated_at": "2026-08-31T03:36:30Z",
+  "closed_at": "2026-08-31T03:36:07Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9788",
+  "body": "Split out of #9308, which scoped four stock seed fixtures for `examples/app-showcase/**`. Three landed. This one did not, because measurement showed it is **not seed data and cannot be made into seed data**, so guessing at it inside that card would have smuggled a design decision into a fixture PR.\n\n## What is blocked\n\n`automation.rollup-summary-filter` (P2), acceptance clause 5:\n\n> \"the child-row filter is settable via the visual editor on a writable package\" (oracle: `screenshot`)\n\n`blocked.by: fixture`, `ref: #3358 (editor half needs a writable-package summary field fixture)`. The item's other four clauses — the recompute half — are runnable on stock today and unaffected. The item's `knownGaps` and `blocked` block are deliberately left untouched by #9308.\n\n## Why it is not a seed addition — measured, not assumed\n\n1. **A writable package is a DB-backed package, and the showcase is definitionally not one.** `isWritablePackage` (`packages/metadata-protocol/src/package-writability.ts`) returns `false` for a **booted code package** — one that registered a manifest into the engine at startup — and the showcase is exactly that. There is no flag, no `allowOrgOverride` route around it: the registry declares `object` as `allowOrgOverride: false, allowRuntimeCreate: true` (`packages/spec/src/kernel/metadata-plugin.zod.ts`), so a showcase object cannot be edited by overlay, and a runtime-created one needs a writable base to live in.\n\n2. **`sys_packages` is not reachable from `defineSeed`.** It is a raw SQL table created by `service-package`'s own DDL (`CREATE TABLE IF NOT EXISTS sys_packages …`), not an ObjectQL object, so the stack's declarative `data:` block cannot address it. Provisioning one means playing the admin's part imperatively at boot — `protocol.installPackage` plus `protocol.saveMetaItem` — in the shape `bind-position-sets.ts` and `seed-approval-demo.ts` already use for other bootstraps.\n\n3. **A roll-up needs TWO objects, not one.** A `summary` field lives on the parent and aggregates a child that carries the relationship back. No existing showcase child can serve, because each already points at its own parent (`showcase_expense_line` at `showcase_expense_report`). So the fixture is a boot-time metadata-authoring bootstrap that mints **two new tables on every fresh boot** of the reference app.\n\n## Why it is a design call rather than a bigger chore\n\nShipping a permanent writable base changes what the reference app **is**, in ways that reach past this one item:\n\n- `access-security.readonly-package-locks-studio` (P2) uses the showcase as the **read-only** side of a two-sided gate and needs \"a WRITABLE (draft/app-local) object\" as its contrast — so a stock writable base would also serve that item. That is an argument in favour, and it is precisely why the decision is not local to the rollup item.\n- Studio's package selector, the `/meta` state routes, and the schema-sync path all gain a second, mutable metadata home on every boot.\n- Today the platform's designed path for a writable base is **on demand** (ADR-0033 zero-package app building: the AI blueprint flow auto-creates one). Nothing consumes a pre-seeded one, so shipping one is capability surface with no measured pull.\n\n## Recommendation\n\nDecide the question before building anything: **should the stock showcase boot with a project-scoped writable package?**\n\n- **If yes** — provision it once, imperatively, alongside the existing `kernel:bootstrapped` bootstraps, with a minimal parent/child pair whose only job is to carry one filtered `summary` field. That closes `automation.rollup-summary-filter` clause 5 and gives `access-security.readonly-package-locks-studio` its contrast side in the same move, and both items should be revised together.\n- **If no** — say so on the two items and retarget them at a run-time step (the runner duplicates the showcase base into a writable one via `POST /packages/:id/duplicate`, which is the platform's own supported path) rather than leaving them carrying a fixture blocker nobody intends to pay.\n\nEither way it wants a maintainer/showcase-owner ruling first; the implementation is small once the question is answered.\n\n## Context\n\n- Parent card: #9308 (three of its four fixtures landed; `FOLLOW-UPS.md` section 6 records the split).\n- The checklist item: `docs/qa/platform-checklist/areas/automation.json` → `automation.rollup-summary-filter`.\n- The read-only contrast item: `docs/qa/platform-checklist/areas/access-security.json` → `access-security.readonly-package-locks-studio`."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 11152,
+  "kind": "issue",
+  "title": "[finding] `AGGREGATION_ROWS` has no boolean column, so the cross-driver aggregation conformance family cannot see a boolean aggregand on any face",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-22T21:43:40Z",
+  "updated_at": "2026-08-28T14:32:20Z",
+  "closed_at": "2026-08-28T14:32:00Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 24,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11152",
+  "body": "Observed while fixing #11065. Filed unassigned as a finding — `packages/spec` was off limits to that card, and this is an observation about test-fixture reach rather than a defect with a settled fix.\n\n## What was observed\n\n`AGGREGATION_CASES` / `AGGREGATION_ROWS` (`packages/spec/src/data/aggregation-conformance.ts`) is the shared case table every driver's aggregation-conformance test runs — the reason those cases live in the spec package at all is that an aggregate answering differently under one driver than under SQL pushdown is \"one query with two numbers, decided by a driver capability bit the caller never sees\".\n\nThe fixture's columns are `id`, `region` (the group-by), `stage` (nullable, duplicate-bearing) and `score` (non-null numeric). **There is no boolean column.** Each column was chosen deliberately and is documented as such — the gap is a reach question, not a mistake.\n\nThe consequence is structural: **no conformance cell exercises a boolean aggregand on any face.** #11065 was `avg` over a boolean answering `null` on `driver-memory` and the arithmetic number on SQLite, and the conformance family — which runs against `driver-memory`, `driver-sql`, `driver-sqlite-wasm`, `driver-turso` and `driver-mongodb` — was green throughout, on `main`, on every PR. It was found from an application, not from the suite built to find exactly this.\n\nRate measures over flag columns (an SLA-violation rate, a win rate) are an ordinary analytics shape, so this is not a hypothetical column.\n\n## The second cell it would settle, which is NOT the same question\n\nAdding a boolean column would immediately raise `min` / `max` over booleans, and that one is genuinely unsettled — worth flagging so nobody reads it as a mechanical follow-up to #11065:\n\n- SQLite / the SQL family: `MIN(col)` / `MAX(col)` over a boolean answer `0` / `1`.\n- objectql's in-memory fallback (`in-memory-aggregation.ts`) and `driver-memory`'s data face both reduce with `<` / `>` and answer `false` / `true`.\n\nSo on `min`/`max` the two in-memory faces **agree with each other** and differ from SQL — the opposite alignment from #11065, where driver-memory was the lone outlier and the correct answer was pinned by the other two. Whether the JSON answer should be `0`/`1` or `false`/`true` is a contract question, not a bug with an obvious side.\n\nA third question the same column would measure, unverified here: PostgreSQL has no `avg(boolean)` at all, so depending on how `driver-sql` stores a boolean field, `avg` over one there may **error** rather than return a number — a third behaviour beside SQLite's number and the pre-#11065 `null`.\n\n## Why file it rather than just adding the column\n\nExtending a fixture that every driver's conformance suite consumes is a cross-driver change with at least one open contract question inside it (`min`/`max` above), and the answers have to be decided before the cases can state expected values. That is a triage/ruling input, not a drive-by edit — and `packages/spec` was explicitly out of bounds for #11065.\n\nRelated: #11065 (the cell this was found through, fixed on `driver-memory`), #11151 (the same cell suspected on `driver-mongodb`), #6814 / #6815 (earlier cells of the same family, both closed, both found the same way).\n\nBlocked-by: #11151"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 12767,
+  "kind": "issue",
+  "title": "`@objectstack/hono` runs its tests against `@objectstack/plugin-hono-server`'s dist — the missing vitest alias was hidden by the unbounded import regex until #12555",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-27T17:18:09Z",
+  "updated_at": "2026-08-30T05:06:24Z",
+  "closed_at": "2026-08-30T05:06:24Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12767",
+  "body": "Filed unassigned by the #12555 dev, as the one repo-wide finding that card's detector fix unmasked. Not fixed there: the remediation makes a suite execute another package's source and so needs its own verification, which is a different surface from a gate-script PR.\n\n## What was hidden\n\n`packages/adapters/hono/src/index.ts` imports at module scope:\n\n```ts\nexport type EnvironmentDriverRegistry = any;\nimport {\n  createOriginMatcher,\n  hasWildcardPattern,\n  DEFAULT_CORS_ALLOW_HEADERS,\n  DEFAULT_CORS_EXPOSE_HEADERS,\n} from '@objectstack/plugin-hono-server';\n```\n\n`check-test-source-alias.mjs` never saw that import. Its `IMPORT_PATTERNS` clause capture was an unbounded `[\\s\\S]*?`, so the match started at the preceding `export`, ran through the `;` and swallowed the whole import statement — leaving a clause that BEGINS with `type`, which `isTypeOnlyClause` then discarded as erased-at-compile-time. A real runtime import was filtered out as type-only.\n\nReproduced against the pre-#12555 regex:\n\n```\nCURRENT  runtime imports kept: []            discarded as TYPE-ONLY: [\"@objectstack/plugin-hono-server\"]\nFIXED    runtime imports kept: [\"@objectstack/plugin-hono-server\"]\n```\n\nIndependent corroboration on `main`, from an artifact nobody edited for this: `check-type-source-resolution.mjs` has carried `@objectstack/plugin-hono-server` in ITS entry for this package all along, because `extractTypeImports` reads only the specifier captures and never applies the type-only filter. The two gates disagreed about the same package for exactly this reason.\n\n## Current state after #12555\n\nThe detector is corrected and the ledger re-measured, so `KNOWN_UNALIASED_TEST_IMPORTS['@objectstack/hono']` now records the truth:\n\n```js\n'@objectstack/hono': ['@objectstack/plugin-hono-server', '@objectstack/types'],\n```\n\nThat is a LEDGER CORRECTION, not a remediation. The hazard the ledger exists to track is still live for this pair: `@objectstack/hono`'s unit verdicts are a function of build state for `@objectstack/plugin-hono-server`, so a stale or behind `dist/` runs those tests green against old behaviour.\n\n## The remediation the gate prescribes\n\n`packages/adapters/hono/vitest.config.ts` today aliases only `@objectstack/runtime`, in the OBJECT form. The gate asks for an anchored array-form entry, and verified the target file exists in the checkout:\n\n```js\nalias: [\n  { find: /^@objectstack\\/plugin-hono-server$/, replacement: path.resolve(__dirname, '../../plugins/plugin-hono-server/src/index.ts') },\n]\n```\n\nNote this converts the existing `@objectstack/runtime` object entry to array form as well, and it points that suite at plugin-hono-server's SOURCE — so it needs the package's tests actually run, not just the gate re-run. That is the whole reason this is a separate card.\n\n⛔ Do not resolve this by widening `KNOWN_UNALIASED_TEST_IMPORTS`: that registry is shrink-only and the entry above is already the corrected measurement.\n\nBlast radius is exactly this one pair — `--list` before and after the detector fix differ in one line repo-wide (303 -> 304 package-dependency pairs, 61 of 72 packages unchanged).\n\nFound while implementing #12555 (branch `claude/issue-12555-import-regex-statement-bound`)."
+}

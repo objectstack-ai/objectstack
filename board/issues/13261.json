@@ -1,0 +1,34 @@
+{
+  "number": 13261,
+  "kind": "pull_request",
+  "title": "docs(adr): record the paper metadata-customization module's retirement in ADR-0005",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-29T15:39:10Z",
+  "updated_at": "2026-08-30T02:27:11Z",
+  "closed_at": "2026-08-30T02:27:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-30T02:27:09Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/13261",
+  "body": "Fixes #13185\n\nADR-0005 named `packages/spec/src/kernel/metadata-customization.zod.ts` in two places as a kept, deliberately-retained model held for a future phase. That module has been deleted whole, so both sentences pointed at a file that no longer exists and promised a future phase ADR-0126 §6 has since ruled out.\n\n**Decides nothing new.** This is a factual text correction to an accepted record, not a re-litigation of ADR-0005. Its own decision — the org-scoped overlay (`allowOrgOverride` on `DEFAULT_METADATA_TYPE_REGISTRY`, `sys_metadata` org rows, the layered code/overlay/effective read) — is untouched by the retirement and is neither edited nor re-summarized here.\n\n## Evidence chain for the correction\n\n- Maintainer ruling of 2026-08-29 on issue #12057 (comment 5459699497), verbatim 「同意」, adopting retirement of the paper metadata-customization protocol under ADR-0049 enforce-or-remove.\n- Executed by PR #13186, merged 2026-08-29T14:16Z.\n- Superseding model: ADR-0126 §6 — wall 3 (upgrades rewrite the packaged base; the customer's choices live in the activation ledger and no upgrade merges into them) rules out the 3-way-merge future phase, and wall 4 supersedes the paper protocol outright (\"nothing may build against it\").\n\nVerified on `origin/main` `7404925` before any edit: `git cat-file -e origin/main:packages/spec/src/kernel/metadata-customization.zod.ts` reports the path does not exist, while both stale lines were still present.\n\n## What changed — one file, two sites, one home for the record\n\nPer Prime Directive 13, both original sentences are left standing as written; the correction is appended.\n\n- **Design principles (binding), item 3** — the substantive claim, so this is where the full record goes: an inline `⚠️ Correction (#13185, 2026-08-29)` note giving the retirement, the evidence chain and the superseding model, and stating explicitly that the principle's own decision is unaffected (customizations are still full-JSON deltas, field-level patches are still not implemented). What changed is only the reserve the sentence pointed at: the RFC 7396 / 3-way-merge direction is closed rather than deferred.\n- **References bullet** — a restatement of that same claim, so it gets the terse corrected fact (the file no longer exists, and what deleted it) plus a pointer to the one home above, rather than a second copy of the reasoning.\n\n## Convention followed\n\nThe inline `⚠️ Correction (#issue, date)` shape, appended to the claim it corrects with the original wording left standing — the ADR-0088 precedent, applied to ADR-0126 §6.4 by PR #13139 earlier the same day. The split between the two sites here mirrors how that PR handled its own §1.1 restatement: a pointer to one home for the correction, not two copies. A strikethrough annotation on the References bullet was considered and rejected — striking the original text through re-reads the record rather than leaving it standing, which is the half of Prime Directive 13 this convention exists to satisfy.\n\n## Verification\n\nGate family derived from the tree, not recalled: `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` (re-derived after the commit; unchanged). All five run green at `e1415210`, quoting each gate's own verdict line:\n\n- `pnpm check:adr-anchors` — `✓ check-adr-anchors --self-test: 106 assertions over the real auditAdrDirectory() / auditCitedNumbers() / assembleAnchors() paths.`\n- `pnpm check:doc-authoring` — `✓ doc authoring guard: 393 files clean — no bare metadata literals.`\n- `pnpm --filter @objectstack/lint run check:doc-formula-expressions` — `✓ check:doc-formula-expressions: 22 record-scoped formula example(s) across 426 files / 1451 TS blocks judged clean by @objectstack/formula.`\n- `pnpm check:pm-governed-merges` — `✓ check-governed-merges --self-test: 206 assertions ...`\n- `pnpm check:adr-links` — `✅ check-adr-links: 576 relative link destination(s) under docs/adr/ resolve`\n\nTwo notes on that run:\n\n- `check:doc-formula-expressions` was **not** on the dispatch's expected gate list; the path derivation added it. Its first two invocations exited 1 with `PREREQUISITE NOT MET` (`@objectstack/formula`, then `@objectstack/lint`, not built) — the gate's own text says \"Nothing was measured\", so those are not failures. After `turbo run build` for each, it measures clean.\n- The links gate result is a real measurement of the new cross-link, not an assumption: the same gate run against the base tree `74049254` in a throwaway compare worktree reports **575** destinations, against **576** here, so the census delta is exactly the one relative link this PR adds (`./0126-packaged-metadata-customization-model.md`). No relative link is written to the deleted module — it stays a code span.\n\n## No changeset\n\n`docs/adr/**` only; this publishes nothing from any package, so the diff carries no changeset and the PR is labelled `skip-changeset` — the same treatment PR #13139 had for its ADR-only diff.\n\n## Governed surface\n\n`docs/adr/**` is a governed surface under Prime Directive 14. This PR stays **draft**: no AI seat marks it ready, arms auto-merge, or enqueues it. Human merge or pinned maintainer approval is the landing path, and the dispatching PM seat owns the terminal steps after review.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01KX8wnyjStaZcuMyAMNsy3N)_"
+}

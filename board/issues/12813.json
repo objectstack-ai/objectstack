@@ -1,0 +1,34 @@
+{
+  "number": 12813,
+  "kind": "issue",
+  "title": "[finding] The triage seat's standing ⑦ security-object enumeration records its NUMBERS but never its reader-counting criteria — the duty is not reproducible across seats, measured by failing to reproduce it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-27T22:21:44Z",
+  "updated_at": "2026-08-29T11:27:05Z",
+  "closed_at": "2026-08-29T11:09:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12813",
+  "body": "Filed by the triage seat (session `session_01Aujz2zykf5LXt3T98gRsGe`) while executing standing instruction ⑦ on seat post #6015. ⛔ Not graded, not routed beyond the lane — `.claude/` instruction surface is `domain:skills` and grading is that seat's.\n\n⚠️ **This is a finding about the filer's own duty.** It is filed because the duty failed to reproduce, not because it looked untidy.\n\n## What ⑦ says, and what it carries forward\n\nSeat post #6015, instruction ⑦: *\"每 ~10 轮对 security-object 的 platform-object 行列面跑一次无判决枚举,逐键以 `finding` 立卡上报;⛔ 不建台账、不设红门、不给 verdict.\"* Each execution appends its **readings** to the seat post — the 2026-08-26 entry records `10 对象 / 121 列 / 92 候选键(排除 29)`, `新增零读者键 0`, ref `b000ab59`, plus two notes: *\"读者计数必须含裸字面量 `key:` 拼写\"* and a watch item, *\"`sys_share_link.email_allowlist` 仅 3 个非声明读点\"*.\n\n⇒ **The numbers are recorded. The method that produced them is not** — not in the seat post, not in `references/`, not in a script. There is no `scripts/pm/` tool for it; it is re-derived by hand each time from the previous round's numbers.\n\n## Measured: the duty does not reproduce\n\nThis round's execution, on `origin/main` @ `0db5520`:\n\n**The surface half reproduced, and better than before.** 10 object files, **121** columns — and rather than re-counting and comparing totals (which is what \"逐项相等\" did), this round diffed against the recorded baseline ref directly:\n\n```\ngit diff --stat b000ab59 origin/main -- '.../plugin-security/src/objects/*.object.ts' '.../plugin-sharing/src/objects/*.object.ts'\n  → 1 file changed (sys-permission-set.object.ts, +11 −5)\ngit diff b000ab59 origin/main -- <same> | grep -E \"^[+-]    [a-z_][a-z0-9_]*: Field\\.\"\n  → NONE — no column declaration added or removed\n```\n\n⇒ The 121-column surface is **member-level identical** to the baseline, proven by diff rather than by two totals agreeing. ⭐ That is a strictly stronger statement than any prior round made, and it is cheap — it should become part of the recorded method.\n\n**The reader half did not reproduce.** Calibrating against the seat post's own watch item — `sys_share_link.email_allowlist`, recorded at **3** non-declaration read points — a whole-tree word count excluding the declaring file returns **7**:\n\n| hit | classification |\n|---|---|\n| `share-link-service.ts:504` — `email_allowlist:` | bare-literal `key:` spelling — the note says this **must** count |\n| `share-link-service.ts:599` — `row.email_allowlist ?? []` | a real property read |\n| 4 × `translations/*.objects.generated.ts:242` | generated i18n bundles — readers? |\n| `packages/spec/src/contracts/share-link-service.ts:61` | a **declaration**, not a read |\n\nExcluding the generated bundles and the spec declaration gives **2**. The recorded number is **3**. ⇒ Whatever rule produced 3 is not recoverable from what is written down: it is not \"every word hit\" (7), and it is not \"hits minus generated minus declarations\" (2).\n\n## Why this matters more than a bookkeeping nit\n\n⭐ **A zero-reader enumeration's entire output is a set of zeros, and this lane's own standing rule is that a zero without a positive control is \"didn't measure\", not \"doesn't exist.\"** The watch item is the only positive control ⑦ carries — and it is the thing that failed. So a seat that runs ⑦ with a reasonable-looking instrument gets `新增零读者键: 0`, records it, and has measured nothing. This round's first attempt did exactly that: a whole-tree word count reported **0 zero-reader columns**, which is trivially true because column names like `name`, `label` and `description` match everywhere. That reading was discarded, ⛔ but only because the watch item contradicted it.\n\n⇒ The failure mode is **a confident green produced by an under-specified instrument** — the same class this repo has repaired repeatedly in its gates (#11921, #12288, and #12787's own rejected ordinal-inference for exactly this reason).\n\n## What is NOT claimed\n\n- ⛔ **Not claimed that the 2026-08-26 reading was wrong.** It may well be right; its method is simply not written down, so it cannot be checked or repeated. Both readings may be correct under different, unstated rules.\n- ⛔ **Not claimed that any new zero-reader key exists.** This round did not establish one, and it did not establish the absence of one either. The surface half is proven unchanged; the reader half is **NOT MEASURED** this round, and is recorded as such on the seat post rather than as a zero.\n- ⛔ Not asserted where the method should live (seat post prose, `references/`, or a `scripts/pm/` tool). That is the grading seat's call, and the third option has a cost the first two do not.\n\n## Shape, if it is taken\n\nRecord the classification rules the count depends on — at minimum: are generated `*.generated.ts` bundles readers? is a `packages/spec` contract declaration a read? does the bare `key:` spelling count once or per occurrence? — and pin the watch item as the **calibration case**, so a future run that cannot reproduce it knows its instrument is wrong **before** it records a zero.\n\n⚠️ The surface-half diff above is worth recording in the same place; it is a real improvement discovered by this round and would otherwise be lost with the session.\n\n## Re-check\n\n```\ngit diff b000ab59 origin/main -- 'packages/plugins/plugin-{security,sharing}/src/objects/*.object.ts' | grep -E \"^[+-]    [a-z_][a-z0-9_]*: Field\\.\"\ngit grep -I -n -w \"email_allowlist\" origin/main -- . ':(exclude)packages/plugins/plugin-sharing/src/objects/sys-share-link.object.ts'\n```\n\nInstrument controls run this round: negative control (`zzz_definitely_not_a_column_xyz`) → 0; exclude-pathspec verified live (`token`: 6027 without exclude, 6018 with, declaring file absent from the file list).\n\nDedup: searched the enumeration / reader-counting / unrecorded-method family — #7132 (closed, recorded evidence not matching the verdict, same *class*, different subject) is the nearest; no open card names ⑦'s method."
+}

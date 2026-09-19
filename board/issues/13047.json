@@ -1,0 +1,34 @@
+{
+  "number": 13047,
+  "kind": "pull_request",
+  "title": "docs(cli): drop stale family counts from the json-stdout-purity docblock",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-29T00:59:28Z",
+  "updated_at": "2026-08-29T03:03:43Z",
+  "closed_at": "2026-08-29T03:03:42Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": "2026-08-29T03:03:42Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/13047",
+  "body": "Fixes #13017\n\nThe docblock of `packages/cli/test/json-stdout-purity.e2e.test.ts` argued its own design from a count that had drifted twice:\n\n> The contract has one implementation face per command, and there are **ten** of them. A file that pinned `migrate recorded-by` alone would go green while the **other nine** stayed broken, and would say nothing at all about the **eleventh**.\n\nThe `FAMILY` table holds **twelve** entries.\n\n## Harmless, and deliberately treated as such\n\nThe family is DISCOVERED from the source tree by `discoverFamily()` and reconciled against `FAMILY` by one assertion. No assertion, exit code or criterion reads the prose numbers. That was re-verified here rather than assumed (see Evidence: the suite count is identical before and after). So this is a **reader-facing** defect only, and the reconciliation mechanism is not touched.\n\n## Route taken: remove the magnitude\n\nOf the three routes the card listed, this takes the first. The prose now reads \"one implementation face per command\", \"the others\", \"a new one\" — deleting the drift construct instead of resetting the number to twelve and waiting for a thirteenth member.\n\nThe sharp measurements sitting beside it are untouched: the `~60 INFO lines` above the payload, the `#4873` extractor story, and the two independent pollution sources. Not having those doubted because of an adjacent stale count is the entire argument for doing this at all.\n\n## A second residue — found by scanning for WORDS, not digits\n\nThe counts are English words, so a digit-based scan does not see them; that is part of why this survived two membership changes. Scanning the whole file for number-words turned up one more instance **outside the docblock**, in the `beforeAll` comment:\n\n```\nSequential also keeps peak memory at one booted kernel rather than nine.\n```\n\nSame class, same staleness (nine vs twelve). It now reads `rather than one per member`.\n\nOne quantifier was considered and deliberately **left alone**: \"Only one member needs anything: `os migrate meta`\" in the `FAMILY` docblock. It counts members whose extra argv is non-empty, not the family size — a new member with `[]` leaves it true — and it names the member directly above the table that verifies it. It is accurate today and does not drift with membership.\n\nNo mechanical \"auto-generated / auto-checked\" apparatus was added to the comment; the card ruled that route (option 3) out.\n\n## Evidence — all at `4b7d34430`\n\nSuite count is unchanged and green, which is the card's criterion:\n\n| measurement | before | after |\n|---|---|---|\n| `vitest list` (collected) | 37 | 37 |\n| `vitest run` | — | `Test Files 1 passed (1)` / `Tests 37 passed (37)` |\n\nThe \"before\" figure was taken by restoring the file from the merge base `8cb96ec41`, proving the pristine text was on disk (`'there are ten of'` = 1 occurrence), listing, then restoring with `git checkout HEAD --` and proving the result byte-identical to the `HEAD` blob (`af39210b7813eca3220dd6b49aa4188b03fcf84a`) with a clean `git diff HEAD`.\n\nGate families were re-derived from the real change set with `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` at this commit. All green, each read from the gate's own verdict line:\n\n`check:nul-bytes` · `check:comment-mask-adoption` · `check:cli-test-child-env` · `check:keyed-text-bounds` · `check:test-source-alias` · `check:cross-package-test-inputs` · `check-ci-filter-parity` · `check:engine-double-contract` · `check:where-matcher` · `check:query-options-erasure` · `check:objectql-double-limit` · `check:page-declaration-shape` · `check:published-files` · `check:slot-lookup` · `check:type-source-resolution` · `check-undeclared-dep-imports` · `check-plugin-teardown-shape` · `check:type-check-coverage` · `docs-audit/check-affected-docs` · `docs-audit/check-drift-comment`\n\nTwo declared limits, so the coverage claim is checkable rather than implied:\n\n- **`pnpm --filter @objectstack/cli typecheck` is NOT a measurement of this file.** It exits 0, but `packages/cli/tsconfig.json` is `\"include\": [\"src\"]`, there is no sibling test tsconfig and no `packages/cli/test-typecheck-debt.json`, so `--listFiles` reports **0** of the package's test files in the program. Read as NOT MEASURED, not as green. This is a pre-existing property of the package, not something this PR moves — no test file is added and `check:type-check-coverage` is green. The file's real exercise here is the vitest run above.\n- **`check:type-check-debt --re-measure` was not run locally.** It refuses on a worktree without the whole workspace closure built, and this worktree built only `@objectstack/cli^...`. Its structural trigger is a *new* test file outside every tsc program; this PR adds none and changes only comment bytes. CI runs it.\n\n## No changeset, by the gate's own rule\n\nThis PR changes comment text in one test file. It publishes nothing, so it carries `skip-changeset` rather than a changeset — `changeset-check` in `pr-automation.yml` has no path exemption, and `lint.yml` names exactly this case (\"such a PR releases nothing, so by the workflow's own prescription it takes the label\").\n\n_Generated by [Claude Code](https://claude.ai/code/session_01UjujZN219uFzBhSYfMykCd)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01UjujZN219uFzBhSYfMykCd)_"
+}

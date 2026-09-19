@@ -1,0 +1,35 @@
+{
+  "number": 12866,
+  "kind": "issue",
+  "title": "ADR-0006 D2 (SDK half): rename client.projects.* to client.environments.*; unwrap keys follow the wire; JSDoc tells the truth",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-28T05:41:43Z",
+  "updated_at": "2026-08-28T15:10:26Z",
+  "closed_at": "2026-08-28T15:10:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12866",
+  "body": "Part of #12865 (epic parent; unparked 2026-08-28 by maintainer ruling recorded there). Filed by epic PM session `session_65d2faee-1ff4-4be8-be28-72b972c539d9`.\n\n## Scope (the SDK half of one coordinated rename)\n\n- `packages/client/src/index.ts`: the `projects` method namespace becomes `environments` — all methods including the nested `projects.packages` block. **No aliases** (standing v5.0 rename rule; ADR-0006 D3 permanently declined a mapping layer).\n- The declared unwrap shapes' keys follow the wire rename: the list shape's `projects` key becomes `environments` (the `total` key stays), and every single-row `project` key becomes `environment`. The producer half is the paired cloud card (link in the comment below) — the two halves declare the SAME wire truth.\n- The JSDoc sentence naming `ProjectProvisioningService.provisionProject`: measured 2026-08-28 — zero hits for that class spelling in cloud's `packages/service-cloud/src` (positive control: the routes files exist and produce these envelopes). Measure what the server actually does today and rewrite the sentence to describe the running system truthfully (ADR-0006 D1 point 3). Do not copy the old class name forward.\n- CLI consumers follow in the SAME PR: `packages/cli/src/commands/environments/list.ts`, `create.ts`, `show.ts` — and measure the sibling files `bind.ts`, `switch.ts`, `environments.test.ts` for the same envelope/namespace consumption before assuming they are clean.\n- Changeset: major for `@objectstack/client` (breaking API rename); the changeset text carries the migration entry — that is the release-notes input. Never touch `content/docs/releases/**`.\n\nBlocked-by: #12038\n\n(PR #12848, which fixes #12038, edits `packages/client/src/index.ts`, `packages/client/exported-any-returns.json`, and the client tests — the same files this card must edit. Hard same-file serial: branch from main only AFTER PR #12848 merges. Its diff does not touch the `projects` block lines, but the exported-any-returns baseline overlaps textually.)\n\n## Landing constraint (HARD)\n\nDRAFT PR; do not merge, do not arm auto-merge. Must land in the same coordinated release window as the producer half (cloud). Neither half ships alone: SDK-half-alone is ADR-0006 D3, permanently declined; the maintainer opens the window (see the epic parent).\n"
+}

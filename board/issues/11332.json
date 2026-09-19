@@ -1,0 +1,34 @@
+{
+  "number": 11332,
+  "kind": "issue",
+  "title": "Three plugin-manifest blocks — `capabilities`, `configuration`, `extensions` — have zero reads of the container itself, so all 8 keys beneath them are inert (`configuration.properties.secret` promises encryption/masking)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-23T11:59:12Z",
+  "updated_at": "2026-08-30T05:28:41Z",
+  "closed_at": "2026-08-30T05:28:26Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11332",
+  "body": "Measured while seeding the plugin-manifest liveness ledger for #10728 (all eight verdicts recorded as `dead` in `packages/spec/liveness/manifest.json`). Filed, not fixed — this is the enforce-or-remove unit the ledger's `dead` rows produce.\n\nMeasured on `origin/main` (`b9e9227e3`). Sibling of #10724, which is the same shape for the `contributes` block; these three were outside that card's scope because nothing had measured the manifest's non-`contributes` surface until now.\n\n## What is declared, and what is measured\n\nFor each block the probe finds **zero reads of the container**, which settles every key beneath it at once — a key cannot be read if the object holding it never is.\n\n| Block | Line | Keys beneath | Reads of the container |\n|---|---|---|---|\n| `capabilities` (`PluginCapabilityManifestSchema`) | `manifest.zod.ts:484` | `implements`, `provides`, `requires`, `extensionPoints`, `extensions` | **0** |\n| `configuration` | `manifest.zod.ts:305` | `title`, `properties` | **0** |\n| `extensions` (`z.record(z.string(), z.unknown())`) | `manifest.zod.ts:491` | — (untyped) | **0** |\n\nProbe: `(manifest|pkg|package|entry|artifact)?.` over `*.ts,*.tsx,*.mts,*.mjs,*.js` across `packages`, `apps`, `examples`, `skills`, excluding `node_modules`/`dist`, test files and comment lines. `objectui` likewise zero.\n\n⚠️ **`.capabilities` is the one that looks non-zero and is not.** A bare `.capabilities` probe returns hits, and every one belongs to a different surface: driver loader contracts (`packages/metadata/src/metadata-manager.ts:798`), the QuickJS sandbox argument set (`packages/runtime/src/sandbox/quickjs-runner.ts:120`), REST discovery (`packages/rest/src/rest-server.ts:3333`). None is reached from a manifest. Worth stating because the next person to re-measure this will hit the same false positive.\n\nAlso note the live analogue one level up: real dependency resolution runs off top-level `manifest.dependencies` (`packages/metadata-protocol/src/protocol.ts:4290-4300`), **not** off `capabilities.requires`.\n\n### Controls — an uncontrolled zero is not a reading\n\n- The same probe finds real reads of sibling manifest keys: `.packaging` (`cli/src/commands/plugin/build.ts:126`), `.data` (`runtime/src/app-plugin.ts:946`), `.contributes` (`objectql/src/engine.ts:4504`).\n- `objectui` control: `manifest.(id|name|namespace|version)` → 46 hits, so manifest reads are findable in that repo.\n\n## The one key worth calling out separately\n\n`configuration.properties` declares a per-setting shape with `secret: z.boolean().optional().describe('If true, value is encrypted/masked (e.g. API Keys)')`.\n\nNothing encrypts, masks, resolves, or even parses it. A plugin author reading that describe() writes `secret: true` next to an API key and gets exactly the same handling as `secret: false` — which is a stronger claim than \"unused\", because the key's own text is an assurance about credential handling. `capabilities`' describe() has the milder version of the same problem (it sells \"plugin interoperability and automatic discovery\"; no discovery path consults it).\n\n## Note on `extensions` specifically\n\nIts value type is `z.unknown()`, so this key is where anything the platform does not yet model would get parked. Its emptiness is therefore evidence of something slightly different from the other two: authors are not parking things here either. Worth separating when a removal is cut — an untyped escape hatch with no users is a cheaper removal than one with unknown users.\n\n## ⚠️ Scope limit — measure `cloud` before removing\n\n`cloud` is **unmeasured**, carried unchanged from #10627 (`add_repo` → \"you don't have access to objectstack-ai/cloud\"), and `manifest.zod.ts:10-18` says the control plane mirrors these shapes when it validates a published `.osplugin` and persists declared metadata onto `sys_package_version`. `capabilities` is the most plausible of the three to have a cloud-side consumer (marketplace discovery). **Run the cloud leg with its own control probe first** — the same precondition #10724 carries.\n\n## Route, if removal is chosen\n\nTombstone, not deletion, on the #4914 / #10724 precedent: neither `ManifestSchema` nor these blocks are `.strict()` (`manifest.zod.ts:132` is a plain `z.object`; the only `.strict()` in the file, at :44, belongs to `PluginPermissionsSchema`), so a plain deletion **silently strips** the key — replacing an inert declaration with an invisible one. `retiredKey()` per block, retired-key entries, one ADR-0087 D3 semantic entry, upgrade-guide row, changeset. Sequencing with #10724 (also a manifest tombstone card, currently `pm:blocked` on the same cloud census) is a triage call — the two touch the same file and the same D3 neighbourhood.\n\nFiled unassigned for triage.\n\nBlocked-by: #12400"
+}

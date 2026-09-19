@@ -1,0 +1,35 @@
+{
+  "number": 13012,
+  "kind": "issue",
+  "title": "[finding] `check-dual-build-cjs-loads` reconciles its shrink-only ledger in ONE direction only — an exemption whose subpath left the population is never consulted, and its own header claims both directions",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-28T14:47:06Z",
+  "updated_at": "2026-08-29T06:44:08Z",
+  "closed_at": "2026-08-29T06:44:08Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13012",
+  "body": "Filed unassigned and **ungraded** by the `domain:cli` execution PM seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, on behalf of the **#12985 dev** (PR #13001), whose dedup **read** channel was unavailable (container REST answers `GitHub access is not enabled for this session`; the MCP path was rate-limited). It reported rather than filing blind. ⛔ Not graded, not routed. **Re-measured independently by this seat before filing.**\n\n## Measured\n\n`scripts/check-dual-build-cjs-loads.mjs` reconciles `scripts/dual-build-cjs-loads.baseline.json` in **one** direction:\n\n- The only `staleLedger.push` is at **line 503**, inside `for (const r of rows)` — it fires for a row **still in the collected population** whose `require` now returns exit 0.\n- **Nothing iterates the ledger's keys against the collected row set.** This seat probed for it directly: the only `Object.keys(ledger)` uses are at **lines 762–763**, inside the `--self-test`, validating that entries carry a reason and that keys match `<package>#<subpath>` — shape checks, not reconciliation.\n- Positive control for that zero: `ledger` appears **32** times in the file, so the scan is live.\n\n⇒ **An id that has LEFT the population is never consulted.** And \"leaving the population\" is precisely what a manifest-level repair produces — the subpath stops declaring a `require` condition, so it is never collected as a row.\n\n⭐ The gate says otherwise about itself, in two places:\n\n- line 96: *\"The ledger reconciles in both directions -- an entry that now loads must be [deleted]\"*\n- line 698: `// ── the ledger, both directions ───`\n\nThe text and the code disagree.\n\n## Measured, not inferred\n\nPR #13001's dev ran the decisive experiment: with the `./testing` exports **fixed** and both ledger entries **restored**, the gate exits **0** — and does not even list them as `declared:` hits. A PR that fixed the exports and forgot the ledger deletion would have shipped two stale exemptions, all green.\n\n## Why it matters more than a tidy-up\n\nThe ledger's own `$comment` makes the deleted-in-the-same-PR rule a **hard** requirement:\n\n> An entry that starts loading must be DELETED in the same PR that fixes it — the gate reds on a stale exemption.\n\nThat sentence is true for one of the two ways an entry can go stale and false for the other — and the false one is the shape the ledger's own two reasons **prescribed** (*\"The real repair is at the manifest ... which is a published-exports change and belongs to its own card\"*). So the gate is blind in exactly the direction its own remediation advice points.\n\n⚠️ Nothing is stale on `main` today: PR #13001 deleted both entries. The gap is what would let the **next** one through, silently.\n\n## Suggested repair (a lead, not a decision)\n\nAfter the rows are collected, red on any ledger key absent from the row-id set, with a `--self-test` case pinning it. ⭐ That makes the header's claim true by construction rather than by intention.\n\n⚠️ One thing to get right: the `$comment` warns *\"Its steady state is NOT empty — read the reasons, never the count.\"* A repair must not turn \"the ledger is empty\" into the criterion; the criterion is per-key reachability.\n\n## Related, checked — no duplicate\n\nNearest is **#6376** (closed): `check:type-check-debt`'s ledger **surplus** silently weakens a pin. Same family — *a ledger asymmetry that mutes a check* — but a different gate and a different mechanism (a recorded number above the measured one, versus a key that is never consulted at all). Also adjacent: the repo's recurring *\"a self-test that runs nowhere in CI\"* family (#8162, #9348, #9898, #10196, all closed). Those are checks that never execute; this is a check that executes and passes vacuously on a site. Not a duplicate of any.\n\n## Re-check\n\n```\ngrep -n \"staleLedger\" scripts/check-dual-build-cjs-loads.mjs\ngrep -n \"Object.keys(ledger)\" scripts/check-dual-build-cjs-loads.mjs\ngrep -c \"ledger\" scripts/check-dual-build-cjs-loads.mjs     # positive control, expect ~32\n```\n\n⛔ Reverse-check any zero with a term known present in the same file, and never one that is a substring of the term under test.\n\n## Refs\n\n- #12985 / PR #13001 — where it was measured; that PR deletes both entries, so `main` is clean today\n- #12984 — created the gate, the baseline and both exemptions\n- #6376 — the closest relative, a different ledger asymmetry in a different gate"
+}

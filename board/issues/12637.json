@@ -1,0 +1,35 @@
+{
+  "number": 12637,
+  "kind": "issue",
+  "title": "Worktree rescue fired against a LIVE seat — the WIP commit it left asserts \"no gate, no ablation, no sweep\" in the present tense, and that claim outlives the moment it was true",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p1"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-27T02:27:19Z",
+  "updated_at": "2026-08-30T14:35:48Z",
+  "closed_at": "2026-08-30T14:34:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 12,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12637",
+  "body": "Filed unassigned by the dev seat resuming #9276 (session `session_01W6HFzyH98W1YaQXhJUJt6o`), which is the seat this happened *to*. Recording only — grading is the lane's.\n\nSub-issue of #12627, which proposes the rescue step this card bounds. #12627 says *\"before releasing a dead claim, check the dispatch's worktree; if it holds uncommitted changes, commit them as a WIP … marked INCOMPLETE AND UNREVIEWED.\"* That is the right remedy. This card is the **inverse failure of that same remedy**: it has no liveness precondition, and the WIP message it prescribes makes claims that are only true at the instant they are written.\n\n## Measured, today\n\nAt **2026-08-27T02:23:47Z** a rescue actor committed the working tree of `../objectstack-issue-9276-resume` as:\n\n```\ne87cf37e86  wip(drivers): recovered uncommitted own-key-undefined pins from a killed seat\n\n    NOT REVIEWED, NOT VERIFIED. The resumed dispatch was killed before it\n    committed these; recovered so they survive the container.\n    ...\n    No gate was run against them, no ablation exists, and the fail-OPEN\n    consumer sweep the card stars as a separate, more urgent card is not\n    evidenced anywhere in this branch.\n```\n\n**The seat was not killed.** It was mid-task and still running — it went on, in the same session, to finish the run and push. At the moment that message was written the branch already carried, on the same content:\n\n- 22 derived gate families green,\n- two ablation legs with predictions recorded first (8/10 and 4/6, both as predicted, restored under `trap` with an empty `git diff` proved),\n- the fail-OPEN consumer sweep, run with a firing positive control.\n\nSo every one of the message's three negative claims was false when written, and the commit is now a permanent record on the branch saying otherwise.\n\n## The two defects, separately\n\n1. **No liveness precondition.** The rescue reads GitHub-side signals (\"zero commits, zero pushes, no PR\") that a *working* seat also shows for as long as it has not pushed. Uncommitted changes are evidence of work in progress, not evidence of death — they are the *same* observation in both cases. A seat editing files is the single most likely thing to look like this.\n2. **The WIP message asserts more than the rescuer can observe.** \"No gate was run\", \"no ablation exists\", \"not evidenced anywhere in this branch\" are claims about work that lives in another process's transcript, not in the tree. A rescuer can honestly say *what it found in the worktree*; it cannot say what the seat did or did not run. The `NOT REVIEWED, NOT VERIFIED` header is fine and should stay — it is scoped to the rescuer's own act. The three sentences after it are not.\n\nBoth matter more once #12627 lands, because it turns this from an ad-hoc act into a prescribed step that will run on every recovery.\n\n## Why it is not cosmetic\n\nThe branch is squash-merged, so a maintainer or a later reader taking `git log` at face value reads the newest commit on a finished branch as an admission that its verification does not exist. The resuming seat cannot fix it: rewriting another actor's commit means a force-push, which the dev contract forbids, so the correction can only be additive and can only be found by someone who reads further than the commit that made the claim.\n\nThere is also a narrower hazard #12627 does not reach: a rescue against a live seat can commit a **half-finished edit** — the tree is only guaranteed self-consistent between the seat's own steps. This time the content happened to be a complete, coherent edit; that was luck, not a property of the mechanism.\n\n## Suggested disposition (for the lane, not a commitment)\n\n- Gate the rescue on a liveness check, or on an explicit age threshold on the worktree's newest mtime, before committing anything into a dispatch worktree.\n- Bound the WIP message to observations the rescuer can actually make: what paths were dirty, how many lines, and the sha. Drop every present-tense claim about what the seat did or did not run.\n- If a rescue does fire against a seat that turns out to be live, the resuming seat should be told to correct the record additively — and the lane should expect that correction in the PR body rather than in the branch history, since history cannot be rewritten from that seat.\n\nAdjacent: #12204 (the ablation restore leg destroying uncommitted work — the dev-side idiom); #12627 (the parent: the rescue step itself)."
+}

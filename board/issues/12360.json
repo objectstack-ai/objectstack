@@ -1,0 +1,36 @@
+{
+  "number": 12360,
+  "kind": "issue",
+  "title": "[finding] `MAX_READ_WRAPPER_DEPTH = 2` costs the read-seam census 6 real seams — the bound is documented, the number never was, and it is 5 of the 8 deltas #12138 attributed to the callback refusal",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T19:52:51Z",
+  "updated_at": "2026-08-30T14:37:18Z",
+  "closed_at": "2026-08-30T14:33:41Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12360",
+  "body": "Observation class — recording only, no verdict asserted, no `pm:queue`. Unassigned. Found while performing the per-seam census #12138 asked for (PR #12356); deliberately **not** fixed there — #12138's declared scope is the wrapper recursion's *walk*, not its *depth bound*.\n\nMeasured on `origin/main` @ `3ddad51b5c`, reproduced after merging `c312a562e3`.\n\n## What I found\n\n`scripts/check-durability-degradation-log-level.mjs` states the bound as a limitation:\n\n> It cannot DISCOVER a seam whose read runs outside the try block, or more than `MAX_READ_WRAPPER_DEPTH` hops away. A ratchet, not a proof — the same honest bound the log-level rule states about its vocabulary.\n\nThe bound is honest and the sentence is correct. What has never been recorded is **how much it costs**, and the answer is not small relative to the census it bounds.\n\nRaising `MAX_READ_WRAPPER_DEPTH` from 2 to 6, with `walkSameTickInclusive` left **exactly as it is** (no change to the callback refusal):\n\n| recognizer | read seams |\n|:--|--:|\n| today — same-tick walk, depth 2 | 64 |\n| same-tick walk, depth 6 | 70 |\n| same-tick walk, depth 50 | 70 (saturated) |\n\n+8 / −2, where the 2 \"removals\" are the same two `try` lines (`objectql/src/engine.ts:9407` and `:10572`) re-attributed to a different first-matching callee, not seams leaving the population. Net **6 real seams** the census does not count. Saturation checked at depth 50, so 6 is the number, not a floor that keeps climbing.\n\nThe six, each an unbroken chain of `await`s on the caller's own tick:\n\n| seam | chain |\n|:--|:--|\n| `metadata-protocol/src/protocol.ts:10243` `getMetaItemCached` | → `getMetaItem` → `findDraft`/`findOverlay` → `lookup` → `engine.findOne` |\n| `metadata-protocol/src/protocol.ts:13559` `saveMetaItem` | same tail |\n| `metadata-protocol/src/protocol.ts:14535` `migrateStoredMetadata` | → `saveMetaItem` → same tail |\n| `metadata-protocol/src/protocol.ts:16170` `publishPackageDrafts` | → `promoteDraftForPublish` → … |\n| `metadata-protocol/src/protocol.ts:17213` `duplicatePackage` | → `saveMetaItem` → same tail |\n| `objectql/src/lifecycle/lifecycle-service.ts:625` `sweep` | → `reapObject` → `archiveObject` → `archivePass` → `hot.find` |\n\nNothing exotic is going on: `protocol.ts` reaches `sys_metadata` through a three-deep helper ladder (`getMetaItem` → `findOverlay` → `lookup`), which is one hop past the bound, and the extraction that produced that ladder is ordinary refactoring.\n\n## Why this is filed separately, and why it matters now\n\n#12138 attributed a delta of 8 seams to the wrapper recursion's callback refusal. **Five of those 8 are these** — they are admitted by raising the depth bound alone, with the callback refusal untouched. The `walkAll` probe appeared to fix them only because walking into nested *declarations* reaches the read at depth 1 regardless of how many call hops are really between, i.e. it masks the depth bound rather than addressing it. Full enumeration and the discriminating run are in PR #12356.\n\nSo anyone reading #12138's table as \"8 callbacks are being missed\" will be wrong about 5 of them, and a fix aimed at callbacks will move a number for a reason that is not the stated one.\n\n## Direction of the error\n\nUnder-count, the safe direction: real read seams are missing from the population rather than fake ones added. But it is the denominator #5186, #6451, #9165, #8845 and #8901 are quoted against, and #8901's restart conjunct (b) is a census re-run — so anyone re-running that census should know 64 is 64 *because of a tunable*, and that the tunable is worth 6.\n\n⛔ This filing does **not** propose raising the bound. Depth 6 was a probe; whether the extra seams are ones the rule should judge, and what a wider population does to the #8845 / #9165 ladders, is a decision with its own measurement attached. Recording the cost is all that is claimed here.\n\n## Dedupe performed\n\n⚠️ **The prescribed REST channel was unavailable** and this is declared rather than papered over: `curl` to `api.github.com` from this seat returns *\"GitHub access is not enabled for this session\"* and `gh` is absent — the condition already filed as #12123. Dedupe therefore ran through one bounded MCP `list_issues` call: 18 open `finding` issues, a non-empty control. None addresses `MAX_READ_WRAPPER_DEPTH`, the wrapper recursion, or the read-seam population. A local `grep` over the gate file confirms the bound is mentioned in four places and quantified in none of them.\n\n## Related\n\n- #12138 / PR #12356 — the census this came out of; carries the per-seam enumeration.\n- #8901 — on hold with a census re-run as restart conjunct (b).\n- #11921 / PR #12137 — the previous recognizer correction to the same denominator (66 → 64).\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01UjM2ia8Av1v5NqfqQEQmC6)_\n"
+}

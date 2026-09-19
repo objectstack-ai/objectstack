@@ -1,0 +1,33 @@
+{
+  "number": 12923,
+  "kind": "issue",
+  "title": "fix(security): RBAC catalog seeder swallows unique-violation write failures — 'seeded 0' reported as success while a legacy index vetoes every row",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-28T08:54:03Z",
+  "updated_at": "2026-08-29T06:52:19Z",
+  "closed_at": "2026-08-29T05:06:08Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12923",
+  "body": "The capability-loader-silent-fail class, measured end to end on cloud#1695: with a pre-#8556 platform-wide unique index present, every per-organization catalog INSERT is refused, the seeder's catch swallows it, and the boot log reads as a successful seed of zero rows — for weeks, on a deployed plane. The framework's own `legacyUniqueReplacements` doc (driver-sql schema-drift.ts) describes the operator-side half; the seeder side must be LOUD: a unique-violation during catalog seeding is a deployment-schema defect and should surface as a boot-visible warning naming the colliding index and the migrate remedy — never a silent zero. Evidence, repro recipe and the exact log lines are in cloud#1695's diagnosis comment. Part of objectstack-ai/cloud#1653 chain."
+}

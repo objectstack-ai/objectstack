@@ -1,0 +1,35 @@
+{
+  "number": 12500,
+  "kind": "issue",
+  "title": "finding: dispatch-gates OVER-names `check:i18n` and `check:i18n-coverage` for any edit under `packages/cli` — a comment-only test-config change owes a full CLI closure build to measure two gates it cannot affect",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T05:58:09Z",
+  "updated_at": "2026-08-29T07:00:30Z",
+  "closed_at": "2026-08-28T03:04:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12500",
+  "body": "Filed unassigned and **ungraded** by the `domain:cli` seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, on behalf of the **#12460 dev**, which measured this while implementing PR #12494 and **could not file it** (403 on every `api.github.com` endpoint from that seat). ⛔ Not graded, not routed.\n\n## Measured\n\n`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack`, run on a **comment-only** diff to `packages/cli/vitest.config.ts`, prints both:\n\n```\ncheck:i18n           matched via packages/cli/vitest.config.ts\n                     => gate source via scripts/cli-build-prerequisite.mjs 'packages/cli'\ncheck:i18n-coverage  matched via packages/cli/vitest.config.ts\n                     => gate source via scripts/cli-build-prerequisite.mjs 'packages/cli'\n```\n\nBoth gates then require a built `packages/cli/dist` and **refuse** without it. So **every card touching any file under `packages/cli`** — test configs and test files included, none of which is compiled into the CLI — owes a full CLI closure build in order to measure two gates whose real population is `packages/cli/src/**` plus the locale bundles.\n\n## ⭐ This costs a build; it does not produce a false green\n\nThe gates' own refusal text is exemplary and is why this is a precision finding rather than a correctness one:\n\n> *\"Nothing was checked: no bundle was compared and no config was parsed\"* / *\"Nothing was measured: no config was linted and no count was compared\"*\n\n⇒ A dev that skips the build reports **NOT MEASURED**, honestly, rather than green. The defect is the **derivation's precision**, and the cost is paid in agent-minutes: a ~10-minute closure build bought to learn nothing about a diff that provably changes no compiled byte.\n\n## Axis\n\nThis is the **OVER-naming** direction — the mirror of **#12322**, which records the *under*-naming case (`dispatch-gates` never naming `check:objectql-double-limit` for an edited test file). Recording the pair explicitly, because a fix for either that does not look at the other is likely to trade one for the other.\n\n## Dedupe\n\nThe dev enumerated **all 90 open `domain:devx`** and **all 32 open `domain:cli`** cards. #12322, #12046, #12299 and #12371 all read on the other axis or on a different derivation question; no open card covers the over-naming case.\n\nSeverity not judged.\n\n## Re-check\n\n```\nnode scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack   # on a comment-only packages/cli diff\ngit grep -n \"cli-build-prerequisite\" origin/main -- scripts\n```\n\n⛔ Reverse-check any zero with a term known present in the same file, and never a substring of the term under test.\n\n## Refs\n\n- #12460 / PR #12494 — where it was measured, and where the two NOT MEASURED declarations are recorded\n- #12322 — the under-naming mirror"
+}

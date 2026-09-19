@@ -1,0 +1,33 @@
+{
+  "number": 12846,
+  "kind": "issue",
+  "title": "stall guard: a freeze at the END of a healthy ci.yml shard still loses to the job timeout on the DEFERRED path — 15m10s of measured run against 10m of cap headroom",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-28T03:07:44Z",
+  "updated_at": "2026-08-31T02:19:10Z",
+  "closed_at": "2026-08-31T02:19:09Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12846",
+  "body": "Found while implementing #11916. That card asked for a gate over the guard's kill budget, and the gate landed; this is about the checked-in **values**, which the gate deliberately cannot judge. Filed separately rather than fixed there, because the remedy is a workflow-budget decision, not a gate.\n\n## The relation\n\n`run-with-stall-guard.mjs` starts its clock at the **last output**, not at the step start: `silentMs = Date.now() - lastOutputAt`, killed at `--stall-minutes`, or deferred to `--stall-cap-minutes` when the source-side liveness probe still sees the group writing.\n\nSo with `p` = the job's prep before the guarded step and `s` = how far into the step the output froze, the verdict lands at `p + s + C`. The room available for `p + s` is therefore `T - C`, and on the ci.yml family that is `30 - 20 = 10` minutes.\n\n## What was measured\n\nGitHub's own runner timestamps, CI run 33135187774 (head `f907fbe9e`, the six `test` shards, `timeout-minutes: 30`) — job start to the start of the guarded step, then the guarded step itself:\n\n| shard | prep | guarded step (healthy) |\n|---|---:|---:|\n| 3/6 | 33s | 2s (turbo cache hit) |\n| 1/6 | 35s | **14m35s** |\n| 6/6 | 38s | 6m07s |\n| 2/6 | 56s | 4m54s |\n| 4/6 | 44s | 2s |\n| 5/6 | 2m03s | 2s |\n\nWorst single shard: **15m10s** of `p + s` before a freeze arriving at the very end of a healthy run.\n\n* undeferred path (kill at the window): `15.2 + 10 = 25.2 < 30` — covered, 4.8m to spare.\n* **deferred path (kill at the cap): `15.2 + 20 = 35.2 > 30`** — the job timeout wins, and the STALL-CAP verdict is never printed.\n\nA deferral means a buffering layer is hiding a live suite from the guard, which the guard's own header calls a bug report about the pipeline. Losing that report to an unlabeled job timeout is precisely the state the guard exists to abolish.\n\n## Why the new gate does not catch it\n\n`check-stall-guard-budget.mjs` judges `C < T` and `T - C >= W`, both statically readable. The term that actually consumes the budget here is the **healthy run length**, which no static sweep can read. The gate's header records this bound so a green line is not misread as \"every stall is covered\"; this issue is the other half.\n\nNote the card's own premise about where the budget goes did not survive the measurement: prep is 33s–2m03s, at most 7% of a 30-minute job — not \"a fair chunk\". The run dominates.\n\n## Options, no decision claimed\n\n1. Raise `timeout-minutes` on the guard-wrapped jobs (`test`, `temporal-conformance`, `dogfood` in ci.yml; `coverage` in coverage-nightly.yml) so `T - C` covers a full healthy run. Costs nothing on green runs; a genuinely wedged job holds a runner longer.\n2. Pass an explicit `--stall-cap-minutes` on those steps, smaller than the derived `2 x` window, so the deferral window shrinks instead. Cheaper, but it narrows the probe the deferral exists to serve.\n3. Accept it and say so where a reader will find it: the deferred path is a symptom-of-a-symptom and rare, and the undeferred path — the #4250 shape — is covered with 4.8m to spare.\n\nThe measurement is one sample of one run; re-take it before choosing, since the slowest shard moves with the shard partition."
+}

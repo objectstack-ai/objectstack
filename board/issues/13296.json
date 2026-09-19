@@ -1,0 +1,35 @@
+{
+  "number": 13296,
+  "kind": "pull_request",
+  "title": "feat(spec,rest): register READ_BACK_FAILED as a named wire row mapped in handleApprovalError",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-29T18:22:04Z",
+  "updated_at": "2026-08-30T05:42:19Z",
+  "closed_at": "2026-08-30T05:42:18Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-30T05:42:18Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/13296",
+  "body": "Part of #13182 — executing the RULED Option B (maintainer, 2026-08-29, verbatim 「同意」): register `READ_BACK_FAILED` as a named wire row, aligned with the `RESUME_FAILED` precedent. This PR deliberately does not close the card — a residual noted below lands as a follow-up commit on this branch once PR #13181 merges. #12769 is not addressed here (it belongs to PR #13181); #13181 remains open territory of its own review.\n\n## What this delivers (ruling point 1 — complete)\n\n- **Error-code ledger row** — `READ_BACK_FAILED` registered under `@objectstack/rest` in `packages/spec/src/api/error-code-ledger.zod.ts`, trailing provenance comment carrying the substance (write recorded, read-back filtered by the caller's org scope, NOT rolled back), no tracker id — mirroring the `RESUME_FAILED` row shape.\n- **`handleApprovalError` mapping arm** — `packages/rest/src/rest-server.ts` maps the `READ_BACK_FAILED:` message prefix to HTTP 500 with `code: 'READ_BACK_FAILED'` on the wire, directly under the `RESUME_FAILED` arm it mirrors (same dispatch mechanism: message-prefix regex, measured, not assumed). **500 semantics stay** (ruling point 2): it is genuinely a server-side inconsistency.\n- **Doc line** — the `IApprovalService` contract docblock (`packages/spec/src/contracts/approval-service.ts`) now states the refusal contract: the write is recorded and NOT rolled back; read the request back with a system or matching-organization context. Substance without tracker ids, per the doc-authoring rule; verified against the precedent — `RESUME_FAILED`'s ledger row and thrown messages carry no tracker ids either.\n- **Generated references** — `error-code-ledger.mdx` and `contract.mdx` regenerated via `check:generated --fix` (the only artifact proved stale; diff is exactly the two list lines plus the enum count).\n- **Pin test** — `rest-approvals-wire-codes.test.ts` gains an org-filtered read-back case: 500, `code: 'READ_BACK_FAILED'`, prefix-stripped body sentence, closed-union membership. Reverse-verified by ablation: with the mapping arm removed the case goes red in the predicted direction (the throw falls through to the template-generated `APPROVAL_APPROVE_FAILED` arm — exactly the misnamed-code state the card describes); restore proved byte-identical against HEAD by blob hash.\n- **Changeset** — `minor` for `@objectstack/spec` and `@objectstack/rest`, matching how `RESUME_FAILED` was introduced. Wire vocabulary change is ADDITIVE only (ruling point 4): no existing code, status, or message changes.\n\n## Sequencing — do NOT land before PR #13181\n\nThe thrower (`ApprovalService.readBackRequest` throwing the `READ_BACK_FAILED:` prefix, from #12769) is NOT on origin/main yet: measured at dispatch, `git grep READ_BACK_FAILED origin/main` answers zero hits, and PR #13181 sits in the merge queue (page state QUEUED, unmerged). Until #13181 lands, this row would be registered-but-unemittable — the exact class the ledger header names as ADR-0112's \"no silent fourth state\" read backwards (the OVERLAY_PERSISTENCE_FAILED precedent). The review chain owns enqueue for this clause-② PR; it must land only after #13181 is on main.\n\n## Residual — pending follow-up commit on this branch, blocked on #13181 landing\n\nRuling point 3 plus the standing doc-authoring rule: the thrown message on PR #13181's branch ends with a \"(#12769)\" tracker-id suffix, and customer-facing prose carries no internal tracker ids (the `RESUME_FAILED` thrown messages carry none — verified). Once #13181 is on main, this branch merges main and trims that suffix (substance unchanged, one line in `packages/plugins/plugin-approvals/src/approval-service.ts`). Authoring that edit now would mean importing an unlanded PR's diff, which the dispatch forbids.\n\n## Verification (all at commit 21f8c61a)\n\n- `pnpm --filter @objectstack/spec run test` — 443 files, 11776 tests, all pass\n- `pnpm --filter @objectstack/rest run test` — 158 files, 2624 tests, all pass\n- `pnpm --filter @objectstack/plugin-approvals run test` — 34 files, 626 tests, all pass\n- `typecheck` green for spec, rest, plugin-approvals (note: rest's tsc excludes test files by config; the edited test file is covered by the `check:test-typecheck` half of the same script, and by the vitest run itself)\n- All 39 dispatch-derived local gates green — including `check:error-code-casing`, `check:dispatcher-error-vocabulary`, `check:generated`, `check:docs`, `check:authorable-surface`, and `check:dual-build-cjs-loads` (after a full `pnpm build`; its earlier refusal was PREREQUISITE NOT MET, not a red) — plus `check:nul-bytes`\n- Ablation legs: mutation proved on disk by targeted line-count (arm lines 1 to 0), test red with `expected READ_BACK_FAILED, received APPROVAL_APPROVE_FAILED`, restore via `git checkout HEAD` verified byte-identical (blob hash d538f059 matches HEAD), suite re-run green on the restored tree\n\nSession: https://claude.ai/code/session_01KX8wnyjStaZcuMyAMNsy3N\n\n_Generated by [Claude Code](https://claude.ai/code/session_01KX8wnyjStaZcuMyAMNsy3N)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01KX8wnyjStaZcuMyAMNsy3N)_"
+}

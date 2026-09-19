@@ -1,0 +1,34 @@
+{
+  "number": 11330,
+  "kind": "issue",
+  "title": "[text correction · ruled B] manifest.runtime tombstone/describe reads truthfully: publish-gate enforced (cloud), load-side NOT enforced",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-23T11:58:17Z",
+  "updated_at": "2026-08-30T15:09:33Z",
+  "closed_at": "2026-08-30T15:09:14Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 12,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11330",
+  "body": "Measured while seeding the plugin-manifest liveness ledger for #10728 (verdict recorded as `dead` in `packages/spec/liveness/manifest.json`). Filed, not fixed — a removal or an enforcement is its own decision, and the measurement has a scope limit (below).\n\nMeasured on `origin/main` (`b9e9227e3`).\n\n## What is declared\n\n`packages/spec/src/kernel/manifest.zod.ts:563` — `runtime: PluginRuntimeSchema.optional()`, an enum of `node` / `sandbox` / `worker` described as the \"Plugin trust tier (ADR-0025 §3.6)\":\n\n- `node` — in-process, full PluginContext (first-party / verified only)\n- `sandbox` — QuickJS-WASM, capability-gated surface\n- `worker` — out-of-process (reserved)\n\n## What is measured\n\nThe key **is** read — twice — and both reads only echo the value into a progress line:\n\n```\npackages/cli/src/commands/plugin/build.ts:127    printStep(`Loaded ${id}@${version} (runtime: ${manifest.runtime ?? 'unset'}, packaging: ${packaging})`)\npackages/cli/src/commands/plugin/publish.ts:94   printStep(`${id}@${version} (… KB, runtime: ${manifest.runtime ?? 'unset'})`)\n```\n\nNothing dispatches on the tier. There is no `runtime === 'sandbox'` branch anywhere in the monorepo, and the QuickJS runner (`packages/runtime/src/sandbox/`) is the hook / action **script-body** sandbox — reached from the body-runner factories, never from a plugin's declared tier. `objectui`: zero reads.\n\nSo authoring `runtime: 'sandbox'` changes one line of build output and nothing else. Note the asymmetry with its immediate neighbour: `packaging` is genuinely live on a behavioural fork (`build.ts:159-161` — `manifest-deps` keeps declared dependencies external instead of bundling them), which is what a read that matters looks like in the same file.\n\n### Controls — an uncontrolled zero is not a reading\n\n- The same probe finds real reads of sibling manifest keys: `.packaging` (`cli/src/commands/plugin/build.ts:126`), `.data` (`runtime/src/app-plugin.ts:946`), `.contributes` (`objectql/src/engine.ts:4504`). The pattern is not blind to this file or this object.\n- `objectui` control: `manifest.(id|name|namespace|version)` returns 46 hits there, so manifest reads are findable in that repo; the zero for `runtime` is about the path, not the probe.\n\n## Why this is security-shaped rather than cosmetic\n\nThe retirement of `manifest.loading` (#4914) removed `loading.sandboxing` precisely because it \"never isolated anything\", and its tombstone — shipped in `manifest.zod.ts:527-530` and again in the ADR-0087 D3 entry `17.plugin-manifest-loading-retired` — redirects every upgrading author, verbatim:\n\n> ⚠️ `loading.sandboxing` in particular never isolated anything … If you were relying on it for isolation, you had none — use the plugin trust tier (`manifest.runtime`) and the permission declarations, which are enforced.\n\nMeasured here, that redirection points at a key with no enforcement in this repo. An author who follows the prescription gets the same nothing they were being warned about, one key over. That is ADR-0049's false-compliance shape with a shipped migration message attached.\n\n(The other half of that sentence — \"the permission declarations\" — is filed separately: the structured `PluginPermissionsSchema` arm of `manifest.permissions` also has zero readers. Cf. the closed #7500, which recorded that `PluginPermissionEnforcer` has no production caller.)\n\n## ⚠️ Scope limit — measure `cloud` before acting\n\nThe `cloud` repo is **unmeasured**, carried unchanged from #10627: it could not be attached to the measuring session (`add_repo` → \"you don't have access to objectstack-ai/cloud\"). Plugin trust-tier enforcement is exactly the kind of thing that could live in the control plane — `manifest.zod.ts:10-18` says cloud mirrors these shapes when it validates a published `.osplugin`. So the `dead` verdict is scoped to `objectstack` + `objectui`, and **the cloud leg must be measured, with its own control probe, before either fork is executed** — the same precondition #10724 already carries.\n\n## The fork (not prejudged)\n\n- **A — Enforce.** Route plugin loading through the declared tier. This is the option the shipped tombstone already promises, and the one that makes the sentence true. Cost: a real isolation path plus the capability-gating surface `sandbox` implies.\n- **B — Retire.** Tombstone `runtime` under ADR-0049 and **correct the `loading` migrate string in the same change**, since that string is the thing actively misdirecting authors. Note the migrate string is shipped in a published spec version, so the correction is itself a spec change.\n- **C — Mark unenforced.** Add an `[EXPERIMENTAL — not enforced]` marker to the `.describe()` so the ledger's marker vocabulary classifies it honestly, correct the migrate string now, and leave the schema pending a real pull.\n\nWhichever fork is taken, the migrate string's claim should stop being made before the fork is resolved — it costs nothing and it is the part actively telling authors they have isolation they do not have.\n\nFiled unassigned for triage.\n\nBlocked-by: #12400"
+}

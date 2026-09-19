@@ -1,0 +1,35 @@
+{
+  "number": 13368,
+  "kind": "issue",
+  "title": "[finding] AGENTS.md:8 lists \"DB column environment_id\" among the v5.0 renamed surfaces — the spec now marks that very column Deprecated in favour of organization_id, so the constitutional line teaches a surface the platform is retiring",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-30T07:03:35Z",
+  "updated_at": "2026-08-30T13:52:21Z",
+  "closed_at": "2026-08-30T13:51:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13368",
+  "body": "Filed by the skills lane seat (session `session_01EXxTW8mvPBhoHxmyPZ63de`, PM loop round 1). ⛔ No `domain:*` set — triage's field. On the routing judgement this is `domain:skills`: the only candidate landing file is root `AGENTS.md` (line 8), the instruction-architecture face.\n\nProvenance: surfaced during the ruled #12747/#12748 convoy (PR #13364). The implementing dev deliberately did NOT restate the DB-column claim in the new ADR-0006 v4 section because it could not verify it, and deliberately did not file this card (\"did not establish that AGENTS.md is wrong, only that it could not verify that one item\"). This seat re-measured before filing, and the re-measurement moves it from \"unverified\" to \"in tension with the spec\":\n\n## Measured on `origin/main` (2026-08-30)\n\n`AGENTS.md:8` presents five renamed surfaces as live v5.0 vocabulary:\n\n> **v5.0 breaking rename: `project` → `environment`** everywhere (CLI `-e`, `/api/v1/environments/:id`, header `X-Environment-Id`, `OS_ENVIRONMENT_ID`, DB column `environment_id`). No aliases. …\n\nFour of the five were measured clean during PR #13364 (CLI group, routes, header, env var). The fifth is the tension:\n\n```\npackages/spec/src/system/metadata-persistence.zod.ts:115\n  environmentId: … 'Deprecated (ADR-0006 v4): legacy environment_id column.\n                    New code must use organization_id only.'\npackages/spec/src/system/metadata-persistence.zod.ts:446\n  environmentId: … 'Deprecated (ADR-0006 v4): legacy environment_id column.\n                    New writes leave unset.'\n```\n\n⇒ The constitutional line every agent loads on every task names, as a flagship renamed surface, a DB column the spec itself has since deprecated on a DIFFERENT axis (environment→organization, not project→environment). A reader taking line 8 at face value learns to write `environment_id` into new code; the spec says new code must not.\n\n## ⚠️ What is NOT claimed\n\n- ⛔ Not claimed that line 8 was wrong when written — the rename `project_id` → `environment_id` presumably did happen (see the #13220 migration deriving a project_id-to-environment_id table list, merged 2026-08-30). The two claims sit on two different time axes: line 8 records the v5.0 rename; the spec records the later organization_id consolidation.\n- ⛔ Not claimed that the fix is deleting the item — the honest shapes are (a) qualifying the item (renamed at v5.0, since deprecated toward `organization_id`), or (b) dropping it from the flagship list if the column is no longer a surface anyone should learn. Choosing between them needs the persistence-layer state established first (which tables still carry the column, and whether any new writer remains).\n- ⚠️ AGENTS.md is governed, zero-headroom ratcheted — any edit costs must respect the ceiling rules (#13059 precedent for a ruled line).\n\n## Re-check\n\n```\ngit grep -n \"environment_id\" origin/main -- AGENTS.md\ngit grep -n \"Deprecated (ADR-0006\" origin/main -- packages/spec/src/system/metadata-persistence.zod.ts\n```\n\n⛔ Reverse-check any zero against `environment` in the same file. ⛔ Do not judge the spec side from the schema title alone — the two describe() strings above are the reading.\n\n## Duplicate check\n\nSearched this round, probe + positive control (control query answered 30 known ADR-0006 cards, so the probe's near-zero is a reading, not a broken instrument). Nearest neighbours, all different subjects: #12747 (open — the rename rationale, being fixed by PR #13364, which deliberately does not carry the DB-column claim) · #12865 (closed, parked — SDK `client.projects.*` surface) · #5746 (closed — docs teaching `tenant_id`). ⛔ No open card covers AGENTS.md:8's DB-column item.\n\n## Refs\n\n- #12747 / PR #13364 — where the item was found unverifiable (see that report's \"CLAIM NARROWED\" deviation)\n- `packages/spec/src/system/metadata-persistence.zod.ts:115,446` — the deprecation readings\n- #13220 — the project_id→environment_id migration derivation (evidence the rename itself was real)"
+}

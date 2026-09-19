@@ -1,0 +1,36 @@
+{
+  "number": 13075,
+  "kind": "issue",
+  "title": "finding: driver-mongodb still lowers `array_agg` / `string_agg` — retired from `AggregationFunction` at #6188, refused by both SQL faces",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-29T03:00:54Z",
+  "updated_at": "2026-08-29T11:36:09Z",
+  "closed_at": "2026-08-29T11:35:31Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13075",
+  "body": "Found while fixing #12818 in the same function (`buildAccumulator`). Filed unassigned, not fixed — that dispatch scoped the work to the `default` arm, and this is a second accept-face narrowing with its own changeset and its own argument.\n\n## What was read\n\n`packages/drivers/driver-mongodb/src/mongodb-aggregation.ts`, `buildAccumulator`, carries two arms for names the Query Protocol no longer declares:\n\n```js\ncase 'array_agg':\n  return { $push: fieldRef ?? '$$ROOT' };\n\ncase 'string_agg':\n  // Collect into array; caller can post-process with $reduce\n  return { $push: fieldRef ?? '' };\n```\n\nand `postProcessAggregation` carries the matching `string_agg` join.\n\n`AggregationFunction` (`packages/spec/src/data/query.zod.ts`) declares six values — `count`, `sum`, `avg`, `min`, `max`, `count_distinct`. `array_agg` and `string_agg` were **removed at #6188** under ADR-0049 enforce-or-remove, and the enum's own error map hands each a retirement prescription. `packages/spec/src/data/query.test.ts` pins the six.\n\n## The divergence\n\nBoth SQL faces already treat these two as class-1 undeclared names and refuse them with `INVALID_QUERY` / 400:\n\n- `driver-sql`: `array_agg` and `string_agg` are in the `UNDECLARED` roster of `sql-driver-out-of-contract-aggregate-function.test.ts`, whose comment records that they **moved** there from class 2 at #6188;\n- `driver-turso`'s `remote-transport.ts` carries the same note verbatim.\n\n`driver-mongodb` is the only face that still answers them. So one query gets a 400 on two backends and a `$push` array on the third — the local/remote fork #5907 exists to prevent, one vocabulary later.\n\nMeasured, without a server (`mongodb-pipeline-evaluator.testkit.ts` over `AGGREGATION_ROWS`): `{ function: 'array_agg', field: 'score' }` answers `[10, 20, 30, 40, 50, 60]`, and `string_agg` the same array before `postProcessAggregation` joins it. Both are pinned as *current behaviour* by `mongodb-unrecognised-aggregate-function.test.ts` (the \"recorded, not fixed\" block) so this divergence cannot be mistaken for an oversight in that file, and so whichever way it is decided, the pin moves deliberately.\n\n## Why it is worth a card rather than a silent cleanup\n\nReachability is the part that needs deciding rather than assuming. `AggregationNodeSchema.function` is the enum, so the protocol door rejects both spellings before they reach any driver; what can still reach `buildAggregationPipeline` is a direct caller of this exported builder, or the driver's own `aggregate`, which reads its aggregations through `(query as any).aggregations`. That is the same population #12818's refusal was written for.\n\nDispositions, for triage:\n\n- **(a) delete both arms** and let them fall to #12818's class-1 refusal (400), matching both SQL faces. It also falsifies the `converts string_agg arrays to joined strings` case in `mongodb-aggregation.test.ts`, which would be INVERTED in place (asserting the refusal) rather than re-baselined, and `postProcessAggregation`'s `string_agg` limb would go with them.\n- **(b) keep them** as a deliberate mongodb-only extension, and say so in the code — at which point the \"one condition, one wording\" parity note in `driver-sql` should record the exception.\n\n(a) is the ADR-0049 direction and the one I would take, but it removes something a caller could be using today, so it is a vocabulary decision rather than a repair.\n\n## What was NOT established\n\n- **Not executed against a live mongod.** This fleet cannot run one (no daemon, no image path; `mongodb-memory-server`'s download is refused by the egress proxy — #5517). Every value above comes from the in-process evaluator, which models the manual rather than observing a server.\n- **Whether any caller writes either spelling.** Not swept across `examples/`, the dataset compiler, or `service-analytics`.\n- **Not swept across the other faces for the reverse direction** — whether `driver-memory`'s analytics face also lowers more than the enum declares was not measured here.\n\nRelated: #12818 (the `default` arm, being fixed now), #6188 (the retirement), #7052 (the same interface's `distinct?: boolean` leftover after the same class of spec retirement — closed), #5907 (the two-class refusal these faces share)."
+}

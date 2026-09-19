@@ -1,0 +1,34 @@
+{
+  "number": 12516,
+  "kind": "issue",
+  "title": "[finding] A liveness citation can rot IN RANGE: `action.target` and `action.requiredPermissions` point at the wrong lines one day after being repointed, and every check stays green",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T07:38:24Z",
+  "updated_at": "2026-08-28T14:54:19Z",
+  "closed_at": "2026-08-28T14:54:09Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12516",
+  "body": "**Origin**: surfaced by the os-dev run for #12215 (repointing the `type`/`body`/`method` anchors in `packages/spec/liveness/action.json`) while spot-checking the sibling entries that PR #12214 repointed the day before. Filed unassigned, recording only — awaiting triage.\n\n## The gap\n\nThree checks now bound a `live` entry's evidence citation, and each closed the previous one's blind spot:\n\n1. the cited **file** must exist (#5623)\n2. a cited **line** must be inside that file (#11210)\n3. the cited file must **name the key** (#11457)\n\nA fourth case satisfies all three and is still wrong: the cited line is *in range*, the file *does* name the key, and the consumer has simply **moved to a different line of the same file**. #11210's own guidance names this (\"a consumer that moved WITHIN the file it is cited to leaves every line in range\"), and #11457 answered the no-line-at-all form of it — but a citation that carries a *specific, now-incorrect* line is caught by neither.\n\n## Measured, on `origin/main` @ `7b95536`\n\nBoth entries below were repointed by PR #12214 on 2026-08-25 with fresh line numbers, and both had drifted by 2026-08-26:\n\n| entry | cited | what is actually there now | the real consumer |\n|---|---|---|---|\n| `action.target` | `packages/runtime/src/action-execution.ts:725` — \"type:'flow' server dispatch — `automation.execute(action.target, …)`\", with `:718` \"rejecting an unknown flow name by that same value\" | `:716-726` is the `FlowActionRefusal` brand assignment and the recognition-predicate docblock — no `automation.execute`, no flow-name rejection | `automation.execute(action.target, {` is at **:809**, inside `dispatchFlowAction` (declared **:780**) |\n| `action.requiredPermissions` | `packages/runtime/src/domains/actions.ts:172-180` — \"ADR-0066 D4 dual-surface gate — resolves the action's declared requiredPermissions and rejects 403\" | `:172-180` is path-part parsing (`parts[1]`/`parts[2]`) and the `invalidBody` validation-failure constructor | the `requiredPermissions` reads are at **:393-400**, **:473** and **:526** |\n\n`pnpm --filter @objectstack/spec check:liveness` is **green** on both, and says so explicitly: `every 'path:NNN' citation names a line that file actually has and every cited file names the property it is evidence for`. It is telling the exact truth; the pointers are still wrong.\n\nNote the shape: the more precisely an entry is cited, the faster it rots. `action-execution.ts` is 1670 lines and actively edited, so a citation pinned to a line there has a short half-life — the two repaired entries drifted within roughly one day of being written, which is a stronger drift rate than the rot #12214 was repairing.\n\n## Why this is worth a card rather than a shrug\n\nThe ledger's whole contract is that a `live` verdict *is* its evidence pointer. A pointer that resolves to real code which is not the consumer is worse than a missing one: it reads as verified, and the next reader who spot-checks it finds plausible code at the address and moves on. That is the same failure the ledger README spends its length warning about, one level in.\n\n## Possible directions (not adjudicated — for triage)\n\n- **A symbol anchor instead of / beside the line.** Cite `dispatchFlowAction` and let the check locate it, so the pointer survives movement within the file. Costs a symbol-resolution step; kills the whole class.\n- **A drift *warning* keyed on line churn**: flag a `verifiedAt` citation whose cited file has been modified since that date. Cheap, no parsing, but noisy on hot files.\n- **Accept it and shorten the clock** for entries citing hot files — the weakest option, since nothing measures \"hot\".\n- Explicitly **do nothing**: rule that a line is a convenience and the file+key anchoring is the contract. Legitimate, but then the line numbers should probably stop being written as if they were load-bearing.\n\n## Scope note\n\nDeliberately NOT folded into the #12215 PR: that card's accept set is the `type`/`body`/`method` entries, and these two are different entries whose citations came from an already-merged PR. #12215's own repoint writes line numbers too, so it inherits this same exposure and is not a fix for it.\n\n## Dedup (searched 2026-08-26)\n\n#11210 (closed, built the line bound) and #11457 (closed, built the key-mention check) each name this residual in passing but neither addresses it; #7133 / #7142 (closed) are cross-repo citation repair; #12462 (open) is about the shrink-only baseline being pinned non-empty, not about citation accuracy. No open card covers in-range line drift.\n\n⚠️ Dedup channel deviation: the REST list endpoint returns **403** from the dev seat this was filed from (verified: `GET /repos/objectstack-ai/objectstack/issues` → `HTTP 403`), so the REST-first dedup rule could not be followed; this search used the MCP semantic search plus a local grep instead.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01E5LFCYBJ3q2s6yW6oMLxwy)_"
+}

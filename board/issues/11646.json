@@ -1,0 +1,35 @@
+{
+  "number": 11646,
+  "kind": "issue",
+  "title": "[finding] the served openapi.json overrides the `info.version` that `packages/spec` owns, so the published artifact says `17.2.0` and the served document says `v1`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-24T10:29:14Z",
+  "updated_at": "2026-08-28T13:52:30Z",
+  "closed_at": "2026-08-28T13:52:30Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 15,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11646",
+  "body": "Raised by the dev seat on #11546 / PR #11641 as an open question, and routed here rather than\nanswered: it is a **public-document contract shape**, which sits on the manual floor. ⛔ Not graded\nand not decided by the routing seat. Filed unassigned.\n\nPR #11641 corrected the *comment* on this line and removed a fallback; it deliberately did **not**\nchange the served value. This card is the question it left open.\n\n## The split, measured\n\n| | `info.version` |\n|---|---|\n| the **published artifact** — `@objectstack/spec`'s `./openapi.json` export, set by `packages/spec/scripts/build-openapi.ts` to `SPEC_VERSION`, pinned by `openapi-self-consistency.test.ts` | `17.2.0` |\n| the **served document** — `GET {base}/openapi.json`, overridden at serve time with `config.api.version` | `v1` |\n\nSame field name, same package family, two different kinds of fact. The route's own test twin already\nasserts that the `info` block is *\"the half `packages/spec` owns\"* and that *\"serve-time enrichment\nmust not touch it\"* — with the assertion narrowed to `info.title` alone, **precisely because\n`version` is overridden**. So the invariant is stated and then excepted, in the same file.\n\n## The three shapes\n\n| | option | what it costs |\n|---|---|---|\n| **A** | leave the override (**what #11641 shipped**) — served `info.version` stays the declared API version identifier | zero behaviour change on every working config; the two faces keep saying different things |\n| **B** | remove the override — served `info.version` becomes `SPEC_VERSION`, matching the published artifact and the twin's stated invariant | a real behaviour change on a **public document** ⇒ Clause-② yes, contract review |\n| **C** | put `info.version` behind an explicit config key so a deployment states which fact it publishes | new public surface for a demand nobody has expressed |\n\n## What is already measured, so nobody re-derives it\n\n- **Consumer survey — zero.** No consumer reads this document's `info.version` by value in\n  `objectstack`, `objectui`, `cloud`, or `cloud-v1`. The one `v{info.version}` render in `cloud-v1`\n  (`apps/cloud/components/api-docs/api-docs-viewer.tsx`) reads **cloud's own**\n  `generateOpenAPISpec()` document, not this one. So there is no consumer pull in either direction.\n- **OpenAPI 3.1.0 does not adjudicate between the two.** Its Info Object says `version` is *\"the\n  version of the OpenAPI document (which is distinct from the OpenAPI Specification version or the\n  API implementation version)\"*. That text **excludes** the runtime/implementation version — which is\n  what settled #11546's original fork — but it does not choose between `v1` and `17.2.0`.\n- **The static artifact carries no `paths`.** It is the contract half rather than a usable document,\n  which is the strongest argument that the two faces are allowed to differ.\n\n## The axis the dev seat named as the weakest point of its own choice\n\nRecorded verbatim rather than smoothed over, because it is the honest half of an A recommendation:\n\n> Long-term soundness: contract-first genuinely favours B (a consumer-side override rewriting a\n> producer-owned contract field is the shape the rule warns about), and this is the one axis where A\n> is the weaker answer — I am flagging that rather than smoothing it.\n\nAgainst that: with a measured **zero** consumer pull, changing a served value on a public document is\nthe speculative widening the startup-scope axis exists to refuse, and #11546 was split out precisely\nto avoid it.\n\n## Routing note\n\nIf this is graded as work, note that the field is owned by `packages/spec`'s build\n(`build-openapi.ts`, `openapi-self-consistency.test.ts`) while the override lives in `packages/rest`\n— so the landing package depends on which option is chosen, and B in particular reads as a\n`domain:spec` change rather than the `domain:cli` lane that filed it."
+}

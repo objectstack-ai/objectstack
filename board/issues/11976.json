@@ -1,0 +1,35 @@
+{
+  "number": 11976,
+  "kind": "issue",
+  "title": "platform-admin re-anchor L7 (docs): authorization + permission-sets pages and the operator runbook for the admin-email variable",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T03:31:50Z",
+  "updated_at": "2026-08-31T06:54:20Z",
+  "closed_at": "2026-08-31T06:53:08Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11976",
+  "body": "Leg **L7** of the accepted #11663 platform-admin re-anchor design. Provenance: design document = #11663 comment 5394453215 (§6 row L7); maintainer acceptance = #11663 comment 5404675670 (2026-08-25, verbatim 「接受你的建议，继续」). Filed by PM session `session_01KWRU3s15AJz7PGW7a7wdCh`.\n\nBlocked-by: #11970\nBlocked-by: #11974\n\n**Surface**: `content/docs/permissions/authorization.mdx` (the design cites lines 116, 336, 385, 412 — re-locate on the current tree, the numbers will have drifted), `content/docs/permissions/permission-sets.mdx:153`, plus an operator runbook section for `OS_PLATFORM_OWNER_EMAIL` (list form, verified-email requirement, fail-closed empty config, revocation = config change + reload). ⛔ Never `content/docs/releases/**` — release notes are compiled centrally at release time.\n\n**Acceptance criterion**: every doc claim about platform-admin derivation matches the landed L2/L4 behaviour on `origin/main` (verified against the code, not against the design); the runbook states the fail-closed and unparseable-entry-fails-whole-variable semantics in operator language."
+}

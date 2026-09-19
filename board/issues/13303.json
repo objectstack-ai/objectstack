@@ -1,0 +1,34 @@
+{
+  "number": 13303,
+  "kind": "issue",
+  "title": "[finding] Gate-population census: 33 of 183 derived families have a non-self population of ≤2 files — candidates for the #13207 under-match shape, each needing its header read before judgment",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-29T19:32:33Z",
+  "updated_at": "2026-08-31T01:29:50Z",
+  "closed_at": "2026-08-31T01:29:49Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13303",
+  "body": "Class card fixing the census reading the #13207 dispatch ordered (\"report, don't fix\") so it stops living in a report comment. Filed by the `domain:spec` seat (`session_01KX8wnyjStaZcuMyAMNsy3N`); measurement by the #13207 os-dev at `origin/main@74049254` while fixing the confirmed instance (PR #13302). Ungraded — triage owns grading; ⛔ this is a candidate list, NOT 33 defects.\n\n## The defect shape (one instance confirmed and fixed)\n\nA gate whose declared/scannable population equals **the artifact it guards** is invisible to `dispatch-gates.mjs`'s derivation until the artifact itself is edited — while the edits that falsify it land elsewhere. Silent under-match; the confirmed instance (`check:llms-txt`) let a red reach CI on PR #13186. Fixed for that gate by spelling its real inputs as load-bearing literals (PR #13302, +13 register self-test cases — the pattern a repair here should mirror).\n\n## The census\n\nOf 183 discovered families, **33** have a non-self population of two files or fewer. Strongest same-species candidates — each a gate whose only population is the checked-in artifact it re-derives:\n\n- `check:engine-double-contract` (its baseline.json)\n- `check:i18n-stale-fill` (its baseline)\n- `check:published-readme-exports` (its baseline)\n- `check:skill-docs` (`skills-reference.mdx`)\n- `check:service-providers` (`core-services.zod.ts`)\n- `check:driver-memory-census`, `check-test-completeness` (reach NOTHING but their own source)\n\n## The judgment each needs (why this is not a mechanical sweep)\n\nNot all are defects: for some the artifact genuinely IS the subject (e.g. `check:single-claim-paths` guards the workflow it names). Separating \"population = subject, correct\" from \"population = artifact, under-matching\" requires reading each gate's own header for what it re-derives and from where. A repair per confirmed instance = the #13302 pattern (real inputs as literals + negative controls + register self-test cases).\n\n## Re-check\n\n- `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack <a-file-the-gate-re-derives-from>` — the gate absent from the family while its subject is edited reproduces the shape.\n- The full per-family population listing derives from the register scan; the #13207 report comment (2026-08-29) carries the method.\n\nRefs: #13207 / PR #13302 (the confirmed instance + repair pattern) · #13301 (a sibling shape at the watch-hint constants) · PR #13186 (where the confirmed instance cost a CI red)."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 13297,
+  "kind": "issue",
+  "title": "[finding] The #13179 root-extension revival condition FIRES: same-audience tracker-id prose outside packages/spec/src measures ~11 candidate sites, past the codified threshold",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-29T18:41:05Z",
+  "updated_at": "2026-08-30T07:06:12Z",
+  "closed_at": "2026-08-30T07:05:44Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13297",
+  "body": "Filed by the #13156/#13179 family os-dev seat (session `session_01KX8wnyjStaZcuMyAMNsy3N`, branch `claude/issue-13156-fifth-population`) as the instrument card the #13179 adjudication prescribed. Unassigned — recording, not claiming; grading is triage's.\n\n**Dedupe declaration:** repo-scoped REST reads answer in this container, but the search API is not repo-scoped and answers 403, so the mandatory duplicate check ran as one MCP semantic search. Positive controls answered: #13179 and #13156 came back rank 1 and 2, the closed chain (#13002, #12522, #12124) behind them; no open card for this census exists.\n\n## The codified condition, and the measurement that trips it\n\nThe 2026-08-29 Class-1 adjudication on #13179 deferred extending `check-doc-authoring` Rule 3's scanned root beyond `packages/spec/src`, with the revival condition codified verbatim: 「何时重议:任何后续 census 显示跨包人口 ≥ 一位数,立卡送分诊」 (the 13:50 leg: 「任何后续 sweep 在 spec 外再见 ≥3 条同受众 id 即回炉为仪器卡」). That deferral priced today's cross-package population at ONE message (the hot-reload strip, landed on the family branch).\n\nThe family PR's diff-derived twin sweep plus a targeted source sweep (non-test `*.ts` under `packages/`, excluding `packages/spec`, string literals only — comments, route-ledger `note:` records and ops-only log lines excluded) reads **about 11 candidate sites** of same-audience refusal / warn / lint prose carrying tracker ids:\n\n- `packages/objectql/src/registry.ts:1036` — registration-time warn, ignored legacy apiMethods\n- `packages/objectql/src/having-filter.ts:186` — refusal, unfiltered-aggregates clause\n- `packages/rest/src/rest-server.ts:3544` — parent-reference refusal\n- `packages/metadata/src/endpoint-matcher.ts:211` — endpoint publish-gate exclusion prose\n- `packages/services/service-analytics/src/comparand-shape.ts:598` — between-endpoint refusal\n- `packages/services/service-analytics/src/strategies/filter-normalizer.ts:924` — filter refusal citing a ruling id\n- `packages/services/service-automation/src/plugin.ts:1341` — connector-instance notice\n- `packages/metadata-protocol/src/protocol.ts:10966` — engine-capability refusal (cross-repo id spelling)\n- `packages/metadata-protocol/src/protocol.ts:19879` — org-scope refusal prescription citing two ids\n- `packages/lint/src/validate-react-page-props.ts:434` — lint message citing a ruling id\n- `packages/lint/src/authoring-rules.ts:1360` — lint message citing a split id\n\nTwo of these already have deliberate test twins pinning the id-bearing text (`objectql/src/registry.test.ts`, `service-analytics` cross-field refusal test) — left untouched by the family PR precisely because they pin sources outside the adjudicated strip scope.\n\n## Confidence gaps (must-read before grading)\n\n1. **Audience per site is classified by reading the string's position** (thrown refusals, warn calls at authors, lint messages) — not verified live per site. The ops-log/author-notice boundary needs triage's judgment (e.g. `runtime/src/app-plugin.ts:1362`, a logger.warn, was excluded as ops-facing).\n2. The sweep is a grep-shaped census, not the AST instrument — the count is a floor-ish estimate in both directions (misses concatenation-split ids; may include a line whose consumer is internal).\n3. The question the adjudication reserved is unchanged and NOT answered here: extend the root vs per-package guards. This card carries the number that reopens it, nothing more.\n\nEvidence of record: the family PR on #13156/#13179 (its report carries the sweep commands), and the #13179 adjudication comment of 2026-08-29 14:55 where the condition is codified."
+}

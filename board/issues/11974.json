@@ -1,0 +1,35 @@
+{
+  "number": 11974,
+  "kind": "issue",
+  "title": "platform-admin re-anchor L4 (plugin-security): bootstrap stops granting under walled postures; explain reports config-derived standing; deprecation log for legacy grants",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T03:31:32Z",
+  "updated_at": "2026-08-31T01:36:53Z",
+  "closed_at": "2026-08-31T01:36:53Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11974",
+  "body": "Leg **L4** of the accepted #11663 platform-admin re-anchor design. Provenance: design document = #11663 comment 5394453215 (§6 row L4, migration step 4); maintainer acceptance = #11663 comment 5404675670 (2026-08-25, verbatim 「接受你的建议，继续」). Filed by PM session `session_01KWRU3s15AJz7PGW7a7wdCh`.\n\nBlocked-by: #11970\n\n**Surface**: `packages/plugins/plugin-security`.\n\n**Content**:\n- `bootstrapPlatformAdmin` stops writing grant rows under **walled** postures (Choice 4A: `single` keeps first-user promotion and its grant row — that branch stays inside the one derivation site, never a second site).\n- Local `isEmailVerified` deleted in favour of core's promoted one (L2); replay narrowed accordingly.\n- The `platformAdmin` service registered; `explain` reports **config-derived** standing (pin #3 auditability: the resolved admin list surfaced read-only — Setup / discovery / health — since no grant row is left to query).\n- This is the step where the **deprecation log starts firing**: a detected legacy row-id grant logs a pointer at the config path (pin #5 loud migration; ⛔ never a silent dual-track). File the legacy-path removal card (L5's removal half) at this leg's landing, not later.\n\n**Discipline**: Clause-② expected **yes**; `needs:contract-review` at review. Also touches `packages/verify/src/harness.ts` fixtures (verified-email shape).\n\n**Acceptance criterion**: on a walled rig with the variable set, bootstrap mints no org-less grant; `explain`/standing surface reports the config-derived admin list read-only; a seeded legacy grant produces exactly one deprecation log line naming `OS_PLATFORM_OWNER_EMAIL`."
+}

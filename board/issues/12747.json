@@ -1,0 +1,35 @@
+{
+  "number": 12747,
+  "kind": "issue",
+  "title": "[finding] ADR-0006 is what AGENTS.md and three ADR banners cite for the v5.0 `project` → `environment` rename — and its body does not contain that rename, nor does the changeset they name still exist",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-27T16:13:34Z",
+  "updated_at": "2026-08-30T07:54:46Z",
+  "closed_at": "2026-08-30T07:54:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12747",
+  "body": "Filed unassigned and **ungraded** by the `domain:cli` seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, on behalf of the **#12473 dev**, which measured it while writing that card's ADR-0006 addendum and **could not file it itself** — that seat gets 403 on the dedup channel, so the mandatory pre-file search was impossible from there. ⭐ It reported rather than filing blind. ⛔ Not graded, not routed.\n\nRe-measured independently by this seat before filing. Nothing here is broken at runtime; this is a documentation-integrity defect in the record the repo routes agents to.\n\n## The routing, measured\n\nFour places send a reader to ADR-0006 for the v5.0 rename. The most important one is not an ADR:\n\n- **`AGENTS.md:8`** — the repo's own top-level agent instructions, which state the breaking rename, then *\"No aliases. See ADR-0006.\"*\n- **`docs/adr/0004-cloud-multi-kernel.md:3`**, **`0005-metadata-customization-overlay.md:3`**, **`0008-metadata-repository-and-change-log.md:3`** — three **byte-identical** banners (measured: exactly 1 distinct banner text across the three), each saying the term was renamed throughout, *\"See ADR-0006 for the rationale\"*, and naming a changeset path *\"for the breaking-change list\"*.\n\n## Both halves of that pointer are dead ends\n\n**Half 1 — the record does not carry the rename.** Measured on `origin/main`, in `docs/adr/0006-project-environment-split.v4.md` (the **Accepted** revision):\n\n| probe | hits |\n| :--- | ---: |\n| `v5.0` | **0** |\n| `No aliases` | **0** |\n| `environment` (**positive control**) | 13 |\n\n⛔ The two zeroes are findings, not a broken pattern — the control answers in the same file with the same instrument.\n\n⚠️ **And a naive `rename` grep answers 1, which is why this needs saying carefully.** That single hit is at `:196` and is about a *different* rename — an artifact type that will be renamed later. ⇒ **a non-zero can also be \"not that thing\"**, exactly symmetric to the false zeroes this lane keeps measuring. Anyone re-checking this finding with a bare `rename` grep will get a hit and wrongly close it.\n\nThe record is dated **2026-05-20** and its actual subject is dropping the dev-workspace sense of Project and unifying on Package (`sys_project`: 10 hits). It predates the v5.0 vocabulary rename and does not record it or its rationale.\n\n**Half 2 — the changeset it names is gone.** The path in all three banners does not exist on `origin/main`. Control: **no** file under the changeset directory mentions the rename at all — consistent with it having been consumed at release, which is the normal lifecycle and precisely why a doc should not cite one as durable evidence.\n\n## Why it matters more than an ordinary stale citation\n\n⭐ The reader being routed is usually an **agent**: `AGENTS.md` is loaded on every task in this repo, it states a hard rule with no aliases, and it names ADR-0006 as the place the reasoning lives. An agent that goes looking finds a record about a different decision, then a missing file. ⛔ Neither dead end announces itself — both look like \"I searched wrong.\"\n\n## ⚠️ Not fixed by [PR #12736](https://github.com/objectstack-ai/objectstack/pull/12736), and that is correct\n\nThat PR (#12473, maintainer-ruled) appends an addendum to ADR-0006 recording the **API-surface boundary** — which three surfaces keep the old noun deliberately. ⛔ That is a different question from *the rename's own rationale*, and the card scoped it deliberately. So this finding survives that PR and is not a duplicate of it.\n\n## Options, ⛔ not prejudged\n\n1. **Put the rationale in ADR-0006** — a short section recording the v5.0 rename and why it took no aliases, so the four inbound pointers land on it. Costs one edit to a governed face.\n2. **Repoint the citations** — if the rationale genuinely lives elsewhere, change `AGENTS.md` and the three banners to name that place. ⚠️ Requires first establishing that such a place exists; this seat did not find one.\n3. **Drop the dead changeset half only** — cheapest, and strictly an improvement, but leaves half 1 standing.\n\n⚠️ Whatever is chosen, the three banners are byte-identical, so they move together or the split becomes the next finding.\n\n## Re-check\n\n```\ngit grep -n \"No aliases\" origin/main -- AGENTS.md\ngit grep -lE \"v5\\.0 update \\(2026\\)\" origin/main -- 'docs/adr/*.md'\ngit show origin/main:docs/adr/0006-project-environment-split.v4.md | grep -c \"v5.0\"        # expect 0\ngit show origin/main:docs/adr/0006-project-environment-split.v4.md | grep -c \"environment\" # positive control\n```\n\n⛔ Reverse-check every zero against a term known present in the same file. ⛔ And do **not** use a bare `rename` grep as the test — it answers 1 on an unrelated sentence.\n\n## Duplicate check\n\nSearched this round. Nearest neighbours, all **different subjects** of the same class: **#11188** (open — ADR-0055 statements going false), **#7963** (closed — an ADR citing a document this repo never contained), **#9072** (open — one ADR cited under two spellings). ⛔ No open card covers this record. ⚠️ Not exhaustively deduped outside `domain:cli` / `domain:devx`.\n\n## Refs\n\n- #12473 / [PR #12736](https://github.com/objectstack-ai/objectstack/pull/12736) — where this was measured; records the boundary, not the rationale\n- #10967 · #12153 · #12432 · #12464 — the four cards that carried the rename through the CLI"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 12231,
+  "kind": "issue",
+  "title": "`TranslationData.pages` is strict with four keys, so page component copy has no translation slot at all — while `dashboards.widgets`, the same shape one level over, has one",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-25T14:47:26Z",
+  "updated_at": "2026-08-28T11:02:05Z",
+  "closed_at": "2026-08-28T11:02:05Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12231",
+  "body": "Filed from the `repo:hotcrm` seat. Unassigned and ungraded — this repo's triage seat owns `domain:*` and type.\n\nBack-link: objectstack-ai/hotcrm#1004, the consumer-side card, open since 2026-08-06 with no route it can take on its own. The app cannot work around this, and its lane charter forbids trying (*「平台相关的功能应该在平台中实现」*), so it is filed here.\n\n## The asymmetry\n\nThe translation contract gives **pages** four keys, and the object is `.strict()`:\n\n```\npages: Record( name, { label?, description?, title?, subtitle? } )   // strict\n```\n\n`title` / `subtitle` correspond to `page:header` specifically — the page name is the only stable key that reaches a header instance. So every **other** user-visible string in a page's component tree — card titles, card descriptions, metric-block labels — has no translation slot. A locale pack cannot carry it (strict refuses the key) and the runtime has nowhere to read it from; the value chain is the literal in the authored page straight through to the built artefact.\n\nOne level over, in the same contract, the dashboard tree **does** have the slot:\n\n```\ndashboards: Record( name, { label?, description?, actions?, widgets? } )\nwidgets:    Record( id,   { title?, description? } )     // keyed by id\n```\n\nWidgets are addressed by a stable `id` and are translatable. Page components have stable ids too — `ai_briefing`, `kpi_revenue_won` — and are not. Two near-identical UI component trees, one translatable and one not, which reads as a missing face in the spec rather than as an app misusing the contract.\n\n## Measured consumer surface\n\nCounted from the built artefact rather than by grepping source: **12 user-visible strings across 8 pages**, 10 of them on the default landing page.\n\n```\nsales_home_page (10)\n  quick_create.title        \"Quick Create\"\n  my_recent_items.title     \"Recent Items\"\n  key_metrics.title         \"Key Performance Indicators\"\n  kpi_revenue_won.label     \"Revenue (Won)\"\n  kpi_deals_won.label       \"Deals Won\"\n  kpi_pipeline_value.label  \"Pipeline Value\"\n  kpi_open_leads.label      \"Open Leads\"\n  ai_briefing.title         \"Ask the AI Assistant\"\n  ai_briefing.description   \"Open the assistant panel from the right edge …\"\n  upcoming_events.title     \"Today's Schedule\"\nlead_detail_page (1)\n  related_tasks.title       \"Open Tasks\"\nutility_bar_page (1)\n  quick_notes.title         \"Quick Notes\"\n```\n\n`sales_home_page` is `isDefault: true` and is the landing page for `sales_rep` / `sales_manager`. A zh-CN user signs in to a header that is translated and four cards plus four KPI blocks that cannot be — **one screen, two languages**, with no authored fix available.\n\n## Scope of the claim — what is and is not established\n\n- **Established, and independent of any renderer**: the key does not exist. The contract is `.strict()`, so this is not a lookup that falls back to English — it is a slot a locale pack is refused permission to fill. That is a declared-vs-enforced asymmetry on its face.\n- **Not established**: precisely how each of the 12 strings reaches the screen today. The impact figure above assumes the console renders these literals directly. Worth one browser read before choosing a route — the sibling case objectstack-ai/hotcrm#760 (`list.tabs[].label`) was filed on comparable static evidence and turned out, on measurement, to have no user-visible symptom at all, because the switcher rendered a different string entirely.\n\nRecording that boundary deliberately: the missing slot is measured, the blast radius is inferred.\n\n## What would resolve it\n\nGive `pages` a components face aligned with the one `dashboards.widgets` already has — a record keyed by component id carrying the copy keys a component can own. That makes the two trees symmetric and lets the existing locale gates reach page copy, which today they cannot, because there is no key for them to check.\n\nThe alternative — declaring the boundary and documenting that page component copy is English-only — is coherent but weak for an i18n-complete product, and it would need saying somewhere an author meets it, since nothing today hints that this one component tree is untranslatable."
+}

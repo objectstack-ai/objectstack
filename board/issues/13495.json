@@ -1,0 +1,36 @@
+{
+  "number": 13495,
+  "kind": "issue",
+  "title": "driver-memory's reference matcher answers `{$between: [null, null]}` with EVERY valued row — the range arm's two comparisons are both false against a null bound, so a bounded range stops bounding",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T14:53:03Z",
+  "updated_at": "2026-08-30T23:53:37Z",
+  "closed_at": "2026-08-30T23:52:56Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13495",
+  "body": "Filed unassigned by the #13357 dev while widening that card's harness across the other operators that can carry a null comparand. Recording only — no severity asserted, routing is triage's.\n\n## Measured\n\nFixture rows `id 1, name 'a'` and `id 3, no value`; both readings of \"no value\" — `name: null` (NULLED) and the key absent (MISSING). Executed on `0e810dde17`.\n\n| face | NULLED | MISSING | |\n|:--|:--|:--|:--|\n| driver-memory **reference matcher** | `['1','3']` | `['1']` | matches the VALUED row both times |\n| driver-memory live mingo path | `['3']` | `[]` | |\n\nRow 1 is `name: 'a'`. The reference matcher says `'a'` is between `null` and `null`. The two faces of one package disagree on every cell, and the matcher also disagrees with itself across the two readings.\n\n## Cause\n\n`packages/drivers/driver-memory/src/memory-matcher.ts`, the `$between` arm:\n\n```ts\nif (Array.isArray(target) && (value < target[0] || value > target[1])) return false;\n```\n\nAgainst a null bound, relational comparison coerces null to 0, so for a string value BOTH `'a' < null` and `'a' > null` are false. Neither disjunct fires, nothing returns false, and the constraint silently stops constraining — the row matches. That is the WIDENING direction, which on an RLS read scope is a permission bypass rather than a degraded filter (#3948), and it is the same failure shape the arm's own comment already records for the malformed-shape case that #5328 closed: \"it used to skip the comparison entirely, which meant matches EVERY row\".\n\nThe shape gate does not catch it: `assertFilterConditionShape` refuses a `$between` whose comparand is not a two-element array (#5328), and `[null, null]` IS a two-element array, so it is accepted and evaluated.\n\n## Not a duplicate of #5328\n\n#5328 was the malformed SHAPE (a `$between` comparand that is not `[min, max]`), and it is closed. This is a well-shaped comparand whose MEMBERS are null — the comparand-value axis, which that card did not touch. The refusal it installed is what lets this shape through.\n\n## Deliberately not asserting the target\n\n`$between` endpoints are pinned elsewhere as bindable bounds (`service-analytics` `NULL_CONTROL`: `{ $between: [null, 5] }` binds both bounds), and the #5332 lane recorded null comparands in ordering positions as \"positions no ruling covers\". So what `[null, null]` SHOULD select may need the same ruling #13357 is waiting on. What is not in doubt is that \"every valued row\" is wrong under all of the candidate readings, and that the two faces of this package must not answer one filter two ways.\n\n## Related\n\n#13357 (the sibling null-comparand axis, awaiting a ruling) · #5328 (the `$between` SHAPE refusal, closed) · #5526 (null in an ordering comparand) · #3948 (widening on a read scope)"
+}

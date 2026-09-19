@@ -1,0 +1,32 @@
+{
+  "number": 13506,
+  "kind": "issue",
+  "title": "os-dev.md's Part-of bullet lacks the bookkeeping-sentence / quote-backtick shapes that PR #13505 sharpened in review-checklist.md — deferred by the frame-region fence",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T15:26:19Z",
+  "updated_at": "2026-08-31T02:51:21Z",
+  "closed_at": "2026-08-31T02:51:21Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13506",
+  "body": "Filed by the skills lane seat (session `session_01EXxTW8mvPBhoHxmyPZ63de`, PM loop round 3), routing a fence-respecting deferral declared in the #12668 dev report. Lane self-triaged: `pm:queue` · `domain:skills`.\n\n## The gap\n\nPR #13505 (the #12668+#12779 landing) sharpened the closing-keyword rule at the Part-of switch point in `.claude/skills/pm-dispatch/references/review-checklist.md`: the reference parser reads the who-will-retire-it **bookkeeping sentence**, negations, and **quote/backtick wrappings** all the same way — nowhere in a PR body may a closing keyword sit adjacent to a card number — with the safe spelling given (bare card number with zero closing verb; the closing plan goes into a comment).\n\n`.claude/agents/os-dev.md` carries its own Part-of bullet, which already states the prohibition, the negation fact, and three safe spellings — but NOT the bookkeeping-sentence and quote/backtick shapes. That bullet sat outside the frame-copy region the #12668 dispatch was fenced to, so the dev correctly deferred it instead of widening its surface.\n\n## Constraints at claim time (re-derive, never recall)\n\n- os-dev.md is governed (`.claude/**`) and line-ratcheted — 466/466 today, with a RULED raise to 471 pending on #12980's landing (决裁批 #9). Whoever takes this card lands AFTER #12980 and re-reads the ceiling then; the edit is one parenthetical extension of the existing bullet, in-place word compression only, ⛔ no re-wrap funding (2026-08-17/2026-08-29 ruling pair).\n- Natural fold candidate: whichever card next opens os-dev.md's non-frame prose after #12980 (#13116 · #13300 · #12800 · #12886 · #13293 queue) — fold-or-serial answered at dispatch time.\n\n## Refs\n\n#12779 (the evidence card: PR #12777 measured red-then-green; PR #13258 prevention case) · #12668 / PR #13505 (where the sharpened wording lives) · #12980 (the pending ruled raise on this file)."
+}

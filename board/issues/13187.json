@@ -1,0 +1,32 @@
+{
+  "number": 13187,
+  "kind": "issue",
+  "title": "Queue-flake anchor: test/serve-publishes-bound-port.e2e.test.ts",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "type": "Bot"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-29T08:47:17Z",
+  "updated_at": "2026-08-29T09:26:51Z",
+  "closed_at": "2026-08-29T09:26:51Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13187",
+  "body": "`test/serve-publishes-bound-port.e2e.test.ts` has ejected **14 pull requests** from the merge\nqueue within a rolling 24 hours — **10 independent hits** once\nGitHub's speculative stacking is accounted for. This issue is the single place for\nthat conversation; it is refreshed by the merge-queue-triage workflow on every\nfurther ejection.\n\n| PR | stack | queue build |\n|---|---|---|\n| #13051 | S1 · root | [33242330316](https://github.com/objectstack-ai/objectstack/actions/runs/33242330316) |\n| #13107 | independent | [33237340137](https://github.com/objectstack-ai/objectstack/actions/runs/33237340137) |\n| #13124 | S3 · root | [33240054144](https://github.com/objectstack-ai/objectstack/actions/runs/33240054144) |\n| #13125 | S3 · inherited | [33240068158](https://github.com/objectstack-ai/objectstack/actions/runs/33240068158) |\n| #13130 | independent | [33239036507](https://github.com/objectstack-ai/objectstack/actions/runs/33239036507) |\n| #13133 | independent | [33238180927](https://github.com/objectstack-ai/objectstack/actions/runs/33238180927) |\n| #13140 | independent | [33240915666](https://github.com/objectstack-ai/objectstack/actions/runs/33240915666) |\n| #13142 | S3 · inherited | [33240069522](https://github.com/objectstack-ai/objectstack/actions/runs/33240069522) |\n| #13145 | independent | [33241594487](https://github.com/objectstack-ai/objectstack/actions/runs/33241594487) |\n| #13148 | S1 · inherited | [33243111144](https://github.com/objectstack-ai/objectstack/actions/runs/33243111144) · [33242330634](https://github.com/objectstack-ai/objectstack/actions/runs/33242330634) |\n| #13152 | S1 · inherited | [33242331510](https://github.com/objectstack-ai/objectstack/actions/runs/33242331510) |\n| #13161 | independent | [33242316964](https://github.com/objectstack-ai/objectstack/actions/runs/33242316964) |\n| #13162 | independent | [33243814538](https://github.com/objectstack-ai/objectstack/actions/runs/33243814538) |\n| #13174 | independent | [33244436318](https://github.com/objectstack-ai/objectstack/actions/runs/33244436318) |\n\n⚠️ **Queue depth is not evidence.** The `stack` column is read out of the queue\nbranch names: GitHub builds each queued PR on top of the previous entry, so a\nbuild whose BASE commit IS another victim's queue HEAD contains that victim's\ntree by construction. A single deterministic break therefore ejects every PR\nbehind it, and the raw victim count climbs with QUEUE DEPTH until the owner\nlands a fix. Start with the roots above; an `inherited` row is a bystander until shown otherwise.\n\n**This issue is a NAME, not a diagnosis.** The workflow that files it reads the\nfailing test file path out of the job logs and counts PRs; it does not\nknow whether this is a flake, a load/timing cliff, a semantic conflict between\nqueued PRs, or a real regression, and it does not act on any of those. No test is\nskipped, quarantined or re-queued by it, and no PR is labelled by it — weakening\na gate stays a human act.\n\nWhat to do with it: read one victim PR's triage comment for the failure REASON\nline beside the FAIL line (a timeout and an assertion are the same FAIL line and\nopposite diagnoses), decide the cause, and close this issue with the fix or with\nthe reason it is not one.\n\nLast refreshed by queue build [33244436318](https://github.com/objectstack-ai/objectstack/actions/runs/33244436318) (PR #13174).\n\n---\n_Filed by the merge-queue-triage workflow (#4859, aggregation #10128)._\n\n<!-- queue-signature-anchor:test/serve-publishes-bound-port.e2e.test.ts -->"
+}

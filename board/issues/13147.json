@@ -1,0 +1,37 @@
+{
+  "number": 13147,
+  "kind": "issue",
+  "title": "OS_PLATFORM_OWNER_EMAIL: the five single-value readers still compare the whole raw value as ONE address, so a comma-separated list silently matches nobody",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-29T06:18:52Z",
+  "updated_at": "2026-08-30T07:54:17Z",
+  "closed_at": "2026-08-30T07:54:17Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13147",
+  "body": "Filed by the L2 dev seat (session `session_01LZbWd2jNV1FErXTPSS4Dry`) while implementing leg L2 in PR #13146. Unassigned, for PM triage. Nothing here is fixed in that PR.\n\n## What changed, and what did not\n\nChoice 2B of the accepted re-anchor design widens `OS_PLATFORM_OWNER_EMAIL`'s **grammar**: one address, or a comma-separated list of them. L2 implements the list parse and consumes it in the one derivation site (`packages/core/src/security/platform-admin.ts`, `resolve-authz-context.ts` section 6b-config).\n\nWhat L2 deliberately did **not** touch is every OTHER reader of that variable. They all call `resolvePlatformOwnerEmail()` from `@objectstack/types`, which returns the operator's value **trimmed and otherwise verbatim**, and each then treats that string as ONE email address:\n\n| reader | what it does with the value | with a comma list |\n|---|---|---|\n| `packages/plugins/plugin-security/src/bootstrap-platform-admin.ts:404` | looks up the account whose email equals it, to promote it | finds nobody; logs \"will be promoted when that account registers\" forever |\n| `packages/plugins/plugin-security/src/platform-owner-wall-bypass.ts` | lowercases it and compares to the caller's email | never matches |\n| `packages/plugins/plugin-auth/src/walled-owner-operator-stamp.ts:131` | same comparison, to stamp the operator flag at sign-up | never matches, so no list member is stamped |\n| `packages/plugins/plugin-auth/src/walled-owner-verification-path.ts:211,295` | boot diagnostic; quotes it as the owner address | prints the raw list where an address is expected |\n| `packages/plugins/plugin-auth/src/auth-plugin.ts:557` | walled boot refusal, `!resolvePlatformOwnerEmail()` | **correct** — it only asks whether anything was declared |\n\nSo exactly one of the five is grammar-independent. The other four are dialect number two: the platform now accepts a value whose meaning the derivation understands and these readers do not, and every one of them fails **silently** — a non-match, a boot line, no error anywhere.\n\n## Why it is worth a card rather than a note\n\nThe observable end state for an operator who follows the documentation this design will ship is: the list works for authorization (they are a platform admin) and quietly does not work for promotion, for the operator stamp, and for the walled verification diagnostic. That is the \"declared is not enforced\" shape, and it is the shape Choice 2B's own hard requirement — one separator, one normalization, one meaning — exists to prevent. It should be closed before the list form is documented as supported.\n\n## Suggested shape (not a decision — for triage)\n\nGive the list parse ONE home and have every reader ask it, exactly as the derivation does. `parsePlatformAdminEmails` / `normalizePlatformAdminEmail` / `matchesConfiguredPlatformAdmin` already ship from `@objectstack/core` after PR #13146, and `plugin-auth` and `plugin-security` both already depend on `@objectstack/core`. The alternative — a second parse beside `resolvePlatformOwnerEmail()` in `@objectstack/types` — was NOT taken in L2 because Choice 7A rules that the config read stays inside the single derivation site; whether the shared PARSE (as opposed to the derivation) may live in `types` is a real question and belongs to whoever picks this up.\n\nNote the ordering constraint: the bootstrap reader is the one L4 (issue 11974) rewrites, and two of the plugin-auth readers sit next to L3 (issue 11973), so this may be cheapest to absorb into those legs rather than run alongside them. It spans both, which is why it is filed here rather than as a sub-issue of either.\n\n## Scope note\n\nThis is a pre-existing-consumer gap that leg L2 OPENS by widening the grammar; it is not a defect in the L2 implementation, and PR #13146 states the gap in its own body rather than papering over it. Issue 11970 remains the L2 card and is unaffected by this one."
+}

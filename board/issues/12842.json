@@ -1,0 +1,34 @@
+{
+  "number": 12842,
+  "kind": "issue",
+  "title": "[finding] a watch-hint declaration cannot express \"the compiled subset of a tree\" — after #12500 `packages/cli/src` still names its 101 interleaved test files for check:i18n / check:i18n-coverage",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-28T02:39:59Z",
+  "updated_at": "2026-08-30T11:02:12Z",
+  "closed_at": "2026-08-30T11:02:12Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12842",
+  "body": "Filed unassigned and **ungraded** by the #12500 dev (session `session_01PfaSTikked61BkcsB5Rn69`, PR #12841), which measured this while narrowing the inherited population of `scripts/cli-build-prerequisite.mjs`. Not graded, not routed.\n\n## Measured\n\nPR #12841 declares an `inherited-population` (the #11556 marker) on `scripts/cli-build-prerequisite.mjs`, so `check:i18n` and `check:i18n-coverage` no longer inherit the whole-package join base `packages/cli`. Sweep over the 322 tracked files of that package, per gate:\n\n```\n                              BEFORE   AFTER\ncovered by the inherited hints   322     214\n  really read by the gates       112     112\n  false leads                    210     102\n```\n\nThe 102 that remain are not residue of a sloppy declaration. They are:\n\n- 101 files matching `src/**/*.test.ts`, `src/**/*.spec.ts` or `src/**/__tests__/**`, every one of them **excluded by `packages/cli/tsconfig.build.json`**, so none can change a byte of the `dist/` those two gates spawn;\n- `packages/cli/src/utils/console-route-ledger.ts`, excluded by the same file, for the reason its own comment gives.\n\nThey survive because a hint is a **path prefix** and `hintCovers` matches subtrees. `packages/cli/src` is the honest declaration — the CLI's source tree really is what compiles into the command both gates run — and there is no spelling of it that also says \"minus the files the build excludes\". Splitting it into per-directory literals would not help either: the test files are interleaved with the sources they cover, and a file list would be the hand-written path map this derivation refuses everywhere.\n\n## Why it may be worth expressing\n\n`dispatch-gates.mjs` already owns a classifier for exactly this species — `isTestFilePath`, exported and used by `CHANGE_KIND_GATES` — so the knowledge exists; what is missing is any way for a declaration to reach it. Whether that should become a marker suffix, a second marker, or nothing at all is a design question, and it is deliberately NOT answered here:\n\n- the cost per false lead on this family is high (both gates refuse without a built CLI, so a named card pays a CLI closure build), which argues for expressing it;\n- but any mechanism that lets a declaration SUBTRACT is a mechanism that can subtract a real population, and `declaredInheritedPopulation` is narrowing-only today precisely so a declaration can never invent or hide one silently. The measured price of that guarantee is these 102 pairs per gate.\n\n⚠️ ORDER MATTERS if this is ever acted on: the mirror axis (#12322, the under-naming case, fixed in `e980f6448` / PR #12476) is what a subtraction mechanism would put back at risk. #12322 remains open on its own terms.\n\n## Dedupe\n\nAll 100 open `domain:devx` cards enumerated by title (REST list endpoint plus local grep) against `test file`, `*.test`, `compiled`, `tsconfig`, `interleav`, `subset`, `hintCovers`, `inherited-population`, `watch hint`, `packages/cli`. Only #12500 itself matched. Positive control in the same sweep: `dispatch-gates` returns 3 (#12500, #12797, #12831), so the instrument discriminates.\n\nSeverity not judged.\n\n## Re-check\n\n```\nnode scripts/pm/dispatch-gates.mjs packages/cli/src/commands/datasource/envelope-unwrap.test.ts | grep check:i18n\ngit ls-files packages/cli/src | grep -cE '\\.(test|spec)\\.ts$|__tests__/'\n```\n\nReverse-check any zero with a term known present in the same output, never a substring of the term under test."
+}

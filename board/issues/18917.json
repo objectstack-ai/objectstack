@@ -1,7 +1,7 @@
 {
   "number": 18917,
   "kind": "issue",
-  "title": "[PM seat] domain:spec · seat 4 — 🟢 os-steve (session_01AmH9bKvGoLjiY86Q4Z3og2) · R11 在轮 · 已落地 1(PR #19137 合并)· 在飞 2(#19099 末轮返工 PR #19153 · #19157 Tier S 复核中 PR #19161+#19162)· 退回队列 1(#19086 串行于 PR #19024)· 决策箱本席 5(#17518 · #18177 · #18605 · #18670 · #19071)",
+  "title": "[PM seat] domain:spec · seat 4 — 🟢 os-steve (session_01AmH9bKvGoLjiY86Q4Z3og2) · R12 在轮 · 已落地 1(PR #19137 合并)· 在飞 1(#19157 返工中 PR #19161+#19162)· 决策箱本席 6(#17518 · #18177 · #18605 · #18670 · #19071 · #19099)· 退回队列 1(#19086 串行于 PR #19024)",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -19,7 +19,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-18T05:48:48Z",
-  "updated_at": "2026-09-19T02:28:40Z",
+  "updated_at": "2026-09-19T03:49:07Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

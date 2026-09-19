@@ -1,0 +1,34 @@
+{
+  "number": 12987,
+  "kind": "pull_request",
+  "title": "docs(skills): stop printing a refusal string the sharing gate no longer emits",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-28T12:25:39Z",
+  "updated_at": "2026-08-28T13:52:50Z",
+  "closed_at": "2026-08-28T13:52:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-28T13:52:48Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12987",
+  "body": "Part of #12260\n\n⛔ **Governed-surface PR — awaiting a human merge.** The only file here is under `skills/**`, which is on the `GOVERNED_SURFACES` register in `scripts/pm/check-governed-merges.mjs` (printed today: `docs/adr/** · .claude/** · skills/** · AGENTS.md · CLAUDE.md`). Prime Directive #14 reserves the landing on any such PR: ⛔ do not merge it, ⛔ do not add it to the merge queue, ⛔ do not arm auto-merge, ⛔ do not flip it out of draft. It is left visibly awaiting a human merge on purpose, which PD#14 defines as the finished state for this class. **Reviewed + approved + fully green does not override this.**\n\n## The doc half of #12976\n\nThis is one of a pair, split for exactly the reason above.\n\n- **#12976** — the code: the sharing middleware's by-id write denial renders through the Operation Message Catalog. That PR carries `Fixes #12260` and is the one that closes the card.\n- **this PR** — the one-line doc correction the code change makes necessary.\n\n`skills/objectstack-data/references/data-hooks.md` printed the by-id write gate's message verbatim, as the literal a hook author would match on:\n\n```\nFORBIDDEN: insufficient privileges to update OBJECT ID\n```\n\n(the two trailing tokens are angle-bracketed placeholders in the file; spelled as words here so this body survives the GitHub sanitizer.)\n\nOnce #12976 lands, that string is never emitted again — the sentence becomes end-user copy rendered in the caller's locale. Matching on it would then be matching on prose that varies per user. The fence now names the shape and points at the stable channel instead: **match on the error's `code` (`FORBIDDEN`) and status (403), not on the prose.** That is better advice than the literal it replaces, independent of this card.\n\n**⚠️ The two want landing together.** Between #12976 merging and this one merging, `data-hooks.md` documents a string the platform no longer emits. Neither order is harmful — the doc is simply briefly stale in one direction, and briefly early in the other — but the gap should be short.\n\n## Token cost: zero, by construction\n\nThe published catalog is loaded whole into every customer agent context window, so length is a per-token cost paid again in every customer session. This correction spends none of it.\n\n| Reading | Before | After | Delta |\n|---|---|---|---|\n| `data-hooks.md`, whole file (lines) | 1446 | 1446 | +0 |\n| `data-hooks.md`, whole file (tokens, the ratchet's own count) | 12611 | 12611 | **+0** |\n| `objectstack-data`, whole published dir (lines) | 4935 | 4935 | +0 |\n| whole published bundle, ratcheted authored total (tokens) | 170520 | 170520 | **+0** |\n\n```\n✓ check-skills-token-ratchet: skills/objectstack-data/references/data-hooks.md is 12611 tokens (ceiling 12611; headroom 0).\n✓ check-skills-token-ratchet: 38 authored bundle file(s) within their ceilings; 11 generator-owned file(s) measured, not ratcheted.\n```\n\nAn earlier draft of this correction carried an explanatory paragraph and measured **+113 tokens over the ceiling**. The ratchet marks that direction ⛔ MAINTAINER-ONLY and these ceilings are shrink-only, so the paragraph was dropped rather than the ceiling raised. Recorded because the terse wording is a constraint, not a style choice.\n\n## Verification\n\nGate families derived on the actual changed set with `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack`, then each run. All green:\n\n`check-skills-token-ratchet` · `check:doc-authoring` · `check:role-word` · `check:skill-compatibility` · `check:skill-frame-sync` · `check:pm-governed-merges` · `check:skill-refs` · `check:doc-formula-expressions` · `check:agent-test-spelling` · `check:changeset-gate-self-tests` · `check:objectui-changeset` · `check:cross-package-test-inputs` · `check:nul-bytes` · `check-empty-changeset` · `check-changeset-no-major` · `check-adr-0087-registration` · `check-ci-filter-parity` · `check-cross-package-test-inputs` · `release-rehearsal-clone --self-test`\n\n`check:doc-formula-expressions` first reported `PREREQUISITE NOT MET` twice in a row — it imports compiled output, and needed `@objectstack/formula` and then `@objectstack/lint` built. Both were built and it then exited 0. Recording it because a prerequisite refusal is **NOT MEASURED**, never a pass and never a finding.\n\n`node scripts/pm/check-half-states.mjs` exits **3 = PREREQUISITE NOT MET** in this container (\"the token in the environment is not a valid GitHub credential\"). It swept nothing, so it is neither a clean board nor a dirty one — a backlog sweep unrelated to this diff, which CI runs with a real credential.\n\n## No changeset, deliberately\n\nThis PR releases nothing: `skills/` is not in any package's `files` array, so no npm package's contents or version move. That is the textbook `skip-changeset` case, and the label is applied for it rather than a changeset being invented — `changeset-check` in `pr-automation.yml` has no docs-only exemption, so without the label it would be red on a PR that ships no package change.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_0194kbQJxUvv2yvsGRtuXpP5)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 12985,
+  "kind": "issue",
+  "title": "Published ./testing exports on metadata-core and service-cluster advertise a require condition vitest structurally refuses — repair the exports shape",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-28T12:15:48Z",
+  "updated_at": "2026-08-28T14:45:58Z",
+  "closed_at": "2026-08-28T14:45:58Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12985",
+  "body": "Enumerated by objectstack#12971's class sweep (its PR body carries the detail): `@objectstack/metadata-core#./testing` and `@objectstack/service-cluster#./testing` re-export vitest, whose CJS entry throws by design ('Vitest cannot be imported in a CommonJS module using require()') — so both published `require` conditions can never load. Pre-existing (declared at b489d3c72, before the import.meta line). The repair is a published-exports change: stop advertising a `require` condition the subpath cannot honour (ESM-only exports for the testing subpaths, or whatever the repo's exports conventions prescribe). ⚠️ The `check:dual-build-cjs-loads` baseline (`scripts/dual-build-cjs-loads.baseline.json`) declares both with reasons and is SHRINK-ONLY — the fixing PR must delete those entries in the same change or the gate reds. Clause-② likely YES (published exports surface) — contract-tier dispatch when taken."
+}

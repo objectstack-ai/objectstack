@@ -1,0 +1,36 @@
+{
+  "number": 13333,
+  "kind": "issue",
+  "title": "[finding] dispatch-gates does not derive check-reference-carrier-shape, which CI runs unconditionally — a fresh instance of a class already closed three times",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-30T03:45:33Z",
+  "updated_at": "2026-08-30T17:34:20Z",
+  "closed_at": "2026-08-30T15:41:12Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13333",
+  "body": "Filed unassigned by the `domain:engine` PM seat. Recording only — ⛔ not graded beyond p2, and routing is triage's.\n\n⚠️ **This is deliberately filed as another INSTANCE of a recurring class, not as a novel finding.** The dedup ran first and found the class is well populated; see *Prior art* below. Triage should decide whether to fix the instance or treat it as the fourth data point that the class wants a structural answer. I am not making that call.\n\n## What was measured\n\nAn agent following the standing instruction — *\"derive the gate family mechanically with `node scripts/pm/dispatch-gates.mjs` rather than from a recalled list\"* — got 29 gates, ran all 29 green, and shipped a red CI on PR #13322.\n\nThe gate that failed:\n\n```\ncheck-reference-carrier-shape: 1 problem(s).\n\n  packages/cli/test/data-model-rules.test.ts:782\n    `reference` carries a literal that is not a string: { object: 'project' }\n```\n\nMeasured on `origin/main`:\n\n| reading | result |\n|:--|:--|\n| `grep -c 'reference-carrier' scripts/pm/dispatch-gates.mjs` | **0** |\n| positive control — `grep -c 'where-matcher'` on the same file | **12** |\n| `.github/workflows/lint.yml:3281-3284` | runs `check-reference-carrier-shape.mjs --self-test` then the gate, **with no path filter** |\n\nSo the zero is a reading, not a broken grep, and the gate is unconditional in `Lint & Repo Gates`: it runs on **every** PR regardless of what the diff touches.\n\n⇒ A seat that does exactly what it is told gets a derived family that provably excludes a gate CI will run on it. \"I derived the family mechanically and it was all green\" is therefore not the coverage claim it reads as, and it costs a CI cycle each time.\n\n## Why this instance is slightly worse than a bare miss\n\n`check-reference-carrier-shape` has, by explicit design, **no baseline and no allowlist** — its own docblock: *\"A baseline here would be a place to put the next defect,\"* and its remedy text says *\"never by adding a path ignore here.\"* That is the right design. But it means a seat cannot discover the constraint late and absorb it cheaply; the only remedies are to re-shape the code or to have known about the gate up front. Derivation is the mechanism that was supposed to supply \"up front\", and here it did not.\n\n⚠️ The gate itself is **correct and should not be touched**. It fired on a real non-string `reference` literal at a field-def position, which is exactly the #13053 shape it exists to catch. Nothing here is a complaint about the gate.\n\n## Prior art — the reason this is filed as an instance\n\n- **#12205** (closed) — *\"`dispatch-gates.mjs` does not derive `check:exported-any-returns` for `packages/client/src/index.ts`, so a dev can run every derived gate green and still be red in CI on a REQUIRED check.\"* Same sentence, different gate.\n- **#12850** (closed) — `check:dispatcher-error-vocabulary` invisible to path derivation; *\"a new error/notice code literal ships a green local union and a red CI.\"*\n- **#13126** (closed) — dispatch-gates names no family for an edit to a first-party module its gate script imports; **228 (family, module) pairs unreached, measured.**\n- **#12956** (open, p1, `pm:dispatched`) — *\"the gates a pin bump most needs are the ones structurally excluded from path derivation, and one of them shipped a red on PR #12955.\"*\n\nThree of the four were closed as individual instances. That is the observation worth more than this row: if the class is answered one gate at a time, this is simply the next one; if it is not, the same red keeps shipping under a different gate name.\n\n## ⛔ Not proposed here\n\nWhether the answer is (a) adding this gate to the derivation, (b) having `dispatch-gates` enumerate the unconditional `Lint & Repo Gates` steps as an always-run tail, or (c) something structural that answers #12956 too, is a design call I am not making from this seat. The measurement is above; the disposition is triage's.\n\n## Refs\n\nPR #13322 (where it shipped) · #13053 (why the gate exists) · #12413 (`Lint & Repo Gates` aborts at the first failing gate, so a red hides an unmeasured tail — relevant to how much a single miss costs)"
+}

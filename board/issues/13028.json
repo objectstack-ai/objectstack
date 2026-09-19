@@ -1,0 +1,37 @@
+{
+  "number": 13028,
+  "kind": "issue",
+  "title": "The composed-host-stack plan sees 8 of ~80 control-plane tables: objectstack#12952's start()-registration residue is the dominant case, not a zero-instance one",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-28T16:26:10Z",
+  "updated_at": "2026-08-29T02:26:29Z",
+  "closed_at": "2026-08-29T02:26:29Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13028",
+  "body": "Follow-up to objectstack#12938 / PR objectstack#12952, found while running the\nconsumer acceptance that PR named (objectstack-ai/cloud#1710).\n\nobjectstack#12952 states its residue plainly:\n\n> a host plugin that registers its objects in `start()` rather than `init()` is\n> invisible to this composition — its tables stay out of the plan.\n\nand its ACCEPT adjudicated Option A partly on the ground that the residue had\n\"zero measured instances\". Measured against the deployment the fix was written\nfor, the residue is not the exception — it is almost the whole set.\n\n## Measurement\n\nObjectStack Cloud's `migrate-control-db.yml`, plane=staging, apply=false, against\nthe real Neon staging control plane, framework pinned at `15d55fb2430f`. Run:\nobjectstack-ai/cloud actions run `33182129326`. The composition worked, and said\nso:\n\n```\n  Database: postgresql://…neon.tech/neondb\n  Examined 8 managed table(s).\n      Composed the host stack from objectstack.config.ts: 36 plugin(s), registered\n      for their declarations only (init runs, start does not — a plan writes nothing).\n```\n\n`composition.hostConfigLoaded` is true. **36** host plugins were composed. The\nresulting managed set is **8 tables**, and every one of them belongs to the\nmessaging / notification family:\n\n```\nsys_http_delivery            sys_notification_preference\nsys_inbox_message            sys_notification_receipt\nsys_notification             sys_notification_subscription\nsys_notification_delivery    sys_notification_template\n```\n\nThe control plane carries roughly eighty `sys_*` tables. `sys_position` and\n`sys_permission_set` — the two objectstack#12938 named by hand as the proof that\nthe old five-table set was wrong — are **still not in the diffed set**, even\nthough `com.objectstack.security` is among the 36 composed plugins. Neither are\n`sys_organization`, `sys_environment`, `sys_domain`, `sys_user` or anything else\n`createCloudStack()` brings.\n\nSo one plugin out of thirty-six registers its objects in `init()`. The other\nthirty-five register in `start()`, and `start()` is exactly what the composition\nsuppresses.\n\n## Why this matters more than the count\n\nThe before/after reads like progress — five tables became eight — and every\nconsumer-side signal the fix emits is green: the config loaded, the composition\nprinted a healthy note, the plan produced findings and named real tables. A\ncoverage gate written against \"more than the artifact-less baseline of five\"\npasses. Cloud's gate (cloud#1710) passes. Nothing reports that seventy-plus\ntables are still unexamined, and `Physical schema is in sync with metadata` is\none composed plugin away from printing again.\n\nThat is the same failure shape objectstack#12938 was filed for, one notch\nnarrower and now wearing a green composition note.\n\n## What a fix has to decide\n\nNot adjudicated here; both axes are real:\n\n- **Is `init()`-registration the contract?** If declaring objects in `init()` is\n  binding, thirty-five plugins across cloud and this repo are in breach and the\n  fix is a lint plus a migration, not a CLI change. That is the contract-first\n  reading and it is the one this repo's own doctrine points at.\n- **Or does the composition need to reach further?** objectstack#12952 measured\n  full-start composition as unsafe (14 writes during a documented dry run), so\n  \"just run `start()`\" is already ruled out. Something narrower — a declared\n  registration phase the kernel can run without side effects — would be a spec\n  change, not a CLI change.\n\nEither way the composition should say what it could not see rather than report a\nnumber that reads as coverage. A count of composed plugins next to a count of\nplugins that contributed objects would have made this visible in the run that\nfound it.\n\nFiled without an assignee.\n"
+}

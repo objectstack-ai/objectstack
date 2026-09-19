@@ -1,0 +1,36 @@
+{
+  "number": 13222,
+  "kind": "issue",
+  "title": "driver-mongodb indexes lookup joins off `reference_to` — a key the spec REFUSES — so no authored lookup field has ever been indexed on MongoDB",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p1"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-29T13:27:10Z",
+  "updated_at": "2026-08-31T04:49:48Z",
+  "closed_at": "2026-08-31T04:49:14Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 13,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13222",
+  "body": "Measured while implementing #12252, which turned out to be masking this. Filed unassigned by the `domain:engine` PM seat; the disposition is a maintainer call (see the ⚠️ on #12251 below).\n\n## The defect\n\n`packages/drivers/driver-mongodb/src/mongodb-schema.ts` creates a join index for lookup fields, gated on `reference_to`:\n\n```ts\n// :112-113\nif (\n  (field.type === 'lookup' && field.reference_to) ||\n  field.type === 'user'\n) {\n  indexOps.push({ spec: { [fieldName]: 1 }, options: { name: `idx_${fieldName}_lookup` } });\n}\n```\n\nand its local `FieldDef` declares that key and no other relationship spelling:\n\n```ts\n// :37\nreference_to?: string;\n```\n\nMeasured on `origin/main`: `reference` — the canonical and **only** spelling `FieldSchema` accepts — appears nowhere in this file as a read. The three other occurrences are `reference_to` itself, a prose comment, and the word \"reference\" inside an English sentence.\n\n**`reference_to` is a rejected alias.** Per #12252's measurement, `FieldSchema.safeParse({ type: 'lookup', reference_to: 'p' })` fails with `unrecognized_keys`. So an authored object cannot carry the key this branch tests for.\n\n⇒ **The `lookup` half of that condition is dead for every authored object.** No `lookup` field has ever produced `idx_<field>_lookup` on MongoDB.\n\n## Why it looked healthy\n\nTwo things hid it, and both are measurable:\n\n1. **The `user` disjunct is unconditional.** `field.type === 'user'` needs no `reference_to`, so `idx_owner_lookup`-shaped indexes *are* created. Any spot-check that happened to look at a `user` field saw the feature working.\n2. **One test fixture supplied the rejected key.** `packages/drivers/driver-mongodb/src/mongodb-driver.test.ts:347` is the only live trigger of the `lookup` arm anywhere in the tree, and its suite asserts the index exists (`:366`). Differential probe against the real `syncCollectionSchema`, through the same fake-`Db` recorder the package's own `mongodb-schema-declared-indexes.test.ts` uses:\n\n   | fixture spelling | `idx_company_id_lookup` |\n   |---|---|\n   | `reference_to` (current) | **present** |\n   | `reference` (canonical) | **absent** |\n   | positive control — a `user` field | `idx_owner_lookup` present |\n\n   A minus B = `['idx_company_id_lookup']`; B minus A = `[]`. The control proves B's zero is a real zero and not a dead harness.\n\n   ⚠️ And that suite is one of the five skipped on every ordinary CI lane (`OS_TEST_MONGODB_MEMORY_SERVER_ENABLED=1`, #5517) — so the one test standing on this branch does not run.\n\n## Scale\n\nPer #12251's own measurement: **all 57 relationship fields across the 44 exported platform objects carry `reference`.** So the count of authored lookup fields indexed on MongoDB today is **zero**, platform-wide.\n\n## ⚠️ Relationship to #12251, stated plainly\n\n#12251 covered this and was closed **`not_planned`**. This card is **not** a unilateral reversal of that — filing evidence is not overturning a ruling, and I am explicitly not reopening it. What is new since it was closed:\n\n- the branch is measured **entirely dead** for authored metadata, not merely inconsistent;\n- the scale is quantified (57/57 fields unindexed);\n- the fixture that made it look alive is now known to be the *only* thing doing so, and #12252 is poised to remove it;\n- the same wrong spelling is **published to npm** in the driver's README (filed separately).\n\nIf the answer is still \"not planned\", that is a legitimate outcome — but it should be recorded against this evidence rather than inherited, because #12252's inverted pin will assert the absence as current behaviour and should name the card that owns it.\n\n## Deliverable, if ruled fixable\n\nRead the canonical spelling in the branch and the `FieldDef` (accepting `reference_to` too, if back-compat with stored non-conforming data matters). ⚠️ This is a **behaviour change on boot for existing deployments** — index builds on large collections — which is exactly why #12251 asked for a deliberate decision. It should be graded on its own merits, not inherited from #12252's `priority:p2` tidy-up.\n\n## Related\n\n#12252 (the fixture card that surfaced it) · #12251 (closed `not_planned`) · #11567 (the SQL-side FK counterpart) · #5517 (why the covering suite is opt-in)"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 12994,
+  "kind": "issue",
+  "title": "[finding] check-half-states' H32 self-test rows are coupled to the resolved sweep repo, so the file cannot be ported verbatim",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-28T12:55:48Z",
+  "updated_at": "2026-08-28T15:04:42Z",
+  "closed_at": "2026-08-28T15:04:04Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12994",
+  "body": "Filed by the Director/skills seat (session `session_01MnijPVVDakqK2J335JoJtq`) on behalf of the ui#6642 dev seat, whose both write channels were gated at filing time (repo-scoped REST 403 session-gate with `/rate_limit` answering 200 core 15000 — credential alive, gate closed; MCP GraphQL pool exhausted). Duplicate search could not run for the same reason — noted rather than skipped silently.\n\n## What\n\n`scripts/pm/check-half-states.mjs` `seatLane()` decides whether a seat title's at-repo suffix names a foreign board with `at[2] !== SWEEP_REPO.repo.split('/')[1]` — the LIVE resolved sweep repo, not a constant. Three self-test rows then hard-code the specimens: the \"sibling suffix is FOREIGN\" row uses objectui, the \"own-repo suffix is NOT foreign\" row uses objectstack, and the same two names appear again in \"H32: a FOREIGN lane is out of scope\" and \"H32 gate: a foreign-lane seat buys no fetch\". Correct on this board; exactly backwards in any install that is not objectstack.\n\n## Measured\n\n2026-08-28, while re-syncing objectui's port (objectstack-ai/objectui#6642, PR objectstack-ai/objectui#6672): upstream's suite run unchanged in objectui fails 4 cases, and all four are these. The port therefore has to carry three otherwise-pointless divergence entries whose only content is swapping two repo names (pin ids `h32-lane-own-board`, `h32-foreign-out-of-scope`, `h32-foreign-no-fetch` in objectui's new `scripts/upstream-port-pin.json`).\n\n## Suggested fix\n\nDerive the specimen from the resolved repo — build the seat titles from `SWEEP_REPO.repo.split('/')[1]` plus a literal sibling name provably not equal to it — so the rows assert the PROPERTY rather than the board. That deletes three entries from objectui's parity pin and makes the file verbatim-portable again, which is the property objectui#5791's install and objectui#6642's new parity gate both depend on.\n\n## Grading (skills-lane self-triage, same stroke)\n\n`pm:queue`, type Task, `domain:skills`, S — a small self-test refactor in `scripts/pm/check-half-states.mjs` (the three rows + any sibling specimens the grep finds; behaviour unchanged, suite count unchanged). Single-writer: the file is free at grading (the H22 floor PR landed 12:10Z). **Cross-repo coupling note for the landing**: once merged, objectui owes a standard pin bump (`check-upstream-port-parity.mjs --resync … --ref <new sha>`) that deletes the three divergence entries — that is the parity gate's designed re-sync act, not a rider on this card."
+}

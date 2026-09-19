@@ -1,0 +1,35 @@
+{
+  "number": 12010,
+  "kind": "issue",
+  "title": "finding: a THIRD consumer-local structural engine type (`ConnectionEngineLike`) carries five members no spec contract declares",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T04:50:16Z",
+  "updated_at": "2026-08-30T09:06:59Z",
+  "closed_at": "2026-08-30T09:06:59Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12010",
+  "body": "Found while carrying out #11833 (the two-site `DataEngineLike` sweep). Filed unassigned as an observation. Measured at `de81acf547`, against `origin/main` = `497ded7801`.\n\n## The observation\n\n#11833 names two consumer-local structural engine types. There is a **third**, and it is the one that actually matters: `ConnectionEngineLike` in `packages/services/service-datasource/src/datasource-connection-service.ts` (~:89). Unlike the other two it is **exported**, and it is what `datasource-admin-plugin.ts` casts its engine handle to for hot pool (de)registration.\n\nIt declares seven engine members. Checked member-by-member against `packages/spec/src/contracts/`:\n\n| member | declared contract equivalent |\n|---|---|\n| `getDriverByName?` | `IDataEngine.getDriverByName?` |\n| `getDefaultDriverName?` | `IDataEngine.getDefaultDriverName?` |\n| `syncObjectSchema?` | has a spec mention — not verified as a contract member |\n| `registerDriver?` | `IObjectQLEngine.registerDriver` — **signature mismatch**, see below |\n| `registerDatasourceDef?` | **NONE** — fork |\n| `markDatasourceUnavailable?` | **NONE** — fork |\n| `clearDatasourceUnavailable?` | **NONE** — fork |\n\nThe three forks are all real methods on the `ObjectQL` class (`packages/objectql/src/engine.ts`: `registerDatasourceDef` :4953, `markDatasourceUnavailable`, `clearDatasourceUnavailable`) — implemented, called across a package boundary, and declared by no contract. That is the #4251 B3 shape exactly: the producer side meets no compiler, so drift lands silently in the consumer.\n\n## The measured mismatch\n\n`registerDriver?: (driver: unknown, isDefault?: boolean) => void` is **wider than the engine it shadows**. The contract is `registerDriver(driver: IDataDriver, isDefault?: boolean): void`. Under this repo's `strict: true`, the real engine is therefore **not assignable** to this local view:\n\n```\nType 'IObjectQLEngine' is not assignable to type 'ConnectionEngineLike'.\n  Types of property 'registerDriver' are incompatible.\n    Type '(driver: IDataDriver, isDefault?: boolean) => void' is not assignable to\n         type '(driver: unknown, isDefault?: boolean) => void'.\n      Types of parameters 'driver' and 'driver' are incompatible.\n        Type 'unknown' is not assignable to type 'IDataDriver'.\n```\n\n(Measured on the identical `registerDriver?` declaration in `datasource-admin-plugin.ts` during #11833; the declaration in this file is byte-identical.) The practical effect is that this seam's type promises the engine accepts *any* value as a driver, which it does not — so a mis-shaped driver reaching `registerDriver` is a runtime problem the compiler is currently structured not to see.\n\n## Why this is filed rather than fixed\n\nClosing it means deciding whether the three forked members get declared on a contract, and that is a public-surface widening — a maintainer call, not a consumer-side one. #11833's ruling is explicit that a member with no declared equivalent is a fork to report, never to widen from the consumer side.\n\nRefs: #11833 (the two-site sweep this was found under) · #11493 (the ruling) · #4251 (B3, the declared-contract sweep this pattern escaped)."
+}

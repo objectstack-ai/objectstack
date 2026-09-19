@@ -1,0 +1,35 @@
+{
+  "number": 10025,
+  "kind": "issue",
+  "title": "Should a definition-level input-schema refusal be non-retryable? #9889's parity floor makes a flow burn its whole retry budget on a verdict that cannot change",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T15:54:36Z",
+  "updated_at": "2026-08-30T14:09:35Z",
+  "closed_at": "2026-08-30T14:09:35Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 15,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10025",
+  "body": "Derived from #9889 (PR #10024) as the explicitly-undecided half. Filed unassigned — this is a ruling request, not work in progress. **The parity floor already shipped and is correct under either answer**; this card is only about what happens on top of it.\n\n## What is settled\n\n#9889 restored the invariant: `validateNodeInputSchemas` is now called by **both** attempt paths (`execute()` and `executeWithoutRetry`), so a flow whose node `config` violates its own declared `inputSchema` is refused on every attempt instead of being refused once and then run for real on retries. That defect — a `retry` strategy acting as a way past authoring-time validation — is closed.\n\n## What is not settled\n\nThe guard's verdict is a **pure function of the flow definition**: its signature is `validateNodeInputSchemas(flow: FlowParsed, _variables: Map<string, unknown>)` with the variables parameter deliberately unused, and it reads `node.inputSchema` against the static `node.config`. Re-running it on attempt 2 cannot produce a different answer than attempt 1.\n\nSo under the shipped parity floor, a `strategy: 'retry'` flow with a mis-declared `inputSchema`:\n\n1. burns its **entire retry budget** — including configured backoff delays — re-deriving a certainty;\n2. writes `maxRetries + 1` identical failed run-log rows, each carrying the same guard message, which is what a run-history reader has to page through to find the one fact that matters.\n\n## The two options\n\n**A — keep the parity floor as shipped.** Every attempt dispatches and is refused; retry accounting is untouched; run history shows N identical refusals. Simplest, already landed, zero further risk.\n\n**B — classify a definition-level guard failure as non-retryable**, so `execute()` never hands off to `retryExecution` for it at all. Refuse once, skip the retry loop.\n\nB is not free, and that is why it is here rather than in the PR:\n\n- It **changes retry accounting** — an operator watching retry counters or run-log volume sees different numbers for the same flow after the change.\n- It likely **changes the result classification**. Today the refusal carries `status: 'failed'` and no ADR-0112 `code` on either path, because #9378's classification gives `code` to the **never-dispatched** exits (`FLOW_DISABLED`, `FLOW_NO_START_NODE`) and `status: 'failed'` to dispatched-and-failed exits. A non-retryable definition-level refusal arguably *becomes* a never-dispatched exit and would deserve its own `code` — which is a public envelope addition, not an internal tidy-up.\n\n## The dev's recommendation (#10024, recorded verbatim in intent)\n\n**B as the end state** — re-running a check whose verdict cannot change wastes the retry budget and misleads run-history readers with N identical failed rows — while noting that it changes retry accounting and result classification, so it wants a ruling, and that the shipped parity floor is correct and safe under either answer.\n\n## PM note\n\nNot adjudicated in the `domain:services` seat. B touches retry accounting **and** would add an ADR-0112 `code` to a public envelope; both sit above seat discretion. Recording it here so the choice is made once, deliberately, rather than drifting in on some later card.\n\nRefs: #9889 (the parity card) · PR #10024 (the landed floor) · #9378 (the exit classification B would move this refusal into) · #9704 / #9510 / #9414 / #9415 (the `execute`/`executeWithoutRetry` drift family)"
+}

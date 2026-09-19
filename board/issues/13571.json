@@ -1,0 +1,37 @@
+{
+  "number": 13571,
+  "kind": "issue",
+  "title": "read-scope-sql's emptied-membership folds are polarity-dependent at the lowering site itself: `$in: []` folds to `1 = 0` one arm from `$not`, and `$nin: []` folds to `1 = 1` (constant TRUE)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "priority:p2",
+    "security"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T01:48:56Z",
+  "updated_at": "2026-08-31T05:51:36Z",
+  "closed_at": "2026-08-31T05:51:36Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13571",
+  "body": "Filed unassigned by the #13552 dev (PR #13570) while measuring that card's PM mechanism assumption 1 (\"does fixing only the guard leave the analytics lowering path independently reachable?\"). Recording only — severity and routing are triage's. #13552 is not resolved by this card and this card does not wait on it.\n\n## What was measured, on `f7347eb`\n\n`packages/services/service-analytics/src/read-scope-sql.ts` `compileOperator`:\n\n- `$in` with an empty array folds to `FALSE_CLAUSE` (`1 = 0`) with the comment \"IN () matches nothing — safe\" — a polarity-DEPENDENT inference sitting one arm away from the `$not` lowering that inverts it (`NOT (1 = 0)` is TRUE for every row). This is the exact inference #13552 repaired at the RLS guard, still standing verbatim at the lowering site.\n- One case below, `$nin` with an empty array folds directly to `1 = 1` (\"NOT IN () excludes nothing\") — constant TRUE with no negation needed at all.\n\n## Why it did NOT block #13552, and what keeps it from biting today\n\nIn-repo, the scope input to this compiler is `StrategyContext.getReadScope`, wired through `security.getReadFilter` — i.e. the RLS compiler's output. After #13552 (PR #13570) the RLS path drops any policy whose compiled filter leans on an emptied membership at inverted polarity, so neither shape reaches this lowering through RLS. The CEL pushdown compiler also never emits `$nin`.\n\n## Why it is still worth a look\n\n- `StrategyContext.getReadScope` is a spec contract (`packages/spec/src/contracts/analytics-service.ts`), fillable by any provider; its own doc shows a hand-written example. A non-RLS provider handing this compiler `{ $not: { f: { $in: [] } } }` or `{ f: { $nin: [] } }` gets a scope clause that is TRUE for every row — on the READ-SCOPE lowering, where a wrong answer is ADR-0021 scope over-reach, not a loose chart filter.\n- The module's stated posture is fail-closed (\"it throws rather than drop a predicate\"). Folding an emptied membership to constant TRUE is the one spot where the emptied case widens instead of throwing or narrowing.\n- Possible dispositions for triage to weigh: treat an emptied membership at widening polarity as a compile refusal (matches the module's fail-closed posture); or fold it null-safely and document the invariant that only fail-closed producers may feed this compiler; or explicitly declare the producer contract (RLS-guard-filtered input only) and pin it.\n\n## Related\n\n#13552 (the guard-side repair; PR #13570) · #5297 (closed — `$not` null-safety and `$not: {}` at this same site) · #5298 (no-value semantics) · ADR-0021 (read-scope contract) · ADR-0055 / ADR-0058 (pushdown contract)"
+}

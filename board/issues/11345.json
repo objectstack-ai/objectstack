@@ -1,0 +1,34 @@
+{
+  "number": 11345,
+  "kind": "issue",
+  "title": "派生相关列表(relatedList:'primary')查询不带 $orderby 且无任何排序声明位;17.0.0 defaultSort 迁移说明与实测矛盾",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-23T12:58:49Z",
+  "updated_at": "2026-08-29T17:57:41Z",
+  "closed_at": "2026-08-29T17:57:41Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 12,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11345",
+  "body": "**一句话:由字段级 `relatedList:'primary'` 自动派生的相关列表,列表查询不带任何 `$orderby`(行序 = 记录 id 兜底序),而 17.2.0 没有给这类相关列表任何排序声明位;且 17.0.0 移除 `view.form.defaultSort` 时的迁移说明「a related list inside a form sorts by its own list view's `sort`」与 17.2.0 实测行为不符。请求提供排序能力(字段级 `relatedListSort`,或让派生相关列表真正继承子对象列表视图的 `sort`)。**\n\n## 复现(17.2.0,真机 Console UI)\n\n1. 父对象 `task_version`,子对象 `task_version_check_item` 通过 lookup 字段声明 `relatedList:'primary'`(带 `relatedListColumns`);子对象有字段 `seq_no`(顺序号)。\n2. 子对象自身的列表视图声明 `sort: [task_code asc, seq_no asc]`。\n3. 在父记录详情页的派生相关列表下,按创建顺序 40 / 10 / 30 / 20 建 4 条子记录(顺序号故意与创建序不同)。\n4. 观察页签行序:**既非 seq_no 序也非创建序**,逐条比对后确认是**记录 id 升序** —— 即服务端在无 `$orderby` 时的兜底主键序。若迁移说明成立(继承子对象视图 sort),行序应为 10/20/30/40。\n\n## 逐层核实过的可声明面(17.2.0)\n\n1. **字段级**:相关列表家族只有 `relatedList` / `relatedListTitle` / `relatedListColumns` / `relatedListFilter`(17.2.0 新增)四键,**无排序键**;字段 schema strict,自造 `relatedListSort` 被校验拒绝。\n2. **视图级**:子对象列表视图的 `sort` 实测**不作用于**派生相关列表(见复现第 4 步)。\n3. **表单级**:`view.form.defaultSort` 已在 17.0.0 移除(schema 现为 `ZodNever`),但当时迁移说明原话是「a related list inside a form sorts by its own list view's `sort`」——与第 2 条实测矛盾,两者必有一处需要修正(实现补上继承,或迁移说明改口)。\n4. **渲染层**:console 17.2.0 由对象 schema 派生相关列表时,产出的描述符只有 `childObject / referenceField / title / columns / isPrimary`,**不产出 sort**;相关列表组件仅在拿到 `sort` 时才拼 `$orderby`。顺带:同一段派生代码也未消费 17.2.0 新增的 `relatedListFilter`(spec 已开、console 未跟,近似旧单 #7118 的 filter 不消费问题,但那单针对的是 page 块 `record:related_list.filter`)。\n\n## 请求\n\n二选一即可解除应用侧阻塞:\n- A. 字段级新增 `relatedListSort`(与 `relatedListColumns` 同族),派生描述符与组件消费之;\n- B. 派生相关列表继承子对象**默认列表视图**的 `sort`(即让 17.0.0 迁移说明成立)。\n\n## 应用侧影响\n\nsteedos-labs/os-project-titanwind-ehr#1746(任务检查项按顺序号显示)因此挂起;项目侧唯一替代路径是 `type:'record'+kind:'slotted'` 整页接管页签区,爆炸半径远超一条默认排序,已按「等平台不绕行」纪律冻结。\n"
+}

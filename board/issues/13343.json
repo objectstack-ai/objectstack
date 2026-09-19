@@ -1,0 +1,30 @@
+{
+  "number": 13343,
+  "kind": "pull_request",
+  "title": "test(rest): pin a permission-store outage as indistinguishable from a capability denial [SUPERSEDED — do not merge]",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T04:48:57Z",
+  "updated_at": "2026-08-30T04:56:37Z",
+  "closed_at": "2026-08-30T04:52:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/13343",
+  "body": "Part of #13279\n\n# ⛔ DO NOT MERGE — SUPERSEDED. Kept open only as evidence for PM adjudication.\n\nThis PR's premise was falsified **after** it was written. The dispatch asked me to pin a reading that \"currently no assertion in the tree pins\". That gap no longer exists: the very same fact, at the very same path, landed on `main` while this branch was being built.\n\n## The finding\n\n| | |\n|:--|:--|\n| my branch base | `0ae9e1e16` |\n| the commit that supersedes this | `43028a8f8` — `test(rest): measure what a swallowed exec-context resolution reaches, and what the package door answers (#13282)`, landed under card #13255 |\n| relationship | `43028a8f8` is the **immediate next commit after my base**. `git merge-base --is-ancestor` confirms it was NOT reachable when I branched. |\n\nThe PM's pre-dispatch check (\"grep hit 0 for this path on `origin/main`, with a positive control hitting 1\") was **correct when taken**. #13282 merged minutes later. Neither seat could see the other — this is a parallel-dispatch race, not a mistake by either.\n\nConsequences, both measured:\n\n1. **Path collision.** #13282's file occupies the exact path this card named as its harness, `packages/rest/src/package-door-execctx-fault-reachability.test.ts` (538 lines there vs 321 here). `git merge-tree` reports `CONFLICT (add/add)`, which is why this PR shows `mergeable_state: dirty`.\n2. **The coverage is already there.** That file pins this card's three-row table by the same method — real `RestServer` constructor seams, `objectQLProvider` injection, `JSON.stringify` comparison — including the load-bearing positive control:\n   - `GRANTS LOST: a permission-store outage answers exactly what \"you hold nothing\" answers` — asserts 403, `studio.access` in the message, and `JSON.stringify(faulted)` equal to the genuinely-empty store's body\n   - `CONTROL 200: the full production stack, healthy end to end, serves the read`\n   - `CONTROL: the same comparison SEPARATES two answers that differ`\n\n⇒ Landing this branch would be a second, conflicting pin of a fact already pinned. I am not reshaping it to fit, and I am not touching #13282's file. Handing it to the PM.\n\n## What was measured before the collision surfaced\n\nThe card's table **does still hold behaviourally** on current `origin/main` — the stop condition did not fire on the measurement itself, only on the dispatch's \"not yet pinned\" premise. This branch's own suite went 10/10 green, and the ablation was non-vacuous: with `tryFind`'s `catch` made to rethrow (anchor matched exactly once, confirmed on disk by marker count and a moved file hash, rebuilt into `dist/` and verified present by `ablation-dist-preflight`), 4 of 10 tests went red. Informative direction: without the swallow the fault propagates, the context becomes undefined and the door answers **401**, not 403 — the neighbouring CONTEXT-LOST shape. That is precisely what makes the 403 a property of the swallow. Restore was verified by `git hash-object` against the HEAD blob (not by the restore command's exit code) and by re-running `ablation-dist-preflight --absent`.\n\nGates, all green on `5d109979f`: `pnpm --filter @objectstack/rest test` (`Test Files 159 passed`, `Tests 2633 passed`), the package `typecheck`, the full family derived by `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack`, and `check:dual-build-cjs-loads` once the closure was built. `node scripts/check-test-completeness.mjs` is NOT MEASURED locally by its own declaration (it grades a saved `turbo run test` log). `check:type-check-debt` is NOT MEASURED — it exceeded the container's foreground limit; the question it would answer here is covered directly, see below.\n\nTypecheck coverage, measured rather than claimed: `packages/rest/tsconfig.json` EXCLUDES `**/*.test.ts`, so that program says nothing about this file. The package's `typecheck` is composite and also compiles the test layer under `tsconfig.test.json`, and there the file IS covered — `--listFiles` shows 1 hit among 159 test files, negative control 0, with none of that project's 6 pre-existing ledgered errors naming it.\n\n## The only open question\n\nWhether anything here is worth salvaging **into** #13282's file, as a follow-up rather than this PR. Candidate deltas, offered for adjudication and not asserted as needed: assertions on the resolved context itself (`userId` survives and `systemPermissions` is empty for both the faulting and the empty store, which separates GRANTS-LOST from CONTEXT-LOST at the context rather than only at the status), equality of the refusal **message** across the two, and the same outage-vs-denial equality on the write half (`POST /packages/publish`).\n\n⛔ Whichever way that goes, the repair question this card declines to rule — should `tryFind` distinguish \"no rows\" from \"the read failed\" — stays open and untouched. #13255 and #12537 are not addressed here either.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01LZbWd2jNV1FErXTPSS4Dry)_"
+}

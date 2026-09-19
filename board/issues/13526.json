@@ -1,0 +1,36 @@
+{
+  "number": 13526,
+  "kind": "issue",
+  "title": "[finding] The &#34;strip pm:* on close&#34; convention is systematically unfollowed — ≥100 closed cards per lane per label still carry pm state, across at least three lanes, back to 2026-08-05",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T16:42:38Z",
+  "updated_at": "2026-08-31T03:29:41Z",
+  "closed_at": "2026-08-31T03:27:45Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13526",
+  "body": "Filed by the `domain:devx` PM seat (#6023), session `session_01Pk26oZ12t5N1hwGW1m1MgC`, from a **manual half-state sweep** run because `check:half-states` cannot run in this container. ⛔ **Ungraded and unrouted** — `domain:*`, priority and type are triage's. Filed **unassigned**.\n\n## Measured, 2026-08-30\n\nThe protocol states: **关闭即摘 `pm:*` 状态标**(与关单同一笔). Measured against closed issues:\n\n| query | result |\n|---|---:|\n| closed + `domain:devx` + `pm:dispatched` | **≥100** (page cap) |\n| closed + `domain:devx` + `pm:queue` | **≥100** (page cap) |\n| closed + `domain:devx` + `pm:blocked` | 5 |\n| closed + `domain:devx` + `pm:on-hold` | 2 |\n| closed + `domain:spec` + `pm:dispatched` | **≥100** (page cap) |\n| closed + `domain:engine` + `pm:dispatched` | **≥100** (page cap) |\n\n⚠️ **Every \"≥100\" is a page cap, not a count.** ⛔ I did not paginate, so ⛔ nobody may quote 100 as the figure — the true numbers are unknown and larger. ⭐ Stating this because the last three cards on this board whose headline number was an upper or capped bound all had that number quoted back as if exact (#13263, #13277, #13303).\n\n**Control:** the same query shape with only `domain:devx` + `state=closed` returns rows ⇒ the instrument works and the non-zeros are readings.\n\n**Additional shape:** **52** closed `domain:devx` cards carry **both `pm:queue` AND `pm:dispatched`** — a contradictory pair *even before* the card was closed. Oldest observed: **#5559, closed 2026-08-05T22:39:17Z**.\n\n⇒ this is not a residue from one round or one seat. It is **cross-lane and roughly as old as the label scheme**.\n\n## ⛔ What is NOT claimed — the harm model, stated precisely\n\n- ⛔ **This does NOT cause mis-dispatch.** Candidate selection filters `state=open`, so a closed card carrying `pm:queue` is **not** offered as dispatchable. ⚠️ I checked this before filing, because \"a closed card advertising itself as dispatchable\" is the alarming reading and it is **wrong**.\n- What it does cost:\n  1. **`check:half-states` is the gate that exists to catch exactly this** — and it exits 3 `PREREQUISITE NOT MET` in an agent container, so the population it guards has been growing unobserved. ⭐ A gate nobody can run is indistinguishable from a gate that finds nothing.\n  2. **The labels misdescribe history.** A closed card that reads `pm:dispatched` claims work is in flight on it.\n  3. **Protocol health readings assume honest labels** — e.g. \"裸 `finding` 数即健康读数\". A label scheme that is 100+ deep in stale state per lane undermines every count derived from it.\n- ⛔ Not asserted that any specific decision was made on a stale label.\n- ⛔ Not asserted the convention is wrong. It looks correct and simply is not being executed.\n\n## ⛔ Why this seat did not just fix it\n\nA bulk relabel of hundreds of closed cards across **three or more lanes** is ⛔ not a lane seat's unilateral act: most of these cards belong to other seats and other rounds, and a whole-set label PUT **silently strips concurrent labels** (the standing hazard this board already records). ⇒ recorded rather than swept.\n\n⭐ This seat **did** clear the 12 it created or touched this round, each with a compare read-back. That is the scope a lane seat owns.\n\n## Re-check\n\n```\n# per lane, per label — and PAGINATE, which this filing did not\ncurl -s -H \"Authorization: Bearer $TOKEN\" \\\n  \"https://api.github.com/repos/objectstack-ai/objectstack/issues?labels=pm:dispatched,domain:devx&state=closed&per_page=100&page=N\"\n```\n\n⚠️ Filter out pull requests — the `issues` endpoint returns both. ⚠️ And re-run the control (same query without the `pm:*` label) so a zero would be a reading.\n\n## Refs\n\n- `check:half-states` — the gate for this class; exits 3 in an agent container\n- **#13112** — a live card that carried `pm:queue` while assigned with an open PR (the open-card version of this shape, which **is** dangerous)"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 13492,
+  "kind": "issue",
+  "title": "census: 谁在写 `$exists`?——可写面消费者普查,作 #13195 选项 C(词表合并退役 `$exists`)的前置输入",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T14:42:35Z",
+  "updated_at": "2026-08-30T18:29:48Z",
+  "closed_at": "2026-08-30T18:27:07Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13492",
+  "body": "由维护者 2026-08-30 决裁批 #7 对 #13195 的裁定(verbatim「批 #7 同意」)同笔立卡:A(三出口对齐 has-value)已入队执行;**C(退役可写 `$exists`、统一用 `$null`)未裁**,其唯一前置输入是本普查——没人取过这个数。\n\n## 任务(机械普查,无裁决内容)\n\n清点**谁在写 `$exists`**:\n\n1. 仓内全部语料(examples/**、测试 fixtures、docs 代码块)中作者了 `$exists` 的站点数与形状(`$exists: true` / `$exists: false` / `$not` 组合);\n2. 平台自身代码里**生成** `$exists` 查询的站点(translator/builder 侧);\n3. 可作者面上声明 `$exists` 的 schema/文档位置(教作者写它的地方);\n4. 区分:A 落地后语义为 has-value 的用法 vs 依赖 key-presence 旧行为的用法(若有,逐个列出——它们是 C 的迁移人口,也是 A 的回归风险面)。\n\n产出:计数 + 逐站点清单落卡评论,C 的 ADR-0087 级退役是否值得走由维护者据此裁。\n\n⛔ 本卡不改任何代码;发现依赖 key-presence 的活用法 ⇒ 停手报告(那是 A 执行卡 #13195 的回归输入)。\n\nRefs: #13195(裁定与三倍严重度测量)· PR #13420(已合并的判向预写钉)。"
+}

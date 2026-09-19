@@ -1,0 +1,34 @@
+{
+  "number": 11723,
+  "kind": "issue",
+  "title": "[Decision] 应用受众姿态 — 业务用户如何进入 ObjectStack 建的应用(平台级默认,今天=全开+不验证)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:epic",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T14:02:27Z",
+  "updated_at": "2026-08-28T12:27:11Z",
+  "closed_at": "2026-08-28T12:27:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11723",
+  "body": "维护者 2026-08-24 指示(原话):「你不能只考虑这个环境，我们是一套开发工具，帮我使用项目经理技能四维综合分析，给我建议。」\n\n## 问题(平台级,不是单环境)\n\n「用 ObjectStack 建的应用,业务用户怎么进来」今天**没有一个可声明的答案**。它是 4-5 个互不相干的开关叠加出来的涌现属性:`emailAndPassword.disableSignUp`、`emailVerification`、`ssoOnlyMode`(spec AuthConfig)、plugin-auth 的 `membershipPolicy`,外加自助注册者落到的**隐式** fallback 权限集。没有名字,没有单一强制点,没人「选择」过这个组合。\n\n## 实测事实(2026-08-24)\n\n1. **全平台默认 = 全开**。租户 kernel(`cloud/packages/objectos-runtime/src/artifact-kernel-factory.ts`)向 AuthPlugin 传 secret/baseUrl/trustedOrigins/oidcProviders/ssoOnlyMode(仅 enforced)/scim(仅够格套餐)/autoDefaultOrganization(仅镜像组织时),**从不传** `disableSignUp` 或 `requireEmailVerification` → 双双落框架默认。实测某生产环境 `/api/v1/auth/config`:`disableSignUp:false`、`requireEmailVerification:false`、`ssoEnforced:false`。这是**舰队默认**,不是某个环境的配置失误。\n2. **注册即入组织**。`reconcileMembership` 挂在 better-auth `user.create.after`(每条建用户路径都过),策略默认 `'auto'`(auth-manager `getMembershipPolicy()`),单组织环境的目标 = 该环境唯一组织 → 自助注册者自动成为 member。\n3. **没有域名白名单**。全仓零命中(邻近词 `disableSignUp` 在同文件命中,反查成立)。\n4. **AI 建的应用无法声明受众**。AI blueprint 无任何 auth/受众面 → **AI 生成的每一个应用都继承「全开+不验证」**,且 AI 结构上无从做对。\n5. **事后补救能力也缺**:该环境 `features.admin:false`(better-auth admin 插件未挂)→ 无停用/封禁用户开关。开着自助注册 + 无法踢人。\n\n## 选项\n\n- **A(推荐)——受众姿态词表**:把「谁可以成为这个应用的用户」收成**一个声明**,闭合词表 `invite_only | email_domain | open`,一处强制;不变量:非 `invite_only` 时**强制邮箱验证**;自助注册者获得的权限集**必须显式声明**;新环境默认 `invite_only`,存量环境保持现状 + 控制台醒目提示 + 一键切换。\n- **B——只加一个域名白名单字段**:最省事,但「受众」继续是涌现属性,AI 依然不会设,默认依然全开。\n- **C——不改代码,写文档教客户设 `disableSignUp`**:零成本,默认仍全开。\n- **D——推 SSO/企业 IdP**:对内部业务应用过重,且 SSO 是 Business+ 付费面,免费/低价客户无解。\n\n## 四维分析\n\n**实际业务需求** — 真实且是舰队级,不是投机面。每个客户建的每个应用,第一天就撞这堵墙:要么放业务用户进来(今天=谁都能进),要么进不来。维护者本人作为平台第一个客户已经撞上。反向证据也成立:确有「公开门户」类应用需要 `open`,所以答案不是「一律关死」,而是**让应用声明自己的受众**。\n\n**项目长远合理性** — 现状正是仓里明令拒绝的 workaround 形状:一个语义(受众)散在五处、无单一强制点。北极星是元数据声明 + declared=enforced,受众理应是**一个声明**,和 `membershipPolicy` 同款(闭合词表、越界值响亮拒绝、单一访问器)。开源边界也对得上:机制(词表+强制)属开放 framework,付费情报(企业 IdP/SCIM/按套餐 enforce)留 cloud。**不做的长期代价**:所有客户应用默认裸奔,第一次真实事故是平台级声誉事件——因为默认是我们给的,不是客户配错的。\n\n**防 AI 写代码犯错(尤其防 AI 写元数据 app)** — 本案最强的一轴。AI blueprint 完全没有受众面,所以 AI 生成的应用**必然**继承全开默认,且 AI 无从声明、无从做对。若按 B 加一个可选字段,AI 只会永远不设它——同一个失效模式换了层皮。正确形状是**契约收紧**:受众是带安全默认的声明,配 publish 时的完备性谓词(ADR-0078 家族:「合法但失效的元数据」正好覆盖「发布了一个没人选过受众的应用」),而不是消费端宽容。\n\n**创业阶段不扩散需求** — 最小闭合:①闭合词表姿态(环境级,不做 per-app);②非 invite_only 强制邮箱验证;③显式声明自助注册者的权限集;④新环境安全默认。**明确不做**:token join link、审批队列、per-app 姿态、按链接分角色、SCIM 交互、自定义 onboarding 流。值得注意的是:A 的实现量**小于**已冻结的 cloud-org join link epic,更便宜的选项恰好在另外三轴上也更优。\n\n**推荐:A**。四轴同向。\n\n## 需要维护者拍板的子决策(存量迁移形状 = 人工地板)\n\n存量环境今天全开。**新环境默认 `invite_only` + 存量保持现状(醒目提示 + 一键切换)**(推荐,不静默翻转已部署行为),还是设一个日期强制翻转?后者会在客户毫无准备时打断其真实用户的注册,前者留下一段「已知不安全但已告知」的窗口。\n\n## 关联\n\n冻结中的 cloud-org join link epic #11586 是**协作者层**(控制面组织成员),与本卡的**业务用户层**(租户环境用户)是两层;维护者已裁定协作者层手工加入即可。本卡若通过,epic 的 token 形状(过期/撤销/限次)可在未来 `link` 姿态复用。\n---\n\n## RULED (maintainer, 2026-08-24, chat — quoted verbatim)\n\n> 「新环境默认 invite_only，存量也默认切换到 invite_only，按这个拆卡派发」\n> 「目前云还没正式上线」\n\nOption **A** is adopted, and the migration sub-decision is settled MORE strictly than this card's own recommendation: **existing environments are switched to `invite_only` too, not grandfathered.**\n\n**PUBLIC CORRECTION.** An earlier revision of this body (posted minutes before, same session) recorded the opposite migration shape — \"新环境默认 invite_only，存量保持现状加提示\" — as ruled. That was superseded within the same conversation once the maintainer supplied the decisive fact: **the cloud has not launched yet.** With no production tenants to interrupt, the grandfathering window this card recommended buys nothing and costs the platform a permanently unsafe default. The warning-banner remediation surface and the \"undeclared = legacy, behave as open\" limbo are **dropped from scope** — do not implement them.\n\n### Design consequences of the ruling (not new decisions)\n\n1. **The framework's own default becomes `invite_only`.** No legacy/undeclared limbo: an undeclared posture IS `invite_only`. This is the safe-by-default shape axis 3 (防 AI 写元数据 app 犯错) asks for — an AI-generated app that declares no audience cannot ship open.\n2. **Breaking-change posture: `minor`, not `major`.** Verified against `scripts/check-changeset-no-major.mjs`: the repo is inside its launch window and ships breaking changes as `minor` under pre-1.0 semantics (every publishable package is in the Changesets `fixed` group, so one `major` would promote the whole monorepo). A `minor` changeset with a loud release note is the correct tier; ⛔ do not introduce a `major`.\n3. **Cloud backfills existing environments** to `invite_only` rather than leaving them undeclared, so the fleet is uniform and the change is auditable.\n4. Self-registration does not disappear — it becomes something an operator **declares** (`email_domain` or `open`), which is the whole point of the vocabulary.\n\n## Epic\n\nCoordination node. Never dispatched. Epic PM session: `session_71836b57-5db6-459d-ae4d-c6d9d7dd2cc6` (maintainer direct-dispatch channel; the spec-touching sub-issue is dispatched by this seat under the same instruction rather than transferred to the spec seat — deviation recorded here).\n\nTerritory: objectstack `packages/spec/src/system/**`, `packages/plugins/plugin-auth/src/**`, `packages/platform-objects/src/**`; cloud `packages/service-tenant/**`, `packages/service-cloud/**`, `packages/objectos-runtime/**`.\n\nSub-issues (contract-first, one per repo):\n- [ ] A — objectstack: posture vocabulary in spec + single enforcement point + forced email verification + declared self-service permission set + completeness predicate + default `invite_only` (Clause-② YES)\n- [ ] B — cloud: new-env provisioning + backfill of existing envs to `invite_only`, posture switch surface, pin bump, E2E — Blocked-by A\n"
+}

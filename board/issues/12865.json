@@ -1,0 +1,33 @@
+{
+  "number": 12865,
+  "kind": "issue",
+  "title": "ADR-0006 D2 execution carrier (SDK half): rename `client.projects.*` → `client.environments.*` + wire unwrap shapes + JSDoc — parked until the next SDK/protocol breaking major",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:epic"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-28T05:20:10Z",
+  "updated_at": "2026-08-29T13:31:53Z",
+  "closed_at": "2026-08-29T13:31:53Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12865",
+  "body": "Filed by the Director/skills seat (session `session_01MnijPVVDakqK2J335JoJtq`), 2026-08-27, on maintainer instruction in live PM chat (verbatim: 「我如何安排 cloud 项目继续处理完？」— arranging the deferred Option-1 rename so it actually fires). This card is the **machine carrier** for ADR-0006's D2 pre-registration (PR #12736): an ADR paragraph is a record, not an inbox — this card is the inbox half.\n\nRestart-when: a maintainer ruling on this card declares the next SDK/protocol breaking major open\n\n## Hold record\n\nParked `pm:on-hold` at filing, 2026-08-27, by maintainer ruling (#12473 option 3, 「其他同意」; the deferral rationale is ADR-0006 D2, merged via PR #12736): doing this today buys a zero-pull cross-repo breaking change. ⛔ Do not dispatch, do not \"tidy\" the surfaces early — an early rename PR reverses a recorded decision (ADR-0006 D1 / Prime Directive 13).\n\n## Scope when it unparks (the SDK half of one coordinated rename)\n\n- `packages/client/src/index.ts`: the `projects` method namespace → `environments` (all methods incl. the nested `projects.packages` block), **no aliases** (the standing v5.0 rename rule); the declared unwrap shapes' keys follow the wire rename (`{ environments: … }` / `{ environment: … }`); the JSDoc sentence naming `ProjectProvisioningService.provisionProject` updated to whatever the server class is named at that time (it must keep describing the running system truthfully — ADR-0006 D1 point 3).\n- CLI consumers of those shapes (`packages/cli/src/commands/environments/list.ts` / `create.ts` / `show.ts`) follow in the same PR.\n- Migration entry in the major's notes; ADR-0006 D1 retired by an addendum in the same release (D2's own instruction: retire, never alias).\n\n## Pairing (hard)\n\n**Must land in the SAME coordinated release as the producer half** — the cloud control plane's response fields `project`/`projects` → `environment`/`environments` (`objectstack-ai/cloud`; that repo's seat files and owns the paired card — requested at this card's filing; link lands in a comment below when filed). Neither half ships alone: shipping the SDK half alone is ADR-0006 D3, permanently declined; shipping the producer half alone breaks every current SDK caller mid-flight.\n\n## Timing note for the ruling-maker (from the 2026-08-27 Director discussion, recorded so it survives)\n\nThe rename's cost grows with SDK adoption — the caller base is smallest now. If one or two majors pass without touching the SDK/protocol face, re-adjudicate deliberately (「专门为它破一次值不值」) instead of letting this hold ride indefinitely. The window depreciates.\n\nRefs: ADR-0006 v4 addendum (PR #12736) · #12473 (the ruled decision card) · the four predecessor cards the addendum exists to stop re-litigating\n\n---\n\n## Epic delegation (2026-08-28, by maintainer ruling — see the unpark comment)\n\n**Epic PM**: session `session_65d2faee-1ff4-4be8-be28-72b972c539d9`, branch `claude/pm-dispatch-adr-0006-d2-sdk-eb8b61`. The hold above is HISTORICAL — unparked 2026-08-28; the Restart-when clause was satisfied by the maintainer's ruling recorded in the unpark comment.\n\n**Declared file territory** (other seats: batch selection avoids intersecting this):\n- objectstack: `packages/client/src/index.ts` (the `projects` namespace), `packages/client` tests and `packages/client/exported-any-returns.json`, `packages/cli/src/commands/environments/**`, `content/docs/api/environment-routing.mdx` + `content/docs/concepts/north-star.mdx` (census-reached, recorded 2026-08-28), `docs/adr/0006-project-environment-split.v4.md` (retirement addendum only, after PR #12736 lands)\n- cloud: `packages/service-cloud/src/routes/environment-crud.ts`, `packages/service-cloud/src/routes/environment-lifecycle.ts`, and their tests\n- Deliberately NOT territory: `packages/spec` (measured 2026-08-28: zero `projects` envelope contracts in spec)\n\n"
+}

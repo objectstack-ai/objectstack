@@ -1,0 +1,36 @@
+{
+  "number": 12975,
+  "kind": "issue",
+  "title": "The /data door ships the ADR-0111 `CODE:` prefix inside the user-facing `error` string, so a localized refusal renders as `FORBIDDEN: …` in a toast",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-28T11:52:47Z",
+  "updated_at": "2026-08-29T14:07:39Z",
+  "closed_at": "2026-08-29T14:07:38Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12975",
+  "body": "Measured on `origin/main@f4e741bd1` (re-confirmed on `ae4cfcce7`). Filed unassigned from the #12260 dev seat; **not a regression from #12260** — see the last section.\n\n## The measurement\n\n`classifyDataError`'s declared-status 4xx arm ships the producer's message verbatim:\n\n`packages/rest/src/error-response.ts:1019-1033`\n\n```ts\nconst msg = typeof error?.message === 'string' && error.message.length > 0\n    ? truncateClientMessage(error.message)\n    : 'Request failed';\nreturn { status: declaredStatus, body: { error: msg, ...thrownCodeFields(error, declaredStatus), ... } };\n```\n\nThe sharing middleware's by-id write refusal declares `{ code: 'FORBIDDEN', status: 403 }`, so it takes exactly this arm. Its thrown message is the ADR-0111 `CODE: message` idiom, and the whole thing — machine prefix included — becomes the flat body's human-readable `error`, which Console and the reporting deployment's own client render verbatim.\n\nPinned byte-for-byte by tests that assert the prefix survives:\n\n- `packages/rest/src/rest-4xx-message-truncation.test.ts:123` — `expect(r.body.error).toBe(msg)` where `msg` starts `FORBIDDEN:`\n- `packages/rest/src/rest-5xx-status-passthrough.test.ts:301` — `expect(r.body).toEqual({ error: msg, code: 'FORBIDDEN', object: 'showcase_inquiry' })`\n\n## The two doors disagree, and one of them says so in prose\n\nThe share-route family and `handleApprovalError` both strip it:\n\n- `packages/rest/src/rest-server.ts:10867` — `res.status(status).json({ code, error: msg.replace(/^[A-Z_]+:\\s*/, '') })`\n- `respondSharingError`'s ADR-0111 prefix arm, same file\n\nAnd `rest-server.ts`'s own `#8111` comment above that arm states:\n\n> The prefix is a SERVER-INTERNAL service→REST derivation: it is stripped below and never reaches the wire, so no consumer can read it\n\nThat is true for **that** door and not true for `/data`. The same refusal therefore reaches a client with the prefix on one route and without it on another — the door-disagreement shape #7525 / #8016 / #11588 keep producing.\n\n## Why it is worth a card now rather than before\n\n#12260 converted the sharing write denial's sentence onto the Operation Message Catalog, so what a zh-CN user now reads on `/data` is:\n\n`FORBIDDEN: 您无权修改或删除这条记录,如需修改请联系该记录的负责人或管理员。`\n\nThe actionable half is localized human language; the machine token glued in front of it is now the only non-human fragment left in the user's face. Before that conversion the whole sentence was English, so the prefix was not the salient part.\n\n## Not a regression, and deliberately out of #12260's scope\n\nThe prefix rode in front of the old English sentence identically — nothing about its handling moved. It is left alone there on purpose: the fence on that card was that the prefix is wire contract and must not be shadowed, and changing which bytes `/data` ships is a REST envelope decision, not a plugin one. Any fix moves the two pinned assertions above, which are legitimate wire-behaviour tests today.\n\n## Options, not a recommendation\n\n1. Strip the `CODE:` prefix in the declared-4xx arm, matching the share door. Changes the flat 4xx body for **every** producer using the idiom, and moves both pinned tests.\n2. Leave `error` alone and have the producers mark `userMessage` (the #12669 channel `withDeclaredUserMessage` already puts on the flat body top level at `error-response.ts:569-571`). Strictly additive on the wire; needs each emitter to opt in.\n3. Rule that the prefix in `error` is intended on `/data` and correct the `#8111` comment, which currently asserts the opposite.\n\nOption 2 looks cheapest and least contract-moving, but which door is right is an envelope decision for the maintainer rather than something a dev seat should pick.\n"
+}

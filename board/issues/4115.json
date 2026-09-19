@@ -1,0 +1,36 @@
+{
+  "number": 4115,
+  "kind": "issue",
+  "title": "[P2] objectui: a spec-named symbol must be an import, not a declaration — make \"derived vs hand-written\" a CI rule, not a review convention",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "priority:p2",
+    "repo:objectui",
+    "tracking"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T10:22:01Z",
+  "updated_at": "2026-08-30T10:31:50Z",
+  "closed_at": "2026-08-10T02:10:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 24,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4115",
+  "body": "Systematizes what #4074 / objectui#3003 / objectui#3009 did by hand for the third time. Filed so the rule outlives the sessions that keep rediscovering it.\n\n## The failure class\n\nobjectui declares local types/consts under the **same names** as `@objectstack/spec` exports, with doc comments claiming spec canonicity. Every audited instance had either drifted or was one spec release away from it:\n\n| symbol | comment claimed | code did | found |\n|---|---|---|---|\n| `ActionType` | \"canonical definition from @objectstack/spec\" | hand union, missing `form` | #2231/#2901 |\n| `ChartType` | (sibling schema re-exported under spec's name) | 7 of 19 members | objectui#2944 |\n| `ActionLocation` + 2 | \"single source of truth… **re-export** here\" | re-*declared* union + tuple + `z.enum` | #4074 |\n| `ActionParamFieldType` | \"aligned with the field types available in spec\" | 16 of 49 members | #4074 |\n\nThe mechanism that makes this class expensive is specific to agent-driven development: **an agent reads the comment, takes it as ground truth, and builds on it**. #2901 was literally filed with a backwards premise because the fork was re-exported under the spec's own symbol name. A wrong canonical-claim is not stale documentation — it is a planted premise for the next session.\n\nAnd the *absence* of derivation is what made #3856 silent: spec 17 removed `action.execute` and objectui produced zero compile errors, because nothing was bound to the spec's `z.infer`.\n\n## The rule\n\n> Any exported type or const in objectui whose name matches a `@objectstack/spec` export must be an `import`/`re-export` of it — or carry an allowlist entry with a reason.\n\nEnforced by a CI script (~100 lines), not prose:\n\n1. Enumerate spec's export names per subpath (`@objectstack/spec/ui`, `/data`, …) at runtime.\n2. Grep objectui `packages/*/src` for `export (type|const|interface) <SameName>` declarations not backed by an import from spec.\n3. Fail with the symbol, the file, and the fix (\"import it, or add an allowlist entry with a reason\").\n\n**Value exports additionally pin by reference identity** (`expect(X).toBe(SpecX)`), because a *faithful copy passes every value comparison* — identity is the only check that distinguishes a re-export from a fork. This insight is already written down in objectui's `spec-subschema-parity.test.ts` and already applied to `ACTION_LOCATIONS` / `ActionLocationSchema` / `ACTION_PARAM_FIELD_TYPES` (objectui#3003); this issue is about applying it uniformly instead of one symbol per incident.\n\n## The allowlist (what keeps this from being a nuisance)\n\nSame governance as `check-type-check-coverage.mjs`'s DEBT map — declared, reasoned, shrink-only. Known-legitimate first entries:\n\n- `@object-ui/types` `ActionSchema` — a deliberate objectui-side *view* over the spec's action (carries renderer-only fields like `openIn`); documented as such.\n- `ObjectUiLocalActionType` / `ObjectUiLocalParamFieldType` — **named local dialects**, each with a tripwire test asserting the spec does *not* own the name (so the day spec adopts it, CI names the alias to retire). This is the sanctioned escape hatch for \"implementation accepts more than spec\": declare the dialect next to the vocabulary it extends, never hide it in a `Record<string, string>` in another package.\n- The `legacy ActionSchema` in `crud.ts` and similar explicitly-legacy shapes, if any collide.\n\nA same-name symbol that is *narrower or wider on purpose* belongs in the allowlist with that purpose written down — at which point the comment is load-bearing instead of decorative.\n\n## One meta-rule\n\nThis rule must land **as the check**, not as an AGENTS.md paragraph. A prose-only rule is precisely the \"declared ≠ enforced\" landmine this whole thread is about (#4074, objectui#3009 — where a guard file's own header falsely claimed its checks were \"the real enforcement\" for the entire interval nothing compiled it).\n\nRefs #4074, #3856, objectui#3003, objectui#3009, objectui#2944, #2901, #2231.\n"
+}

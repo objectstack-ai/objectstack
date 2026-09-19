@@ -1,0 +1,34 @@
+{
+  "number": 13309,
+  "kind": "pull_request",
+  "title": "fix(spec): repoint the agent, skill and action liveness citations at the real cloud path",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T02:44:45Z",
+  "updated_at": "2026-08-30T04:01:17Z",
+  "closed_at": "2026-08-30T04:01:16Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-30T04:01:16Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/13309",
+  "body": "Part of #13272.\n\nDeliberately `Part of` rather than a closing keyword: this PR lands the half that\nrecorded evidence can justify, and the card's re-verification half is still open.\nSee \"Scope boundary\" below.\n\n## What was wrong\n\nTwenty-two `evidence` citations across three liveness ledgers named\n`packages/services/service-ai/...`, a path that exists in **neither** repository:\n\n| ledger | citations | `_note` repeated the falsified sentence |\n|---|---|---|\n| `packages/spec/liveness/agent.json` | 11 | yes |\n| `packages/spec/liveness/skill.json` | 8 | yes |\n| `packages/spec/liveness/action.json` | 3 | yes |\n\nBoth halves of the recorded claim were false, each in its own direction:\n\n1. **The framework tree is absent, not stale.** Every `_note` called the\n   framework's own service-ai tree \"a stale build artifact with no `src/`\".\n   Measured in this checkout: `git ls-files | grep -ic service-ai` returns `0`,\n   and `packages/services/` holds every sibling service except service-ai.\n   There is no artifact to be stale.\n2. **The prefix was wrong for cloud too.** Cloud's real layout, measured at\n   cloud@`15f55df` and recorded on #13042, is `packages/service-ai/...` — never\n   `packages/services/service-ai/...`.\n\n## Why they sat green, and why the repair is not a plain re-spelling\n\n`FOREIGN_PATH_PREFIXES` in `packages/spec/scripts/liveness/evidence.mts` lists\nthe **stale** spelling, so those citations were silently classified foreign and\nnever resolved. They did not survive scrutiny — they were exempt from it.\n\nThe real cloud path is repo-rooted in shape and is **not** in that list, so a\nnaive repoint resolves as LOCAL and fails CI. Every repointed citation therefore\ncarries the explicit `cloud` realm marker, which is the attribution\n`scanEvidence` reads directly rather than a special case for one prefix.\n\n**Measured by ablation on this branch** (fix committed first, mutation confirmed\non disk by anchored grep counts, restored to byte-identity against the HEAD\nblobs afterwards):\n\n| tree | gate line | exit |\n|---|---|---|\n| with the `cloud` markers | `467 repo-local ... 467 resolved; 154 attributed to another repo` | 0 |\n| markers stripped (naive repoint) | `489 repo-local ... 467 resolved, 22 MISSING; 132 attributed` | 1 |\n\n`132 + 22 = 154`, so the markers move exactly the twenty-two citations into the\nforeign bucket and nothing else. The change is gate-neutral against `main`\n(both spellings classify foreign) while removing a provably wrong path.\n\nThe constant is deliberately left untouched, per the card and its triage: adding\nthe real path to it would let an unmarked citation pass silently, trading one\nunfalsifiable spelling for another.\n\n## Scope boundary — recorded in each `_note`, not only here\n\nThis corrects the package root from the recorded measurement **only**. The cited\nconsumers were **not** re-read against a cloud checkout (this session has no\ncloud access), so:\n\n- no `verifiedAt` is stamped, and\n- no `#symbol` anchor is added — the gate never resolves a foreign anchor, so an\n  unverified one would re-create the very unfalsifiable pointer this repair\n  removes.\n\nNo `status` verdict is altered. Re-verifying these 22 consumers against a live\ncloud checkout remains the open half of #13272 and needs a container that has the\ncloud repo.\n\n## Verification\n\nRun at `7e1580b9` (the final commit on this branch):\n\n- `check:liveness` — exit 0; its own verdict line: \"every 'live' / 'planned' /\n  'experimental' entry's repo-local evidence path resolves\".\n- `check:empty-state`, `check:strictness-ledger`, `check:variant-docs` (the rest\n  of `spec-liveness-check.yml`) — exit 0.\n- `packages/spec` liveness suite — `evidence.test.ts`, `check-liveness.test.ts`,\n  `verification.test.ts`, `key-mention.test.ts`: 4 files, 113 tests passed.\n  These matter because `evidence.test.ts` walks the **real** ledger directory.\n- `check:published-files`, `check:merge-driver`, `check:nul-bytes`, and the\n  changeset family — exit 0.\n- 27 of the 29 families derived by `scripts/pm/dispatch-gates.mjs --repo\n  objectstack-ai/objectstack` are green. Two are NOT MEASURED by their own\n  declaration, neither a red: `check-half-states` (needs a GitHub credential;\n  `PREREQUISITE NOT MET`) and `check-test-completeness` (needs a saved test-run\n  log, unreachable locally). Two more — `check:dev-prereqs` and\n  `check:dual-build-cjs-loads` — are left to CI: both need a full build and this\n  diff adds no build input, being JSON data plus a changeset.\n\nThe ledgers ship inside this package's npm tarball (`liveness` is named in\n`files`), so this is a published-data change and carries a changeset, following\nthe precedent of the symbol-anchor batches.\n\n## Note for the reviewer, on the dispatch brief\n\nThe brief for this card stated that `tool.json`'s five citations had been\nrepaired in PR #13302 and pointed there for the citation pattern. That is not\nwhat PR #13302 contains — its diff is `packages/spec/scripts/check-llms-txt.ts`\nplus `scripts/pm/dispatch-gates.mjs` (a watch-hint card). `tool.json` on\n`origin/main` still carries all six occurrences of the stale prefix and is\nuntouched here, correctly, since it belongs to #13042. The repair pattern in this\nPR was therefore derived from `evidence.mts` itself and from the ledger README's\nrealm-marker section, not from that PR.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01KX8wnyjStaZcuMyAMNsy3N)_"
+}

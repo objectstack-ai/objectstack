@@ -1,0 +1,34 @@
+{
+  "number": 12672,
+  "kind": "issue",
+  "title": "pm-dispatch SKILL.md's engine-lane row still records the driver-memory/driver-mongodb investment freeze as live — dissolved 2026-08-11, and the stale line seeded a wrong hold and a wrong dispatch brief",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-27T06:36:21Z",
+  "updated_at": "2026-08-29T09:35:18Z",
+  "closed_at": "2026-08-29T09:35:18Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12672",
+  "body": "Filed by the triage seat (daily round 2026-08-27, session `session_01Czs5tCwMymUvzB9QCA2yhH`) while re-judging a `pm:retriage` objection. Labeled `finding` + `domain:skills` per the standing rule (skills-lane findings are self-triaged by that seat); deliberately ungraded here.\n\n## The stale line\n\nThe pm-dispatch SKILL.md domain-lane table, `domain:engine` row, still carries (as of this repo's current main):\n\n> `packages/drivers/driver-*`(维护者 2026-08-05 对 `driver-memory` / `driver-mongodb` 族有投入冻结指令;`formula` / `driver-sql` 不受影响)\n\n## The freeze is dissolved, by the maintainer's own rulings\n\n#5499's record is unambiguous — two maintainer rulings on 2026-08-11 (comments `5249019855` and `5252526378` on that anchor): 「5499 解冻 mongodb 相关开发,继续全速推进」 and 「driver-memory 也解冻…」, the second stating \"this card's freeze is fully dissolved … it no longer gates anything\" and retiring the standing hold-on-filing triage rule. On-disk corroboration: the head note of packages/spec/src/data/aggregation-conformance.ts records both lifts and dates.\n\n## Why the line has already cost real rounds (this is the FOURTH sighting family, not a nit)\n\nThe engine seat's 2026-08-26 comment on #5499 documented three same-day sightings of the dissolved freeze circulating as live (a card body, a dispatch brief that told a dev to \"scope against it\", and a triage comment). This round found the likely ROOT of that circulation plus a fourth cost: the 2026-08-23 hold on the mongodb boolean-aggregation card was requested from the maintainer citing #5499's standing rule as active — twelve days after the rule was retired — and that hold then blocked a spec-lane conformance card until a retriage objection unwound it (record on that card's thread, 2026-08-27). The SKILL.md lane table is the one place every fresh triage/PM session reads before touching #5499 itself, which makes it the highest-leverage single line to correct: **a citation to a ruling is not a reading of the ruling, and the skill text is the citation everyone reads first.**\n\n## Suggested shape (the skills seat decides)\n\nReplace the parenthetical with the current fact (freeze 2026-08-05, dissolved 2026-08-11 per #5499's rulings — or simply drop the parenthetical and let #5499 carry its own history). Protocol-semantic face: SKILL.md main file ⇒ the standing tiering clause applies (fable construction, governed surface, draft PR, human merge); the line ratchet means the correction should pay for itself by deletion.\n\nDedup: searched this round (`SKILL.md lane table stale investment freeze …`) — zero existing cards on the skill-text line; the #5499 sightings comment records the pattern but carries no card."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 12879,
+  "kind": "issue",
+  "title": "[finding] `@objectstack/cli` and `@objectstack/plugin-hono-server` are the only two published packages with no `exports` map — every `dist/**` module is deep-importable, and one already is",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-28T06:31:34Z",
+  "updated_at": "2026-08-29T07:28:16Z",
+  "closed_at": "2026-08-29T07:28:16Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12879",
+  "body": "Filed unassigned and **ungraded** by the `domain:cli` seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, on behalf of the **#12804 dev** — the pre-file dedup channel is 403 from that seat (measured: the bare REST issues endpoint answers 403 with *\"GitHub access is not enabled for this session\"*). ⭐ It reported rather than filing blind. ⛔ Not graded, not routed.\n\n⭐ **Why this is worth a card rather than a note:** it came out of a dev **weakening its own favourable conclusion**. That card's clause-② criterion was *\"no symbol of this module appears in the package's entry barrel\"*. It measured that, the criterion **held** — and then it went and measured whether \"not in the barrel\" actually means \"unreachable\". It does not.\n\n## Measured on `origin/main`\n\n`packages/cli/package.json` declares **no `exports` key**. It declares `main: dist/index.js` and `files: [\"dist\", …]` ⇒ under Node's resolution, **every** `dist/**` module is importable from outside the package, whatever the entry barrel names.\n\n**And one already is** — `packages/qa/dogfood/test/build-shaped-artifact.ts:75` deep-imports a `dist/utils/…` module of `@objectstack/cli`.\n\n### ⭐ The census, which is what makes this a deviation rather than a house style\n\n| population | count |\n| :--- | ---: |\n| workspace `package.json` files scanned | **74** |\n| declaring an `exports` map | **68** |\n| **not** declaring one | **6** |\n\n⇒ ⭐ Sharper still, because four of those six are not published libraries at all — a scaffold template and three QA packages, none of which declare `main` or `files`. **Among packages that actually publish a dist, exactly two lack an `exports` map:**\n\n- **`@objectstack/cli`**\n- **`@objectstack/plugin-hono-server`** — ⚠️ same shape, same `main` + `files`, no `exports`. ⛔ **A fix that closes only the first leaves its twin open.**\n\nSpot-checked peers all declare one: `rest`, `client`, `objectql`, `runtime`, `spec`, `core`. ⇒ this is a deviation from an overwhelming convention, which is evidence it is an oversight rather than a decision — ⛔ but this seat did **not** find any prose declaring it deliberate either way, and did not look for a historical reason. ⚠️ Establish that before acting.\n\n## Why it matters beyond tidiness\n\n⭐ **It weakens a criterion this repo actually uses.** \"Is this symbol part of the public surface?\" gets answered by reading the barrel — that is how #12804's clause-② check was written, and how a semver bump level gets argued. In a package with no `exports` map that question has **two different answers**:\n\n- *declared* surface — what the barrel exports;\n- *reachable* surface — every module under `dist/`.\n\n⇒ every internal module is one `import` away from becoming someone's dependency, **silently**, with no gate and no signal. The failure only shows up later, as a \"why did an internal refactor break a consumer\".\n\n⚠️ **And the trap runs the other way too.** If accidental reachability were treated as a public contract, then *every* internal refactor in these two packages would owe a minor bump — which would ratchet the whole package for the sake of a reachability nobody deliberately offered. ⭐ That is exactly why the right move is to close the hole, ⛔ not to reprice changes against it. (This seat ruled #12804's bump `patch` on that reasoning: the one existing deep import is **in-repo**, from a QA package — no published consumer depends on it.)\n\n## Options, ⛔ not prejudged\n\n1. **Declare an `exports` map on both packages**, naming the entry (plus whatever subpaths are genuinely intended). ⚠️ The existing in-repo deep import breaks unless its subpath is declared or that importer is changed — ⭐ so measure the real reachable set before writing the map, and decide that one case explicitly.\n2. **Declare it, and add a guard** that a published package must have one — closing the class rather than the two instances. ⚠️ Costs a gate; ⭐ but this repo's habit is that a convention holding for 68 of 70 is a ratchet waiting to be written down.\n3. **Record it as deliberate** — if there is a reason (a consumer that must deep-import, a bundler constraint), write it where the next reader looks, so the two spellings stop reading as drift.\n\n## Re-check\n\n```\npython3 -c \"import json;d=json.load(open('packages/cli/package.json'));print('exports' in d, d.get('main'), d.get('files'))\"\ngit grep -n \"@objectstack/cli/dist\" -- ':!packages/cli'\n```\n\n⛔ Reverse-check any zero against a control — here the control is the 68 packages that DO declare one; a census that returns \"nobody declares exports\" means the instrument is broken, not that the convention is absent.\n\n## Duplicate check\n\nSearched this round; **6 matches, all closed and different subjects** — #11185 / #10769 (CLI dynamic-import resolution anchoring), #11394 (a gate's CWD-relative constants), #10452 / #8946 / #9757 (cross-package test-input declaration). ⭐ The search reached the right corpus (CLI packaging/resolution cards came back), so the zero open matches is a reading, not silence. ⛔ No open card covers the missing `exports` map. ⚠️ Not exhaustively deduped outside `domain:cli` / `domain:devx`.\n\n## Refs\n\n- #12804 / [PR #12872](https://github.com/objectstack-ai/objectstack/pull/12872) — where this was measured, as a qualification on that card's own clause-② criterion\n- #12663 / [PR #12754](https://github.com/objectstack-ai/objectstack/pull/12754) — the module whose \"internal, not exported\" status this nuance bears on"
+}

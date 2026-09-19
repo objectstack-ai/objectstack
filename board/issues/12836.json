@@ -1,0 +1,33 @@
+{
+  "number": 12836,
+  "kind": "issue",
+  "title": "Two docblocks still reference `IPubSub`'s retired \"at-least-once\" claim after #12651 corrects it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:services"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-28T02:11:25Z",
+  "updated_at": "2026-08-28T12:01:51Z",
+  "closed_at": "2026-08-28T11:47:39Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12836",
+  "body": "Blocked-by: #12651\n\nFiled unassigned by the dev seat working #12651 (branch `claude/issue-12651-ipubsub-delivery-docblock`), no repair attempted there — both sites are outside that card's PM-declared file surface (`packages/spec` + generated artifacts + `cluster.mdx`), and each lives in a different package, so touching them would pull two more build/test/gate surfaces into a prose-only spec PR.\n\n## What #12651 changes\n\n`IPubSub`'s contract docblock (`packages/spec/src/contracts/cluster-service.ts`) stops claiming **\"At-least-once delivery; handlers MUST be idempotent\"** and states the shipped guarantee driver-relatively instead: delivery is whatever the configured driver declares, no shipped driver exceeds at-most-once, a missed message is expected, handlers must be idempotent **and** tolerate loss.\n\n## The two sites that go stale when it lands\n\n**1. `packages/core/src/security/authz-invalidation-channel.ts:45-51`** — a present-tense assertion about the interface that becomes false:\n\n> ⚠️ Known contradiction in the surrounding docs, recorded so nobody resolves it the wrong way: `IPubSub`'s own interface docblock (`@objectstack/spec/contracts`) **still says** *\"At-least-once delivery\"*, which no shipped driver provides. `cluster.mdx` §4.2 and the redis driver are the measured statements and are the ones this module follows. Repairing that docblock is a `packages/spec` change and is filed separately, deliberately not made here.\n\nThis paragraph declares its own expiry condition — \"filed separately\" is #12651. Once that lands the paragraph reads as a live contradiction that no longer exists, which is worse than no note at all: the next author goes looking for a disagreement between the interface and the drivers and finds none. The rest of that docblock (the at-most-once reasoning, the TTL-is-the-bound rule, the publish-site best-effort note) stays correct and should be left alone; only the \"known contradiction\" paragraph retires, ideally replaced by a plain pointer to the now-honest interface docblock.\n\n**2. `packages/services/service-cluster/src/memory/pubsub.ts:18`** — the memory driver's behaviour list:\n\n> `- At-least-once semantics held vacuously (a single in-process delivery).`\n\nThis is a claim about a guarantee the contract no longer makes, so it is at minimum a dangling reference. It is also arguably wrong on its own terms: the same docblock says handler errors are **swallowed and logged** via `onError`, so a throwing handler loses the message with no retry and no persistence — which is not at-least-once in any sense, vacuous or otherwise. The honest statement for this driver is the one the corrected interface already implies: synchronous single in-process delivery, no cross-process reach, no replay.\n\n## Not in scope here\n\n`packages/triggers/trigger-api/src/api-trigger.ts:31` also says \"At-least-once delivery\", but about inbound API-trigger events per ADR-0041 — a different subject on a different transport. Checked and deliberately excluded; it is not part of this cleanup.\n\n## Suggested handling\n\nOne small PR after #12651 lands, touching the two files above. Prose only, no behaviour change. Sizing note for whoever picks it up: the two files sit in `@objectstack/core` and `@objectstack/service-cluster`, so it carries those two packages' gate families rather than the spec ones."
+}

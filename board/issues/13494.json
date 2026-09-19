@@ -1,0 +1,36 @@
+{
+  "number": 13494,
+  "kind": "issue",
+  "title": "driver-memory's reference matcher answers `{$eq: null}` with NO MATCH on a MISSING key — it is the one surface of five that does not read `$eq: null` as the null predicate (#5332)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-30T14:52:44Z",
+  "updated_at": "2026-08-30T23:53:36Z",
+  "closed_at": "2026-08-30T23:52:55Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13494",
+  "body": "Filed unassigned by the #13357 dev while re-measuring that card's premise. Recording only — no severity asserted, routing is triage's.\n\nThis is **not** the #13357 defect. #13357 is about the LIST spellings (`$in:[null]` / `$nin:[null]`), whose target semantics I found to be undecided. This one is about the SCALAR spelling, and it **is** decided — by #5332, whose ruling every other surface honours.\n\n## The ruling this contradicts\n\n#5332 ruled that `$eq: null` IS the null predicate. From its own body, the \"为什么是 bug\" section:\n\n> **与其他后端分叉**：`read-scope-sql.ts` 的 `compileOperator`（同包）对 `$eq: null` 明确给 `IS NULL`、`$ne: null` 给 `IS NOT NULL`；`driver-sql` 的 `nullValueSatisfiesOperator` 也是按「`$eq: null` 就是 null 谓词」写的。\n\nand from the ACCEPT review on it (comment `5193874591`):\n\n> `driver-mongodb` 的 translator 把 `$null: true` 直接改写成 `{$eq: null}`，四家后端（read-scope-sql / driver-sql / driver-memory / formula）同法编译 —— 本模块是一个包里唯一唱反调的那一半，故这是对齐、不是新决策\n\n## Measured\n\nFixture rows `id 1, name 'a'` and `id 3, no value`, driving both readings of \"no value\" — `name: null` (NULLED) and the key absent (MISSING). Executed on `0e810dde17`.\n\n| surface | `$eq: null` NULLED | `$eq: null` MISSING | |\n|:--|:--|:--|:--|\n| `$null: true` (the anchor), every surface | `['3']` | `['3']` | — |\n| driver-memory **reference matcher** | `['3']` | `[]` | DISAGREE |\n| driver-memory live mingo path | `['3']` | `['3']` | agree |\n| `formula` `matchesFilterCondition` | `['3']` | `['3']` | agree |\n| `driver-sqlite-wasm` (executed) | `['3']` | n/a — SQL has one reading | agree |\n| `service-analytics` normalizer | `notSet` leaf | n/a | agree |\n\nSo the reference matcher is the only surface that can express the MISSING reading and gets it wrong, and it disagrees with the OTHER FACE OF ITS OWN PACKAGE — the recurring defect class in this exact file (#5240, #5324, #5328 each closed one instance of \"this face and the live one answer one filter two ways\").\n\n## Cause\n\n`packages/drivers/driver-memory/src/memory-matcher.ts`, the pre-switch guard in `checkCondition`:\n\n```ts\nif (value === undefined && op !== '$exists' && op !== '$null' && !noValueSatisfiesNegation(op)) {\n    return false;\n}\n```\n\n`$eq` is not on the allowlist, so a MISSING key short-circuits to \"no match\" before the `$eq` arm ever runs. The NULLED reading works only because the guard tests `=== undefined` while the arm below uses loose `!=`, so `null != null` is false and the row matches. The two readings are decided in two different places, which is how they came apart — the same shape as the note already in that guard about `$nin` / `$notContains`.\n\nNote `$ne: null` is NOT affected: it is on the allowlist, reaches its arm, and `undefined == null` is true, so it correctly excludes the no-value row on both readings.\n\n## Why this is separable from #13357\n\n#13357's cells need a maintainer ruling because the platform is split two ways on what a null LIST member means, and the #5332 lane explicitly recorded `$in: [null]` as \"comparand positions no ruling covers\". Nothing is split about `$eq: null`: one ruling, four surfaces already agreeing, one dissenter. It can be fixed without deciding anything.\n\n## Related\n\n#5332 (the ruling) · #13357 (the list spellings, which are NOT ruled) · #13166 (the same guard, the negation allowlist) · #6125 (the `undefined` comparand axis, closed, different value) · #5240 / #5324 / #5328 (prior two-face divergences in this file)"
+}

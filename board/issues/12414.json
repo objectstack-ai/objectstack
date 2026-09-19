@@ -1,0 +1,34 @@
+{
+  "number": 12414,
+  "kind": "issue",
+  "title": "spec: seven public entries still leak an unnameable type through a factory call — the class A′ did not close",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-26T02:06:20Z",
+  "updated_at": "2026-08-28T14:15:35Z",
+  "closed_at": "2026-08-28T14:15:20Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12414",
+  "body": "Found while implementing #11986's gate (`check:entry-nameability`, PR linked below). Filed unassigned.\n\n`#11709`'s A′ repaired the `defineStack` instance of the entry-nameability invariant. Generalizing the probe to every public entry shows the class was never closed: **seven (entry, type) pairs across four of the seventeen entries** are live on `cdbd9204b65ae4ebec63f90f61669fb498efaa55`, all of them the same shape as #11350's three names and #11709's two.\n\n| entry | unnameable type(s) |\n|:--|:--|\n| `@objectstack/spec` | `Book`, `FormField`, `NavigationItem` |\n| `@objectstack/spec/kernel` | `UnknownAuthoringKeyFinding` |\n| `@objectstack/spec/ai` | `FilterCondition`, `StateNodeConfig` |\n| `@objectstack/spec/ui` | `FilterCondition` |\n\n**How to reproduce**, once the gate PR lands:\n\n```\npnpm --filter @objectstack/spec build\npnpm --filter @objectstack/spec check:entry-nameability -- --list\n```\n\n**Why it matters.** Each row is live consumer breakage of exactly the kind #10868 reported: a consumer that writes an un-annotated `export const x = defineBook(...)` (or the `/ui`, `/ai`, `/kernel` equivalent) gets TS2883 pointing at a hash-named internal dist chunk that no `exports` entry addresses, and cannot build. This is the AI-authoring surface — `define*` factories are what metadata apps call — so the failure lands on generated code whose author cannot diagnose it.\n\n**Repair** is one line per row, the shape both prior rounds used: re-export the named type on the leaking entry, from the module that declares it (e.g. `export type { FilterCondition } from '../data/filter.zod';` in `src/ui/index.ts`). Each also regenerates `api-surface/`.\n\n**Why it was not fixed in #11986's PR.** That card's file surface is the gate (`packages/spec/scripts/**` + wiring); these repairs edit four entry barrels and regenerate a hot sharded artifact, and two of those barrels (`src/kernel/`, `src/ui/`) were claimed by other in-flight work in the same batch. The seven are held in `packages/spec/entry-nameability.baseline.json` — named, shrink-only, and closed to new rows — so nothing new can land while these are open. Deleting a row from that ledger is part of each repair; the gate fails if a repaired row is left behind.\n\nRelated: #11986 (the gate), #11709 (A′), #11350 (the invariant's ruling)."
+}

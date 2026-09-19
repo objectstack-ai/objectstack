@@ -1,0 +1,34 @@
+{
+  "number": 12817,
+  "kind": "issue",
+  "title": "[finding] The unlock scan's enumeration reports completion over a list it did not finish reading — perPage 50 against 51 blocked cards, and the output cannot tell the two apart",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-27T23:28:38Z",
+  "updated_at": "2026-08-29T09:00:16Z",
+  "closed_at": "2026-08-29T09:00:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12817",
+  "body": "Filed unassigned by the triage seat, session `session_01Aujz2zykf5LXt3T98gRsGe`. ⛔ Not claimed, not graded.\n\n## ⚠️ This card was filed with the wrong claim and has been rewritten down. Read this section first.\n\n**As originally filed**, this card claimed the unlock scan's body-only `Blocked-by:` read was a defect, and proposed that the scan read comments as well. **That claim is retracted.** Two things were missed at filing:\n\n1. **#8941 already exists and is the same card** — *\"the pm:blocked unlock scan greps issue BODIES only, while seats deliberately park `Blocked-by:` lines in COMMENTS\"* — filed 2026-08-16, **closed completed 2026-08-24**.\n2. **It was resolved the other way**, and the ruling is in `.claude/skills/pm-dispatch/references/platform-readings.md`:\n\n   > **`Blocked-by:` 行归 BODY(单通道反向索引)**:追加按上条「解码后写回」执行;历史上寄放在评论里的行按同程序**增量**回填(⛔ 不搞批量突击 —— 限流压力);**解锁扫描只 grep body,⛔ 不加常设评论读**;旧「连评论一起扫(`in:comments`)」提示作废。\n\n⇒ The body-only read is **correct**. The proposed \"read comments too\" fix is **the rejected direction**. The 69% of blocked cards without a body-level line is **outstanding incremental backfill**, deliberately not done as a batch — expected progress, not a defect.\n\n⛔ Also retracted: the argument that a well-reasoned comment placement means the scan should follow it. That argument was considered by #8941 and decided against.\n\nWhat survives is one defect that #8941 does not cover, and it is the whole of this card now.\n\n---\n\n## The defect: an enumeration that cannot say it was truncated\n\nThe unlock scan enumerates open `pm:blocked` cards and reads their blockers. On 2026-08-27 it ran with:\n\n```\nlist_issues(state=OPEN, labels=[pm:blocked], perPage=50, ...)\n  -> issues: 50 returned\n  -> totalCount: 51\n```\n\n**One card was never examined.** Nothing in the scan's own output distinguishes \"read all 51\" from \"read 50 of 51\" — the caller sees a list and proceeds. It was caught only because the count mismatch happened to be noticed by hand.\n\nThe missed card was **#9709**. Reading it produced a real finding: its body stated *\"blocked until **PR #9706** lands\"*, and **PR #9706 merged 2026-08-19**, nine days earlier. Its live blocker is the still-open epic #9465 — a different card the body never named in a machine-readable field.\n\n⛔ Note carefully: **nothing was lost.** #9709 was still blocked, on the fence, so the discharged blocker would not have released it. The defect is not the outcome — it is that a scan reported completion over a list it had not finished reading, and no reader could have told.\n\n### Why this is the same class as #12411 / #12815\n\nThose two cards are about `dispatch-gates` rendering \"staleness could not be measured\" identically to \"this tree is current\". This is the same collapse in a different instrument: **an incomplete reading and a complete reading print the same thing.** #12411 landed the fix for one half of its case (PR #12816); #12815 holds the other half. This card is that shape in the triage seat's own enumeration.\n\n## Shape of the fix — constraints, not a design\n\n- **Compare the returned count against `totalCount` on every enumeration, and say so when they differ.** Proceeding silently is the defect; paginating is only half the answer, because the next list that outgrows the page size reintroduces it.\n- **A truncated read must not be reportable as a clean scan.** Same standard `check-governed-merges.mjs` already applies to unaudited repos: *\"nothing was found there because nothing was looked at.\"* That script prints `⛔ sweep INCOMPLETE` and refuses to read as clean; the unlock scan has no equivalent.\n- Prefer one predicate over a second code path, for the reason #12815 gives on its own file: a second hand-written branch is a second thing to keep in sync.\n- ⛔ Not proposed: any change to where `Blocked-by:` lives, or to the body-only read. That is settled by #8941 and is not reopened here.\n\n## Backfill progress, recorded as a reading rather than a claim\n\nSince the ruling's incremental backfill has no progress meter, this is one, measured 2026-08-27 across both authorized repos:\n\n| repo | open `pm:blocked` | body-level `Blocked-by:` | outstanding |\n|---|---|---|---|\n| objectstack | 50 | 19 | 31 |\n| objectui | 38 | 8 | 30 |\n| **total** | **88** | **27 (31%)** | **61 (69%)** |\n\nControl run: a loose `/Blocked[-\\s]?by/i` sweep found exactly one card matching loosely but not strictly (#6182), and it is a **negation** in prose (\"is not blocked by this\"), not a missed blocker ⇒ the strict extractor does not under-match on the bodies it reads.\n\n⚠️ Two increments have since been performed by this seat, so the number above is already stale by two: **#9709** (`Blocked-by: #9465`, backfilled 2026-08-28 with byte-level read-back) and **#8103** (`Blocked-by: #12804` — pending; deferred deliberately, see below).\n\n### One measured caveat for whoever does the next increment\n\nThe decode-then-write-back round trip was validated on #9709 and preserved everything checked — `&lt;--` inside a code fence, every escaped apostrophe, both code fences — **except the trailing `_Generated by [Claude Code]_` attribution footer, which was stripped.** Bodies carrying that footer lose it on a backfill. Bodies without one (#8103 among them) are unaffected.\n\n⛔ **#8103's backfill was deliberately deferred one round** rather than done opportunistically: it is a maintainer-ruled destructive sweep over a secrets table, its body carries the safety constraints on that deletion, and a full-body rewrite means retyping them. The procedure was proven on a low-stakes card first. That is the intended reading of \"⛔ 不搞批量突击\".\n\n## Duplicate check\n\n**#8941 is the parent of the retracted half** and is closed; this card is deliberately **not** a duplicate of it after the rewrite — the enumeration-completeness defect is not mentioned there. Nearest live neighbours: #12813 (the ⑦ reader-count method, also a seat-procedure finding, also `domain:skills`) and #12815 (the same collapse class in `dispatch-gates`)."
+}

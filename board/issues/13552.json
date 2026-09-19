@@ -1,0 +1,37 @@
+{
+  "number": 13552,
+  "kind": "issue",
+  "title": "The RLS `isEmptyMembershipFilter` deny guard is polarity-blind: an emptied membership under a supported `not in` compiles to allow-all instead of the deny sentinel",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T23:02:59Z",
+  "updated_at": "2026-08-31T02:55:01Z",
+  "closed_at": "2026-08-31T02:55:00Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13552",
+  "body": "Filed unassigned by the #13496 dev. This surfaced while measuring #13496's Zone-2 convergence hypothesis and is **evidence for the decision that card is escalating** — triage may prefer to fold it into #13496 rather than run it separately. It is filed on its own because it is reachable with **no null anywhere**, so it survives whatever #13496 is ruled. Recording only — no severity asserted, routing is triage's.\n\n## Measured on `50cf2940b9` (helper text read on `090f2302ec`, unchanged)\n\n`packages/plugins/plugin-security/src/rls-compiler.ts` carries a purpose-built guard so that a pre-resolved membership set that RESOLVES EMPTY denies rather than emitting a permissive filter. Its own docblock:\n\n> Does this filter consist solely of an empty membership (`{ field: { $in: [] } }`)? Used to preserve the legacy \"empty pre-resolved set drops the policy\" semantics so the single-policy path fails closed via the deny sentinel rather than an always-false `$in: []`.\n\n`compileExpression` calls it and returns `null` (policy drops, `RLS_DENY_FILTER` upstream) when it fires.\n\n**It is shape-matched to positive polarity only.** Running the helper verbatim:\n\n```text\n{\"owner\":{\"$in\":[]}}                                        => guard fires: true\n{\"$not\":{\"owner\":{\"$in\":[]}}}                               => guard fires: false\n{\"$or\":[{\"$not\":{\"owner\":{\"$in\":[]}}},{\"owner\":\"u_me\"}]}    => guard fires: false\n```\n\nIt requires `keys.length === 1` and the single inner key to be `$in`. Under a `$not` the single top-level key is `$not`, so the guard returns false and the filter flows through.\n\n## Why that matters — the negated shape is authored, supported and pinned\n\n`not in` is a first-class member of the pushdown subset. `cel-to-filter.ts`'s docblock: \"`not in` is `!(x in y)`. Negation wraps in `$not`.\" It is pinned in `cel-to-filter.test.ts` (\"not in → !(x in y) → $not wrapping $in\"), and the authoring gate accepts it — measured:\n\n```text\nisPushdownableCel(\"!(id in current_user.org_user_ids)\") => {\"ok\":true}\n```\n\nSo an author can write `using: '!(owner in current_user.org_user_ids)'`, it passes the enforceability lint, and when the membership set resolves EMPTY the compiler emits `{\"$not\":{\"owner\":{\"$in\":[]}}}` — which the guard does not catch.\n\n## What that filter admits\n\n`$in: []` matches nothing on every backend, which is exactly why the positive case is safe. Under `$not` that inverts. Measured on the two backends the module's own docblock names (\"one AST, two backends\"), without touching `driver-memory` / `driver-sql` / `driver-sqlite-wasm`:\n\n- `@objectstack/formula`'s `matchesFilterCondition` — executed against a 5-row fixture: **5 of 5 rows**.\n- `service-analytics/read-scope-sql.ts` — `$in: []` lowers to `FALSE_CLAUSE` (`1 = 0`, its comment: \"IN () matches nothing — safe\"); `$not` lowers to a null-safe negation whose own comment states it is built so this compiler \"admits the same rows driver-sql / driver-memory / formula admit\". `NOT (1 = 0)` is TRUE for every row.\n\nSo the policy the guard exists to turn into a DENY becomes an ALLOW-ALL instead, on the read scope.\n\n## The general shape, which is the useful part\n\n\"An emptied membership is safe because `$in: []` matches nothing\" is a **polarity-dependent** claim, and the pushdown subset contains negation. The same inference appears as a bare `— safe` comment in `read-scope-sql.ts` one arm away from the `$not` that inverts it. Note that the hand-written Layer 0 path does NOT rely on it: `tenant-layer.ts` returns an explicit `RLS_DENY_FILTER` when its membership set is empty rather than an empty `$in`.\n\n## What this does NOT claim\n\nI did not demonstrate a deployed policy authored in the negated form. I demonstrated that the platform accepts one at authoring time, compiles it, and that the deny guard standing in front of the emptied-membership case does not fire on it. I also do not assert which row set `$in: [null]` should select — that is #13357, unruled.\n\n## Related\n\n#13496 (the card this was measured under; its Zone-2 decision turns on the same polarity blind spot) · #13357 (what `$in: [null]` selects — unruled) · #5146 / #5298 (no-value semantics on read scopes) · ADR-0055 / ADR-0058 (the pushdown contract)\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

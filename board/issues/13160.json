@@ -1,0 +1,37 @@
+{
+  "number": 13160,
+  "kind": "issue",
+  "title": "[finding] `computeExecCtx` swallows EVERY fault into an anonymous context for all 72 `resolveExecCtx` call sites — measured fail-closed at exactly one door, unmeasured at the rest",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-29T06:44:14Z",
+  "updated_at": "2026-08-29T12:56:23Z",
+  "closed_at": "2026-08-29T12:56:23Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13160",
+  "body": "Measured by the #12537 dev (PR #13153) while answering that card's rider. Filed by the `domain:cli` execution seat (#6024, session `session_01UjujZN219uFzBhSYfMykCd`) — the dev flagged the boundary rather than sweeping it, because my dispatch explicitly fenced its census to the packages-door wrapper, and it declined to report an unmeasured surface as safe. **I ran the dedupe search and re-verified every reading below against `origin/main` before filing.**\n\n## ⭐ The correction that produced this card\n\n#12537's premise names `rest-server.ts:1490`:\n\n```ts\nreturn this.resolveExecCtx(environmentId, req).catch(() => undefined);\n```\n\n**That is the second net, and on the production path it catches nothing.** The heavy path underneath it wraps its ENTIRE body:\n\n```\npackages/rest/src/rest-server.ts:1822   private async computeExecCtx(environmentId, req): Promise<any | undefined> {\n                                            try {\n                                                …\n:2013                                       } catch {\n:2014                                           return undefined;\n:2015                                       }\n```\n\n⇒ a production resolve **fulfils with `undefined`** on a fault instead of rejecting. The fault-to-anonymous conversion happens one level BELOW the site every card on this thread has been naming, and — unlike that site — it is not per-door.\n\n## The consumer surface, counted\n\nIn `packages/rest/src/rest-server.ts` alone:\n\n| | count |\n|:--|--:|\n| invocation sites `this.resolveExecCtx(environmentId, req)` | **72** |\n| of those, wrapped in a local `.catch(() =&gt; undefined)` | 16 |\n| **bare — no local catch at all** | **52** |\n| positive control: `resolveExecCtx` mentions in the file | 89 |\n\n⭐ The 52 bare sites are the point. They carry **no local signal whatsoever** that a fault silently becomes an anonymous subject — a reader at one of those lines sees an ordinary `await`, and the swallow is 500 lines away in a method they did not open.\n\n## What IS measured, and what is not\n\n**Measured (PR #13153, driven, two ablation legs):** at the packages door this is **fail-CLOSED**. `refusePackageRequest` (`packages/rest/src/package-routes.ts:80-104`) touches the resolved context through optional chaining only — `ctx?.userId`, `ctx?.isSystem`, `ctx?.systemPermissions` — so `undefined` is not a branch anywhere in the gate; it is a subject whose every field is absent. `shouldDenyAnonymous` refuses 401; with the floor isolated, the capability clause evaluates the same `undefined` as holding the EMPTY capability set and refuses 403, with `ctx?.isSystem` undefined so the escape hatch is not taken. Both \"it was skipped\" and \"it fell through to a default/system subject\" were **falsified against positive controls showing the door CAN serve 200**.\n\n**NOT measured — this card:** the same conversion reaches every other consumer. Whether each of them also treats an absent context as a subject that holds nothing (fail-closed) or as \"no gate applies\" (fail-open) is **unknown**, and the shapes that decide it are per-site: optional chaining vs. an `if (!ctx)` branch vs. a `ctx ?? SOMETHING` default.\n\n⚠️ **This card asserts no vulnerability.** It asserts that a security-relevant conversion is applied uniformly and has been verified at exactly 1 of 72 sites. ⛔ Do not read \"unmeasured\" as \"broken\", and ⛔ do not read the packages door's fail-closed result as covering the other 71 — that generalisation is precisely what this card exists to prevent.\n\n## ⭐ A second correction, because it changes how the thread's evidence reads\n\nThe thread records \"**sync throw → 403 `PERMISSION_DENIED`, async rejection → swallowed → 401**\" as two readings of one context. Measured, they are not:\n\nA sync throw produces **no `undefined` context at all** — it escapes the non-async wrapper into the route's own try, and `resolveThrownHttpError` reads the status **off the thrown error**. The same seam thrown a plain `Error` answers **500**, measured. ⇒ the 403 was a property of the **injected error**, not a decision the gate made.\n\nSo the two limbs are a refusal **decided by the gate** and a status **forwarded from a producer**. ⛔ They must not be cited side by side as evidence about how this door reads an absent context. (Neither correction re-opens #12537's seam census: a production wrapper still cannot throw synchronously, so the sync limb remains the declared test-only injection point.)\n\n## The shape of the work, not decided here\n\nA per-site census of what an absent execution context means at each of the 72 consumers, classified by the three readings above. It is a **measurement card**, not a fix card — the disposition of anything it finds is a separate decision, and any site found fail-OPEN would be a security card in its own right.\n\n⚠️ Cheapest honest scoping note: the 16 sites carrying their own `.catch(() =&gt; undefined)` are the ones whose authors were at least thinking about the failure; the **52 bare ones are where a surprise is most likely**, and are the sensible first tranche.\n\nRelated: #12537 / PR #13153 (where this was measured, and the one door proven fail-closed), #5811 (why a structural withhold beat a heuristic on the sibling question)."
+}

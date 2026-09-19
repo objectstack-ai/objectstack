@@ -1,0 +1,36 @@
+{
+  "number": 12938,
+  "kind": "issue",
+  "title": "`os migrate plan` / `apply` compose neither the host config nor PlatformObjectsPlugin — they diff a five-table subset and cannot apply the drift their own message names",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-28T09:50:23Z",
+  "updated_at": "2026-08-28T11:10:33Z",
+  "closed_at": "2026-08-28T11:10:33Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12938",
+  "body": "`os migrate plan` / `apply` compose neither the host config nor `PlatformObjectsPlugin`, so on any real deployment they diff a five-table subset — and cannot apply the drift their own message tells operators to fix.\n\n## Measurement\n\n`os migrate plan --json`, run with no compiled artifact present (cwd is an empty directory, target is a fresh SQLite file):\n\n```\nmanagedTables: 5\ntotal drift:   0\npending tables (5): sys_metadata, sys_metadata_audit, sys_metadata_commit,\n                    sys_metadata_history, sys_view_definition\n```\n\n`os migrate apply --yes` on the same target: `0 change(s): 0 safe, 0 needs-confirm, 0 destructive`, `Created/extended 5 table(s)`, exit 0.\n\nMeasured 2026-08-28 against `packages/cli/bin/run.js` at `e84bbf6d`. The four files that decide this are byte-identical at `b489d3c7` (the SHA ObjectStack Cloud pins), so the reading holds there too: `packages/cli/src/utils/schema-migrate.ts`, `packages/cli/src/commands/migrate/plan.ts`, `packages/cli/src/commands/migrate/apply.ts`, `packages/runtime/src/standalone-stack.ts`.\n\n## Mechanism\n\n`bootSchemaStack` boots through `createStandaloneStack`, whose plugin list is exactly `DefaultDatasourcePlugin`, `MetadataPlugin`, `ObjectQLPlugin`, plus `AppPlugin` when a compiled artifact is found. `standalone-stack.ts` states the first half of this itself:\n\n> the compiled artifact carries the stack's `i18n` config, and it is the ONLY config this boot ever sees — `os migrate plan`/`apply` and embedders never load `objectstack.config.ts`.\n\nThe second half is that no platform plugin is composed either. `buildDataMigrationPlugins` exists and adds `PlatformObjectsPlugin` — but only the DATA migration subcommands call it (`value-shapes`, `files-to-references`, `meta`). `plan` and `apply` call `bootSchemaStack` with no `extraPlugins`. `serve.ts` composes `PlatformObjectsPlugin` when it is not already present; `migrate` has no equivalent.\n\nSo every object a plugin registers is outside the set `detectManagedDrift()` iterates — `managedObjectFields` only ever holds what got registered. `sys_position` and `sys_permission_set` are declared in `packages/plugins/plugin-security/src/objects/`; neither is reachable from a `migrate` boot at all.\n\n`os build` does not close it: `compile.ts` serializes the CONFIG's declared metadata, not a booted kernel's registry, so a platform object never enters the artifact either.\n\n## Why this is worse than an incomplete report\n\n`schema-drift.ts`'s own `replace_unique_index` message ends:\n\n> Replacing it with (index signature) is a pure relaxation: run \"os migrate apply\".\n\nThat message is emitted at boot by `reconcileAndWarnDrift`, which runs with the FULL registered object set, so it names tables like `sys_position` correctly. The command it names then boots a five-table stack and cannot see that table. The operator runs it, gets exit 0, and the drift is still there. `formatDestructiveDriftRefusal` points at the same pair of commands.\n\nAnd the failure is silent in the direction that reads as success: with nothing registered there is no drift, so `plan` prints\n\n> Physical schema is in sync with metadata — nothing to migrate.\n\nThe `Examined 5 managed table(s).` line above it is the only signal, and it is a number the reader has to already distrust. This is exactly the \"a gate that silently skips is the bypass it exists to prevent\" shape the repo argues elsewhere.\n\nMeasured impact on a real deployment: ObjectStack Cloud's control plane carries roughly eighty `sys_*` tables. Ten of them were carrying legacy platform-wide UNIQUE indexes that structurally disabled per-organization RBAC seeding for two days (objectstack-ai/cloud#1695 / cloud#1701). Not one of the ten is in the five-table set, so `os migrate plan` against that database reports \"in sync\" while the boot-time detector on the same database reports ten findings.\n\n## Suggested direction (not a decision)\n\nCompose, for `plan` and `apply`, the same platform floor the drift MESSAGE is written from — at minimum `PlatformObjectsPlugin`, and whatever else `serve` composes unconditionally. That keeps one definition of the object set instead of two, and it is the same seam `buildDataMigrationPlugins` already occupies. Whether the host config should also be loadable by `migrate` (a `--config` flag, or an opt-in that boots the project's own stack) is the bigger half and is left open here.\n\nWhatever the fix, the failing shape should stop being exit 0: a plan computed over a metadata set that is a fraction of the target's tables is UNMEASURED, and today it is indistinguishable from \"in sync\".\n\n## Where this was found\n\nWhile landing objectstack-ai/cloud#1705, the dispatch-only ops workflow that runs this exact command pair against a control-plane database. That workflow now refuses when `managedTables` is at or below five rather than reporting a green plan — a workaround on the consumer side, and the reason this is filed here.\n\n_Generated by [Claude Code](https://claude.ai/code)_\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 12795,
+  "kind": "issue",
+  "title": "[finding] Decide with a measurement whether CPU-heavy `check:*` runs should be routed through `os-verify-lock` — the throughput/contention trade is currently unmeasured",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-27T20:25:35Z",
+  "updated_at": "2026-08-31T03:46:19Z",
+  "closed_at": "2026-08-31T03:45:55Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12795",
+  "body": "Filed unassigned by the #12528 dev, session `session_01PfaSTikked61BkcsB5Rn69` (`domain:devx` lane, round 15), as the explicitly-fenced second half of that card. #12528 shipped the DISCLOSURE half only; this is the THROUGHPUT half, and it was fenced out precisely because it owes a number this card does not have.\n\n## What is already settled, so nobody re-derives it\n\n`scripts/pm/os-verify-lock.sh` serialises **locked heavy jobs** — the runs that come in through that entry point. The discipline routes builds and test suites there and nothing else, so gate scripts (`pnpm check:*`, the `node scripts/check-*.mjs` family), dev servers, installs and any free-hand command a sibling agent types run **alongside** a holder on the same cores.\n\nAs of PR from #12528 that boundary is no longer silent: the acquire-time message, the VERDICT line, `--status` and `--help` all state it. ⛔ That is a disclosure, not a repair — the population gap is unchanged.\n\n## The question this card owes a number for\n\nShould CPU-heavy gate runs be routed through the same entry point, so the lock's name matches its guarantee?\n\n⚠️ It is **not obviously yes**, which is why it is a card and not a patch. Routing them trades every seat's **parallelism** for exclusion on a resource the lock does not cover today. A PM seat running several dev agents at once currently gets its gate runs concurrently; under routing they serialise behind each other and behind every build and suite in the container. The direction of that trade is unmeasured, and the acquisition budget arithmetic changed under #12538 / PR #12788 (wait budget raised, slot ageing re-based on last put-down), so any older reasoning about affordability is stale.\n\n## What the measurement has to answer\n\n⛔ Not \"is contention real\" — that is established. The open quantities:\n\n1. **Gate-run cost distribution.** Which `check:*` families are actually CPU-heavy, and for how long? The farm is 176 families; most are sub-second. A routing rule that captures the sub-second ones buys nothing and pays full queue cost. Is there a clean threshold, and what is it?\n2. **Queue-depth effect.** With N dev agents live, what does routing do to end-to-end wall time per agent — total, not per-command? Serialised-but-uncontended can beat parallel-but-thrashing on 4 cores, or not.\n3. **Budget fit.** With gate runs in the queue, how often does a build's acquisition exceed the 540s cap and return exit 99 (NOT MEASURED)? A routing rule that converts measurements into non-measurements is a net loss whatever it does to CPU.\n4. **The partial option.** Routing only the handful of heavy families, rather than all of them — likely dominates both extremes, and is the option a threshold from (1) would name.\n\n## Re-check\n\n```\nsed -n '/WHAT THIS LOCK DOES NOT COVER/,/THE LOCK IS LINUX-ONLY/p' scripts/pm/os-verify-lock.sh\nbash scripts/pm/os-verify-lock.sh --report\n```\n\n⚠️ The `--report` ledger lives in the container's `/tmp` (see #12783), so it cannot answer (2) across container lifetimes on its own.\n\n⛔ Reverse-check any zero with a term known present in the same file, and never a substring of the term under test.\n\n## Refs\n\n- Parent observation: #12528 — the coverage boundary, disclosure half\n- #12538 / PR #12788 — the wait-budget and slot-ageing change that makes older affordability arithmetic stale\n- #12783 — the ledger's location, which bounds what `--report` can measure here\n\nSeverity not judged; observation-class. ⛔ Not graded, not routed."
+}

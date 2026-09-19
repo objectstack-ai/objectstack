@@ -1,0 +1,35 @@
+{
+  "number": 12874,
+  "kind": "issue",
+  "title": "[finding] Governed Surface Queue Guard: the merge_group leg installs no dependencies, so the #11705 generated-surface lift NEVER applies at queue time — pure-regeneration PRs still need a human APPROVED review; the trade needs a ruling",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-28T06:28:54Z",
+  "updated_at": "2026-08-29T02:47:23Z",
+  "closed_at": "2026-08-29T02:47:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12874",
+  "body": "R9 spec-seat close-out finding (session `session_01JvjTCjJQn9zSTXEhUKgT7s`, 2026-08-28). Recording only — unassigned. This is a decision-needing mismatch between two mechanisms that both claim to answer \"is this diff governed\": it should be graded toward a maintainer ruling, not silently fixed either way.\n\n## The mismatch, measured on PR #12718\n\n- **Seat-side predicate**: `node scripts/pm/check-governed-merges.mjs --test <paths>` on #12718's tree, with dependencies installed, exits 0 — \"NOT governed — PURE REGENERATION\": the touched `skills/objectstack-platform/references/_index.md` is byte-equal to a fresh `gen:skill-refs` recompute, which is exactly the #11705/#10277-C generated-artifact exception. (Without deps the same script FAILS CLOSED — generator `--check` exit 254 — also measured.)\n- **Queue-side reality**: the Governed Surface Queue Guard's `merge_group` leg **installs no dependencies by design**, so it can never evaluate the byte-equality lift: any `skills/**` row fails closed at queue time and the run demands an APPROVED review from any account ≠ PR author (#8161 predicate). Measured as PR #12718's `CI_FAILURE` dequeue (run 33099507477), resolved only by the maintainer's review (5048199709).\n- The guard's own header records this as a **filed-not-taken** trade (fast queue leg vs. lift fidelity).\n\n## Cost observed this shift\n\nOne code PR whose only governed-glob touch was a byte-identical regenerated index consumed: one queue kick, one standing-down comment, one review request, and one maintainer interaction — for a diff the register's own predicate calls not governed. Multiply by every future spec PR whose regeneration sweeps the skills index.\n\n## The question for the ruling (options, not a recommendation)\n\nA. Accept the cost: human review stays the queue-time answer for anything under a governed glob; document it so seats park such PRs for review immediately instead of discovering the kick. (Status quo, now documented.)\nB. Let the merge_group leg install the minimal dependency closure needed by the generators' `--check` twins so the #11705 lift works at queue time — pays queue latency for lift fidelity.\nC. Precompute: a pull_request-leg artifact (byte-equality attestation signed by the run) that the merge_group leg can verify without deps.\n\nRefs: #11705, #10277, #8161, #9495; PR #12718 (both kicks + the recovery); `scripts/pm/check-governed-merges.mjs` header."
+}

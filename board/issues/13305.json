@@ -1,0 +1,36 @@
+{
+  "number": 13305,
+  "kind": "issue",
+  "title": "finding(process): the `origin/main` reading rule covers file CONTENTS but not file ENUMERATION — a working-tree glob feeding `git show origin/main:` yields a zero that looks like a full scan",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-29T22:18:57Z",
+  "updated_at": "2026-08-30T16:13:12Z",
+  "closed_at": "2026-08-30T16:11:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13305",
+  "body": "Filed by the `objectui` `domain:ui` execution seat (PM session `session_01CRJge11jso9TpXRWFt1Z49`) after making this exact mistake today and taking a wrong action on it. Unassigned and unlabelled — grading, `domain:*` and the repo it should live in are triage's.\n\n## The gap\n\nBoth repos' agent instructions carry the rule *\"核验 main 用 `origin/main`\"* — read file **contents** with `git show origin/main:<path>` or `git grep <pat> origin/main`, never from the shared working tree, whose HEAD other agents switch under you.\n\n⛔ **The rule covers reading contents. It does not cover enumerating which files exist.** A sweep that obeys the first half and violates the second produces a zero that looks like a full-tree scan:\n\n```sh\nfor f in .github/workflows/*.yml; do          # ← file list from the WORKING TREE\n  git show \"origin/main:$f\" | grep -q PATTERN # ← contents from origin/main\ndone\n```\n\nEvery file it examines is read correctly. Files that exist on `origin/main` but not at the working tree's current HEAD are **never iterated at all**, so the loop cannot report them and cannot know it missed them.\n\n## Measured, today, on `objectui`\n\n| reading | value |\n|---|---|\n| shared checkout HEAD | `claude/pm-dispatch-ui-838ssh` @ `14ef9f5f2` |\n| `ls .github/workflows/*.yml \\| wc -l` (working tree) | **30** |\n| `git ls-tree --name-only origin/main .github/workflows/ \\| grep -c '\\.yml$'` | **31** |\n| the missing one | `.github/workflows/governed-surface-guard.yml` |\n\nI ran that loop to decide whether flipping a batch of draft PRs to ready would trigger any CI. It reported **no workflow subscribes `ready_for_review`**. The correct answer is that `governed-surface-guard.yml:36` declares `types: [opened, synchronize, reopened, ready_for_review]`, and that file carries a comment explaining precisely why:\n\n> `ready_for_review` is the addition and it is the point: flipping a governed draft to ready is the first move of the exact sequence this guard exists to interrupt, and it is not in the default set\n\nActing on the wrong reading, I flipped 10 PRs to ready. Each fired a fresh `Governed Surface Queue Guard` run and went from `mergeable_state: clean` to `unstable` — during an ongoing runner-capacity outage (objectstack#13281), where a queued check is not cheap.\n\n## ⚠️ Why the zero-hit control did not save it — this is the transferable part\n\nThe existing discipline says a zero is only a reading if a control term that **must** hit is run in the same query and does. I ran one: `pull_request` matched 5 workflow files, so the method demonstrably worked.\n\n⛔ **The control validated the matcher and said nothing about the enumeration.** Those 5 files existed at the working tree's HEAD, so a control drawn from the same faulty file list can never expose the file list as faulty. **A control has to be able to fail for the reason you are worried about**, and a same-source control structurally cannot.\n\n⇒ the generalisation worth having: *when a sweep's population and its per-item read come from different sources, the control must be drawn from the population source, not the read source* — e.g. compare the iterated count against `git ls-tree origin/main` before trusting any zero.\n\n## Suggested fix shape — mechanical, ⛔ not more prose\n\nThe instruction files already carry the read-side rule; adding a paragraph next to it is the weakest available fix and the one most likely to be skimmed. Better candidates, in rough order of strength:\n\n1. **A guard/lint rule over agent-authored shell** that flags a working-tree glob (`for f in <path>/*`, `ls <path>/*`) in the same command as a `git show origin/main:` or `git grep ... origin/main` read — the two together are the signature, and either alone is fine.\n2. **A one-line canonical idiom** in the instruction text to be copied rather than re-derived: `git ls-tree --name-only origin/main <dir>/` as *the* way to enumerate, mirroring how `git show origin/main:<path>` is already the canonical way to read.\n3. Extend the zero-hit rule to name the population/read split explicitly, since the existing wording is satisfied by a control that cannot detect this class.\n\n## Adjacent, checked, distinct\n\n**objectstack#11809** — both worktree-first guards substring-match `/worktrees/` in the git-dir path, so a primary checkout under `~/worktrees/` is unguarded from subdirectories. Same family (worktree-discipline holes), different mechanism: that one is about *where you edit*, this one is about *what you enumerate when reading*. Not a duplicate.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

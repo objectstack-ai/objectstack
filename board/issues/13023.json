@@ -1,0 +1,36 @@
+{
+  "number": 13023,
+  "kind": "issue",
+  "title": "`meta.deleteItem` declares a return type — `{ type, name, deleted }` — that the reset door has never answered",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-28T15:43:14Z",
+  "updated_at": "2026-08-30T03:54:19Z",
+  "closed_at": "2026-08-30T03:54:19Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13023",
+  "body": "Measured while implementing #12181 (the `deleteItem` carrier half), on `origin/main` at `87042b5de`. Reported rather than folded in: #12181's ruling is scoped to the request-side carriers, and correcting a published return type is an accept-set change of its own.\n\n## What was measured\n\nBoth `deleteItem` declarations in `packages/client/src/index.ts` (the unscoped `ObjectStackClient.meta` and the environment-scoped `ScopedEnvironmentClient.meta` twin) declare:\n\n```ts\nPromise<{ type: string; name: string; deleted: boolean }>\n```\n\nThe door answers something else entirely. `DELETE /meta/:type/:name` ends with `res.json(result)` where `result` is `deleteMetaItem`'s return, and both the implementation (`packages/metadata-protocol/src/protocol.ts`) and the contract (`DeleteMetaItemResponseSchema`, `packages/spec/src/api/protocol.zod.ts`) declare:\n\n```ts\n{ success: boolean; reset?: boolean; message?: string; seq?: number; projectionApplied?: … }\n```\n\nThere is no `type`, no `name`, and no `deleted` on any branch of the response. Driven end to end against a real `RestServer` + real `ObjectStackProtocolImplementation` + real `sys_metadata` tables (the harness added in #12181's PR), a successful reset answers `{ success: true, reset: true, message: 'Customization overlay deleted — view/… reset to artifact default. [seq=…]' }`.\n\n## Why it is worth a card\n\nThe declared shape is not merely imprecise, it is uninhabited: a first-party caller who branches on the documented `deleted` flag reads `undefined` — falsy — on **every** reset, including the ones that really deleted a row. The truthful signal is `reset`, and the \"nothing was there\" case (`success: true, reset: false`) is exactly the one a caller most wants to distinguish. The types compile, so nothing surfaces this; the SDK's own tests had to cast through `any` to read the real fields.\n\n`DeleteMetaItemResponse` is already exported from `@objectstack/spec`, so this is a declaration catch-up (the #11679 shape, one layer up) rather than a new contract.\n\n## Scope note\n\nBoth declarations carry the same wrong shape, so a fix must land on both — the same twin-divergence trap #12181 and #11713 record. Narrowing a published return type is a breaking change to anyone who wrote `.deleted`; the ruling would need to decide between correcting the type outright and declaring the response the spec already declares.\n\nRelated: #12181 (the request-side carriers on this same method), #11679 (the same declared-vs-sent gap on `DeleteMetaItemRequest`), and `packages/client/src/return-type-precision.test.ts`."
+}

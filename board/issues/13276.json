@@ -1,0 +1,30 @@
+{
+  "number": 13276,
+  "kind": "issue",
+  "title": "`tool.objectName` is `live` on a basis the cloud walk falsified — the re-grade needs an objectui reader, which #13042's container did not have",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-29T16:52:19Z",
+  "updated_at": "2026-08-29T17:20:42Z",
+  "closed_at": "2026-08-29T17:20:42Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13276",
+  "body": "Spun out of the #13042 re-closure (PR #13275). That card re-closed five of the six `tool.json` entries against cloud `origin/main@15f55df`; this is the sixth, deliberately left `live` and UNDATED rather than stamped or re-graded. Recording the measurement so the next reader starts from it instead of re-deriving it.\n\n## What was measured, at framework `ba76fb7d` / cloud `15f55df`\n\n`packages/spec/liveness/tool.json` rests every verdict on the basis its own `_note` states: tool metadata is write-only, and a prop is `live` because the runtime consumes the **same-named field on `AIToolDefinition`**, not because anything reads tool metadata back.\n\nApplied to `objectName`, that basis does not hold:\n\n1. **Both cited sites read a different key.** `packages/service-ai/src/tools/action-tools.ts`, at `actionToToolDefinition` and `createActionToolHandler`, reads `action.objectName` — the ActionSchema key. `action.json`'s own `objectName` row carries the *identical* citation, `packages/services/service-ai/src/tools/action-tools.ts:535`, word for word. The tool ledger appears to have inherited the action ledger's pointer.\n2. **The same-named field is written and never read.** `AIToolDefinition.objectName` is set at `actionToToolDefinition` and read by nothing: zero readers across the cloud repo (`git grep` over all non-test `packages/**/*.ts`, checked against every `getAll()` / `getDefinition()` consumer — `ai-service.ts`, `eval-runner.ts`, `agent-routes.ts`, `assistant-routes.ts`, `tool-routes.ts`), and zero in this repo. The near-misses are all tool *arguments*, not the definition: `security-enterprise/.../tool-interceptor.ts` `extractObjectName`, `service-ai-studio/.../open-record.tool.ts`.\n3. **It never reaches persisted metadata either.** Cloud has exactly one `metadataService.register` site for `tool` (in `service-ai-studio/src/plugin.ts`), and it ingests only the shipped Studio definition lists — none of them action-backed, none carrying `objectName`.\n\nThis is the producer-with-no-consumer shape the ledger README records for `seed.env`, arriving from the other end.\n\n## Why it was not re-graded to `dead` in #13042\n\nThe one candidate reader left is an **objectui read-back** of a persisted `tool` record. No objectui checkout was reachable in that container, so the negative could not be closed. The README is explicit that a negative cross-repo claim resting on a search that cannot see the renderer is the `app.homePageId` / `#4895` failure shape — a verdict that was wrong precisely because the renderer was outside the search.\n\nLeaving the entry undated keeps it on the `--stale-verification` worklist, which is where a claim that could not be closed belongs. Its `note` carries the full measurement.\n\n## The work\n\nWalk objectui for any read of a persisted `tool` record's `objectName` — the metadata-admin preview read points for the `tool` type first, per the #7131 mechanical rule (`registerMetadataPreview('tool'`), recording an absent preview as a finding rather than skipping it. Then either:\n\n- **a reader exists** ⇒ stamp `verifiedAt`, repoint the evidence at it with an `objectui @sha` realm marker, and note that the verdict rests on the read-back rather than on the `AIToolDefinition` surface — which would also mean this file's `_note` overstates the write-only framing; or\n- **no reader exists** ⇒ re-grade `live` to `dead` under ADR-0049. Note that this moves the `tool` row in `packages/spec/liveness/state-counts.md` (currently `13 | 1 | 0 | 0 | 14`), so the regen is part of that change, and `#13042`'s single-file fence is why it was not done there.\n\n**Executor constraint: a container with an objectui checkout.** A framework-only or framework-plus-cloud container can only repeat the measurement above; it cannot close it.\n\nRelated: #13272 (the same stale-path defect in `agent.json` / `skill.json` / `action.json`)."
+}

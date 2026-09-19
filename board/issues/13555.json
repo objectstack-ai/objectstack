@@ -1,0 +1,34 @@
+{
+  "number": 13555,
+  "kind": "pull_request",
+  "title": "docs(driver-sql,service-analytics): repoint three comments at the moved driver-error classifier",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T00:11:52Z",
+  "updated_at": "2026-08-31T00:51:12Z",
+  "closed_at": "2026-08-31T00:51:11Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": "2026-08-31T00:51:11Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/13555",
+  "body": "Fixes #13516\n\nThree prose pointers still named `metadata/src/utils/schema-sync-errors.ts` after #13279 moved that module into `@objectstack/types` as `driver-error-classification.ts`. Each is a reader's trail to the reasoning behind a driver-error verdict, so a dangling one costs the next author exactly the thing the comment exists to give them.\n\n**Comment text only — no behaviour, no published surface, no test changed.**\n\n## The target, verified rather than copied\n\nConfirmed against `origin/main` (`ff37576976`) instead of taken from the card or from #13279's prose:\n\n- `packages/metadata/src/utils/` no longer holds the file. It contains `history-cleanup.ts`, `lru-cache.ts`, `lru-cache.test.ts` and `metadata-history-utils.ts`, and nothing else.\n- The module now lives at `packages/types/src/driver-error-classification.ts`, its suite at `packages/types/src/driver-error-classification.test.ts`.\n\n## The sweep: ten hits, three of them stale\n\n`git grep schema-sync-errors` over the whole tree returns **ten** hits, not three. The card's count of stale ones is nonetheless exactly right — the other seven are correct as they stand:\n\n| site | verdict |\n|:--|:--|\n| `drivers/driver-sql/src/sql-driver.ts:816` | **stale — repaired** |\n| `drivers/driver-sql/src/sql-driver-backend-fault-envelope.test.ts:77` | **stale — repaired** |\n| `services/service-analytics/src/analytics-service.ts:194` | **stale — repaired** |\n| `types/src/driver-error-classification.ts:36` | correct: names the deleted file as deleted |\n| `types/src/driver-error-classification.test.ts:8` | correct: historical note on the move |\n| `types/src/unique-violation.ts:123` | correct: breadcrumb updated by #13475 |\n| `types/src/error-leak.test.ts:141` | correct: breadcrumb updated by #13475 |\n| `services/service-datasource/src/external-datasource-service.ts:768` | correct: breadcrumb updated by #13475 |\n| `metadata/CHANGELOG.md:1514`, `:4301` | historical release record — deliberately untouched |\n\nThe repairs follow the idiom the pointers updated in #13475 already use: name the real current path, and keep the historical note of where it was.\n\n## The claims were checked, not just the paths\n\nA comment whose claim is wrong would be a finding to file, not something to repair here. Both claims hold:\n\n- The two driver-sql sites cite a pin by name — `\"follows an error wrapped as cause\"`. That test name is live in the new suite, at `driver-error-classification.test.ts:63` and `:166` (once per predicate).\n- The analytics site claims the anchored Postgres `relation \"x\" does not exist` shape matches the classifier's. That pattern moved with the module and is intact.\n\n## Load-bearing check\n\nThe three sites are prose, but the finding worth recording is that two of the three **files** sit inside a ratcheted gate's population:\n\n- `check:doc-authoring` carries a shrink-only `(file, issue-id)` ledger over `packages/**` in `scripts/doc-authoring-prose-id.baseline.json`, and both `sql-driver.ts` and `analytics-service.ts` have entries there. Adding `#13279` to those files is exactly the shape that moves a ratchet. It does not, for two reasons read from the gate rather than assumed: the leg scans **string literals only** and explicitly excludes comments, and it excludes `*.test.ts` outright. Confirmed empirically — `check:doc-authoring` is green on this diff.\n- Line anchors of the form `sql-driver.ts:1064` are written across the ADRs and audits, so a line-count change would shift them. Sampling first showed they are **already** rotted: `sql-driver.ts` is 16,786 lines, and ADR-0113's `:4901` (expects `col.notNullable()`), ADR-0053's `:1967` and `:1543`, and ADR-0028's `:610` none of them resolve to what they name today. Only `content/docs/permissions/system-context.mdx` is ledgered for line anchors, and none of these files appear in it. So the constraint is void, and the comments were reflowed for readability.\n\n## Verification\n\nAll of the below on `159f225f94`, the pushed head.\n\n- Gate family derived from the real change set by `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` — 22 path-matched families plus the convention-triggered ones. **All green**, except two recorded honestly:\n  - `check:test-completeness` exits **3 = PREREQUISITE NOT MET** — it grades a saved `turbo run test` log and none was passed. Its own output says to record this as NOT MEASURED, not as a red.\n  - `check:type-check-debt` and `check:dual-build-cjs-loads` need the whole workspace built; not run locally, left to CI.\n- `pnpm lint` — the full repo-wide `eslint . --no-inline-config`, not a narrowed run. Exit 0.\n- `pnpm --filter @objectstack/driver-sql --filter @objectstack/service-analytics run typecheck` — both `tsc --noEmit`, exit 0.\n- `sql-driver-backend-fault-envelope.test.ts` — `Test Files 1 passed (1)`, `Tests 11 passed | 3 skipped (14)`. The three skips are the suite's own live-dialect cells with no database present; the diff touches no test code.\n- `@objectstack/service-analytics` suite — `Test Files 83 passed (83)`, `Tests 1805 passed (1805)`.\n- `check:nul-bytes` — `OK (scanned 7520 text file(s) ... no raw ASCII control bytes)`.\n\n## Changeset\n\nLabelled `skip-changeset`. This diff publishes nothing from any package — it is comment text in three files — which `lint.yml` calls the textbook case for that label.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01F3jdziLbAPGeceVNmSox5L)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01F3jdziLbAPGeceVNmSox5L)_"
+}

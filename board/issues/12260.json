@@ -1,0 +1,33 @@
+{
+  "number": 12260,
+  "kind": "issue",
+  "title": "[sharing][i18n] sharing 层写拒绝文案硬编码英文(insufficient privileges to update …),未走 record_access_denied 同款 i18n 渲染",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T15:20:57Z",
+  "updated_at": "2026-08-29T06:51:55Z",
+  "closed_at": "2026-08-28T12:52:53Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12260",
+  "body": "## 现象(@objectstack/*@17.2.0)\n\n对声明 `sharingModel: 'public_read'` 的对象,持对象级 allowEdit 但非记录属主的用户 by-id PATCH 一条记录,sharing 中间件拒绝时返回给客户端的 message 是英文硬编码原文(`FORBIDDEN: insufficient privileges to update <object> <id>` 形态),端上直接把它展示给了终端用户。\n\n对照:plugin-security 的记录级拒绝走 i18n 渲染(`record_access_denied` 键 / userFacingDenialMessage),同一环境下返回的是本地化中文(「您无权访问这条记录,如需访问请联系该记录的负责人或管理员。」)。同一个「没权限写这条记录」的用户场景,走到哪一层拒绝决定了用户看到人话还是英文,行为不一致。\n\n## 复现步骤\n\n1. 任一自定义对象声明 `sharingModel: 'public_read'` + `access: { default: 'private' }`;\n2. 权限集给用户 allowRead + allowEdit(不带 modifyAllRecords);\n3. 该用户对一条 owner_id 非本人(或为 null)的记录 by-id PATCH;\n4. 403,message 为上述英文原文;前端(H5/自研客户端)展示原文。\n\n## 期望\n\nsharing 层的写/删拒绝复用与 `record_access_denied` 相同的 i18n 渲染机制(或给出稳定的 message key 供端上映射),让应用侧在任何一层被拒都能拿到本地化人话文案。\n\n## 补充\n\n- 实测来源:应用项目按记录属主收紧共享模式的交付自测,负例 REST 探针原文在私有应用仓留档,需要可提供;\n- 与已关闭的 #7366(Console 丢弃服务端 403 文案)不同题:本单是服务端 message 本身未本地化。"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 12668,
+  "kind": "issue",
+  "title": "pm-dispatch decision framework: add three maintainer-ruled standing rules — pull-directed priority order, startup-stage no-gradualism, release-reminder discipline (2026-08-27)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-27T05:40:14Z",
+  "updated_at": "2026-08-31T03:06:54Z",
+  "closed_at": "2026-08-31T02:44:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12668",
+  "body": "Provenance: maintainer, 2026-08-27, PM chat (adjudication session `session_01DKWDdUJ2XNRESVVWUvcpnh`). The maintainer asked whether the long-term axis should win when a four-facet analysis is split (verbatim: 「四维分析有争议的时候是否应该优先长远线？」); the seat recommended the narrower pull-directed order below; the maintainer accepted (verbatim: 「tong y 4」 — 同意, the four-rule set).\n\n## The ruled rule set (to be written into the four-facet decision framework)\n\n1. **With real measured business pull (axis ② non-zero), a split resolves toward the long-term shape (axis ①)**: pay once for the end state rather than twice for a patch — temporary workarounds accrete, and no-workarounds is already constitutional.\n2. **With zero measured pull, a split resolves toward non-proliferation (axis ④)**: defer / remove, record, reopen free. (Remove is itself often the long-term-correct shape — ① and ④ frequently agree on removal cards; what loses is building for zero users.)\n3. **Axis ③ breaks remaining ties toward the loud/structural option.**\n4. **Security/permission boundaries and destructive/hard-to-reverse actions stay on the human floor regardless** — no automatic priority applies to them.\n\n## Binding constraint the ruling carries\n\n⛔ **This order ranks seat RECOMMENDATIONS only.** A split four-facet block still escalates to the maintainer — the auto-adjudication confidence gate's 四棱同向 requirement is unchanged, and this rule must not widen the 代裁 face. The split itself is the signal that an input only the maintainer holds (commercial hardness, appetite, deployment reality) is missing. Worked evidence from the 2026-08-27 adjudication run: #8501 split ① vs ②④ and the maintainer correctly ruled AGAINST the long-term build (C, visibility-first) on commercial facts no seat can see; #12278 split and resolved toward long-term (C) because pull was real — the pattern is pull-directed, not long-term-always.\n\n## Implementation notes for the skills seat\n\n- The four-facet framework's copies are sync-guarded (`check:skill-frame-sync`) — all copies move in one PR.\n- Protocol-semantic face ⇒ the standing tiering clause applies (fable construction; governed surface, draft PR, human merge only — the merge is the maintainer's review record).\n- The pm-dispatch SKILL.md line ratchet only goes down: the detail belongs in `references/decision-analysis.md`, with at most an anchor-line change in the main file paid for by deletion if needed.\n\nNamed reader: the skills lane seat. Routing note for triage: `domain:skills` (instruction-architecture face)."
+}

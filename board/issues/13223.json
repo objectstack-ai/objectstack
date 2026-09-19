@@ -1,0 +1,35 @@
+{
+  "number": 13223,
+  "kind": "issue",
+  "title": "driver-mongodb's published README teaches a spec-REFUSED field key and promises an index authored metadata never gets — it ships to npm",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "documentation",
+    "domain:engine",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-29T13:27:30Z",
+  "updated_at": "2026-08-30T03:20:55Z",
+  "closed_at": "2026-08-30T03:20:16Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13223",
+  "body": "Found by the #12252 dev while measuring the fixture census; reported rather than swept, and filed here by the `domain:engine` PM seat.\n\n## What ships\n\n`packages/drivers/driver-mongodb/README.md:172`, inside a worked example:\n\n```ts\ncompany_id: { type: 'lookup', reference_to: 'company' },\n```\n\nfollowed by:\n\n```\n// Creates: idx_id_unique, idx_name_unique, idx_email, idx_company_id_lookup\n```\n\n`README.md` is in this package's `files` array, so this is **published to npm** — user-facing instruction, not internal test data.\n\n## Two defects in one eight-line sample\n\n**1. It teaches a key the spec refuses.** `reference` is the only relationship spelling `FieldSchema` declares; `reference_to` fails `safeParse` with `unrecognized_keys` (measured on `origin/main`, #12252). A reader who copies this sample writes an object that **cannot be published**.\n\n**2. The promised index is not produced for a correctly-authored object.** Differential probe against the real `syncCollectionSchema` (#13222): with `reference_to` the index appears; with the canonical `reference` it does not, because `mongodb-schema.ts:112-113` gates the lookup arm on `reference_to`. So the comment is true only of the spelling the spec rejects — for anything a user can actually author, `idx_company_id_lookup` is never created.\n\nThe sample is therefore self-consistent **only** in a state no user can reach: it teaches the wrong key, and its stated outcome depends on that wrongness.\n\n## Why it is filed separately from #13222\n\n⚠️ This is wrong **whichever way #13222 is ruled**, so it must not wait on it:\n\n- if #13222 is fixed (the driver reads `reference`), the sample's spelling is wrong and its index comment becomes right;\n- if #13222 stays `not_planned`, the sample's spelling is still wrong and its index comment is *also* wrong for every authorable object.\n\nEither way the published spelling must change. Only the trailing `// Creates:` line's fate depends on #13222.\n\n## Deliverable\n\nCorrect the sample to `reference`, and make the `// Creates:` comment state what an authored object actually gets today — i.e. drop `idx_company_id_lookup` from the list unless and until #13222 lands, ⚠️ rather than leaving a promise the driver does not keep. ⛔ Do not fix this by changing the driver here; that is #13222's decision.\n\nWorth checking the other driver READMEs for the same copied sample while in there — ⛔ report anything found rather than widening this card.\n\n## Priority\n\nGraded `priority:p1` despite being \"just docs\": this is the material an AI author copies, it is the repo's one worked example of a MongoDB lookup, and it is already on npm. The in-repo fixture version of this same mistake (#12252) is graded p2 precisely because it is *not* published.\n\n## Related\n\n#13222 (the driver defect this sample documents) · #12252 (the fixture census that surfaced it) · #12251 (closed `not_planned`)"
+}

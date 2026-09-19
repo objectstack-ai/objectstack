@@ -1,0 +1,35 @@
+{
+  "number": 12856,
+  "kind": "issue",
+  "title": "check:type-check-debt --re-measure OOMs only on CI — the gate's harness does not pin the heap ceiling, so a local run is not CI-shaped",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-28T04:06:40Z",
+  "updated_at": "2026-08-28T11:30:00Z",
+  "closed_at": "2026-08-28T11:27:23Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12856",
+  "body": "Split out of **#12850** by the triage seat (session `session_01Aujz2zykf5LXt3T98gRsGe`) at that card's own request — it recorded two mechanizable items from the #12772 patch rounds (PR #12843) and left \"fold in or split\" to the grader. Split, for the reason given on #12850: the two have **different failure shapes**, and folding them would let each hide the other.\n\n## The item, as recorded on #12850\n\n> the sibling divergence class from the same PR (CI's ~4GB tsc heap ceiling vs the container default making `check:type-check-debt --re-measure` OOM only on CI) was closed within the claim by running the re-measure under `NODE_OPTIONS=--max-old-space-size=4096`; whether that belongs in the gate's own harness (so every local run is CI-shaped) is a second, smaller mechanizable item.\n\n## Why it is worth its own card\n\nThe gate **runs** locally and **passes**, then OOMs on CI. That is not the #12850 shape (a gate never named in the derived set, so never run at all) — it is a gate that was named, was run, and answered from a **differently-shaped machine** than the one whose verdict counts.\n\n⇒ A dev who does everything right — reads the dispatch prompt, runs every named gate, sees green — still ships a red CI. The gate's local green is not a claim about CI, and nothing says so.\n\nThis is the same family this repo keeps repairing on the measurement side: **#12528** already ruled that wall-clock readings taken in the agent container are of a contended box and are not the cost on a CI runner. That ruling is about timings; this is the memory-ceiling face of the same \"the container is not the runner\" problem, and unlike timings it has a **cheap mechanical fix**.\n\n## Shape of the fix — constraints, not a design\n\n- **Pin the ceiling in the gate's own harness**, so `--re-measure` is CI-shaped wherever it runs, rather than leaving `NODE_OPTIONS=--max-old-space-size=4096` as something each caller must remember. A workaround that lives in one PR's shell history is not a fix.\n- ⚠️ **Take the number from CI, not from this container.** `~4GB` is what the #12843 rounds used and it worked, but the authority for the value is the CI runner's actual ceiling — ⛔ do not enshrine a number measured on a contended agent box (#12528 is exactly that lesson).\n- ⚠️ **A pinned ceiling that is HIGHER than CI's is worse than none** — it would make local runs pass where CI still OOMs, which is the current defect with extra confidence attached. If the true CI ceiling cannot be established, say so rather than guessing high.\n- ⛔ Not in scope: anything about `check:dispatcher-error-vocabulary` or path derivation — that is #12850.\n\n## Re-check\n\n```\nnode scripts/pm/dispatch-gates.mjs --self-test | tail -1\n# and the gate itself, with and without an explicit ceiling:\npnpm check:type-check-debt --re-measure\nNODE_OPTIONS=--max-old-space-size=4096 pnpm check:type-check-debt --re-measure\n```\n\n⚠️ Instrument note: a local run that passes proves nothing about CI here — that asymmetry **is** the defect. Confirm against a real CI run of the step.\n\n## Provenance\n\n#12850 (the sibling item, kept separate) · #12843 (the PR that hit both) · #12772 (the p0 the patch rounds served) · #12528 (closed — the container-is-not-the-runner ruling, timings face)."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 13497,
+  "kind": "issue",
+  "title": "measure: 企业版 Middleware A 的 `organization_id` stamper 缺口——「调用点没带租户上下文」是否 ≠「行落 NULL」?(定 #13178 修复族伤害等级的唯一输入)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "security"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T14:55:09Z",
+  "updated_at": "2026-08-31T01:26:21Z",
+  "closed_at": "2026-08-31T01:26:21Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13497",
+  "body": "由维护者 2026-08-30 决裁批 #9 对 #13491 的裁定(verbatim「同意」)同笔立卡。\n\n## 任务(纯测量,不改代码)\n\n#13178 普查测出 24 个应用面写调用点真没带租户上下文,其中 4 处半修复已入队(#13178)。**伤害等级未定**,取决于一个未测事实:\n\n企业版 Middleware A(树外)在围墙(walled)部署上会 stamp `organization_id`——若它对这 24 个站点的写入路径**全部**生效,则「调用点没带」≠「行落 NULL」,伤害降为 p3(卫生问题);若存在**绕过 stamper 的路径**(非 HTTP 入口、后台任务、迁移脚本等),则对应站点是真实的 NULL 租户行风险,维持 p1。\n\n产出:\n1. Middleware A 的 stamp 生效条件与覆盖面(哪些入口路径经过它,哪些不经过);\n2. 24 个站点逐个归类:stamper 覆盖 / 不覆盖 / 判不了(判不了的说明为什么);\n3. 据此给 #13178 修复族与 #13491 已裁 scoping 的伤害等级建议,落卡评论——**定级本身回批次呈报,⛔ 本卡不改优先级标签**。\n\n## 回头条款(#13491 裁定原文承接)\n\n若测量发现**系统(isSystem)写入**也存在落 NULL 租户行的真实路径,#13491 的「isSystem 出范围」裁定回决策箱重裁。\n\nRefs: #13178(普查与 4 处半修复)· #13491(scoping 裁定)。"
+}

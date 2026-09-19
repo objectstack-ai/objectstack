@@ -1,0 +1,34 @@
+{
+  "number": 13085,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): drop the dissolved engine-lane investment-freeze parenthetical",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-29T04:42:28Z",
+  "updated_at": "2026-08-29T09:35:19Z",
+  "closed_at": "2026-08-29T09:35:17Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": "2026-08-29T09:35:17Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/13085",
+  "body": "Fixes #12672\n\n## What\n\nDrops the stale investment-freeze parenthetical from the `domain:engine` row of the pm-dispatch domain-lane table (`.claude/skills/pm-dispatch/SKILL.md`, line 266). The freeze it described (maintainer, 2026-08-05, `driver-memory` / `driver-mongodb`) was dissolved by two maintainer rulings on 2026-08-11 recorded on the #5499 anchor (comments 5249019855 and 5252526378): 「5499 解冻 mongodb 相关开发,继续全速推进」 and 「driver-memory 也解冻…」. The DROP option was chosen (PM preference): the parenthetical is deleted rather than re-dated, so the row cannot go stale on this axis again — #5499 carries its own history.\n\nPremise verified on disk before editing: the head note of `packages/spec/src/data/aggregation-conformance.ts` (lines 141-143 at this branch's base) records both lifts — \"the maintainer lifted the #5499 investment freeze for `driver-mongodb` on 2026-08-11 and for `driver-memory` later the same day\".\n\n## Before / after (the changed fragment of the `domain:engine` row)\n\nBefore (full row: 765 bytes, the file's widest table row and the seed of its ratchet pin):\n\n> `packages/drivers/driver-*`(维护者 2026-08-05 对 `driver-memory` / `driver-mongodb` 族有投入冻结指令;`formula` / `driver-sql` 不受影响)—— 车道合并(维护者 2026-08-19…)\n\nAfter (full row: 642 bytes):\n\n> `packages/drivers/driver-*` —— 车道合并(维护者 2026-08-19…)\n\nNo issue number was added to the file (id-lint pattern held: `check:pm-skill-id-lint` green below); dates and the anchor's own record carry the history.\n\n## Ratchet arithmetic\n\n| Metric | Before | After | Ceiling / pin | Headroom after |\n|:--|--:|--:|--:|--:|\n| SKILL.md line count | 1005 | 1005 | 1005 (zero-headroom) | 0 — net-0 edit |\n| Widest table row (this row) | 765 B | 642 B | pin 765 (shrink-only) | 123 B paid down |\n\nThe ratchet gate now prints the opportunistic-tighten hint (\"lower the pin to 642\"). The pin lives in the gate script `scripts/pm/check-skill-line-ratchet.mjs`; tightening it is a gate-script edit outside this card's dispatch scope, so it is reported to the PM as a follow-up instead of ridden here.\n\n## Gates\n\nDerived with `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` (9 matched families for this diff; derivation asserted against this checkout's origin and re-run after the final commit). Full union re-run at final commit `38f278a0e`; verdict lines below are quoted from that run's logs (long lines truncated at \"…\").\n\n| Gate | Exit | Its own verdict line |\n|:--|--:|:--|\n| `pnpm check:pm-skill-ratchet` | 0 | ✓ check-skill-line-ratchet: .claude/skills/pm-dispatch/SKILL.md is 1005 lines (ceiling 1005; headroom 0). · ✓ …widest table row is 642 bytes (pin 765; headroom 123). |\n| `pnpm check:pm-skill-id-lint` | 0 | ✓ check-skill-id-lint: 23 file(s) clean (pattern /#[0-9]{3,}/g). |\n| `pnpm check:skill-frame-sync` | 0 | ✓ check-skill-frame-sync: 4 copies of the decision frame are structurally isomorphic across 3 files |\n| `pnpm check:agent-test-spelling` | 0 | ✓ check-agent-test-spelling: 0 violations — 398 file(s) · 4558 bare `--` token(s) · 1223 launcher-rooted run(s) · 9 separator(s) JUDGED … |\n| `pnpm check:doc-authoring` | 0 | ✓ doc authoring guard: 13338 customer-facing string(s) across 672 spec sources clean — no internal issue-id references … |\n| `pnpm --filter @objectstack/lint run check:doc-formula-expressions` | 0 | ✓ check:doc-formula-expressions (field-level `*When`, #11407): 14 predicate(s) on a statically determinable field layer judged clean; 6 skipped as undeterminable. |\n| `pnpm check:pm-governed-merges` | 0 | ✓ check-governed-merges --self-test: 206 assertions … |\n| `pnpm check:pm-governed-prose` | 0 | ✓ check-governed-prose: 2 instruction surface(s) name all 5 registered governed surfaces … and claim no others. |\n| `node scripts/pm/check-governed-queue-guard.mjs --self-test` | 0 | ✓ check-governed-queue-guard self-test: 113 cases pass … |\n| `pnpm check:nul-bytes` | 0 | check-nul-bytes: OK (scanned 7281 text file(s) -- 7281 tracked, 0 untracked-not-ignored; skipped 7 binary; no raw ASCII control bytes). |\n\nNOT MEASURED locally, by design: the queue guard's main entrypoint reads GITHUB_EVENT_PATH (the CI workflow event payload) and refuses without it — \"⛔ Governed Surface Queue Guard: could not read GITHUB_EVENT_PATH (ENOENT…)\". Its offline `--self-test` (the runnable local form its own header documents) passed, exit 0; the real verdict lands in CI on this PR. First-pass prerequisite refusals (`@objectstack/formula`, then `@objectstack/lint` not built — \"PREREQUISITE NOT MET … Nothing was measured\") were resolved by building both, then the gate ran and passed; those refusals are not findings.\n\n## Changeset\n\nNone — `.claude/**` is on the no-release closed list; `skip-changeset` label applied at PR-open with read-back.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01MnijPVVDakqK2J335JoJtq)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01MnijPVVDakqK2J335JoJtq)_"
+}

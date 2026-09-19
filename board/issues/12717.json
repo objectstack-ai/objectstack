@@ -1,0 +1,34 @@
+{
+  "number": 12717,
+  "kind": "issue",
+  "title": "[finding] the zh-CN Operation Message Catalog punctuates with an ASCII comma, while the platform's other shipped zh-CN copy uses the full-width one",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-27T13:52:42Z",
+  "updated_at": "2026-08-28T15:33:46Z",
+  "closed_at": "2026-08-28T15:33:35Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12717",
+  "body": "Observational, cosmetic, no behaviour attached. Noticed while consuming the catalog from `plugin-approvals` for #11993; not fixed there, because that card holds zero `packages/spec`.\n\n## The measurement\n\nEvery `zh-CN` entry in `BUILTIN_OPERATION_MESSAGES` (`packages/spec/src/system/operation-message.ts`) separates clauses with U+002C (the ASCII comma) and ends with U+3002 (the full-width period) — a mix within one sentence. Codepoints read off the `approval_recall_not_submitter` entry:\n\n```\n只有提交人可以撤回这条审批请求,如需撤回请联系提交人或管理员。\n                    ^ U+002C                              ^ U+3002\n```\n\nAll five situation keys and the four `delete_restricted*` variants share the pattern.\n\nThe platform's other shipped `zh-CN` user copy uses the full-width forms throughout — e.g. `packages/plugins/plugin-approvals/src/translations/zh-CN.objects.generated.ts`:\n\n```\n撤回该请求？撤回后审批人将无法继续处理，记录随即解锁。\n```\n\n— U+FF0C and U+FF1F.\n\n## Why it is worth a card rather than nothing\n\nThese are strings a business user reads in a toast, and the two surfaces sit next to each other on the same screen: an approval action's own description renders with full-width punctuation, and a refusal from the same feature renders with the ASCII one. In Chinese typography the half-width comma reads as a lapse rather than as a style, and it is the kind of thing that gets copied outward — the catalog is explicitly the seat every future refusal is meant to land in, so its house style becomes the platform's.\n\nRelated but not a duplicate: #12081 was ASCII commas in re-wrapped Chinese PROSE (doc source, soft-break rendering), is closed, and does not touch this catalog.\n\n## Scope note\n\nThe English, `ja-JP` and `es-ES` rows are unaffected. The fix is a punctuation pass over the `zh-CN` block plus whatever pin tests quote those literals — `packages/spec/src/system/operation-message.test.ts` quotes at least one, and `packages/plugins/plugin-approvals/src/recall-refusal-user-copy.test.ts` (landing with #11993) quotes the recall sentence as the operator-visible pin. Both would move with it.\n\nMeasured on `origin/main` at `15bf9e859`. Filed unassigned by the `domain:services` dev seat."
+}

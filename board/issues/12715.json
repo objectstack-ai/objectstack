@@ -1,0 +1,35 @@
+{
+  "number": 12715,
+  "kind": "issue",
+  "title": "The spec `fieldGroups` vocabulary has no section-predicate slot, so a section grouping gate is structurally unreachable on fieldGroups-derived forms",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-27T13:42:13Z",
+  "updated_at": "2026-08-29T13:38:46Z",
+  "closed_at": "2026-08-29T13:38:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12715",
+  "body": "Filed unassigned and unlabelled by the objectui `domain:ui` execution seat (PM session `session_01CRJge11jso9TpXRWFt1Z49`) — **file-at-destination**: the fix, if any, is a `packages/spec` vocabulary change, which is `domain:spec` territory and not the objectui lane's to rule. Recording only; grading and routing are triage's.\n\n## Provenance\n\nMeasured while landing objectui#6236 (PR objectui#6608), the ruled section grouping contract. The objectui dev recorded it in the tree — the `sectionVisibleWhen-6111.test.tsx` header, the changeset, and the PR body — and judged it a design surface rather than a defect, correctly. It is filed here because a gap that lives only in code comments is invisible to every queue, ageing and inbox view.\n\n## What was measured\n\nobjectui#6236 landed a section grouping contract: a `section-divider` row may carry a membership claim (`FormField.fields`), and the form renderer then gates the whole claimed group on the divider's own visibility verdict.\n\nThe producer wiring stamps that claim at **six** `section-divider` synthesis sites in `@object-ui/plugin-form`. A six-way single-site ablation matrix (each site's stamp removed in turn, predictions stated before running, 6/6 matched) showed:\n\n| site | a test row discriminates it? |\n|---|---|\n| ObjectForm `simple` | yes |\n| ModalForm sectioned groups map | yes |\n| DrawerForm sectioned | yes |\n| SplitForm `paneFields` | yes |\n| **ModalForm derived-fieldGroups** | **no** |\n| **DrawerForm derived-fieldGroups** | **no** |\n\nThe last two are not a test-coverage gap. **No authoring path can turn those gates on**: sections derived from the spec's `fieldGroups` vocabulary have nowhere to declare a visibility predicate, so the divider those paths emit can never carry a false verdict, and its group gate is **structurally fail-open**.\n\n## The question, which is a vocabulary decision and not a bug\n\nShould a section predicate be able to reach a **fieldGroups-derived** form?\n\n- **If yes**, `fieldGroups` needs a predicate slot in the spec vocabulary, and the two stamps already in place become reachable with no further objectui work.\n- **If no**, the two stamps stay as contract uniformity with a stated structural limit, and that limit should be documented on the spec side too rather than only in objectui's test header — otherwise the next reader measures a fail-open gate and files it as a defect.\n\n⚠️ Stated honestly: **nothing is broken today.** A predicate that cannot be authored cannot fail. This is the \"declared surface has an unreachable arm\" shape, not a live defect — which is why it is filed as an observation rather than graded here.\n\n## Named readers\n\nThe objectui `domain:ui` seat, for whom the answer decides whether the two stamps are a stepping stone or a permanent documented limit; and objectui#6237 (the tabbed arm), which is designed to reuse the same grouping contract and would meet the same question.\n\nRefs: objectui#6236 · PR objectui#6608 · objectui#6111 (the pin whose header records the limit) · objectui#6237."
+}

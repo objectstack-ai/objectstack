@@ -1,0 +1,33 @@
+{
+  "number": 13161,
+  "kind": "pull_request",
+  "title": "chore(pm): unstale the release-aftercare ceiling comment in the line ratchet",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-29T06:45:50Z",
+  "updated_at": "2026-08-29T08:59:39Z",
+  "closed_at": "2026-08-29T08:59:38Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": "2026-08-29T08:59:38Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/13161",
+  "body": "Fixes #13093\n\nComment-only. The gate's predicate, every ceiling value and the `CEILINGS` data are unchanged; the gate was green before and stays green.\n\n## What was stale\n\nThe comment block attached to the `release-aftercare.md` `CEILINGS` entry carried two claims that were true when written and went stale when `landing-operations.md` was re-pinned 82 to 80.\n\nBefore:\n\n```js\n  // count (headroom 0, same convention as the entries above). Its pointer from\n  // landing-operations.md rides existing slack on that file's last\n  // MERGED-tracking line, so that ceiling stays at 82 — no re-wrap, no cut.\n```\n\nAfter:\n\n```js\n  // count (headroom 0, same convention as the entries above). It is pointed at\n  // from landing-operations.md, whose ceiling is the entry directly above and is\n  // deliberately not restated here: a live number copied into a neighbour's\n  // comment goes stale the next time that file moves — which is what happened to\n  // the arithmetic this sentence replaces.\n```\n\n## Evidence that both claims were stale\n\n**Claim 1 — \"that ceiling stays at 82\".** The gate prints the refutation on every run:\n\n```\n✓ check-skill-line-ratchet: .claude/skills/pm-dispatch/references/landing-operations.md is 80 lines (ceiling 80; headroom 0).\n```\n\nThe `CEILINGS` entry immediately above the comment reads `80`, and this file's own header already records the move — \"`landing-operations.md` moved the other way (82 → 80, its standing headroom locked in)\". The comment therefore contradicted both its neighbour and its own header.\n\n**Claim 2 — \"rides existing slack on that file's last MERGED-tracking line\".** Measured against the script's own `MAX_LINE_BYTES` (120): the pointer to `release-aftercare.md` sits on **line 49** of `landing-operations.md` at 104 bytes, while the **last** MERGED-tracking line in that file is now **line 53**. The positional claim no longer locates the pointer, and the file sits at its ceiling with headroom 0.\n\n## Why the arithmetic was dropped rather than corrected\n\nRestating a neighbouring entry's live number is precisely what made this comment stale. A corrected number would re-stale the next time `landing-operations.md` moves, so the smaller honest wording wins: the `CEILINGS` entry and the gate's per-run verdict line are both authoritative and self-updating, and the comment now points at them instead of copying them. The replacement sentence also records *why* the arithmetic is absent, so a later author does not helpfully re-add it.\n\n## Gates\n\nUnion derived mechanically with `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack`; all runs below are at commit `08caf7243`, which is this branch's head. Exit codes captured by redirect-then-capture, never through a pipe.\n\n| Gate | Trigger | Result |\n|---|---|---|\n| `pnpm check:pm-skill-ratchet` (includes `--self-test`) | gate script identity | green — `✓ check-skill-line-ratchet self-test: 111 cases pass.` |\n| `pnpm check:agent-test-spelling` | `scripts/**` | green |\n| `pnpm check:bash32-floor` | `scripts/**` | green |\n| `pnpm check:cli-command-ids` | `scripts/**` | green |\n| `pnpm check:cross-package-test-inputs` | `scripts/**` | green |\n| `pnpm check:entry-guard` | `scripts/**` | green |\n| `pnpm check:parse-guard` | `scripts/**` | green |\n| `pnpm check:pnpm-filter-targets` | `scripts/**` | green |\n| `pnpm check:watch-hint-literal` | `scripts/**` | green |\n| `node scripts/check-ci-filter-parity.mjs` | `scripts/**` | green |\n| `node scripts/check-cross-package-test-inputs.mjs` | `scripts/**` | green |\n| `node scripts/check-shard-attestation.mjs` | `scripts/**` | green |\n| `node scripts/pm/bare-root-worklist.mjs --self-test` | convention: edits a gate script | green |\n| `pnpm check:pm-dispatch-gates` | convention: edits a gate script | green |\n| `node scripts/check-published-list-mirrors.mjs` | reads the edited file | green |\n| `node scripts/check-skills-token-ratchet.mjs` | reads the edited file | green |\n| `node scripts/check-test-completeness.mjs` | `scripts/**` | **not measured locally** — CI-only |\n\n`check-test-completeness.mjs` has no pnpm wrapper and takes a turbo test log produced at runtime by the Test Core job (`node scripts/check-test-completeness.mjs \"$RUNNER_TEMP/test-core.log\"`). Invoked bare it prints its usage line and exits 1, which is an invocation error rather than a verdict, so it is recorded as not measured rather than as a pass or a failure. CI runs it with its real argument.\n\nThe last two rows are not path-derived: they are the scripts that textually reference the edited file, run because a comment change inside a gate script is exactly the kind of edit a mirror or token gate could read.\n\n## Changeset\n\nNone. `scripts/pm/**` is a repo-internal gate surface that publishes nothing, and this diff is comment-only, so the PR takes the `skip-changeset` label instead.\n\n## Scope\n\nOne file, one hunk, five lines replacing three. No ceiling value, predicate or `CEILINGS` datum is touched — including the `SKILL.md` row-pin that a later queued card will lower.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01MnijPVVDakqK2J335JoJtq)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01MnijPVVDakqK2J335JoJtq)_"
+}

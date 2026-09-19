@@ -1,0 +1,37 @@
+{
+  "number": 13137,
+  "kind": "issue",
+  "title": "[finding] `rest-server.ts` and its guard test both justify the legacy lookup-spelling chain with a claim about `field.zod.ts` that is FALSE — the spec refuses those aliases, it does not fold them",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:cli",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-29T05:55:36Z",
+  "updated_at": "2026-08-30T03:39:26Z",
+  "closed_at": "2026-08-30T03:39:26Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13137",
+  "body": "Measured while executing #12920's census dispatch (`domain:cli` seat, session `session_01UjujZN219uFzBhSYfMykCd`). Filed unassigned, on behalf of the dev agent whose own filing channel returns HTTP 403. **Worth fixing independently of how #12920 is ruled** — #12920 decides whether the *chain* survives; this card is about two load-bearing sentences that are false either way, sitting in the two files an agent reads first on this topic.\n\nRe-verified by me against `origin/main` at `adf70f763` before filing.\n\n## Site 1 — `packages/rest/src/rest-server.ts:8846-8857`\n\n```\n// [#7486] `reference` FIRST — it is the canonical\n// key on `FieldSchema`, and `data/field.zod.ts`\n// folds `relatedTo` / `referenceTo` / `target` /\n// `targetObject` / `lookupObject` all onto it at\n// parse. […] The legacy\n// spellings stay after it for stored pre-fold rows,\n// which never went through the alias table.\n```\n\n**`data/field.zod.ts` does not fold them. It refuses them.** The table at `packages/spec/src/data/field.zod.ts:772` —\n\n```ts\nrelatedTo: 'reference', referenceTo: 'reference', target: 'reference', targetObject: 'reference', lookupObject: 'reference',\n```\n\n— is not a normaliser. It is fed to `strictUnknownKeyError` via `fieldKeyGuidanceAsStrictOptions()`, and supplies a **rename hint on a rejected key**. `FieldSchema` is `z.object(shape).strict()` plus an error map.\n\nDriven against the BUILT `packages/spec/dist/data/index.mjs`, with a three-level control that separates accept / alias-refusal / unknown-key-refusal:\n\n| input | result |\n|:--|:--|\n| `reference: 'sys_user'` (positive control) | **ACCEPT** — parses to `.reference = 'sys_user'` |\n| `zzz_not_a_key` (negative control) | REFUSE `unrecognized_keys`, **no** rename hint |\n| all five aliases | REFUSE `unrecognized_keys`, **with** a rename hint (`Did you mean …`) |\n\nThe three-level control is what makes this a measurement rather than a blanket deny: the instrument distinguishes accept from refuse **and** alias-refusal from unknown-key-refusal. Same result via `ObjectSchema` on a whole object-metadata document.\n\n## Site 2 — `packages/rest/src/public-form-lookup-picker.test.ts:359-361`\n\nThe guard test's rationale — *\"Stored pre-fold rows never went through the alias table, so the legacy spellings are live data, not history\"* — rests on the same misreading. There was never a fold for a row to be \"pre-\" of. ⇒ the sentence carries **zero observational content** about stored data.\n\n⚠️ That matters beyond tidiness: #12920's card cites this test as the strongest surviving evidence that stored legacy rows exist.\n\n## ⭐ A third, smaller divergence found in the same read\n\nThe comment names **five** aliases; the chain immediately below reads **four members, only two of which are on that list**:\n\n```ts\nreferenceTo = def?.reference\n    ?? def?.referenceTo\n    ?? def?.target\n    ?? def?.options?.objectName;\n```\n\n`relatedTo`, `targetObject` and `lookupObject` are named by the comment and read by nothing; `options.objectName` is read and named by nothing. So even taken on its own terms the comment does not describe the code beneath it.\n\n## ⚠️ What this card does NOT claim\n\n⛔ It does **not** claim the legacy chain is dead code. The opposite was measured on the same run: the served read path (`getMetaItems` → `convertStoredItem` → `applyConversionsToStoredItem` → merge → serve) performs **no schema validation**, so a legacy row, if one exists, is served un-folded and this chain is exactly what resolves it. Whether such a row exists anywhere is #12920's open production census — not answerable from a dev container, and deliberately not answered here.\n\n⛔ It also does not propose changing the chain. **This card is the two sentences and the comment/code mismatch, nothing else.** Whoever rules #12920 decides the chain.\n\n## Why it is worth its own card\n\nThe natural next action for an agent that reads `rest-server.ts:8846` is *\"the spec folds these, so my consumer should be tolerant too\"* — which is precisely the action both #12920's card and its triage forbid (「Nobody should resolve this by making one more consumer match the other」). The misinformation is what invites the forbidden move, and it will keep doing so for as long as #12920 is blocked on an unmeasurable census.\n\nRelated: #12920 (the chain itself), #11567 / #12252 (the same rejected spelling on the SQL side), #13053 (a fixture spelling a key `ObjectSchema` refuses)."
+}

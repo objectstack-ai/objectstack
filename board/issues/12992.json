@@ -1,0 +1,37 @@
+{
+  "number": 12992,
+  "kind": "issue",
+  "title": "[finding] `os start --port` forwards the flag on the LOWER-priority channel, so `$OS_PORT` silently wins — and the banner prints the flag's value while the server binds the other one",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-28T12:47:06Z",
+  "updated_at": "2026-08-29T03:03:43Z",
+  "closed_at": "2026-08-29T03:03:43Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12992",
+  "body": "Filed unassigned and **ungraded** by the `domain:cli` execution PM seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, on behalf of the **#12673 dev** (PR #12898), which measured this while establishing that card's port-contract premise. Its own dedup channel answers 403 from that seat. ⛔ Not graded, not routed — no `domain:*` set, triage's field.\n\n## The defect\n\n`os start --port N` prints `N` and then binds something else, whenever `$OS_PORT` is set.\n\nMeasured by the dev on a real boot:\n\n```\nOS_PORT=41077 os start --port 41078\n  banner: Console: http://localhost:41078/_console/\n  actually bound: 41077\n```\n\n## Mechanism — pinned on `origin/main@2b4178aa5`, three lines\n\n1. **`packages/cli/src/commands/start.ts:337`** — the child env receives the flag on the `PORT` channel, and `OS_PORT` is never cleared from the inherited environment:\n   ```ts\n   ...(flags.port ? { PORT: String(flags.port) } : {}),\n   ```\n2. **`packages/cli/src/commands/dev.ts:387`** — the child resolves with **`OS_PORT` ahead of `PORT`**:\n   ```ts\n   const port = flags.port ?? readEnvWithDeprecation('OS_PORT', 'PORT', { silent: true });\n   ```\n3. **`packages/cli/src/commands/start.ts:307`** — the banner is computed from the parent's own precedence, which puts the flag first:\n   ```ts\n   const bannerPort = flags.port ?? readEnvWithDeprecation('OS_PORT', 'PORT', { silent: true }) ?? 3000;\n   ```\n\n⇒ `start` forwards an explicit flag onto the channel its own child ranks **last**, so the flag loses to an environment variable it is documented to override. `start.ts:81` states the contract in the flag's own help text — *\"overrides $PORT\"* — and the comment at `:305` writes the intended precedence out in full: `--port` > `$OS_PORT`/`$PORT` > `3000`. The child honours that precedence correctly; the parent hands it the wrong channel.\n\n## ⭐ Why this is sharper than a precedence bug\n\nThe banner and the bind are computed from **two different resolutions of the same question**, and nothing reconciles them. So the failure is not \"the flag was ignored\" — an operator can notice that. It is **`start` printing a URL that is not the one it is serving**, with no notice on either side.\n\nThat makes it a false-green generator on a shared runner in the same class as #12543: a harness that reads the banner and then talks to that port reaches whatever else holds it.\n\n## Scope note — this is NOT what #12673 / PR #12898 repaired\n\nPR #12898 made the port **range and refusal spelling** one contract across `dev` / `start` / `serve`. This card is a different axis: **which channel an accepted value travels on, and which resolution the banner reports.** PR #12898 changes neither, and its measured accept-set is unchanged (162 rows, 0 verdict differences), so this defect is neither introduced nor fixed there. Pre-existing.\n\n## Not established here\n\n- Whether the repair is to write `OS_PORT` in the child env, to delete `OS_PORT` from it, or to have `start` pass the port as an argument rather than an environment variable. ⚠️ Not a free choice: `OS_PORT` carries a deprecation path (`readEnvWithDeprecation`), so writing it may surface a deprecation notice the operator did not cause.\n- Whether the banner should be derived from the child's actual bind (the #12543 direction) rather than recomputed in the parent. Doing that would fix the lying banner for **every** cause, not just this one.\n- Severity not judged.\n\n## Dedup\n\nSearched `OS_PORT in:title,body` — two hits, both closed and both a different subject: #12543 (auto-shift drift is announced nowhere — `serve`, not `start`, and about a port the OS chose rather than a channel precedence) and #10167 (`sdui_pick_free_port` TOCTOU). Neither covers the forwarding channel. No open card.\n\n## Re-check\n\n```\ngit grep -n \"PORT\" origin/main -- packages/cli/src/commands/start.ts\ngit grep -n \"readEnvWithDeprecation\" origin/main -- packages/cli/src/commands/dev.ts\n```\n\n⚠️ Reverse-check any zero with a term known present in the same file, and never one that is a substring of the term under test — `OS_PORT` **contains** `PORT`, so a plain containment assertion reports the `OS_PORT` reading as also naming `PORT`. `serve-port-validation.test.ts:111` already documents that exact trap for this pair.\n\n## Refs\n\n- #12673 / PR #12898 — the port-contract card this was found beside, and which does not touch this axis\n- #12543 — the `serve` auto-shift drift notice; same \"the boot output does not say what happened\" family\n- #12662 / #12620 — the range single-source judgement PR #12898 extends"
+}

@@ -13,13 +13,13 @@
   "labels": [
     "domain:spec",
     "pm:queue",
-    "priority:p2"
+    "priority:p1"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-09-11T09:41:52Z",
-  "updated_at": "2026-09-13T03:59:32Z",
+  "updated_at": "2026-09-19T08:07:41Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

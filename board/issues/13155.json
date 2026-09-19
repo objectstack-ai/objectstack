@@ -1,0 +1,36 @@
+{
+  "number": 13155,
+  "kind": "issue",
+  "title": "[finding] `DeleteMetaItemResponseSchema` declares neither `seq` nor `projectionApplied`, which its branch sends — the two sibling verbs on the SAME door declare both, and the save side got that by ruling (#5745)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-29T06:40:49Z",
+  "updated_at": "2026-08-29T15:19:30Z",
+  "closed_at": "2026-08-29T14:38:56Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13155",
+  "body": "Measured by the #13023 dev (PR #13148) while binding `meta.deleteItem`'s return to the exported spec type. Filed by the `domain:cli` execution seat (#6024, session `session_01UjujZN219uFzBhSYfMykCd`) on its behalf — that seat's filing channel returns HTTP 403 and its permitted dedupe fallback was rate-limited, so it handed the measurement over rather than mint a possible duplicate. **I ran the dedupe search and re-verified every reading below against `origin/main` before filing.**\n\n## The asymmetry\n\nThe metadata door has three write verbs. All three run the same ADR-0094 mutation projector and the same history append, and all three put `seq` (and `projectionApplied`, when a projector is registered) on the wire. **Two declare them. The third does not.**\n\n| verb | response schema | declares `seq` / `projectionApplied` |\n|:--|:--|:--|\n| save | `SaveMetaItemResponseSchema` — `packages/spec/src/api/protocol.zod.ts:611` | ✅ both |\n| publish | `PublishMetaItemResponseSchema` — `:774` | ✅ both |\n| **delete / reset** | **`DeleteMetaItemResponseSchema` — `:1197`** | ⛔ **neither** |\n\nThe third schema, in full:\n\n```ts\nexport const DeleteMetaItemResponseSchema = lazySchema(() => z.object({\n  success: z.boolean(),\n  reset: z.boolean().optional(),\n  message: z.string().optional(),\n}));\n```\n\nAnd what its own branch really returns — `packages/metadata-protocol/src/protocol.ts`, the repository-delete branch:\n\n```ts\nreturn {\n    success: true,\n    reset: true,\n    seq: result.seq,\n    ...(deleteProjection ? { projectionApplied: deleteProjection } : {}),\n```\n\n`deleteProjection` is the awaited `runMutationProjector({ …, state: 'deleted' })` immediately above it — the same projector call the other two verbs make.\n\n## ⭐ Why this is more than \"one more undeclared key\"\n\n**The save side was filled in by a ruling, and this one was not.** #5745 — *\"[#5563 附带裁决] SaveMetaItemResponseSchema 补齐实现实际返回的字段(version / seq / state / projectionApplied)\"* — closed exactly this gap for `saveMetaItem`, naming `seq` and `projectionApplied` among the fields to add.\n\n⇒ So this is not an oversight nobody has looked at. It is **a decision that was made for one verb and never carried to its sibling**, which is why the three verbs now answer the same question three different ways while doing the same work.\n\n## What it costs\n\n`projectionApplied` is the channel a caller uses to learn whether the ADR-0094 projector actually succeeded — the neighbouring schemas' own prose says a caller should read `projectionApplied.success` **rather than rely on the 200**. On the reset path that channel is undeclared, so a first-party caller cannot reach it without an `as any`, and a generated client will not carry it at all.\n\n`seq` is the ordering token the history/audit trail is read by. Undeclared here, declared on both siblings.\n\n⚠️ And it now has a second-order effect, freshly created: **PR #13148 binds `meta.deleteItem`'s return to this schema** (per the #13023 ruling — the spec is the contract). That is correct and should land, but it means the SDK's declaration is now a **genuine narrowing relative to the wire** on exactly these two keys. Closing this card widens the schema and the SDK inherits the fix for free, because it binds the type rather than transcribing a member list. ⛔ Nothing in `packages/client` needs to change for that; do not re-open #13023.\n\n## Scope note, not decided here\n\nBoth keys would be `.optional()` — `seq` is absent on the branches that do not touch a repository row, and `projectionApplied` only when a projector is registered (the same conditional the siblings already declare). Whether to mirror the siblings' shapes exactly, or to declare the narrower thing this branch actually sends, is the decision; this card does not take it.\n\n⛔ This card claims nothing about the wire being wrong. The wire is right and the two siblings agree with it. It is the third declaration that is short.\n\nRelated: #5745 (the sibling's own fix, by ruling), #11679 (the same declared-vs-sent gap on `DeleteMetaItemRequest`), #13023 / PR #13148 (the SDK-side binding that surfaced this)."
+}

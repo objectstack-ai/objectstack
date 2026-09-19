@@ -1,0 +1,37 @@
+{
+  "number": 13168,
+  "kind": "issue",
+  "title": "[finding] The dissolved #5499 freeze is still asserted in the PRESENT TENSE at ~13 more in-code sites — including three design rationales that rest on it as a live constraint",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-29T06:57:14Z",
+  "updated_at": "2026-08-29T10:32:27Z",
+  "closed_at": "2026-08-29T10:32:27Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13168",
+  "body": "Found while doing #13089 (which is scoped to exactly four named sites — two pm-dispatch reference files, two in-code pin annotations). A full-tree sweep for the anchor shows the residue radius is roughly four times what that card names. #13089 is not addressed wider by this finding; it stays scoped to its four sites.\n\nDissolution evidence, on disk: head note of `packages/spec/src/data/aggregation-conformance.ts` — \"the maintainer lifted the **#5499 investment freeze** for `driver-mongodb` on 2026-08-11 and for `driver-memory` later the same day\".\n\nSwept at `56470d86b` with `grep -rn 5499 packages --include=*.ts`, CHANGELOGs excluded. Triage needs to separate three kinds, because they are NOT one repair:\n\n## A. Present-tense claims that the freeze is in force — plainly false now\n\n- `packages/objectql/src/engine.ts:4465` — \"`packages/drivers/**` is under the #5499 investment freeze, so that work is not this change's to do.\"\n- `packages/objectql/src/engine-autonumber-resync.test.ts:683` — \"`packages/drivers/**` is under the #5499 freeze\"\n- `packages/objectql/src/temporal-comparand-door.ts:60` — \"under the #5499 investment freeze\"\n- `packages/objectql/src/search-filter.ts:34`\n- `packages/objectql/src/filter-comparand-shape.ts:14` — points at \"the #5499 freeze argument\"\n- `packages/runtime/src/package-service.null-seam.test.ts:20` — \"a package whose investment is frozen (#5499)\"\n- `packages/spec/src/data/index.ts:11` — \"drivers (#5499)\"\n- `packages/spec/src/data/filter-logic-conformance.ts:179` (measurement-table cell \"no — DIVERGENT, frozen (#5499)\"), `:202` (\"two backends inside the #5499 investment freeze\"), `:212` (\"both frozen by #5499\")\n\n## B. The three that are more than stale prose — a live design rationale on a void premise\n\nThese do not merely mention the freeze; they use it as the REASON for a structural choice, so re-reading them today yields an argument whose premise is gone:\n\n- `packages/spec/src/data/filter-comparand-type.ts:29` — \"…are under the #5499 investment freeze, **so the policy cannot be grown per driver**; it is promoted here, to the face the SQL family already…\"\n- `packages/spec/src/data/filter-comparand-shape.ts:42` — \"(#5499), **so the policy cannot be grown per driver**.\"\n- `packages/spec/src/data/filter-comparand-type-conformance.ts:29` — \"This is how the **frozen drivers** (#5499) inherit the policy without a driver-local patch.\"\n\nWorth a judgement rather than a search-and-replace: promoting the policy to the spec face may well still be the right shape on its own merits, but the recorded justification is now unsound, and the next reader deciding where a comparand policy belongs will read a constraint that no longer exists. Either the rationale is restated on surviving grounds or the decision is re-opened — silently deleting the clause loses the fact that it was ever argued.\n\n## C. Dated / historical records — probably correct as they stand\n\nListed so a sweep does not \"fix\" them: they are frozen-in-time records, not present-tense claims.\n\n- `packages/runtime/src/autonumber-seed-cross-side-parity.integration.test.ts:72,76` and `packages/runtime/src/sandbox/undeclared-field-write-driver-split.integration.test.ts:87` — both quote the dated maintainer ruling 「#5499 冻结令冻的是缺陷修复投入,不禁止作参照物使用」 (2026-08-06) to justify using driver-memory as a reference implementation. The conclusion survives the dissolution; only the premise is moot.\n- `packages/objectql/src/having-filter.ts:116` — \"The #5499 freeze **was lifted** for this operator as a sanctioned one-off (maintainer ruling, 2026-08-08)\". Already past tense and dated; now merely superseded by the full 2026-08-11 dissolution rather than wrong.\n- `packages/spec/src/migrations/entries/semantic/17.aggregation-node-distinct-retired.ts:32`, `17.query-array-string-agg-retired.ts:24`, `17.driver-sql-distinct-bare-filter-typed.ts:44` — ADR-0087 retirement records, authored at their retirement date.\n\n⚠️ `packages/spec/src/migrations/registry.ts:1252,1273,1696,2797,4049` carries the same five strings but is GENERATED (`pnpm --filter @objectstack/spec gen:migration-registry`) from the `entries/` files above. Hand-editing it would be reverted by the generator and would trip `check:migration-registry`.\n\n## Note on `datasource-autoconnect.test.ts`\n\n`packages/runtime/src/datasource-autoconnect.test.ts:19` says \"surface is being retired (#5499)\" — a RETIREMENT claim, not a freeze claim. It cites the same anchor for a different proposition and needs checking on its own terms rather than being swept with the rest.\n\n## Related\n\n- #13089 — the four-site card this was found from; open.\n- #13166 — the `domain:engine` divergence split out of #13089's sites 3-4, which is what `filter-logic-conformance.ts:179` above is the table cell for.\n\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 12915,
+  "kind": "issue",
+  "title": "17.1-era artifacts carrying bare-root form-view predicates silently degrade on 17.2: unbound root faults open, conditionally-hidden fields render and their `required: true` dead-ends console record creation — no ADR-0087 conversion covers the predicate-root move",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-28T08:32:02Z",
+  "updated_at": "2026-08-28T14:48:16Z",
+  "closed_at": "2026-08-28T14:48:16Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12915",
+  "body": "Found during the post-merge browser dogfood of PR #12843 (2026-08-28, isolated-posture epic #12701 aftercare). Filed by PM session `local_6f4b2700-a5fd-43ae-98a2-65e25e1dfe95`. Dedupe: searched requiredWhen/visibleWhen family in objectstack and objectui — the objectui conditional-rule cards (objectui#4161/#5627/#6261, all closed) fix evaluator plumbing, none covers the artifact-era root move; no objectstack card names a predicate-root conversion.\n\n## Reproduction (real machine, real artifact)\n\n- Runtime: merged `main` (contains #12843's versioned forward-conversion door), `os serve -p 4712` with `OS_ARTIFACT_URL=file://<hotcrm>/dist/objectstack.json` — a REAL artifact built 2026-08-05 by released `@objectstack/cli` 17.1.0 (hotcrm v2.2.2, `engines.protocol ^17.0.0-rc.1`).\n- Boot is green — the #12843 door converts 6 conversion families / 215 sites, permission tombstones included. #12843 itself works as shipped.\n- In the console: HotCRM → 线索 → 新建, fill only the four genuinely-required fields (name/company/email; status stays `new`) → submit is BLOCKED: 未通过原因 (disqualification_reason), 重复于 (duplicate_of_type), 重复的线索 (duplicate_of_lead) are rendered and flagged required.\n- Same payload POSTed to `/api/v1/data/crm_lead` from the same session: **201 Created**. Server-side validation is correct; the dead-end is client-side and metadata-era-induced.\n\n## Mechanism — each step measured\n\n1. The 17.1 artifact authors form-view entries as `{\"field\": \"disqualification_reason\", \"required\": true, \"visibleWhen\": {\"dialect\": \"cel\", \"source\": \"status == \\\"unqualified\\\"\"}}` — bare identifier root, the era's working spelling (hotcrm v2.2.2 ran fine on 17.1 with it).\n2. The CURRENT contract binds form-field predicates to the `record.` root and declares the fail-mode: \"a bare identifier is unbound and faults open\" (`packages/spec/src/ui/view.zod.ts:1981`).\n3. So on 17.2 the predicate faults open → the conditionally-hidden field renders → its unconditional `required: true` (authored to be gated by visibility) blocks every create.\n4. hotcrm's own sources were later migrated to `record.`-root spellings (`src/views/lead.view.ts:10,36,90` on current hotcrm main documents exactly this fail-open) — which is why only ALREADY-BUILT artifacts exhibit the degradation. This is the #12772 shape one layer up: the artifact parses now, but a semantic surface the era legally authored is silently broken.\n\n## Why this lands here (not objectui, not hotcrm)\n\nThe pinned console behaves per the current contract (fault open — and the loud-rejection precedent for unbound roots is the 2026-08-27 `features.*` ruling recorded on view.zod.ts). The era-compatibility fix surface is the ADR-0087 conversions registry in `packages/spec`: a versioned conversion rewriting bare-identifier form-view predicate roots to the `record.` root for artifacts whose declared floor predates the root move. **The rail for applying it already exists**: PR #12843's `applyArtifactForwardConversions` replays the registry (retired entries included) at every framework artifact door, keyed off the artifact's declared floor — a new registry entry plugs straight in, M2-return semantics preserved by the same versioned-window rule.\n\nOpen design point for triage/spec seat: the rewrite needs a field-name-aware guard (only prefix identifiers that name fields of the view's object; leave `has(...)` args and non-field identifiers alone), and a ruling on whether fault-open for still-unconverted spellings should become loud like `features.*`.\n\n## Impact\n\nAny pre-move artifact using the visibility-gated-required authoring pattern dead-ends record creation in the console UI for those objects (API unaffected). For the single-DB SaaS posture this is tenant-facing: a tenant admin cannot create a lead through the UI on an artifact-deployed hotcrm of that era."
+}

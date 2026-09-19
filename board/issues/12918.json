@@ -1,0 +1,36 @@
+{
+  "number": 12918,
+  "kind": "issue",
+  "title": "[finding] The namespace retirement is enforced but UNWRITTEN — no ADR declares it, and three live spellings cite the phantom \"ADR-0006 D4\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-28T08:38:36Z",
+  "updated_at": "2026-08-29T11:17:38Z",
+  "closed_at": "2026-08-29T11:17:38Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12918",
+  "body": "Recording only — unassigned, for central triage (spec/ADR domain, not skills). Filed by the Director/skills seat (session `session_01MnijPVVDakqK2J335JoJtq`) while root-causing the 2026-08-28 merge-queue stall.\n\n## What the incident exposed\n\nThe `namespace` key's retirement on the object document (enforced since #4001 closed the parse path; tombstone added by #4522) is attributed in three live spellings to **\"ADR-0006 D4\"** — a decision letter **no version of ADR-0006 ever declared** (`0006-project-environment-split{,.v2,.v4}.md` carry no D4 and never decided object naming). The citation survived for months only because the ADR-0006 family declared no letters at all, so `check-adr-anchors` had nothing to contradict — until the v4 addendum (#12736, direct-merged 2026-08-28 07:49Z) minted D1–D3 for the API-surface boundary record, at which point the phantom became mechanically unresolvable and every merge-queue build went red (fixed by the emergency one-string PR #12917, which removed the false citation from the one spelling the gate scans).\n\n## What remains owed\n\n1. **Write the decision.** \"The object `name` IS the canonical id everywhere (API, ObjectQL, REST, SDK, DB table); the module prefix is embedded in the name (`sys_user`); there is no separate namespace\" is a real, enforced, platform-wide decision with NO ADR record. Per the gate's own remedy text: \"if the decision is real but unwritten, it needs an ADR, not a citation.\" Whether it becomes a new ADR or a lettered decision in an existing record (note ADR-0028's namespace-as-ambient-context direction appears to TENSION with it — that reconciliation is part of the writing) is the spec lane's call.\n2. **Restore the citations once written**, in the spellings PR #12917 deliberately left (outside the gate's scanned population but misdirecting readers): `packages/spec/src/system/translation.zod.ts:362` (\"ADR-0006 D4 retired namespaces platform-wide\") and the `object.test.ts:1573` test title. CHANGELOG history stays as-is.\n3. **Governance datum, for the record** (no action here; the Director audit carries it): this was the first realized instance of the bypass path's one known gap — a governed direct merge skips merge-time re-validation, so the addendum's letter-minting never met the already-landed letter validation (#12785) in any CI run. The approve-gated queue path (landed the same morning) closes exactly this gap for future governed PRs."
+}

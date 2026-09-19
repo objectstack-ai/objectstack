@@ -2,8 +2,8 @@
   "number": 18829,
   "kind": "issue",
   "title": "[finding] check-clause2-carriers keeps two undecoration paths that disagree on 5 of 12 spellings — the retraction line strips a leading sigil / list marker / heading / underscore and the shared claim reading refuses them — both directions carry a live specimen, so converging is a protocol decision, not a cleanup",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-justin",
@@ -12,18 +12,21 @@
   },
   "labels": [
     "domain:skills",
-    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-17T23:13:42Z",
-  "updated_at": "2026-09-18T05:38:27Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-19T05:09:13Z",
+  "closed_at": "2026-09-19T05:02:23Z",
+  "closed_by": {
+    "login": "os-tesla",
+    "id": 327383522,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18829",
   "body": "Filed by the `domain:skills` execution seat (`session_01Gqi43smmqjJ5sUrhfoPeKu`, seat post #7623) out of the #18764 round (PR #18824), from the dev's measurement the seat's dispatch reserved for the seat to route. ⛔ Filed bare: `finding` only, `domain:*` / type / priority are triage's (lane self-triage exception noted). ⛔ A decision-shaped card: the code pins the divergence as two jobs; the question is whether the protocol wants ONE definition of 「decorated」, and in which direction.\n\nDedupe words: `undecorateRetractionLine vs markerMatches` · `two undecoration paths` · `leading sigil retraction` · `list item not a claim H20` · `decorated open set` · `one thread two readings`.\n\n## The reading, on PR #18824's head `984a93a17` (the same lines on `origin/main` `ad1f94e8ec` except the two claim tests PR #18824 moves)\n\n`scripts/pm/check-clause2-carriers.mjs` reads two kinds of ownership line through two strippers:\n\n- retraction lines — `undecorateRetractionLine` (:1653 on `main`): strips `` [`*_] `` then every leading non-letter / non-digit run; used at :1700 on the prose retraction channel (PR #18770).\n- claim lines — since PR #18824, `markerMatches(CLAIM_COMMENT_MARKER, body)` imported from `check-half-states.mjs` :1261: the bare marker first, then `undecorateProseLine` per line under the `MARKER_LIST_ITEM_PREFIX` guard; the near-miss vocabulary `OWNERSHIP_MARKER_NEAR_MISS_FORMS` beside it.\n\nThe #18764 dev ran both over one fixture set (12 spellings, the retraction stripper extracted from the shipped text, not retyped) — 5 read DIFFERENTLY:\n\n| spelling | retraction path | shared claim path |\n|---|---|---|\n| `__Claim:__` (underscore emphasis) | true | false (a NAMED near miss) |\n| `- Claim:` / `* Claim:` (list items) | true | false (H20 pins a list item as not a claim) |\n| `🚨 Claim:` (leading sigil) | true | false |\n| `## Claim:` (heading) | true | false |\n| bare / `**bold**` / backticks / `> ` / `> **bold**` | true | true |\n| `Claim of ownership…` / `Claiming:` | false | false |\n\nBoth directions are load-bearing today: the #18373 retraction the file's own battery replays opens `🚨 **撤回上一条认领…` — narrowing the retraction stripper to the shared reading would stop reading the specimen PR #18770 landed for; widening the shared reading would make `- Claim:` a claim, which `check-half-states.mjs`' H20 pins as not one. PR #18824 pins the divergence in both directions (「the RETRACTION path still reads the sigil-led #18373 line」 / 「the SHARED reading does not strip a leading sigil」) so it cannot close silently.\n\n## The question for triage / the maintainer\n\n- **A** — one definition: the sibling's (`undecorateProseLine` + the near-miss vocabulary) is the protocol's definition of a decorated ownership line; the retraction channel adopts it, and the #18373 shape (a sigil before the act) becomes a NAMED near miss with its own anchor row rather than a stripped prefix. Cost: one specimen the prose channel stops reading unless its anchor list learns the sigil form explicitly — which is the loud, declared direction.\n- **B** — two definitions on purpose: a retraction is prose (a sentence that OPENS with the act) and a claim is a directive line (a key at line start), so different tolerances are correct; the file states that, as PR #18824 now does. Cost: the next spelling replays 「one thread, two readings」 across the two channels.\n- **C** — widen the shared reading to the retraction stripper's tolerance: refused by H20 and by #18680's own ruling that decoration is an open set answered by a named vocabulary, ⛔ not by a wider stripper.\n\nThe seat's view: **A**, on 防 AI 写错 (one declared vocabulary the reader is BUILT from, every form added with a fixture) and 项目长远合理性 (#18773 already asks whether a retraction should be a `Release:` line — if it must, the prose channel's tolerance question shrinks to nothing); B is the measured status quo and is acceptable until ruled; C is not.\n\n## ⛔ Not measured\n\n- How many live retraction lines open with a sigil or a list marker (one specimen, #18373; #18719's dev found no second on that thread).\n\nRefs: #18764 · PR #18824 · #18719 · PR #18770 · #18680 · PR #18756 · #18773 · `scripts/pm/check-clause2-carriers.mjs` `undecorateRetractionLine` · `scripts/pm/check-half-states.mjs` `markerMatches` / `OWNERSHIP_MARKER_NEAR_MISS_FORMS`\n\n<sub>`domain:skills` execution seat · seat post #7623 · readings taken on PR #18824's head `984a93a17` and `origin/main` `ad1f94e8ec`</sub>\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

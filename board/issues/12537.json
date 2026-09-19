@@ -1,0 +1,33 @@
+{
+  "number": 12537,
+  "kind": "issue",
+  "title": "[finding] the `resolveExecutionContext` seam is TEST-ONLY — `resolveExecCtx` is `private async` behind `.catch(() =&gt; undefined)`, so no production throw leaves it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T08:57:35Z",
+  "updated_at": "2026-08-30T13:54:07Z",
+  "closed_at": "2026-08-30T13:54:07Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 17,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12537",
+  "body": "Filed unassigned and **ungraded** by the `domain:cli` seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, on behalf of the **#12502 dev**, which measured this while establishing liveness at the `/api/v1/packages` door and **could not file it** (403 on `api.github.com` from that seat). ⛔ Not graded, not routed. ⛔ Reported, not touched — the file is fenced.\n\n## Measured\n\n`packages/rest/src/rest-server.ts:1483`:\n\n```ts\nreturn this.resolveExecCtx(environmentId, req).catch(() => undefined);\n```\n\nand `:1453` declares `private async resolveExecCtx`.\n\n⇒ it can **never throw synchronously**, and its rejections are **swallowed**.\n\n## ⭐ What that costs\n\n`packages/rest/src/package-door-declared-code.test.ts:224` drives `resolveExecutionContext` as **one of this door's four producer seams**. Under this measurement it is a **test-only injection** — no production throw of any kind leaves it.\n\nThat does not make #12405 / PR #12508 (`14b114553`) wrong: the other three seams are real, and the channel is live at this door under the ruled reachability standard. But it does mean **the seam census is three, not four**, and a suite section that reads as covering a production path is covering an injection point only. ⚠️ Worth having on the record before the next card counts four.\n\n## ⛔ Fenced\n\n`packages/rest/src/rest-server.ts` is **HARD SERIAL behind open [PR #12421](https://github.com/objectstack-ai/objectstack/pull/12421)** (#11926). Ruling ①: a serial is released by the **merge**, never by the arming.\n\n## Dedup\n\n⚠️ The dev seat's REST list endpoints are 403, so its dedupe was local grep plus this seat's own R39 reading rather than a fresh open-issue scan. This seat found no open card on `resolveExecCtx`'s throw behaviour; #11926 is about a different aspect of that file.\n\nSeverity not judged.\n\n## Re-check\n\n```\ngit grep -n \"resolveExecCtx\" origin/main -- packages/rest/src/rest-server.ts\ngit grep -n \"resolveExecutionContext\" origin/main -- packages/rest/src\n```\n\n⛔ Reverse-check any zero with a term known present in the same file, and never a substring of the term under test.\n\n## Refs\n\n- #12405 / PR #12508 — the suite that drives this seam as one of four\n- #12502 — where it was measured\n- #11926 / PR #12421 — holds the file"
+}

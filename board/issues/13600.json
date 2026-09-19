@@ -1,0 +1,34 @@
+{
+  "number": 13600,
+  "kind": "pull_request",
+  "title": "docs(docs-audit): state the recall denominator in both headers",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T02:52:04Z",
+  "updated_at": "2026-08-31T03:23:55Z",
+  "closed_at": "2026-08-31T03:23:53Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-31T03:23:53Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/13600",
+  "body": "Fixes #13306\n\n## What\n\nWrites the recall-denominator definition into both places a reader would look for it, per the maintainer's 2026-08-31 ruling in #13306:\n\n- `scripts/docs-audit/affected-docs.mjs`'s header (the authoritative half, right after the existing `Scope:` line)\n- `.github/workflows/docs-drift-check.yml`'s header (a short cross-reference, since it already documents a *separate* structural-invisibility class from #11356/#11357 and previously said nothing about the denominator)\n\nNo behavior change. No new recall figure is computed by this PR — the one figure cited is the already-measured, dated reading from #13306's own investigation (31 of 46 ground-truth entries were `content/docs/references/**` pages), used only as evidence for *why* the denominator must be the tool's declared corpus, not as a live metric.\n\n## Why (the substance, not just \"excludes generated pages\")\n\n`affected-docs.mjs` excludes `content/docs/references/**` **by construction** — those pages are auto-generated and never hand-edited, so telling an author \"you may have affected this page\" would be *wrong advice*, not missing advice. Therefore any recall ratio computed with **all `content/docs` edits** as the denominator is not measuring this tool at all — it measures how often the docs generator happened to run inside the sampling window (#13306 measured this moving by a factor of 2.7 just from widening the sample window: 17.4% → 6.5%, same tool, same method). The denominator has to be **the corpus the tool claims to cover**.\n\n`docs-drift-check.yml`'s header already records a *different* invisibility class (a page already in scope that still goes unlisted because it restates a rule without naming what the tool anchors on — #11356/#11357) and already states the check is advisory-only. This PR adds the other half — the denominator statement — and points the two files at each other so they compose instead of each stating their own thing, per the dispatch's Zone 3 suggestion.\n\n## Fences respected\n\n- Did **not** widen the corpus to include generated pages — that would trade a real regression (bad advice on unowned pages) for a better-looking number, which is exactly what the ruling forbids.\n- Did **not** re-open measurement or produce a new recall figure.\n- No bare number that rots: the one number cited (31/46) is tied to a method and a date, with a pointer to #13306 for the full derivation, not asserted as a constant truth about the tool.\n- `content/docs/releases/**` untouched.\n\n## Zone 2 (PM mechanism hypotheses) — results\n\n- **H1 confirmed**: the two headers were adjacent-but-non-composing. `affected-docs.mjs` already had a `Scope:` line (the corpus) but never framed it as a *recall denominator*, and `docs-drift-check.yml` documented structural invisibility without ever mentioning a denominator at all. Both are read before writing, and both are now cross-referenced (see the docs-drift-check.yml addition) rather than restated independently in full.\n- **H2 confirmed**: no executable assertion pins either header's *text*. `affected-docs.mjs --self-test`, `check-audit-scope.mjs --self-test`/run, `check-affected-docs.mjs`, and `check-drift-comment.mjs` all pin *behavior* (the corpus enumeration, the anchor derivation, the comment's rendered wording for what the run could/couldn't see) — none of them read or assert on this header comment block. So the denominator is documentation-only right now; it is not mechanically derived from a single source of truth, and this wording is the thing that must not drift.\n\n## Tests\n\nComment-only change to two files — no production behavior touched, so no build/test face is owed beyond confirming the edit didn't disturb anything the surrounding self-tests pin. All run in the worktree after `pnpm install`:\n\n- `node scripts/check-nul-bytes.mjs` on both files — clean; `grep -naP '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f]'` on both — no hits.\n- `python3 -c \"import yaml; yaml.safe_load(open('.github/workflows/docs-drift-check.yml'))\"` — parses.\n- `node scripts/docs-audit/affected-docs.mjs --self-test` → `✓ affected-docs self-test: 487 cases pass.`\n- `node scripts/docs-audit/check-audit-scope.mjs --self-test && node scripts/docs-audit/check-audit-scope.mjs` → both green (189 hand-written docs, 9 release-owned pages).\n- `node scripts/docs-audit/check-affected-docs.mjs` → exit 0 (the workflow's own self-test step).\n- `node scripts/docs-audit/check-drift-comment.mjs` → `✓ check-drift-comment: 56 cases pass across 5 fixture diff(s).`\n- Full derived gate family via `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` against the actual 2-file diff (not the dispatch prompt's list) — 29 matched families + 2 convention-triggered ones for editing a gate script. All run, all green (exit codes captured before any pipe): `check:agent-test-spelling`, `check:bash32-floor`, `check:cli-command-ids`, `check:cross-package-test-inputs`, `check:docs-audit-scope`, `check:entry-guard`, `check:node-version`, `check:parse-guard`, `check:pm-governed-merges`, `check:pnpm-acquisition`, `check:pnpm-filter-targets`, `check:required-contexts`, `check:shard-attestation`, `check:stall-guard-budget`, `check:watch-hint-literal`, `check:workflow-status-functions`, `check-aggregator-roster.mjs`, `check-ci-filter-parity.mjs`, `check-whole-set-label-write.mjs`, `pm/ci-failure.mjs --self-test`, `pm/bare-root-worklist.mjs --self-test`, `check:pm-dispatch-gates`.\n- No changeset: this diff edits comments only, in `scripts/docs-audit/**` and a workflow header, publishes nothing from any package. `skip-changeset` label applied.\n\n## PR relationship\n\n`Fixes #13306` — this PR is the dispatch's own closing condition: \"the deliverable is the two headers' wording.\" #13471 (the `SCREAMING_SNAKE` literal-anchor gap) is independent and intentionally not touched here, per the ruling.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01Pk26oZ12t5N1hwGW1m1MgC)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Pk26oZ12t5N1hwGW1m1MgC)_"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 12993,
+  "kind": "issue",
+  "title": "[finding] The SMTP port bound 1-65535 is hand-written three times across two packages — the enforcement, its own message text, and the settings form can drift apart",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-28T12:47:30Z",
+  "updated_at": "2026-08-29T10:55:50Z",
+  "closed_at": "2026-08-29T10:55:50Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12993",
+  "body": "Filed unassigned and **ungraded** by the `domain:cli` execution PM seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, on behalf of the **#12673 dev** (PR #12898), whose dedup channel answers 403. ⛔ Not graded, not routed — no `domain:*` set, triage's field. This is the **same defect class** #12673 repaired for the CLI listen port, in a different family.\n\n## Measured on `origin/main@2b4178aa5`\n\nThree independent hand-written spellings of one bound:\n\n| # | site | what it is |\n|---|---|---|\n| 1 | `packages/plugins/plugin-email/src/transports/smtp.ts:113` | the enforcement — `port < 1 \\|\\| port > 65535` |\n| 2 | `packages/plugins/plugin-email/src/transports/smtp.ts:114` | the **message text**, which re-spells the same range as a literal: `(expected 1-65535)` |\n| 3 | `packages/services/service-settings/src/manifests/mail.manifest.ts:74` | the settings form's bound — `min: 1, max: 65535` |\n\nSites 1 and 2 are adjacent lines, which is the cheapest possible drift: changing the check without changing the sentence produces a refusal that misstates its own rule, and nothing fails.\n\n## Why it is worth a card rather than a shrug\n\nThis is the exact shape #12673 was opened for and PR #12898 repaired for the CLI listen port: one contract, several doors, each door re-spelling the bound. There the repair was a single shared module (`packages/cli/src/utils/port-contract.ts`) owning the constants, the reader and the notices, with a test pinning that **exactly one** declaration of the range exists.\n\nHere the two packages are in different layers (a transport plugin and a settings manifest), so the shared-module answer may not transfer unchanged — which is why this is filed as a finding rather than folded into PR #12898.\n\n⚠️ **The bounds are deliberately NOT the same as the CLI's, and a fix must not \"unify\" them.** The CLI listen range floors at **0** (port 0 means *let the OS choose*); the SMTP bound floors at **1**, because 0 is not a destination you can connect to. PR #12898's body records this distinction explicitly. A repair that collapses both onto one constant would silently make `0` a legal SMTP port.\n\n## Not established here\n\n- Which layer should own the shared bound, or whether the settings manifest should derive from the transport rather than the reverse.\n- Whether the message text should be generated from the constants (removing site 2 as a construct) or merely tested against them (leaving it to be remembered). ⭐ The first is strictly stronger — it deletes the drift instead of checking for it.\n- Severity not judged. Nothing here is currently wrong on the wire; the three numbers agree today. This is a drift-surface card, not a bug report.\n\n## Dedup\n\nSearched the repo for an existing card on the SMTP port bound and on shared numeric-bound duplication; the only adjacent open work is #12673 / PR #12898, which is the CLI listen port and explicitly scoped away from this family in its own body. No open card covers the SMTP bound.\n\n## Re-check\n\n```\ngit grep -n \"65535\" origin/main -- '*.ts'\n```\n\n⚠️ **Path precision matters here and cost this seat a false zero.** The plugin lives at `packages/plugins/plugin-email/`, **not** `plugins/plugin-email/`; a scan pinned to the latter returns a clean, entirely convincing zero from a directory that does not exist. Reverse-check any zero with a term known present in the same corpus. Note also that `65535` legitimately appears in `packages/drivers/driver-sql` as a **MySQL row-byte budget** — a different contract, not a fourth copy of this one.\n\n## Refs\n\n- #12673 / PR #12898 — the same defect class, repaired for the CLI listen port; carries the shared-module shape and the floor-0-vs-floor-1 distinction"
+}

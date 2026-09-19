@@ -1,0 +1,36 @@
+{
+  "number": 13405,
+  "kind": "issue",
+  "title": "[security] datasource credential in a nested config position is served in cleartext on read — redaction is top-level-key-only",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T09:55:40Z",
+  "updated_at": "2026-08-31T04:42:17Z",
+  "closed_at": "2026-08-31T04:31:00Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13405",
+  "body": "## Existence (reproduction withheld pending maintainer)\n\nA datasource credential placed in a **nested** config position (not the top-level credential key) is accepted at the runtime admin door and then **served in cleartext through the datasource read doors** (`GET /api/v1/datasources/:name` and `GET /api/v1/meta/datasource`), with `hasSecret:false` / `redactedConfigKeys:[]`. The equivalent credential at the **top-level** key is correctly refused at publish and redacted on read — so the redactor is top-level-key-only and does not descend into nested config objects. Observed across all three replicas of a live multi-node deployment; the meta-registry entry propagates cluster-wide at create time.\n\nPer the maintainer disclosure ruling (2026-08-18, #9387) and RUNNER protocol rule 2's carve-out, **the reproduction, the exact nested position, and the request bodies are NOT published here or anywhere on GitHub.** They are held in the QA runner session and available to the maintainer directly. Existence published, recipe withheld, is a complete and actionable report.\n\n## Why this is distinct from prior art\n\n- **#9040 / #9124** established read-side redaction for mongo passthrough secrets; #9124 explicitly notes read is redacted since #9040 and only the *store-side* half was open. This finding is that read redaction **does not hold** for the nested position — a live gap on the read boundary, not the at-rest half.\n- **#7990** flags `sys_metadata.metadata` as a general cleartext sink for inline credentials in authored artefacts; this is the datasource-admin-door + read-door manifestation, where the refusal/redaction that works for the top-level key is absent for the nested one.\n\n## Verification\n\nIndependently reproduced twice by two separate QA agents (original run + a dedicated rule-7 verify-pass), each from its own fixtures, with the top-level position as the negative control (correctly refused). No cross-tenant read was involved — the exposure is on the authoring tenant's own read path. All planted secrets were scrubbed after each run (verified absent from every door on every replica).\n\n## Suggested direction\n\nMake the read-side redactor (and the publish-time inline-credential refusal) recurse into nested config objects, so the nested position is treated identically to the top-level key it mirrors. A second-order cleanup gap was also seen: datasource `DELETE` clears the admin/detail-door registry but does not evict the `/api/v1/meta/datasource` in-memory metadata registry cluster-wide (create broadcasts, delete does not mirror), which prolonged the exposure until the entry was scrubbed.\n\nQA-source: #13404 · integration-system.datasource-credential-refusal-matrix · clauses 1,3"
+}

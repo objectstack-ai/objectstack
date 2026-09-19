@@ -1,0 +1,30 @@
+{
+  "number": 12910,
+  "kind": "issue",
+  "title": "check:adr-anchors is red on every PR: the namespace tombstone cites ADR-0006 D4, which no revision of ADR-0006 records",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-28T08:08:40Z",
+  "updated_at": "2026-08-28T13:05:04Z",
+  "closed_at": "2026-08-28T10:30:53Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12910",
+  "body": "Since PR #12736 merged (2026-08-28), `check:adr-anchors` exits 1 on EVERY PR: the `namespace` tombstone message in `packages/spec/src/data/object.zod.ts` cites \"ADR-0006 D4\", and ADR-0006 — which declared no decision letters when the citation was written — now declares a real letter index (D1, D1.1–D1.3, D2, D3) with no D4, flipping the soft cannot-verify into a hard failing assertion. Discovered during #12867 (its dev proved the red pre-exists that branch byte-identically; escalation recorded on #12786, comment 5450025028).\n\nMeasured facts (2026-08-28, origin/main):\n\n- The failing citation is the `namespace` tombstone string: \"`namespace` was retired in ADR-0006 D4 — the object `name` IS the canonical id everywhere…\" (also cites #4001 for closing the parse path).\n- No revision of ADR-0006 (v1–v4) records retiring the object-schema `namespace` key at all: every `namespace` hit in the v4 file is about code-identity tables or the SDK method namespace. So this is not a simple D4→v4 respell — the cited provenance appears to be wrong, not just misindexed.\n- Impact: the gate is advisory (not in the six required contexts) but red on every PR, so every lane's every-check-green enqueue discipline now needs a manual disposition per PR until fixed. Three draft PRs parked for the ADR-0006 D2 coordinated window (#12885, #12908, cloud#1692) hit it at enqueue time — tracked as a window blocker on epic #12865's checklist.\n\nFix shape (for the spec seat — this file is packages/spec territory): locate the true provenance of the namespace-key retirement (an ADR that actually records it, or the retirement PR/issue) and respell the citation; if no record exists, drop the ADR reference from the tombstone and keep the concrete #4001 pointer. ⛔ Do NOT mint an ADR-0006 D4 to green the gate — manufacturing a decision letter to satisfy a checker is the defect class the gate exists to catch (#12867's dev declined exactly this).\n\nRefs: #12786 (the broad letters audit finding this regression escalates), PR #12736 (the merge that armed the assertion), epic #12865 (consumer of the fix at its landing window).\n"
+}

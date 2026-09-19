@@ -1,0 +1,33 @@
+{
+  "number": 13473,
+  "kind": "pull_request",
+  "title": "fix(pm-dispatch): gate the worktree-rescue step with the three adjudicated fences",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T14:03:38Z",
+  "updated_at": "2026-08-30T14:34:54Z",
+  "closed_at": "2026-08-30T14:34:53Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-30T14:34:52Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/13473",
+  "body": "Fixes #12637\n\nWrites the three adjudicated fences from the card's 2026-08-28 grading (取卡者围栏, 缺一不可) into the standing worktree-rescue step of the stale-claim reclaim passage, `.claude/skills/pm-dispatch/SKILL.md` (passage now lines 553-562; anchor `INCOMPLETE AND UNREVIEWED` re-derived on merged main `c38b7eff7` at :556 before editing). `dispatch-runbook.md` untouched — no split was needed.\n\n## The three fences, and where each landed\n\n1. **存活前置 (liveness precondition)** — new lines 555-557: before committing into any dispatch worktree, any actor first passes a liveness/ownership check or an explicit age threshold on the worktree's newest mtime; GitHub-side silence alone is never grounds. Faithful add: the evidence-not-death rationale — zero commits / zero pushes / no PR are the identical signals for a working-but-unpushed seat; 「未提交改动是在飞工作的证据,不是死亡的证据。」\n2. **消息边界 (message boundary)** — new line 560: the rescue WIP message states only rescuer-observables (dirty paths / line counts / sha); 「⛔ 不写席位行为的现在时断言。」 The standing `INCOMPLETE AND UNREVIEWED` header stays, now explicitly scoped on line 559: 「抬头限救树者行为,保留」.\n3. **误伤补救 (mis-hit remedy)** — new line 562: a rescue that hits a live seat is corrected additively by that seat, in the PR body, never by history rewrite; faithful add: the reason spelled inline (dev 禁 force-push).\n\nThe one sanctioned in-passage deletion (per the R1 PM disposition, option A, 2026-08-30T07:16Z): the last-line-of-defense rationale clause 「死在编辑中途的 dev 没来得及自己 WIP 推,这一步是最后防线」 (79 bytes at line 557 pre-edit) — its dev-already-dead premise is exactly what fence 1 corrects. Everything else in the passage is preserved verbatim, including 「续派者 diff 它,⛔ 不无审续建」 and 「有带提交活分支的认领永不回收」. No ceiling change, no re-wrap-as-funding (2026-08-17 ruling), no unrelated deletions. Faithful (+4) spelling chosen over the floor (+2) per the dispatch's preference: this is protocol text about honest evidence bounds, and the two faithful adds are the rationale and the no-force-push note.\n\n## Line budget\n\n| file | before | after | ceiling | headroom after |\n|---|---|---|---|---|\n| .claude/skills/pm-dispatch/SKILL.md | 943 | 947 | 1005 | 58 |\n| references/dispatch-runbook.md | 271 | 271 (untouched) | 278 | 7 |\n\nNet +4 lines (8 insertions, 4 deletions), inside the headroom freed by #13389. Every touched line is 116 bytes or less (widest new line: 116).\n\n## Gates — union run at final commit `01769913b`, clean tree, exits captured by redirect-then-capture\n\nDerived with `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` in the worktree (change set: exactly this one file). All nine matched families:\n\n- check:pm-skill-ratchet — exit 0 — verdicts: 「.claude/skills/pm-dispatch/SKILL.md is 947 lines (ceiling 1005; headroom 58).」 and 「widest table row is 642 bytes (pin 642; headroom 0).」\n- check:pm-governed-prose — exit 0 — 「2 instruction surface(s) name all 5 registered governed surfaces … and claim no others.」 (pinned region untouched)\n- check:pm-skill-id-lint — exit 0 — 「23 file(s) clean」\n- check:skill-frame-sync — exit 0 — 「binding sentence present in all 4; 4 count mention(s) agree」\n- check:agent-test-spelling — exit 0\n- check:doc-authoring — exit 0 — 「831 pinned site(s) … no growth, no burn-down unrecorded.」\n- check:doc-formula-expressions — exit 0 — 「57 cases passed」 + three clean sweeps (needed `@objectstack/formula` and `@objectstack/lint` built first; the first two runs printed the gate's own PREREQUISITE NOT MET banner — not-measured, not red)\n- check:pm-governed-merges — exit 0 — 「--self-test: 230 assertions」 + live generator certification\n- check-governed-queue-guard — CI-context only: locally it refuses with 「could not read GITHUB_EVENT_PATH」 by design (it judges the workflow event payload); it runs at queue time in governed-surface-guard.yml\n- check:nul-bytes — exit 0 (owed on any edit)\n\nStale-tree note: origin/main advanced to `d38ad7fc5` during the run (three commits); none touches `.claude/skills/pm-dispatch/` or any matched gate script, so the family list and the budget arithmetic stand. Base refresh before the human merge is the PM's landing step per the grading.\n\n## Reverse verification (fix committed first; both restores proven by hash equality against the HEAD blob plus empty `git diff HEAD`)\n\nThe gate reads the source file directly from the working tree (no dist, no exports resolution), so no build leg applies; each mutation was proven on disk before reading the gate (marker grep hit count plus measured line count/width).\n\n- Leg 1 — plus one line (948): predicted GREEN, observed GREEN — 「SKILL.md is 948 lines (ceiling 1005; headroom 57)」, exit 0. This deliberately falsifies the dispatch example's premise (+1 line goes RED) — that premise belonged to R1's zero-headroom world; after #13389 the line ceiling does not bind at +1, and the binding envelope on this card is the adjudicated +2..+4 budget, not the ratchet.\n- Leg 2 — line 560 widened to 198 bytes: predicted RED, observed RED — exit 1, verdict 「SKILL.md has 1 line(s) over the 120-byte budget: L560 (198B)」. This is the constraint that actually binds every line this PR touches.\n- Both legs restored: `git hash-object` equals HEAD blob `d4abba29c2f7b1385d9d363cc7dd81148a40fec3`, `git diff HEAD` empty, under an EXIT/INT/TERM trap with absolute paths.\n\n## Governed surface posture\n\nDiff is `.claude/**` only — this PR stays DRAFT; no ready flip, no queue, no auto-merge, no review from any seat. The maintainer lands it by hand (or via the pinned-approval path) after the PM's ACCEPT review. `skip-changeset` applies (publishes nothing from any package; closed-list diff class).\n\n_Generated by [Claude Code](https://claude.ai/code/session_01EXxTW8mvPBhoHxmyPZ63de)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01EXxTW8mvPBhoHxmyPZ63de)_"
+}

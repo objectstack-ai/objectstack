@@ -1,0 +1,36 @@
+{
+  "number": 13499,
+  "kind": "issue",
+  "title": "finding: H8 的 merged-PR 窗口按「~18 merges/day」定成两页，实测已达 ~196/day —— 超过约 24 小时的交付对巡查结构性不可见（本轮实测 14 张滞留 4–6 天）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T15:06:16Z",
+  "updated_at": "2026-08-31T03:29:38Z",
+  "closed_at": "2026-08-31T03:27:44Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13499",
+  "body": "`scripts/pm/check-half-states.mjs` 的 H8（「交付 PR 已合并、卡仍挂 `pm:dispatched`」）读一个**按条数**封顶的已合并 PR 窗口。那个条数当初是按一个明确写下的合并速率算的，而**速率已经涨了约 11 倍**，窗口因此缩到约一天。结果不是漏报个例，是**一整段时间之前的交付全部落到视野之外**。\n\n未认领，只作记录。\n\n## 机制（读码）\n\n`listRecentlyMergedPullRequests`（`scripts/pm/check-half-states.mjs:4082` 附近）：\n\n```js\nfor (let page = 1; page <= 2; page++) {\n  const batch = await rest(\n    `/repos/${OWNER_REPO}/pulls?state=closed&sort=updated&direction=desc&per_page=100&page=${page}`,\n  );\n  out.push(...batch.filter((p) => p.merged_at));\n  if (batch.length < 100) break;\n}\n```\n\n页数的依据写在它自己的文档注释里（`:4078`）：\n\n> a quota decision whose consequence is H8's stated boundary (a delivery older than the window is invisible). At **~18 merges/day** two pages reach well past the longest measured unexecuted-verdict latency\n\n⚠️ 同一个文件里另外三处窗口都是 **10 页**（`:3980` / `:4066` / `:4105`），只有这一处是 2 页。\n\n## 实测：前提已经过期约 11 倍\n\n2026-08-30 取 `state=closed&sort=updated&direction=desc&per_page=100` 第一页，时间跨度：\n\n| 读数 | 值 |\n|:--|:--|\n| 100 条 closed PR 覆盖 | `2026-08-30T02:47:19Z` → `2026-08-30T14:44:30Z` |\n| 即 | **11.95 小时** |\n| 折算 | **约 196 merges/day**（注释前提：~18） |\n| ⇒ 两页 200 条实际覆盖 | **约 24 小时** |\n\n## 后果，本轮直接测到\n\n对两仓所有仍挂 `pm:dispatched` 的开放卡，按分支前缀 `head:claude/issue-<n>-` 反查交付，再用 `is:closed is:unmerged` 反查确认合并状态：\n\n- **52 张在飞卡中，24 张（46%）的交付 PR 已合并而卡未回标**；\n- 其中 **14 张的交付合并于 2026-08-24 ~ 08-26**，即滞留 **4.6–6.0 天**；\n- 这 14 张**全部落在 H8 约 24 小时的窗口之外** ⇒ 不是没人处置，是**仪表已经看不见它们了**；\n- 最久的一张 objectui#5174 挂了 **6.0 天**，其席位早在 ACCEPT 里写明了终态（`Card returns to pm:queue`）却没落成标签。\n\n⚠️ 而滞留是有连带成本的，不只是账面难看：objectstack#11925 的 `pm:dispatched` 在交付合并后又挂了 5 天，期间 `domain:cli` 席位据此把 **#12104 / #12034 / #12181 三张卡按热文件串行挂起不派**（见 #11925 的 `5443363161`）。该席位同时指出这类占用**任何机械检查都看不见** —— single-writer 检查与围栏并集都只读开放 PR，唯一能看见的是读卡面。⇒ 一个已合并未回标的 `pm:dispatched`，在这套机制里会伪装成一个活的独占写者。\n\n（这 24 张已按各卡上已有的席位判定回标，2026-08-30，维护者指令。）\n\n## 修法的形状（是建议，不是处方）\n\n把封顶从**条数**改成**时间**：一直翻页直到 `merged_at` 早于 N 天（N 取「未执行判定的最长实测延迟」而不是一个页数），并保留一个页数上限作为配额兜底。这样速率再涨一次，覆盖的**时间跨度**不变。\n\n⚠️ 两个必须一起做的：\n\n1. **把那句 `~18 merges/day` 换成从数据推导的量，或者至少让它在过期时会响** —— 一个写死在注释里的速率前提，正是这次失效的根。\n2. **两个方向都进自测**（H8 用例在 `:4963` 附近）：窗口内命中要报；窗口外、但按新的时间判据仍应在内的交付**也**要报。\n\n## 相邻但不是同一个缺陷\n\n**#11036**（2026-08-22 立，仍是未分诊 `finding`）：H8 认交付只看 PR 正文的 `Part of #N` / closing keyword，不读分支名，写 `Refs #N` 就静默漏报。⚠️ **两个缺陷会叠加** —— 一笔用 `Refs` 拼法、又落在窗口之外的交付，H8 有两层看不见它。建议两张一起排。\n\n## 没测的\n\n- objectui 侧是否运行同一个巡查、其窗口覆盖多久：本轮没查。该仓合并速率低于 objectstack，但滞留最久的 12 张恰恰在那边。\n- 已关闭的卡上同形的漏报：H8 只读开放 issue（#10688 已记），那类本来就在它视野外。\n\n## 域标签\n\n刻意留空 —— `domain:*` 只由分诊席产出。与 #11036 同理，我的读法是它的 SUBJECT 是派发协议自身的门禁（比照 `scripts/pm/check-governed-merges.mjs` 归 `domain:skills` 的先例），但这一判归分诊。"
+}

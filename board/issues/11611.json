@@ -1,0 +1,34 @@
+{
+  "number": 11611,
+  "kind": "issue",
+  "title": "multi-org: platform/system tables (logs, messaging, config) never carry organization_id — by design, or planned?",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T08:37:46Z",
+  "updated_at": "2026-08-28T10:47:44Z",
+  "closed_at": "2026-08-27T16:02:35Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11611",
+  "body": "## Question\n\nOn a production-like install (multi-org enabled: enterprise package + license), **platform/system tables never carry `organization_id` — including rows created today**. Business-object tables do carry it (we backfilled our own legacy rows project-side). Please confirm: is the absence of org scoping on these system tables **by design**, or should they be org-scoped (and if so, is a migration planned)?\n\nWe are not reporting a malfunction — everything works. We only need the design intent confirmed, and to know whether org markers will be added later, so we can decide whether to account for it in operations.\n\n## Inventory (read-only scan, 2026-08-23, 112 org-column-bearing tables scanned)\n\nPlatform tables where **100% of rows (old and new)** lack `organization_id` — 9,577 rows total:\n\n| Category | Rows |\n|---|---:|\n| Logs (job logs 5,613 / audit logs 1,510 / feed 916 / automation runs 5) | 8,044 |\n| Messaging (inbox messages & receipts 766 / notifications & deliveries 410 / email 96 / templates 28) | 1,300 |\n| Config & metadata misc (capabilities / metadata / files / permission sets / positions etc.) | 233 |\n\n## Environment\n\n- `@objectstack/*@17.2.0`, PostgreSQL 16\n- Multi-org enabled and in active use; 47 business tables are fully org-scoped and clean\n"
+}

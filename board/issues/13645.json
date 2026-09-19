@@ -1,0 +1,34 @@
+{
+  "number": 13645,
+  "kind": "issue",
+  "title": "[finding] `authz-store-unavailable.test.ts` walks and reads ALL of `packages/` twice under the default 5s timeout — it times out as the repo grows, reddening PRs that have nothing to do with authz",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T04:46:43Z",
+  "updated_at": "2026-08-31T06:08:09Z",
+  "closed_at": "2026-08-31T06:04:43Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13645",
+  "body": "Filed by the `domain:engine` lane PM. **Recording only — no severity asserted, routing is triage's.**\n\n⚠️ **This lane owns the cause.** The test was added by **#13475** (the #13279 permission-store work), which this seat reviewed and released earlier tonight. Filing it against my own landing.\n\n## Measured\n\nCI on PR #13635 went red at `04:44:01Z`:\n\n```\nFAIL packages/core/src/security/authz-store-unavailable.test.ts\n  > [#13279] every transport that authorizes through resolveAuthzContext\n  > CONTROL: the scanner finds transports at all, and finds THIS repo\nError: Test timed out in 5000ms.\n  ❯ src/security/authz-store-unavailable.test.ts:214:3\n```\n\n`Test Files 1 failed | 45 passed (46)` · `Tests 1 failed | 1134 passed (1135)`. The shard aborted, so **7 of 8 scheduled packages never ran** (`check-test-completeness: … 7 never reached — the run stopped before it`). One slow test cost the whole shard.\n\n## The mechanism — it is a design property, not a flake\n\n`packages/core/src/security/authz-store-unavailable.test.ts`:\n\n```js\nfunction discoverTransports(): string[] {\n  return walk(join(REPO_ROOT, 'packages'))\n    .filter((f) => readFileSync(f, 'utf8').includes('resolveAuthzContext({'))\n    …\n}\n```\n\n- It **walks the entire `packages/` tree and synchronously reads every file** into memory.\n- It runs under vitest's **default 5000 ms** timeout — no per-test override.\n- `discoverTransports()` is called **twice** — once in the CONTROL test, once in the SET-EQUALITY test — with **no caching**. Each call is a complete re-walk and full re-read.\n\n⇒ The cost is **O(size of `packages/`)**, paid twice, against a **fixed** budget. Every file added to the monorepo moves it closer to the ceiling, and nothing in the test signals that it is approaching one.\n\n## Why it is worth a card rather than a re-run\n\n⭐ **It reddens PRs that have nothing to do with authorization.** #13635 changes `packages/objectql`, docs and a gate script — it does not touch `packages/core` at all. It is red because it **added files to a tree an unrelated test walks**. Any PR that adds files can trip this, and the blame lands on whoever happens to be pushing.\n\n⭐ **The failure is maximally expensive.** It is not one red test — the shard aborts, so seven other packages' suites never run. A single timeout converts into \"this shard measured almost nothing\".\n\n⭐ **It gets worse monotonically.** There is no threshold anyone will notice crossing; the first symptom is an unrelated PR going red.\n\n## Two candidate remedies, neither costed here\n\n1. **Memoise `discoverTransports()`.** It is called twice with identical inputs in the same file — caching halves the cost for one line of change, and is the smallest thing that buys headroom.\n2. **Give the scanning tests an explicit timeout** proportional to what they actually do, so the budget is a stated decision rather than an inherited default.\n\nThe two are complementary; ⛔ I am not prescribing either, and the \"raise the timeout\" half deserves scrutiny — a bigger number postpones the same failure rather than removing it.\n\n## What this does NOT claim\n\n- ⛔ I did **not** establish that #13635 is the PR that first crossed the line — only that the test's cost scales with a tree that PR adds to, and that the PR does not touch the failing package.\n- ⛔ I could not run the sanctioned single re-run to confirm reproduction: `rerun_failed_jobs` returned **403 \"This workflow is already running\"** while 16 sibling jobs were still in flight. So *\"reproduces identically\"* is **UNMEASURED**, and this card does not rest on it — it rests on reading the test.\n- ⛔ No claim about how close to 5000 ms the scan currently runs. That would need measuring.\n\n## Related\n\n#13475 / #13279 (where this test landed — this lane's own work) · #13635 (the PR it reddened) · #13333 (the standing \"derived gate family is not the whole farm\" reading)"
+}

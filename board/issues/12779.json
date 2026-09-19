@@ -1,0 +1,35 @@
+{
+  "number": 12779,
+  "kind": "issue",
+  "title": "[finding] the pm-dispatch `Part of` instruction should warn about the sentence that names who will close the card — measured red-then-green on PR #12777",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-27T18:55:32Z",
+  "updated_at": "2026-08-31T03:07:03Z",
+  "closed_at": "2026-08-31T03:07:03Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12779",
+  "body": "Filed unassigned and **ungraded** by the `domain:services` PM seat, session `session_0194kbQJxUvv2yvsGRtuXpP5`. ⛔ Not graded, not routed. ⚠️ Touches `.claude/skills/pm-dispatch/SKILL.md`, a **governed surface** — filed as a card rather than edited, and the maintainer's merge is the review record.\n\n## The near-miss, and it is measured rather than argued\n\nOn PR #12777 the PM ruled the closing keyword down from `Fixes #11833` to `Part of #11833`, because #11833 carries `has_children: true` with `sub_issues_summary {total: 1, completed: 0}` — `Fixes` would have auto-retired a parent showing 0 of 1 children complete, as a merge side effect rather than anyone's decision.\n\nWhile making that edit, the dev's own **explanatory prose** contained:\n\n> The PM will **close #11833** deliberately after the merge.\n\nGitHub's reference parser matches `close` / `fixes` / `resolves` plus a number **regardless of the surrounding sentence**. That bookkeeping line would have re-armed the exact auto-close the edit existed to prevent.\n\n⭐ **This is not a hypothetical the dev reported — the gate caught it red.** Two runs of the repo's own check on the same PR, same head:\n\n| run | time | conclusion |\n|---|---|---|\n| `98634479836` — *Part-of PR must not also close its card* | 2026-08-27 18:52:17Z | ❌ **failure** |\n| `98634968551` — same check, after the rephrase | 2026-08-27 18:54:28Z | ✅ success |\n\nThe dev caught it on read-back, rephrased, and the gate went green. ⇒ The control worked exactly as designed; this card is about the **instruction**, not the gate.\n\n## Why the instruction is worth changing anyway\n\nThe negation trap is already documented for prose like *\"this does not fix #N\"*. ⚠️ The higher-risk shape is the one that bit here and is **not** covered: the sentence naming **who will retire the card and when**. It reads as pure bookkeeping, it is written *because* the author is being careful about not closing, and it is therefore most likely to appear in exactly the PR bodies switching to `Part of`.\n\n⇒ The body most likely to write a closing keyword next to the card number is the body **explaining why it is not closing that card**. The warning belongs where the lane tells a dev to switch to `Part of`, not only where closing keywords are discussed.\n\n⛔ **No wording proposed here**, and no recommendation on whether it earns a governed-surface edit at all — the gate already catches it, at the cost of one red CI round. Whether that cost is worth a doc change is a grading call, and the file is maintainer-authored.\n\n## Provenance\n\nRaised by the dev on #11833 as an open question (option A: leave it per-PR; option B: promote it), with its own recommendation of **B, weakly**, and the honest note that *\"nothing is blocked either way\"*. The PM agrees with B and is recording it here rather than acting on it, because `.claude/**` is not this seat's to edit.\n\n## Dedup\n\n**#12668** (`pm:queue`, `domain:skills`) is the nearest neighbour — *\"pm-dispatch decision framework: add three maintainer-ruled standing rules\"*. Different content (pull-directed priority order, startup-stage no-gradualism, release-reminder discipline), but it touches the same file, so ⭐ **if this is graded worth doing, folding it into that card is likely cheaper than a second governed-surface PR.** That is a routing suggestion, not a claim about priority.\n\n## Re-check\n\n```\ngh api repos/objectstack-ai/objectstack/check-runs/98634479836 --jq .conclusion   # failure\ngh api repos/objectstack-ai/objectstack/check-runs/98634968551 --jq .conclusion   # success\n```"
+}

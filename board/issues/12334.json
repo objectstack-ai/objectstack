@@ -1,0 +1,34 @@
+{
+  "number": 12334,
+  "kind": "issue",
+  "title": "[Decision] Should `**/build/**`, `**/.next/**` and `**/.turbo/**` join the global ESLint ignore — three rules are enabled there today",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T18:51:36Z",
+  "updated_at": "2026-08-31T06:58:26Z",
+  "closed_at": "2026-08-31T06:55:49Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12334",
+  "body": "Filed by the `domain:devx @ objectstack` seat (#6023, session `session_01UjM2ia8Av1v5NqfqQEQmC6`) as the residue of **#12304 / PR #12332**. That PR ships the provably-neutral half; this card carries the half that is a real semantic change and therefore not this seat's to take.\n\n## What #12332 already does\n\nPromotes `**/node_modules/**` and `**/dist/**` to a global `ignores`-only config object. Measured before/after, zero rules enabled on those paths both ways, source coverage unchanged (5155 linted files before and after, 0 errors), and it captures essentially all the cost this repo actually pays:\n\n| tree | config | wall | peak RSS |\n|---|---|---|---|\n| + 84 MB of `dist/` bundles | before | **511.6 s** | **5424.4 MB** |\n| + 84 MB of `dist/` bundles | after | **79.6 s** | **806.1 MB** |\n\n## The question\n\nThe per-object `ignores` lists also carry `**/build/**`, `**/.next/**` and `**/.turbo/**`. Those three were **not** promoted, because promoting them is **not** semantics-neutral:\n\n```\npackages/core/build/x.ts  ->  LINTED, 3 rules ENABLED, @typescript-eslint/parser\n   slot-lookup/no-any-assignment · no-restricted-syntax · query-options/no-any-erasure\n```\n\nThree config objects (the `packages/**` and `examples/**` ones) list only `**/node_modules/**` and `**/dist/**`, so TypeScript under the other three directories still matches them.\n\n**Latent, not live**: nothing in this repo emits to `build/`, and the only Next.js app is `apps/docs`, which sits outside `packages/**`. `git ls-files` matches **0** tracked files under any of the five patterns (control: **4451** under `/src/`).\n\n## Options\n\n| | |\n|---|---|\n| **A** | Promote all five. Makes the config's intent — never lint build output — uniformly true, and removes a latent inconsistency where generated TypeScript under `build/` is linted while the same file under `dist/` is not. Costs a real, currently-unreachable semantic change. |\n| **B** | Keep #12332's scope (`node_modules` + `dist`). Provably neutral; leaves the inconsistency, and leaves `apps/docs/.next` output in the population (linted, 0 rules) for anyone who builds the docs site. |\n| **C** | A, **plus** level the three per-object `ignores` lists so no object can match build output — making the neutrality claim structurally true rather than incidental. |\n\nFlipping to A is a one-line change to the array already in PR #12332.\n\n---\n\nos-decision-facets\n\n**一句话问题**：`eslint.config.mjs` 的全局 ignore 要不要把 `**/build/**`、`**/.next/**`、`**/.turbo/**` 一并纳入 —— 这三个目录下今天有 **3 条规则真的启用着**（`packages/core/build/x.ts` 实测），所以纳入是一次真实的接受集变更，不是「什么都不改」的收尾。\n\n**四棱**：\n① **实际业务拉动**：今天**够不到** —— 全仓 0 个追踪文件落在这五个模式下（对照：`/src/` 下 4451 个），没有人正在被它咬。拉动来自一致性而非疼痛：同一份生成代码放 `dist/` 不被 lint、放 `build/` 被 lint，配置的意图和它的行为不一致。\n② **平台长远合理性**：配置的意图本来就是「永不 lint 构建产物」，A/C 让这句话真正成立；C 更进一步，把它变成结构上成立而不是碰巧成立。反方向的理由是：一条**潜伏**的不一致比一次**真实**的规则静默更便宜，B 保留了前者而不付出后者。\n③ **防 AI 犯错**：⚠️ 这是本卡最该看的一棱。派发令里本席把「这些路径 0 条规则启用」写成了**不可协商的裁定**，而它是假的 —— dev 按裁定自带的证伪条款停手并回报，才没有把这三条规则静默地关掉。⭐ **在生成代码上关掉规则和在源码上关掉规则，从 diff 上看是同一行**；A 若要做，应当作为一次**具名的修正**做，而不是搭在「反正不改变什么」的说法上。C 比 A 更抗未来误读，因为它不依赖任何人记得这个理由。\n④ **创业阶段不扩散**：B 零成本且已在 PR 里；A 是那个数组加三行；C 还要动三个对象的 ignore 列表，是三者中唯一需要复核「有没有别的东西依赖那三个对象仍然匹配 build/」的。⛔ 三者都不新增依赖、不动发布面。\n\n**推荐**：**A**，若你希望这条不变量被强制而不是被断言则取 **C**。理由采纳 dev 原话的实质：在生成产物上静默规则是**修正**而非覆盖率削减 —— 那几个目录下没有人写的代码，而 lint 生成代码正是本卡要去掉的缺陷本身。**置信缺口**：`apps/docs/.next` 是唯一一个今天真会出现构建产物的位置，本席**未测**在那里跑 lint 的实际成本与启用规则数；若你倾向 A/C，值得让实现方先补这一个读数。\n\n**低摩擦裁决格式**：回「A」/「B」/「C」即可。\n\n## Refs\n\n#12304（母卡，实测与成本）· PR #12332（已落 B 的那半边）· #12211（分诊在姊妹卡上的同款原则：*\"if the measurement instead argues for removing or demoting any check, that is a maintainer decision and the card comes back to the box\"*）"
+}

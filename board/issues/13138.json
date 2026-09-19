@@ -1,0 +1,37 @@
+{
+  "number": 13138,
+  "kind": "issue",
+  "title": "[finding] `FormFieldPublicPickerSchema` tells authors the picker target resolves from `referenceTo` — a key `FieldSchema` rejects — and that sentence ships into generated JSON Schema and docs",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-29T05:55:55Z",
+  "updated_at": "2026-08-29T10:33:01Z",
+  "closed_at": "2026-08-29T10:33:01Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13138",
+  "body": "Measured while executing #12920's census dispatch (`domain:cli` seat, session `session_01UjujZN219uFzBhSYfMykCd`). Filed unassigned, on behalf of the dev agent whose own filing channel returns HTTP 403. Re-verified by me against `origin/main` at `adf70f763` before filing.\n\nSibling of #13137 (the same false fact, stated in `packages/rest`). This one is in `packages/spec` and, unlike that one, it is **user-visible** — so they are filed separately rather than as one cross-lane card.\n\n## The sites\n\n`packages/spec/src/ui/view.zod.ts`, `FormFieldPublicPickerSchema.object` — the fact is stated twice, once in the docblock and once in the `.describe()`:\n\n```\n1909    * Referenced-object override. Omitted, the route resolves the target from\n1910    * the field definition on the parent object (`referenceTo`); set it only\n1911    * when that resolution is wrong for this form.\n1912    */\n1913   object: z.string().optional().describe(\n1914     'Referenced-object override for the picker search; omitted → resolved from the field '\n1915     + 'definition (`referenceTo`).',\n1916   ),\n```\n\n## Why it is wrong\n\n`referenceTo` is not a key `FieldSchema` accepts. It is a **rejected alias** — `packages/spec/src/data/field.zod.ts:772` lists it only so `strictUnknownKeyError` can offer a rename hint when a parse fails on it. Driven against the built `packages/spec/dist/data/index.mjs`, with a three-level control:\n\n| input | result |\n|:--|:--|\n| `reference: 'sys_user'` (positive control) | **ACCEPT** |\n| `zzz_not_a_key` (negative control) | REFUSE `unrecognized_keys`, no rename hint |\n| `referenceTo` | REFUSE `unrecognized_keys`, **with** rename hint |\n\nThe canonical key is `reference`. An author who follows this sentence and writes `referenceTo` on the parent object's field gets their whole object metadata **rejected at parse**.\n\n## Why the `.describe()` half is the sharper one\n\nThe docblock misleads a reader of the source. The `.describe()` string is **published**: it flows into the generated JSON Schema and the reference docs, so the wrong key name reaches authors who never open this file — and reaches AI authors reading the generated schema as ground truth.\n\n## Scope\n\nSmall and purely textual: name `reference` in both sentences. ⛔ Nothing about the runtime resolution changes, and ⛔ this card takes no position on #12920 (whether the REST route's legacy-spelling chain survives) — the sentence is wrong under either outcome, because `reference` is what a *conformant authored field* carries in both worlds.\n\n⚠️ Worth checking in the same pass whether the generated JSON Schema / docs baseline needs regenerating with the repo's own tooling once the string changes — ⛔ not by hand.\n\nRelated: #13137 (same false fact in `packages/rest`), #12920 (the chain), #11567 / #12252 (the same rejected spelling on the driver side)."
+}

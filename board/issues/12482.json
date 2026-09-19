@@ -1,0 +1,34 @@
+{
+  "number": 12482,
+  "kind": "issue",
+  "title": "finding: `syncObjectSchema` is implemented, consumed by two service packages, and declared by no contract — the #12010 member its table marked \"not verified\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T05:20:32Z",
+  "updated_at": "2026-08-28T14:32:18Z",
+  "closed_at": "2026-08-28T14:32:01Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12482",
+  "body": "Found while carrying out #12248 (adjudicating `ConnectionEngineLike`'s three undeclared members per the #11833 ruling's item 4). Filed unassigned as an observation, measured on `origin/main` = `bb920ee089`.\n\n## The observation\n\n#12010's member table listed `syncObjectSchema?` as \"has a spec mention — not verified as a contract member\". Verified now: the spec mention is **prose only** (two comment lines in `packages/spec/src/data/injected-system-column-provenance.ts:223-225`); **no contract file declares the member** (`grep syncObjectSchema packages/spec/src/contracts/` is empty, including after #12248's five declarations). Meanwhile it meets the same evidence bar those five were declared under:\n\n- **Implemented**: `packages/objectql/src/engine.ts:12509` — `async syncObjectSchema(objectName: string): Promise<void>` (ADR-0015 §18: register DDL-free read metadata for a federated object after its driver connects).\n- **Consumed cross-package, twice, both through consumer-local structural recovery**:\n  - `packages/services/service-datasource/src/datasource-connection-service.ts:104` (declared on `ConnectionEngineLike`) and `:620` (live call per bound external object after connect);\n  - `packages/services/service-messaging/src/messaging-service-plugin.ts:353-355` — `(engine as unknown as { syncObjectSchema?: … }).syncObjectSchema`, with its own comment recording that the member \"lives on the concrete ObjectQL engine, not the contract\".\n\nThat is the #4251 shape exactly: producer meets no compiler, drift lands silently in two consumers.\n\n## Why filed rather than fixed in #12248's PR\n\nThe 2026-08-25 ruling's item 4 pulls exactly **three** `ConnectionEngineLike` members into the spec-seat sweep (`registerDatasourceDef`, `markDatasourceUnavailable`, `clearDatasourceUnavailable`); `syncObjectSchema` is not among them, and #12010's own table leaves it unadjudicated. Declaring it is a one-line optional member (`syncObjectSchema?(objectName: string): Promise<void>`) plus the standard pin block, but it widens a published contract outside the ruled scope — recorded for triage instead. Dedup: PM's 2026-08-25 `domain:spec` enumeration + 2026-08-26 branch-name scan (REST issue-list is 403 from the dev seat; increment checked by branch names only).\n\nRefs: #12248 (the five members declared under this bar, with the pin pattern) · #12010 (the inventory that flagged it \"not verified\") · #11833 (the ruling) · #4251 (B3)."
+}

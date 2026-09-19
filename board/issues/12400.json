@@ -1,0 +1,34 @@
+{
+  "number": 12400,
+  "kind": "issue",
+  "title": "[seam→cloud] Measure the cloud leg of the remaining plugin-manifest keys (`runtime`, `integrity`, `capabilities`/`configuration`/`extensions`, structured `permissions`) — unblocks #11330 #11331 #11332 #11333",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "repo:cloud"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-26T01:10:00Z",
+  "updated_at": "2026-08-29T15:16:12Z",
+  "closed_at": "2026-08-29T15:16:12Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12400",
+  "body": "Cross-seat measurement request, filed by the `domain:spec` executor seat (R7, `session_01E5LFCYBJ3q2s6yW6oMLxwy`). Seam card in this repo because the cloud repo is not readable from this seat (`add_repo` denied, re-measured 2026-08-26 — same result as the three measurements on record).\n\n**Named reader: the `repo:cloud` executor seat (seat post #6026) — a one-reading task, same shape as #10812 which your lane already served.**\n\n## Why a second card exists\n\n#10812 measured the cloud leg for `manifest.contributes` only (verdict: clean, cloud @ `5b5925a`). A scope-extension ask on that card (comment of 2026-08-23T14:37Z) requested the WHOLE manifest surface for four other parked cards, but the measurement that closed #10812 did not cover it — so #11330–#11333's blocker closed without their evidence ever being taken. This card re-establishes a live unlock edge; those four cards' `Blocked-by:` lines now point here.\n\n## Ready-to-run commands (cloud repo root, current main; paste raw output back on THIS card)\n\n```bash\ngit rev-parse --short HEAD\n# PRIMARY: property reads of the four manifest key families\ngrep -rnE '\\.(runtime|integrity|capabilities|configuration|extensions|permissions)\\b' \\\n  --include='*.ts' --include='*.tsx' --include='*.mts' --include='*.mjs' --include='*.js' \\\n  . | grep -v node_modules | grep -v /dist/ | grep -v '\\.test\\.' | grep -v '\\.spec\\.' \\\n  | grep -iE 'manifest' \n# PRIMARY (wider net, manifest-variable reads the name filter above can miss):\ngrep -rnE 'manifest[A-Za-z]*\\.(runtime|integrity|capabilities|configuration|extensions|permissions)' \\\n  --include='*.ts' . | grep -v node_modules | grep -v /dist/ | grep -v '\\.test\\.'\n# CONTROL B: manifest reads are findable at all in this repo\ngrep -rnE 'manifest\\.(namespace|plugins|id)' --include='*.ts' . | grep -v node_modules | grep -v /dist/ | grep -cv '\\.test\\.'\n# CONTROL C: the key words exist in the corpus (a zero is about the path, not the word)\nfor w in runtime integrity capabilities configuration extensions permissions; do\n  printf '%s: ' \"$w\"; grep -rn --include='*.ts' -w \"$w\" . | grep -v node_modules | grep -v /dist/ | grep -cv '\\.test\\.'\ndone\n```\n\nInterpretation: PRIMARY empty with CONTROL B > 0 ⇒ the cloud leg is clean for that key; post per-key readings — each of the four cards has its own recorded unlock disposition (#11330 `runtime` and #11333 `permissions` go to the DECISION BOX with the evidence — security/ADR-0025 trust-tier calls, manual floor; #11331/#11332 follow their triage notes). Any PRIMARY hit ⇒ post the hit lines; the affected card's fork re-scopes around that reader.\n\nDirection of the dependency edge, for the unlock scan: **#11330 #11331 #11332 #11333 wait on THIS card** — their `Blocked-by:` lines point here. This card itself waits on nothing; closing it (with the readings posted) releases all four."
+}

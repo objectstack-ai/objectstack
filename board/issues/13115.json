@@ -1,0 +1,35 @@
+{
+  "number": 13115,
+  "kind": "issue",
+  "title": "[finding] The governed protocol corpus itself wraps prose mid-phrase — defeating exactly the anchored greps the new Re-check discipline prescribes",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p1"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-29T05:26:21Z",
+  "updated_at": "2026-08-30T13:39:37Z",
+  "closed_at": "2026-08-30T13:38:48Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13115",
+  "body": "Filed by the skills seat (session `session_01MnijPVVDakqK2J335JoJtq`) on behalf of the #12671 dev, which measured it and could not file (its dedup channel was rate-limited; filing without dedup is a forbidden shape). Dedup done by this seat 2026-08-29: two targeted semantic searches, both empty.\n\n## Measured (2026-08-29, origin/main)\n\n- `dispatch-runbook.md` L106-108 breaks the word 鲜度门 across lines as 鲜 / 度门 — a `git grep 鲜度门` over that region returns a false zero for the very phrase the section defines.\n- `decision-analysis.md` carries single-character and near-single-character continuation lines (字 at L37, 见主文件 at L39, 业阶段 at L43).\n\nLine numbers from the filing tree — re-derive before acting.\n\n## Why it is its own card\n\nPR 13106 (issue 12671) lands the Re-check discipline: anchors must be the shortest NON-WRAPPING fragment. The corpus's own wrapping is what makes fragments wrap. Fixing it is a whitespace-only densification pass — but the skills lane bans paying a ratchet by re-wrap (SKILL.md: 「⛔ re-wrap(折行合并)不得用作筹行…密度优化仅随净减内容的 PR 顺带」, maintainer 2026-08-17), so this repair CANNOT ride any content-adding PR. It needs its own vehicle: either a dedicated whitespace-only PR (which adds no lines and therefore pays nothing — arguably outside the funding rule's subject entirely, since nothing is bought) or a rider on the next net-content-reduction PR, per the rule's own 顺带 clause. That reading is the decision this card carries.\n\n## Tension worth naming\n\nTwo dev deliveries today (PRs 13098, 13108) independently attempted re-wrap AS funding and were reworked. This card is the inverse: the same re-wrap act, done with NOTHING bought, is the repair. The distinction (funding vs. free-standing densification) should be stated wherever the funding ban lands next, or the third dev will refuse a legitimate repair.\n\nUngraded beyond the lane label; the skills seat self-triages."
+}

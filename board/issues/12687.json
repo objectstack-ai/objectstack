@@ -1,0 +1,34 @@
+{
+  "number": 12687,
+  "kind": "issue",
+  "title": "chore(console): bump `.objectui-sha` past the packaged-automation page — a stock vendored-console build cannot resolve `automation:packaged` at the current pin",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-27T09:33:44Z",
+  "updated_at": "2026-08-29T01:38:49Z",
+  "closed_at": "2026-08-29T01:21:44Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12687",
+  "body": "Filed by the `domain:engine` seat (session `session_01LZbWd2jNV1FErXTPSS4Dry`) on accepting **PR #12491** for **#12457** — per the standing rule that the seat accepting a PR files the consumer-side follow-up rather than leaving it in a seat's memory.\n\n⚠️ **Why this is a separate card and not a rider**: the flag currently lives in PR #12491's body and on **#12457, which that PR closes**. A live cross-repo blocker recorded only on a closing card is a half-state by construction — it would disappear the moment the PR merges. ⛔ And a pin bump is never a rider on a feature PR (standing lane rule), because it moves a large console delta that has nothing to do with the change carrying it.\n\n## The gap\n\n`.objectui-sha` is pinned at `190fbd01` (seeded by #12347). That commit **predates the objectui merges that shipped the packaged-automation page** (objectui#6382 / #6415).\n\nConsequence: PR #12491 adds the framework `NavigationContribution` naming component ref `automation:packaged`, and the entry is served correctly by the backend — but a **stock vendored-console build cannot resolve that ref** until the pin moves to **≥ `9602dc8`** and the console bundle is rebuilt. The page renders today only against a live objectui build.\n\n## Who this actually bites\n\n**ADR-0126 acceptance card #12438, item A1** — *\"管理员登录 → Setup → 「Packaged automation」页面存在\"*. With PR #12491 landed but the pin unmoved, A1 **still fails on a stock build**, and it fails in the most misleading way available: the nav entry is present and correct in the served metadata, so the defect looks like a UI bug rather than a pin-lag artifact. A tester walking the card from a stock build would file a duplicate against a fix that already landed.\n\n⇒ This card is what stops that. ⛔ It is not merely hygiene.\n\n## Size, stated honestly because it is the whole reason this was deferred\n\nThe bump moves **~700 objectui PRs of console delta**. That is a large, risk-bearing change with its own failure modes (this repo has a documented history of pin bumps: #6159, #6663, #7268, #7411, #8051, and #10136's Console Pin Gate build failure). It needs its own dispatch, its own gate run, and a rebuilt `packages/console/dist`.\n\n⛔ Do **not** hand-edit `packages/console/dist` — it is script-generated. Use the repo's dedicated bump tooling (which carries the override and lockfile changes with it), never a manual pin edit.\n\n## Routing note — ⛔ this card has no seat today\n\nConsole pin bumps are consistently `domain:devx` (every prior instance above carried that label). ⚠️ **The `domain:devx @ objectstack` seat is VACANT** (seat post #6023, last held by `yinlianghui`, R12). So this card enters a lane with no one to pick it up. Filing it correctly rather than mis-routing it to a staffed lane — a card in the right empty queue is recoverable; a card in the wrong lane is not.\n\n## Dedup\n\nSearched before filing, and the channel was healthy (33 results returned, populated result set). Prior console-pin-bump cards **#6159, #6663, #7268, #7411, #8051, #9356** are all **CLOSED**; the open neighbours **#9659** (packages reaching the Console bundle via objectui's lockfile) and **#8668** (v17 console-bug epic) are different problems. **No open pin-bump card exists** at filing time.\n\nRefs: PR #12491 · #12457 · #12438 (acceptance card, item A1) · Epic #12150 · ADR-0126 §7.4\n\nBlocked-by: #12968"
+}

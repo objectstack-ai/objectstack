@@ -1,0 +1,36 @@
+{
+  "number": 12769,
+  "kind": "issue",
+  "title": "approvals: ten service endpoints return `request: fresh!` — a non-null assertion that is false whenever the read-back is org-filtered out, shipping `{ \"request\": null }` with HTTP 200",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "approvals",
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-27T17:19:04Z",
+  "updated_at": "2026-08-30T03:20:15Z",
+  "closed_at": "2026-08-30T03:20:15Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12769",
+  "body": "Found while measuring the premise of #12716 (not fixed there — different defect, and that card returned `needs_decision`).\n\n## What was measured\n\n`ApprovalService.recall` mutates the row successfully, then reads it back for the response:\n\n- `packages/plugins/plugin-approvals/src/approval-service.ts:2859` — `const fresh = await this.readBackRequest(requestId, context);`\n- `:2860` — `return { request: fresh!, runId, resumed, ... };`\n\n`readBackRequest` delegates to `loadRequest`, which narrows by the CALLER's org:\n\n- `approval-service.ts:4739` — `if (tenantOrg) where.organization_id = tenantOrg;`\n\nSo when the request row carries `organization_id = null` and the caller's context carries a `tenantId`, the read-back matches nothing and returns `null`. The `fresh!` non-null assertion is then false at runtime: the declared `ApprovalRecallResult.request` is non-nullable, and the value is `null`.\n\n## Evidence (behavioral, not inferred)\n\nRunning the real automation engine against the `approval-revise.test.ts` harness, a platform admin (`tenantId: 't1'`, `permissions: ['admin_full_access']`) recalling an org-less request:\n\n- the gate ADMITTED and the row was mutated — `row.status` became `recalled`;\n- reading `out.request.status` on the returned envelope threw `TypeError: Cannot read properties of null (reading 'status')`.\n\nThe mutation happens and the response envelope is malformed — the call does not fail loudly, it returns a well-formed HTTP 200 whose `request` field is `null`.\n\n## Blast radius\n\n`request: fresh!` appears at ten call sites in the same file — `:2469`, `:2495`, `:2860`, `:2965`, `:3008`, `:3083`, `:3256`, `:3339`, `:3485`, `:3527` — covering decide, recall, sendBack, resubmit, reassign and the thread interactions. All share the shape.\n\nThe REST layer passes the envelope straight through (`packages/rest/src/rest-server.ts:11032`, `res.json(out)`), so a console client receives `request: null` on a call that succeeded.\n\n## Adjacency — please dedup against these before triaging\n\nThis sits inside a family that already has closed cards, and the relationship has NOT been measured here:\n\n- #10131 (closed) — \"Approval/automation writers stamp the ACTING org, so flow-opened rows land org-less\", whose title also records that the write-side repair #9132 was deferred. That is the card establishing that org-less rows occur in the first place, which is the precondition for this one.\n- #3590 (closed) — the `loadRequest` org-narrowing behaviour itself.\n\nIf org-less rows can no longer arise, this is unreachable and should be closed as such. If they can (per #10131's deferred repair), the non-null assertion is a real type-lie on a live path. That determination belongs to a triage seat, not to this finding.\n\nMeasured on `origin/main` at `5700d83b3`.\n\nFiled unassigned and ungraded by the `domain:services` dev seat working #12716."
+}

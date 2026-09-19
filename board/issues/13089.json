@@ -1,0 +1,34 @@
+{
+  "number": 13089,
+  "kind": "issue",
+  "title": "The dissolved #5499 investment freeze is still spelled as LIVE in pm-dispatch references and two in-code pin annotations — same staleness class #12672 fixed, wider radius",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-29T04:44:38Z",
+  "updated_at": "2026-08-29T11:26:50Z",
+  "closed_at": "2026-08-29T11:26:50Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13089",
+  "body": "Found while implementing #12672 (which fixed ONLY the SKILL.md domain-lane row, per its dispatch scope — PR #13085). The same dissolved freeze (maintainer 2026-08-05; dissolved 2026-08-11 by the two rulings recorded on the #5499 anchor, comments 5249019855 and 5252526378, the second also retiring the standing hold-on-filing triage rule) is still asserted as live in four more places:\n\n1. `.claude/skills/pm-dispatch/references/lanes/engine.md` lines 20-24, 常设承诺 — outright false now: 「维护者 2026-08-05 对 `driver-memory` / `driver-mongodb` 族的投入冻结**继续有效**;能穿过冻结的形状是「消除静默失败模式」与清账/对齐既有能力,形如**能力投资**的卡派发前须取裁决」. This is the lane brief PMs scope dispatches from — the exact defect class that cost the 4+ rounds #12672 recorded. Fixing it needs one judgment call, which is why it was not ridden in-place on PR #13085: does the \"capability-investment cards need a ruling before dispatch\" clause survive the lift, given the second 2026-08-11 ruling retired the hold-on-filing rule? The drop-vs-reword choice mirrors the one the PM already made for SKILL.md (drop; the anchor carries its own history).\n\n2. `.claude/skills/pm-dispatch/references/compile-surfaces.md` line 17, the 「冻结」 row: 「维护者 2026-08-05 投入冻结:**pin-annotate,不翻转**。冻结面仍要申报,结论是「不在范围 + 冻结指令」」. The table's own maintenance clause three lines below says the PR that changes freeze status must update this table — the lift PRs did not. Note the row's file pointer is doubly stale: it cites `read-scope-sql.ts:176`, and that file now lives at `packages/services/service-analytics/src/read-scope-sql.ts` (annotation now at ~line 180).\n\n3. `packages/objectql/src/having-filter.ts:41` (comment): \"driver-memory / driver-mongodb still answer the old way only because #5499 freezes them; the divergence is against a frozen face, not against the ruling.\" Present tense — the freeze no longer holds. Whether the two faces have since been aligned (post-lift, both drivers were enrolled in the aggregation conformance table per the head note of `packages/spec/src/data/aggregation-conformance.ts`) or the HAVING divergence still exists and now needs a real card instead of a freeze excuse — needs checking, and is exactly the kind of question the stale comment currently answers wrongly.\n\n4. `packages/services/service-analytics/src/read-scope-sql.ts:180` (comment): \"`driver-mongodb` stay pin-only under the #5499 freeze.\" Same present-tense staleness.\n\nCorroboration for the dissolution, on disk: head note of `packages/spec/src/data/aggregation-conformance.ts` (\"the maintainer lifted the #5499 investment freeze for `driver-mongodb` on 2026-08-11 and for `driver-memory` later the same day\").\n\nSuggested shape: same DROP discipline as #12672 for sites 1-2 (dates + the anchor carry the history; ⛔ no issue numbers in the protocol files — id-lint), and for sites 3-4 re-verify what is actually true post-lift before rewording (the comments may be hiding a now-actionable divergence). Sites 1-2 are net-negative edits under the reference-file ratchets. #12672 is not addressed wider by this card; it remains scoped to the SKILL.md row and its PR."
+}

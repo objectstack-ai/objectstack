@@ -1,0 +1,36 @@
+{
+  "number": 13549,
+  "kind": "issue",
+  "title": "driver-memory's reference matcher matches a NULL-VALUED row against a well-formed bounded `$between` — the live mingo path excludes it, so one package answers one filter two ways",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T22:12:54Z",
+  "updated_at": "2026-08-30T23:53:41Z",
+  "closed_at": "2026-08-30T23:52:56Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13549",
+  "body": "Filed unassigned by the #13524 dev while sweeping the declared operator vocabulary through both faces of this package. Recording only — no severity asserted, routing is triage's.\n\nThe clobber card needed a single-operator agreement baseline before it could score composed cells, so it measured every declared operator alone on both faces. Seventeen of eighteen agreed. `$between` did not.\n\n## Measured\n\nExecuted on `50cf2940b9`. Fixture, five rows, both readings of \"no value\":\n\n```\n{id:'1', v:'2026-07-01'}  {id:'2', v:'2026-07-15'}  {id:'3', v:'2026-07-28'}\n{id:'4', v:null}          {id:'5'}                       (key ABSENT)\n```\n\nFilter `{v: {$between: ['2026-07-01', '2026-07-15']}}` — bounds well formed, both non-null:\n\n| face | ids |\n|:--|:--|\n| driver-memory live mingo path (`find()`) | `['1','2']` |\n| driver-memory **reference matcher** (`match()`) | `['1','2','4']` |\n\nRow 4 has no value. The reference matcher says it lies inside a bounded range. Row 5 — the same absence spelled as a missing key — is excluded, so the matcher also disagrees with itself across the two readings of \"no value\".\n\nFor contrast, measured in the same run: the other seventeen declared operators (`$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$in`, `$nin`, `$contains`, `$notContains`, `$startsWith`, `$endsWith`, `$icontains`, `$like`, `$ilike`, `$null`, `$exists`) each returned the identical id set on both faces on this fixture.\n\n## Cause\n\n`packages/drivers/driver-memory/src/memory-matcher.ts`, the `$between` arm:\n\n```ts\nif (Array.isArray(target) && (value < target[0] || value > target[1])) return false;\n```\n\nWith `value === null` and string bounds, relational comparison coerces `null` to `0` and compares it against a string, so BOTH `null < '2026-07-01'` and `null > '2026-07-15'` are false. Neither disjunct fires, nothing returns false, and the range stops constraining — the no-value row matches. The MISSING reading escapes only because the pre-switch guard in `checkCondition` short-circuits on `value === undefined` before this arm runs, which is why the two readings come apart.\n\nThis is the WIDENING direction: on an RLS read scope a range that stops bounding is a permission bypass rather than a degraded filter (#3948).\n\n## Not a duplicate of the two queued matcher cards\n\n- **#13495** is the same arm and the same coercion, but on the **comparand** axis: `{$between: [null, null]}`, a null BOUND, matching every VALUED row. This card is the **value** axis: valid non-null bounds, a null STORED VALUE. Fixing null bounds does not decide what a null value does, and #13495's own body asserts no target for either.\n- **#13494** is the `$eq: null` scalar spelling against a MISSING key, in the pre-switch guard rather than the range arm.\n\nBoth were read before filing; neither carries this cell.\n\n## Not in scope for #13524\n\n#13524 is the composed-constraint clobber in the two LIVE translators. Its repair leaves the reference matcher untouched by design — the matcher is that card's ORACLE, and it loops the operators so it cannot express the clobber at all. This single-operator divergence predates and survives that repair; #13524's vocabulary sweep is written to score the live path against itself for exactly this reason, so it is green with this cell still open.\n\n## Related\n\n#13495 (the null-BOUND axis of the same arm) · #13494 (the `$eq: null` guard) · #13357 (null comparands, awaiting a ruling) · #13166 (the same guard, negation allowlist) · #5328 (the `$between` SHAPE refusal, closed) · #3948 (widening on a read scope) · #13524 (the card that measured this)"
+}

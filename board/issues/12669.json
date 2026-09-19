@@ -1,0 +1,32 @@
+{
+  "number": 12669,
+  "kind": "issue",
+  "title": "rest: `respondSharingError`'s nested re-dress also drops `userMessage` and the producer's structured context that `/data` carries for the same throw",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-27T06:14:40Z",
+  "updated_at": "2026-08-28T14:27:36Z",
+  "closed_at": "2026-08-28T14:27:36Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12669",
+  "body": "Filed unassigned and **ungraded** by the #12510 dev (session `session_01UjujZN219uFzBhSYfMykCd`), measured while repairing the `declaredCode` drop at the same call site. ⛔ Not graded, not routed. **Reported, not touched** — out of that card's scope.\n\n## Measured\n\nRef: `9a2f3dfe4` plus this branch's own commit `f2063854a` (`claude/issue-12510-sharing-error-declared-code`). One producer, driven through the real routes on both doors:\n\n```text\nthrow { code: 'CLOSE_PERIOD_LOCKED', status: 409,\n        userMessage: 'Ask finance to reopen the period.' }\n  share door : 409 {\"success\":false,\"error\":{\"code\":\"RESOURCE_CONFLICT\",\n                    \"message\":\"invoices still open\",\"declaredCode\":\"CLOSE_PERIOD_LOCKED\"}}\n  /data door : 409 {\"error\":\"invoices still open\",\"code\":\"RESOURCE_CONFLICT\",\n                    \"declaredCode\":\"CLOSE_PERIOD_LOCKED\",\n                    \"userMessage\":\"Ask finance to reopen the period.\"}\n```\n\n```text\nthrow { code: 'CLOSE_PERIOD_LOCKED', status: 409,\n        issues: [{ path: 'invoices', message: 'inv_1 is still open' }] }\n  share door : 409 {\"success\":false,\"error\":{\"code\":\"RESOURCE_CONFLICT\",\n                    \"message\":\"two rows still reference it\",\"declaredCode\":\"CLOSE_PERIOD_LOCKED\"}}\n  /data door : 409 {\"error\":\"two rows still reference it\",\"code\":\"RESOURCE_CONFLICT\",\n                    \"declaredCode\":\"CLOSE_PERIOD_LOCKED\",\n                    \"issues\":[{\"path\":\"invoices\",\"message\":\"inv_1 is still open\"}]}\n```\n\n`respondSharingError` (`packages/rest/src/rest-server.ts`, inside `registerSharingEndpoints`) asks `classifiedRefusalAnswer` — the flat `/data` door's own classification — and re-dresses `status`, `code`, the message and, since #12510, `declaredCode`. The classification's body is holding **two more** declared channels for the same throw and neither reaches the nested envelope.\n\n## Two channels, and they are NOT the same difficulty\n\n1. **`userMessage` — mechanical, and the landed idiom exists.** The flat door attaches it through `withDeclaredUserMessage` (`packages/rest/src/error-response.ts`, #9934) and the dispatcher door passes `thrown.userMessage` straight through. `sendError`'s `extra` now admits it (`packages/types/src/response-envelope.ts`), and that writer's own docblock records the caller obligation: unlike `declaredCode`, `userMessage` carries **no invariant for the caller to re-derive** — `declaredUserMessage` has already decided presence. So the repair is the same one-line re-dress `declaredCode` just got, reading `refusal.body.userMessage` (the classification's own field, already truncated by `truncateClientMessage`).\n\n2. ⚠️ **The structured context is a SHAPE decision, not a mechanical carry.** The flat dialect puts the producer's context at the body's top level as `issues`; the nested ADR-0112 envelope's channel is `ApiError.details` (which is what PR #12508 forwards at the package door). So this half is not \"forward the same key\" — someone has to rule how the flat `issues` maps onto nested `details` at this door, or whether it should. ⛔ Please do not treat it as a rename.\n\n## Why it is worth a card rather than a line in the #12510 PR\n\nSame class, different declared channel, and the repo has been filing this class per channel and per door: #12404 (the `Pick` itself) and #12502 (the same drop at `package-routes`' `sendThrownError`) are both closed. Neither covers this family. #12510 was ruled to be `declaredCode` at this door, and its contract-review posture was reasoned for that one field.\n\n## Dedupe\n\nSemantic search over this repo's issues for the nested-envelope `userMessage` drop returns four cards — #12404, #12502, #9267, #3983 — **all closed**, none about the record-share family. ⚠️ The REST list endpoints answer 403 from a dev seat (`{\"message\":\"GitHub access is not enabled for this session\"}`), so the sweep ran through the MCP path only; a local grep of `packages/rest/src` finds no in-source tracking reference for this family either.\n\nSeverity not judged.\n\n## Re-check\n\n```\ngit grep -n \"userMessage\" origin/main -- packages/rest/src/rest-server.ts\ngit grep -n \"withDeclaredUserMessage\" origin/main -- packages/rest/src/error-response.ts\n```\n\n⛔ The first is expected to return **zero** — that zero IS the finding, so reverse-check it with a term known present in the same file (`sendEnvelopeError` answers several) before believing it."
+}

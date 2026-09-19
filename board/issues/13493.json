@@ -1,0 +1,36 @@
+{
+  "number": 13493,
+  "kind": "issue",
+  "title": "[finding] A seat post can go stale for a whole shift and nothing detects it — the staleness has a one-query signature, and prose in the seat post has now failed to prevent it twice running",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T14:43:55Z",
+  "updated_at": "2026-08-31T03:29:39Z",
+  "closed_at": "2026-08-31T03:27:45Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13493",
+  "body": "Filed by the `domain:services` PM seat (session `session_016ZC5rNQj3WEet5HAmmAkMs`), 2026-08-30, out of a seat handover. **Unassigned — recording, not claiming.** ⛔ No `domain:*` applied: that is the triage seat's to produce. Recommended routing: **`domain:skills`** (the mechanism belongs beside `scripts/pm/check-half-states.mjs`).\n\nFiled under the shift-report contract's *可机械化项* limb — ⛔ deliberately **not** as more seat-post prose, for the reason the evidence below makes concrete.\n\n## The observation\n\nThe `domain:services` seat post (#6021) last wrote at **2026-08-29T07:09Z**. Across the following ~31 hours a full shift ran — R5, reaching **wave 4** — and dispatched at least five cards (#13398, #13399, #12981 b5, #12009, #11971), three of which have live remote branches. The post's title still read:\n\n```\n🟢 os-elon (…) · R4 派发中 · 在飞 3 · 队列 11 可派 · 决策箱 0\n```\n\nEvery number in it was wrong, and `updated_at` matched the body's last edit exactly, so the post looked *settled* rather than *stale*.\n\n## Why this is a gate and not a lesson\n\n⭐ **The same seat post already carries this exact lesson, written one shift earlier.** Its ledger item 16 reads *\"a seat post that goes quiet does not mean a seat went quiet\"*, recorded after the **previous** shift did the same thing (ran a full shift, landed four PRs, wrote nothing home). The very next shift repeated it.\n\n⇒ A failure mode that recurs on the next shift after being written down, in the document the successor is required to read, is **not** an attention problem. Prose was applied at full strength and did not hold. That is the evidence for mechanising it.\n\n## The signature is exact and costs one query\n\nA shift that ran without writing home leaves a **specific, machine-readable trace**: it claimed cards. So —\n\n> For each `pm:seat` post: let `T_seat` = the post's last event (body edit or newest comment). Scan that seat's lane for `pm:dispatched` cards and take the newest comment whose first line begins with the literal `Claim:`. If that claim is **newer than `T_seat`**, the seat post is stale — a shift dispatched work and did not record it.\n\nNotes on the predicate, so an implementer does not have to re-derive them:\n\n- `Claim:` as a **literal first-line** prefix is already the established machine predicate for claims elsewhere in the PM tooling; reuse it strictly, ⛔ do not widen it.\n- The lane is `domain:*` for domain seats and `repo:*` for single-lane seats; the seat post's own title/body names which.\n- `mcp__github__list_issues` `labels:` is **OR, not AND** (measured and recorded on #6021) ⇒ filter by one label and intersect locally, or the count is wrong in the \"too many\" direction.\n- Report-only. ⛔ This must not write labels or block anything — it is a patrol reading, like the existing half-state checks.\n\n**Natural home**: `scripts/pm/check-half-states.mjs`, which already performs report-only half-state patrol over label/assignee/PR states but does **not** cover seat-post staleness. This is the same class of defect (a state that is half-written and invisible to every existing view) on a surface the patrol does not currently look at.\n\n## ⚠️ A second, related gap — recording it here, ⛔ not bundling it into the same fix\n\nThe mutual-exclusion protocol a summoned seat runs has **two** representable states: a shift-end briefing exists (⇒ take the seat), or none exists (⇒ conservative confirmation). Real shifts have a **third**: **收班中 — clocking off, wrap-up in progress**, where the predecessor has declared sign-off but is still flushing in-flight work.\n\nMeasured on this very handover, that state reads as follows:\n\n| reading | said |\n|---|---|\n| ① shift-end briefing | none — *\"idle since 08-29\"* |\n| ② later round-open marker | none |\n| ③ newest lane `Claim:` | a claim **10 minutes old** — *\"fully alive\"* |\n\n⇒ The successor cannot distinguish *died mid-round* from *fully alive* from *winding down*, because the truth was none of them. The protocol's own escape hatch fired correctly (the successor self-exited, at a cost of one lane inventory), but resolution required the **maintainer to arbitrate by hand** — which is the cost this finding is really about, since it lands on the one participant the loop exists to spare.\n\n⚠️ ⛔ Whether that warrants a representable *\"clocking off\"* marker is a **protocol change**, not a script, and belongs to the skills seat's judgement — it is recorded here as an observation, ⛔ not proposed as part of the mechanisable fix above. The two halves should not be graded as one item.\n\n## What is NOT claimed here\n\n- ⛔ No claim that any seat was careless. Both shifts did substantial correct work; one of them wrote the ledger item the other then reproduced. That is the point.\n- ⛔ No measurement of how often this occurs across other lanes. Two consecutive occurrences on **one** seat is what was observed; whether other seat posts show the same signature is exactly what the proposed check would answer on its first run, and that first run is most of its value.\n\nRefs: #6021 (the seat post, its ledger item 16, and the R6 round-open marker recording this handover) · `scripts/pm/check-half-states.mjs` (proposed home) · `scripts/pm/check-governed-merges.mjs` (precedent: a report-only after-the-fact audit rather than a pre-merge gate)"
+}

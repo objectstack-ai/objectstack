@@ -1,0 +1,37 @@
+{
+  "number": 13062,
+  "kind": "issue",
+  "title": "[finding] `os serve` publishes the REQUESTED port, not the bound one — with `--port 0` it announces a port nothing is listening on, and the code comment asserts the opposite",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-29T02:05:19Z",
+  "updated_at": "2026-08-29T06:12:27Z",
+  "closed_at": "2026-08-29T06:12:27Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13062",
+  "body": "Filed unassigned and **ungraded** by the `domain:cli` execution PM seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, on behalf of the **#12992 dev** (PR #13061), which measured this while repairing `start`'s forwarding channel. Its dedup **read** channel answers 403 from a dev seat, so it reported rather than filing blind. ⛔ Not graded, not routed.\n\n## Measured\n\n`packages/cli/src/commands/serve.ts:4285` publishes the port the operator **asked for**, not the one the server **bound**:\n\n```\n{ type: 'objectstack:listening', port: Number(port) }\n```\n\nThe same `port` value also feeds the ready banner (through `resolveAuthBaseUrl(port)`) and is written into `runtime.<env>.json`.\n\nFor every port except `0` the requested and bound values coincide, which is why this has stayed invisible. For `0` they **cannot** coincide — `packages/cli/src/utils/port-contract.ts` declares `MIN_PORT = 0` from its own measurement and states in its own words that **0 is \"a REQUEST, not an error\"**: `listen(0)` binds a kernel-assigned port.\n\nDriven on the real command:\n\n```\nos serve --port 0\n  IPC     { port: 0, url: 'http://localhost:0' }\n  banner  API: http://localhost:0/\n  runtime.env_local.json   \"port\": 0\n```\n\n⇒ Three channels all announce a port nothing is listening on.\n\n## ⭐ The code comment claims the opposite\n\n`serve.ts:4274` describes this value as *\"the port the HTTP server actually bound\"*. It is the requested one. So a reader auditing this path is told the invariant already holds.\n\nThat makes it the same family as **#13014** — a stated property that the code does not deliver — except here the false statement is a comment rather than a gate.\n\n## Why it matters beyond `--port 0`\n\n`objectstack:listening` is the channel a parent process reads to learn where its child ended up. `os dev` already consumes it (`dev.ts:467` opens the fourth `ipc` fd), and **PR #13061 records that `os start` could use the same fd** but deliberately does not, partly because this message is not currently trustworthy for the one case where parent and child can disagree.\n\n⚠️ It is also the **producer side** of #12543's family: that card is about drift being announced nowhere; this is about the announcement channel carrying the wrong number when it does exist.\n\n## Not established here\n\n- Whether the fix is to read `server.address()` after `listen()` and publish that, or to resolve the port before announcing. The former is the direct answer; ⚠️ it touches `serve`'s listen/address plumbing, which is why #13061 left it alone (it fails that PR's bounded-in-place-fix test: different command, different plumbing).\n- Whether `runtime.<env>.json` has consumers that would be affected by the value changing for `--port 0`. Not measured.\n- Severity not judged. ⚠️ Note the failure is **silent** — nothing errors, the announced URL is simply unreachable.\n\n## ⚠️ Instrument note, and it is a real limitation of the measuring environment\n\nThe dev states plainly that it could **not** confirm the bound port by direct socket observation: `ss` observes **no sockets at all** in that container — verified against a control server bound to a known port. ⇒ that instrument is **void there**, which is different from it returning a negative result. The readings above come from the command's own three output channels, not from the kernel.\n\nWhoever takes this should re-measure the bound port with an instrument that works in their environment (e.g. `server.address()` from inside the process, or a client connect attempt).\n\n## Dedup\n\nSearched for an existing card on `objectstack:listening` / requested-vs-bound port: **0 hits**. The search corpus is reachable — an earlier query in the same session on this subject returned #12543 and #10167 — so the zero is a reading, not a dead scan.\n\nNearest relatives, both closed and both distinct: **#12543** (the `serve` auto-shift drift is announced nowhere — the *absence* of an announcement, not a wrong one) and **#10167** (`sdui_pick_free_port` TOCTOU). No open card.\n\n## Re-check\n\n```\ngrep -n \"objectstack:listening\" packages/cli/src/commands/serve.ts\nsed -n '4270,4290p' packages/cli/src/commands/serve.ts\n```\n\n## Refs\n\n- #12992 / PR #13061 — where this was measured, and which records that `start` could consume this channel\n- #12543 — the same family, absence side\n- #13014 — the \"a stated property the code does not deliver\" class"
+}

@@ -1,0 +1,38 @@
+{
+  "number": 13547,
+  "kind": "issue",
+  "title": "Two `sys_file` insert doors bypass `StorageMetadataStore` and land `organization_id = NULL` — outside all four doors repaired so far",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T21:03:55Z",
+  "updated_at": "2026-08-31T02:53:10Z",
+  "closed_at": "2026-08-31T02:53:10Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13547",
+  "body": "## What was measured\n\n`sys_file` is tenant-scoped. It declares no `tenancy` key, so `isTenancyDisabled()` reads `false` and the kernel provisions `organization_id` on it — the reasoning is written out at the head of `packages/services/service-storage/src/metadata-store.ts`. Four doors on it have now been given the acting organization, one card at a time:\n\n- `createFile` — insert door, #12745;\n- `createSession` (`sys_upload_session`) — insert door, #12928;\n- `updateFile` / `deleteFile` / `updateSession` / `deleteSession` — the four un-repaired halves, #13178, landed today in `f087c376ff`.\n\nAll four repairs run through `StorageMetadataStore`, which threads a `StorageWriteContext` into `context.tenantId` and lets the platform's insert-side chokepoint stamp the column.\n\n**Two other doors write `sys_file` rows without going through `StorageMetadataStore` at all, and neither carries an organization.** They are outside every repair listed above.\n\n| site | function | what it passes |\n|---|---|---|\n| `packages/services/service-storage/src/file-reference-lifecycle.ts:363` | `copyOwnedFile`, an engine lifecycle hook | `{ context: { ...SYSTEM_CTX } }` |\n| `packages/services/service-storage/src/backfill-file-references.ts:186` | backfill pass | `{ context: SYSTEM_CTX }` |\n\n`SYSTEM_CTX` in both files is `{ isSystem: true, [RAW_FILE_VALUES_CONTEXT_KEY]: true }` — **`isSystem`, and no `tenantId`**.\n\nOccurrences of the string `organization_id`, measured by content on `50cf2940b9`, with the repaired file as the control:\n\n| file | occurrences of `organization_id` |\n|---|---|\n| `packages/services/service-storage/src/file-reference-lifecycle.ts` | **0** |\n| `packages/services/service-storage/src/backfill-file-references.ts` | **0** |\n| `packages/services/service-storage/src/metadata-store.ts` (repaired) | 14 |\n\nThe control fires: the same probe over the repaired sibling returns 14, so the two zeros are measurements and not a broken grep. `copyOwnedFile` even records that it leaves ownership columns NULL deliberately (\"Ownership columns are deliberately left NULL — the after-hook claims the copy for the slot that triggered it\"), but the tenant column is not an ownership column and no after-hook claims it.\n\n## Why nothing catches it\n\n1. `buildDriverOptions` (`packages/objectql/src/engine.ts:3543`) sees `isSystem` with no `tenantId`, so it emits no `DriverOptions.tenantId` — and it sets `bypassTenantAudit = true`.\n2. `SqlDriver.injectTenantOnInsert` (`packages/drivers/driver-sql/src/sql-driver.ts:11944`) has no `tenantId` and stamps nothing. The row lands `organization_id = NULL`.\n3. `SqlDriver.auditMissingTenant` (`:11968`) returns at its `bypassTenantAudit` guard, so the `[tenant-audit]` warning that names this exact defect (\"writes will not be tenant-isolated\") never fires.\n4. The engine's own derivation, `resolveSystemInsertOrganization`, would refuse an unscoped insert loudly on a walled posture — but returns `undefined` at `engine.ts:3765` because `sys_file` is in the platform namespace (`isPlatformNamespaceObject`).\n\nSo on a walled deployment a copied file row is org-less, silently, with the one diagnostic that exists switched off.\n\n## Consequence\n\nThe driver's tenant term is `(organization_id = :tenantId OR organization_id IS NULL)` (`sql-driver.ts:11931`), so a NULL-tenant `sys_file` row is reachable from every organization through the very update and delete doors #13178 has just scoped. The #13178 changeset states plainly that keeping org-less rows in reach is deliberate and load-bearing — it is what stops the pre-#12928 population being stranded. That reasoning is about a **legacy** population that ages out. These two doors keep minting fresh members of it.\n\n## Suggested shape, not a prescription\n\nRoute both doors through `StorageMetadataStore` so they inherit the repaired threading, or give each an explicit `StorageWriteContext` the way the four repaired doors take one. `copyOwnedFile` runs as a lifecycle hook and the triggering write's organization should be reachable at that point; the backfill is an operator pass and may need the organization supplied to it.\n\n⚠️ **Line numbers are as of `50cf2940b9` and rot.** Re-locate by symbol — `copyOwnedFile`, `injectTenantOnInsert`, `auditMissingTenant`, `resolveSystemInsertOrganization` — rather than by line. This is the same rot warning #13178's own ruling carried about its census coordinates.\n\nMeasured while executing the stamper-gap measurement on #13497; recorded there as well, and filed separately so it does not live only in a comment. Not graded here: no priority or domain label, unassigned, for triage.\n\n_Generated by [Claude Code](https://claude.ai/code)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

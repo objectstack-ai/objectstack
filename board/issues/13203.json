@@ -1,0 +1,36 @@
+{
+  "number": 13203,
+  "kind": "issue",
+  "title": "sys-metadata's declared overlay index shape diverges from the migration-owned partial form — every composed migrate plan proposes a recreate_index that would break draft/active coexistence",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p1"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-29T10:57:03Z",
+  "updated_at": "2026-08-31T01:21:39Z",
+  "closed_at": "2026-08-31T01:21:39Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13203",
+  "body": "From cloud#1736's audit (control-plane drift): the framework's overlay-index migration owns `idx_sys_metadata_overlay_active` and installs a PARTIAL, NULL-safe form (`WHERE state='active'`, `COALESCE(package_id,'')`), but sys-metadata.object.ts DECLARES a plain index under the same name. Consequences: (1) `os migrate plan` proposes recreate_index [destructive] on every run against a DB carrying the migration's form; (2) if anyone ever applies it, the plain form collides draft with active and leaves package-less overlays unconstrained — and because syncDeclaredIndexes skips by NAME, the framework migration would never repair it. Deliverable: make the DECLARED shape carry the partial/NULL-safe form (or teach the declaration vocabulary to express it), so the plan stops proposing the wrong index. Consumer evidence: cloud#1736 table, findings on sys_metadata."
+}

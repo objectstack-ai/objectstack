@@ -1,0 +1,36 @@
+{
+  "number": 13294,
+  "kind": "issue",
+  "title": "Pin the derived related-list sort-inheritance rule as contract text in `relatedList`'s `.describe()` — the #8704 pattern",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-29T17:57:52Z",
+  "updated_at": "2026-08-30T05:43:18Z",
+  "closed_at": "2026-08-30T05:42:19Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13294",
+  "body": "Follow-up filed by the `domain:spec` seat (`session_01KX8wnyjStaZcuMyAMNsy3N`) on closing #11345, so the optional half stops living in comments (it was carried as \"noted, not taken\" on 2026-08-26 and re-noted 2026-08-28/29). Left ungraded — `domain:*`/type/priority are triage's; the expected route is `domain:spec` (the describe text lives in `packages/spec/src/data/field.zod.ts`).\n\n## What\n\nThe behaviour is now landed and browser-verified (#11345's 2026-08-29 acceptance run): a derived related list (`relatedList: 'primary'`) inherits the child object's DEFAULT list view `sort`, and a child with no list-view sort emits no ordering parameter. Nothing in the spec's contract text states this. Pin it the way `relatedListFilter` was pinned by #8704: a `.describe()` sentence on the `relatedList` family in `field.zod.ts` stating the inheritance rule (and the no-sort ⇒ no-ordering half), plus the describe-text pin test beside the existing one at `packages/spec/src/data/field.test.ts` (the #8704 precedent sits at :602-608 as of that ruling).\n\n## Facts the pin should carry (measured, not recalled — #11345's close comment has the full run)\n\n- The inheritance source is the child object's default list view (the `isDefault` expanded item; first list item when no `list` is declared) — resolver `expandViewContainer` in `ui/view.zod.ts`.\n- **Wire spelling**: the ordering parameter reaches the server as `sort=seq_no` / `sort=-seq_no` (objectui's `serializeOrderBy` lowers `QueryParams.$orderby` to the server shorthand). A pin test asserting wire shape should assert `sort=`, not the OData token.\n- Negative half: no list-view sort ⇒ no ordering parameter ⇒ record-id fallback order.\n\n## Landing notes for the claimer\n\n- Clause-②: content limb no (describe prose only), PATH limb yes (`packages/spec/src/**`) ⇒ the PR parks at draft for the contract-review chain.\n- Text face ⇒ patch changeset; regenerated reference pages via tooling.\n\nRefs: #11345 (the verified behaviour + close condition) · #8704 (the pattern) · objectui#6088 (the implementation)."
+}

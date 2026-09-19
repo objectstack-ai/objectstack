@@ -1,0 +1,34 @@
+{
+  "number": 12974,
+  "kind": "issue",
+  "title": "Layer 0: should a verified platform admin cross the org wall by PERMISSION entitlement, not only posturePermitsCrossTenant's three shapes? (cloud#1676 upstream half)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-28T11:48:34Z",
+  "updated_at": "2026-08-29T07:04:09Z",
+  "closed_at": "2026-08-29T04:06:59Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12974",
+  "body": "From cloud#1676 (control-plane operator console reads EMPTY on Tenant Usage / Payout Accruals under the armed Layer 0 wall) — this is the **general-fix adjudication** that card explicitly deferred upstream.\n\n## The contract question\n\n`computeTenantLayer0Filter` lets a platform admin cross the organization wall only where `posturePermitsCrossTenant` holds — `isPrivate || tenancyDisabled || isBetterAuthManaged` (`plugin-security/src/security-plugin.ts`). A PUBLIC TENANT object matches none of the three, so a deliberately org-less platform admin hits `isolated`'s \"no active organization ⇒ fail closed\" and reads EMPTY — even where a Layer-1 mechanism has already verified the admin and would audit the read (cloud's `cross_org_admin_read` widening fires, 200 is returned, zero rows inside).\n\n**Proposal to adjudicate:** a verified platform admin crosses Layer 0 on any object their permission entitles them to, rather than only on the three enumerated shapes. Possibly via the OrgScopingEntitlement surface (#12704 added a platform-global exemption arm — is that the intended door, and does it cover per-object admin entitlement rather than only object-level exemption?).\n\n## Why it matters beyond the two objects\n\nAny operator surface over PUBLIC tenant-owned control tables has this shape. Cloud has taken the contained route-side detour meanwhile (explicitly-authorized `/api/v1/cloud/admin/*` reads, admin-session-gated + audited, landed with the both-directions pin in `unscoped-control-plane-tenant-wall.test.ts`) — but the operator's METADATA-DRIVEN screens still read the generic data path and stay empty until either this adjudication opens the wall for entitled admins, or every such screen is moved off the generic path one by one.\n\n## Measured evidence\n\nTwo-tenant rig, `apps/cloud/test/unscoped-control-plane-tenant-wall.test.ts`: generic-path admin reads pinned EMPTY (both directions), route-side reads pinned FULL — the pair documents exactly the delta this adjudication would close."
+}

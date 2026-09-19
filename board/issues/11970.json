@@ -1,0 +1,34 @@
+{
+  "number": 11970,
+  "kind": "issue",
+  "title": "platform-admin re-anchor L2 (core): env-configured verified-email derivation of PLATFORM_ADMIN — the config branch inside the single derivation site",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-25T03:31:00Z",
+  "updated_at": "2026-08-29T09:59:10Z",
+  "closed_at": "2026-08-29T09:58:29Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 12,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11970",
+  "body": "Leg **L2** of the accepted #11663 platform-admin re-anchor design. Provenance: design document = #11663 comment 5394453215 (§2, §3, §4 Choices 1–3 and 7, §6 row L2); maintainer acceptance = #11663 comment 5404675670 (2026-08-25, verbatim 「接受你的建议，继续」, bundle 1A/2B/3A/4A/5A/6A/7A). Filed by PM session `session_01KWRU3s15AJz7PGW7a7wdCh`.\n\nBlocked-by: #11965\nBlocked-by: #10348\n\n(#10348-C consolidates the stray judges onto `resolve-authz-context.ts` — the stated prerequisite so this derivation changes in exactly one place; #11965 is the spec capability declaration this leg reads.)\n\n**Surface**: `packages/core` — new `security/platform-admin.ts` (promoted `isEmailVerified`, normalization, list parse, derivation); the config branch in `resolve-authz-context.ts` §6b; `+ @objectstack/types` dependency (Choice 7A — measured acyclic); `ADMIN_STANDING_SURFACE` update.\n\n**Ruled shape (⛔ not re-litigable here)**:\n- **1A**: reuse `OS_PLATFORM_OWNER_EMAIL` (`packages/types/src/env.ts:172`); no second variable.\n- **2B**: comma-separated list; one normalization (lowercase), duplicates collapsed, blanks dropped, **any unparseable entry fails the whole variable closed** — never skip-and-continue.\n- **3A**: live env read per derivation with a per-process memo keyed on the raw string; ⛔ no runtime mutation endpoint.\n- Verified-email match only (an unverified account holding a configured address confers nothing); empty/unset config = **zero platform admins, fail closed** (dev-admin seed stays development-only).\n- Derived standing is **added**; the legacy row-id grant read is still honoured in this leg (migration step 3 — nothing revoked here).\n\n**Known cost, stated up front**: this moves the pinned golden — reading `email_verified` makes the `sys_user` read unconditional for authenticated principals, and the query multiset is pinned in `resolve-authz-context.batch-equivalence.test.ts` + `.golden.json`. Move it **with an explanation**; ⛔ never silently re-baseline. Also touches `packages/verify/src/harness.ts:360-371` + two CLI e2e fixtures (verified-email shape after #11343).\n\n**Discipline**: Clause-②: **yes** (authorization derivation); `needs:contract-review` at review; contract-review tier mandatory.\n\n**Acceptance criterion**: with `OS_PLATFORM_OWNER_EMAIL=a@b.c` and a **verified** account `a@b.c`, derivation yields `PLATFORM_ADMIN` with the declared capability set; unset/empty/malformed variable yields zero config-derived admins (loudly); legacy grant path still honoured and logging its deprecation pointer."
+}

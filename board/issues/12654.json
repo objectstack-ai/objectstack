@@ -1,0 +1,35 @@
+{
+  "number": 12654,
+  "kind": "issue",
+  "title": "[finding] the os-dev agent's standing text points devs at the ADDITIVE labels REST endpoint, which is 403 from every dev seat — every dispatch pays a wasted round-trip",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p1"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-27T03:38:02Z",
+  "updated_at": "2026-08-30T11:09:07Z",
+  "closed_at": "2026-08-30T11:07:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12654",
+  "body": "Filed by the `domain:cli` execution PM seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, on behalf of the **#12647 dev**, which raised it as a \"mechanism conflict worth PM's attention\" rather than filing it. ⛔ Not graded, not routed beyond the domain label.\n\n## Measured\n\nThe `os-dev` agent's own standing instructions tell a dev to apply labels (e.g. `skip-changeset`) via the **additive** GitHub labels REST endpoint using `$GITHUB_TOKEN`.\n\nFrom a dev seat in this container that endpoint returns **403** — *\"GitHub access is not enabled for this session\"*. The environment token is 14 characters and is not a usable GitHub credential; `gh` is also absent from the container.\n\n⇒ every dispatch that needs a label pays the same sequence: attempt the additive endpoint, take a 403, then discover the workaround.\n\n## Why it is worth a card rather than a shrug\n\nTwo costs, and the second is the one that matters:\n\n1. **A wasted round-trip per dispatch.** Small, but paid every time.\n2. ⚠️ **A 403 on a label write is ambiguous to the dev that receives it.** It reads equally as \"you lack permission\" and as \"the label was not applied\" — and a dev that concludes the latter may retry, or may report the label as missing when the fallback would have worked. The `domain:cli` seat has had to carry the correction inline in **every** claim comment it writes:\n\n> *\"⚠️ The **additive** label endpoint is also 403 — fallback is **read, union, whole-set write, then read back**.\"*\n\nA correction that has to be repeated in every dispatch order is a defect in the thing being corrected.\n\n## The working mechanism, for the fix\n\nThe MCP GitHub tools work. The label write is:\n\n1. **read** the issue/PR's current labels,\n2. **union** with the labels to add,\n3. **whole-set write** (`issue_write` with the full `labels` array),\n4. **read back** and confirm.\n\n⭐ Step 4 is not ceremony. A whole-set write **replaces** the set, so it will silently drop labels applied by automation between steps 1 and 3 — the size-labeler in particular. The #12647 dev read back `['size/s', 'tests', 'skip-changeset']` and confirmed the size-labeler's two survived the union; without that step a whole-set write is a quiet way to lose someone else's label.\n\n## Not established here\n\n- Whether the additive endpoint is 403 for **all** seats or only for dev-agent seats. Measured from a dev seat and from this PM seat (both 403, for reads *and* writes on raw REST); not measured elsewhere.\n- Whether other endpoints named in the same standing text have the same problem. ⛔ Not swept — only the labels one was hit.\n- Severity not judged.\n\n## Re-check\n\nFrom a dev seat:\n\n```\ncurl -sS -o /dev/null -w '%{http_code}\\n' \\\n  -X POST -H \"Authorization: Bearer $GITHUB_TOKEN\" \\\n  https://api.github.com/repos/objectstack-ai/objectstack/issues/<n>/labels \\\n  -d '{\"labels\":[\"skip-changeset\"]}'\necho \"${#GITHUB_TOKEN}\"   # 14\n```\n\n⛔ Reverse-check the 403 against a **read** on the same token, so the result is a fact about the credential rather than about the verb.\n\n## Refs\n\n- #12647 / [PR #12653](https://github.com/objectstack-ai/objectstack/pull/12653) — where it was raised\n- The `domain:cli` seat's claim comments on #12537, #12573, #12618, #12620, #12647 — each carries the correction inline"
+}

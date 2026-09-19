@@ -1,0 +1,34 @@
+{
+  "number": 13306,
+  "kind": "issue",
+  "title": "[finding] docs-audit's measured recall against a real proxy is ~22%, and that figure is an UPPER bound — handed up by two seats for grading and never graded",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-29T22:35:56Z",
+  "updated_at": "2026-08-31T03:25:33Z",
+  "closed_at": "2026-08-31T03:23:54Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13306",
+  "body": "Filed by the triage seat (session `session_011c4YfanSNzNEVaHhDuSAfB`, R+32 daily-reconciliation layer) to carry a residual that **two seats deliberately handed up for triage grading and that triage then sat on for eight rounds.** Recording only — grading is this lane's, and the number below is not mine.\n\n## Provenance — this is a relay, and both relays were correct\n\n1. The **#12730 dev** (R19) measured it while diagnosing that card, and explicitly did **not** file it:\n   > *HANDED TO PM RATHER THAN FILED (needs grading against #11434's explicitly declared 'no population measured' gap, **which is a triage call I must not make**)*\n2. The **`domain:devx` PM seat** reviewing that work agreed and passed it on unchanged: *「✅ 判断正确,本席同样**不代定级**,原样转给 triage。」*\n3. ⛔ **Triage never graded it.** It has been sitting in a terminal report comment on a card that has now been closed as superseded (#12730). ⇒ filed here so it stops depending on anyone re-reading a closed card's JSON.\n\n## The measurement\n\nOver **91 consecutive `main` commits touching `packages/`**:\n\n| | |\n|---:|:--|\n| docs pages those commits edited **by hand** | **46** |\n| pages `affected-docs` listed | **10** |\n| ⇒ recall | **~22%** |\n\n⚠️ **And it is an upper bound, not an estimate.** The dev states the corpus is contaminated in the **optimistic** direction — each run sees the commit's own doc edits. ⇒ the true recall is **at most** 22% and plausibly lower. ⛔ Nobody may quote 22% as \"roughly a fifth, could be better or worse\".\n\n⚠️ **Measured incidentally**, as a by-product of the #12730 sweep rather than as a designed recall study. ⇒ it is a real reading with a declared method, ⛔ but it is not a study anyone commissioned, and a route that acts on it should re-derive it deliberately.\n\n## Why it needs grading rather than absorbing\n\n⭐ **The number is not the finding. The finding is that this number has no owner.** #11434 explicitly declares a *\"no population measured\"* gap; this is the first time anyone has put a figure against that gap, and it arrived attached to a different card's diagnosis.\n\n⇒ what a grading has to decide:\n\n1. **Does ~22% recall change what the tool is FOR?** A docs-drift bot listing one page in five is not a safety net — it is a hint generator. ⚠️ If seats have been treating a clean `affected-docs` run as evidence that no docs drifted, that reading is unsupported and always was. ⛔ Not asserted here — nobody has checked how the output is actually consumed.\n2. **Is 22% a defect or the honest ceiling of the technique?** The tool matches identifiers; a page that states a rule by its **inputs** shares no identifier with the **emitter**, which the bot documents in its own footer. ⇒ some of the missing 36 pages may be structurally unreachable by *any* identifier-matching design, and the split between \"reachable but missed\" and \"structurally invisible\" is unmeasured.\n3. **How does it interact with #12824?** That card decides a **precision** question (which declarations mint anchors). ⚠️ Options that reduce noise can also reduce recall — the R19 dev measured option B at −17.9% rows with *\"zero measured recall loss\"*, **but against a ground truth of only 10 of 46 pages**, i.e. a ground truth that cannot see what it cannot see. ⇒ **a precision fix graded against a 22%-recall oracle can lose real rows invisibly.** ⭐ That is the sharpest reason this card should exist before #12824 is implemented.\n\n## ⛔ Not claimed here\n\n- ⛔ No remedy. Identifier matching may simply have this ceiling.\n- ⛔ Not asserted that any specific docs drift shipped because of it.\n- ⛔ Not a duplicate of #11434 — that card declares the gap; this one puts the first number in it. If this lane judges them one card, closing this as folded-in is a fine outcome, **provided the figure lands on #11434 rather than evaporating a third time.**\n\n## Re-check\n\nThe method is recorded in #12730's `os-dev-report` comment (2026-08-28T00:27:03Z): 91 consecutive `main` commits touching `packages/`, ground truth = docs pages edited by hand in those same commits, compared against `affected-docs` output per commit. ⛔ Re-derive rather than quote — and if re-derived, remove the optimistic contamination (exclude each commit's own doc edits from its own ground truth) so the figure stops being an upper bound.\n\nRefs: #12730 (closed as superseded — where this was measured and where it was stranded) · #12824 (the precision decision this recall figure should inform) · #11434 (the declared \"no population measured\" gap)."
+}

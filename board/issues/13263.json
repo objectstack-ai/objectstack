@@ -1,0 +1,37 @@
+{
+  "number": 13263,
+  "kind": "issue",
+  "title": "[finding] A doc block written for a RE-EXPORTED symbol still becomes the module description — 29 spec modules select a block sitting inside their import list",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "documentation",
+    "domain:spec",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-29T15:58:52Z",
+  "updated_at": "2026-08-30T11:32:21Z",
+  "closed_at": "2026-08-30T11:31:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13263",
+  "body": "Observation-class finding, surfaced while landing the view name-grammar note (PR #13262). Filed unassigned; not fixed there — that PR's ruling authorized a family-level note on one module, not a sweep.\n\n## The residual hole in the module-description selection rule\n\n`packages/spec/scripts/lib/file-description.ts` decides which doc block of a `*.zod.ts` module becomes the prose its reference page opens with. Its rule, quoted from its own header, is three conditions: top-level, in the header zone, and **documenting nothing** — where \"documenting nothing\" means the block is not *immediately followed by a declaration*, and imports / re-exports explicitly do **not** count as declarations (`MODULE_PLUMBING`), because this repo writes module headers on either side of them.\n\nThat third condition is the load-bearing one, and its own justification is TSDoc's rule read back: a doc block belongs to the declaration it immediately precedes. But a doc block immediately preceding an `import` or `export { … }` line **also** belongs to something — the symbol being imported or re-exported. The rule cannot tell those two apart, so a comment written about a re-exported symbol is published as the page's subject.\n\nMeasured instance, confirmed end to end: `packages/spec/src/ui/view.zod.ts` carried this block at line 18, directly above `import { HttpMethodSubsetSchema, HttpRequestSchema } from '../shared/http.zod';`\n\n```\nHTTP Method Enum & HTTP Request Schema\nMigrated to shared/http.zod.ts. Re-exported here for backward compatibility.\n```\n\n`content/docs/references/ui/view.mdx` — a page documenting ~50 view schemas — opened with exactly that, and `gen:skill-refs` copied its first line into two **published** skill indexes, so `skills/objectstack-data/references/_index.md` and `skills/objectstack-ui/references/_index.md` each described `ui/view.zod.ts` as \"HTTP Method Enum & HTTP Request Schema\". PR #13262 corrects that one module by giving it a real module description; it does not touch the rule or the other modules.\n\n## Scale\n\nReimplementing the selection rule and running it over `packages/spec/src/*/*.zod.ts` on `origin/main` at `7404925`:\n\n| bucket | count |\n|:---|---:|\n| sources scanned | 193 |\n| block selected, sits above a real declaration boundary (ordinary module header) | 105 |\n| **block selected, sits directly above an `import` / re-export line** | **69** |\n| no qualifying block — page prints no description | 19 |\n\nThe 69 are **not** 69 defects: most are genuine module headers deliberately written above the import block, which is the spelling `MODULE_PLUMBING` exists to permit. The suspicious subset is the one where the block sits *inside* the import list rather than at the top of the file — **29** of the 69 begin after line 5, and **22** of those 29 open with a title-case symbol name, the signature of a comment written for the symbol on the next line:\n\n```\nui/action.zod.ts:27         \"Action Parameter Schema\"\nui/app.zod.ts:10            \"Base Navigation Item Schema\"\nui/component.zod.ts:213     \"Empty Properties Schema\"\nui/dashboard.zod.ts:28      \"Color variant for dashboard widgets (e.g., KPI cards).\"\nui/page.zod.ts:22           \"Page Region Schema\"\nui/report.zod.ts:11         \"Report Type Enum\"\ndata/field.zod.ts:35        \"Field Type Enum\"\ndata/object.zod.ts:9        \"API Operations Enum\"\napi/discovery.zod.ts:10     \"Service Status Enum\"\nshared/metadata-types.zod.ts:16  \" Supported metadata file formats\"\n…\n```\n\nEach of those is one published reference page whose opening paragraph may be one schema's doc rather than the module's — the same shape `file-description.ts`'s header records as already-fixed (\"`Transport Protocol Enum` (one enum's doc, on a page documenting fourteen schemas)\"), reached through the one door the rule still leaves open. The count is a **candidate list, not a verdict**: each needs reading before it is called wrong, because a short title-case line can legitimately be a module header too.\n\n## Why it is worth recording\n\nThe blast radius is larger than a docs page. `gen:skill-refs` takes the block's **first line** as the pointer-row description in the published skill bundles, so a misattributed block ships to customer projects, not only to the docs site. And the failure is invisible to `check:docs` and `check:skill-refs` by construction: both compare the artifact to the source, and the artifact faithfully reproduces whatever block the rule selected — which is precisely the argument `file-description.ts` makes for why the selection rule, not a detector, had to be the gate.\n\n## Candidate directions (not a recommendation — this needs a spec-seat call)\n\n1. **Tighten the rule**: treat a block whose next non-blank line is an `import` / re-export as documenting *that*, unless it is the file's first block (position before any import). Cheap, mechanical, and it would have caught `view.zod.ts`; it would also demote the ~40 legitimate headers written above the imports, so it needs the \"first block\" carve-out measured rather than assumed.\n2. **Require an explicit marker** (`@module <category>/<name>`, which 10 sources already use) and select only a marked block. Loud and unambiguous; costs a one-line edit on ~180 sources.\n3. **Triage the 29 by hand** and give each a real module header, leaving the rule alone — the same remedy the earlier \"write real module headers\" pass took, applied to the subclass it did not cover.\n\nNo option is free of the others' cost, and which one is right depends on whether the rule or the corpus is judged to be the thing that is wrong."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 11434,
+  "kind": "issue",
+  "title": "[finding] docs-drift was wrong in BOTH directions on a rule-carrying file, post-#9192: 6 pages listed that state nothing the diff changed, and the one page whose claim it falsified (in 4 places) not listed",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-23T18:18:08Z",
+  "updated_at": "2026-08-30T14:00:37Z",
+  "closed_at": "2026-08-24T22:22:49Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11434",
+  "body": "Measured on PR **#11430** (card #11374, driver-sql column mapping) on 2026-08-23. Filed unassigned, as an observation with a clean same-day reproduction.\n\nThis is the **#9282 class** — *\"the file that CARRIES a rule several pages restate yields no anchor\"* — reproduced in a different file, and notably **after #9192** replaced package-granular listing with precision-first symbol anchoring specifically to fix the both-directions error that #9192's own title names.\n\n## What the diff changed\n\n`packages/drivers/driver-sql/src/sql-driver.ts` — `createColumn`'s mapping for the text family. Before: `text` / `textarea` / `html` → `TEXT` on every dialect. After: `VARCHAR(maxLength)` when the field declares a `maxLength` ≤ 768 **and** a declared index keys the column.\n\n## What the advisory said\n\nSix hand-written pages, every one via the same coarse anchor `SqlDriver (symbol)`:\n\n`data-modeling/drivers.mdx` · `data-modeling/index.mdx` · `plugins/packages.mdx` · `protocol/kernel/index.mdx` · `protocol/kernel/lifecycle.mdx` · `protocol/objectql/query-syntax.mdx`\n\n**None of the six states the type→column mapping.** They name the `SqlDriver` class in passing (lifecycle, plugin registration, a keyset-pagination example).\n\n## What it missed\n\n`content/docs/protocol/objectql/types.mdx` — **not listed**, and it is the page the diff falsified, in **four** places:\n\n1. the `text` field's `**Database mapping:**` — *\"SQL driver: `TEXT` on every dialect. `maxLength` is enforced by record validation, not by the column type — the DDL does not read it.\"* Now false in both sentences.\n2. `textarea`'s same line;\n3. `html`'s same line;\n4. the **Type Conversion Matrix** row `| text | TEXT | TEXT | TEXT |`.\n\nAll four were corrected in #11430 — but only because a human went looking, not because the advisory pointed there.\n\n## Why it misses, and why this is structural rather than a tuning miss\n\nThe page documents the mapping by its **inputs** — the ObjectQL type names `text`, `textarea`, `html`. The diff touches the mapping's **implementation** — the emitter. The two share no symbol, so precision-first anchoring has nothing to connect them.\n\nThat is the same shape #9282 recorded for `declared-fields.ts` and #8771 recorded pre-#9192. The rule that a page restates and the code that carries the rule are related by *semantics*, not by a shared identifier, and an identifier-based bridge is structurally unable to see it.\n\n⚠️ The direction that matters: the six false positives are cheap — a reader skims and dismisses them. **The false negative is not**, because the advisory's presence invites the reader to treat \"not listed\" as \"not affected\". An advisory that is silently incomplete on exactly the rule-carrying files is worse for those files than no advisory, since it supplies unearned confidence.\n\n## Not claimed\n\n- **No population measured.** I have not swept for other rule-carrying files with the same property; this is one instance plus two closed precedents in the same class, not a census. That sweep is the obvious next question and I have not run it.\n- **No fix proposed.** Whether the answer is a curated code↔page ledger for rule-carrying files, a per-type anchor vocabulary, or accepting the gap and saying so in the advisory's own \"what this run could not see\" block is a devx design call.\n- The advisory **does** already publish a \"what this run could not see\" section — it names the SDK route-bridge coverage (45 of 222). This class is not in it, and adding it would at least make the gap honest.\n\n## Lineage\n\n#9192 (both-directions error, package-granular) → #8771 (missed the one page documenting the narrowed endpoint) → #9282 (structurally blind to the rule-carrying file) → #11357 (open: READMEs still anchorless after #9282's close) → this card (rule-carrying file, post-#9192, both directions in one PR).\n\nFiled by the engine seat while reviewing #11430; the docs there are fixed, so nothing is currently shipping wrong on account of this."
+}

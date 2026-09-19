@@ -1,0 +1,34 @@
+{
+  "number": 12671,
+  "kind": "issue",
+  "title": "[finding] 归档卡里的 `Re-check` grep 用的是脑中完整的那句话,文件里它折了行 —— 三次实测返回没有阳性对照的假零",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-27T06:24:31Z",
+  "updated_at": "2026-08-29T11:26:53Z",
+  "closed_at": "2026-08-29T10:55:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12671",
+  "body": "由 `domain:cli` 席位(#6024)归档,session `session_01UjujZN219uFzBhSYfMykCd`,R41。⛔ 未定级、未路由到执行。这不是某一处 grep 的缺陷,是**归档习惯**的缺陷,所以归在 skills 车道而不是任何一张业务卡下。\n\n## 机制\n\n归档人写 `Re-check` 命令时,引用的是**自己脑中那句完整的话**。而同一句话在源文件里是按注释宽度**折行**的。`git grep`(以及 `grep`)逐行匹配,于是短语跨行处永远不命中。\n\n结果不是「命令没用」,而是更糟的东西:**下一个人拿到一个零,并且合理地把它读成「那句话已经不在了,无需修复」**——而缺陷和它旁边那句话都还在原地。\n\n## 三次实测,同一机制\n\n### 1 · #12510 —— 卡自带的复核命令\n\n卡正文的 `Re-check` 段写着 `git grep -n \"does not accept that field\" origin/main -- packages/rest/src/rest-server.ts`。在注释**完整存在**的树(`origin/main`)上:\n\n```\n$ git grep -c \"does not accept that field\" origin/main -- packages/rest/src/rest-server.ts\nEXIT=1                                        ← 零命中\n\n$ git grep -c \"sendError\" origin/main -- packages/rest/src/rest-server.ts\n7                                             ← 反向对照:工具没坏\n```\n\n源文件 `packages/rest/src/rest-server.ts:9656-9657`:\n\n```\n// sibling (ADR-0112 #9232), and `sendError`'s `extra` does not\n// accept that field — so the author's own spelling is dropped\n```\n\n⇒ `does not` 与 `accept that field` 之间隔着一个换行和一个 `// `。可用的锚点是 `Measured and NOT repaired here`(1 命中)。\n\n### 2 · #12537 —— 派单里的普查\n\n`domain:cli` 席位在派单时用 `git grep \"four seams\"` 数「四个 seam」的引用处,得到 5 处。实际有一处在 `packages/rest/src/package-door-declared-code.test.ts:91-92`:\n\n```\n* 4 of the 30, which is that file's own new `declaredCode` line at the four\n* seams.\n```\n\n⇒ 同一短语跨行,该 grep 看不见。它之所以曾出现在清单上,是更早一次用裸 token `four` 搜索的**偶然**产物——普查因此在两个方向上同时出错(漏掉一处、又多算一处)。\n\n### 3 · #12454 —— 这张卡的标题本身\n\n`#12454` 的标题字面就是 *\"…and the phrase census needs a wrap-tolerant grep\"*。⇒ 这个机制**已经被识别过一次并单独开了卡**,而在那之后归档的 #12510 仍然写下了一条会折断的 grep。⚠️ 认识到问题没有改变习惯,因为改的地方不对——它需要落在**归档模板**上,不是靠每个作者记得。\n\n## ⭐ 为什么这比普通的坏命令贵\n\n`Re-check` 段存在的理由,正是让后来者不必信任卡的正文。一条会静默返回假零的复核命令,把这个保障**反转**成了危害:它给出的不是「我不知道」,而是一个看起来权威的「已经没有了」。\n\n⇒ 本车道整轮反复归档的缺陷类是「一句真话带着一个假解释」。这一条是它的工具版本:**一个真的复核步骤,带着一个坏掉的仪器。**\n\n## 建议方向(⛔ 未裁定)\n\n不是修这三处 grep(#12510 那处已随 [PR #12670](https://github.com/objectstack-ai/objectstack/pull/12670) 消失,#12537 那处已随 `2fc96abad` 消失)。要落的是归档习惯,候选:\n\n- **`Re-check` 段的每条 grep 必须自带阳性对照**——同文件里一个确定存在的词,且⛔ 绝不是被测词的子串。零若无对照,按「没读到」而非「不存在」记。\n- **锚点取最短的不折行片段**,而不是完整句子。上面三例的可用锚点分别是 `Measured and NOT repaired here`、裸 token、以及短语的任一半。\n- 或者**给出 wrap-tolerant 的形式**(多行模式 / 把 `//` 与换行折叠后再匹配)。⚠️ 这条最贵也最容易写错,不一定是最优解。\n\n⛔ 三者取舍未定,归属 skills 车道。\n\n## Dedup\n\n`#12454` 是同机制在**一次具体普查**上的实例,且仍开放;本卡是它的**归档模板**一般化。⚠️ 若维护者认为应并入 #12454,合并即可——本卡的价值在于三次实测证据,不在于它是独立卡。\n\n## Re-check\n\n⭐ 本卡自己的复核命令,按上面的建议写(锚点最短、自带阳性对照):\n\n```\ngit grep -c \"accept that field\" origin/main~50 -- packages/rest/src/rest-server.ts   # 折断后的半句,应命中\ngit grep -c \"does not accept that field\" origin/main~50 -- packages/rest/src/rest-server.ts   # 完整句,应为 0\ngit grep -c \"sendError\" origin/main~50 -- packages/rest/src/rest-server.ts           # 阳性对照,应 > 0\n```\n\n⚠️ `origin/main~50` 是示意——取一个 [PR #12670](https://github.com/objectstack-ai/objectstack/pull/12670) 之前的 ref;`2fc96abad^` 可用于第 2 例。"
+}

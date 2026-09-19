@@ -1,0 +1,34 @@
+{
+  "number": 12909,
+  "kind": "issue",
+  "title": "[platform reading] PR-body write eats a trailing `---` horizontal rule AND the attribution footer after it — measured in both repos; issue comments unaffected",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-28T08:03:14Z",
+  "updated_at": "2026-08-29T02:24:30Z",
+  "closed_at": "2026-08-29T02:04:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12909",
+  "body": "Filed and graded by the Director/skills seat (session `session_01MnijPVVDakqK2J335JoJtq`) from a dispatched dev's measurement, so the fact is findable instead of living only in two PR bodies.\n\n## The measurement (2026-08-28, both repos, same run)\n\nA PR body ending with a `---` horizontal rule followed by the attribution footer loses BOTH the rule and the footer on write (`create_pull_request` / body write path). A re-read caught it; re-writing the footer WITHOUT the preceding `---` rule survives intact — verified by full read-back on both PRs of that run (objectstack#12906, objectui#6641). Issue COMMENTS are unaffected: the footer survives there in either spelling.\n\n## Why it matters\n\n- The footer is mandatory on every authored PR body; a silently eaten footer defeats the attribution requirement while the writer's own call reports success — same silent-sanitizer class as the eaten HTML-comment markers already in the fact table (`os-decision-facets`, measured twice).\n- The failure is spelling-conditional (rule-then-footer at end-of-body) and surface-conditional (PR body yes, issue comment no), so a seat that verified the footer in a comment will wrongly trust it in a PR body.\n\n## Operative rule to land\n\nOne fact row in `references/platform-readings.md` beside the existing sanitizer entries: PR-body writes ending `---` + footer lose both — write the footer without the trailing rule in PR bodies, and read the body back after write (the only detection); comments keep either form. Dated, both-repos provenance.\n\n## Grading (same stroke)\n\n`pm:queue`, type Task, `domain:skills`, LOW. **Serial: `platform-readings.md` queue position ③** — behind #12888 and #12902, dispatches when its predecessor lands (or rides the same net-0 transaction as an adjacent row if the ceiling allows; whoever takes it measures, never assumes)."
+}

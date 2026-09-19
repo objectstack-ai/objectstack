@@ -1,0 +1,35 @@
+{
+  "number": 13437,
+  "kind": "pull_request",
+  "title": "fix(metadata,objectql,metadata-protocol): require a missing-table error to name the table that was read",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T11:52:57Z",
+  "updated_at": "2026-08-30T12:31:09Z",
+  "closed_at": "2026-08-30T12:31:07Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": "2026-08-30T12:31:07Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/13437",
+  "body": "Fixes #13324\n\n`isMissingTableError` answers the one question that licenses a fail-soft caller to\ntreat an empty result as the truth: \"did this READ fail because the table has not\nbeen provisioned yet?\". It matched the **shape** of the dialect phrase and never\nasked **which** table the phrase names.\n\n## The defect, measured\n\nDriven against a real libsql file database on this branch:\n\n```\nCREATE VIEW sys_metadata AS SELECT id, type, state FROM table_that_does_not_exist;\nSELECT * FROM sys_metadata;\n  -> SQLITE_ERROR: no such table: main.table_that_does_not_exist\n```\n\n`sys_metadata` exists and may be backed by rows. The phrase matches the regex, so\nthe read was answered **benign** — a false \"benign\", the direction the module's own\ndocblock calls far more expensive than a false \"real\".\n\n## Why the phrase alone cannot decide it\n\nThe suggested cheaper route was to exclude the measured \"names something else\"\nshapes, as `excludes` already does for the Postgres column phrasings. Measured, that\nroute cannot work: a view over a missing base table and a genuine missing table the\ncaller happened to qualify produce **byte-identical** messages.\n\n| case | libsql message | correct verdict |\n|:---|:---|:---|\n| view over a dropped base table | `no such table: main.absent_base` | loud |\n| genuine missing table, qualified | `no such table: main.orders` | benign |\n\nNothing in the string separates them. The only discriminator is whether the name in\nthe phrase is the name that was asked for, so the read's name is a **parameter**\nrather than another regex. A shape-only exclusion would have had to give up one of\nthose two verdicts, and giving up the second is a lost true positive.\n\n## The change\n\nA third front-exclusion channel on `MISSING_TABLE`, alongside the `#6347`\nsub-object phrase it is the sibling of. That one recognises a failure about\nsomething *inside* a relation; this one recognises a failure about a *different*\nrelation. Both end the question with `false`, and both can only ever **subtract**\nbenign verdicts, never add one:\n\n- no name extractable, or no name supplied — unchanged verdict\n- any extracted name matches the read — benign (a true positive)\n- names found, none of them the read's — loud\n\nThe comparison folds away schema/database qualifiers, the legacy\n`namespace__short` prefix `resolveTableName` strips, and case, so a tolerant match\nnever manufactures a loud verdict for a genuine missing table.\n\n**The parameter is optional.** `@objectstack/metadata` is a published package and\n`./errors` a published subpath, so a required parameter would be a breaking API\nchange and a major bump. Omitting it reproduces the previous behaviour exactly; all\n17 in-repo call sites pass it. The cost of that choice is that the narrowing is\nopt-in per call site, and it is stated in the JSDoc.\n\n## Call sites\n\nSeventeen, across six files in three packages — `packages/metadata`,\n`packages/objectql`, `packages/metadata-protocol`. Five of the thirteen files in\nthe dispatched surface turned out to be **prose only** (`packages/rest` x2,\n`packages/runtime`, `packages/types`, and `packages/drivers/driver-sql`), so this\nlane's hot serial file is **not written by this PR** at all.\n\nOne shared helper needed more than a name. `rethrowUnlessMetadataStoreUnprovisioned`\nserves callers reading four different tables (`sys_metadata`,\n`sys_metadata_audit`, `sys_metadata_commit`, `sys_metadata_history`); the first\ndraft hardcoded `sys_metadata` and turned `diffMetaItem`'s genuinely unprovisioned\n`sys_metadata_history` into a loud failure. Its parameter is **required** — it is\nprivate, so the compiler can enforce it — and each caller now names what it read.\n\n## Two test fixtures were unfaithful, and are corrected rather than re-baselined\n\nNeither expectation moved. Both fixtures threw one fixed error for **every** read\nregardless of object, so a `sys_organization` probe received a fault phrased for\n`my_app_widget`, and a test titled \"an unprovisioned sys_metadata_commit\" injected\na fault phrased for `sys_metadata`. No driver does that. The injectors now phrase\nthe fault for the table actually read; the assertions are untouched.\n\n## Evidence\n\n- **Ablation** — removing the new channel turns exactly the 3 defect pins red and\n  leaves all 72 other cases green, so the true-positive pins do not ride on it.\n  Mutation and restore were each confirmed on disk by blob hash against HEAD.\n- **The card's own repro, A/B on one tree** (ablated dist vs fixed dist,\n  `os migrate plan`, `NODE_ENV=production`):\n\n  | | pre-fix | fixed |\n  |:---|---:|---:|\n  | `sys_metadata` view reads reported at ERROR | 0 | **3** |\n  | `sys_metadata_activation` genuine-miss WARN (true positive) | 1 | 1 |\n  | plan still produced, exit 0 | yes | yes |\n\n  Three — the count the card measured, and the phrase named `main` exactly as it\n  recorded.\n- **Fence: no true positive regressed.** Every shape is pinned with the read named\n  — sqlite `no such table: X` and its schema-qualified form, Postgres\n  `relation \"x\" does not exist`, MySQL `table \"x\" doesn't exist`, `unknown table`,\n  the SQLSTATE, symbolic-code and errno limbs, and the driver wrapper that carries\n  the original as `cause`.\n\nTests and gates, all at `6316ca068f`: `@objectstack/metadata` 698, `@objectstack/objectql`\n4287, `@objectstack/metadata-protocol` 2017 (10 skipped), plus 51 runtime real-driver\nfail-soft probes. Full-repo `pnpm lint` and `pnpm build` (71/71) green. 38 of the 40\nderived gates green; `check-test-completeness` and `pm/check-half-states` are exit 3\nNOT MEASURED (they need a CI turbo log and a GitHub credential respectively), which\nboth gates declare is not a finding.\n\n#13273 is not addressed here and remains open — it only adds one more reader of this\npredicate, a consequence of the gap rather than its cause.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01F3jdziLbAPGeceVNmSox5L)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01F3jdziLbAPGeceVNmSox5L)_"
+}

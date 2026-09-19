@@ -1,0 +1,36 @@
+{
+  "number": 13078,
+  "kind": "issue",
+  "title": "Two `packages/spec` route response schemas declare a `data` NARROWER than the contract their route relays — `AnalyticsResultResponseSchema` and `TriggerFlowResponseSchema`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-29T03:37:54Z",
+  "updated_at": "2026-08-29T12:19:26Z",
+  "closed_at": "2026-08-29T12:19:26Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13078",
+  "body": "Found while binding the five in-repo `return res.json()` methods of #12104. **Out of that\ncard's declared scope and deliberately not fixed there** — that card binds client return types;\nthis is a producer-side declaration defect in `packages/spec`, and it changed what #12104 could\nbind.\n\n> ⓘ Angle brackets are spaced throughout (`Promise< any >`) on purpose — GitHub's body sanitizer\n> strips tag-shaped spans, backticks and fenced code included.\n\n## The defect\n\nBoth schemas below look like the authoritative response contract for their route. Both declare a\n`data` that is a **strict subset** of what the route's producer declares and actually serves. A\nconsumer that binds either — which is exactly what a sweep reaches for — ships a declaration\nthat refuses reads the wire really carries.\n\n### 1. `AnalyticsResultResponseSchema` (`packages/spec/src/api/analytics.zod.ts`)\n\n`POST /analytics/query` ends `deps.success(await analyticsService.query(body, ctx))`, so `data`\nis `IAnalyticsService.query`'s declared return, `AnalyticsResult`\n(`packages/spec/src/contracts/analytics-service.ts`).\n\n| declared on the schema | declared on `AnalyticsResult` |\n|---|---|\n| `rows` | `rows` |\n| `fields: { name, type }[]` | `fields: { name, type, label?, format?, currency?, percentScale? }[]` |\n| `sql?` | `sql?` |\n| — | `totals?: { dimensions, rows }[]` |\n\n`fields[].label` is not hypothetical: it is served by a real `AnalyticsService`, measured in\n`packages/client/src/analytics-automation-json-erasure.test.ts`. `currency` and `percentScale`\nare the ADR-0053 / objectui#3136 renderer chains, and `totals` is the ADR-0021 marginal-aggregate\nchannel — every one of them a key a dashboard reads.\n\n### 2. `TriggerFlowResponseSchema` (`packages/spec/src/api/automation-api.zod.ts`)\n\n`POST /automation/:name/trigger` (and the legacy `POST /automation/trigger/:name`) end\n`deps.success(result)` where `result` is `IAutomationService.execute`'s declared return,\n`AutomationResult`.\n\n| declared on the schema | declared on `AutomationResult` |\n|---|---|\n| `success`, `output?`, `error?`, `durationMs?` | those four, plus `code?`, `status?`, `runId?`, `screen?`, `successMessage?`, `errorMessage?`, `summary?` |\n\nThe missing members are not decoration. `status: 'paused'` + `runId` + `screen` is the whole\nthird state of the #9378 / #9510 trigger contract — the payload a caller resumes a screen flow\nwith — and the SDK's own docblock on `automation.trigger` tells callers to read exactly those.\n\n## Why this is the same shape #6442 already fixed once, in this same file\n\n`AnalyticsMetadataResponseSchema` used to declare `{ cubes: Cube[] }` for an endpoint that has\nalways answered a bare `CubeMeta[]`. The maintainer ruled (2026-08-08) \"narrow the declaration\",\nand the schema's own docblock records the reasoning: the TS contract already agreed with the\nruntime and **the schema was the lone outlier**. These two are the same class, caught the same\nway — by reading the producer's declared return next to the schema.\n\n## Remedy shape (not prescribed — this is the question the card carries)\n\nEither bring each schema's `data` up to its producer's contract, or state in each docblock that\nthe schema is a deliberate PROJECTION and name what a consumer must not bind it to. What must\nnot stay is the current state: a response schema that reads as the route's contract, is\nnarrower than it, and has no note saying so. `AnalyticsResultResponse` additionally has **no\nexported type at all** (`protocol.zod.ts` keeps a module-local `z.infer` alias), so a consumer\ncannot name it even if it were right.\n\n## What #12104 did about it, so this is not re-derived\n\n`client.analytics.query` and `client.automation.trigger` were bound to the producer contracts\n(`BaseResponse & { data: AnalyticsResult }` / `BaseResponse & { data: AutomationResult }`)\nrather than to these two schemas, and the near-miss is pinned in\n`packages/client/src/return-type-precision.test.ts` so a later sweep cannot quietly retarget\nthem. Their two siblings, `AnalyticsMetadataResponseSchema` and `AnalyticsSqlResponseSchema`,\nDO agree with their producer and were used as-is.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01UjujZN219uFzBhSYfMykCd)_\n"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 12862,
+  "kind": "issue",
+  "title": "[finding] 1316 duplicate heading anchors remain on 162 of 214 reference pages — the section grammar's own headings (`### Properties`, `### Allowed Values`, `#### Option N`) carry no qualifier at all",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-28T04:45:15Z",
+  "updated_at": "2026-08-29T11:58:07Z",
+  "closed_at": "2026-08-29T11:58:07Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12862",
+  "body": "Observation recorded while fixing #12590 (duplicate `### Nested Shape:` anchors). Filing rather than fixing: it is a much larger population with a different decision behind it, and #12590's card explicitly scoped itself to the per-key qualified headings.\n\n## What was measured\n\nCounting duplicate heading TEXTS per emitted page under `content/docs/references/**`, on the tree regenerated with #12590's fix applied (214 pages):\n\n```\nexcess=1316  pages=162  distinct heading texts=6\n```\n\nBroken down by heading text (excess occurrences summed across pages):\n\n| excess | heading |\n|---:|:---|\n| 1133 | `### Properties` |\n| 145 | `### Allowed Values` |\n| 12 | `### Union Options` |\n| 12 | `#### Option 1` |\n| 12 | `#### Option 2` |\n| 2 | `#### Option 3` |\n\nThe worst single page is `content/docs/references/ui/view.mdx` with 44 occurrences of `### Properties`; `api/protocol.mdx` has 124.\n\n## Why this is a separate question from #12590\n\nTwo different kinds of heading live on these pages, and only one of them was ever qualified:\n\n- **Per-key headings** — `### Nested Shape: \\`Schema.key\\`` and `### Allowed Values: \\`Schema.key\\``. These exist to be uniquely addressable; the `Schema.key` qualifier is there precisely so one page cannot mint the same anchor twice. #12590 fixed the case where two sibling union variants shared both halves of that qualifier (12 excess / 4 pages), and the qualified population is now zero.\n- **Section-grammar headings** — `### Properties`, `### Allowed Values`, `### Union Options`, `#### Option N`. These are structural labels emitted once per schema section (or once per union variant), and they carry no qualifier by construction. One page carries many schema sections, so they repeat by design.\n\nSo this is not the same defect one level up; it is the open question of whether the section grammar should be addressable at all.\n\n## What is NOT claimed here\n\n- Nothing in the repo is known to link to these anchors. `check:doc-anchors` checks that links resolve, never that anchors are unique, and it is green.\n- Whether the docs site's slugger de-duplicates repeated headings (appending `-1`, `-2`) was not measured. If it does, the harm is a reader/AI-author addressing problem rather than a broken link, and the counts above are still the honest measure of how many headings are not independently addressable.\n\nTriage should decide between: qualify the section grammar the way the per-key headings are qualified; demote these to a non-heading rendering so they mint no anchor; or accept them and say so in the renderer so the next reader of the `Schema.key` qualifier does not read the inconsistency as a bug.\n\nReproduce with any per-file duplicate-heading count over `content/docs/references/**`, e.g. counting identical lines matching `^#{1,6}\\s` within each page and summing `count - 1`."
+}

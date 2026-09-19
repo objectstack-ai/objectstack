@@ -1,0 +1,36 @@
+{
+  "number": 12358,
+  "kind": "issue",
+  "title": "[finding] check:durability-log-level's read-seam WRAPPER hop matches a callee name with no shape check — `Set.prototype.delete` resolves to the file's own `delete()` method, #11921's defect one level up",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T19:52:22Z",
+  "updated_at": "2026-08-30T12:53:17Z",
+  "closed_at": "2026-08-30T12:53:00Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12358",
+  "body": "Observation class — recording only, no verdict asserted, no `pm:queue`. Unassigned. Found while performing the per-seam census #12138 asked for (PR #12356); deliberately **not** fixed there, because fixing it is the provenance problem #11921 owns.\n\nMeasured on `origin/main` @ `3ddad51b5c`, reproduced after merging `c312a562e3`.\n\n## What I found\n\n#11921 (PR #12137) fixed `isReadCall` matching a **vocabulary** callee name with no shape check — `Array.prototype.find` on a plain local array counted as a storage read. The fix is `contradictsDriverReadShape`, and it is applied at exactly one place:\n\n```js\nif (DRIVER_READ_CALLEES.has(name) && !contradictsDriverReadShape(node)) return true;\n// ...\nif (depth >= MAX_READ_WRAPPER_DEPTH || seen.has(name)) return false;\nconst body = functionBodies.get(name);   // ← the WRAPPER hop. No shape check, no receiver check.\n```\n\nThe **wrapper hop** resolves a callee name against a flat same-file `functionBodies` index with no equivalent test. Any call whose `calleeName` happens to equal a function declared in that file is followed into that function's body, regardless of receiver.\n\nThe live instance, in `packages/metadata-protocol/src/sys-metadata-repository.ts`:\n\n- `close()` (line 1343) has `try { w.terminate(); } catch { … }`.\n- `terminate` resolves by name to the local `const` arrow at line 1246 — synchronous, `void`, in-memory only.\n- Its only call is `self.watchers.delete(subscription)`, where `private readonly watchers = new Set(...)` (line 303). A `Set.prototype.delete`.\n- `calleeName` returns `delete`, and `functionBodies.get('delete')` returns this file's `async delete(ref, opts)` method (line 653) — whose `engine.findOne('sys_metadata', …)` sits inside a `withTxn` callback.\n\nSo a `Set.delete` on an in-memory watcher registry is one hop away from being read as a `sys_metadata` driver read.\n\n## Nothing is wrong today, and that is the whole point\n\nThe recognizer does **not** currently reach the fake read: the wrapper recursion's `walkSameTickInclusive` refuses to descend into the `withTxn` callback, so the walk stops before it gets there. The defect is latent, and it is armed by exactly the change #12138 was dispatched to consider.\n\nMeasured, with the `walkAll` probe #12138 describes:\n\n| recognizer | read seams |\n|:--|--:|\n| today (`walkSameTickInclusive`) | 64 |\n| probe (`walkAll`) | 72 |\n| probe, with the `delete` wrapper hop refused | 70 |\n\nThe ablation removes exactly two seams — `promoteDraft` → `dropPromotedDraftRow` (**real**: `await this.delete(ref, …)`, the genuine method) and `close` → `terminate` (**fake**: the `Set.delete`) — and nothing else. One of the two seams the widening would have bought is invented.\n\n## Direction of the error\n\nThis one runs the **unsafe** way. Every other narrowness in that file under-counts; a fake seam is an invented member of the read-seam denominator that #5186, #6451, #9165, #8845 and #8901 are all quoted against. It is also silent: the seam prints in `--list` looking exactly like a real one, and its catch happens to be benign, so no verdict changes and nothing draws attention to it.\n\n## Why it is filed rather than fixed\n\nDistinguishing `this.delete(ref, opts)` from `someSet.delete(x)` is a receiver/provenance question, which is #11921's problem and explicitly out of #12138's scope. Two cheap shapes exist and neither is obviously right without a measurement:\n\n- require the wrapper hop's receiver to be `this` / `self` / a bare identifier (would drop the `Set.delete` and keep `this.delete`);\n- give the wrapper hop a `contradictsDriverReadShape`-style argument test.\n\nBoth need a census over the whole scan root before anyone should believe them, exactly as #11921's did.\n\n## Dedupe performed\n\n⚠️ **The prescribed REST channel was unavailable** and this is declared rather than papered over: `curl` to `api.github.com` from this seat returns *\"GitHub access is not enabled for this session\"* and `gh` is absent — the condition already filed as #12123. Dedupe therefore ran through one bounded MCP `list_issues` call: 18 open `finding` issues, a non-empty control. None addresses `isReadCall`, the wrapper hop, `functionBodies` name resolution, or the read-seam population; the nearest neighbours are unrelated tooling/process findings (#12341 verify-lock discoverability, #12326 docs OG cards). A local `grep` over the gate file confirms `contradictsDriverReadShape` is referenced at the vocabulary check and nowhere near the wrapper hop.\n\n## Related\n\n- #11921 / PR #12137 — the same defect on the vocabulary name, fixed.\n- #12138 / PR #12356 — the census that surfaced this; carries the per-seam enumeration and the ablation.\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01UjM2ia8Av1v5NqfqQEQmC6)_\n"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 12948,
+  "kind": "issue",
+  "title": "[finding] One route emits `declaredCode` by hand instead of through the shared rule — harmless today (it is a 4xx), but it makes \"every emission goes through one rule\" literally false",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-28T10:08:31Z",
+  "updated_at": "2026-08-30T02:27:10Z",
+  "closed_at": "2026-08-30T02:27:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12948",
+  "body": "Filed unassigned and **ungraded** by the `domain:cli` seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, R47, on behalf of the **#12509 dev** — the pre-file dedup channel is 403 from that seat (measured: *\"GitHub access is not enabled for this session\"*). ⭐ It reported rather than filing blind. ⛔ Not graded, not routed. **Re-measured by this seat before filing**, reading taken at `10:06Z` on `origin/main` `8beb3deaf`.\n\n⚠️ **No defect is reachable today**, and the reason is structural rather than lucky — see below. This is filed because of what it does to a *sentence* that #12509 just made load-bearing.\n\n## Measured\n\n`packages/cloud-connection/src/cloud-connection-plugin.ts:382` emits the producer-spelling error field **directly**, inside a hand-built error object, on a **hard-coded 4xx** — a verbatim relay of an upstream device-authorization spelling.\n\n| probe | hits |\n| :--- | ---: |\n| the shared demotion helper, in that file | **0** |\n| the field name, across the repo (**positive control**) | 34 files |\n\n⛔ The zero is a finding, not a broken pattern — the control shows the term is live and the scan reaches the corpus.\n\n⭐ The site is **deliberate and documented**: the comment four lines above states the channel choice on purpose (the upstream spelling *\"rides the open, producer-owned channel instead\"*). ⛔ This card does not call it a mistake.\n\n## Why it still matters, precisely\n\n[#12509](https://github.com/objectstack-ai/objectstack/issues/12509) (ruled Option D, landing as [PR #12946](https://github.com/objectstack-ai/objectstack/pull/12946)) implements the demoted-vs-author-declared distinction **once**, inside the read every door already makes — and that is exactly why it needed **zero door edits**. Its ADR anchor now records the invariant in those words.\n\n⇒ ⚠️ **This site is not a door and does not make that read.** So the sentence \"every emission of this field goes through the one shared rule\" is **literally false**, and a reader who takes it literally — the next person extending the rule, or auditing it — will audit a population that is missing one member.\n\n⭐ Why nothing is broken today, stated as a property rather than an accident: #12509's rule only withholds on a **5xx** whose producer declared no status. This site emits on a **4xx**, so it falls outside the rule's scope **by construction**, not by coincidence. ⛔ That also means it would go wrong silently if this route ever grew a 5xx limb.\n\n## Options, ⛔ not prejudged\n\n1. **Route it through the shared helper.** ⚠️ Measure first whether the helper's demotion semantics are even correct here — this is a **relay** of an upstream vocabulary, not a demotion of an in-repo producer's code, and those may not be the same thing. ⛔ Do not assume the helper is a drop-in.\n2. **Record the exemption where the invariant is written** — i.e. amend the sentence to \"every *door* emission\", and note this relay as the declared non-door case. ⭐ Cheapest, and it makes the audit population honest immediately.\n3. **Add a mechanical guard** that the field is only written by the shared helper, with this site allowlisted. ⚠️ Costs a gate; ⭐ but this repo's pattern is that an invariant worth writing in an ADR anchor is worth a checker, and #12509 just made this one load-bearing.\n\n⭐ Option 2 is the one that closes the *stated* defect (a false sentence); 1 and 3 are larger and belong to whoever owns the channel.\n\n## Re-check\n\n```\ngit grep -n \"declaredCode\" -- packages/cloud-connection/src/cloud-connection-plugin.ts\ngit grep -c \"demotedDeclaredCode\" -- packages/cloud-connection/src/cloud-connection-plugin.ts   # expect 0\ngit grep -l \"declaredCode\" -- '*.ts' | wc -l                                                     # positive control\n```\n\n⛔ Reverse-check the zero against the control. ⚠️ And use a working-tree scan rather than `git grep` if you have created files and not staged them — a newly created unstaged file returns a clean zero from a dead scan, which is the newest of seven false-zero mechanisms measured this session.\n\n## Duplicate check\n\nSearched this round; **1 match**, and the control fired (the query returned a card about this very field, so the corpus was reached). That match is **#11719** (closed) and is the **opposite** problem — a shared sender that *could not carry* the field at all. ⛔ No open card covers a site that emits it without the shared rule. ⚠️ Not exhaustively deduped outside `domain:cli`.\n\n## Refs\n\n- #12509 / [PR #12946](https://github.com/objectstack-ai/objectstack/pull/12946) — the one-rule implementation and the ADR anchor whose sentence this qualifies\n- #11719 — closed; the same field, the inverse defect"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 13367,
+  "kind": "pull_request",
+  "title": "fix(pm): GitHub REST channel reachability is a session property — not an endpoint or seat-type fact",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T07:00:29Z",
+  "updated_at": "2026-08-30T11:07:57Z",
+  "closed_at": "2026-08-30T11:07:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-30T11:07:56Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/13367",
+  "body": "Fixes #12654\nFixes #12766\n\nFamily fold — one PR for both cards, per the 2026-08-28 triage rulings on each (「两张卡一个 PR」), with one commit per member.\n\n## What changed\n\n**`.claude/agents/os-dev.md` (member card 12654, commit d7b408c49)** — the labels bullet's parenthetical stated a seat-type fact: container dev seats get 403 on repo-scoped REST as a class (a 2026-08-25 reading). That is contradicted by four independent gate-open dev-container readings of HTTP 200 on the additive label POST. Rewritten, line-neutral, to the per-session form: reachability is a property of the session, not of the endpoint or the seat type — the session gate answers before the endpoint is consulted, reads and writes fail together behind a closed gate, gate-open sessions measure 200 — probe first; the readings live in platform-readings. Also added the adjudicated limitation beside the four-step fallback: the compare read-back only DETECTS a concurrent label strip, it cannot PREVENT one, and a stripped gate-semantic label reads as green.\n\n**`.claude/skills/pm-dispatch/references/platform-readings.md` (member card 12766, commit 8d9a85f45)** — the fact line said \"session property\" but still carried endpoint-shaped residue (a single gate-open counterexample; per-container framing). Rewritten to the adjudicated shape with the three measured facts: (1) the 403 body \"GitHub access is not enabled for this session\" is a session gate answering before the endpoint is consulted, so a closed-gate 403 has zero discriminating power about any specific endpoint; (2) behind a closed gate, reads AND writes both 403 (matched-pair control); (3) four independent gate-open dev containers measured the additive label POST at 200, each confirmed by an independent GET read-back, and the channel is wider than labels — issue POST 201, comment writes, card/comment reads. The probe stays the only safe reading; no channel is written as an unconditional guarantee.\n\nThis dev's own session adds a fresh corroborating reading: a 14-character env token with a gate-open session — repo-scoped GET 200, additive label POST 200 with read-back (below) — so token length does not decide the channel; the session gate does.\n\n## Kept intact (adjudicated)\n\n- The four-step fallback (read, union, whole-set write, compare read-back) and its rationale, including the size-labeler counter-strip evidence — 「⭐ 卡把 fallback 写得很好,⛔ 一个字都不要删」: semantics fully preserved; wording compressed only where needed to pay the line ratchet.\n- The two read-channel cards are not cited for any write claim; their own subjects are untouched.\n\n## Line budget (both files sit at their ratchet ceilings with zero headroom)\n\n- os-dev.md: 466 lines before, 466 after (ceiling 466); the edited bullet stays 13 lines.\n- platform-readings.md: 314 lines before, 314 after (ceiling 314); the edited entry stays 10 lines.\n- Every edited line within the 120-byte cap (gate-verified).\n\n## Gates — post-final-commit union at head 8d9a85f45, via scripts/pm/os-verify-lock.sh, VERDICT command-exit 0\n\ncheck:agent-model-declared · check:agent-test-spelling · check:doc-authoring · lint check:doc-formula-expressions (after building the @objectstack/lint closure — its first run was \"PREREQUISITE NOT MET\", a non-measurement, not a red) · check:nul-bytes · check:pm-governed-merges · check:pm-skill-id-lint · check:pm-skill-ratchet (its own verdict lines: \"os-dev.md is 466 lines (ceiling 466; headroom 0)\" and \"platform-readings.md is 314 lines (ceiling 314; headroom 0)\") · check:skill-frame-sync — all exit 0, joined with the shell AND operator so the lock's verdict covers every one. check-governed-queue-guard: its 113-case self-test passes locally; the guard itself reads a CI event payload and judges at queue time by design.\n\nGate list re-derived from the actual diff with scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack: matches the dispatch's 10 families exactly. Changeset families intentionally not triggered — the diff is entirely under .claude/**, so skip-changeset applies (label on this PR, with compare read-back).\n\n## Governed surface\n\nBoth files are under .claude/** — this PR stays DRAFT for the maintainer's hand merge; no seat flips it ready, queues it, or arms auto-merge. Please update the base to current main and re-run gates before merging.\n\n## Reported to the PM, outside this PR's file surface\n\nThe standing-text sweep (item two of the head card's \"Not established\" list) found one residue: references/rest-channel.md frames its checkmark annotations per seat category in its header, while its own definition line already reads each checkmark as \"measured in a gate-open session\" — consistent with the session-property shape, so nothing here contradicts it; flagged for a follow-up wording alignment if the PM wants one.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01EXxTW8mvPBhoHxmyPZ63de)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01EXxTW8mvPBhoHxmyPZ63de)_"
+}

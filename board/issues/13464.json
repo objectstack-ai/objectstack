@@ -1,0 +1,36 @@
+{
+  "number": 13464,
+  "kind": "issue",
+  "title": "Verify `manifest.integrity` at publish preflight — the framework leg of #11331 (does not discharge the unpack ruling)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T13:42:32Z",
+  "updated_at": "2026-08-31T01:11:02Z",
+  "closed_at": "2026-08-31T01:10:40Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13464",
+  "body": "Part-of #11331 · step 2 (framework leg), sized from the #13455 locating read (accepted; full evidence: https://github.com/objectstack-ai/objectstack/issues/13455#issuecomment-5469022469).\n\n## ⚠️ Scope framing — this card does NOT discharge the #11331 ruling\nThe ruled enforce leg (re-verification at unpack) has **no landing surface in this repo** — there is no unpack (ADR-0025 §3.5 steps 4–7 unimplemented). That leg routes to the cloud control plane and is tracked on #11331. This card lands the smaller **real** framework leg: today `os plugin publish` uploads artifacts whose bytes may no longer match their own declared `manifest.integrity` digests, because nothing anywhere reads that map. After this card, the publisher checks its own artifact pre-upload. The spec's promise of re-verification at unpack remains outstanding and must not be marked resolved by this PR.\n\n## Task\n1. **`verifyIntegrity(files, integrity)`** (~40 lines + a structured rejection envelope) in `packages/core/src/security/` beside `plugin-artifact-signature.ts` (which already declares itself byte-for-byte mirrored by cloud's `package-signing.ts` — keep that mirroring property in mind: pure, dependency-free, portable). Semantics: for each entry in the integrity map, hash the corresponding in-memory file and compare; refuse on **mismatch**, **missing file for a declared entry**, and (report, see decision below) **extra files not in the map**.\n2. **One call site**: `os plugin publish` preflight at `packages/cli/src/commands/plugin/publish.ts:84` — the full tree is already in memory (`packages/cli/src/utils/osplugin.ts:156`) and currently discarded. Verify before upload; refuse the publish on failure with an actionable message.\n3. **TSDoc prose corrections** (prose only, no shape change): `packages/spec/src/kernel/manifest.zod.ts:100-109` and `:610-614` — stop claiming the runtime re-verifies at unpack; state what is true (computed at build, self-checked at publish; unpack-time verification is the cloud control plane's obligation, not yet implemented here).\n4. **Ledger note prose**: `packages/spec/liveness/manifest.json` integrity row (~:265-269) — `status` **stays `dead`** (its verdict is a per-repo reader census; the publish self-check makes the CLI a reader, so if `check:liveness` semantics say a non-test reader flips it, follow the tool's verdict — never hand-edit a status the tool disagrees with). Correct the note prose either way.\n5. **Tests**: match / single-file mismatch / missing declared entry / extra file / **absent map ⇒ permissive pass** (the field is `.optional()`).\n6. **Changeset** (`.changeset/*.md`): `os plugin publish` gains a refusal — patch bump, plain sentence.\n\n## Decision mandate (pre-answered, carry in PR description)\n**Absent integrity map = permissive** (publish proceeds, optionally with a one-line notice). Strict-by-default would reject every pre-`computeIntegrity` artifact and would be a contract change to an `.optional()` field — that needs its own ruling, not a rider here. Extra-files-not-in-map: refuse (a stale map is exactly the drift this check exists to catch) — if that proves controversial in review, downgrade to warn there, not here.\n\n## Error code\nPer the precedent at `packages/runtime/src/artifact-reference.ts:68-73`, a pre-server-bind CLI refusal is **NOT** registered in `ERROR_CODE_LEDGER` — keep this card clear of `packages/spec/src/api/error-code-ledger.zod.ts`.\n\n## Gates owed\n`pnpm --filter @objectstack/cli test` · `pnpm --filter @objectstack/core test` · `pnpm --filter @objectstack/spec check:liveness` · `pnpm --filter @objectstack/spec check:authorable-surface` (baseline measured unmoved by the prose edits — keys only, no describe text) · changeset present.\n\n## Clause ② (pre-recorded)\n- **Path limb fires**: the diff touches `packages/spec/src/kernel/manifest.zod.ts` ⇒ the PR **parks as DRAFT with `needs:contract-review` on both carriers** (PR + card). Review chain owns enqueue.\n- **Content limb fires**: publish gains an accept/reject change ⇒ **fable-mandatory dispatch**.\n\nBlocked-by: (none)\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

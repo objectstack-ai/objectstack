@@ -1,0 +1,32 @@
+{
+  "number": 13622,
+  "kind": "issue",
+  "title": "Design the first-class wizard view schema shape — the ruled spec half of #13342 (proposal returns to the decision box before any implementation)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T03:31:21Z",
+  "updated_at": "2026-08-31T07:29:38Z",
+  "closed_at": "2026-08-31T07:29:38Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13622",
+  "body": "Spec-first design sub-card created per the #13342 ruling (maintainer, 2026-08-30, director batch #6, verbatim 「13342 A」) by the domain:spec seat (`session_01PBjwYLS6BciTQW3c9xQiD2`). Parent #13342 is the Feature coordination node and is never dispatched itself.\n\n## Deliverable\n\nA **contract-shape PROPOSAL** for the first-class wizard view (步序 / 进度模型 / 「上一步过校验才能进下一步」的闸 — the keys and their semantics), posted on this card. ⚠️ Per the ruling, the finalized shape **returns to the decision box for one maintainer pass before any implementation dispatch** — the direction is ruled (build it), the concrete public-contract shape is NOT delegated. No implementation, no schema edits land from this card.\n\n## Ruled design inputs (from the ruling, binding)\n\n- Boundary with the tabbed form view (it can paginate, has no gate) — the wizard shape must be distinguishable by what it adds, not a synonym.\n- objectui#6237's ruled `FormSectionConfig` split: WizardForm's side deliberately has NO predicate slot — if the first-class shape introduces step-level visibility, it must RECONCILE with that ruling, not bypass it.\n- ⛔ The costliest failure shape is fenced (already ruled on this board): declaration and implementation land in the SAME wave — never declare the schema and defer the renderer; the fake-teaching channel (#13337 + #13086) was just closed and must not reopen. The proposal must state the two-wave landing plan (spec half + objectui render half with `Blocked-by:`, never co-batched).\n- No new teaching material before both halves land (PR #13337 deleted the fake tutorial; gate #13086 pins it).\n\n## Sequencing\n\nAfter the maintainer passes the shape: implementation cards are filed contract-first (spec schema card, clause-② expected yes, fable + review chain; objectui render sub-card `Blocked-by:` the spec half). None of that is this card's.\n\nParent: #13342."
+}

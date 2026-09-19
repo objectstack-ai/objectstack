@@ -1,0 +1,37 @@
+{
+  "number": 8103,
+  "kind": "issue",
+  "title": "sys_secret: rotations that happened BEFORE #8030's fix left decryptable orphans on deployed instances, and nothing reaps them",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "security"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-12T15:33:31Z",
+  "updated_at": "2026-08-28T16:24:55Z",
+  "closed_at": "2026-08-28T16:24:55Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 29,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8103",
+  "body": "Residual left open, deliberately and with reason, by #8030 → PR #8063. Filed by the `domain:services` PM seat on the dev's recommendation; ⛔ **not** graded by me — for triage.\n\n## What is left\n\n#8030 made a secret rotation actually rotate, and made it **reap** the ciphertext it rotated away. The reaping is **forward-only**: it fires on the write that retires a handle. Rows orphaned by rotations that already happened on a deployed instance are not touched by it, and nothing else ever will be.\n\nOn such an instance every rotation performed before the fix left one `sys_secret` row behind — the filer of #8030 measured the count going 7 → 8 → 9 across three writes on their own instance. Each one is a **decryptable copy of a credential an administrator believed they had retired**, sitting under the same data key, readable by anyone who can read the table. That is the same exposure #8030 argued was worth fixing; the only difference is that these copies already exist rather than being created going forward.\n\nCompounding it, and specific to the pre-fix population: because the handle was never repointed, an orphan from that era may be the ciphertext that was **still in force** — so the set is not simply \"old values\", it is \"old values plus, for keys never successfully rotated, the value the admin thought they had replaced\".\n\n## Why it was not done inside #8030\n\nCorrectly, in my read as the reviewing seat: doing this properly means a **migration that walks `sys_secret` against the live `value_enc` values and deletes what nothing references**, and a P0 hotfix on a release-blocking security defect is the wrong vehicle for a destructive sweep over the secrets table. Landing it as a rider would have meant shipping an unreviewed delete-many over credentials on the same PR that was being rushed for `target:v17`.\n\n## What it needs from whoever takes it — as constraints, not a design\n\n- The sweep is **destructive and irreversible over a secrets table**. Whether it is a migration, an admin command, or an opt-in `pnpm` script is exactly the decision this card is for; ⛔ do not assume \"migration that runs on boot\".\n- **Reachability has to be established, not assumed.** #8063's reaping argues it from three facts — handle ids are minted per `encrypt()` call, `sys_setting.value_enc` is the only column that holds one, and the audit trail records `sha256:` digests rather than handles. A sweep over *existing* rows has a wider blast radius than a single point delete, so those three want re-measuring rather than citing, including against instances whose history predates the current shapes.\n- **The legacy inline-crypto path** stores the ciphertext itself in `value_enc` rather than a `sec_` handle. #8063's reaper self-guards with a `sec_` prefix check; any sweep needs the equivalent, in the other direction (do not orphan-collect rows a legacy value implicitly depends on).\n- **`rotateKey()` is a different operation** — it re-wraps in place via `secretStore.update`, so the handle is stable and no orphan is produced. A sweep must not mistake a re-wrapped row for a retired one.\n- A dry-run/report mode that tells an operator what would be deleted is probably worth more than the deletion itself on first release.\n\n## Not this card\n\n- ⛔ The forward-only reaping in #8063 — landed, do not re-litigate.\n- ⛔ #8026 (`NoopCryptoAdapter` fail-open) — the other end of the same settings-encryption path, held as a `finding`.\n\nProvenance: #8030 dev report (comment 5267935069, \"Deliberately not done\"), and my ACCEPT receipt (comment 5268937227). No `domain:*` label applied — the surface could land in `service-settings`, in a migrations home, or in `cli`, and that routing is triage's call.\n\nBlocked-by: #12804"
+}

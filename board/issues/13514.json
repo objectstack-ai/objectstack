@@ -1,0 +1,34 @@
+{
+  "number": 13514,
+  "kind": "pull_request",
+  "title": "feat(plugin-security): walled bootstrap stops minting the platform-admin grant row; platformAdmin audit service; legacy-grant deprecation pointer (L4)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T15:58:18Z",
+  "updated_at": "2026-08-31T01:36:53Z",
+  "closed_at": "2026-08-31T01:36:52Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": "2026-08-31T01:36:52Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/13514",
+  "body": "Fixes #11974\n\nPart of #11663 (leg L4; design comment 5394453215 §6 row L4, maintainer acceptance 5404675670, bundle 1A/2B/3A/4A/5A/6A/7A — verbatim 「接受你的建议，继续」). #11973 (L3) remains open and is not addressed here; #11670 remains open.\n\n## What lands\n\nUnion of gates/tests re-run at the final commit `d5eeda5` — all green (15 derived gate families incl. `check:nul-bytes`, plugin-security 90 test files / 1664 tests, package typecheck; downstream: verify harness posture suites 18/18, walled dogfood fixtures 18 passed / 3 env-skipped).\n\n1. **Walled postures stop minting the grant row.** `bootstrapPlatformAdmin` under `group`/`isolated` writes no `sys_user_permission_set` row, whatever accounts exist. Standing is config-derived at the one derivation site (`resolve-authz-context.ts` §6b-config, landed with L2/PR #13146 and #13319) — each declared, verified account resolves `PLATFORM_ADMIN` at request time. `single` keeps first-user promotion and its grant row byte-for-byte (Choice 4A; over-denial pins kept).\n2. **Read-only `platformAdmin` service** (new `platform-admin-service.ts`, registered by SecurityPlugin): `configuredEmails()` (declared/refused/normalized list) + `standing()` (per entry: registered, verified, standing-holding user id). Frozen; no writable member (Choice 3A: no runtime mutation path). The walled bootstrap's per-boot standing log consumes the same implementation, so log and service cannot disagree.\n3. **Deprecation log fires at this leg** (pin #5). A detected legacy org-less human grant is pointed at the config path through core's `reportLegacyPlatformAdminGrant` — the SAME once-per-process latch the derivation-site reporter uses, so boot-time + request-time detection can never total two lines. Pinned: a seeded legacy grant produces exactly one line naming `OS_PLATFORM_OWNER_EMAIL`, the holder id and their address, across repeated bootstraps. Nothing is revoked (P5's honoured window).\n4. **Explain agrees with enforcement** (P8): new pin — a declared+verified admin with ZERO grant rows explains as `PLATFORM_ADMIN` through `buildContextForUser` (which delegates to the one resolver; core's own §6b-config pins cover the derivation side).\n5. **Replay narrowed.** `shouldReplayBootstrapFor` now fires only for `sys_user` insert/create under non-walled postures. The #11343 update arm (`email_verified`/`email`) existed solely to re-attempt the walled elevation after the verifying write; that elevation is retired, and under walled postures no `sys_user` write can change the bootstrap's answer. Middleware-seam pin re-derived accordingly.\n6. The one-line local `isEmailVerified` alias is deleted (the predicate's canonical home is `@objectstack/types`, consumed via the shared standing implementation — the card's \"promoted into core\" premise was stale; nothing in `packages/types` or `packages/core` is touched).\n\n## Guard refusals: none deleted, none added\n\nL3's `last-admin-guard` re-pricing is its own reviewed step and is untouched (as is all of `packages/plugins/plugin-auth/**`). The walled `walled_owner_email_undeclared` backstop refusal is kept with its exact reason string; `walled_owner_not_registered` / `walled_owner_not_verified` are not refusals removed but elevation outcomes whose decision moved to the derivation site — their distinctions survive as the standing report's per-entry `registered`/`verified` fields, and the fail-closed direction (unverified confers nothing) is enforced and pinned in core.\n\n## Behavior notes for the contract reviewer\n\n- **Bootstrap return contract**: under walled postures with a usable config the reason is now `walled_config_derived` (was `walled_owner_not_registered`/`walled_owner_not_verified`, or a grant write). `already_have_admin` is now a `single`-only outcome; under walled a pre-existing human grant row gets the deprecation pointer instead of a silent early exit. The only in-repo consumer reading the report (`cli meta resync`) reads seed/resync counters only — unaffected.\n- **Seed-ownership handoff** (`claimSeedOwnership`) no longer runs under walled postures — it was keyed on the promoted admin, and there is none. Walled/multi-org seed ownership is the enterprise organizations package's per-org bootstrap job (per `auth-plugin.ts`'s posture split). `single` handoff unchanged.\n- **Reader census for the stopped write** (PM assumption 3, measured at `3800e42`): plugin-auth's `ensureDefaultOrganization` is gated `!postureEnforcesWall(...)` and never runs under walled postures in this repo; `last-admin-guard` sees the same zero-grant-row population a fresh walled rig already has today before its owner registers (no new state); explain's provenance reads report nothing on empty tables; `auto-org-admin-grant` reads the permission-set rows, which this leg keeps minting (the org-less-row reap is L6, behind the census and #11670's resolver scoping). Nothing revoked on existing rigs — the legacy read is honoured.\n- **Known interim window (design H4, owned by L3 #11973 — not addressed here):** the enterprise organizations package (out of this repo) reuses `ensureDefaultOrganization`, which still finds \"the platform admin\" via grant rows and triggers on grant inserts. A FRESH walled rig running that package will not auto-create its default organization between this leg landing and L3's re-point. The design's §6 dependency table imposes no L3-before-L4 order (both depend on L2 only), and existing rigs keep their rows; flagged here so the review weighs it consciously.\n- The harness fixture item from the card was measured dead: walled harness rigs declare the dev admin as owner and the dev-admin seed already stamps `email_verified: true`, so config-derived standing works with zero fixture changes (`packages/verify/src/harness.ts` untouched).\n\n_Generated by [Claude Code](https://claude.ai/code/session_016ZC5rNQj3WEet5HAmmAkMs)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016ZC5rNQj3WEet5HAmmAkMs)_"
+}

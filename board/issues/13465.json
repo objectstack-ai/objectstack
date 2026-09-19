@@ -1,0 +1,33 @@
+{
+  "number": 13465,
+  "kind": "pull_request",
+  "title": "docs(pm): measure and refuse the aggregate fan-in line, recording it beside the refused fifth key",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T13:43:18Z",
+  "updated_at": "2026-08-30T14:14:56Z",
+  "closed_at": "2026-08-30T14:14:54Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-30T14:14:54Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/13465",
+  "body": "Fixes #13251\n\n## The card is a question, and the measured answer is NO\n\nThe card asks whether `dispatch-gates` should print an aggregate fan-in line for an edited shared module, carrying the information the refused import-edge identity key (#13126 / PR #13247) left on the floor. This PR ships **no behaviour change**: it records the measured refusal of the aggregate line in the docblock section where the sibling refusal lives, leaning on the same self-test pins as its staleness alarms. The full measurement is in the `os-dev-report` comment on #13251; the load-bearing figures:\n\n**How often it would fire** — over the live card population (1,862 first-parent commits on `origin/main`, 2026-08-16..2026-08-30, window proven by `scripts/pm/git-history.mjs`: `git log --first-parent origin/main since 2026-08-16, floor 2026-08-15`, measured at 71627f7b):\n\n- fires on **164 cards (8.8%)** — so the Zone 2 noise condition (\"fires on almost every card\") does NOT hold;\n- but the aggregate-proper case — the five head utilities whose refused 118-lead lists motivated the card — fired on **11 cards (0.6%)**; `scripts/invoked-as.mjs` itself on **2**;\n- **153 of 164 firings (93%)** land on tail modules with fan-in 1..3, where the line is not an aggregate at all — its whole value is the one to three NAMES;\n- the single most-fired module is `scripts/pm/dispatch-gates.mjs` itself (**61 cards**), whose line would read \"imported by 1 discovered family\" — withholding the one name that matters, the already-pinned `bare-root-worklist --self-test` witness.\n\n**Why no printable shape survives** — the three shapes trichotomize:\n\n1. **all names** = the fifth `coveringKey` key, refused in PR #13247 with pins that re-derive the price every run (today: 241 novel of 282 pairs, invoked-as at 121 families, 207/241 on 5 modules);\n2. **names under a threshold** — and \"top importers: ...\" capped at K is the same thing — is a **fan-in cutoff**, the volume rule triage fenced behind needs-user-decision (provenance-not-volume norm);\n3. **a bare count**, the only in-discretion shape, fails the claim comment's own bar (\"changes a decision, not is true\") exactly where it fires most: a count without names forces a second lookup the tool refuses to print.\n\n**What the refusal costs, re-priced**: 231 of the 241 novel pairs sit in UNFILTERED workflows — CI runs those families on every PR, so the miss stays \"one CI round\", as the existing docblock prices it. 10 pairs (all on head modules) sit behind paths-filtered patrol workflows (`half-state-patrol.yml`, `required-set-patrol.yml`, `prerelease-pin-watch.yml`, `release-coverage-patrol.yml`, `validate-deps.yml`) where a load break defers past the PR — a count line would not fix those either, since it names nothing runnable.\n\nThe cheaper homes triage preferred (module-header note, opt-in `--explain`) are NOT built, deliberately: the \"aggregate lines get read\" assumption is unmeasured (the card and triage both flag it), a numeric header note re-creates the rotting-prose drift this tool exists to refuse (the card's own 228 was 234 by filing time and 241 today), and under startup-focus discipline the measured value on the table (up to one CI round on ~8% of cards, if anyone runs the flag) does not buy an always-maintained surface today. If a future card demonstrates pull, the measurement here is its baseline.\n\n## What changed\n\n- `scripts/pm/dispatch-gates.mjs` — 29 added lines of docblock in `coveringKey`'s refused-fifth-key section, recording the second refusal beside the first. No executable line touched.\n\n## Verification (all at final head 23847803)\n\n- `pnpm check:pm-dispatch-gates` — \"dispatch-gates self-test: 944 cases pass.\" (same 944 as at merge-base 71627f7b); the refused-class pins re-derived live: \"241 (family, imported module) pair(s) no key reaches, of 282\" · \"the witness holds\" · \"a card editing scripts/invoked-as.mjs would name 121 families\" · \"207 of 241 novel pair(s) land on 5 module(s)\"\n- `node scripts/pm/bare-root-worklist.mjs --self-test` — \"OK self-test: 51 live row(s) ... none stale, none missing, none contradicted.\"\n- `node scripts/check-self-test-wired.mjs` — \"every one of the 151 script(s) CI runs that ship a --self-test has that self-test run by CI.\"\n- `node scripts/check-nul-bytes.mjs` — \"OK (scanned 7447 text file(s) ...)\"\n- `node scripts/pm/dispatch-gates.mjs` (no paths, the tool's work leg) — banner: \"gate list derived from the tree of 'objectstack-ai/objectstack' at commit 23847803\"; 15 families named for this diff; the 10 remaining runnable ones all green locally (agent-test-spelling, bash32-floor, cli-command-ids, cross-package-test-inputs, entry-guard, parse-guard, pnpm-filter-targets, watch-hint-literal, ci-filter-parity, shard-attestation).\n- `node scripts/check-test-completeness.mjs` — NOT MEASURED locally by its own design (exit 3, \"PREREQUISITE NOT MET — grades a saved turbo run test log\"); CI supplies the teed log on Test Core.\n\nDeclared narrowing: whole-repo `pnpm lint` is CI's run, not re-run locally; every gate above was run on the committed head after the final commit.\n\n`skip-changeset` applies: the diff is comments in `scripts/pm/**` only — nothing publishes from any package.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01Pk26oZ12t5N1hwGW1m1MgC)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Pk26oZ12t5N1hwGW1m1MgC)_"
+}

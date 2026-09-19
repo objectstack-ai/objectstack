@@ -1,0 +1,35 @@
+{
+  "number": 13662,
+  "kind": "pull_request",
+  "title": "feat(cli): ratify `./console` as a public subpath export — the out-of-repo consumer #13123 predicted",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xs",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T05:38:42Z",
+  "updated_at": "2026-08-31T06:21:33Z",
+  "closed_at": "2026-08-31T06:21:32Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-31T06:21:31Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/13662",
+  "body": "## What\n\nOne deliberate door in the CLI's `exports` map: `\"./console\"` → `dist/utils/console.{js,d.ts}` — the self-contained static-serve util (`resolveConsolePath` / `hasConsoleDist` / `createConsoleStaticPlugin` + drift-guard helpers; fs/path only, no oclif).\n\n## Why\n\n#13123 sealed the CLI behind an `exports` map and its own body names this exact remedy for an out-of-repo consumer: *ratify the subpath as public surface rather than read `dist/` paths*. That consumer exists — **cloud's `objectos-runtime` node server** mounts the Console SPA through this util, formerly via `@objectstack/cli/dist/utils/console.js`. Under the sealed map that specifier now fails at both layers:\n\n- **types**: tsup DTS refuses with TS2307 (measured on cloud's pin-bump build);\n- **runtime**: `ERR_PACKAGE_PATH_NOT_EXPORTED`, which the consumer's defensive catch turns into a silent API-only boot — a working deployment loses its console with nothing but a warn line.\n\nDuplicating the util in cloud was rejected: it is 654 lines carrying the objectui-pin drift guards (#7752) and the mount-decision policy — a fork would drift by construction.\n\n## Scope\n\nThe surface grows by ONE named door, not back to \"everything under `dist/`\". `check:published-files`' GATED invariant stays green (the map names real entries); census floor untouched. Changeset: `@objectstack/cli` minor.\n\n## Gates at this head\n\nFull 71-package build, full-repo lint, `check:published-files`, `check-empty-changeset` — all exit 0. Cloud-side consumer verified against a locally patched checkout of this exact map: runtime resolution returns all three functions, objectos-runtime DTS builds green, and cloud's five harness suites pass.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

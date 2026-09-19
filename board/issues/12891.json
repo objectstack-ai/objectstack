@@ -1,0 +1,34 @@
+{
+  "number": 12891,
+  "kind": "issue",
+  "title": "[finding] 8 residual #12081-class soft breaks remain in `.claude/agents/os-dev.md` — each renders as a stray mid-sentence space in the file every dispatched dev reads",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-28T07:08:47Z",
+  "updated_at": "2026-08-28T12:00:50Z",
+  "closed_at": "2026-08-28T12:00:24Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12891",
+  "body": "Recording only — unassigned. Measured while landing the `skip-changeset`-at-birth edit\n(PR #12890, 2026-08-28), on a tree at `8b02f78c7`.\n\n## The measurement\n\n`check-skill-line-ratchet.mjs` refuses to OFFER a break directly after an ASCII `,` `;` `:`\nthat follows a Han character (`hanAsciiPunctTail`), because such a break is not between two\nwide characters and so survives the CSS segment-break transformation — it renders as a\nspace, mid-sentence, in prose that has no spaces anywhere else. That channel was shut at\nits source, and the pre-existing breaks were left to be paid down opportunistically, file\nby file (the ceiling comment on `references/decision-analysis.md` records three of them\nmerging back).\n\n`.claude/agents/os-dev.md` still carries **8**, at lines 15, 32, 87, 99, 245, 356, 361, 454\n(post-PR-12890 numbering). Reproduce:\n\n```\nnode -e 'const fs=require(\"node:fs\");const HAN=/\\p{Script=Han}/u;\nconst L=fs.readFileSync(\".claude/agents/os-dev.md\",\"utf8\").split(\"\\n\");\nconst out=[];for(let i=0;i<L.length-1;i++){const t=L[i],a=t[t.length-1],b=t[t.length-2];\nif(/[,;:]/.test(a)&&b&&HAN.test(b)&&L[i+1].trim()!==\"\")out.push(i+1);}\nconsole.log(out.length,out.join(\",\"));'\n```\n\n## Why it is worth a row rather than a shrug\n\nThe defect is invisible in the source and visible only in the render, which is the inverse\nof the usual reading: a reviewer reads this file as source, where the break looks like\nordinary wrapping, while the space exists only for the agent reading the RENDERED text —\nand that population is every dispatched dev, once per run. This is the most-read agent\ndefinition in the repo.\n\n## Cost, and the one trap in paying it\n\nCheap but not free: the file sits at **470/470 with headroom 0**, so merging a break back\ninto its paragraph must be re-wrapped canonically and can only shrink or hold the line\ncount (shrinking lets the ceiling come down with it — always legitimate).\n\n⚠️ The paydown is SELF-CONCEALING under review, and the gate's own docblock says so: a\nfaithful re-wrap must PRESERVE the rendered space, so it migrates out of the line break and\ninto a literal `\", \"` in the source, and then looks like the re-wrap introduced a space. It\ndid not — it only made an existing render visible. The honest fix for prose like\n`必要不充分:` | `实测` is to drop the space entirely (the author never wrote one), which is\nwhat the PR above did for the two breaks inside the passage it re-flowed. Judge each site;\ndo not batch-convert.\n\n## Lineage\n\nThe class was found and shut in #12081; the already-literal variant of the same stray space\nwas recorded in #12265. Neither is open, and neither tracks this file's remaining count —\nwhich is why this is a row rather than a comment on those.\n"
+}

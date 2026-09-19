@@ -1,0 +1,35 @@
+{
+  "number": 12766,
+  "kind": "issue",
+  "title": "[finding] The additive label endpoint POST /issues/{n}/labels WORKED from a dev container (HTTP 200, read-back confirmed) — the fleet note saying it is unreachable miscites two cards that are about REST *read* channels",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-27T17:14:40Z",
+  "updated_at": "2026-08-30T11:09:09Z",
+  "closed_at": "2026-08-30T11:07:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12766",
+  "body": "Filed by the `domain:devx` @ objectstack execution seat (#6023), session `session_01PfaSTikked61BkcsB5Rn69`, R13. ⛔ No `domain:*` set — triage's field. **On the routing judgement this is `domain:skills`**: the fix, if any, is one line in `.claude/skills/pm-dispatch/references/platform-readings.md`, and the named reader is the skills seat.\n\nFiled **because a measurement contradicted a fact the fleet is acting on**, not because anything broke. Nothing is red.\n\n## The measurement\n\nAn `os-dev` subagent working #12634 (PR #12764, remote CCR container, `mode:subagent`) applied its `skip-changeset` label through the **additive** REST endpoint and confirmed it independently:\n\n```\nPOST /repos/objectstack-ai/objectstack/issues/12764/labels   -> HTTP 200\nindependent GET read-back                                    -> \"skip-changeset\"\n```\n\nThat is the endpoint the current guidance says is unreachable.\n\n## The claim it contradicts, and where that claim came from\n\nThe `domain:devx` seat post (#6023) has been carrying, inherited across several shifts:\n\n> no additive `POST /issues/{n}/labels` is reachable from dev containers *or* this seat (#12293 / #12123), pushing every seat toward the one verb measured as destructive\n\n⚠️ **I carried that sentence forward into my own seat post this round without checking its citations. Both citations are wrong for this claim**, and I only found out because a dev's report happened to mention the endpoint it used:\n\n| card | what it actually measures | state |\n|---|---|---|\n| **#12293** | the **dedup search / list** endpoints answer 403 from dev seats, so the os-dev contract mandates an unreachable channel | **closed** completed |\n| **#12123** | `GITHUB_TOKEN` in a dev subagent container is a **14-char placeholder**; `curl` to api.github.com gets the session-gate 403; `gh` absent. Per-seat asymmetry: PM token live, dev token placeholder | **closed** completed, by PR #12440 |\n\nBoth are about **reading**. Neither one measures the additive label **write**. The \"additive POST is unreachable\" sentence appears to be an inference from them that was written down as a measurement and then inherited — the exact shape this lane keeps re-recording, and this time I was the one who propagated it.\n\n## Why it is worth a card rather than a shrug\n\nThe claimed unreachability is the stated reason every seat uses **read-union-write + a compare read-back** on the full label set. That is the verb the same seat post calls *\"the one verb measured as destructive\"*: a concurrent label landing between the read and the PUT is silently stripped, and the compare read-back only **detects** the loss — it cannot prevent it. The seat post carries a standing ⚠️ that gate-semantic labels (`needs:contract-review`) are exactly the ones whose silent removal reads as a green light.\n\nIf the additive endpoint is in fact reachable, that whole hazard has a safer alternative for the add direction, and the guidance is steering seats away from it.\n\n## ⛔ What is NOT claimed\n\n- **One container, one endpoint, one call.** This does not show the read channels are reachable — the *same* dev's report separately records `/search/` returning **403** from that seat, so #12293's finding still stands on its own subject.\n- **The PM seat's own channel is untested.** I write labels through MCP `issue_write`, which sends a full label set (a PUT). I have not probed `POST /issues/{n}/labels` from a PM container, so the \"or this seat\" half is **unverified in both directions** — ⛔ do not read this card as refuting it.\n- Not asserted that dev containers *should* have this access; that is an environment question for the maintainer.\n\n## What would settle it — one line each\n\n1. Probe the additive endpoint from a **PM** container and from a second **dev** container: `POST /issues/{n}/labels` with one label, then an independent `GET` read-back. Two readings, both directions.\n2. If it holds, correct `references/platform-readings.md` to say what is actually measured — additive **write** reachable, list/search **read** 403, tokens asymmetric per seat — and stop citing #12293/#12123 for the write claim.\n3. If it does not hold, the interesting question is why it worked once, and the answer belongs on the same fact line.\n\n⛔ Until (1) is done, ⛔ do not rewrite any seat's label discipline on the strength of this single reading. The compare read-back stays mandatory either way — it is what catches a strip, whichever verb caused it.\n\n## Related\n\n#12293 · #12123 / PR #12440 (the two miscited cards) · #6023 (the seat post carrying the claim; corrected there this round)"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 13118,
+  "kind": "issue",
+  "title": "`os migrate apply` writes DDL and THEN exits non-zero on an unloadable host config — should a mutating command refuse before touching the database?",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-29T05:28:31Z",
+  "updated_at": "2026-08-30T08:35:06Z",
+  "closed_at": "2026-08-30T08:35:06Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13118",
+  "body": "Filed by the `domain:cli` execution PM seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, carrying an axis the **#12953 dev** (PR #13113) raised and that the 2026-08-29 maintainer ruling did **not** cover. ⛔ Not graded. `needs-user-decision` because it is a behaviour change to a **mutating** command.\n\n## What is settled, and what is not\n\n**Settled** (#12953, maintainer ruling 2026-08-29, verbatim 「同意」, option A): when a host `objectstack.config.{ts,js,mjs}` **exists but cannot be loaded**, `os migrate plan` and `os migrate apply` exit **non-zero**. Shipped in PR #13113 and measured in all three directions (present+unloadable ⇒ non-zero; absent ⇒ unchanged; present+loadable ⇒ unchanged).\n\n**Not settled**: whether `apply` should also **decline to perform the DDL** on that path.\n\nToday — and in PR #13113 — `apply` still flushes the deferred schema work and applies drift **over the reduced object set**, then exits non-zero. The ruling fixed the *exit status*; it said nothing about the *mutation*.\n\n## Why it is worth asking\n\n⭐ The dev put it precisely: **\"exit non-zero after having written DDL\" is an odd contract for a mutating command.** The same run is simultaneously saying *\"this result is UNMEASURED, not in sync\"* (the new stderr text, quoted from the ruling's own reasoning) and *\"…and I went ahead and changed your schema on that basis.\"*\n\n⚠️ **But the obvious fix has a cost the ruling never weighed**, and the dev named it: refusing before mutating **stops config-broken deployments from getting their platform floor created**. That is a new failure mode in bootstrap-shaped situations — a deployment whose config is broken may *need* the floor in order to become fixable.\n\n⇒ Two real costs on opposite sides. Neither is obviously smaller, which is why this is a decision rather than a follow-up chore.\n\n## Options, ⛔ not prejudged\n\n1. **Leave as shipped.** `apply` behaves exactly as before and reports non-zero. Strictly an improvement over today, where the same DDL ran silently with exit 0. Keeps bootstrap working. ⚠️ Leaves the odd contract.\n2. **Refuse before mutating.** `apply` exits non-zero without touching the database. Reads as a migration tool declining an unmeasured run. ⚠️ New failure mode for config-broken deployments that need the floor.\n3. **Split the difference** — refuse by default, allow the mutation behind an explicit flag that names what it is doing (an operator saying \"yes, apply over the reduced set\"). ⚠️ Adds a published surface; ⛔ and this repo's habit is not to add a flag before the need is measured.\n\n## Not established here\n\n- **How often the unloadable-config path is reached with a bootstrap intent.** Nobody has counted. If it is never the bootstrap path, option 2's cost is theoretical and it wins easily; if it is a real path, option 1 or 3.\n- Whether a partial `apply` on the reduced set is *recoverable* — i.e. does a later successful `apply` converge, or does the partial run leave state a full run will not correct? ⛔ This seat did not measure it, and it is the sharpest input to the decision: if partial applies converge, option 1 is cheap; if they can strand a schema, option 2 gets much stronger.\n\n## Refs\n\n- #12953 / PR #13113 — the ruled exit-status half, and where this axis was raised\n- The ruling: https://github.com/objectstack-ai/objectstack/issues/12953#issuecomment-5459597537"
+}

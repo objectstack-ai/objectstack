@@ -1,0 +1,37 @@
+{
+  "number": 13496,
+  "kind": "issue",
+  "title": "`compileCelToFilter` lowers a null MEMBER of a membership array straight into an RLS `$in`, bypassing the fail-closed path a null SCALAR variable takes — and the backends then disagree three ways on what that filter selects",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T14:53:29Z",
+  "updated_at": "2026-08-31T06:29:17Z",
+  "closed_at": "2026-08-31T06:28:32Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13496",
+  "body": "Filed unassigned by the #13357 dev. This is the p2 census that card's triage audit ordered (\"执行者顺手做这次普查,带正对照\"), and it FIRED. Recording only — no severity asserted, routing is triage's.\n\nBlocked-by: #13357 — what this filter SHOULD select is the ruling that card is waiting for. The fail-closed asymmetry below is independent of that ruling; the row-set consequence is not.\n\n## Measured, with a positive control\n\n`compileCelToFilter` (`packages/formula/src/cel-to-filter.ts`) is the canonical CEL pushdown for read scopes (ADR-0058 D1/D2/D6), consumed by `plugin-security/rls-compiler.ts` and `plugin-sharing`. Executed on `0e810dde17`, same expression each time, only the resolved membership array varying:\n\n```text\nCONTROL  clean list  : {\"ok\":true,\"filter\":{\"owner\":{\"$in\":[\"u1\",\"u2\"]}}}\nPROBE    null member : {\"ok\":true,\"filter\":{\"owner\":{\"$in\":[\"u1\",null]}}}\nPROBE    only null   : {\"ok\":true,\"filter\":{\"owner\":{\"$in\":[null]}}}\nPROBE    empty list  : {\"ok\":true,\"filter\":{\"owner\":{\"$in\":[]}}}\n```\n\nThe control compiles to a plain `$in`, so the harness reaches the lowering; the probes are a reading and not a silence. The null member is passed through verbatim into an RLS filter.\n\n## The asymmetry\n\nThe module's own docblock states the discipline:\n\n> A variable that resolves to `undefined`/`null` yields `unresolved-variable` (the \"no active org\" fail-closed path).\n\nThat holds for a SCALAR variable and is pinned (`cel-to-filter.test.ts`: \"null variable (e.g. no active org) → unresolved-variable (fail closed)\"). It is not applied to a null MEMBER inside a resolved membership array: `lowerMembership` checks only `Array.isArray(value)` and emits the list as-is. So the one shape that is a security predicate gets the fail-closed treatment and the other does not.\n\nThe empty-list case is deliberate and already ruled — `packages/lint/src/validate-empty-combinators.ts` calls `$in: []` \"a legitimate, declared predicate — matches nothing on every backend\", and I measured it consistent across all faces. It is listed above only as the neighbouring shape, not as a defect.\n\n## Why the emitted filter is not a harmless no-op\n\nThe backends do not agree on what `{owner: {$in: [null]}}` selects. Measured by execution on the same fixture (`id 1, name 'a'` and `id 3, no value`), the two readings of \"no value\" being a stored null and an absent key:\n\n| surface | `$in: [null]` |\n|:--|:--|\n| `driver-sqlite-wasm` / `driver-sql` (compiles to `IN (NULL)`) | `[]` — matches nothing |\n| driver-memory live mingo path | `['3']` — matches the no-value row, both readings |\n| driver-memory reference matcher, `formula` | `['3']` on a stored null, `[]` on an absent key |\n\nSo one sharing rule or read scope admits three different row sets depending on which backend serves it. That is the harm class #5146 named in its own note — \"one permission rule admitting different row sets per backend\" — reached here by a machine-generated filter rather than an authored one.\n\nDirection depends on which reading is ruled: against the SQL family a scope that should have admitted rows admits none (a lockout), and against the Mongo family a scope silently admits the rows whose column is unset (a widening). Both are wrong answers with nothing to read.\n\n## What this does NOT claim\n\nI did not demonstrate a production context provider that actually puts a null into a membership array — I demonstrated that the lowering does not stop one. Two of the three sibling construction paths DO strip: the engine's expand batch (`engine.ts`: `if (val == null) continue` and `val.filter((id) => id != null)`) and search's option collection (`search-filter.ts`: `if (opt == null) continue`). This one is the unguarded member of that set.\n\n## Related\n\n#13357 (what `$in:[null]` means — unruled, and the blocker) · #5332 (the `$eq: null` ruling, scoped to the scalar spellings) · #13494 (the scalar `$eq: null` cell) · #5146 / #5298 (no-value semantics on read scopes) · ADR-0055 / ADR-0058 (the pushdown contract)"
+}

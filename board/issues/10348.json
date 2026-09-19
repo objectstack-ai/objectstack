@@ -1,0 +1,35 @@
+{
+  "number": 10348,
+  "kind": "issue",
+  "title": "[finding] Three spellings of the ADR-0068 platform-admin read now live in plugin-auth, and one of them skips the system read context",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "security"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-20T16:09:31Z",
+  "updated_at": "2026-08-29T01:24:35Z",
+  "closed_at": "2026-08-24T13:49:00Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 13,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10348",
+  "body": "Found while implementing #9968 (impersonation half). Filed unassigned; no fix attempted — consolidating a security predicate is not that card's scope.\n\n`platform-admin-gate.ts`'s own header states the principle this violates:\n\n> Before this module the gate existed as four near-identical inline copies … N copies of an authorization predicate is the shape that drifts: the next mount is written by copying whichever copy the author happened to open. One exported judge, called by every mount, is the fix.\n\nThat consolidation covered the *session-shaped* question (`isPlatformAdminUser(sessionUser)` / `judgePlatformAdmin(session)`). The **id-shaped** question — \"is this user id a platform admin?\", i.e. the `sys_user_permission_set` → `admin_full_access` / `organization_id = null` lookup — was never consolidated, and now has three spellings in one package:\n\n| # | Site | Read path |\n|---|---|---|\n| 1 | `auth-manager.ts` — the `isPlatformAdmin()` closure inside `customSession` | `dataEngine.find(...)` **directly** |\n| 2 | `auth-manager.ts` — `isOrgOrPlatformAdmin()`'s first half | `withSystemReadContext(engine).find(...)` |\n| 3 | `auth-manager.ts` — `isPlatformAdminUserId()` (added by #9968) | `withSystemReadContext(engine).find(...)` |\n\nAll three do the same two reads with the same `limit: 50` and the same `admin_full_access` name match, and all three fail closed.\n\n**The one substantive difference is #1.** It queries the engine **without** `withSystemReadContext`, while #2 and #3 both wrap. `isOrgOrPlatformAdmin`'s docblock says why the wrapper is there:\n\n> Reads through `withSystemReadContext` so the lookups are not themselves RLS-scoped to the acting (possibly non-privileged) user.\n\nWhether that matters for #1 depends on whether `customSession`'s callback already runs in a privileged context. **This finding does not claim #1 is a bug** — that is the measurement someone should take before acting, and it is exactly the kind of difference that is invisible while three copies exist. If the wrapper is unnecessary in #1, the two wrapped copies are carrying a cost for nothing; if it is necessary, #1 is a session-derivation path that can under-report platform admin for a caller whose RLS scope hides the join rows.\n\n`resolve-authz-context.ts` is named as authoritative for the platform-admin half by `isOrgOrPlatformAdmin`'s docblock, which suggests a fourth spelling may exist outside this package — worth counting as part of the same sweep.\n\nSuggested shape: one exported id-shaped judge next to `isPlatformAdminUser` in `platform-admin-gate.ts`, taking the data engine, with the system-read-context decision made once and written down; the three call sites then differ only in what they do with the answer. Note that `isOrgOrPlatformAdmin` must keep its *narrower/wider* distinction — it deliberately also admits org owners/admins, which a platform-admin route must not."
+}

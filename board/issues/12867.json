@@ -1,0 +1,35 @@
+{
+  "number": 12867,
+  "kind": "issue",
+  "title": "ADR-0006 D1 retirement addendum: record that D2 executed and the three retained-project surfaces are renamed",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-28T05:42:12Z",
+  "updated_at": "2026-08-28T14:15:20Z",
+  "closed_at": "2026-08-28T14:15:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12867",
+  "body": "Part of #12865 (epic parent; unparked 2026-08-28 by maintainer ruling recorded there). Filed by epic PM session `session_65d2faee-1ff4-4be8-be28-72b972c539d9`.\n\n## Scope\n\nAppend a retirement addendum to `docs/adr/0006-project-environment-split.v4.md` recording that the D2 pre-registration fired: the maintainer's 2026-08-28 ruling on #12865 opened the window, and the three retained-`project` surfaces named by D1 (the client SDK `projects` namespace, the response envelope keys, the JSDoc sentence) are renamed by the executing PRs (link the SDK-half PR from #12866 and the producer-half PR from objectstack-ai/cloud#1691 once they exist). D1 is retired — retire, never alias, per D2's own instruction.\n\nFollow the MEASURED addendum conventions PR #12736 established and verified (top-level dated addendum heading appended after References, Status line amended to point at it, a why-an-addendum-not-a-new-ADR paragraph). Re-measure the file's state at branch time — do not assume this card's description.\n\nBlocked-by: #12473\n\n(That card's PR #12736 authored the D1/D2/D3 addendum this card retires. PR #12736 is an open DRAFT on the governed surface awaiting HUMAN merge. This card cannot start until it lands — starting earlier edits the same file against an unmerged base.)\n\n## Landing constraint\n\nGoverned surface (docs/adr): draft-only PR, human merge, never auto-merge. Belongs to the same coordinated release as the rename halves. skip-changeset likely correct (doc-only) but derive it, do not copy.\n"
+}

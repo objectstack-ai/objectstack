@@ -1,0 +1,35 @@
+{
+  "number": 11813,
+  "kind": "issue",
+  "title": "`packages/spec` still tells authors `current_user` is unbound on a form FIELD `visibleWhen` — three text sites stale after objectui#6010 (and the section slot must NOT be swept with them)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T17:44:38Z",
+  "updated_at": "2026-08-28T13:32:17Z",
+  "closed_at": "2026-08-28T13:31:03Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11813",
+  "body": "Filed unassigned by the `domain:devx` dev seat while implementing #11740 (the documentation half of objectui#6010). Recording only — not graded, no `domain:*`. ⛔ Deliberately NOT fixed in the #11740 PR: the dispatch fenced the spec side as its own finding, and the fix here changes generated artifacts and a lint message, not prose on a hand-written page.\n\nMeasured on `origin/main` @ `7e83932` and objectui `origin/main` @ `a100f77`.\n\n## What moved\n\nobjectui#6010 (PR #6037, merged 2026-08-24) bound the host predicate scope on the five authored-predicate call sites in objectui's form renderer, so a runtime form **FIELD** `visibleWhen` / `visibleOn` now resolves `current_user` (and the ADR-0068 `user` / `ctx.user` / `os.user` aliases) — the same scope the page/app-nav node gate and per-option `visibleWhen` already bound. #11740 corrects the hand-written docs pages. Three text sites in this repo carry the pre-#6010 claim and are not reached by that PR.\n\n## Site 1 — `packages/spec/src/ui/view.zod.ts` `FormFieldSchema.visibleWhen` (JSDoc `:1936-1948`, `describe()` `:1959`)\n\n> ⚠️ **No `current_user` here** (#6146). […] A predicate referencing `current_user` is an UNBOUND identifier: the evaluation faults and falls back […] `current_user` IS bound for **per-option** `visibleWhen` […]; **that is the only `*When` surface where it resolves.**\n\nThe final clause is what is now false. Both the JSDoc and the `describe()` string need re-measuring, and the `describe()` is the one with reach: it is the source of the generated reference row below.\n\n## Site 2 — `content/docs/references/ui/view.mdx:163` (GENERATED — do not hand-edit)\n\nThe page carries `{/* ⚠️ AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. */}`, and its `FormField.visibleWhen` row is a verbatim copy of site 1's `describe()`. It corrects itself when site 1 does, via `pnpm --filter @objectstack/spec build:docs` / `check:docs`. Listed so the fix is not called done before the generated page is regenerated.\n\n⚠️ **`FormSectionSchema.visibleWhen` (`view.zod.ts:2116-2119` → `view.mdx:250`) is a different verdict and must NOT be swept along with site 1.** Measured in objectui: the only runtime reader of an authored section predicate is the console's second form renderer (`apps/console/src/components/FormPage.tsx:651`), which still passes `undefined` for the scope — and the object-view chain drops the key entirely before it reaches the renderer that would bind it (objectui#6111). So \"no `current_user` at section level\" is still true where the key is read at all. A uniform sweep of both slots would make the section text wrong in the direction this whole card family is about.\n\n## Site 3 — `packages/lint/src/validate-expressions.ts:681` (prescription text) and `packages/lint/scripts/check-doc-formula-expressions.mjs:559-561` (measured layer table)\n\n`fieldRuleRootIssue`'s prescription for a user root on an OBJECT field-level `*When` says per-option is *\"the one `*When` surface that binds `current_user` and its ADR-0068 aliases\"*. The rule's verdict is unaffected — `FIELD_RULE_BOUND_ROOTS` is about object field rules (ADR-0036), which the server's own rule-validator evaluates without `current_user`, so refusing the root there is still right. It is the \"one surface\" phrasing that has aged.\n\n⚠️ Whoever fixes it should be careful about what the new phrasing offers as an alternative: a view form field's `visibleWhen` now binds `current_user` **client-side only**. Telling an author to move a server-enforced object rule onto the view predicate would trade a loud lint error for a silent enforcement gap. The per-option and permission-set prescriptions in that message are the ones that survive server-side.\n\nThe gate script's docstring table (*\"Re-measured on objectui `origin/main` @ `2aff580`\"*) folds the view form field layer into its `object field / form section` row, which is now two verdicts in one cell.\n\n## Suggested shape\n\nOne PR: re-measure site 1's two strings, regenerate site 2, re-word site 3's two comments — with the section slot explicitly re-measured and left alone if it still reads true. No schema or validation change is implied: every one of these is documentation carried inside code.\n\n## Pointers\n\n- objectui#6010 / objectui PR #6037 — the binding restoration, with the five call sites.\n- objectui#6110 — the two objectui evaluators that still pass `undefined` scope.\n- objectui#6111 — authored `FormSection.visibleWhen` dropped before evaluation on the object-view chain.\n- #11740 — the hand-written docs half, which cites all three.\n- ADR-0089 D1 / ADR-0068 D1 — the binding contract.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015ahemw8RcTgqtxrj15PEZx)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

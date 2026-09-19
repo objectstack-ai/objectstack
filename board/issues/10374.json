@@ -1,0 +1,35 @@
+{
+  "number": 10374,
+  "kind": "issue",
+  "title": "finding: any late console.* in a vitest worker can fail a fully green suite — the #9371 amplifier is upstream and still live",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tests"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-20T17:07:55Z",
+  "updated_at": "2026-08-30T17:10:54Z",
+  "closed_at": "2026-08-30T17:04:06Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10374",
+  "body": "Recorded while fixing #9371. **The trigger there was ours and is fixed. The amplifier is vitest's and is not.** Filing so the next occurrence is diagnosed in minutes instead of two sightings and a reproduction.\n\n## The mechanism, read out of the installed vitest (4.1.10)\n\n`packages/vitest/dist/chunks/console.*.js` — the worker's replacement `console` batches writes and flushes them from a microtask:\n\n```js\nfunction sendLog(type, taskId, content, size, origin) {\n    state().rpc.onUserConsoleLog({ type, content, taskId, ... });   // ← return value DISCARDED\n}\n```\n\n`packages/vitest/dist/chunks/init.*.js` — `execute()` tears the worker down:\n\n```js\n} finally {\n    await rpcDone().catch(() => {});\n    await Promise.all(cleanups.map((fn) => fn())).catch(() => {});   // ← $rejectPendingCalls\n}\n```\n\nand the cleanup it pushed:\n\n```js\nawait Promise.all(rpc.$rejectPendingCalls(({ method, reject }) => {\n    reject(new EnvironmentTeardownError(`[vitest-worker]: Closing rpc while \"${method}\" was pending`));\n}));\n```\n\n`rpcDone()` awaits a **snapshot** (`Array.from(promises)`) taken when it is called. Any console RPC created *after* that snapshot is still pending when `$rejectPendingCalls` runs, and gets rejected. Because `sendLog` discards the promise, **nobody is holding it** — so the rejection is unhandled, `listenForErrors` catches it, and it is reported as an unhandled error. Vitest fails a run on an unhandled error even when no assertion failed.\n\nNet: **one `console.log` emitted late enough, in any package, turns a fully green suite into exit 1.**\n\n## Two properties that make it nasty\n\n1. **It is invisible in the log.** Vitest 4's non-TTY default reporter is `MinimalReporter`, which sets `silent: 'passed-only'` — console output from passing tests is never printed. But the *worker still sends the RPC*. Measured: a probe test's `console.log` never appeared in the output while its `process.stdout.write` did. So a suite can be paying hundreds of RPC round-trips per run for output nobody will ever read, and the only symptom is the flake.\n2. **The window is load-width.** It is the duration of `rpcDone()`. On an idle box that is ~1 ms; on a saturated queue runner it is long enough for a lingering async callback to slip inside. That is the whole of the \"load-dependence\" in #9371 — nothing about the code under test changes.\n\n## Reproduced\n\nOn a 4-vCPU container, 4 concurrent full `examples/app-showcase` suites × 3 rounds, with a probe wrapping `rpc.onUserConsoleLog`:\n\n```\nRPCREJECT 30847 t=38057 id=137 err=EnvironmentTeardownError: [vitest-worker]: Closing rpc while \"onUserConsoleLog\" was pending\n   … ×6, all in one worker, all in the same millisecond sweep\nAFTERALL  30847 t=37655        ← the file's tests and hooks were already done\nRPCSTART  30847 t=37899 id=135 ← eight console RPCs began AFTER that\nPROCEXIT  30847 t=38099\n```\n\n## What this does and does not claim\n\n- ⛔ Not a request to silence anything. Suppressing console output would hide real diagnostics and is exactly what #9371 refused.\n- The **only** general defence available to us is the one #9371 applied: do not let async work outlive the test file. Any package whose harness leaves a timer, a poll, or a fire-and-forget write running past the end of a file is exposed, and `vitest --detectAsyncLeaks` finds those (it named #9371's file and no other in the showcase suite).\n- Upstream, either half would close it: flush pending console logs before `$rejectPendingCalls`, or do not reject a fire-and-forget notification into an unhandled rejection. Whether to raise that with vitest is triage's call, not this finding's.\n\n## Recognising the next one\n\n`Errors N` with `Tests X passed (X)` and a non-zero exit, message `EnvironmentTeardownError: [vitest-worker]: Closing rpc while \"onUserConsoleLog\" was pending`. ⚠️ The file it names is where the rejection **originated** — in practice the file the worker was on — so read it as \"this file had console output in flight at teardown\", not \"the bug is in this file\"."
+}

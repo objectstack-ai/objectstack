@@ -1,0 +1,34 @@
+{
+  "number": 13153,
+  "kind": "pull_request",
+  "title": "test(rest): measure what a swallowed execution context reads as at the packages door",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-29T06:39:32Z",
+  "updated_at": "2026-08-29T10:55:50Z",
+  "closed_at": "2026-08-29T10:55:48Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": "2026-08-29T10:55:48Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/13153",
+  "body": "Part of #12537 — the rider (part 2) of the maintainer ruling of 2026-08-29 (option B). This is a **measurement**, not a fix: zero wire-behaviour change, and option A (un-swallowing) is deliberately **not** done here.\n\n## The question, and why the thread's answer did not close it\n\nThe thread already carried a wire-level reading: a resolver that throws synchronously reaches `sendThrownError`, one that rejects is swallowed and the caller sees the anonymous floor. That answers *which status code comes out*. The rider asks what an `undefined` execution context **means inside the permission decision**, and three readings can produce byte-identical responses:\n\n1. a **subject that holds nothing** (evaluated, denies),\n2. an evaluation that is **skipped**,\n3. a fall-through to a **default / system subject**.\n\n(2) and (3) are fail-open postures; (1) is not.\n\n## Measured answer: (1), at both clauses. The swallow fails CLOSED.\n\n`refusePackageRequest` (`packages/rest/src/package-routes.ts`) touches the resolved context through optional chaining only — `ctx?.userId`, `ctx?.isSystem`, `ctx?.systemPermissions` — so `undefined` is not a branch, it is a subject whose every field is absent.\n\n| drive | answer | what it shows |\n|:--|:--|:--|\n| rejecting resolver, `GET` | 401 `UNAUTHENTICATED` | read as the **anonymous subject**; refused at the floor |\n| rejecting resolver, anonymous floor isolated | 403 `FORBIDDEN` | capability clause evaluates it as holding the **empty set** |\n| `isSystem: true` context (control) | 200 | the door *can* serve — the refusals are decisions, not artefacts |\n| capable context (control) | 200 | allow is observable |\n\n⇒ not skipped, not a system subject. **⛔ The stop condition in the ruling does not fire**: this is not a permission-adjacent fail-open.\n\n## Two things that correct the record\n\n**1. This `.catch` is the SECOND net, not the first.** `RestServer.computeExecCtx` wraps its whole body in `try { … } catch { return undefined; }`, so a production resolve **fulfils with `undefined`** on a fault instead of rejecting — the wrapper's `.catch(() => undefined)` has nothing to catch on that path, and the fault-to-anonymous conversion happens one level below it. Pinned white-box, against a control that injects a real inner rejection and shows the wrapper *is* what swallows when there is something to swallow.\n\n**2. \"sync throw ⇒ 403 PERMISSION_DENIED\" is not a fact about this door.** A sync throw produces no `undefined` context at all: it escapes the non-`async` wrapper, lands in the route's own `try`, and `resolveThrownHttpError` reads the status **off the thrown error**. The same seam thrown a plain `Error` answers **500**, measured. So the 403 was a property of the injected error, not a gate decision. This does not re-open the seam census — the sync limb remains the declared test-only injection point.\n\n## What the swallow actually costs\n\nDiagnosability, not permission: a **faulting** resolver, an **unwired** resolver and a **genuinely anonymous** caller are one answer, byte-identical on the wire. Pinned, with a control showing the same comparison separates two answers that differ.\n\n## Verification\n\n- **New suite** `packages/rest/src/package-door-execctx-fault-reading.test.ts`: `Test Files 1 passed (1)` / `Tests 20 passed (20)`. Every \"did not happen\" reading carries a same-shaped positive control.\n- **Ablation, both legs, mutation and restore proved on disk by blob hash** (`git hash-object` vs the `HEAD` blob), restore under an `EXIT`/`INT`/`TERM` trap using absolute paths:\n  - leg A — make the capability clause skip evaluation for `undefined`: **1 red**, and it is the anonymous-floor-isolated case. Every other assertion stayed green, because the floor short-circuits ahead of the capability clause on every wire-reachable method. That leg is why the isolation instrument exists.\n  - leg B — make the swallow yield `{ isSystem: true }`: **6 red**, including the byte-identity pin and the \"service never reached\" zero.\n  - ⚠️ A first ablation attempt exited 127 (`vitest` not on the path used) — the mutation was on disk but nothing ran. Recorded as NOT MEASURED and re-run; the numbers above are from the run that happened.\n- **Comment-only proof** for `rest-server.ts`, instrument calibrated in **both** directions: base and head both emit sha256 `a54bd8a47802cc1df20f68140ceaa2c9e14fed6f14ffc80eb7987ec2f6a35722` under `removeComments: true` (EQUAL); a code-token mutant hashes `976e407a…` (DIFFERS); a comment-token mutant hashes `a54bd8a4…` (SAME).\n- **Sibling suites** unaffected: the four package-door suites together, `Test Files 4 passed (4)` / `Tests 175 passed (175)`.\n- **Typecheck**: `@objectstack/rest` build program and test program both green; `check:test-typecheck: OK` with the debt ledger unchanged at `3 file(s) / 6 error(s)`, none of them this file. Coverage stated rather than implied: `--listFiles` puts the new test in the **test** program (1 hit) and not the build program (0 hits).\n- **Gates** from `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` (change set taken from git itself), exit codes captured before any pipe — 20 families run, all exit 0.\n- **Ratchets re-run after the final commit**: `RATCHET RUN AT HEAD=a5ca6b21d (worktree clean: 0 path(s) dirty)` — nul-bytes, where-matcher, objectql-double-limit, engine-double-contract, query-options-erasure, slot-lookup, type-check-coverage all exit 0.\n- **Narrowing declared**: no repo-wide `pnpm lint` and no whole-farm run; `check:type-check-debt` needs a built workspace closure and was not run locally (`check:test-typecheck` for this package, the ratchet the new test file could move, is green with the ledger unchanged). `check-test-completeness.mjs` needs a turbo test log CI supplies — NOT MEASURED, not a red. CI runs the farm regardless.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01UjujZN219uFzBhSYfMykCd)_"
+}

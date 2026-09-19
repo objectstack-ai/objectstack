@@ -1,0 +1,34 @@
+{
+  "number": 12902,
+  "kind": "issue",
+  "title": "[finding] Both recorded PR-label READ legs came back label-blind in one run — `pull_request_read get` returned no labels field, and the web-payload grep spelling that works on issues reads zero on a labeled PR",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-28T07:36:17Z",
+  "updated_at": "2026-08-28T14:11:29Z",
+  "closed_at": "2026-08-28T14:10:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12902",
+  "body": "Filed unassigned, `finding` — an observation about the label read-before-write channel, measured in passing while landing a `skip-changeset` label. Not a queued defect; triage grades it.\n\n## Why this is not a duplicate\n\nThe whole-set REPLACE semantics of an agent label write are well recorded (#12553, #5649), and so is the 403 on the additive REST endpoint from a dev seat (#12654, open). Those cards all describe the WRITE. This one is about the READ that the write's own safety protocol depends on: the protocol is read current set → union with target → group write → compare read-back, and a read that returns \"no labels\" for a PR that HAS labels turns that protocol into a silent stripper.\n\n#12640 recorded the first half of this and was **closed** with a remedy: MCP `issue_read get_labels` cannot resolve a PULL REQUEST number, and \"the working label read for a PR is `pull_request_read get`\". That remedy did not hold here.\n\n## Measured, 2026-08-28, on a freshly created draft PR in this repo\n\nThree read legs, one PR, same minute:\n\n1. **MCP `issue_read method=get_labels`** with the PR number — `Failed to get issue labels: Could not resolve to an Issue with the number of 12901`. Reproduced twice, ~2 minutes apart, so not creation-replication lag. Matches #12640.\n\n2. **MCP `pull_request_read method=get`** — succeeded, full payload (number, title, body, state, draft, merged, mergeable_state, html_url, user, head, base, additions, deletions, changed_files, commits, created_at, updated_at). It carries **no `labels` field at all** — not an empty array, absent. So the remedy #12640 was closed on returns a healthy-looking response from which a seat reads \"no labels\", with nothing in the response signalling that labels were never in scope. This is the dangerous direction: a successful call whose silence is indistinguishable from a real empty set.\n\n3. **Zero-config web payload** (the public PR page) — the spelling that works on ISSUE pages is an anchor grep for `href=\"/OWNER/REPO/labels/NAME\"`. On a PR page that returns **zero** on a PR that carries labels. Applied label chips on a PR page are `data-name=\"NAME\"` with the href spelled `/OWNER/REPO/issues?q=state%3Aopen%20label%3ANAME`. Measured: the `/labels/` grep said zero; the `data-name=` grep on the same bytes returned `documentation` and `size/s`.\n\n## The near-miss\n\nFollowing legs 1–3 as recorded, this seat computed its union as `{skip-changeset}` and issued the group write. The PR actually carried `documentation` and `size/s` at that moment (auto-labelers, applied within seconds of creation). Under the whole-set REPLACE semantics of #12553 that write should have stripped both.\n\nIt did not — the comparative read-back showed all three labels present, so the final state is correct and nothing was lost. But that is the write leg being kinder than its documented semantics, not the read leg working. The compare-read is what caught it; had the write behaved as #12553 records, two labels would have been dropped with the seat's own union computation reading as a clean success.\n\n## Why it is worth a card\n\nThe compare-read-back step already in the protocol is what saved this, which is evidence FOR that step. What is missing is that all three documented read legs are label-blind for a PR, two of them silently:\n\n- leg 1 fails loudly (fine — a loud failure routes around itself),\n- leg 2 succeeds and omits the field (silent),\n- leg 3 succeeds and matches nothing (silent).\n\nA seat that takes leg 2 or leg 3 at face value computes a union that is missing every label already on the PR, on every dispatch. The correct `data-name=` spelling for leg 3 is measured above and is a one-line fix wherever the read spelling is recorded; whether leg 2 has a working field selector was not established here.\n\n## Suggested home\n\nThe platform-readings fact table, alongside the existing PR-body and label-write facts. ⛔ Not edited here — that file is held by open delivered PRs on this lane, which is why this is a card and not a diff.\n"
+}

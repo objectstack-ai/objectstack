@@ -1,0 +1,36 @@
+{
+  "number": 13524,
+  "kind": "issue",
+  "title": "A field operator whose lowering reuses another operator's key silently CLOBBERS it — $null, $between and $notContains on driver-memory and driver-mongodb, key-order dependent",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p1"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T16:28:32Z",
+  "updated_at": "2026-08-30T22:50:30Z",
+  "closed_at": "2026-08-30T22:49:59Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13524",
+  "body": "Measured while implementing #13195 (the `$exists` has-value alignment). Not caused by it: every cell below reproduces on `origin/main` at `b95ff78848`, with `$exists` removed from the picture entirely. #13195 guarded the one operator it moved and deliberately did not half-fix the class — this is the class.\n\n## The shape\n\nBoth document-shaped drivers translate a field constraint by writing into ONE result object, keyed by the operator name the backend understands:\n\n- `driver-memory` — `normalizeFieldOperators` in `packages/drivers/driver-memory/src/memory-driver.ts`\n- `driver-mongodb` — `translateFieldOperators` in `packages/drivers/driver-mongodb/src/mongodb-filter.ts`\n\nSeveral authorable operators do not map to a key of their own name. They lower onto keys an AUTHOR can also write on the same field:\n\n| authorable operator | lowers to |\n|---|---|\n| `$null` | `$eq` / `$ne` |\n| `$between` | `$gte` and `$lte` / `$lt` |\n| `$notContains` | `$not` |\n\nWhen both appear on one field constraint, the second assignment overwrites the first inside a single object literal. One of the two constraints disappears — with no error, no warning, and no trace in the emitted document. WHICH one disappears is decided by the author's key order, because that is the order `Object.keys` walks.\n\n## Measured, on `origin/main`\n\nFixture, three rows: `{id:'1', name:'a'}`, `{id:'2', name:'b'}`, `{id:'3', name:null}`. Driven through `InMemoryDriver.find()`, with `driver-memory`'s reference matcher (`memory-matcher.ts` `match()`) as the oracle — it loops the operators and cannot clobber, and it is the face #5962 aligned:\n\n| filter | live path | reference matcher |\n|---|---|---|\n| `{name: {$null: false, $ne: 'b'}}` | `['1','3']` | `['1']` |\n| `{name: {$ne: 'b', $null: false}}` | `['1','2']` | `['1']` |\n\nOne predicate, written two ways that differ only in key order, returns two different row sets — and neither is the answer. `['1','3']` keeps the row with no value in a filter that demands the field have one; `['1','2']` keeps the row the `$ne` excludes.\n\n`driver-mongodb` has the identical defect one layer earlier, visible in the emitted document without needing a server: `translateFilter({name: {$null: false, $ne: 'b'}})` and its key-swapped twin emit different documents, neither carrying both constraints.\n\n## A third, wider instance on the analytics face\n\n`MemoryAnalyticsService.query()` builds its `$match` as `matchStage[fieldPath] = builder(...)` (`packages/drivers/driver-memory/src/memory-analytics.ts`). That is not a per-key clobber but a WHOLESALE one: two constraints on the same member and the second replaces the first entirely, for EVERY operator pair, not only the ones that share a lowered key. Worth measuring before assuming it is the same fix.\n\n## Why this is filed rather than fixed\n\n#13195 moved `$exists` onto the same `{$ne: null}` / `{$eq: null}` lowering the maintainer's 2026-08-30 ruling prescribed, which would have made `$exists` the fourth member of this class. Measured unguarded, four composed cells that AGREED with the reference matcher on `main` started disagreeing — so that card promotes a lowered `$exists` whose key is taken to its own `$and` branch, and pins it. That guard is scoped to the operator that card moved, on purpose: the other three members are pre-existing, none of them is that card's cell, and a bespoke guard per operator is not the fix. The fix is one rule for the class, in both translators, with the reference matcher as the oracle.\n\n## What a fix owes\n\n1. Re-measure the table above rather than trusting it, and extend it to `$between` and `$notContains`, which were reasoned from the code and NOT executed here.\n2. Decide one rule for the class. #13195's promotion (free key merges inline, taken key becomes its own `$and` branch) is one candidate and is already implemented and pinned for one operator; a refusal at the shape gate is another, and is a behaviour break for filters that work today.\n3. Measure the analytics face separately — it clobbers wholesale, so it may need a different remedy.\n4. The reference matcher is the oracle throughout: it cannot express this defect, and it is the face the platform already aligned to.\n\nRelated: #13195 (the `$exists` alignment that surfaced this and guards its own operator), #5930 (five independent filter-to-predicate compilers, one per semantic ruling).\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

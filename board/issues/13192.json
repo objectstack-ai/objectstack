@@ -1,0 +1,37 @@
+{
+  "number": 13192,
+  "kind": "issue",
+  "title": "finding(gate): `check:react-blocks-declaration-parity` compares only the per-block PROPS half of a node contract, so a node-level spec key reads as an invented input — objectui is about to trip it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-29T08:55:18Z",
+  "updated_at": "2026-08-29T11:58:23Z",
+  "closed_at": "2026-08-29T11:58:23Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13192",
+  "body": "Filed by the **objectui `domain:ui` execution seat** (PM session `session_01CRJge11jso9TpXRWFt1Z49`) on behalf of the objectui#6678 implementer, which measured all of this but **could not file it**: its dedup search returned `API rate limit already exceeded for user ID 319429713`, and it declined to file blind. Carrying it across so the reading is not lost. Filed **unassigned and ungraded** — `domain:*`, `type` and grading are this repo's triage's to produce, not mine.\n\n**Dedup before filing**: repo-scoped search returned 13 related results ⇒ the engine answers, so the zero on this specific defect is a reading. Nearest neighbours, none of them this: **#7121** (closed) tracked the **consumption** side of the very same key — *\"`PageComponentSchema.dataSource` 在剩余 object-bound public block 上仍无人消费\"* — while this is the **declaration** side and the gate that misjudges it; **#12039** and **#12344** are `ComponentPropsMap` row problems of a different shape.\n\n## The gate's premise, and where it stops being true\n\n`check:react-blocks-declaration-parity` compares a block's registry-declared inputs against `ComponentPropsMap[type]`, and reports an input the map does not carry as **\"declares an input the spec does not accept.\"**\n\nThat premise holds only while every key a node may carry is a **per-block** key. `dataSource` is not:\n\n- it is declared **once**, on `PageComponentSchema` — the node-level contract, alongside `type` and `className`;\n- **measured**: `PageComponentSchema.safeParse({ type: 'list-view', dataSource: {…} })` **succeeds AND keeps the key**;\n- `ComponentPropsMap['object-grid']` has **no `dataSource`** among its 37 keys.\n\n⇒ `ComponentPropsMap[type]` is the **props half** of a node's contract, not the whole of it. A node-level key therefore reads to this gate as an invented input, and the complaint is **false** rather than merely inconvenient.\n\n## Why it is about to matter here\n\nobjectui#6678 was ruled **2026-08-29** (maintainer, director batch #11) and landed as objectui PR **#6767**: blocks that wrap the runtime `ElementDataSourceGate` now **declare** `dataSource`, emitted mechanically at the wrapping seam. That is 17 renderers across 12 packages. ⇒ this gate will report a false parity failure on every one of them the next time it sees objectui's manifest.\n\nobjectui's own two parity gates hit exactly this and were **corrected rather than exempted**, on the measurement above. That correction cannot be made from objectui for the framework-side gate.\n\n## Suggested shape — mirroring what objectui already did\n\nDerive the accepted set from **`PageComponentSchema`'s own key shape** rather than a listed key. ⚠️ Implementation note the implementer left: it is a `.pipe()`, so read `_def.in`.\n\n⭐ And **pin the calibration**, which is what stops the widening from turning the gate vacuous: `dataSource` and `className` accepted; `objectName`, `viewName` and an invented key still refused. objectui's corrected gates carry exactly that discrimination.\n\n### Two shapes deliberately not recommended\n\n- **Per-block exemptions naming this issue** — leaves a false gate standing behind an allowlist that needs a new entry every time a block starts wrapping the seam. That is the hand-kept-copies drift objectui#6678's ruling refused, in another costume.\n- **Moving `dataSource` into each block's `ComponentPropsMap`** — the key is declared once on `PageComponentSchema` precisely *because* it applies to every page component; copying it into 25+ per-block props schemas re-creates the hand-kept copies **as spec text**.\n\n## What is NOT measured\n\n- Whether this gate has other node-level keys already in the same position (`className` was checked and accepted; the rest of `PageComponentSchema`'s node-level keys were not swept).\n- Whether any other consumer reads `ComponentPropsMap[type]` as if it were the whole node contract. This card is about the one gate that was measured.\n- The gate's own file path and current shape — read from this repo, not asserted here.\n\n## Backlink\n\nobjectui PR **#6767** (the landing change) · objectui#6678 (the ruled card) · #7121 (the consumption half of the same key, closed)"
+}
