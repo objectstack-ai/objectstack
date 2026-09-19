@@ -9407,7 +9407,12 @@ export async function selfTest() {
   }
   t('⛔ NEGATIVE, every branch and every optional clause: the bare phrase is gone from the printed line', G_ALL.every((line) => !line.includes(G_BARE)), G_ALL.find((line) => line.includes(G_BARE)));
   t('⛔ NEGATIVE, on the SOURCE: the bare phrase appears nowhere in this file, so a revert in the green line\'s construction reds even if these constants are bypassed', !readFileSync(SELF_PATH, 'utf8').includes(G_BARE));
-  t('⛔ CONTROL — the source scan is not asleep: the SAME read finds the wording that replaced it', readFileSync(SELF_PATH, 'utf8').includes('is in the same state on both LABEL carriers'));
+  // ⛔ The control asserts the READ, ⛔ never the wording — the wording is held
+  // by the branch cases above, which drive the builder rather than grep for its
+  // text. A control that scanned for the new phrase would be satisfied by this
+  // battery's own assertion strings, which is the shape `#16304`'s note at the
+  // head of this self-test names: a pin written from the thing it pins.
+  t('⛔ CONTROL — the source read is not empty or misdirected: the SAME read reaches this file\'s green-line builder', readFileSync(SELF_PATH, 'utf8').includes('export function greenPairLine('));
   t('every branch states the non-read in the same words, ⛔ never a per-branch paraphrase', G_ALL.every((line) => says(line, PR_BODY_NOT_READ)));
   t('the non-read names the DOCUMENT that was not read — the PR body — and the one that was', says(PR_BODY_NOT_READ, 'did NOT read the PR body') && says(PR_BODY_NOT_READ, 'from the CARD only'));
   t('…and it reports a NON-READ, ⛔ never a verdict about that document', says(PR_BODY_NOT_READ, 'neither compared nor denied here'));
