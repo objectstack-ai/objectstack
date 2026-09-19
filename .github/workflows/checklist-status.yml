@@ -46,6 +46,15 @@ name: Platform Checklist Status
 # loudly, which is the right direction, but it is avoidable by merging the
 # ledger PR first.
 
+# This workflow is paths-filtered (the `pull_request:` trigger below), so
+# `scripts/pm/dispatch-gates.mjs` requires it to discover a `check:` family or
+# say why it has none. It has none, and that is the maintainer's ruling rather
+# than an omission: the whole point of publishing on a schedule is that the
+# paired gate was refused. The declaration is the one line under this
+# paragraph — it owns that line alone, so ⛔ do not wrap its reason or write a
+# comment directly beneath it; a continuation line is read as a CUT reason and
+# refused by name.
+# dispatch-gates: no-check-families -- the only step that runs anything is `pnpm gen:checklist-status`, a GENERATOR that renders the wiki pages; a paired `check:checklist-status` was explicitly ruled out (staleness of this reading entry is tolerated, not gated), so no named local check family exists for this workflow to discover
 on:
   schedule:
     # Weekly, as ruled. The ledger moves at the pace of platform capabilities,
