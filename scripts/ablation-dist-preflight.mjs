@@ -211,6 +211,7 @@ import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
+import { gitFreeEnv } from './git-env.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 import { WORKSPACE_FILE, parseWorkspaceGlobs, workspacePackageDirs } from './workspace-enumerator.mjs';
 
@@ -450,6 +451,11 @@ function readTreeStatus(repoRoot) {
   try {
     const out = execFileSync('git', ['status', '--porcelain', '-z'], {
       cwd: repoRoot,
+      // The tree under test is the one `repoRoot` names and nothing else (#16644).
+      // An inherited GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE outranks `cwd`, so under a
+      // hook this would certify SOME OTHER tree as restored -- the one direction this
+      // preflight exists to make impossible.
+      env: gitFreeEnv(),
       encoding: 'utf8',
       maxBuffer: 64 * 1024 * 1024,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -475,6 +481,8 @@ function markerPresence(repoRoot, entries, marker) {
     try {
       head = execFileSync('git', ['show', `HEAD:${e.path}`], {
         cwd: repoRoot,
+        env: gitFreeEnv(), // #16644: the HEAD blob of THIS tree, never a hook's
+
         maxBuffer: 64 * 1024 * 1024,
         stdio: ['ignore', 'pipe', 'ignore'],
       });
@@ -714,7 +722,9 @@ function selfTest() {
   // verdict mean anything. This leg replays the measured incident end to end.
   const repo = mkdtempSync(join(tmpdir(), 'ablation-preflight-git-'));
   try {
-    const git = (...args) => execFileSync('git', args, { cwd: repo, stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8' });
+    // #16644: a throwaway corpus, so every child is spawned with GIT_* stripped --
+    // `git init` here under an inherited GIT_DIR writes core.bare into the SHARED config.
+    const git = (...args) => execFileSync('git', args, { cwd: repo, env: gitFreeEnv(), stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8' });
     const srcPath = join(repo, 'source.ts');
     const genPath = join(repo, 'generated-baseline.json');
     const MARK = 'OS_ABLATION_LEAK_MARK';

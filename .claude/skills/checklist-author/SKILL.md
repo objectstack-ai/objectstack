@@ -41,6 +41,15 @@ metadata:
 3. **本技能的简报是假设,源码才是真相** —— 每个测试项按 README.md「Item anatomy」
    的契约写;缺 fixture 记 `blocked`/`knownGaps`,永不伪造覆盖。
 
+## 缺项写成 `planned` 项,不写成注释
+
+sweep 发现「定义要求、平台还没有」的能力,写成该区的 `status: "planned"` 项(title ·
+priority · personas,`since: null` 或目标 release,⛔ 无 steps);注释没有 id,派发时指
+不到。它是 `coverage.json` 的合法映射目标但⛔ 不算覆盖:只映射到它的种类仍报 UNMAPPED。
+
+**`planned → active` 只由一次判 pass 的运行记录兑现** —— steps/acceptance 随实现 PR 落
+地,跑过才翻状态(bump `revision`、追 `history`);⛔ 代码落地就翻 = 账本开始虚报覆盖。
+
 ## 规模指引
 
 一轮全量 sweep ≈ 5 个 hunter + 8 个 writer agent。范围化的问题(「X 有测试吗?」)
