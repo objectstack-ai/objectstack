@@ -1867,9 +1867,9 @@ const CORPUS = defineCorpus({
 //   string-substring   the symbol survives only INSIDE a longer string token:
 //                      `saveItem` in `client: 'meta.saveItem'`, `:shareId` in a
 //                      route pattern, a name inside an `it(...)` title or a
-//                      `.describe(...)` sentence. 29 rows, the largest class.
+//                      `.describe(...)` sentence. 21 rows, the largest class.
 //   import-only        the cited file IMPORTS the symbol; the declaration is in
-//                      another file. 9 rows.
+//                      another file. 8 rows.
 //   member-access      the symbol survives only as `x.symbol` on some other
 //                      object — `manifest.objectExtensions`. 3 rows.
 //   json-value-not-key the `.json` target carries the symbol as a VALUE; the
@@ -1884,10 +1884,27 @@ const CORPUS = defineCorpus({
 //                      1 row — the sharpest single illustration of what a
 //                      looser second resolver buys.
 //
+// ⭐ THE DRAIN (#18104). The `bad-citation` half is a population with an owner,
+// and it leaves this ledger ONE WAY: the citation is re-pointed at what the
+// cited file actually declares, the row goes, and the ceiling below comes down
+// by the same number in the same edit. ⛔ Never by raising the ceiling, ⛔ never
+// by widening `scripts/symbol-anchors.mjs`, ⛔ never by lowering a file floor —
+// a repair moves an anchor from `residual` to `resolved` and leaves the floor
+// population untouched, which is why draining costs no floor headroom at all.
+//
+// ⚠️ The binding measurement above (56 of 633, at #16898) is a DATED READING of
+// the tree it was taken against and is left standing as one. It is not this
+// ledger's current size: the drain lands per area file, so read the live count
+// off `SHARED_RESOLVER_RESIDUAL.length` and the console line, never off that
+// paragraph. First slice landed (#18104): `areas/access-security.json`,
+// `areas/api-backend.json` and `areas/automation.json` — 9 rows, all of them
+// citations naming a route table's client-method names or route path
+// parameters where the declaration the item means is the ledger export itself.
+//
 // `verdict` is the classification #16898's acceptance asks for, and there are
 // exactly two:
 //
-//   bad-citation  (47 rows) the anchor names a symbol the cited file does not
+//   bad-citation  (38 rows) the anchor names a symbol the cited file does not
 //                 declare. The repair is in the LEDGER: re-point the anchor at
 //                 what the file carries, or drop to a bare citation. ⚠️ Dropping
 //                 costs the file an anchor and most floors have no headroom, so
@@ -1902,19 +1919,10 @@ const CORPUS = defineCorpus({
 //                 the core to reach them: it is shared with four other corpora
 //                 and widening it would export this defect to all of them.
 const SHARED_RESOLVER_RESIDUAL = Object.freeze([
-  { doc: 'areas/access-security.json', anchor: 'packages/rest/src/rest-route-ledger.ts#saveItem', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/access-security.json', anchor: 'packages/rest/src/rest-route-ledger.ts#shareId', shape: 'string-substring', verdict: 'bad-citation' },
   { doc: 'areas/ai.json', anchor: 'packages/mcp/src/plugin.ts#OS_MCP_SERVER_ENABLED', shape: 'string-substring', verdict: 'bad-citation' },
   { doc: 'areas/ai.json', anchor: 'packages/runtime/src/domains/ai.ts#capabilityUnavailable', shape: 'import-only', verdict: 'bad-citation' },
-  { doc: 'areas/api-backend.json', anchor: 'packages/rest/src/rest-route-ledger.ts#REST', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/api-backend.json', anchor: 'packages/runtime/src/route-ledger.ts#getLegalNextStates', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/api-backend.json', anchor: 'packages/triggers/trigger-api/src/trigger-api-route-ledger.ts#flowName', shape: 'string-substring', verdict: 'bad-citation' },
   { doc: 'areas/approvals.json', anchor: 'examples/app-showcase/src/security/seed-approval-demo.ts#AUDITOR_DEMO_USER', shape: 'import-only', verdict: 'bad-citation' },
   { doc: 'areas/attachments-storage.json', anchor: 'packages/spec/liveness/field.json#live', shape: 'json-value-not-key', verdict: 'bad-citation' },
-  { doc: 'areas/automation.json', anchor: 'examples/app-showcase/objectstack.config.ts#ConnectorRestPlugin', shape: 'import-only', verdict: 'bad-citation' },
-  { doc: 'areas/automation.json', anchor: 'packages/runtime/src/route-ledger.ts#getRuntimeStatus', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/automation.json', anchor: 'packages/runtime/src/route-ledger.ts#getScreen', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/automation.json', anchor: 'packages/runtime/src/route-ledger.ts#runId', shape: 'string-substring', verdict: 'bad-citation' },
   { doc: 'areas/cli.json', anchor: 'packages/cli/src/commands/compile.ts#emitJson', shape: 'import-only', verdict: 'bad-citation' },
   { doc: 'areas/cli.json', anchor: 'packages/cli/src/commands/doctor-deprecation-hint-commands.test.ts#Doctor', shape: 'import-only', verdict: 'bad-citation' },
   { doc: 'areas/cli.json', anchor: 'packages/cli/src/utils/format.exit-code.test.ts#emitJson', shape: 'import-only', verdict: 'bad-citation' },
@@ -1963,7 +1971,7 @@ const SHARED_RESOLVER_RESIDUAL = Object.freeze([
 // fail), so this is the belt on the braces: a silent append — the one edit that
 // would turn a closed ledger back into a permissive rule, one row at a time —
 // refuses here rather than validating.
-const SHARED_RESOLVER_RESIDUAL_CEILING = 55;
+const SHARED_RESOLVER_RESIDUAL_CEILING = 46;
 
 const residualKey = (doc, anchor) => `${doc}::${anchor}`;
 const SHARED_RESOLVER_RESIDUAL_INDEX = new Map(
