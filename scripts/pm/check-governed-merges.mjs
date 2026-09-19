@@ -42,7 +42,13 @@
  * `--test` mode is a PREDICATE, so it answers on its own codes and shares only
  * the failure code with the sweep:
  *   0  the given paths are NOT governed — ordinary queue landing applies.
- *   3  the given paths ARE governed — human merge only. Deliberately NOT 1 or
+ *   3  the given paths ARE governed — landing per the TIER the verdict line and
+ *      `--json` name (Tier H: a human merge or an authorized approval; Tier S:
+ *      a review of record on the PR thread — "The two landing tiers" below).
+ *      ONE code for both tiers, deliberately: every reader of this status asks
+ *      "may a seat arm this on green alone?", and the answer is no for both;
+ *      the tier is a second fact and travels in the words and the JSON, never
+ *      in the status, so no `$?` reader learns a new number. Deliberately NOT 1 or
  *      2: a governed verdict must be impossible to confuse with the sweep's
  *      "could not sweep" / "incomplete", so `if cmd; then` and `$?` readings
  *      cannot silently turn a governed answer into an environment complaint.
@@ -209,6 +215,52 @@
  * 3, carving `.claude/workflows/**` out of the register, was considered and
  * explicitly REJECTED by the same ruling. Removing this row NARROWS what the
  * exception machinery lifts; nothing that was governed became clear.
+ *
+ * ## The two landing tiers (#19133, ruled 2026-09-18)
+ *
+ * The maintainer, on the skills seat's proposal, verbatim 「同意改规则。」, then
+ * 「我觉得这些我也没必要确认:.claude/settings.json、.claude/hooks/**」. The
+ * proposal, verbatim: 「把『受管 = 人合』的范围缩到真正的法——`AGENTS.md`、
+ * `CLAUDE.md`、`docs/adr/**`、`docs/NORTH-STAR.md`、`.claude/settings.json`、
+ * `.claude/hooks/**`;而 `.claude/skills/**`、`.claude/agents/**` 这些舰队自己的
+ * 仪器,凭席内 `CONTRACT_REVIEW_TIER` 复核 PASS 就走队列,事后由总监席的受管合并
+ * 审计(职责四)抽查。」 — and the amendment moved settings and hooks over too.
+ *
+ * MEMBERSHIP did not move: every row below still governs exactly what it did,
+ * one hit still forks the whole PR, and `--test` still exits 3 on every one of
+ * them. What moved is the LANDING each row waits for, carried as `tier` on the
+ * row and derived per PR by `governedTierFor`:
+ *
+ *   H  人合 — `docs/adr/**`, `docs/NORTH-STAR.md`, `skills/**`, `AGENTS.md`,
+ *      `CLAUDE.md`: the maintainer's hand, or an authorized APPROVED review by
+ *      `GOVERNED_APPROVERS` and then the owning seat lands it. Unchanged.
+ *   S  席内达档复核落地 — the whole `.claude/**` tree: the owning seat lands it
+ *      through the queue once the PR thread (or its card) carries a
+ *      `## Contract review` record for the PR's CURRENT head with
+ *      `Served-tier: CONTRACT_REVIEW_TIER` and `**VERDICT: PASS**`,
+ *      `check-clause2-carriers.mjs --pair N` reads 0 and every check is green.
+ *      Exactly the path the fact layer (`.claude/skills/pm-dispatch/references/`)
+ *      used since #17950, generalised to the tier; the post-merge audit (this
+ *      sweep) and the director seat's 职责四 are the compensating control, and a
+ *      Tier S merge without a PASS record is that audit's finding.
+ *
+ * ⭐ ALL, not ANY: a PR is Tier S only when EVERY governed path in it lies under
+ * a Tier S row — 「混合 diff 一条命中即整 PR 分叉」 one level down. One Tier H path
+ * and the whole PR is Tier H; an empty or ungoverned list answers H (fail
+ * closed — the tier of nothing is never the cheaper one), and the tier is
+ * recomputed on the LIFTED slice, since a certified regeneration under
+ * `skills/**` can be the only Tier H hit in a diff. `.claude/settings.json` is
+ * the permission set itself and lands under Tier S by the amendment; the
+ * auto-mode classifier still refuses AI writes to it, so the maintainer's hand
+ * stays its writer and the tier removes only the approval click.
+ *
+ * Published `skills/**` stays Tier H: the seat did not propose moving it.
+ * `check-governed-queue-guard.mjs` reads `tier` and `governedTierFor` from HERE
+ * (a module-scope import; the cycle that forces its mirrors is with
+ * `check-half-states.mjs`, not with this file), so there is ONE register and one
+ * tier function, and `check-governed-prose.mjs` keeps pinning the SET of globs
+ * the instruction prose names — the tier is an attribute the prose states in
+ * words, which that gate deliberately does not parse.
  *
  * ### The generator co-edit fence (#11084) — a NARROWING, not a widening
  *
@@ -752,8 +804,9 @@ import { isEntrypoint } from '../invoked-as.mjs';
 // must not red. A battery BELOW its floor means cases stopped running; the
 // remedy is to find what stopped registering.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'the governed predicate: the 2026-08-18 unified list, exactly': 8,
-  'the dispatch-gates declaration (#9979)': 8,
+  'the governed predicate: the 2026-08-18 unified list, exactly': 9,
+  'the dispatch-gates declaration (#9979)': 9,
+  '⚖️ the two landing tiers (#19133, ruled 2026-09-18)': 19,
   'since parsing': 4,
   'the window: landing order, not committer dates (#12633)': 15,
   'since-ref is topological (#12633 route B)': 7,
@@ -782,7 +835,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 25;
+const SELF_TEST_BATTERY_FLOOR = 26;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -858,19 +911,49 @@ export const EXIT_TEST_GOVERNED = 3;
 export const EXIT_TEST_NOT_GOVERNED = 0;
 
 /**
+ * The two landing tiers (header section "The two landing tiers"). Every register
+ * row carries one as `tier`; `governedTierFor` derives a PR's tier from the rows
+ * its governed paths hit. The VALUES are single letters on purpose — they render
+ * inside verdict lines and `--json`, and a reader greps `Tier H` / `Tier S`.
+ * `landing` is the sentence a verdict prints for the tier: what lifts the four
+ * prohibitions, and who lands after that.
+ */
+export const GOVERNED_TIER_H = 'H';
+export const GOVERNED_TIER_S = 'S';
+export const GOVERNED_TIERS = Object.freeze({
+  [GOVERNED_TIER_H]: Object.freeze({
+    id: GOVERNED_TIER_H,
+    name: 'Tier H(人合)',
+    landing: "the maintainer's hand, or an authorized APPROVED review (GOVERNED_APPROVERS) and then the owning seat lands it",
+  }),
+  [GOVERNED_TIER_S]: Object.freeze({
+    id: GOVERNED_TIER_S,
+    name: 'Tier S(席内达档复核落地)',
+    landing:
+      'the owning seat lands it through the queue on a `## Contract review` record for the CURRENT head ' +
+      '(`Served-tier: CONTRACT_REVIEW_TIER`, `**VERDICT: PASS**`), `check-clause2-carriers.mjs --pair N` at 0 and every check green',
+  }),
+});
+
+/**
  * The governed surfaces, in report order — the 2026-08-18 unified definition
- * (see header). `prefix` entries match path prefixes; `exact` entries match
- * one repo-relative path byte-for-byte (the repo-ROOT instruction files, not
- * `examples/AGENTS.md`, not template copies). One path hit governs a whole
- * PR — 「混合 diff 一条命中即整 PR 分叉」; proportion is never a question.
- * The register is repo-agnostic: it applies in all of `GOVERNED_REPOS`.
+ * (see header), tiered by the 2026-09-18 ruling. `prefix` entries match path
+ * prefixes; `exact` entries match one repo-relative path byte-for-byte (the
+ * repo-ROOT instruction files, not `examples/AGENTS.md`, not template copies —
+ * and `docs/NORTH-STAR.md`, the maintainer's North Star, joined 2026-09-18 on
+ * his word as the law above `AGENTS.md`; the PM skill cites it by section). One
+ * path hit governs a whole PR — 「混合 diff 一条命中即整 PR 分叉」; proportion is
+ * never a question, and `tier` decides only what the landing waits for, never
+ * whether the path is governed. The register is repo-agnostic: it applies in
+ * all of `GOVERNED_REPOS`.
  */
 export const GOVERNED_SURFACES = Object.freeze([
-  Object.freeze({ id: 'adr', prefix: 'docs/adr/', glob: 'docs/adr/**', what: 'architecture decision records' }),
-  Object.freeze({ id: 'claude-tree', prefix: '.claude/', glob: '.claude/**', what: 'the agent instruction tree (skills, agents, hooks, settings)' }),
-  Object.freeze({ id: 'skills-catalog', prefix: 'skills/', glob: 'skills/**', what: 'the published skills catalog' }),
-  Object.freeze({ id: 'agents-md', exact: 'AGENTS.md', glob: 'AGENTS.md', what: 'the repo-root agent instruction file' }),
-  Object.freeze({ id: 'claude-md', exact: 'CLAUDE.md', glob: 'CLAUDE.md', what: 'the repo-root Claude instruction file' }),
+  Object.freeze({ id: 'adr', prefix: 'docs/adr/', glob: 'docs/adr/**', tier: GOVERNED_TIER_H, what: 'architecture decision records' }),
+  Object.freeze({ id: 'claude-tree', prefix: '.claude/', glob: '.claude/**', tier: GOVERNED_TIER_S, what: 'the agent instruction tree (skills, agents, hooks, settings)' }),
+  Object.freeze({ id: 'skills-catalog', prefix: 'skills/', glob: 'skills/**', tier: GOVERNED_TIER_H, what: 'the published skills catalog' }),
+  Object.freeze({ id: 'agents-md', exact: 'AGENTS.md', glob: 'AGENTS.md', tier: GOVERNED_TIER_H, what: 'the repo-root agent instruction file' }),
+  Object.freeze({ id: 'claude-md', exact: 'CLAUDE.md', glob: 'CLAUDE.md', tier: GOVERNED_TIER_H, what: 'the repo-root Claude instruction file' }),
+  Object.freeze({ id: 'north-star', exact: 'docs/NORTH-STAR.md', glob: 'docs/NORTH-STAR.md', tier: GOVERNED_TIER_H, what: "the maintainer's North Star — the law above AGENTS.md" }),
 ]);
 
 /**
@@ -881,10 +964,12 @@ export const GOVERNED_SURFACES = Object.freeze([
  * own source, and "looks like a path" there means "carries a separator". The
  * three `prefix` rows above have one and reach dispatch-gates already — the
  * `skills/**` row is one of the three specimens that motivated reading a hint
- * AS WRITTEN. The two `exact` rows do not: a repo-root FILE carries no
- * separator, so an `AGENTS.md` or `CLAUDE.md` card derived this gate not at all
- * while the same card is GOVERNED by it (draft-only PR, maintainer merge) —
- * the loudest possible thing to learn late.
+ * AS WRITTEN. The two repo-ROOT `exact` rows do not: a repo-root FILE carries
+ * no separator, so an `AGENTS.md` or `CLAUDE.md` card derived this gate not at
+ * all while the same card is GOVERNED by it (draft-only PR, maintainer merge)
+ * — the loudest possible thing to learn late. The `docs/NORTH-STAR.md` row is
+ * `exact` WITH a separator: it reaches dispatch-gates as written and declares
+ * no hint (the self-test pins that an exact row with a separator has none).
  *
  * `<file>/**` is the form that reaches one: the extractor accepts it, and
  * `collapseHint` reduces it back to that single path. `examples/AGENTS.md` and
@@ -1046,6 +1131,10 @@ export function applyGeneratedExceptions(verdict, provenanceByPath = new Map()) 
     matched,
     hitPaths: verdict.hitPaths.filter((p) => !lifted.has(p)),
     governed: matched.length > 0,
+    // Recomputed on the LIFTED slice (#19133): the lifted path may have been
+    // the only Tier H hit, and a stale pre-lift `H` would send a Tier S diff to
+    // the maintainer's click the ruling removed.
+    tier: matched.length > 0 ? landingTierOf(matched) : null,
     exceptions,
   };
 }
@@ -1081,6 +1170,35 @@ export function governedPathsIn(paths) {
       typeof p === 'string' && (surface.prefix ? p.startsWith(surface.prefix) : p === surface.exact),
     ),
   })).filter((surface) => surface.files.length > 0);
+}
+
+/**
+ * The landing tier of an already-matched governed slice (`governedPathsIn`'s
+ * shape — post-lift callers hand in the lifted slice, so a certified
+ * regeneration that was the only Tier H hit no longer decides). Pure.
+ *
+ * ⭐ ALL, not ANY: `S` only when every matched row is Tier S. An EMPTY slice
+ * answers `H` — fail closed: a caller that reached a tier question with nothing
+ * governed has lost the fact the question rests on, and the tier of nothing is
+ * never the cheaper one. `testVerdict` reports `null` for that case itself,
+ * before asking here.
+ */
+export function landingTierOf(matched) {
+  const list = Array.isArray(matched) ? matched : [];
+  if (list.length === 0) return GOVERNED_TIER_H;
+  return list.every((s) => s?.tier === GOVERNED_TIER_S) ? GOVERNED_TIER_S : GOVERNED_TIER_H;
+}
+
+/**
+ * The landing tier of a PR with these paths — `H` or `S`, never anything else.
+ * Register-keyed: the rows the paths hit carry the answer, so no second copy of
+ * "which surfaces land on a record" exists anywhere (the queue guard imports
+ * THIS function). Ungoverned riders in the list are not consulted and cannot
+ * demote a Tier H list or promote a Tier S one; an empty or wholly ungoverned
+ * list answers `H` (see `landingTierOf`).
+ */
+export function governedTierFor(paths) {
+  return landingTierOf(governedPathsIn(paths));
 }
 
 /** `owner/name` out of any git remote spelling, or null. Pure. */
@@ -1213,6 +1331,9 @@ export function testVerdict(paths) {
   const hit = new Set(matched.flatMap((s) => s.files));
   return {
     governed: matched.length > 0,
+    // The landing tier (#19133): `H` / `S` while governed, `null` when nothing
+    // is — a `--json` reader never sees a tier for a diff that has none.
+    tier: matched.length > 0 ? landingTierOf(matched) : null,
     checked: list.length,
     surfacesChecked: GOVERNED_SURFACES.length,
     matched,
@@ -1274,11 +1395,31 @@ export function renderTestVerdict(verdict) {
     return `      ${s.glob} ×${s.files.length} — ${s.what}\n${files}`;
   });
   const clear = verdict.clearPaths.length > 0 ? `\n  paths not on the register: ${verdict.clearPaths.slice(0, 8).join(', ')}` : '';
+  // The tier (#19133): Tier H keeps its wording word for word and gains one
+  // line naming its tier; Tier S prints its OWN verdict block naming the
+  // record-on-thread landing. Both say GOVERNED and the same three verbs, so
+  // every grep reader of this text keeps its answer; both exit 3.
+  const tier = verdict.tier ?? landingTierOf(verdict.matched);
+  if (tier === GOVERNED_TIER_S) {
+    return (
+      `${head}\n` +
+      `  ⛔  GOVERNED — Tier S(席内达档复核落地): every governed path here lies under a Tier S surface, so the OWNING\n` +
+      `      seat lands this PR through the queue once its thread (or its card) carries a \`## Contract review\` record\n` +
+      `      for the CURRENT head — \`Served-tier: CONTRACT_REVIEW_TIER\`, \`**VERDICT: PASS**\` — with\n` +
+      `      \`check-clause2-carriers.mjs --pair N\` at 0 and every check green (AGENTS.md Prime Directive #14).\n` +
+      `      Before that record no seat flips it ready, enqueues it, or arms auto-merge; ⛔ no seat approves it either,\n` +
+      `      and no maintainer click is waited for. One hit governs the whole PR — 「混合 diff 一条命中即整 PR 分叉」;\n` +
+      `      one Tier H path among the hits and the whole PR would be Tier H.\n` +
+      `${lines.join('\n')}${clear}` +
+      renderExceptionLines(verdict)
+    );
+  }
   return (
     `${head}\n` +
     `  ⛔  GOVERNED — a human merge is the review record for this PR (#9495 regime).\n` +
     `      No seat flips it ready, enqueues it, or arms auto-merge (AGENTS.md Prime Directive #14).\n` +
     `      One hit governs the whole PR — 「混合 diff 一条命中即整 PR 分叉」; proportion is not a question.\n` +
+    `      ⚖️ landing tier: H(人合) — ${GOVERNED_TIERS[GOVERNED_TIER_H].landing}.\n` +
     `${lines.join('\n')}${clear}` +
     renderExceptionLines(verdict)
   );
@@ -3223,15 +3364,16 @@ async function selfTest() {
   // ── the governed predicate: the 2026-08-18 unified list, exactly ──────────
   battery('the governed predicate: the 2026-08-18 unified list, exactly');
   const ids = (paths) => governedPathsIn(paths).map((s) => s.id);
-  assert('all-five-surfaces-declared-in-order', GOVERNED_SURFACES.map((s) => s.id).join(',') === 'adr,claude-tree,skills-catalog,agents-md,claude-md', GOVERNED_SURFACES.map((s) => s.id).join(','));
+  assert('all-six-surfaces-declared-in-order', GOVERNED_SURFACES.map((s) => s.id).join(',') === 'adr,claude-tree,skills-catalog,agents-md,claude-md,north-star', GOVERNED_SURFACES.map((s) => s.id).join(','));
   assert('adr-prefix', ids(['docs/adr/0001-x.md']).join() === 'adr');
   assert('whole-claude-tree-not-only-skills', ids(['.claude/hooks/guard-main-checkout.sh', '.claude/agents/os-dev.md', '.claude/settings.json']).join() === 'claude-tree');
   assert('published-skills-catalog-is-governed', ids(['skills/objectstack-ui/SKILL.md']).join() === 'skills-catalog');
   assert('root-agents-md-exact', ids(['AGENTS.md']).join() === 'agents-md');
   assert('root-claude-md-exact', ids(['CLAUDE.md']).join() === 'claude-md');
+  assert('north-star-exact', ids(['docs/NORTH-STAR.md']).join() === 'north-star');
   // Near misses, each load-bearing: prefixes need their trailing slash; the
   // exact entries are the repo-root files only (see header).
-  assert('near-misses-stay-out', ids(['docs/adrs/z.md', '.claude-x/y.md', 'skillsx/a.md', 'examples/AGENTS.md', 'packages/create-objectstack/src/templates/AGENTS.md', 'apps/CLAUDE.md.bak']).length === 0, JSON.stringify(ids(['examples/AGENTS.md'])));
+  assert('near-misses-stay-out', ids(['docs/adrs/z.md', '.claude-x/y.md', 'skillsx/a.md', 'examples/AGENTS.md', 'packages/create-objectstack/src/templates/AGENTS.md', 'apps/CLAUDE.md.bak', 'docs/north-star.md', 'docs/NORTH-STAR.md.bak', 'examples/docs/NORTH-STAR.md', 'docs/NORTH-STAR.mdx', 'content/docs/concepts/north-star.mdx']).length === 0, JSON.stringify(ids(['examples/AGENTS.md'])));
   assert('a-mixed-diff-groups-by-surface', ids(['docs/adr/0001.md', 'AGENTS.md', 'package.json']).join() === 'adr,agents-md');
 
   // ── the dispatch-gates declaration (#9979) ───────────────────────────────
@@ -3241,7 +3383,10 @@ async function selfTest() {
   // shows up only as a dev dispatched on a root-file card who is not told that
   // the card is GOVERNED.
   battery('the dispatch-gates declaration (#9979)');
-  const rootExacts = GOVERNED_SURFACES.filter((s) => s.exact).map((s) => s.exact);
+  // Only the SEPARATOR-LESS exact rows need a hint; an exact row that carries a
+  // separator (`docs/NORTH-STAR.md`) reaches dispatch-gates as written.
+  const rootExacts = GOVERNED_SURFACES.filter((s) => s.exact && !s.exact.includes('/')).map((s) => s.exact);
+  assert('an-exact-row-with-a-separator-declares-no-hint', GOVERNED_SURFACES.filter((s) => s.exact && s.exact.includes('/')).every((s) => !ROOT_FILE_WATCH_HINTS.includes(`${s.exact}/**`)) && GOVERNED_SURFACES.some((s) => s.exact === 'docs/NORTH-STAR.md'));
   assert('every-exact-root-row-declares-a-watch-hint', rootExacts.every((f) => ROOT_FILE_WATCH_HINTS.includes(`${f}/**`)), JSON.stringify(rootExacts));
   assert('the-declaration-names-no-file-this-register-does-not-govern', ROOT_FILE_WATCH_HINTS.every((h) => rootExacts.includes(h.replace(/\/\*+$/, ''))), JSON.stringify(ROOT_FILE_WATCH_HINTS));
   assert('both-root-instruction-files-are-declared', ROOT_FILE_WATCH_HINTS.join(',') === 'AGENTS.md/**,CLAUDE.md/**', ROOT_FILE_WATCH_HINTS.join(','));
@@ -3256,6 +3401,47 @@ async function selfTest() {
   assert('merge-subject', pullNumberFromSubject('Merge pull request #123 from x/y') === 123);
   assert('mid-title-issue-citation-is-not-the-pr', pullNumberFromSubject('docs: checklist names the renamed check run (#9420) (#9490)') === 9490);
   assert('no-pr-in-subject', pullNumberFromSubject('chore: direct push') === null);
+
+  // ── the two landing tiers (#19133, ruled 2026-09-18) ─────────────────────
+  //
+  // Membership is pinned above and unchanged; what this battery pins is the
+  // LANDING attribute: which rows carry S, that a PR is S only when every
+  // governed path is S, that the verdict line and `--json` carry the tier while
+  // the exit stays shared, and that a lift recomputes it.
+  battery('⚖️ the two landing tiers (#19133, ruled 2026-09-18)');
+  const tierOf = (id) => GOVERNED_SURFACES.find((s) => s.id === id)?.tier;
+  assert('every-row-carries-a-tier-and-it-is-H-or-S', GOVERNED_SURFACES.every((s) => s.tier === GOVERNED_TIER_H || s.tier === GOVERNED_TIER_S), JSON.stringify(GOVERNED_SURFACES.map((s) => [s.id, s.tier])));
+  assert('the-tier-values-are-distinct-single-letters-a-reader-greps', GOVERNED_TIER_H === 'H' && GOVERNED_TIER_S === 'S' && Object.keys(GOVERNED_TIERS).join() === 'H,S');
+  assert('Tier-S-is-exactly-the-whole-claude-tree-row', GOVERNED_SURFACES.filter((s) => s.tier === GOVERNED_TIER_S).map((s) => s.id).join() === 'claude-tree');
+  assert('Tier-H-is-the-law-adr-north-star-skills-catalog-agents-md-claude-md', GOVERNED_SURFACES.filter((s) => s.tier === GOVERNED_TIER_H).map((s) => s.id).join() === 'adr,skills-catalog,agents-md,claude-md,north-star');
+  assert('settings-and-hooks-are-Tier-S-by-the-amendment', governedTierFor(['.claude/settings.json', '.claude/hooks/guard-main-checkout.sh']) === GOVERNED_TIER_S);
+  assert('skills-agents-and-the-fact-layer-are-Tier-S', governedTierFor(['.claude/skills/pm-dispatch/SKILL.md', '.claude/agents/os-dev.md', '.claude/skills/pm-dispatch/references/contract-review.md']) === GOVERNED_TIER_S);
+  assert('each-Tier-H-surface-answers-H-alone', ['docs/adr/0001-x.md', 'docs/NORTH-STAR.md', 'skills/objectstack-ui/SKILL.md', 'AGENTS.md', 'CLAUDE.md'].every((p) => governedTierFor([p]) === GOVERNED_TIER_H));
+  assert('ALL-not-ANY-one-Tier-H-path-makes-the-whole-list-Tier-H', governedTierFor(['.claude/agents/os-dev.md', '.claude/settings.json', 'AGENTS.md']) === GOVERNED_TIER_H);
+  assert('an-ungoverned-rider-neither-demotes-a-Tier-H-list-nor-promotes-a-Tier-S-one', governedTierFor(['README.md', 'AGENTS.md']) === GOVERNED_TIER_H && governedTierFor(['README.md', '.claude/agents/os-dev.md']) === GOVERNED_TIER_S);
+  assert('an-EMPTY-or-UNGOVERNED-list-answers-H-fail-closed', governedTierFor([]) === GOVERNED_TIER_H && governedTierFor(undefined) === GOVERNED_TIER_H && governedTierFor(['README.md']) === GOVERNED_TIER_H);
+  assert('the-published-skills-catalog-stays-Tier-H-the-seat-did-not-propose-moving-it', tierOf('skills-catalog') === GOVERNED_TIER_H);
+  assert('--test-carries-the-tier-and-null-when-nothing-is-governed', testVerdict(['.claude/agents/os-dev.md']).tier === GOVERNED_TIER_S && testVerdict(['AGENTS.md']).tier === GOVERNED_TIER_H && testVerdict(['README.md']).tier === null);
+  const tierSCase = testVerdict(['packages/spec/src/index.ts', '.claude/agents/os-dev.md']);
+  const tierHCase = testVerdict(['packages/spec/src/index.ts', '.claude/agents/os-dev.md', 'AGENTS.md']);
+  const tierSText = renderTestVerdict(tierSCase);
+  const tierHText = renderTestVerdict(tierHCase);
+  assert('a-Tier-S-verdict-renders-its-OWN-block-naming-the-record-on-thread-landing', /Tier S/.test(tierSText) && /## Contract review/.test(tierSText) && /CONTRACT_REVIEW_TIER/.test(tierSText) && /--pair/.test(tierSText), tierSText);
+  assert('and-still-says-GOVERNED-with-the-three-verbs-so-every-grep-reader-keeps-its-answer', /GOVERNED/.test(tierSText) && /arms auto-merge/.test(tierSText) && !/human merge is the review record/.test(tierSText), tierSText);
+  assert('a-Tier-H-verdict-keeps-its-wording-word-for-word-and-names-its-tier', /a human merge is the review record for this PR/.test(tierHText) && /landing tier: H/.test(tierHText) && !/Tier S/.test(tierHText), tierHText);
+  assert('a-mixed-list-renders-H-the-one-Tier-H-path-decides', tierHCase.tier === GOVERNED_TIER_H && tierHCase.hitPaths.join() === '.claude/agents/os-dev.md,AGENTS.md', JSON.stringify(tierHCase.hitPaths));
+  assert('exit-3-is-SHARED-by-both-tiers-the-tier-lives-in-the-words-and-the-json-never-the-status', runTestModeExitFor(['.claude/agents/os-dev.md']) === EXIT_TEST_GOVERNED && runTestModeExitFor(['AGENTS.md']) === EXIT_TEST_GOVERNED && runTestModeExitFor(['README.md']) === EXIT_TEST_NOT_GOVERNED);
+  // A lift can change the tier: a diff whose only Tier H hit is a certified
+  // regeneration under `skills/**` is, post-lift, a Tier S diff — the tier is
+  // recomputed on the lifted slice, never read off the pre-lift one.
+  const liftPath = 'skills/objectstack-ui/references/_index.md';
+  const lifted = new Map([[liftPath, { pureRegeneration: true, reason: 'byte-equal to the generator' }]]);
+  const preLift = testVerdict([liftPath, '.claude/agents/os-dev.md']);
+  const postLift = applyGeneratedExceptions(preLift, lifted);
+  assert('the-tier-is-recomputed-on-the-LIFTED-slice', preLift.tier === GOVERNED_TIER_H && postLift.tier === GOVERNED_TIER_S && postLift.governed === true, JSON.stringify([preLift.tier, postLift.tier]));
+  const allLifted = applyGeneratedExceptions(testVerdict([liftPath]), lifted);
+  assert('and-null-once-every-hit-is-lifted', allLifted.governed === false && allLifted.tier === null, JSON.stringify(allLifted.tier));
+  assert('the-tier-words-name-the-landing-each-waits-for', /GOVERNED_APPROVERS/.test(GOVERNED_TIERS.H.landing) && /Contract review/.test(GOVERNED_TIERS.S.landing) && /--pair/.test(GOVERNED_TIERS.S.landing));
 
   // ── --since parsing ───────────────────────────────────────────────────────
   battery('since parsing');
@@ -4581,13 +4767,13 @@ async function selfTest() {
   const liftedHead = renderTestVerdict(liftedTest).split('\n')[0];
   assert(
     '⭐ the-test-head-no-longer-reports-a-post-lift-zero-as-if-nothing-had-hit-the-register',
-    liftedHead === 'governed-surface predicate: 0 of 4 path(s) hit the register after 1 generated-artifact lift(s) (5 surfaces, repo-agnostic).',
+    liftedHead === 'governed-surface predicate: 0 of 4 path(s) hit the register after 1 generated-artifact lift(s) (6 surfaces, repo-agnostic).',
     liftedHead,
   );
   const plainHead = renderTestVerdict(testVerdict(['packages/spec/src/ui/view.zod.ts'])).split('\n')[0];
   assert(
     'and-a-verdict-with-no-lift-keeps-its-head-line-byte-for-byte',
-    plainHead === 'governed-surface predicate: 0 of 1 path(s) hit the register (5 surfaces, repo-agnostic).',
+    plainHead === 'governed-surface predicate: 0 of 1 path(s) hit the register (6 surfaces, repo-agnostic).',
     plainHead,
   );
 
@@ -5012,7 +5198,7 @@ async function selfTest() {
     for (const failure of failures) console.error(`  • ${failure}`);
     process.exit(1);
   }
-  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the #12633 landing window — the QS-7 regression pin in both directions, the topological close beyond the budget, the unproven-boundary EDGE, the listed-or-INCOMPLETE invariant over every fixture, the escalating floors, per-repo --since-ref resolution and its named fallback, and the window words — the replay fixtures, the five-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the three-way attribution column (resolved · every-channel-failed · NOT LOOKED UP, and the note pointer that belongs to the middle one alone), the --test pre-arm predicate, the generated-artifact provenance exception — the register's invariants incl. the RETIRED #9866 row staying retired (no row lifts anything under .claude/**, and the audit workflow is plainly governed again), a row with no recompute failing closed, lift/reject/absent-provenance semantics, the untouched mixed-diff rule, named-rows-not-a-class, the #11084 generator co-edit fence in both directions incl. a row with no instrument tree, and its render words — the #11705 generator-owned rows inside skills/** (a genuine generated file passes, the same path hand-edited does not, a path no generator declares is hand-authored content, per-row fences, and the enumeration read from the real generator), the exit table, the report wording pins, and the #13307 remote-reachability leg — the pure freshness verdicts in every branch (unreachable · a remote naming no commit · an unreadable local tip · a mirror behind its remote · the two-unreadable-shas degenerate case that must never read as a match), the report words in both directions (an unreachable repo never renders the tick, a reachable one still says a MEASURED zero, and a row with no remote reading never claims one), and the REAL prober on local bare-repo fixtures over the file transport — a live remote, a deleted one, the --exit-code branch, and a mirror the remote moved past — the #13423 identity leg (an origin no slug parses from refuses, pure and end-to-end, with audited reachable only through a parsed matching slug), the #13424 per-repo window resolution (a sibling-only pin resolves in its own repo, the self-only control still errors, and the end-to-end sibling-pin sweep reports instead of exiting 1), the #13307 sweep-code provenance line in all three branches, and the #13836 attribution set — every refusal carries its precondition category on the row, in the footer, and in --json; the shallow-clone path in both directions; and the run-1-vs-run-2 flip reproduced on real fixtures with zero local writes — and the live battery's own PREREQUISITE, asked before a single case runs: an uninstalled checkout refuses with the repo-wide NOT-MEASURED code end to end instead of reporting a shrunken battery, while the floor still names the battery, by itself, for a case that genuinely stopped registering) — and the #15406 replay of PR #15284: the sweep still CLASSIFIES a certified regeneration as a governed merge and still lists it, its row now names the register row it does not recompute and where certification is recorded, and the --test head no longer reports a post-lift zero as if nothing had hit the register — and the #17003 derivation set: the Link walk that ends on rel=next rather than on a short page, a rename reaching the predicate as BOTH of its paths, a walk the PR's own count contradicts refusing rather than answering on a subset, a channel chosen once and never spliced mid-walk, every --branch leg on an injected git incl. the uncomputable merge base that REFUSES instead of falling back to two-dot, and the card's own reproduction run end to end on a real repo — a branch behind a main that has since touched a governed path answers GOVERNED two-dot and NOT governed three-dot, a rename out of a governed path is a hit only because the diff is taken --no-renames, the merge-base refusal prints no verdict at all, and the verdict is byte-identical through --branch and through --test on the same list. — and the #18055 banner set: the INCOMPLETE banner is BUILT on the attribution-failure path instead of throwing while it is built, it still returns EXIT_INCOMPLETE, the proxy hint renders from the plan the sweep now binds and stays empty both when the plan says no hint and when the incompleteness is not about attribution, and a real sweep whose every attribution channel fails prints the banner on STDERR and exits 2.\n  ${liveNote}`);
+  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the #12633 landing window — the QS-7 regression pin in both directions, the topological close beyond the budget, the unproven-boundary EDGE, the listed-or-INCOMPLETE invariant over every fixture, the escalating floors, per-repo --since-ref resolution and its named fallback, and the window words — the replay fixtures, the five-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the three-way attribution column (resolved · every-channel-failed · NOT LOOKED UP, and the note pointer that belongs to the middle one alone), the --test pre-arm predicate, the generated-artifact provenance exception — the register's invariants incl. the RETIRED #9866 row staying retired (no row lifts anything under .claude/**, and the audit workflow is plainly governed again), a row with no recompute failing closed, lift/reject/absent-provenance semantics, the untouched mixed-diff rule, named-rows-not-a-class, the #11084 generator co-edit fence in both directions incl. a row with no instrument tree, and its render words — the #11705 generator-owned rows inside skills/** (a genuine generated file passes, the same path hand-edited does not, a path no generator declares is hand-authored content, per-row fences, and the enumeration read from the real generator), the exit table, the report wording pins, and the #13307 remote-reachability leg — the pure freshness verdicts in every branch (unreachable · a remote naming no commit · an unreadable local tip · a mirror behind its remote · the two-unreadable-shas degenerate case that must never read as a match), the report words in both directions (an unreachable repo never renders the tick, a reachable one still says a MEASURED zero, and a row with no remote reading never claims one), and the REAL prober on local bare-repo fixtures over the file transport — a live remote, a deleted one, the --exit-code branch, and a mirror the remote moved past — the #13423 identity leg (an origin no slug parses from refuses, pure and end-to-end, with audited reachable only through a parsed matching slug), the #13424 per-repo window resolution (a sibling-only pin resolves in its own repo, the self-only control still errors, and the end-to-end sibling-pin sweep reports instead of exiting 1), the #13307 sweep-code provenance line in all three branches, and the #13836 attribution set — every refusal carries its precondition category on the row, in the footer, and in --json; the shallow-clone path in both directions; and the run-1-vs-run-2 flip reproduced on real fixtures with zero local writes — and the live battery's own PREREQUISITE, asked before a single case runs: an uninstalled checkout refuses with the repo-wide NOT-MEASURED code end to end instead of reporting a shrunken battery, while the floor still names the battery, by itself, for a case that genuinely stopped registering) — and the #15406 replay of PR #15284: the sweep still CLASSIFIES a certified regeneration as a governed merge and still lists it, its row now names the register row it does not recompute and where certification is recorded, and the --test head no longer reports a post-lift zero as if nothing had hit the register — and the #17003 derivation set: the Link walk that ends on rel=next rather than on a short page, a rename reaching the predicate as BOTH of its paths, a walk the PR's own count contradicts refusing rather than answering on a subset, a channel chosen once and never spliced mid-walk, every --branch leg on an injected git incl. the uncomputable merge base that REFUSES instead of falling back to two-dot, and the card's own reproduction run end to end on a real repo — a branch behind a main that has since touched a governed path answers GOVERNED two-dot and NOT governed three-dot, a rename out of a governed path is a hit only because the diff is taken --no-renames, the merge-base refusal prints no verdict at all, and the verdict is byte-identical through --branch and through --test on the same list. — and the #18055 banner set: the INCOMPLETE banner is BUILT on the attribution-failure path instead of throwing while it is built, it still returns EXIT_INCOMPLETE, the proxy hint renders from the plan the sweep now binds and stays empty both when the plan says no hint and when the incompleteness is not about attribution, and a real sweep whose every attribution channel fails prints the banner on STDERR and exits 2 — and the #19133 landing tiers: every register row carries H or S, Tier S is exactly the .claude/** row, a list is S only when every governed path is S (empty or ungoverned answers H), the verdict line and --json carry the tier while both tiers share exit 3, and the tier is recomputed on the lifted slice.\n  ${liveNote}`);
 
   return SELF_TEST_VERDICT;
 }
