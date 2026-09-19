@@ -1440,7 +1440,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#18640 — an inline closed set RE-SPELLED at the same binding is not a set that gained a value': 20,
   '#18702 — a declaring factory PRIVATE to one file, resolved through its own DEFINITION': 54,
   "#18721 — a hunk's LEADING CONTEXT is not a reason to abandon the parameter reading": 14,
-  '#19099 — a member BOUNDED inside a bag the block re-declared out of a universal acceptor': 52,
+  '#19099 — a member BOUNDED inside a bag the block re-declared out of a universal acceptor': 53,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -5454,6 +5454,23 @@ export function selfTest() {
     '+  filter: strictObject({',
     '+    newKey: z.string(),',
     '+  }),',
+    ' });',
+  ).length === 1);
+  t('⭐ FRAMES ALONE — two sibling bags put the removal and the new bag at the SAME indent, and only the frames the hunk shows open tell them apart: a `filter` removed from `meta` does not certify a `filter` bag declared inside `other`', pathTells(
+    '@@ -3,9 +3,11 @@ import { z } from \'zod\';',
+    ' export const ThingSchema = z.object({',
+    '   meta: z.object({',
+    '     a: z.number(),',
+    '-    filter: z.unknown(),',
+    '-  }).optional(),',
+    '-  other: z.object({',
+    '+  }),',
+    '+  other: strictObject({',
+    '+    filter: strictObject({',
+    '+      newKey: z.string(),',
+    '+    }),',
+    '     keep: z.number(),',
+    '   }),',
     ' });',
   ).length === 1);
   t('⭐ INDENT ALONE — a hunk that shows no enclosing opener at all leaves the two lines’ INDENT as the only nesting evidence, and a key removed one level deeper does not certify a bag re-declared at the top', pathTells(
