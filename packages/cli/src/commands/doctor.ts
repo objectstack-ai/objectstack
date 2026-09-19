@@ -701,7 +701,9 @@ export function resolveTenancyPostureOrFinding(reading: DotenvReading): TenancyP
 
 // ─── Config-Aware Checks ────────────────────────────────────────────
 
-function detectCircularDependencies(objects: any[]): string[] {
+// Exported for the pin on its carrier reading below; `doctor` itself is the
+// only caller.
+export function detectCircularDependencies(objects: any[]): string[] {
   const issues: string[] = [];
   const graph = new Map<string, string[]>();
 
