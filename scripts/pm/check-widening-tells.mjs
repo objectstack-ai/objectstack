@@ -1111,15 +1111,15 @@
  * ⛔ A HUNK MAY BEGIN INSIDE A COMMENT, and the flag above must not read that
  * as a guess. The walk starts at the hunk's own first line with no comment
  * state, so a doc comment opened above the hunk has its body read as code — and
- * the ` */` that ends it was being taken for a bare slash. Measured on the same
+ * the ` *\/` that ends it was being taken for a bare slash. Measured on the same
  * 250-diff corpus: 21 of the 88 readable T1 stacks went unreadable that way,
- * 21 of 21 raised by ` */`, across 7 diffs — and one of them is an honest
+ * 21 of 21 raised by ` *\/`, across 7 diffs — and one of them is an honest
  * #18234 narrowing this file had ALREADY landed a decline for, turned back into
- * a tell. ⇒ a `*/` outside a block comment, on a walk that has opened none of
+ * a tell. ⇒ a `*\/` outside a block comment, on a walk that has opened none of
  * its own and raised no flag, is read as what it unambiguously is: the hunk
  * began inside a comment. The frames the comment text pushed are discarded and
  * the walk restarts after it. ⭐ No regex lexer, and no heuristic: outside a
- * string and outside a comment, `*/` is not valid TypeScript.
+ * string and outside a comment, `*\/` is not valid TypeScript.
  *
  * ⭐ The same measurement is why a LONE `/` no longer raises the flag either. A
  * regex literal cannot span lines, so a `/` with no second `/` left on its line
@@ -1187,9 +1187,9 @@
  *     removed key's place and keeps telling. The place is a textual agreement
  *     between two CONTEXT lines, ⛔ never a resolved path.
  *   • a hunk whose walk had to guess — a regex literal carrying a bracket, a
- *     type-blind pop, an unterminated string, an unexplained `*/` — certifies
+ *     type-blind pop, an unterminated string, an unexplained `*\/` — certifies
  *     nothing from that byte on, and every member after it fires. ⛔ A division
- *     and the ` */` of a hunk that began inside a comment are NOT that: both
+ *     and the ` *\/` of a hunk that began inside a comment are NOT that: both
  *     are read, and both are pinned.
  *   • T2 is deliberately not extended, with its own overturn condition stated
  *     on {@link insideReplacedUniversalAcceptorBag}.
@@ -2358,14 +2358,14 @@ function topLevelMembers(s, open, close) {
  *     and division pushes and pops nothing.
  *   • a closer whose type does not match the opener it popped.
  *   • a string literal that never closes on its line.
- *   • a `*/` this walk cannot explain — a second one, or one after the flag is
- *     already up. ⛔ The FIRST `*/` on a clean walk is not a trigger at all: it
+ *   • a `*\/` this walk cannot explain — a second one, or one after the flag is
+ *     already up. ⛔ The FIRST `*\/` on a clean walk is not a trigger at all: it
  *     says the hunk began inside a comment (see the reset below).
  *
  * ⛔ Every reader that SUPPRESSES anything must refuse when the flag is set, and
  * every trigger must be stated wherever this reading is described. A disclosure
  * naming only the division operator — which raises nothing, and occurs zero
- * times on this tree's corpus — while ` */` fired on 24% of readable T1 stacks
+ * times on this tree's corpus — while ` *\/` fired on 24% of readable T1 stacks
  * is how the first cut of this flag regressed a landed #18234 decline in the
  * commonest hunk shape there is.
  *
