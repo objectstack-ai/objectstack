@@ -160,11 +160,12 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // instead would re-assert the rule and see nothing about what is
       // checked in.
       //
-      // src/shared/retired-key-migrate-sentence.test.ts also reads this
-      // root (`PUBLISHED_SKILLS_ROOT`, `:102`) as the second corpus for its
-      // widened population (#10848, see the `.claude` entry above) — "plus
-      // every `.md` file under `skills/`" (`:92`), emitted as
-      // `skills:`-prefixed entries (`:484-485`).
+      // `packages/spec/src/shared/retired-key-migrate-sentence.test.ts` also
+      // reads this root (`PUBLISHED_SKILLS_ROOT`, line 102 as measured) as the
+      // second corpus for its widened population (#10848, see the `.claude`
+      // entry above) — "plus every `.md` file under `skills/`" (line 92 as
+      // measured), emitted as `skills:`-prefixed entries (lines 484-485 as
+      // measured).
       //
       // The whole subtree rather than `skills/*/references/_index.md`: the test
       // reads the DIRECTORY too (a new skill dir changes its verdict), and a

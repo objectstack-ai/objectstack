@@ -127,6 +127,7 @@ import {
   frameCountMentions,
   runAllChecks,
 } from './check-skill-frame-sync.mjs';
+import { gitFreeEnv } from './git-env.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -158,9 +159,22 @@ const SAMPLE_FRAME_FILE_RX = new RegExp(SAMPLE_FRAME_FILE.replace(/[.*+?^${}()|[
 // git plumbing
 // ---------------------------------------------------------------------------
 
-function git(args, { cwd = REPO_ROOT, timeoutMs } = {}) {
+/**
+ * @param {string[]} args
+ * @param {{ cwd?: string, timeoutMs?: number, network?: boolean }} [opts]
+ *   `network` marks a child that TALKS TO A REMOTE, and it is the one thing that keeps
+ *   the GIT_* strip off (#16644). Every other call this helper serves -- `rev-parse`,
+ *   `init`, `config`, `remote add`, `update-ref`, `commit` -- operates on the repository
+ *   its `cwd` names, and the self-test hands it mkdtemp fixtures, so those get
+ *   `gitFreeEnv()`. ⛔ The strip is NOT a default that may be applied blindly to a
+ *   remote-touching child: this container carries the remote rewriting and credential
+ *   settings in GIT_CONFIG_COUNT / GIT_CONFIG_KEY_* / GIT_CONFIG_VALUE_* and the proxy
+ *   CA bundle in GIT_SSL_CAINFO, and a fetch stripped of those loses its transport.
+ */
+function git(args, { cwd = REPO_ROOT, timeoutMs, network = false } = {}) {
   const r = spawnSync('git', args, {
     cwd,
+    ...(network ? {} : { env: gitFreeEnv() }),
     encoding: 'utf8',
     timeout: timeoutMs,
     maxBuffer: 64 * 1024 * 1024,
@@ -200,7 +214,14 @@ export function resolveReference({
   if (noFetch) {
     why = '--no-fetch was passed, so nothing was fetched';
   } else {
-    const fetched = git(['fetch', '--quiet', '--no-tags', 'origin', 'main'], { cwd: root, timeoutMs });
+    // ⛔ AMBIENT ENVIRONMENT ON PURPOSE -- never `gitFreeEnv()` here (#16644).
+    // NETWORK-TOUCHING: this is the one child in this file that reaches `origin`, and on
+    // this repo's agent containers the ambient environment is what makes that possible --
+    // GIT_CONFIG_COUNT with GIT_CONFIG_KEY_* / GIT_CONFIG_VALUE_* pairs rewriting the
+    // GitHub remote and disabling interactive credentials, plus GIT_SSL_CAINFO naming the
+    // proxy CA bundle. Stripped, the fetch loses its transport configuration and this
+    // gate degrades to rung 1 on every run -- a warning where a verdict belongs.
+    const fetched = git(['fetch', '--quiet', '--no-tags', 'origin', 'main'], { cwd: root, timeoutMs, network: true });
     if (fetched.ok) {
       const sha = git(['rev-parse', '--verify', '--quiet', 'FETCH_HEAD^{commit}'], { cwd: root });
       if (sha.ok) {

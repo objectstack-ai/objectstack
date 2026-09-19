@@ -15,15 +15,37 @@ import {
 // the raw value), so every case in this file pins the variable's state instead
 // of inheriting the ambient environment's.
 const ENV = 'OS_PLATFORM_OWNER_EMAIL';
+/**
+ * [#11663 L5] The two inputs `resolveTenancyPosture()` reads, in its order:
+ * `OS_TENANCY_POSTURE` when set, else `OS_MULTI_ORG_ENABLED` (truthy ⇒
+ * `isolated`), else `single`. BOTH are driven here, never just the canonical
+ * one, and the default for this file is pinned to `single` rather than
+ * inherited — the legacy grant anchor this helper falls back to is now
+ * posture-keyed, so a case that leaves the posture unset would measure
+ * whatever the box exports instead of the posture it was written against.
+ * `single` is that posture for every case above the walled suite.
+ */
+const POSTURE_ENV = 'OS_TENANCY_POSTURE';
+const MULTI_ORG_ENV = 'OS_MULTI_ORG_ENABLED';
 let ambientOwnerEmail: string | undefined;
+let ambientPosture: string | undefined;
+let ambientMultiOrg: string | undefined;
 beforeEach(() => {
   ambientOwnerEmail = process.env[ENV];
+  ambientPosture = process.env[POSTURE_ENV];
+  ambientMultiOrg = process.env[MULTI_ORG_ENV];
   delete process.env[ENV];
+  process.env[POSTURE_ENV] = 'single';
+  delete process.env[MULTI_ORG_ENV];
   resetPlatformAdminEmailMemo();
 });
 afterEach(() => {
   if (ambientOwnerEmail === undefined) delete process.env[ENV];
   else process.env[ENV] = ambientOwnerEmail;
+  if (ambientPosture === undefined) delete process.env[POSTURE_ENV];
+  else process.env[POSTURE_ENV] = ambientPosture;
+  if (ambientMultiOrg === undefined) delete process.env[MULTI_ORG_ENV];
+  else process.env[MULTI_ORG_ENV] = ambientMultiOrg;
   resetPlatformAdminEmailMemo();
 });
 
@@ -31,6 +53,18 @@ afterEach(() => {
 function declare(value: string): void {
   process.env[ENV] = value;
   resetPlatformAdminEmailMemo();
+}
+
+/**
+ * [#11663 L5] Declare the REQUESTED tenancy posture for one arm. `undefined`
+ * clears BOTH inputs, which is how a rig that configured no tenancy at all is
+ * spelled — and that rig resolves `single`. There is no memo to drop:
+ * `resolveTenancyPosture()` re-reads the environment on every call.
+ */
+function requestPosture(value: 'single' | 'group' | 'isolated' | undefined): void {
+  delete process.env[MULTI_ORG_ENV];
+  if (value === undefined) delete process.env[POSTURE_ENV];
+  else process.env[POSTURE_ENV] = value;
 }
 
 type Row = Record<string, any>;
@@ -323,6 +357,8 @@ describe('isDefaultOrganizationBootstrapTrigger', () => {
     [{ object: 'sys_user', operation: 'update', data: { name: 'renamed' } }, false],
     [{ object: 'sys_user', operation: 'update' }, false],
     [{ object: 'sys_user', operation: 'delete' }, false],
+    // ⚠️ [#11663 L5] These two are `true` under `single` ONLY — the harness
+    // pins that posture for this file. The walled answer is pinned below.
     [{ object: 'sys_user_permission_set', operation: 'insert' }, true],
     [{ object: 'sys_user_permission_set', operation: 'create' }, true],
     [{ object: 'sys_user_permission_set', operation: 'update', data: { organization_id: null } }, false],
@@ -331,5 +367,133 @@ describe('isDefaultOrganizationBootstrapTrigger', () => {
     [{}, false],
   ])('%j → %s', (opCtx, expected) => {
     expect(isDefaultOrganizationBootstrapTrigger(opCtx as any)).toBe(expected);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+/**
+ * [#11663 L5] The legacy grant anchor is POSTURE-KEYED here too — the third
+ * reader of the one anchor, keyed with the other two.
+ *
+ * `resolve-authz-context.ts` §6b stopped deriving `PLATFORM_ADMIN` from an
+ * unscoped `admin_full_access` grant under a walled posture, and the break-glass
+ * guard's enumeration was keyed with it. This helper is the reader that does not
+ * merely COUNT that population but CONFERS on it: whoever it picks is written a
+ * `sys_member { role: 'owner' }` row on the Default Organization and handed the
+ * org's seeded rows. Left unkeyed, a walled rig still carrying a legacy row would
+ * bind that holder as an organization owner while the derivation grades the same
+ * account MEMBER and `bootstrapPlatformAdmin` logs zero administrators — one
+ * anchor, two readers, opposite answers, in one boot.
+ *
+ * ⚠️ Reachable on a walled rig although plugin-auth's own wiring skips the helper
+ * there: `@objectstack/organizations` — which every walled posture requires —
+ * wraps and calls it on `kernel:ready` and after every triggering write.
+ *
+ * ⛔ BOTH directions are pinned. Keying this reader is only correct if `single`
+ * keeps its fallback: that rig's first-user promotion still mints the grant row
+ * (Choice 4A) and it is still the only thing that answers the population question
+ * there, so a one-sided pin would let a later edit key `single` too and leave
+ * every zero-config deployment with no Default Organization and no owner.
+ */
+describe('[#11663 L5] under a WALLED posture the legacy grant anchors nothing', () => {
+  const OWNER = 'owner@corp.example';
+
+  it('⭐ a legacy grant holder is NOT bound as owner — the answer is no_admin, and nothing is written', async () => {
+    // The finding. Before the key, this fixture bound `u1` — an account the
+    // derivation grades MEMBER on the same rig — as the Default Organization's
+    // owner, and handed them the seeded rows.
+    for (const walled of ['group', 'isolated'] as const) {
+      requestPosture(walled);
+      const ql = makeQl();
+      const res = await ensureDefaultOrganization(ql);
+      expect(res, walled).toMatchObject({ defaultOrgCreated: false, memberCreated: false, reason: 'no_admin' });
+      expect(ql.insert, walled).not.toHaveBeenCalled();
+      expect(ql.tables.sys_member, walled).toHaveLength(0);
+      expect(ql.tables.sys_organization, walled).toHaveLength(0);
+    }
+  });
+
+  it('…and `single` binds that same holder on the identical fixture — the control', async () => {
+    // Same fixture, same call, opposite answer, and the ONLY difference is the
+    // posture. Without this the arm above would pass just as well on a helper
+    // that had stopped answering everywhere, which is a zero-config rig with no
+    // organization and no owner.
+    requestPosture('single');
+    const ql = makeQl();
+    const res = await ensureDefaultOrganization(ql);
+    expect(res.memberCreated).toBe(true);
+    expect(ql.tables.sys_member[0]).toMatchObject({ user_id: 'u1', role: 'owner' });
+  });
+
+  it('the DEFAULT posture binds it too — an unconfigured deployment resolves `single`', async () => {
+    // Both tenancy inputs unset is what a rig that configured no tenancy at all
+    // looks like. This is the arm the maintainer's zero-config constraint is
+    // about, and it must never move.
+    requestPosture(undefined);
+    const ql = makeQl();
+    const res = await ensureDefaultOrganization(ql);
+    expect(res.memberCreated).toBe(true);
+    expect(ql.tables.sys_member[0].user_id).toBe('u1');
+  });
+
+  it('the CONFIG anchor still binds under a wall — only the row route is retired', async () => {
+    // The control that keeps the first arm honest: `no_admin` under a wall must
+    // come from the retired row route, not from the helper having stopped
+    // resolving anything. A declared, VERIFIED owner is bound exactly as before.
+    requestPosture('isolated');
+    declare(OWNER);
+    const ql = makeQl({
+      sys_user: [{ id: 'u_cfg', email: OWNER, email_verified: true }],
+    });
+    const res = await ensureDefaultOrganization(ql);
+    expect(res.memberCreated).toBe(true);
+    // ⭐ …and it is the CONFIG account, not the legacy holder `u1` the same
+    // fixture still carries — the preference and the retirement in one reading.
+    expect(ql.tables.sys_member[0]).toMatchObject({ user_id: 'u_cfg', role: 'owner' });
+  });
+
+  it('an UNVERIFIED declared owner does NOT fall back to the legacy holder under a wall', async () => {
+    // The window this card leaves open on purpose, pinned as a WAIT rather than
+    // a silent mis-binding: before the declared account verifies, a walled rig
+    // has no platform administrator, so there is nobody to bind. The verifying
+    // update re-runs the helper through the trigger predicate. Under `single`
+    // the same fixture falls back to `u1` — that arm is next door.
+    requestPosture('isolated');
+    declare(OWNER);
+    const ql = makeQl({
+      sys_user: [{ id: 'u_cfg', email: OWNER, email_verified: false }],
+    });
+    const res = await ensureDefaultOrganization(ql);
+    expect(res.reason).toBe('no_admin');
+    expect(ql.tables.sys_member).toHaveLength(0);
+  });
+
+  it('costs NO grant read under a wall — the key is read from the environment, not the engine', async () => {
+    // The gate must not buy its answer with a query. Under a wall neither the
+    // `sys_permission_set` lookup nor the grant scan is issued at all.
+    requestPosture('isolated');
+    const ql = makeQl();
+    await ensureDefaultOrganization(ql);
+    const objects = ql.find.mock.calls.map((c: any[]) => c[0]);
+    expect(objects).not.toContain('sys_permission_set');
+    expect(objects).not.toContain('sys_user_permission_set');
+  });
+
+  it('the trigger predicate retires its grant-insert arm under a wall, and keeps it under `single`', async () => {
+    // Cost only — the helper answers `no_admin` from that grant under a wall
+    // either way, so firing bought a re-run that could only repeat itself. The
+    // sibling predicate `shouldReplayBootstrapFor` spells the same exclusion.
+    // ⛔ The `sys_user` arms must NOT move: the declared owner's verifying
+    // update is the ONLY write that ever grows the population on a walled rig,
+    // so keying that off would strand the deployment forever.
+    for (const walled of ['group', 'isolated'] as const) {
+      requestPosture(walled);
+      expect(isDefaultOrganizationBootstrapTrigger({ object: 'sys_user_permission_set', operation: 'insert' }), walled).toBe(false);
+      expect(isDefaultOrganizationBootstrapTrigger({ object: 'sys_user_permission_set', operation: 'create' }), walled).toBe(false);
+      expect(isDefaultOrganizationBootstrapTrigger({ object: 'sys_user', operation: 'update', data: { email_verified: true } }), walled).toBe(true);
+      expect(isDefaultOrganizationBootstrapTrigger({ object: 'sys_user', operation: 'insert' }), walled).toBe(true);
+    }
+    requestPosture('single');
+    expect(isDefaultOrganizationBootstrapTrigger({ object: 'sys_user_permission_set', operation: 'insert' })).toBe(true);
   });
 });

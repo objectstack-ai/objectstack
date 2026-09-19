@@ -31,6 +31,13 @@
 // on stock fixtures. Pass --include-blocked to list them too (the runner records them as
 // blocked with their fixture reason, per RUNNER.md).
 //
+// PLANNED items (`status: "planned"`) are never runnable by any selector and there is no
+// flag that makes them so — the capability does not exist yet, so there is nothing to
+// drive and no oracle to consult. They are REPORTED instead: the same selector resolves
+// against them and they are printed under a PLANNED heading for the run record to carry
+// as the verdict `planned`. ⛔ A planned id must not reach a runner; whatever verdict
+// came back would be about nothing.
+//
 // Output: a table (id · priority · surface · blocked?) to stderr for humans, and — with
 // --json — a machine list to stdout for the runner to fan out over.
 
@@ -55,10 +62,23 @@ function loadItems(areasDir = AREAS_DIR) {
 /**
  * Resolve a selector string against a set of items (+ optional coverage map).
  * Pure and side-effect-free so the self-test can exercise it directly.
+ *
+ * `opts.status` picks WHICH pool the same selector resolves against, and
+ * defaults to the runnable one. A `planned` item records a capability the
+ * definition requires and the platform does not yet verify: there is nothing to
+ * drive, so it must never reach a runner — but it must not vanish either, or a
+ * selector answers "nothing here" about an area whose gap the ledger is
+ * deliberately carrying. Resolving one selector against both pools is what lets
+ * the CLI below report a planned item AS planned while running nothing for it.
+ *
+ * @param {string} selector
+ * @param {object[]} items
+ * @param {{metadataKinds?: Record<string, {items?: string[]}>}} [coverage]
+ * @param {{status?: string}} [opts]
  * @returns {object[]} the matched items (order: as declared)
  */
-export function selectItems(selector, items, coverage = { metadataKinds: {} }) {
-  const active = items.filter((it) => it.status === 'active');
+export function selectItems(selector, items, coverage = { metadataKinds: {} }, opts = {}) {
+  const active = items.filter((it) => it.status === (opts.status ?? 'active'));
   const byId = (id) => active.filter((it) => it.id === id);
 
   if (selector === 'all') return active;
@@ -104,13 +124,30 @@ export function selectItems(selector, items, coverage = { metadataKinds: {} }) {
       if (inArea.length) return inArea;
     }
     if (raw.includes('/') || /\.(tsx?|jsx?|mjs|cjs)$/.test(base)) {
-      return selectItems(`file:${raw}`, items, coverage);
+      // `opts` rides along: a prefix-less path resolved against the planned
+      // pool must stay in the planned pool, or the convenience form silently
+      // answers from a different ledger than the one asked about.
+      return selectItems(`file:${raw}`, items, coverage, opts);
     }
     const asId = byId(val);
     if (asId.length) return asId;
     return active.filter((it) => it.id.startsWith(`${val}.`));
   }
   return []; // unknown prefix
+}
+
+/**
+ * The same selector, resolved against the PLANNED pool. The runner reports what
+ * this returns as `planned` and drives none of it (RUNNER.md "Verdicts") — a
+ * planned item is never `pass`, never `fail`, never `blocked`, because no
+ * oracle was consulted and none could have been.
+ *
+ * ⛔ Not a variant of `--include-blocked`: a blocked item is a real test the
+ * environment cannot run today, and hiding it is a fixture problem. A planned
+ * item has nothing to run at all.
+ */
+export function selectPlanned(selector, items, coverage = { metadataKinds: {} }) {
+  return selectItems(selector, items, coverage, { status: 'planned' });
 }
 
 function isBlocked(it) {
@@ -145,8 +182,12 @@ function isBlocked(it) {
 // The count is a FLOOR, not an equality — adding cases is ordinary work and must
 // not red. A battery BELOW its floor means cases stopped running; the remedy is
 // to find what stopped registering.
+// 17 → 31: the `planned` status. Every selector shape is driven against the
+// runnable pool to prove a planned item is in NONE of them, and against the
+// planned pool to prove it is still reachable — the two halves of "skipped by
+// every selector, reported as `planned`".
 const SELF_TEST_BATTERIES = Object.freeze({
-  'checklist-select self-test': 17,
+  'checklist-select self-test': 31,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -180,9 +221,11 @@ function selfTest() {
     { id: 'a.two', status: 'active', priority: 'P1', surface: 'api', since: 'v16.1', source: ['#3358'], blocked: { by: 'fixture', ref: '#1' } },
     { id: 'b.three', status: 'active', priority: 'P0', surface: 'api', since: 'v15', source: ['packages/foo/baz.ts'] },
     { id: 'b.gone', status: 'retired', priority: 'P0', surface: 'api', since: 'v15', retiredReason: 'x' },
+    { id: 'b.promised', status: 'planned', priority: 'P1', surface: 'api', since: null, personas: ['admin'], source: ['packages/foo/baz.ts'] },
   ];
-  const COV = { metadataKinds: { hook: { items: ['a.one'] } } };
+  const COV = { metadataKinds: { hook: { items: ['a.one'] }, widget: { items: ['b.promised'] } } };
   const ids = (sel) => selectItems(sel, FIX, COV).map((i) => i.id).sort();
+  const plannedIds = (sel) => selectPlanned(sel, FIX, COV).map((i) => i.id).sort();
   // Counted, never transcribed (#15305): the success line below used to carry a
   // hand-typed `17`, a number nothing derived and nothing compared — accurate on
   // the day it was typed and silently wrong the first time a case is added or
@@ -212,6 +255,27 @@ function selfTest() {
   eq(ids('packages/foo/bar.ts'), ['a.one'], 'bare source path (has /) → file: mode');
   eq(ids('bar.ts'), ['a.one'], 'bare source basename (code ext) → file: mode');
   eq(ids('missing.json'), [], 'unmatched .json name → empty, no throw');
+  // ── planned items: skipped by every selector, reported by their own ───────
+  // The runnable pool is what a runner drives, so the FIRST direction is that a
+  // planned item never appears in it — by any spelling of any selector, which
+  // is why each shape is driven rather than the one that happens to be handy.
+  eq(ids('all'), ['a.one', 'a.two', 'b.three'], 'all excludes planned as well as retired');
+  eq(ids('area:b'), ['b.three'], 'area: excludes planned');
+  eq(ids('b.promised'), [], 'a planned item asked for BY ID is still not runnable');
+  eq(ids('priority:P1'), ['a.two'], 'priority: excludes planned');
+  eq(ids('surface:api'), ['a.two', 'b.three'], 'surface: excludes planned');
+  eq(ids('capability:widget'), [], 'capability: excludes planned — a kind mapped only to planned items resolves to nothing runnable');
+  eq(ids('file:packages/foo/baz.ts'), ['b.three'], 'file: excludes planned');
+  // The second direction — and the one that makes the first safe. If planned
+  // items were only dropped, a selector would answer "nothing here" about an
+  // area whose gap the ledger is deliberately carrying.
+  eq(plannedIds('all'), ['b.promised'], 'the planned pool is reachable by the same selector');
+  eq(plannedIds('area:b'), ['b.promised'], 'area: resolves against the planned pool');
+  eq(plannedIds('b.promised'), ['b.promised'], 'a bare planned id resolves in the planned pool');
+  eq(plannedIds('capability:widget'), ['b.promised'], 'capability: resolves against the planned pool — this is where a capability-gap card points');
+  eq(plannedIds('packages/foo/baz.ts'), ['b.promised'], 'the prefix-less path form keeps the pool it was asked about');
+  eq(plannedIds('area:a'), [], 'an area with no planned items reports none — the pool is not a fallback');
+  eq(plannedIds('b.gone'), [], 'retired is not planned — two different absences, not one');
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -286,6 +350,7 @@ function main() {
   let matched = selectItems(selector, items, coverage);
   const droppedBlocked = includeBlocked ? [] : matched.filter(isBlocked);
   if (!includeBlocked) matched = matched.filter((it) => !isBlocked(it));
+  const planned = selectPlanned(selector, items, coverage);
 
   if (json) {
     process.stdout.write(JSON.stringify(matched.map((it) => ({ id: it.id, priority: it.priority, surface: it.surface, since: it.since, revision: it.revision })), null, 2) + '\n');
@@ -298,7 +363,25 @@ function main() {
   if (droppedBlocked.length) {
     console.error(`\n  hidden (blocked): ${droppedBlocked.map((i) => i.id).join(', ')}`);
   }
+  // Reported, never returned. The JSON the runner fans out over stays the
+  // RUNNABLE list — a planned id reaching a runner would be driven, and
+  // whatever verdict came back would be about nothing. What the run record owes
+  // these ids is the verdict `planned`, which no oracle is consulted for.
+  if (planned.length) {
+    console.error(`\n  ${planned.length} PLANNED item(s) matched this selector — not run, and not runnable: the definition requires the capability and the platform does not verify it yet.`);
+    console.error('  Record each as `planned` in the run record (⛔ never pass/fail/blocked — no oracle was consulted), and do not drive any of them.');
+    for (const it of planned) {
+      console.error(`    ${it.priority}  ${String(it.surface ?? '-').padEnd(8)}  ${it.id}${it.since ? `  → target ${it.since}` : ''}`);
+    }
+  }
   if (matched.length === 0) {
+    // A selector that matched ONLY planned items is answered, not refused: the
+    // ledger has something to say about it and said it above. "Nothing matched"
+    // would send the caller off to fix a selector that is working.
+    if (planned.length) {
+      console.error('\n  (nothing to run: every match is planned — report them as `planned` and stop)');
+      return;
+    }
     console.error('  (nothing matched — check the selector; try `all` or `area:<name>`)');
     process.exit(1);
   }

@@ -1069,6 +1069,55 @@ export const RecordDetailsProps = strictObject({
   showHeader: z.boolean().optional().describe(
     'Render the detail body\'s own heading (renderer default: off).',
   ),
+  /**
+   * ── The record-block field-security pair (#18159, spec half of
+   * objectui#8649). Declared on `record:details`, `record:highlights` and
+   * `record:related_list`; this is the family header the other two point at.
+   *
+   * WHAT THEY ARE. Two filters over the field list THIS BLOCK draws, applied
+   * in the browser after the record has been fetched.
+   * `RecordDetailsRenderer` folds both through one `filterList` pass:
+   * `enforceFieldSecurity` re-applies the caller's FIELD-read answer — the
+   * platform's own `checkField`, resolved server-side and handed down, never a
+   * second opinion — and `redactFields` drops the names it lists outright. An
+   * entry the fold cannot NAME is dropped too (objectui#9054), so the pair
+   * fails closed on input it does not understand.
+   *
+   * WHAT THEY ARE NOT. A data-access control. The record is fetched whole, so
+   * a filtered value is in the page either way and neither key keeps it from a
+   * caller who reads the response. The gates that do are the field's own
+   * `requiredPermissions` / `maskingRule` (ADR-0066 D3) and the permission
+   * set — the server applies those before the payload leaves it. Prime
+   * Directive #10 is why each `describe()` below says that in the text an
+   * author actually reads, rather than leaving the key names to imply it.
+   *
+   * ⚠️ `redactFields` NEIGHBOURS `hideFields` on this block and the two are
+   * not the same channel: `hideFields` is the DEDUPE list (the renderer merges
+   * the live `record:highlights` registrations and the page-title field into
+   * it), while `redactFields` is the author's deliberate omission and is the
+   * arm that participates in the fail-closed fold above. On a well-formed
+   * field list they remove the same rows. Converging them is a contract
+   * question this card did not open.
+   *
+   * ⚠️ The THIRD key objectui reads on these three blocks —
+   * `requiredPermissions` — is deliberately NOT declared here. Its read is
+   * `perms.can(objectName, name)`, whose second parameter is the closed
+   * `PermissionActionSchema` enum (`create`/`read`/…/`admin`), not the
+   * ADR-0066 capability set every other `requiredPermissions` in this spec
+   * names. Measured: under the backend-backed provider an unmapped name falls
+   * to the object's `allowRead` bit, so a capability nobody holds passes for
+   * every reader; under the role-based provider the same name is denied for
+   * everyone whenever the object carries a permission config. Declaring it
+   * would mint the ADR-0049 fail-open access gate this repo retired on
+   * `app.areas[].requiredPermissions` in 17.0.0. The exit is the spec seat's
+   * to rule.
+   */
+  enforceFieldSecurity: z.boolean().optional().describe(
+    'Fold this block\'s field list through the caller\'s FIELD-read permissions before rendering, so a field the permission set denies leaves no empty row behind (renderer default: off). Presentation only: it re-applies the same field-read answer the server already enforced (ADR-0066 D3) and never widens access — with it off a denied field still arrives masked or stripped, and with it on the server still decides every value.',
+  ),
+  redactFields: z.array(z.string()).optional().describe(
+    'Field names this block never renders, whatever the permission answer (renderer default: render everything authored). Presentation only, evaluated in the browser after the record is fetched — the values are still in the page, so this is NOT a data-access control and NOT the object\'s `publicSharing.redactFields`, which removes them server-side. To keep a value from the caller, gate the field itself (`requiredPermissions` / `maskingRule`, ADR-0066 D3) or the permission set. Neighbours `hideFields`, which is the dedupe channel the renderer also writes to.',
+  ),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 });
@@ -1162,6 +1211,26 @@ export const RecordRelatedListProps = strictObject({
     linkField: z.string().optional().describe('Field on `objectName` that stores the picked record id (junction case). Omit for a 1:m re-parent.'),
     label: I18nLabelSchema.optional().describe('Label for the Add button (default "Add").'),
   }).optional().describe('Add-existing-via-picker config (generic m2m/junction assignment).'),
+  /**
+   * The record-block field-security pair — see the family header on
+   * `RecordDetailsProps` for what the two keys are, what they are not, and why
+   * the third key objectui reads on this block is not declared.
+   *
+   * On THIS block the pair folds `columns` rather than a field list, and
+   * `redactFields` is additionally handed down to `RelatedList` itself: the
+   * component derives its own columns when none are authored, so filtering the
+   * authored array alone let a redacted field return through the derivation
+   * (objectui#9053). The fold fails closed on a column it cannot name
+   * (objectui#8793) — the table library's own `accessorKey` spelling is not an
+   * identity this fold accepts, and an entry it cannot check is one it must
+   * not pass.
+   */
+  enforceFieldSecurity: z.boolean().optional().describe(
+    'Fold this list\'s `columns` through the caller\'s FIELD-read permissions on the RELATED object before rendering (renderer default: off). Presentation only: it re-applies the same field-read answer the server already enforced (ADR-0066 D3) and never widens access — the rows are fetched either way and the server still decides every value.',
+  ),
+  redactFields: z.array(z.string()).optional().describe(
+    'Field names this list never renders, whatever the permission answer (renderer default: render every column authored or derived). Applies to the authored `columns` AND to the columns the list derives for itself when none are authored. Presentation only, evaluated in the browser after the rows are fetched — the values are still in the page, so this is NOT a data-access control and NOT the object\'s `publicSharing.redactFields`, which removes them server-side. To keep a value from the caller, gate the field itself (`requiredPermissions` / `maskingRule`, ADR-0066 D3) or the permission set.',
+  ),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 });
@@ -1243,6 +1312,24 @@ export const RecordHighlightsProps = strictObject({
 }, {
   fields: z.array(RecordHighlightsField).min(1).max(7).describe('Key fields to highlight (1-7 fields max, typically displayed as prominent cards). Each item may be a bare field name or {name, label?, type?, readonly?} for inline overrides.'),
   layout: z.enum(['horizontal', 'vertical']).default('horizontal').describe('Layout orientation for highlight fields'),
+  /**
+   * The record-block field-security pair — see the family header on
+   * `RecordDetailsProps` for what the two keys are, what they are not, and why
+   * the third key objectui reads on this block is not declared.
+   *
+   * On THIS block the pair folds the normalized `fields` chips. The renderer
+   * expresses the fail-closed arm by dropping unnameable entries BEFORE the
+   * allow-list rather than inside the filter — the same semantics as
+   * `record:details`, not a third policy. A chip dropped here is also dropped
+   * from the `HighlightFieldsContext` registration, so `record:details` does
+   * not go on hiding a body row for a highlight this block never drew.
+   */
+  enforceFieldSecurity: z.boolean().optional().describe(
+    'Fold this block\'s highlight chips through the caller\'s FIELD-read permissions before rendering, so a field the permission set denies leaves no empty chip behind (renderer default: off). Presentation only: it re-applies the same field-read answer the server already enforced (ADR-0066 D3) and never widens access — the record is fetched either way and the server still decides every value.',
+  ),
+  redactFields: z.array(z.string()).optional().describe(
+    'Field names this block never renders as a chip, whatever the permission answer (renderer default: render every field authored). Presentation only, evaluated in the browser after the record is fetched — the values are still in the page, so this is NOT a data-access control and NOT the object\'s `publicSharing.redactFields`, which removes them server-side. To keep a value from the caller, gate the field itself (`requiredPermissions` / `maskingRule`, ADR-0066 D3) or the permission set.',
+  ),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 });
@@ -2502,6 +2589,21 @@ const objectBlockHistory = (type: string) =>
 const FILTERS_TO_FILTER = { filters: 'filter' } as const;
 
 /**
+ * A page size — a positive integer, and nothing else.
+ *
+ * ONE spelling for a rule the rest of this package already carries, so the
+ * component arm cannot drift from it again: `PaginationConfigSchema`
+ * (`view.zod.ts`) declares `pageSize: z.number().int().positive()` and
+ * `pageSizeOptions: z.array(z.number().int().positive())`; `MetadataQuery`
+ * (`kernel/metadata-plugin.zod.ts`) and the two marketplace request schemas
+ * (`marketplace/marketplace.zod.ts`) say `z.number().int().min(1)`. Each of
+ * those pins its own refusal of `0` by name. Until #19046 the `object-grid`
+ * door below said `z.number()` and `z.unknown()`, and was the only
+ * page-size declaration in the package that accepted `0`.
+ */
+const GridPageSizeSchema = z.number().int().positive();
+
+/**
  * `object-grid` (objectui `plugin-grid/src/ObjectGrid.tsx` @ `eb7f586b`).
  * Read points per key: `objectName` (throughout), `columns`/`fields` (:714-715),
  * `filter` (:739, lowered via `toFilterNode` to `$filter`), `defaultFilters`
@@ -2629,9 +2731,53 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
     + 'becomes `sort: [{ field, order }]`); the pair itself is unchanged. '
     + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
   ),
-  pagination: z.unknown().optional()
-    .describe('Pagination config ({ pageSize, pageSizeOptions, … }); its presence enables paging'),
-  pageSize: z.number().optional().describe('Flat page-size shorthand; `pagination.pageSize` wins when both are set'),
+  /**
+   * Pagination config — the two members whose value is a PAGE SIZE bounded to
+   * {@link GridPageSizeSchema}, the accept set the view arm has ruled all
+   * along, and the bag itself left OPEN.
+   *
+   * The `z.unknown()` this door carried until #19046 was a read-point record
+   * of the same #7751 vintage as its `filter` and `sort` neighbours above, and
+   * it made the SAME authored member carry two accept sets, of which renderers
+   * read the looser: `PaginationConfigSchema` refuses `pageSize: 0` and pins
+   * that refusal by name ('should reject zero pageSize' / 'should reject zero
+   * values in pageSizeOptions', `view.test.ts`), while this door receipted it
+   * `success: true`. Measured at objectui#9853: an authored
+   * `pagination.pageSize: 0` reached `ObjectGrid`, went out on the wire as
+   * `$top: 0` and rendered ZERO ROWS, with no grouping needed to trigger it,
+   * and it reached the renderer through THIS arm — the view arm would have
+   * refused it. objectui#9896 repaired the consumer half (a resolver at every
+   * read point); this is the declaration half.
+   *
+   * **`z.looseObject`, not `strictObject` — the bag stays open, deliberately.**
+   * `PaginationConfigSchema` is itself closed, but reusing it here would
+   * refuse every sibling key this door has accepted since it was written — the
+   * `…` in its own describe says authors pass them — which is a wider
+   * narrowing than the defect measured above and a different decision. So what
+   * narrows is the accept set of a page size; what does NOT narrow is which
+   * keys the bag may carry. `BuildProgressFrameSchema`
+   * (`ai/build-progress.zod.ts`) is the house precedent for a floor-not-ceiling
+   * shape, and `DashboardWidgetConfigSchema` for an open bag with declared
+   * members.
+   *
+   * Read points measured at objectui `d18322415`: `ObjectGrid.tsx:1209` and
+   * `:1628` read `(schema.pagination as any)?.pageSize ?? schema.pageSize`,
+   * `:4179` reads `schema.pagination?.pageSize` and `:4359`
+   * `schema.pagination?.pageSizeOptions` — those two are the only members any
+   * read point on this door names, and the objectui registry has published
+   * this input as `type: 'object'` all along (`plugin-grid/src/index.tsx:223`),
+   * so a non-object value here was already answered `type-mismatch` one tier
+   * down while this schema accepted it. `:4175` reads presence only
+   * (`schema.pagination !== undefined ? true : …`), which is why an authored
+   * `pagination: false` used to mean paging ON.
+   */
+  pagination: z.looseObject({
+    pageSize: GridPageSizeSchema.optional(),
+    pageSizeOptions: z.array(GridPageSizeSchema).optional(),
+  }).optional()
+    .describe('Pagination config ({ pageSize, pageSizeOptions, … }); its presence enables paging. `pageSize` and every `pageSizeOptions` entry is a positive integer — the accept set the view arm\'s `PaginationConfigSchema` already rules; the bag stays open, so other keys pass through unvalidated'),
+  pageSize: GridPageSizeSchema.optional()
+    .describe('Flat page-size shorthand, a positive integer; `pagination.pageSize` wins when both are set'),
   showPagination: z.boolean().optional().describe('Show the pager (read only when `pagination` is absent)'),
   searchableFields: z.array(z.string()).optional()
     .describe('Fields the toolbar search queries; a non-empty list enables search'),

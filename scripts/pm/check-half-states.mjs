@@ -1349,11 +1349,43 @@ export function markerMatches(marker, text) {
  *     the corpus above, so it is left unnamed rather than guessed at — add it
  *     WITH its fixture when a live line appears.
  *
+ * ## The `leading-sigil` form (#18829 A) — the shape a SECOND stripper used to swallow
+ *
+ * `check-clause2-carriers.mjs` read its retraction lines through a stripper of
+ * its own, which removed every leading non-letter/non-digit character before
+ * matching — so `🚨 Claim:`, `## Claim:`, `- Claim:` and `__Claim:__` all
+ * read as the directive THERE while `markerMatches` refused every one of them:
+ * two undecoration paths, 5 of 12 spellings apart. The maintainer ruled (batch
+ * #156 item 4, letter A) that the protocol's definition of a decorated
+ * ownership line is THIS reading, that the other stripper is deleted, and that
+ * the sigil-led #18373 shape 「becomes a **named** near-miss row with its own
+ * fixture, so the loud, declared direction keeps reading it」. This member is
+ * that row.
+ *
+ * A sigil is an emoji or symbol run (`So` / `Sm` / `Sk` / `Sc`, with its
+ * combining and format marks) in front of the word — 「🚨 」, 「⚠️ 」, 「⇒ 」,
+ * 「⛔ 」, the fleet's own openers — optionally under a bullet or a blockquote
+ * (「- ⚠️ 」 is on #18373's own thread). It is ⛔ NOT decoration:
+ * `undecorateProseLine` strips asterisks and backticks and nothing else, on
+ * purpose, so a sigil-led `**Release:**` stays unread by `markerMatches` and
+ * is NAMED here instead — the same trade the `underscore-emphasis` member
+ * makes. The fixture is the #18373 line written in the act the protocol names
+ * (`Release:`, 去向 「让先到者」 — #18773 A), sigil and bold intact.
+ *
+ * ⚠️ Two boundaries, stated: the specimen's own PROSE (「🚨 **撤回上一条认领…」)
+ * is named by NO form, because naming it would mean reading the verb — the
+ * channel #18773 A retires (⛔ B: 「a reader inferring an act from a verb
+ * replays the next spelling」); its thread is named by the cross-author row
+ * one file over instead. And a heading AND a sigil (`## 🚨 Release:`) is named
+ * by no form — no live line has shown it; add it WITH its fixture when one does.
+ *
  * Ordered MOST SPECIFIC FIRST: the form a line is named by is the first that
  * matches it, so `## __Release:__` is a heading rather than an emphasis, and
  * `## Claim + dispatch` is `heading-bare` rather than `heading` only because
- * `heading` holds out for the colon. The two additions sit LAST, so neither can
- * rename a line an older form already read.
+ * `heading` holds out for the colon. The two #18831 additions sit LAST, so
+ * neither can rename a line an older form already read; `leading-sigil` sits
+ * between `separator` and them — no older form's fixture opens with a sigil,
+ * and neither addition's does.
  *
  * `re` matches the OFFENDING OPENING only and never the remainder, so the
  * matched text IS the prefix a row prints and a seat greps for. No `g` flag,
@@ -1389,6 +1421,12 @@ export const OWNERSHIP_MARKER_NEAR_MISS_FORMS = Object.freeze([
     what: 'the canonical word with a separator that is not the canonical colon',
     example: 'Release — session `session_x` — 去向 `pm:queue`',
     re: /^[ \t]*>?[ \t]*[_*`]{0,3}(?:Claim(?:ed)?|Release)[_*`]{0,3}[ \t]*[：–—-]/iu,
+  }),
+  Object.freeze({
+    id: 'leading-sigil',
+    what: 'the directive led by a SIGIL — an emoji or symbol run before the word, which the shared stripper does not remove (it strips decoration, ⛔ never a sigil)',
+    example: '🚨 **Release:** session `session_01JbZnqu8bt6YqfJsr9vaFb3` · 因:本卡已由 `os-litant` 在先认领,本席晚了 13 分钟 · 去向:让先到者',
+    re: /^[ \t]*>?[ \t]*(?:(?:[-+*]|\d+[.)])[ \t]+)?(?:[\p{So}\p{Sm}\p{Sk}\p{Sc}][\p{So}\p{Sm}\p{Sk}\p{Sc}\p{Mn}\p{Me}\p{Cf}]*[ \t]*)+[_*`]{0,3}(?:Claim(?:ed)?|Release)[_*`]{0,3}[ \t]*[:：]/iu,
   }),
   Object.freeze({
     id: 'heading-bare',
@@ -35434,7 +35472,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   // fixture. ⭐ The counterfactual pin: the roster is asserted EQUAL to a frozen
   // list of ids, so a form added without a fixture reds and a form silently
   // dropped reds. That is the failure mode that produced this card.
-  b(BATTERY68, 'vocabulary ⭐ the roster is EXACTLY the declared forms — an addition without a fixture reds, a silent drop reds', OWNERSHIP_MARKER_NEAR_MISS_FORMS.map((f) => f.id).join(','), 'heading,list-item,underscore-emphasis,inflected-word,separator,heading-bare,bare-word');
+  b(BATTERY68, 'vocabulary ⭐ the roster is EXACTLY the declared forms — an addition without a fixture reds, a silent drop reds', OWNERSHIP_MARKER_NEAR_MISS_FORMS.map((f) => f.id).join(','), 'heading,list-item,underscore-emphasis,inflected-word,separator,leading-sigil,heading-bare,bare-word');
   b(BATTERY68, 'vocabulary: the roster is FROZEN', Object.isFrozen(OWNERSHIP_MARKER_NEAR_MISS_FORMS), true);
   b(BATTERY68, 'vocabulary: …and so is every member', OWNERSHIP_MARKER_NEAR_MISS_FORMS.every((f) => Object.isFrozen(f)), true);
   b(BATTERY68, 'vocabulary: every member carries an id, a printable name, a fixture and a pattern', OWNERSHIP_MARKER_NEAR_MISS_FORMS.every((f) => typeof f.id === 'string' && typeof f.what === 'string' && typeof f.example === 'string' && f.re instanceof RegExp), true);
@@ -35485,6 +35523,30 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   b(BATTERY68, '#18831 ordering: …an inflected word with a colon is still `inflected-word`', miss68('Claiming: seat, session `session_x`').form, 'inflected-word');
   b(BATTERY68, '#18831 ordering: …and a dash-written claim is still `separator`, which is H34\'s row and ⛔ not this addition\'s', miss68('Claim — skills seat, session 019x').form, 'separator');
   b(BATTERY68, '#18831 ordering: …a `-` bulleted claim with no colon is named by NEITHER addition — a list is not a heading and not a line start', ownershipMarkerNearMisses(rows68('- Claiming the producer half, seat `domain:spec`')).length, 0);
+
+  // THE `leading-sigil` FORM (#18829 A) — the shape the sibling's retired
+  // retraction stripper used to swallow, NAMED here instead. The fixture is the
+  // #18373 retraction (`os-bill`, comment 5717333576) written in the act the
+  // protocol names, its own sigil and bold kept; the PROSE it was actually
+  // written as is pinned below as named by NO form, with the reason.
+  const SIGIL_RELEASE = '🚨 **Release:** session `session_01JbZnqu8bt6YqfJsr9vaFb3` · 因:本卡已由 `os-litant` 在先认领,本席晚了 13 分钟 · 去向:让先到者';
+  const SIGIL_18373_PROSE = '🚨 **撤回上一条认领(`5717315121`)—— 本卡已由 `os-litant` 在先认领,本席晚了 13 分钟。** `domain:spec` seat 2(`session_01JbZnqu8bt6YqfJsr9vaFb3`,座位贴 #18549)。⏱️ 本条读数取自同一动作:2026-09-17T15:54Z。';
+  b(BATTERY68, '#18829 ⭐ a sigil-led `Release:` is read by NEITHER marker — the stripper removes decoration, ⛔ never a sigil', markerMatches(RELEASE_COMMENT_MARKER, SIGIL_RELEASE) || markerMatches(CLAIM_COMMENT_MARKER, SIGIL_RELEASE), false);
+  b(BATTERY68, '#18829 ⭐ …and it is NAMED, as `leading-sigil`, with the sigil-and-decoration prefix a seat greps for', [miss68(SIGIL_RELEASE).form, miss68(SIGIL_RELEASE).prefix].join(' '), 'leading-sigil 🚨 **Release:');
+  b(BATTERY68, '#18829: the very line the sibling pinned as 「the SHARED reading does not strip a leading sigil」 is the same form on the claim side', miss68('🚨 Claim: PM loop round 1').form, 'leading-sigil');
+  b(BATTERY68, '#18829 control: take the sigil off by hand and the SAME line reads through `markerMatches` — the sigil was the only thing in the way', markerMatches(RELEASE_COMMENT_MARKER, SIGIL_RELEASE.replace('🚨 ', '')), true);
+  b(BATTERY68, '#18829 control: …and once read it is ⛔ not a near miss — reading and census stay complements', ownershipMarkerNearMisses(rows68(SIGIL_RELEASE.replace('🚨 ', ''))).length, 0);
+  b(BATTERY68, '#18829 control: the derived bare line really differs from the fixture', SIGIL_RELEASE === SIGIL_RELEASE.replace('🚨 ', ''), false);
+  b(BATTERY68, '#18829: the fleet\'s other openers — ⚠️ with its variation selector, ⇒, ⛔, ⭐ — are the same form, decorated or not', ['⚠️ Release: x', '⇒ Claim: x', '⛔ **Claimed:** x', '⭐ `Release:` x'].map((l) => miss68(l).form).join(','), 'leading-sigil,leading-sigil,leading-sigil,leading-sigil');
+  b(BATTERY68, '#18829: two sigils, a sigil under a bullet (「- ⚠️ 」, on #18373\'s own thread) and a sigil in a blockquote are named too', ['🚨 ⚠️ Release: x', '- ⚠️ Release: x', '> 🚨 Claim: x'].map((l) => miss68(l).form).join(','), 'leading-sigil,leading-sigil,leading-sigil');
+  b(BATTERY68, '#18829 control: a sigil AFTER the word is not in the way — the line reads, and is no near miss', [markerMatches(RELEASE_COMMENT_MARKER, 'Release: 🚨 session x'), ownershipMarkerNearMisses(rows68('Release: 🚨 session x')).length].join(','), 'true,0');
+  b(BATTERY68, '#18829 control: a sigil-led line WITHOUT the word is silent — 「⚠️ 本条读数…」 and 「⇒ …」 are prose', ownershipMarkerNearMisses(rows68('⚠️ 本条读数取自同一动作:2026-09-17T15:54Z。\n⇒ the next seat re-reads the card\n⭐ Claimed by nobody yet')).length, 0);
+  b(BATTERY68, '#18829 control: a sigil-led directive with NO record after it is silent — a census, ⛔ not a sigil count', ownershipMarkerNearMisses(rows68('🚨 Release:')).length, 0);
+  b(BATTERY68, '#18829 ⛔ the #18373 PROSE specimen itself — a sigil before 撤回, an act the protocol never declared — is named by NO form: reading the verb is the channel #18773 A retires (⛔ B), so here it is prose, and its thread is named by the cross-author row one file over', ownershipMarkerNearMisses(rows68(SIGIL_18373_PROSE)).length, 0);
+  b(BATTERY68, '#18829 ⛔ CONTROL: the specimen really opens with the sigil-and-bold the form reads — only the word is missing', SIGIL_18373_PROSE.startsWith('🚨 **') && SIGIL_RELEASE.startsWith('🚨 **'), true);
+  b(BATTERY68, '#18829 ordering: the form sits between `separator` and the two #18831 additions', OWNERSHIP_MARKER_NEAR_MISS_FORMS.map((f) => f.id).slice(4, 7).join(','), 'separator,leading-sigil,heading-bare');
+  b(BATTERY68, '#18829 ordering: …and steals no older form\'s fixture — every earlier member is still named by ITSELF', OWNERSHIP_MARKER_NEAR_MISS_FORMS.slice(0, 5).every((f) => miss68(f.example).form === f.id), true);
+  b(BATTERY68, '#18829 boundary: a heading AND a sigil is named by no form — unseen on any thread read, left unnamed rather than guessed', ownershipMarkerNearMisses(rows68('## 🚨 Release: x')).length, 0);
 
   // SILENCE CONTROLS — a census that names prose is a census nobody reads, and
   // every one of these is a line MEASURED on the open board.

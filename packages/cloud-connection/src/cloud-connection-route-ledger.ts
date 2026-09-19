@@ -100,7 +100,7 @@ export interface CloudConnectionRouteLedgerEntry {
 }
 
 export const CLOUD_CONNECTION_ROUTE_LEDGER: readonly CloudConnectionRouteLedgerEntry[] = [
-    // ── cloud binding + install proxy (ADR-0008 Phase 1) ───────────────
+    // ── cloud binding + install proxy (cloud ADR-0008 Phase 1) ───────────────
     // Same-origin doors for the Console's Setup surface. The SPA cannot call
     // the control plane from a tenant subdomain (cross-origin, cross-site
     // cookie), so the runtime answers on its own origin and talks to cloud
@@ -125,7 +125,7 @@ export const CLOUD_CONNECTION_ROUTE_LEDGER: readonly CloudConnectionRouteLedgerE
         note:
             'begins an RFC 8628 device-code bind — the RUNTIME is the genuine device-flow client; it asks cloud for a device '
             + 'and user code and hands them to the Setup UI for an operator to approve in the cloud console. An SDK method '
-            + 'here would put the device-flow client in the browser, which is the opposite of what ADR-0008 Phase 1 wires.',
+            + 'here would put the device-flow client in the browser, which is the opposite of what cloud ADR-0008 Phase 1 wires.',
     },
     {
         route: 'POST /api/v1/cloud-connection/bind/poll',

@@ -26,7 +26,7 @@ import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
 // engine is what `metadata-protocol.validateData` returns, so letting the two
 // drift would put a translation layer between a verdict and its contract.
 import type { ValidateDataIssue, ValidateDataResponse } from '@objectstack/spec/api';
-import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readAutonumberCounter, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY, isCurrentUserDefaultToken, isNowDefaultToken, isMultiValueField, driverSupportsTransactions } from '@objectstack/spec/data';
+import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readAutonumberCounter, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, referenceCarrierOf, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY, isCurrentUserDefaultToken, isNowDefaultToken, isMultiValueField, driverSupportsTransactions } from '@objectstack/spec/data';
 // [#5158] Door 2's lowering sink — the SAME pair the protocol face (Door 1)
 // runs, so `FilterArray` has exactly one lowering in the product.
 import {
@@ -13093,7 +13093,24 @@ export class ObjectQL implements IObjectQLEngine {
         if (!childName || !fields) continue;
         for (const fdef of Object.values(fields)) {
           if (!fdef || (fdef.type !== 'master_detail' && fdef.type !== 'lookup')) continue;
-          const ref = fdef.reference;
+          // [#18550] The carrier is read through the ONE arbiter, so a
+          // `reference` no reader can read REFUSES here instead of reading as
+          // "this child does not reference `name`". The two answers stay
+          // different on purpose:
+          //
+          //  - ABSENCE (`undefined` / `null` / `''`) is unchanged and still
+          //    silent. `referenceCarrierOf` answers `undefined` for all three
+          //    and this `continue` skips the field, which is what a field that
+          //    names no target legitimately means (`FieldSchema.reference` is
+          //    `.optional()`, `StrictField` declares it nullable).
+          //  - UNREADABILITY is the loud one. An object- or array-valued
+          //    carrier was TRUTHY here and then failed both name comparisons
+          //    below, so the relation was dropped from the set silently — and
+          //    this function's `'none'` is, by its own docblock above, the one
+          //    verdict that asserts something POSITIVE about the schema
+          //    ("nothing references this object"). An unreadable carrier can
+          //    no more support that claim than an unreadable registry can.
+          const ref = referenceCarrierOf(fdef, 'ObjectQL.planCascadeAtomicity');
           if (!ref) continue;
           let resolvedRef: string | undefined;
           try { resolvedRef = this.resolveObjectName(ref); } catch { resolvedRef = undefined; }
@@ -13541,7 +13558,14 @@ export class ObjectQL implements IObjectQLEngine {
       if (!childName || !fields) continue;
       for (const [fieldName, fdef] of Object.entries(fields)) {
         if (!fdef || (fdef.type !== 'master_detail' && fdef.type !== 'lookup')) continue;
-        const ref = fdef.reference;
+        // [#18550] Same arbiter, same absence-vs-unreadability split as
+        // {@link ObjectQL.planCascadeAtomicity} states above — and this is the
+        // seam where the silence was measurable end to end: an unreadable
+        // carrier made the relation invisible to the cascade, so `delete()`
+        // removed the parent, left a `master_detail` child behind, and
+        // reported success. No `restrict` refusal, no `set_null`, nothing
+        // logged. Absence still `continue`s here exactly as before.
+        const ref = referenceCarrierOf(fdef, 'ObjectQL.cascadeDeleteRelations');
         if (!ref) continue;
         // Match the target object by raw or resolved name.
         let resolvedRef: string | undefined;

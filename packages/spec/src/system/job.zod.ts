@@ -10,11 +10,51 @@ import { CronExpressionInputSchema } from '../shared/expression.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
 import { retiredKey } from '../shared/retired-key';
+import { isValueDomainMember } from '../shared/value-domain.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
+
+/**
+ * The cron zone's authoring door — `iana_time_zone` membership, judged by the
+ * package's own shared predicate (#16292).
+ *
+ * The same concept is judged by the same predicate at four columns already
+ * (`sys_business_unit.timezone`, `sys_organization.timezone`, `sys_job.timezone`,
+ * `sys_report_schedule.timezone`, all via `valueDomain: 'iana_time_zone'`), and
+ * `sys_job.timezone` is a WRITE-ONLY mirror — `DbJobAdapter.upsertJobRow` writes
+ * it and nothing reads it back — so that column never judges the value the
+ * scheduler actually honours. This is the separate, earlier door: the value an
+ * author writes here is the one `toBoundaryJobSchedule` carries to
+ * `CronJobAdapter.schedule`, where croner (constructed with a callback) throws on
+ * a non-member and `AppPlugin` logs a per-job FAILED TO SCHEDULE at `error`. The
+ * job is then declared and never runs. Refusing at parse moves that discovery
+ * from "whichever environment boots first" to `defineJob` / `os build`.
+ *
+ * ⚠️ Membership is the runtime's ICU answer, not a checked-in list — the
+ * `Intl.DateTimeFormat` probe the module header of `shared/value-domain.zod.ts`
+ * argues for at length (the `Intl.supportedValuesOf('timeZone')` enumeration
+ * omits `UTC`, this platform's own default). That is deliberate and is the SAME
+ * exposure the four columns, the settings door and `resolveAuthzContext` already
+ * carry: the accept set here is exactly what every `Intl`-based consumer
+ * downstream accepts, so parse-time and schedule-time cannot disagree on one
+ * host. ⛔ Do not substitute a pattern or a pinned zone list — both re-admit
+ * `Europe/Munich`, a shape-valid zone that does not exist.
+ */
+const CronTimezoneSchema = z.string().refine(
+  (value) => isValueDomainMember('iana_time_zone', value),
+  {
+    error: (issue) =>
+      `'${String(issue.input)}' is not an IANA time zone identifier. `
+      + `Write a zone the platform can honour — 'UTC', 'Asia/Shanghai', 'America/New_York' — `
+      + `not a UTC offset ('UTC+8'), a Windows zone name ('China Standard Time') or a `
+      + `zone that does not exist ('Europe/Munich'). Membership is the Intl.DateTimeFormat `
+      + `probe, the same judge as valueDomain: 'iana_time_zone' on sys_job.timezone.`,
+  },
+);
+
 export const CronScheduleSchema = lazySchema(() => z.object({
   type: z.literal('cron'),
   expression: CronExpressionInputSchema.describe('Cron expression — cron`0 0 * * *` for daily at midnight. Build emits {dialect:"cron",source} envelope.'),
-  timezone: z.string().optional().default('UTC').describe('Timezone for cron execution (e.g., "America/New_York")'),
+  timezone: CronTimezoneSchema.optional().default('UTC').describe('IANA time zone the cron expression is evaluated in (e.g., "America/New_York"). Refused at parse unless it is a member of `iana_time_zone` — the same closed domain and the same `Intl.DateTimeFormat` membership probe `sys_job.timezone` is written against; a UTC offset such as "UTC+8" is not one.'),
 }));
 
 /**

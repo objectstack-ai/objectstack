@@ -274,6 +274,25 @@
 //     function — the silent direction, chosen because the loud one would fail
 //     tests over a parse this file cannot afford to get right (see `asPath` for
 //     why evaluating instead of reading was rejected).
+//   - **The load is read one hop through a same-package helper (#17658).** The
+//     scan above wants a LITERAL specifier sitting inside an import form, and a
+//     wrapper offers neither site: `loadOptionalPackage('@objectstack/cloud-
+//     connection')` hands the specifier to a helper that imports a VARIABLE, so
+//     the file got no `clocked` entry AND no `moduleScope` entry — both of the
+//     conditions the diagnostic needs, unmet at once. The result was silence,
+//     with CI green, over a probe measured at 5005ms against the default 5000ms
+//     `testTimeout` (#17180, on a built worktree). The hop is followed when the
+//     callee is declared in the test file itself, or imported through a RELATIVE
+//     specifier resolving INSIDE this package, and that callee's body performs a
+//     dynamic load of a NON-literal specifier. A callee reached through a bare
+//     specifier is another package's code and is not followed; one that imports
+//     a literal is already read at its own site, and following it would report
+//     the same load twice.
+//     ⛔ REACH, not population. The specifier reported is still one this package
+//     was already measured to resolve through `dist/` — the same set, read at the
+//     same granularity. A specifier whose ONLY mention anywhere in a package is
+//     such a call never enters that measurement and is still not reported;
+//     widening the population is a different card.
 //
 // ── The registry, and why it is shaped like this ────────────────────────────
 //
@@ -819,6 +838,18 @@ function maskedProjections(source) {
 }
 
 /**
+ * One file's projections and its function-body ranges, computed once.
+ *
+ * Both readers below want all three, and masking is the expensive half of this
+ * gate (see `importCache`), so a file is projected once and the context handed
+ * down rather than re-derived per rule.
+ */
+function sourceScanContext(source) {
+  const { commentsOnly, codeOnly } = maskedProjections(source);
+  return { commentsOnly, codeOnly, ranges: functionBodyRanges(codeOnly) };
+}
+
+/**
  * The `<` matching a closing `>`, for a return-type annotation. -1 if none.
  *
  * Balanced groups inside the argument list are jumped through `openOf` rather
@@ -961,9 +992,8 @@ function functionBodyRanges(code) {
  * function body, with the line and the spelling the diagnostic quotes. Type-only
  * clauses and `typeof import(…)` queries appear in neither: they never resolve.
  */
-function moduleLoadSites(source) {
-  const { commentsOnly, codeOnly } = maskedProjections(source);
-  const ranges = functionBodyRanges(codeOnly);
+function moduleLoadSites(source, ctx = sourceScanContext(source)) {
+  const { commentsOnly, codeOnly, ranges } = ctx;
   const inFunction = (index) => ranges.some(([start, end]) => index > start && index < end);
   const moduleScope = new Set();
   const clocked = [];
@@ -998,23 +1028,180 @@ function lineOf(source, index) {
   return line;
 }
 
+// ── the one hop: a load routed through a same-package helper (#17658) ─────
+
 /**
- * The clocked-window findings for one test file: a dynamic load of a specifier
- * this package resolves through `dist/`, inside a function body, with no
- * module-scope load of the same specifier anywhere in the file.
+ * A dynamic load whose specifier is NOT a literal — `await import(specifier)`.
+ *
+ * This is what makes a callee a loader rather than an ordinary function: the
+ * specifier it loads is whatever it was handed, so the literal lives at the CALL
+ * SITE and nowhere else. A helper importing a literal is deliberately excluded —
+ * the scanner above already reads that site, and reading it twice would report
+ * one load as two.
  */
-function clockedWindowFindings(file, offendingSpecs) {
+const VARIABLE_LOAD = /\b(?:import|require)\s*\(\s*[A-Za-z_$]/;
+
+/**
+ * A call whose first argument is a quoted string, with the callee captured.
+ * The cheap pre-filter and the site reader both run this; `lastIndex` is reset
+ * at every entry because it is shared.
+ */
+const CALL_WITH_LITERAL = /\b([A-Za-z_$][\w$]*)\s*\(\s*['"]([^'"]+)['"]/g;
+
+/**
+ * A relative `import … from './x.js'` — the only hop this rule follows. The
+ * clause class is `IMPORT_PATTERNS`' own, bounded to one statement for the
+ * reason #12555 records.
+ */
+const RELATIVE_IMPORT_CLAUSE = /\bimport\s+([^;'"]*?)\s*from\s*['"](\.[^'"]*)['"]/g;
+
+/**
+ * Names this source declares whose function body performs a `VARIABLE_LOAD`.
+ *
+ * Both spellings a helper is written in are read, and the value form must BE a
+ * function (`= (`, `= function`, `= x =>`) so that a plain `const` cannot adopt
+ * the body of whatever function happens to follow it. A declaration owns the
+ * first body range that opens after it and before the NEXT declaration, which is
+ * what keeps a multi-line signature — `}): Promise< { … } > {`, the shape that
+ * defeated the brace scanner once already — attached to its own function.
+ */
+const HELPER_DECLARATION =
+  /\b(?:export\s+)?(?:async\s+)?function(?:\s*\*)?\s+([A-Za-z_$][\w$]*)|\b(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s+)?(?:\(|function\b|[A-Za-z_$][\w$]*\s*=>)/g;
+
+function dynamicVariableLoaders(ctx) {
+  if (!VARIABLE_LOAD.test(ctx.codeOnly)) return new Set();
+  const ranges = [...ctx.ranges].sort((a, b) => a[0] - b[0]);
+  const decls = [];
+  HELPER_DECLARATION.lastIndex = 0;
+  let match;
+  while ((match = HELPER_DECLARATION.exec(ctx.codeOnly))) decls.push({ name: match[1] ?? match[2], at: match.index });
+  const names = new Set();
+  for (let i = 0; i < decls.length; i++) {
+    const next = decls[i + 1]?.at ?? ctx.codeOnly.length;
+    const body = ranges.find(([start]) => start > decls[i].at && start < next);
+    if (!body) continue;
+    if (VARIABLE_LOAD.test(ctx.codeOnly.slice(body[0], body[1]))) names.add(decls[i].name);
+  }
+  return names;
+}
+
+/** `path -> loader names`, for the whole process: a helper serves many tests. */
+const helperLoaderCache = new Map();
+
+function helperLoadersOf(helperFile) {
+  const cached = helperLoaderCache.get(helperFile);
+  if (cached) return cached;
+  let names;
+  try {
+    names = dynamicVariableLoaders(sourceScanContext(readFileSync(helperFile, 'utf8')));
+  } catch {
+    names = new Set();
+  }
+  helperLoaderCache.set(helperFile, names);
+  return names;
+}
+
+/** Is `candidate` inside `dir`? `relative()` climbing out is the whole test. */
+function isInsidePackage(dir, candidate) {
+  const rel = relative(dir, candidate);
+  return rel.length > 0 && !rel.startsWith('..');
+}
+
+/**
+ * `local name -> how the hop is spelled`, for every binding in this test file
+ * that routes a specifier into a dynamic load one frame down.
+ *
+ * Two sources, and no third: a loader declared in this very file, and one
+ * imported through a relative specifier that resolves INSIDE this package. A
+ * bare specifier is another package's code — following it would make this rule
+ * a cross-package walk, which is a different reader and a different card.
+ */
+function helperLoaderBindings(file, ctx, packageDir) {
+  const bindings = new Map();
+  for (const name of dynamicVariableLoaders(ctx)) bindings.set(name, 'declared in this file');
+  RELATIVE_IMPORT_CLAUSE.lastIndex = 0;
+  let match;
+  while ((match = RELATIVE_IMPORT_CLAUSE.exec(ctx.commentsOnly))) {
+    const clause = match[1];
+    if (isTypeOnlyClause(clause)) continue;
+    const target = resolveRelative(file, match[2]);
+    if (!target || !isInsidePackage(packageDir, target)) continue;
+    const loaders = helperLoadersOf(target);
+    if (loaders.size === 0) continue;
+    const braced = clause.trim().match(/\{([\s\S]*)\}/);
+    if (!braced) continue;
+    for (const piece of braced[1].split(',')) {
+      const spelt = piece.trim();
+      if (!spelt || /^type\s/.test(spelt)) continue;
+      const renamed = spelt.match(/^([A-Za-z_$][\w$]*)\s+as\s+([A-Za-z_$][\w$]*)$/);
+      const exported = renamed ? renamed[1] : spelt;
+      const local = renamed ? renamed[2] : spelt;
+      if (loaders.has(exported)) bindings.set(local, `via \`${match[2]}\``);
+    }
+  }
+  return bindings;
+}
+
+/**
+ * The clocked loads this file pays through a helper: a call, inside a function
+ * body, handing a literal specifier to a binding that loads a variable.
+ *
+ * Shaped like a `clocked` entry so the diagnostic needs no second spelling —
+ * `form` is the callee, so the message quotes the call the author actually
+ * wrote, and `via` names the hop.
+ */
+function helperRoutedLoadSites(file, ctx, offendingSpecs, packageDir) {
+  const bindings = helperLoaderBindings(file, ctx, packageDir);
+  if (bindings.size === 0) return [];
+  const sites = [];
+  CALL_WITH_LITERAL.lastIndex = 0;
+  let match;
+  while ((match = CALL_WITH_LITERAL.exec(ctx.commentsOnly))) {
+    const [, callee, spec] = match;
+    if (!bindings.has(callee)) continue;
+    if (!offendingSpecs.has(spec)) continue;
+    if (!ctx.ranges.some(([start, end]) => match.index > start && match.index < end)) continue;
+    sites.push({ spec, form: callee, line: lineOf(ctx.source, match.index), via: bindings.get(callee) });
+  }
+  return sites;
+}
+
+/** Does any call in this file hand a literal from the measured set to anything? */
+function mightRouteALoad(source, offendingSpecs) {
+  CALL_WITH_LITERAL.lastIndex = 0;
+  let match;
+  while ((match = CALL_WITH_LITERAL.exec(source))) if (offendingSpecs.has(match[2])) return true;
+  return false;
+}
+
+/**
+ * The clocked-window findings for one test file: a load of a specifier this
+ * package resolves through `dist/`, paid inside a function body, with no
+ * module-scope load of the same specifier anywhere in the file.
+ *
+ * Two readers, one population. The first wants a literal specifier inside an
+ * import form; the second follows one hop into a same-package helper that
+ * imports a variable (#17658). Findings are merged in source order and deduped
+ * per specifier, so a file that pays the same load both ways reports once.
+ */
+function clockedWindowFindings(file, offendingSpecs, packageDir) {
   let source;
   try {
     source = readFileSync(file, 'utf8');
   } catch {
     return [];
   }
-  if (!/\b(?:import|require)\s*\(/.test(source)) return [];
-  const { moduleScope, clocked } = moduleLoadSites(source);
+  const direct = /\b(?:import|require)\s*\(/.test(source);
+  const routed = mightRouteALoad(source, offendingSpecs);
+  if (!direct && !routed) return [];
+  const ctx = { source, ...sourceScanContext(source) };
+  const { moduleScope, clocked } = moduleLoadSites(source, ctx);
+  const sites = routed
+    ? [...clocked, ...helperRoutedLoadSites(file, ctx, offendingSpecs, packageDir)].sort((a, b) => a.line - b.line)
+    : clocked;
   const seen = new Set();
   const findings = [];
-  for (const site of clocked) {
+  for (const site of sites) {
     if (!offendingSpecs.has(site.spec)) continue;
     if (moduleScope.has(site.spec)) continue;
     if (seen.has(site.spec)) continue;
@@ -1689,7 +1876,7 @@ function scan(root) {
     const clockedLoads = [];
     if (offendingSpecs.size > 0) {
       for (const file of reachable.testFiles.sort()) {
-        for (const finding of clockedWindowFindings(file, offendingSpecs)) {
+        for (const finding of clockedWindowFindings(file, offendingSpecs, pkg.dir)) {
           clockedLoads.push({ ...finding, file: relative(root, file) });
         }
       }
@@ -1830,6 +2017,12 @@ function check(root, registry) {
     for (const load of pkg.clockedLoads ?? []) {
       failures.push(
         `${load.file}:${load.line}: \`${load.form}('${load.spec}')\` is paid inside a function body — a CLOCKED window.\n` +
+          (load.via
+            ? `    The literal specifier is the ARGUMENT: \`${load.form}\` (${load.via}) hands it to a dynamic\n` +
+              '    `import()` of a VARIABLE one frame down, so the specifier is literal HERE and nowhere else.\n' +
+              '    The transform is identical either way — the indirection changes who writes the specifier,\n' +
+              '    not what gets loaded or when.\n'
+            : '') +
           `    This file has no module-scope load of \`${load.spec}\`, and this package resolves that specifier\n` +
           '    through `dist/`, so the first call transforms that dependency\'s whole module graph while a\n' +
           "    `testTimeout` or `hookTimeout` is running. Measured on the incident this rule comes from: 3.1-3.6s\n" +
@@ -2435,6 +2628,71 @@ function buildFixtureTree() {
       '});\n',
   });
 
+  // ── (27-28) THE ONE HOP (#17658) ────────────────────────────────
+  //
+  // The shape the literal scanner cannot see: the specifier is a literal, but it
+  // sits in ARGUMENT position, and the `import()` one frame down takes a
+  // VARIABLE. Measured on the real instance (`packages/cli/src/utils/
+  // optional-package.test.ts`, #17180): the file got no `clocked` entry and no
+  // `moduleScope` entry, so both of the diagnostic's conditions were unmet at
+  // once and the gate said nothing while the probe took 5005ms against a 5000ms
+  // `testTimeout`.
+  //
+  // A helper living in ANOTHER package, exporting an identically-shaped loader,
+  // so the "one hop, SAME package" bound is pinned by a case that would really
+  // be reported if the hop were followed through a bare specifier.
+  fixture(root, 'packages/remote-loader', {
+    'package.json': ARTIFACT_MANIFEST('@fx/remote-loader'),
+    'src/index.ts':
+      'export async function loadThing(specifier: string): Promise<unknown> {\n' +
+      '  return await import(specifier);\n' +
+      '}\n',
+  });
+
+  // (27) VIOLATING, routed. `ledger.test.ts` is what puts the three specifiers
+  // in this package's measured set — exactly how `@objectstack/cloud-connection`
+  // is in `@objectstack/cli`'s while the routed file pays no module-top load of
+  // it. It is a separate file on purpose: a module-top load in THIS file would
+  // pay the transform during collection and the finding would be wrong.
+  fixture(root, 'packages/clocked-helper-routed', {
+    'package.json': ARTIFACT_MANIFEST('@fx/clocked-helper-routed'),
+    'src/loader.ts':
+      'export async function loadThing(specifier: string): Promise<unknown> {\n' +
+      '  return await import(specifier);\n' +
+      '}\n' +
+      'export function describeThing(name: string): string {\n' +
+      '  return name;\n' +
+      '}\n',
+    'src/ledger.test.ts': "import '@fx/core';\nimport '@fx/core/logger';\nimport '@fx/core/nested';\nexport default 1;\n",
+    'src/thing.test.ts':
+      "import { it } from 'vitest';\n" +
+      "import { loadThing, describeThing } from './loader.js';\n" +
+      "import { loadThing as foreignLoad } from '@fx/remote-loader';\n" +
+      "it('y', async () => {\n" +
+      "  const mod = await loadThing('@fx/core');\n" +
+      "  const label = describeThing('@fx/core/logger');\n" +
+      "  const other = await foreignLoad('@fx/core/nested');\n" +
+      '  return [mod, label, other];\n' +
+      '});\n',
+  });
+
+  // (28) THE CONTROL. The same routed call, in a file that already pays the
+  // load at module top — the remedy this gate prints, and the state the real
+  // instance is in today. Reporting it would mean the reader had stopped asking
+  // WHERE the load is paid and started reporting the indirection itself.
+  fixture(root, 'packages/clocked-helper-routed-paid', {
+    'package.json': ARTIFACT_MANIFEST('@fx/clocked-helper-routed-paid'),
+    'src/loader.ts':
+      'export async function loadThing(specifier: string): Promise<unknown> {\n' +
+      '  return await import(specifier);\n' +
+      '}\n',
+    'src/thing.test.ts':
+      "import { it } from 'vitest';\n" +
+      "import '@fx/core';\n" +
+      "import { loadThing } from './loader.js';\n" +
+      "it('y', async () => loadThing('@fx/core'));\n",
+  });
+
   return root;
 }
 
@@ -2466,7 +2724,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the canary (#8020)': 14,
   'the cross-boundary walk (#8351)': 7,
   'the latent half (#9674)': 8,
-  'the clocked-window rule (#10126)': 12,
+  'the clocked-window rule (#10126)': 19,
   'the import clause is bounded to ONE statement (#12555)': 11,
   'the declared population must stay READABLE by the dispatch deriver': 11,
   'the declaration must still BE the workspace (#11510)': 22,
@@ -2855,6 +3113,63 @@ function selfTest() {
     expect(
       clockedIn('packages/clocked-literal-brace/src/thing.test.ts:4').every((f) => f.includes("import('@fx/core')")),
       'the clocked-window finding for the literal-brace fixture lost or renamed its specifier',
+    );
+
+    // ── THE ONE HOP (#17658) ──────────────────────────────────────────────
+    //
+    // Needles carry the FULL path for the reason the `clocked-load` pair
+    // records: `packages/clocked-helper-routed` is a prefix of
+    // `packages/clocked-helper-routed-paid`, so a loose needle would read the
+    // control fixture's silence as this one's.
+    expect(
+      clockedIn('packages/clocked-helper-routed/src/thing.test.ts:5').some((f) =>
+        f.includes("loadThing('@fx/core')"),
+      ),
+      'a load routed one hop through a same-package helper went unseen — the literal scanner is still the only reader (#17658)',
+    );
+    // The diagnostic has to say WHY this call is a load at all, or the author
+    // reads it as a false positive: the callee is named, the hop is named, and
+    // the reason the specifier is literal only here is stated.
+    expect(
+      clockedIn('packages/clocked-helper-routed/src/thing.test.ts:5').length === 1 &&
+        clockedIn('packages/clocked-helper-routed/src/thing.test.ts:5').every(
+          (f) => f.includes('via `./loader.js`') && f.includes('VARIABLE'),
+        ),
+      'the routed finding did not name the hop it followed — an author cannot tell it from a false positive',
+    );
+    // …and it still prints the one remedy, which is unchanged by the routing.
+    expect(
+      clockedIn('packages/clocked-helper-routed/src/thing.test.ts:5').length === 1 &&
+        clockedIn('packages/clocked-helper-routed/src/thing.test.ts:5').every(
+          (f) => f.includes('COLLECTION') && f.includes("import '@fx/core';"),
+        ),
+      'the routed finding printed no module-top import to add — the remedy is the same one, not a new one',
+    );
+    // BOUND ONE: the callee must be a LOADER. `describeThing` is exported from
+    // the same helper module and takes the same kind of argument, so a reader
+    // that follows the module rather than the function reports this too.
+    expect(
+      clockedIn('packages/clocked-helper-routed/src/thing.test.ts').every((f) => !f.includes('@fx/core/logger')),
+      'a call to a non-loading export of the same helper module was reported — the hop follows the MODULE, not the function',
+    );
+    // BOUND TWO: ONE hop, SAME package. `@fx/remote-loader` exports a loader of
+    // exactly the shape followed above, reached through a BARE specifier — so
+    // this leg fails loudly if the rule ever becomes a cross-package walk.
+    expect(
+      clockedIn('packages/clocked-helper-routed/src/thing.test.ts').every((f) => !f.includes('@fx/core/nested')),
+      'a helper reached through a BARE specifier was followed — the one-hop rule has become a cross-package walk',
+    );
+    // One file, one finding: the two bounds above are the whole difference.
+    expect(
+      clockedIn('packages/clocked-helper-routed/src/thing.test.ts').length === 1,
+      'the one-hop reader did not report exactly the one routed load this fixture pays in a clocked window',
+    );
+    // THE CONTROL: the same routed call with the module top already paying it.
+    // This is the state the real #17180 instance is in today, so a reader that
+    // reports it has turned the remedy into the defect.
+    expect(
+      clockedIn('packages/clocked-helper-routed-paid/src/thing.test.ts').length === 0,
+      'a routed call in a file that already loads the specifier at module top was reported — that is the remedy, not the defect',
     );
 
     // ── the import clause is bounded to ONE statement (#12555) ────────────

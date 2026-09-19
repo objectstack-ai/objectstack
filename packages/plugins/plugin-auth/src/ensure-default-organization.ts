@@ -34,13 +34,26 @@
  *      `plugin-security`'s `resolvePlatformAdminStanding` serves the audit
  *      surface with, so the account this helper binds is the account the
  *      audit surface reports as holding standing.
- *   2. **Legacy grant anchor** (Choice 4A + P5): the oldest unscoped
- *      `sys_user_permission_set` row on `admin_full_access`, exactly as
- *      before. This is what still anchors `single`-posture deployments
- *      (first-user promotion keeps writing the grant row there, by ruling)
- *      and pre-migration walled deployments inside P5's honoured window. It
- *      is removed with the legacy-grant removal leg (design §5 step 6), not
- *      here — nothing in this leg is subtractive.
+ *   2. **Legacy grant anchor** (Choice 4A), **under a NON-WALLED posture
+ *      only**: the oldest unscoped `sys_user_permission_set` row on
+ *      `admin_full_access`. This is what still anchors `single`-posture
+ *      deployments — first-user promotion keeps writing the grant row there,
+ *      by ruling, and #11979 is the card that disposes of it.
+ *
+ *      ⛔ Under a walled posture this anchor is RETIRED. P5's honoured
+ *      migration window closed with the legacy-grant removal leg (design §5
+ *      step 6), which keyed the derivation site off under a wall, and this
+ *      helper is keyed with it on the same expression. It has to be: this
+ *      reader does not merely COUNT administrators, it CONFERS — it writes the
+ *      selected account a `sys_member { role: 'owner' }` row on the Default
+ *      Organization and hands them the org's seeded rows. Left unkeyed, a
+ *      walled rig still carrying a legacy row would bind that holder as an
+ *      organization owner while `resolveAuthzContext` grades the same account
+ *      MEMBER and the bootstrap logs that the deployment has zero platform
+ *      administrators — one anchor, two readers, opposite answers, in one
+ *      boot. ⚠️ Reachable on a walled rig through `@objectstack/organizations`,
+ *      which wraps this helper; plugin-auth's own wiring already skips it
+ *      under a wall.
  *
  * Strategy (idempotent, run on `kernel:ready` and after every write matched
  * by {@link isDefaultOrganizationBootstrapTrigger}):
@@ -58,6 +71,8 @@
  */
 
 import { matchesConfiguredPlatformAdmin, resolvePlatformAdminEmails } from '@objectstack/core';
+import { postureEnforcesWall } from '@objectstack/spec/security';
+import { resolveTenancyPosture } from '@objectstack/types';
 
 interface BootstrapLogger {
   info: (message: string, meta?: Record<string, any>) => void;
@@ -188,12 +203,16 @@ function oldestFirst(a: any, b: any): number {
  *    `true`, and on a fresh walled rig it is the ONLY write that ever will —
  *    post-L4 no grant row is minted there, so a grant-insert trigger never
  *    fires again (the interim window this leg closes).
- *  - **`sys_user_permission_set` insert/create** — the LEGACY anchor's
- *    trigger, kept verbatim: `single`-posture first-user promotion still
- *    lands standing as a grant insert (Choice 4A), and P5's honoured window
- *    still admits legacy walled grants. This arm is retired with the
- *    legacy-grant removal leg (design §5 step 6), together with the grant
- *    read it serves — ⛔ not as a side effect of this re-point.
+ *  - **`sys_user_permission_set` insert/create**, **under a NON-WALLED
+ *    posture only** — the LEGACY anchor's trigger: `single`-posture
+ *    first-user promotion still lands standing as a grant insert (Choice 4A).
+ *    ⛔ Under a wall it is retired, keyed on the same expression as the grant
+ *    read it serves, because a grant insert can no longer move the answer
+ *    there. This is a COST arm and nothing more — the helper is idempotent and
+ *    answers `no_admin` from that grant under a wall either way, so firing on
+ *    it bought a re-run that could only repeat itself. The sibling predicate
+ *    `shouldReplayBootstrapFor` in `plugin-security` already spells the same
+ *    walled exclusion for the same reason.
  *
  * A `sys_user` DELETE never grows the population (the simulation direction
  * `last-admin-guard.ts` documents), and an update touching neither standing
@@ -217,6 +236,8 @@ export function isDefaultOrganizationBootstrapTrigger(opCtx: {
     return false;
   }
   if (opCtx?.object === 'sys_user_permission_set') {
+    // [#11663 L5] Retired under a wall, with the grant read it serves.
+    if (postureEnforcesWall(resolveTenancyPosture())) return false;
     return op === 'create' || op === 'insert';
   }
   return false;
@@ -290,9 +311,26 @@ export async function ensureDefaultOrganization(
   let adminUserId: string | undefined = await findConfigAnchoredAdminUserId(ql);
 
   // 2. LEGACY grant anchor (oldest cross-tenant `admin_full_access` grant) —
-  //    still what anchors `single` posture and P5's honoured migration
-  //    window; removed with the legacy-grant removal leg (design §5 step 6).
-  if (!adminUserId) {
+  //    still what anchors `single` posture (Choice 4A; #11979 disposes of it),
+  //    and ⛔ RETIRED under a wall [#11663 L5].
+  //
+  //    The key is the derivation site's own expression, read from the
+  //    ENVIRONMENT rather than the engine, so it adds no query and cannot
+  //    disagree with `resolve-authz-context.ts` §6b about which postures the
+  //    row anchors. ⛔ It is NOT a policy of this helper's own: this file asks
+  //    the population question「which user is the platform admin?」, and an
+  //    answer that differs from the derivation's is the dual-track the
+  //    migration window exists to close — worse here than at the break-glass
+  //    guard, because that reader counts and this one CONFERS (a
+  //    `sys_member { role: 'owner' }` row and the org's seeded rows).
+  //
+  //    Under a wall with no verified declared owner yet, the correct answer is
+  //    `no_admin`: nobody holds platform standing on that rig, so there is
+  //    nobody to bind. The declared owner's verifying update re-runs this
+  //    helper through the trigger predicate above, and the binding happens
+  //    then — the window is a WAIT, not a silent mis-binding.
+  const legacyGrantAnchorRetired = postureEnforcesWall(resolveTenancyPosture());
+  if (!adminUserId && !legacyGrantAnchorRetired) {
     const adminPs = await tryFind(ql, 'sys_permission_set', { name: 'admin_full_access' }, 1);
     if (adminPs.length === 0 || !adminPs[0].id) {
       return { defaultOrgCreated: false, memberCreated: false, reason: 'no_admin' };

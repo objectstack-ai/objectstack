@@ -3,10 +3,18 @@
 /**
  * bootstrapDeclaredWebhooks — the ingestion bridge that closes #3461.
  *
- * Verifies that stack/connector-declared `webhook` metadata (spec shape:
- * `object` / `isActive`) is materialized into `sys_webhook` data rows
- * (`object_name` / `active` / `definition_json`), idempotently and without
- * clobbering admin edits — and that the dispatcher then sees those rows.
+ * Verifies that STACK-declared `webhook` metadata (spec shape: `object` /
+ * `isActive`) is materialized into `sys_webhook` data rows (`object_name` /
+ * `active` / `definition_json`), idempotently and without clobbering admin
+ * edits — and that the dispatcher then sees those rows.
+ *
+ * This header used to say "stack/connector-declared", mirroring the same false
+ * clause the implementation's docblock carried: a connector's nested
+ * `webhooks[]` never becomes a `webhook` metadata item and so never reaches
+ * this bridge at all. Nothing in THIS file ever exercised a connector — every
+ * fixture below seeds `declared.webhook` directly — so the word was a claim the
+ * suite did not make. The claim it does not make is measured against a real
+ * engine next door, in `bootstrap-declared-webhooks.connector-nested.test.ts`.
  */
 
 import { describe, expect, it, vi } from 'vitest';

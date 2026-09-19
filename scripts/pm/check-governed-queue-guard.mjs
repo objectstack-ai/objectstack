@@ -352,6 +352,73 @@
  * revival of the retired sha pin — it is the RECORD's own identity test, and it
  * applies to nothing but this tier.
  *
+ * ## The FOURTH leg: the SIZE line (#19036, maintainer ruling 2026-09-18)
+ *
+ * Everything above is keyed on PATHS or on a LABEL. On 2026-09-18 the
+ * maintainer ruled a limb keyed on the NUMBER, verbatim and untranslated:
+ *
+ *   > 修改代码量超过某个行数（比如5000）就应该人工审核
+ *
+ * PR #19033 landed it seat-side: `testVerdict(paths, { size })` in the sibling
+ * carries a `size` limb, `HUMAN_MERGE_LINE_THRESHOLD` (5,000) is declared
+ * there ONCE, the comparison is `additions + deletions` STRICTLY greater, and
+ * generated files are INCLUDED — the case that prompted the ruling, PR #18971
+ * (+238,310 / −119, 237,706 of them regenerated), touched no governed path and
+ * landed through THIS leg's queue build on an AI review alone. The seat-side
+ * `--test` / `--pr` / `--branch` refused from that day; the queue did not,
+ * because `runGuard` handed the predicate no size (#19036, class (b): a
+ * declared contract the queue could not hold). This leg is the queue half.
+ *
+ * ⭐ IMPORTED, NEVER RESTATED — the ruled constraint, and the reason the
+ * ablation in the PR that landed this inverts the comparison in the SIBLING
+ * and watches THIS file's pins redden: the threshold, the comparison and the
+ * generated-files inclusion are `sizeVerdict`'s, reached through
+ * `testVerdict([], { size })` and judged by `landsByHumanMerge`. With an empty
+ * path list that call IS the size limb alone: the PATH limb is the governed
+ * leg's question, already answered on the LIFTED rows with the register's
+ * exception applied, and a raw path list handed here would judge it a second
+ * time without the lift — the two-mechanisms shape #11705 forbids. This file
+ * declares no threshold and spells no comparison; the self-test pins both
+ * absences against this file's own source.
+ *
+ * ⚖️ THE COST, and why EVERY queued pull request pays it: the size is a
+ * property of the pull request, not of a governed path, so it cannot ride the
+ * governed leg's head read — that read exists only for rows the register
+ * classes as governed, and the case this leg exists for (#18971's shape: over
+ * the line, NOTHING governed) never reaches it. So this leg reads
+ * `GET /pulls/{n}` once per queued pull request, through the SAME
+ * `makePullReader` the governed leg uses (the pull object already carries
+ * `additions` / `deletions`; the reader's shape grew a `size`, no second
+ * endpoint) and under the same `pull-requests: read` scope, nothing wider.
+ * Merge groups are small, so the bill is one read per PR per build — the
+ * carrier leg's own bill, on the same endpoint, paid a second time rather than
+ * shared, because each leg's refusal must stay separable in a log and each
+ * block prints its own count. The zero-cost-clear rendering above is scoped
+ * to say so (#15406's lesson, a third time).
+ *
+ * ⛔ FAIL-CLOSED ON AN UNREADABLE SIZE, and this is the one place the
+ * 2026-09-04 rule 「a read that decides nothing may not block a landing」 cuts
+ * the OTHER way: this read DECIDES. A pull read that fails, or a pull object
+ * with no `additions` / `deletions` pair, is a refusal on its own code (exit
+ * 9), never a size of zero and never a pass — the sibling's `--pr` refuses on
+ * exactly that absence (exit 1 there) for exactly that reason.
+ *
+ * ⛔ NO APPROVAL LIFTS THIS LIMB, and no review of record does either. The
+ * landed predicate says a human MERGE — 「人工审核」 landed as the same terminal
+ * a governed diff has (ACCEPT on the card, `needs-user-decision` on the PR, a
+ * final 维护者速读, review requested from `GOVERNED_APPROVERS`) and the
+ * maintainer's own click (人工直合). An authorized APPROVED review lifts a
+ * Tier H path because the 2026-08-27 ruling said so of PATHS; nothing has
+ * said it of the NUMBER, and widening a governance gate past its own ruling is
+ * how gates acquire policy nobody agreed to. Widening it is a one-line
+ * maintainer decision — in the sibling, where the predicate lives.
+ *
+ * ⚠️ `pull_request` leg: SILENT, byte-identical, like the carrier leg. The
+ * seat-side pre-check already refuses an oversized PR before it is armed, and
+ * the ruling this leg implements is about the LANDING. (The `pull_request`
+ * payload carries `additions` / `deletions` for free; a forecast there is a
+ * one-line maintainer decision, not taken here.)
+ *
  * ## Exit codes — the refusal is impossible to read as clean
  *
  *   0  CLEAR    — nothing governed in the diff (no API call was made), or every
@@ -383,9 +450,27 @@
  *   7  REFUSED  — the carrier leg could not READ a queued pull request's labels,
  *                 or the merge group names no pull request to read them from.
  *                 Split from 6 for the same reason 4 is split from 3.
+ *   8  REFUSED  — a queued pull request is over the human-merge line:
+ *                 `additions + deletions` strictly greater than the sibling's
+ *                 `HUMAN_MERGE_LINE_THRESHOLD`, generated files included
+ *                 (#19036, the 2026-09-18 ruling). The SIZE leg, not the
+ *                 governed one; its remedy is a human merge and nothing else.
+ *   9  REFUSED  — the SIZE leg could not READ a queued pull request's size (the
+ *                 pull read failed, or the object carries no pair), or the merge
+ *                 group names no pull request to read it from. Split from 8 the
+ *                 way 4 is split from 3 and 7 from 6.
  *   1  CANNOT RUN — unusable event payload, unsupported event, unreadable git.
  *                 Still non-zero, still red: this file has no green that means
  *                 "did not look".
+ *
+ *   ⭐ THREE legs, ONE exit, and the precedence is pinned: every leg's block is
+ *   always printed, and the code is the GOVERNED leg's when it refuses, else
+ *   the SIZE leg's, else the CARRIER's (`groupExitCode`). The governed refusal
+ *   already sat above the carrier because its remedy is the stricter one; the
+ *   size refusal's remedy (a human merge) is the same terminal as Tier H, so it
+ *   sits above the carrier for the same reason and below the governed code
+ *   because that code was already the top of this table — a group that is
+ *   both governed-unsatisfied and oversized prints both limbs and exits 3.
  *
  * ## What this file does NOT do
  *
@@ -407,11 +492,17 @@ import { fileURLToPath } from 'node:url';
 import {
   GENERATED_SURFACE_EXCEPTIONS,
   GOVERNED_SURFACES,
+  GOVERNED_TIER_H,
+  GOVERNED_TIER_S,
+  HUMAN_MERGE_LINE_THRESHOLD,
   applyGeneratedExceptions,
   generatedExceptionFor,
   governedPathsIn,
+  governedTierFor,
   groupHitsByException,
+  landsByHumanMerge,
   pullNumberFromSubject,
+  pullSizeFrom,
   recomputeProvenanceFor,
   testVerdict,
 } from './check-governed-merges.mjs';
@@ -443,8 +534,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the 2026-09-04 unpinned predicate (the queue leg\'s)': 12,
   'decomposition, and the multi-PR group trap': 6,
   'the verdict table, both events': 10,
-  'the pull_request leg is an EARLY WARNING and never reddens': 3,
-  'the replay fixtures: the three incidents this guard descends from': 9,
+  'the pull_request leg is an EARLY WARNING and never reddens': 5,
+  'the replay fixtures: the three incidents this guard descends from': 11,
   '⭐ the ordering guarantee, measured with a spy that THROWS': 7,
   'the words a reader acts on (requirement (e))': 26,
   '⭐ #14063 END TO END: what the dependency install actually buys': 9,
@@ -453,13 +544,14 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ #14063: the environment the exemption needs, pinned to the YAML': 7,
   '⭐ #15406: a CLEAR reached through a lift is not a clear that saw nothing': 10,
   '⛔ #17040: the contract-review carrier is the enqueue gate': 39,
-  '⭐ #18020: the references tier — a review of record, not an approval': 40,
+  '⭐ #18020 → #19133 Tier S: a review of record, not an approval': 43,
   '⭐ #18701: the record lives on the PR or its card, and BOTH are read': 14,
+  '⛔ #19036: the SIZE line at the queue — imported, per queued PR, fail-closed': 30,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 21;
+const SELF_TEST_BATTERY_FLOOR = 22;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -483,6 +575,15 @@ export const EXIT_REFUSED_UNATTRIBUTED = 5;
  */
 export const EXIT_REFUSED_CARRIER = 6;
 export const EXIT_REFUSED_CARRIER_UNREADABLE = 7;
+/**
+ * The SIZE leg's two refusals (#19036, the 2026-09-18 ruling). The same split,
+ * for the same reason: "this pull request is over the line" and "we could not
+ * read its size" are different facts, and the second one DECIDES here — unlike
+ * the PR head, whose read failing is a note — so it refuses on a code of its
+ * own. ⛔ Neither may ever be folded into the other, nor into 3/4 or 6/7.
+ */
+export const EXIT_REFUSED_OVERSIZED = 8;
+export const EXIT_REFUSED_SIZE_UNREADABLE = 9;
 
 /**
  * The check-run name branch protection would pin, and the wiring it belongs
@@ -548,39 +649,47 @@ export const GOVERNED_APPROVERS = Object.freeze(['os-zhuang', 'hotlong']);
  */
 export const CONTRACT_REVIEW_LABEL = 'needs:contract-review';
 
-// ── the references TIER: a review of record in place of an approval (#18020) ─
+// ── the landing TIER: Tier S lands on a review of record, Tier H on an approval ─
 
 /**
- * The ONE governed prefix that lands through the merge queue on a review of
- * record (#17950, ruled 2026-09-13 「我点头」; charter text landed by PR #18018).
+ * The two landing tiers, READ from the register (#19133, ruled 2026-09-18
+ * 「同意改规则。」 on the skills seat's proposal; the amendment moved
+ * `.claude/settings.json` and `.claude/hooks/**` over too: 「我觉得这些我也没
+ * 必要确认」). Every `GOVERNED_SURFACES` row carries `tier`, and
+ * `governedTierFor` — imported from the register's own file at module scope,
+ * like every other predicate this guard reads — derives a pull request's tier
+ * from the rows its GOVERNED paths hit. ⛔ Nothing here spells a prefix, a glob
+ * or a row: the #18020 references tier was a prefix constant declared here
+ * (`REFERENCES_TIER_PREFIX`, the fact layer alone); it is gone, and a seat
+ * reading the register gets the same answer to "what lands this on a record"
+ * as this guard does. The register's `.claude/**` row still AUDITS every path
+ * under it exactly as before — the tier is a LANDING rule inside the row, never
+ * a membership one, which is why ⛔ nothing here touches `GOVERNED_SURFACES`.
  *
- * ⛔ Spelled as a PREFIX with its trailing slash, never as a `**` glob. The
- * glob shape is the REGISTER's vocabulary — `check-governed-prose` reads every
- * `**`-shaped code span in an instruction surface as a claim about
- * `GOVERNED_SURFACES` — and this is not a register entry: the register's
- * `.claude/**` row still AUDITS every path under it, exactly as before. What
- * this constant names is a LANDING tier inside that row, which is why ⛔ nothing
- * here touches `GOVERNED_SURFACES` and why a seat reading the register still
- * gets the same answer to "is this governed": yes.
+ * `H` (人合) is the DEFAULT in every ambiguous case, because the two are not
+ * symmetric: reading a Tier H path as S lands a maintainer-owned file on a
+ * seat's own review, while reading a Tier S path as H costs one authorized
+ * approval — the maintainer is asked to look at a pull request they need not
+ * have, and the claiming seat lands it from there. An empty list answers H for
+ * the same reason (the register's `landingTierOf` does; see its docblock).
  *
- * The trailing slash is load-bearing rather than tidy: without it
- * `.claude/skills/pm-dispatch/references-draft/x.md` would classify into the
- * tier on a bare `startsWith`, and a sibling directory one character away from
- * the ruled one is the cheapest possible way to widen a governance boundary
- * nobody agreed to widen. The battery pins that path in the refusing direction.
+ * ⭐ ALL, not ANY, and not a proportion: 「混合 diff 一条命中即整 PR 分叉」 is the
+ * regime's own rule one level up, and this is the same rule one level down. One
+ * Tier H path in the diff and the whole pull request is Tier H. The paths
+ * handed to `governedTierFor` are the GOVERNED paths of one entry —
+ * `decomposeGovernedWork` has already dropped everything the register does not
+ * match, so an ordinary source file riding along cannot demote it.
  */
-export const REFERENCES_TIER_PREFIX = '.claude/skills/pm-dispatch/references/';
+export const TIER_H = GOVERNED_TIER_H;
+export const TIER_S = GOVERNED_TIER_S;
 
 /**
- * The two landing tiers. `rules` is the DEFAULT in every ambiguous case,
- * because the two are not symmetric: reading a rules-layer path as references
- * lands a maintainer-owned file on a seat's own review, while reading a
- * references path as rules costs one authorized approval — the maintainer is
- * asked to look at a pull request they need not have, and the claiming seat
- * lands it from there.
+ * The Tier S surfaces in the register's own glob spelling — for the WORDS a
+ * verdict prints, never for a second match (the match is `governedTierFor`).
  */
-export const TIER_RULES = 'rules';
-export const TIER_REFERENCES = 'references';
+export function tierSGlobs() {
+  return GOVERNED_SURFACES.filter((s) => s.tier === GOVERNED_TIER_S).map((s) => s.glob).join(', ');
+}
 
 /**
  * WHERE a review of record may live, in the words a refusal prints — a MIRROR
@@ -599,25 +708,12 @@ export const TIER_REFERENCES = 'references';
 export const REVIEW_OF_RECORD_LOCATION = 'the PR or its card';
 
 /**
- * Which tier a governed pull request's governed paths fall in.
- *
- * ⭐ ALL, not ANY, and not a proportion: 「混合 diff 一条命中即整 PR 分叉」 is the
- * regime's own rule one level up, and this is the same rule one level down. One
- * rules-layer path in the diff and the whole pull request is rules-layer.
- *
- * `paths` are the GOVERNED paths of one entry — `decomposeGovernedWork` has
- * already dropped everything the register does not match, so an ordinary source
- * file riding along in the same PR is not consulted here and cannot demote it.
- *
- * An EMPTY list answers `rules`: an entry with no governed paths never reaches
- * this function, and a caller that got one anyway has lost the fact this
- * decision rests on.
+ * `governedTierFor` — the register's own function, re-exported so this file's
+ * readers (`check-clause2-carriers.mjs`'s cross-tool pin) and its battery keep
+ * one name. ⛔ Not a wrapper and not a copy: the register answers, this file
+ * relays. The tier docblock above carries the ALL-not-ANY rule and the H default.
  */
-export function governedTierFor(paths) {
-  const list = (Array.isArray(paths) ? paths : []).map((path) => String(path ?? ''));
-  if (list.length === 0) return TIER_RULES;
-  return list.every((path) => path.startsWith(REFERENCES_TIER_PREFIX)) ? TIER_REFERENCES : TIER_RULES;
-}
+export { governedTierFor };
 
 /** Where each imported recogniser lives. Named, so a failure can say which file. */
 export const RECOGNISER_SOURCES = Object.freeze({
@@ -980,16 +1076,16 @@ export function unreadableApproval(reason) {
 /**
  * Is this governed pull request SATISFIED?
  *
- * ⭐ The approval limb is first and is unchanged, which is what makes the
- * references tier MONOTONE: an entry the 2026-09-04 predicate already cleared
- * is cleared here by the same reading, at the same cost, in the same words. The
- * tier limb can only ADD a pass, and only on an entry whose `record` key exists
- * — merge_group, references tier. ⛔ Never reorder these two: a record consulted
- * ahead of an approval would let a seat's own review displace a maintainer's.
+ * ⭐ The approval limb is first and is unchanged, which is what makes Tier S
+ * MONOTONE: an entry the 2026-09-04 predicate already cleared is cleared here
+ * by the same reading, at the same cost, in the same words. The tier limb can
+ * only ADD a pass, and only on an entry whose `record` key exists — merge_group,
+ * Tier S. ⛔ Never reorder these two: a record consulted ahead of an approval
+ * would let a seat's own review displace a maintainer's.
  */
 export function entrySatisfied(entry) {
   if (entry?.approval?.state === 'approved') return true;
-  return entry?.tier === TIER_REFERENCES && entry?.record?.state === 'stands';
+  return entry?.tier === TIER_S && entry?.record?.state === 'stands';
 }
 
 /**
@@ -1000,7 +1096,7 @@ export function entrySatisfied(entry) {
  */
 export function entryUnreadable(entry) {
   if (entry?.approval?.state === 'unreadable') return true;
-  return entry?.tier === TIER_REFERENCES && entry?.record?.state === 'unreadable';
+  return entry?.tier === TIER_S && entry?.record?.state === 'unreadable';
 }
 
 /**
@@ -1012,10 +1108,10 @@ export function guardVerdict({ event, governed = [], unattributed = [], approval
     ...entry,
     approval: approvals.get(entry.pr) ?? unreadableApproval('no review reading was recorded for this pull request'),
     // ⭐ The record key EXISTS only where the tier leg ran — merge_group, on a
-    // references-tier entry. That is not a nicety: the `pull_request` leg's
-    // rendering is byte-identical to the pre-#18020 one BY CONSTRUCTION, since
-    // the renderer can only print what the key's presence lets it see.
-    ...(event === EVENT_MERGE_GROUP && entry.tier === TIER_REFERENCES
+    // Tier S entry. That is not a nicety: the `pull_request` leg's record
+    // block is absent BY CONSTRUCTION, since the renderer can only print what
+    // the key's presence lets it see (the tier LINE itself prints on both legs).
+    ...(event === EVENT_MERGE_GROUP && entry.tier === TIER_S
       ? { record: records.get(entry.pr) ?? { state: 'unreadable', reason: 'no record reading was recorded for this pull request' } }
       : {}),
   }));
@@ -1056,6 +1152,23 @@ export function renderGuardVerdict(verdict) {
       ...s.files.slice(0, 12).map((f) => `          - ${f}`),
       ...(s.files.length > 12 ? [`          … and ${s.files.length - 12} more`] : []),
     ]);
+  // ⚖️ The landing tier and what it waits for (#19133), printed on BOTH legs so
+  // the early warning names the tier as the card requires. The queue leg's
+  // record block follows it where the record key exists.
+  const tierLines = (entry) =>
+    entry.tier === TIER_S
+      ? [
+          `        ⚖️ landing tier: S(席内达档复核落地) — every governed path above lies under a Tier S surface (${tierSGlobs()}),`,
+          '           so a review of record on the CURRENT head lands it in place of an authorized approval: a `## Contract',
+          `           review\` comment on ${REVIEW_OF_RECORD_LOCATION} naming this head, \`Served-tier: CONTRACT_REVIEW_TIER\`,`,
+          '           `**VERDICT: PASS**`, `check-clause2-carriers.mjs --pair N` at 0 and every check green; then the OWNING seat',
+          '           lands it (#19133, maintainer 2026-09-18 「同意改规则。」). One Tier H path here and this line would read H.',
+        ]
+      : [
+          '        ⚖️ landing tier: H(人合) — waits for the maintainer\'s hand or an authorized APPROVED review',
+          `           (GOVERNED_APPROVERS: ${GOVERNED_APPROVERS.join(', ')}); then the OWNING seat lands it. No review of record`,
+          '           substitutes here: one Tier H path in the diff and the whole pull request is Tier H.',
+        ];
 
   // ⚠️ The `pull_request` leg's wording is BYTE-IDENTICAL to the pre-pinning
   // guard (the 2026-08-27 card's own constraint) — only the queue leg, where
@@ -1094,9 +1207,9 @@ export function renderGuardVerdict(verdict) {
       // already falsified. It is scoped here instead of rewritten.
       if (verdict.event === EVENT_MERGE_GROUP) {
         lines.push(
-          '      ⚠️ Scoped to the GOVERNED-SURFACE leg. On merge_group this file ALSO reads the contract-review',
-          '      carrier on every queued pull request — one label read each, fail-closed — and that leg reports',
-          '      separately below. An outage there DOES refuse this merge group.',
+          '      ⚠️ Scoped to the GOVERNED-SURFACE leg. On merge_group this file ALSO reads every queued pull request',
+          '      for its SIZE and for the contract-review carrier — one pull read each, fail-closed — and those two',
+          '      legs report separately below. An outage there DOES refuse this merge group.',
         );
       }
       return lines.join('\n');
@@ -1128,15 +1241,10 @@ export function renderGuardVerdict(verdict) {
   for (const entry of verdict.entries) {
     lines.push('', `  #${entry.pr} — governed:`);
     lines.push(...surfaceLines(entry));
-    // ⭐ Printed only where the tier leg ran, so the rules layer's block and the
-    // whole `pull_request` leg keep their bytes.
-    if (entry.record !== undefined) {
-      lines.push(
-        `        ⚖️ landing tier: REFERENCES — every governed path above is under ${REFERENCES_TIER_PREFIX}, so a`,
-        '           review of record on the CURRENT head satisfies this check in place of an authorized approval',
-        '           (#17950, ruled 2026-09-13 「我点头」). One rules-layer path here and this line would be absent.',
-      );
-    }
+    // The pre-#19133 `pull_request` byte-identity constraint (2026-08-27) is
+    // superseded by that ruling's own requirement: the early warning names the
+    // tier and what it waits for.
+    lines.push(...tierLines(entry));
     if (entry.approval.state === 'approved') {
       lines.push(
         queueLeg(entry.approval)
@@ -1244,26 +1352,51 @@ export function renderGuardVerdict(verdict) {
 
   lines.push('');
   if (verdict.conclusion === 'warned') {
+    // Per tier (#19133): the early warning names which tier each pull request
+    // is and what it waits for. A Tier H block and a Tier S block, each printed
+    // only when an entry of that tier is present.
+    const tierH = verdict.entries.filter((e) => e.tier !== TIER_S);
+    const tierS = verdict.entries.filter((e) => e.tier === TIER_S);
     lines.push(
       '  ⚠️  EARLY WARNING, not a failure — this run is on the pull request, and this check is deliberately',
-      '      GREEN here. A governed PR parked in draft while it waits for an authorized approval IS the',
+      '      GREEN here. A governed PR parked in draft while it waits for what its tier lands on IS the',
       '      regime\'s healthy resting state (「四件套留 draft 等人批,⛔ 不翻正式不入队」), and a check that',
       '      reddens on the healthy case is the permanently-red gate the 2026-08-18 ruling retired',
-      '      (红灯常态化本身有毒).',
-      '',
-      '      ⛔ What a seat must NOT do with this PR while no authorized APPROVED review is on record:',
-      '         flip it ready, enqueue it, or arm auto-merge (AGENTS.md Prime Directive #14 — its four',
-      '         prohibitions lift for that approval and for nothing else). One governed path governs the',
-      '         whole PR — 「混合 diff 一条命中即整 PR 分叉」; proportion is not a question.',
-      '',
-      `      ✅ What a seat DOES do once an account in GOVERNED_APPROVERS (${GOVERNED_APPROVERS.join(', ')}) has APPROVED it,`,
-      '         on ANY commit: the CLAIMING SEAT lands it — ruling C (#17971, maintainer 2026-09-13, verbatim',
-      '         「C. approve 后不管后续改动都由席位落地:」), 「席位落地 = 过落地前检、清标、ready、',
-      '         auto-merge,踢出/变基同法。」 Unapproved, the maintainer\'s own direct merge (人工直合) is',
-      '         the only landing this pull request has.',
+      '      (红灯常态化本身有毒). The tier line on each entry above names its tier and what it waits for.',
+    );
+    if (tierH.length > 0) {
+      lines.push(
+        '',
+        `      ⚖️ Tier H (人合) — ${tierH.map((e) => `#${e.pr}`).join(', ')}:`,
+        '      ⛔ What a seat must NOT do with this PR while no authorized APPROVED review is on record:',
+        '         flip it ready, enqueue it, or arm auto-merge (AGENTS.md Prime Directive #14 — its four',
+        '         prohibitions lift for that approval and for nothing else). One governed path governs the',
+        '         whole PR — 「混合 diff 一条命中即整 PR 分叉」; proportion is not a question.',
+        '',
+        `      ✅ What a seat DOES do once an account in GOVERNED_APPROVERS (${GOVERNED_APPROVERS.join(', ')}) has APPROVED it,`,
+        '         on ANY commit: the CLAIMING SEAT lands it — ruling C (#17971, maintainer 2026-09-13, verbatim',
+        '         「C. approve 后不管后续改动都由席位落地:」), 「席位落地 = 过落地前检、清标、ready、',
+        '         auto-merge,踢出/变基同法。」 Unapproved, the maintainer\'s own direct merge (人工直合) is',
+        '         the only landing this pull request has.',
+      );
+    }
+    if (tierS.length > 0) {
+      lines.push(
+        '',
+        `      ⚖️ Tier S (席内达档复核落地) — ${tierS.map((e) => `#${e.pr}`).join(', ')}: every governed path lies under a Tier S`,
+        `         surface (${tierSGlobs()}). ⛔ What a seat must NOT do while no review of record for the CURRENT head is on`,
+        '         the thread: flip it ready, enqueue it, or arm auto-merge — and ⛔ no seat submits an approving review',
+        '         in its place. ✅ What lifts those: a `## Contract review` comment on',
+        `         ${REVIEW_OF_RECORD_LOCATION} naming this head with \`Served-tier: CONTRACT_REVIEW_TIER\` and \`**VERDICT: PASS**\`,`,
+        '         `check-clause2-carriers.mjs --pair N` at 0 and every check green; then the OWNING seat lands it through',
+        '         the queue — no maintainer click is waited for (#19133, maintainer 2026-09-18 「同意改规则。」). A record',
+        '         on an OLDER head does not carry forward: a record names the head it judged.',
+      );
+    }
+    lines.push(
       '',
       '      If it IS enqueued anyway, the merge-queue run of this same check will REFUSE it unless every',
-      '      governed pull request above carries an APPROVED review by then.',
+      '      governed pull request above carries what its tier waits for by then — the approval, or the record.',
     );
     return lines.join('\n');
   }
@@ -1276,15 +1409,15 @@ export function renderGuardVerdict(verdict) {
     const viaRecord = verdict.entries.filter((e) => e.approval.state !== 'approved' && e.record?.state === 'stands');
     if (viaRecord.length > 0) {
       lines.push(
-        '  ✅  CLEARED — and NOT every pull request below cleared on an approval. ⚖️ The references tier (#17950,',
-        `      ruled 2026-09-13 「我点头」) satisfied ${viaRecord.length} of them: ${viaRecord.map((e) => `#${e.pr}`).join(', ')} —`,
-        `      every governed path in each lies under ${REFERENCES_TIER_PREFIX}, and each carries the skills seat's`,
+        '  ✅  CLEARED — and NOT every pull request below cleared on an approval. ⚖️ Tier S (#17950\'s references',
+        `      path, generalised by #19133, maintainer 2026-09-18 「同意改规则。」) satisfied ${viaRecord.length} of them: ${viaRecord.map((e) => `#${e.pr}`).join(', ')} —`,
+        `      every governed path in each lies under a Tier S surface (${tierSGlobs()}), and each carries the owning seat's`,
         '      review of record on its CURRENT head (`## Contract review`, `Reviewed-by:`, a standing `Served-tier:`).',
         '      ⛔ This is NOT the approval clear: no account in GOVERNED_APPROVERS acted on those pull requests, and',
         '      the record above is the entire review. ⚠️ Existence and provenance only — whether it reads PASS is',
-        '      precondition ① of the landing check and stays human. Every OTHER governed path is the rules layer and',
-        '      still needs the authorized approval; the post-merge audit',
-        '      (`node scripts/pm/check-governed-merges.mjs`) lists these landings exactly as it always has.',
+        '      precondition ① of the landing check and stays human. Every Tier H path still needs the authorized',
+        '      approval; the post-merge audit (`node scripts/pm/check-governed-merges.mjs`) lists these landings',
+        '      exactly as it always has, and a Tier S merge without a PASS record is that audit\'s finding.',
       );
       return lines.join('\n');
     }
@@ -1340,8 +1473,8 @@ export function renderGuardVerdict(verdict) {
   );
   if (verdict.entries.some((e) => e.record !== undefined)) {
     lines.push(
-      `        3. Or — ONLY for a pull request whose governed paths all lie under ${REFERENCES_TIER_PREFIX},`,
-      '           which the tier line on each entry above says outright — the skills seat posts its review of record',
+      `        3. Or — ONLY for a pull request whose governed paths all lie under a Tier S surface (${tierSGlobs()}),`,
+      '           which the tier line on each entry above says outright — the owning seat posts its review of record',
       `           on the CURRENT head and re-queues: a \`## Contract review\` comment on ${REVIEW_OF_RECORD_LOCATION} naming`,
       '           this head, carrying a `Reviewed-by:` line and a `Served-tier:` line whose token is the NAME',
       '           `CONTRACT_REVIEW_TIER` — ⛔ never its value and never any model identifier, because `AGENTS.md`',
@@ -1349,7 +1482,7 @@ export function renderGuardVerdict(verdict) {
       '           seat\'s own transcript grep, which leaves no repository artifact at all.',
       '           ⛔ A record on an OLDER head does not carry forward — unlike an approval,',
       '           which since 2026-09-04 does — because a record names the head it judged. ⛔ And it widens to nothing:',
-      '           one rules-layer path in the diff and option 1 or 2 is the only way through.',
+      '           one Tier H path in the diff and option 1 or 2 is the only way through.',
     );
   }
   lines.push(
@@ -1423,7 +1556,7 @@ export async function runGuard({ event, rows, fetchReviews, fetchPull, fetchComm
       approvals.set(entry.pr, unreadableApproval(String(error?.message ?? error).split('\n')[0]));
     }
   }
-  // ── the references tier (#18020) ────────────────────────────────────────
+  // ── Tier S: the record leg (#18020, generalised to the tier by #19133) ──
   //
   // ⭐ LAST, and only for what is still unsatisfied. Two properties come out of
   // that placement and neither is decoration: the leg is MONOTONE (it is never
@@ -1433,7 +1566,7 @@ export async function runGuard({ event, rows, fetchReviews, fetchPull, fetchComm
   if (event === EVENT_MERGE_GROUP) {
     let recognisers = null;
     for (const entry of governed) {
-      if (entry.tier !== TIER_REFERENCES) continue;
+      if (entry.tier !== TIER_S) continue;
       if (approvals.get(entry.pr)?.state === 'approved') continue;
       if (recognisers === null) {
         try {
@@ -1683,6 +1816,226 @@ export function renderCarrierVerdict(verdict) {
   return lines.join('\n');
 }
 
+// ── the SIZE line: the FOURTH leg, and the number IS the gate (#19036) ──────
+
+/**
+ * The leg's own name in a log — a third predicate inside the same check run,
+ * named apart from the other two for the same reason the carrier leg is.
+ */
+export const SIZE_LEG_NAME = 'Human-Merge Size Line (2026-09-18 ruling)';
+
+/**
+ * ONE queued pull request's size, judged. Pure.
+ *
+ * ⭐ THE LANDED PREDICATE, reached through its own front door and nothing
+ * else: `testVerdict([], { size })` is the sibling's verdict on the SIZE limb
+ * alone (an empty path list has no PATH limb to fire — that limb is the
+ * governed leg's question, answered on the lifted rows above), and
+ * `landsByHumanMerge` is the sibling's own reading of it. The threshold, the
+ * comparison and what counts live there; this function holds no number.
+ *
+ * An unmeasured size — no pair on the pull object, or half of one — is
+ * `unreadable`, never `within`: `sizeVerdict` answers `measured: false,
+ * exceeds: false` for it, which `landsByHumanMerge` would read as clear, and
+ * that is precisely the fail-open reading this leg exists to refuse.
+ */
+export function sizeReading(pr, size) {
+  const verdict = testVerdict([], { size });
+  if (verdict.size?.measured !== true) {
+    return {
+      pr,
+      state: 'unreadable',
+      verdict,
+      reason:
+        'the pull object carries no `additions` / `deletions` pair, so the size cannot be read — ' +
+        'an unread size is never a size of zero',
+    };
+  }
+  return { pr, state: landsByHumanMerge(verdict) ? 'oversized' : 'within', verdict };
+}
+
+/**
+ * The size verdict, as data. Pure, the same shape as `carrierVerdict` — the
+ * renderer and the exit code both read it rather than re-deriving it.
+ *
+ * ⚠️ `merge_group` ONLY: the `pull_request` leg returns `not-applicable` and
+ * renders the empty string, so that leg's output stays byte-identical (the
+ * 2026-08-27 constraint, kept by the carrier leg and kept here). A group that
+ * names no pull request has no size to read and refuses the way the carrier
+ * leg does; a reading that never arrived is `unreadable`, never `within`.
+ */
+export function sizeGuardVerdict({ event, pulls = [], readings = new Map(), apiCalls = 0 }) {
+  const base = { event, entries: [], apiCalls, legName: SIZE_LEG_NAME };
+  if (event !== EVENT_MERGE_GROUP) {
+    return { ...base, conclusion: 'not-applicable', exitCode: EXIT_CLEAR, refusalKind: null };
+  }
+  if (pulls.length === 0) {
+    return { ...base, conclusion: 'refused', exitCode: EXIT_REFUSED_SIZE_UNREADABLE, refusalKind: 'no-pull' };
+  }
+  const entries = pulls.map(
+    (pr) =>
+      readings.get(pr) ?? {
+        pr,
+        state: 'unreadable',
+        verdict: testVerdict([], { size: null }),
+        reason: 'no size reading was recorded for this pull request',
+      },
+  );
+  const out = { ...base, entries };
+  if (entries.some((e) => e.state === 'unreadable')) {
+    return { ...out, conclusion: 'refused', exitCode: EXIT_REFUSED_SIZE_UNREADABLE, refusalKind: 'unreadable' };
+  }
+  if (entries.some((e) => e.state === 'oversized')) {
+    return { ...out, conclusion: 'refused', exitCode: EXIT_REFUSED_OVERSIZED, refusalKind: 'oversized' };
+  }
+  return { ...out, conclusion: 'clear', exitCode: EXIT_CLEAR, refusalKind: null };
+}
+
+/**
+ * The size orchestrator, with its one IO dependency injected — the SAME
+ * `fetchPull` the governed leg reads heads with, so the pull object is read by
+ * one reader with one contract.
+ *
+ * Every queued pull request is read, and the enumeration is the carrier leg's
+ * (`carrierPullsInGroup`): per commit, deduplicated, the queue ref consulted
+ * only when nothing is attributed — so a bare sibling cannot carry an
+ * oversized PR through, the #9902 direction. One pull read per queued PR; the
+ * count is printed and pinned. A throw is caught into an `unreadable` reading,
+ * never a pass and never an escaping rejection.
+ */
+export async function runSizeGuard({ event, rows, namedPull = null, fetchPull }) {
+  if (event !== EVENT_MERGE_GROUP) return sizeGuardVerdict({ event });
+  const pulls = carrierPullsInGroup(rows, namedPull);
+  const readings = new Map();
+  let apiCalls = 0;
+  for (const pr of pulls) {
+    try {
+      apiCalls += 1;
+      const pull = await fetchPull(pr);
+      readings.set(pr, sizeReading(pr, pull?.size ?? null));
+    } catch (error) {
+      readings.set(pr, {
+        pr,
+        state: 'unreadable',
+        verdict: testVerdict([], { size: null }),
+        reason: String(error?.message ?? error).split('\n')[0],
+      });
+    }
+  }
+  return sizeGuardVerdict({ event, pulls, readings, apiCalls });
+}
+
+/**
+ * The words a reader acts on for this leg. Returns '' on the `pull_request`
+ * leg. Every entry prints WHAT WAS READ — the two numbers, their sum and the
+ * threshold — on the clear path as much as on the refusal, so a queue log
+ * always shows the number a landing was judged on. The refusal names the limb
+ * (SIZE), quotes the ruling untranslated, and names the ONE remedy: a human
+ * merge. ⛔ It does not advise making the diff smaller — a guard that
+ * suggests how to get under its own line is a guard that gets routed around.
+ */
+export function renderSizeVerdict(verdict) {
+  if (verdict.conclusion === 'not-applicable') return '';
+  const lines = [];
+  lines.push(
+    `${SIZE_LEG_NAME} — ${verdict.event} — ${verdict.entries.length} queued pull request(s), ` +
+      `${verdict.apiCalls} pull read(s).`,
+  );
+  const numbers = (e) => `${e.verdict.size.changedLines} changed line(s) (+${e.verdict.size.additions} / -${e.verdict.size.deletions})`;
+  for (const entry of verdict.entries) {
+    if (entry.state === 'oversized') {
+      lines.push(
+        '',
+        `  #${entry.pr} — ⛔ ${numbers(entry)} EXCEEDS the human-merge line ${entry.verdict.size.threshold}`,
+        '        (additions + deletions, generated files INCLUDED) — this pull request lands only by a HUMAN MERGE.',
+        `        read from: ${entry.verdict.size.source ?? '(source not recorded)'}`,
+      );
+    } else if (entry.state === 'unreadable') {
+      lines.push('', `  #${entry.pr} — ⛔ the size could NOT be read — ${entry.reason}`);
+    } else {
+      lines.push('', `  #${entry.pr} — ✅ ${numbers(entry)}, at or under the human-merge line ${entry.verdict.size.threshold}.`);
+    }
+  }
+
+  if (verdict.conclusion === 'clear') {
+    lines.push(
+      '',
+      `  ✅  CLEAR — no queued pull request is over the human-merge line (${HUMAN_MERGE_LINE_THRESHOLD} changed lines,`,
+      '      additions + deletions, generated files INCLUDED). The number is read off the pull object, per queued',
+      '      pull request; the threshold and the comparison are scripts/pm/check-governed-merges.mjs\'s, imported.',
+    );
+    return lines.join('\n');
+  }
+
+  lines.push('', '  ⛔  REFUSED — this merge group must not land.');
+  if (verdict.refusalKind === 'no-pull') {
+    lines.push(
+      '      This merge group names NO pull request — neither its commit subjects nor its queue head ref',
+      '      resolve to one — so there is no size to read at all. Fail closed: a queue entry nobody can point',
+      '      at a pull request for cannot be shown to be under the line.',
+    );
+  } else if (verdict.refusalKind === 'unreadable') {
+    lines.push(
+      '      The size could not be READ for at least one queued pull request above. ⛔ This is a refusal and',
+      '      not a pass, deliberately: unlike the PR head, which has decided nothing since 2026-09-04, the size',
+      '      DECIDES here, so a read that fails must refuse. "Nobody is over the line" and "we could not find',
+      '      out" are different facts (exit 8 vs 9), and neither of them is "under". Re-run once the API is',
+      '      reachable; if the object keeps omitting the pair, `node scripts/pm/check-governed-merges.mjs',
+      '      --branch <ref>` counts the same range locally.',
+    );
+  } else {
+    lines.push(
+      '      At least one queued pull request above is over the human-merge line — the SIZE limb, whatever',
+      '      paths it touches (additions + deletions, generated files INCLUDED: no regen family, docs build or',
+      '      revert is carved out, because the case that prompted the ruling, PR #18971, was exactly that).',
+      '      The maintainer\'s ruling (2026-09-18, verbatim, untranslated):',
+      '',
+      '        「修改代码量超过某个行数（比如5000）就应该人工审核」',
+      '',
+      '      landed as `HUMAN_MERGE_LINE_THRESHOLD` in scripts/pm/check-governed-merges.mjs, which this leg',
+      '      IMPORTS — the number, the comparison and what counts are that file\'s, never restated here.',
+    );
+  }
+  lines.push(
+    '',
+    '      What satisfies this check:',
+    '        1. ⭐ Take the pull request out of the queue: convert it back to DRAFT (disarming auto-merge',
+    '           alone does NOT dequeue it) and park it there — parked outside the queue is the SAFE state.',
+    '        2. Then a HUMAN MERGE — the same terminal a governed diff has: ACCEPT on the card,',
+    '           `needs-user-decision` on the PR, a final 维护者速读, review requested from GOVERNED_APPROVERS',
+    `           (${GOVERNED_APPROVERS.join(', ')}); the maintainer's own click lands it (人工直合).`,
+    '           ⛔ An authorized APPROVED review does NOT lift this limb the way it lifts a Tier H path, and no',
+    '           review of record does either: the landed predicate says a human MERGE, and widening it is the',
+    '           maintainer\'s one-line decision in the sibling, not this file\'s.',
+    '',
+    '      When the governed-surface leg above ALSO refused, both limbs fired on this group: the exit code is',
+    '      the governed leg\'s (precedence governed > size > carrier, pinned) and this limb stands regardless.',
+    '      ⛔ "Edit this check" and moving the threshold here are not ways through — the threshold lives in ONE',
+    '         place, and this file only reads it.',
+    '',
+    '      Verify any pull request\'s number before acting: node scripts/pm/check-governed-merges.mjs --pr <n>',
+  );
+  return lines.join('\n');
+}
+
+/**
+ * THREE legs, ONE exit code. Pure, and pinned: the governed leg's refusal
+ * wins, then the size leg's, then the carrier's. The governed refusal already
+ * sat above the carrier because its remedy is the stricter one (no landing at
+ * all without an authorized approval, a record, or the maintainer's own direct
+ * merge); the size refusal's remedy is the same human terminal as Tier H, so
+ * it sits above the carrier for the same reason, and below the governed code
+ * because that code was already the top of the table — a group that is both
+ * governed-unsatisfied and oversized prints both limbs and exits on the
+ * governed one. ⛔ No leg's code is swallowed silently: every block is always
+ * printed, whichever code the run exits on.
+ */
+export function groupExitCode({ governed, size, carrier }) {
+  if (governed?.exitCode !== EXIT_CLEAR) return governed.exitCode;
+  if (size?.exitCode !== EXIT_CLEAR) return size.exitCode;
+  return carrier.exitCode;
+}
+
 
 // ── git (diff decomposition; zero API) ──────────────────────────────────────
 
@@ -1889,23 +2242,31 @@ export function makeReviewReader({ apiUrl, slug, token, fetchImpl = fetch, perPa
 }
 
 /**
- * The pull request OBJECT, reduced to the three fields this file reads.
+ * The pull request OBJECT, reduced to the four fields this file reads.
  *
  * `sha` is the CURRENT head — what the 2026-08-27 predicate pinned a review's
  * `commit_id` against, and what a review of record names. `body` and `headRef`
  * are what the references tier locates the pull request's CARD from (#18701):
  * the same closing-keyword / `Part of` / branch-name relation the rest of the
  * regime pairs a PR with its card by, asked through `deliveredCardNumber`.
+ * `size` is the `additions` / `deletions` pair the SIZE leg judges (#19036),
+ * read through the sibling's own `pullSizeFrom` so what counts as a pair is
+ * decided in ONE place — or `null` when the object carries no such pair, which
+ * the size leg turns into a refusal of its own (exit 9) and the governed leg,
+ * which never reads it, ignores.
  *
- * ⭐ ONE REQUEST for all three, deliberately: the card thread the tier leg
- * gained costs no call the head read was not already making, because GitHub
- * answers the whole pull object here. Same channel as the review read: the
- * standard GITHUB_TOKEN REST API under the workflow's existing
+ * ⭐ ONE REQUEST for all four, deliberately: the card thread the tier leg
+ * gained, and now the size, cost no call the head read was not already making,
+ * because GitHub answers the whole pull object here. Same channel as the review
+ * read: the standard GITHUB_TOKEN REST API under the workflow's existing
  * `pull-requests: read` scope, nothing wider.
  *
  * Throws on any non-2xx and on a body with no parseable `head.sha` — a head
  * this guard cannot read pins NOTHING and can find no record, and the caller
- * turns the throw into a REFUSAL (exit 4), never a pass.
+ * turns the throw into a REFUSAL (exit 4), never a pass. ⚠️ A MISSING size
+ * pair is NOT a throw here: the governed leg's head reading must not fail on
+ * a field it does not read, so the pair is `null` and the leg that DOES read
+ * it refuses on that null.
  */
 export function makePullReader({ apiUrl, slug, token, fetchImpl = fetch }) {
   return async function fetchPull(pull) {
@@ -1916,7 +2277,13 @@ export function makePullReader({ apiUrl, slug, token, fetchImpl = fetch }) {
     if (!/^[0-9a-f]{7,40}$/i.test(sha)) {
       throw new Error(`GET /repos/${slug}/pulls/${pull} answered no parseable head.sha — cannot pin approvals`);
     }
-    return { sha, body: String(row?.body ?? ''), headRef: String(row?.head?.ref ?? '') };
+    const pair = pullSizeFrom(row);
+    return {
+      sha,
+      body: String(row?.body ?? ''),
+      headRef: String(row?.head?.ref ?? ''),
+      size: pair === null ? null : { ...pair, source: `GET /repos/${slug}/pulls/${pull}` },
+    };
   };
 }
 
@@ -2048,14 +2415,19 @@ async function main() {
   const fetchComments = makeCommentReader(reader);
 
   const verdict = await runGuard({ event: context.event, rows, fetchReviews, fetchPull, fetchComments, lifted });
-  // The second leg (#17040). It runs on `merge_group` only and renders '' on the
-  // other, so the `pull_request` output is byte-identical to what it was.
+  // The SIZE leg (#19036): every queued pull request, through the same pull
+  // reader the governed leg reads heads with. `merge_group` only, '' on the
+  // other leg, so the `pull_request` output is byte-identical to what it was.
+  const size = await runSizeGuard({ event: context.event, rows, namedPull: context.namedPull, fetchPull });
+  const sizeBlock = renderSizeVerdict(size);
+  // The carrier leg (#17040). Same event split, same silence on `pull_request`.
   const carrier = await runCarrierGuard({ event: context.event, rows, namedPull: context.namedPull, fetchLabels });
   const carrierBlock = renderCarrierVerdict(carrier);
   const report = [
     `${context.label} — ${rows.length} commit(s) in range`,
     ...notes,
     renderGuardVerdict(verdict),
+    ...(sizeBlock === '' ? [] : ['', sizeBlock]),
     ...(carrierBlock === '' ? [] : ['', carrierBlock]),
   ].join('\n');
   console.log(report);
@@ -2068,14 +2440,15 @@ async function main() {
       /* a summary that cannot be written changes no verdict */
     }
   }
-  // BOTH legs are always evaluated and BOTH blocks are always printed, so no
-  // reading is lost whichever refuses. The governed refusal wins the exit code
-  // when both fire, because its remedy is the stricter of the two (no landing at
-  // all without either an authorized approval or the maintainer's own direct
-  // merge, Prime Directive #14) and it subsumes the carrier's "take it out of
-  // the queue". ⛔ The carrier code is not swallowed silently — its block states
-  // the refusal in full either way.
-  return verdict.exitCode !== EXIT_CLEAR ? verdict.exitCode : carrier.exitCode;
+  // ALL THREE legs are always evaluated and ALL THREE blocks are always printed,
+  // so no reading is lost whichever refuses. The precedence is `groupExitCode`'s
+  // and is pinned there: governed, then size, then carrier — the governed
+  // refusal's remedy is the stricter one (no landing at all without an
+  // authorized approval, a record, or the maintainer's own direct merge, Prime
+  // Directive #14), the size refusal's is the same human terminal, and both
+  // subsume the carrier's "take it out of the queue". ⛔ No leg's code is
+  // swallowed silently — every block states its refusal in full either way.
+  return groupExitCode({ governed: verdict, size, carrier });
 }
 
 // ⛔ NOT `process.exitCode = await main()`, and this is not a style choice.
@@ -2171,18 +2544,24 @@ export async function selfTest() {
   const HEAD = 'f'.repeat(40);
   const OLD = '0'.repeat(40);
   const approvedAt = (login, sha) => ({ state: 'APPROVED', user: { login }, commit_id: sha });
-  // The shape `fetchPull` answers with: the head the log names plus the two
-  // fields the references tier locates a card from (#18701). Spelled once, so a
+  // The shape `fetchPull` answers with: the head the log names, the two fields
+  // the references tier locates a card from (#18701), and the size pair the
+  // SIZE leg judges (#19036) — `null` unless a fixture hands one in, exactly
+  // as the reader answers a pull object without the pair. Spelled once, so a
   // fixture can never disagree with `makePullReader` about what a pull row is.
-  const pull = (sha = HEAD, { body = '', headRef = '' } = {}) => ({ sha, body, headRef });
+  const pull = (sha = HEAD, { body = '', headRef = '', size = null } = {}) => ({ sha, body, headRef, size });
   const authorizedPass = (login = GOVERNED_APPROVERS[0]) => authorizedApprovalVerdict([approvedAt(login, HEAD)], HEAD);
   // The same authorized approval, on a commit that is no longer the head. Under
   // the retired sha pin this exact fixture was the REFUSAL case.
   const authorizedPassOnOlder = (login = GOVERNED_APPROVERS[0]) => authorizedApprovalVerdict([approvedAt(login, OLD)], HEAD);
-  const run = (event, rows, approvals = new Map()) => {
+  const run = (event, rows, approvals = new Map(), records = new Map()) => {
     const { governed, unattributed } = decomposeGovernedWork(rows);
-    return guardVerdict({ event, governed, unattributed, approvals, apiCalls: governed.length });
+    return guardVerdict({ event, governed, unattributed, approvals, records, apiCalls: governed.length });
   };
+  // The record reading a Tier S entry gets when the thread was READ and held
+  // nothing — the incident shape (#19133): "no record" is a refusal of its own
+  // kind, distinct from "the thread could not be read".
+  const absentRecord = (pr) => new Map([[pr, { state: 'absent', read: { pr: 0, card: 0 }, readSummary: '0 on the PR and 0 on its card', cardNote: 'replay fixture, no card thread searched' }]]);
 
   // ── the register is READ, never restated (#9840) ──────────────────────────
   //
@@ -2388,13 +2767,35 @@ export async function selfTest() {
     ),
   );
   assert('and-an-unattributed-governed-commit-does-not-redden-a-pr-run-either', run('pull_request', [{ sha: 'c'.repeat(40), subject: 'x', pr: null, paths: ['CLAUDE.md'] }]).exitCode === EXIT_CLEAR);
+  // #19133: the early warning names the TIER and what it waits for, on the
+  // pull_request leg — where no record is read, so the tier line alone carries it.
+  const warnedS = run('pull_request', [row(9528, ['.claude/agents/os-dev.md'])], new Map([[9528, approvalVerdict([])]]));
+  const warnedSText = renderGuardVerdict(warnedS);
+  assert(
+    'the-early-warning-names-Tier-S-and-the-record-it-waits-for-and-asks-for-no-approval',
+    warnedS.conclusion === 'warned' && /landing tier: S/.test(warnedSText) && /## Contract review/.test(warnedSText) && /CONTRACT_REVIEW_TIER/.test(warnedSText) &&
+      !/What a seat DOES do once an account in GOVERNED_APPROVERS/.test(warnedSText),
+    warnedSText,
+  );
+  const warnedHText = renderGuardVerdict(warnedV);
+  assert('and-names-Tier-H-and-the-approval-it-waits-for-with-no-Tier-S-block', /landing tier: H/.test(warnedHText) && /authorized APPROVED review/.test(warnedHText) && !/Tier S \(/.test(warnedHText), warnedHText);
 
   // ── the replay fixtures: the three incidents this guard descends from ─────
   battery('the replay fixtures: the three incidents this guard descends from');
   for (const replay of REPLAYS) {
     const rows = [row(replay.pr, replay.files, 'e'.repeat(40), replay.subject)];
-    const queued = run('merge_group', rows, new Map([[replay.pr, authorizedApprovalVerdict([], HEAD)]]));
-    assert(`replay-REFUSES-at-the-queue: ${replay.name}`, queued.exitCode === EXIT_REFUSED_UNAPPROVED, JSON.stringify(queued.conclusion));
+    // #19133: two of the three incidents are `.claude/**` and therefore Tier S
+    // today, so the queue judges them on the record leg too. Each incident's
+    // thread carried no record — the reading is ABSENT, and the refusal is the
+    // same "unapproved" the incident deserved. A Tier S entry with NO reading
+    // at all refuses as UNREADABLE instead: "could not find out" never clears.
+    const tier = governedTierFor(replay.files);
+    const queued = run('merge_group', rows, new Map([[replay.pr, authorizedApprovalVerdict([], HEAD)]]), tier === TIER_S ? absentRecord(replay.pr) : new Map());
+    assert(`replay-REFUSES-at-the-queue: ${replay.name}`, queued.exitCode === EXIT_REFUSED_UNAPPROVED, JSON.stringify([queued.conclusion, tier]));
+    if (tier === TIER_S) {
+      const unread = run('merge_group', rows, new Map([[replay.pr, authorizedApprovalVerdict([], HEAD)]]));
+      assert(`replay-is-Tier-S-and-with-NO-record-reading-refuses-UNREADABLE-never-clears: ${replay.name}`, unread.exitCode === EXIT_REFUSED_UNREADABLE, JSON.stringify(unread.conclusion));
+    }
     const early = run('pull_request', rows, new Map([[replay.pr, approvalVerdict([])]]));
     assert(`replay-only-WARNS-on-the-pr: ${replay.name}`, early.conclusion === 'warned' && early.exitCode === EXIT_CLEAR);
     const text = renderGuardVerdict(queued);
@@ -3183,6 +3584,273 @@ export async function selfTest() {
     JSON.stringify(INCIDENTS_17040.map((i) => [i.pr, i.carrier])),
   );
 
+  // ── ⛔ #19036: the SIZE line at the queue — imported, per queued PR, fail-closed ─
+  //
+  // The maintainer's 2026-09-18 ruling landed seat-side in PR #19033 while the
+  // queue kept handing the predicate no size, so PR #18971's shape — over the
+  // line, NOTHING governed — still merged through this leg. The cases below are
+  // the card's acceptance in its order: the oversized ungoverned group is
+  // REFUSED with the limb named; at-threshold is clear; a governed AND
+  // oversized group prints both limbs and exits on the governed code; the
+  // pull_request leg is byte-identical; an unreadable size fails CLOSED; and
+  // the number, the comparison and what counts are IMPORTED — pinned against
+  // this file's own source, and proved by the landing PR's ablation, which
+  // inverts the comparison in the SIBLING and watches these pins redden.
+  battery('⛔ #19036: the SIZE line at the queue — imported, per queued PR, fail-closed');
+  const LINE = HUMAN_MERGE_LINE_THRESHOLD;
+  const sizePair = (additions, deletions, source = 'GET /repos/o/r/pulls/1') => ({ additions, deletions, source });
+  assert(
+    'the-two-size-codes-are-distinct-non-zero-and-collide-with-no-other-code',
+    new Set([
+      EXIT_CLEAR, EXIT_CANNOT_RUN, EXIT_REFUSED_UNAPPROVED, EXIT_REFUSED_UNREADABLE, EXIT_REFUSED_UNATTRIBUTED,
+      EXIT_REFUSED_CARRIER, EXIT_REFUSED_CARRIER_UNREADABLE, EXIT_REFUSED_OVERSIZED, EXIT_REFUSED_SIZE_UNREADABLE,
+    ]).size === 9 && EXIT_REFUSED_OVERSIZED !== 0 && EXIT_REFUSED_SIZE_UNREADABLE !== 0,
+    JSON.stringify([EXIT_REFUSED_OVERSIZED, EXIT_REFUSED_SIZE_UNREADABLE]),
+  );
+  // The reader: the pair rides the SAME pull read the head does.
+  const sizedRow = await makePullReader({ ...readerArgs, fetchImpl: fakeRes({ head: { sha: HEAD }, additions: 238310, deletions: 119 }) })(18971);
+  assert(
+    'the-pull-reader-answers-the-size-pair-off-the-same-object-naming-the-endpoint-as-its-source',
+    sizedRow.sha === HEAD && sizedRow.size.additions === 238310 && sizedRow.size.deletions === 119 && sizedRow.size.source === 'GET /repos/o/r/pulls/18971',
+    JSON.stringify(sizedRow),
+  );
+  const unsizedRow = await makePullReader({ ...readerArgs, fetchImpl: fakeRes({ head: { sha: HEAD }, additions: 3 }) })(7);
+  assert(
+    '⛔ a-pull-object-without-the-pair-answers-size-null-and-STILL-answers-the-head-the-governed-leg-is-undisturbed',
+    unsizedRow.sha === HEAD && unsizedRow.size === null,
+    JSON.stringify(unsizedRow),
+  );
+  // The reading: the sibling's predicate, size limb alone.
+  const overRead = sizeReading(1, sizePair(LINE, 1));
+  const atRead = sizeReading(1, sizePair(LINE, 0));
+  const underRead = sizeReading(1, sizePair(LINE - 1, 0));
+  assert('⭐ threshold-plus-one-changed-line-is-OVERSIZED', overRead.state === 'oversized' && overRead.verdict.size.changedLines === LINE + 1, JSON.stringify(overRead.verdict.size));
+  assert('⭐ exactly-the-threshold-is-WITHIN-the-comparison-is-strictly-greater', atRead.state === 'within' && atRead.verdict.size.changedLines === LINE, JSON.stringify(atRead.verdict.size));
+  assert('one-under-is-WITHIN', underRead.state === 'within');
+  assert(
+    '⛔ no-pair-is-UNREADABLE-never-within',
+    sizeReading(1, null).state === 'unreadable' && sizeReading(1, { additions: 3 }).state === 'unreadable' && /never a size of zero/.test(sizeReading(1, null).reason),
+  );
+  assert(
+    '⭐ the-reading-IS-the-landed-predicate-landsByHumanMerge-agrees-on-every-branch-and-the-path-limb-stays-out-of-it',
+    landsByHumanMerge(overRead.verdict) === true && landsByHumanMerge(atRead.verdict) === false && landsByHumanMerge(underRead.verdict) === false && overRead.verdict.governed === false,
+  );
+  // The verdict table.
+  const sizeRun = (pulls, states) => {
+    const readings = new Map();
+    for (const [pr, state] of Object.entries(states)) {
+      const n = Number(pr);
+      readings.set(
+        n,
+        state === 'unreadable'
+          ? { pr: n, state, verdict: testVerdict([], { size: null }), reason: 'HTTP 403 (fixture)' }
+          : sizeReading(n, state === 'oversized' ? sizePair(LINE, 1) : sizePair(LINE, 0)),
+      );
+    }
+    return sizeGuardVerdict({ event: EVENT_MERGE_GROUP, pulls, readings, apiCalls: pulls.length });
+  };
+  const overOne = sizeRun([5], { 5: 'oversized' });
+  assert('an-OVERSIZED-queued-PR-REFUSES-with-code-8', overOne.exitCode === EXIT_REFUSED_OVERSIZED && overOne.conclusion === 'refused' && overOne.refusalKind === 'oversized');
+  const atOne = sizeRun([5], { 5: 'within' });
+  assert('an-at-threshold-queued-PR-is-CLEAR-and-exits-0', atOne.exitCode === EXIT_CLEAR && atOne.conclusion === 'clear');
+  const unreadOne = sizeRun([5], { 5: 'unreadable' });
+  assert('⛔ an-UNREADABLE-size-REFUSES-with-its-OWN-code-9-never-passes', unreadOne.exitCode === EXIT_REFUSED_SIZE_UNREADABLE && unreadOne.refusalKind === 'unreadable');
+  assert(
+    'a-pull-with-NO-recorded-reading-REFUSES-rather-than-defaulting-to-within',
+    sizeGuardVerdict({ event: EVENT_MERGE_GROUP, pulls: [5], readings: new Map(), apiCalls: 1 }).exitCode === EXIT_REFUSED_SIZE_UNREADABLE,
+  );
+  const sizeNoPull = sizeGuardVerdict({ event: EVENT_MERGE_GROUP, pulls: [], readings: new Map(), apiCalls: 0 });
+  assert('a-merge-group-naming-NO-pull-request-REFUSES-on-9-with-kind-no-pull', sizeNoPull.exitCode === EXIT_REFUSED_SIZE_UNREADABLE && sizeNoPull.refusalKind === 'no-pull');
+  assert('⭐ a-within-sibling-does-NOT-carry-an-oversized-PR-through-the-group', sizeRun([11, 22], { 11: 'oversized', 22: 'within' }).exitCode === EXIT_REFUSED_OVERSIZED);
+  // The pull_request leg: not applicable, silent, read-free.
+  const sizePrLeg = sizeGuardVerdict({ event: EVENT_PULL_REQUEST, pulls: [5], readings: new Map() });
+  assert(
+    'the-pull_request-leg-is-NOT-APPLICABLE-exits-clear-and-renders-NOTHING-so-that-legs-output-stays-byte-identical',
+    sizePrLeg.conclusion === 'not-applicable' && sizePrLeg.exitCode === EXIT_CLEAR && renderSizeVerdict(sizePrLeg) === '',
+  );
+  let sizeReadsOnPr = 0;
+  const sizePrRun = await runSizeGuard({
+    event: EVENT_PULL_REQUEST,
+    rows: [carrierRow(5)],
+    fetchPull: () => {
+      sizeReadsOnPr += 1;
+      throw new Error('the size leg must not read on the pull_request leg');
+    },
+  });
+  assert('and-makes-ZERO-pull-reads-there-measured-with-a-spy-that-THROWS', sizeReadsOnPr === 0 && sizePrRun.apiCalls === 0 && sizePrRun.conclusion === 'not-applicable');
+  // End to end through the orchestrator: one pull read per queued PR, the enumeration the carrier leg's.
+  const sizeReads = [];
+  const e2eSize = await runSizeGuard({
+    event: EVENT_MERGE_GROUP,
+    rows: [carrierRow(11), carrierRow(22), carrierRow(11)],
+    fetchPull: async (pr) => {
+      sizeReads.push(pr);
+      return pull(HEAD, { size: pr === 11 ? sizePair(LINE, 1) : sizePair(1, 0) });
+    },
+  });
+  assert(
+    '⭐ end-to-end-ONE-pull-read-per-queued-PR-deduplicated-in-group-order-and-the-oversized-one-refuses',
+    sizeReads.join() === '11,22' && e2eSize.apiCalls === 2 &&
+      e2eSize.apiCalls === carrierPullsInGroup([carrierRow(11), carrierRow(22), carrierRow(11)]).length && e2eSize.exitCode === EXIT_REFUSED_OVERSIZED,
+    JSON.stringify({ reads: sizeReads, apiCalls: e2eSize.apiCalls, exit: e2eSize.exitCode }),
+  );
+  let sizeUrl = '';
+  const e2eReader = await runSizeGuard({
+    event: EVENT_MERGE_GROUP,
+    rows: [carrierRow(42)],
+    fetchPull: makePullReader({
+      ...readerArgs,
+      fetchImpl: async (url) => {
+        sizeUrl = url;
+        return { ok: true, status: 200, json: async () => ({ head: { sha: HEAD }, additions: 10, deletions: 2 }) };
+      },
+    }),
+  });
+  assert(
+    'and-through-the-real-reader-it-hits-the-pull-object-route-the-scope-already-granted',
+    /\/repos\/o\/r\/pulls\/42$/.test(sizeUrl) && e2eReader.exitCode === EXIT_CLEAR && renderSizeVerdict(e2eReader).includes('12 changed line(s) (+10 / -2)'),
+    sizeUrl,
+  );
+  const e2eSizeThrows = await runSizeGuard({
+    event: EVENT_MERGE_GROUP,
+    rows: [carrierRow(11)],
+    fetchPull: async () => {
+      throw new Error('GET /repos/o/r/pulls/11 answered HTTP 403');
+    },
+  });
+  assert(
+    '⛔ a-throwing-pull-read-is-exit-9-never-escapes-and-names-its-cause',
+    e2eSizeThrows.exitCode === EXIT_REFUSED_SIZE_UNREADABLE && /403/.test(renderSizeVerdict(e2eSizeThrows)) && /REFUSED/.test(renderSizeVerdict(e2eSizeThrows)),
+    renderSizeVerdict(e2eSizeThrows),
+  );
+  const e2eNoPair = await runSizeGuard({ event: EVENT_MERGE_GROUP, rows: [carrierRow(11)], fetchPull: async () => pull() });
+  assert(
+    '⛔ a-pull-object-with-no-pair-is-exit-9-too',
+    e2eNoPair.exitCode === EXIT_REFUSED_SIZE_UNREADABLE && /no `additions` \/ `deletions` pair/.test(renderSizeVerdict(e2eNoPair)),
+    renderSizeVerdict(e2eNoPair),
+  );
+  // ⭐ THE CARD'S CASE — PR #18971's shape: over the line, NOTHING governed. The
+  // governed leg is CLEAR at zero reads (its spies throw), the size leg
+  // REFUSES, and the group exits on the size code.
+  const pr18971 = [{ sha: 'e'.repeat(40), subject: 'chore(spec): regenerate artefacts (#18971)', pr: 18971, paths: ['packages/spec/api-surface/x.json', 'content/docs/references/y.mdx'] }];
+  const explodeForSize = () => {
+    throw new Error('the governed leg must not read for an ungoverned diff');
+  };
+  const g18971 = await runGuard({ event: EVENT_MERGE_GROUP, rows: pr18971, fetchReviews: explodeForSize, fetchPull: explodeForSize, fetchComments: explodeForSize });
+  const s18971 = await runSizeGuard({
+    event: EVENT_MERGE_GROUP,
+    rows: pr18971,
+    fetchPull: async () => pull(HEAD, { size: sizePair(238310, 119, 'GET /repos/objectstack-ai/objectstack/pulls/18971') }),
+  });
+  const c18971 = await runCarrierGuard({ event: EVENT_MERGE_GROUP, rows: pr18971, fetchLabels: async () => ['size/xl'] });
+  const exit18971 = groupExitCode({ governed: g18971, size: s18971, carrier: c18971 });
+  assert(
+    '⭐ #18971-replay-an-OVERSIZED-PR-with-NO-governed-path-is-REFUSED-at-the-queue-on-the-size-code',
+    g18971.conclusion === 'clear' && g18971.apiCalls === 0 && s18971.exitCode === EXIT_REFUSED_OVERSIZED && c18971.exitCode === EXIT_CLEAR && exit18971 === EXIT_REFUSED_OVERSIZED,
+    JSON.stringify({ governed: g18971.conclusion, size: s18971.exitCode, carrier: c18971.exitCode, exit: exit18971 }),
+  );
+  const text18971 = renderSizeVerdict(s18971);
+  assert(
+    'and-the-rendering-names-the-PR-the-two-numbers-their-sum-the-threshold-and-the-limb',
+    text18971.includes('#18971') && text18971.includes('238429 changed line(s) (+238310 / -119)') && text18971.includes(`EXCEEDS the human-merge line ${LINE}`) &&
+      text18971.includes('SIZE limb') && text18971.includes('generated files INCLUDED'),
+    text18971,
+  );
+  assert(
+    'and-names-the-ONE-remedy-a-HUMAN-MERGE-quoting-the-ruling-untranslated-and-never-advises-shrinking-the-diff',
+    text18971.includes('HUMAN MERGE') && text18971.includes('修改代码量超过某个行数（比如5000）就应该人工审核') && text18971.includes('DRAFT') && !/shrink|split the|smaller/i.test(text18971),
+    text18971,
+  );
+  assert(
+    'and-says-an-approval-does-NOT-lift-this-limb-and-points-at-the-sibling-for-the-number',
+    /does NOT lift this limb/.test(text18971) && /check-governed-merges\.mjs --pr/.test(text18971),
+  );
+  assert('and-the-read-source-is-printed-so-a-log-shows-where-the-number-came-from', text18971.includes('read from: GET /repos/objectstack-ai/objectstack/pulls/18971'));
+  // A governed path AND oversized: both limbs print, one exit — the governed
+  // code, already the top of the table.
+  const bothRows = [row(9527, ['AGENTS.md', 'packages/x.ts'])];
+  const gBoth = await runGuard({ event: EVENT_MERGE_GROUP, rows: bothRows, fetchReviews: async () => [], fetchPull: async () => pull(HEAD, { size: sizePair(LINE, 1) }), fetchComments: async () => [] });
+  const sBoth = await runSizeGuard({ event: EVENT_MERGE_GROUP, rows: bothRows, fetchPull: async () => pull(HEAD, { size: sizePair(LINE, 1) }) });
+  const cBare = carrierVerdict({ event: EVENT_MERGE_GROUP, pulls: [9527], readings: new Map([[9527, { pr: 9527, state: 'bare', labels: [] }]]), apiCalls: 1 });
+  assert(
+    '⭐ governed-AND-oversized-prints-BOTH-limbs-and-exits-on-the-GOVERNED-code',
+    gBoth.exitCode === EXIT_REFUSED_UNAPPROVED && sBoth.exitCode === EXIT_REFUSED_OVERSIZED &&
+      groupExitCode({ governed: gBoth, size: sBoth, carrier: cBare }) === EXIT_REFUSED_UNAPPROVED &&
+      /REFUSED/.test(renderGuardVerdict(gBoth)) && /REFUSED/.test(renderSizeVerdict(sBoth)),
+    JSON.stringify([gBoth.exitCode, sBoth.exitCode]),
+  );
+  const gApprovedBig = await runGuard({
+    event: EVENT_MERGE_GROUP,
+    rows: bothRows,
+    fetchReviews: async () => [approvedAt(GOVERNED_APPROVERS[0], HEAD)],
+    fetchPull: async () => pull(HEAD, { size: sizePair(LINE, 1) }),
+    fetchComments: async () => [],
+  });
+  assert(
+    '⛔ an-authorized-APPROVAL-clears-the-path-limb-and-lifts-NOTHING-from-the-size-the-group-still-exits-8',
+    gApprovedBig.conclusion === 'cleared' && groupExitCode({ governed: gApprovedBig, size: sBoth, carrier: cBare }) === EXIT_REFUSED_OVERSIZED,
+  );
+  // The lift lifts a PATH, never the number: rows whose every path the register
+  // lifted still pay the size.
+  const liftedAll = await runSizeGuard({
+    event: EVENT_MERGE_GROUP,
+    rows: [{ sha: 'f'.repeat(40), subject: 'x (#77)', pr: 77, paths: [] }],
+    fetchPull: async () => pull(HEAD, { size: sizePair(237706, 0) }),
+  });
+  assert('⭐ a-certified-pure-regeneration-lifts-the-PATH-and-lifts-NOTHING-from-the-size-at-the-queue-either', liftedAll.exitCode === EXIT_REFUSED_OVERSIZED);
+  // The exit precedence, the whole table. A group naming NO pull request now
+  // answers on 9 rather than the carrier's 7 — both blocks still print their
+  // own refusal; only the code changed hands, and it is pinned here.
+  const exitOf = (n) => ({ exitCode: n });
+  assert(
+    '⭐ groupExitCode-precedence-governed-THEN-size-THEN-carrier-pinned-on-every-combination',
+    groupExitCode({ governed: exitOf(0), size: exitOf(0), carrier: exitOf(0) }) === EXIT_CLEAR &&
+      groupExitCode({ governed: exitOf(0), size: exitOf(0), carrier: exitOf(EXIT_REFUSED_CARRIER) }) === EXIT_REFUSED_CARRIER &&
+      groupExitCode({ governed: exitOf(0), size: exitOf(EXIT_REFUSED_OVERSIZED), carrier: exitOf(EXIT_REFUSED_CARRIER) }) === EXIT_REFUSED_OVERSIZED &&
+      groupExitCode({ governed: exitOf(EXIT_REFUSED_UNAPPROVED), size: exitOf(EXIT_REFUSED_OVERSIZED), carrier: exitOf(EXIT_REFUSED_CARRIER) }) === EXIT_REFUSED_UNAPPROVED &&
+      groupExitCode({ governed: exitOf(EXIT_REFUSED_UNREADABLE), size: exitOf(0), carrier: exitOf(EXIT_REFUSED_CARRIER_UNREADABLE) }) === EXIT_REFUSED_UNREADABLE &&
+      groupExitCode({ governed: exitOf(0), size: exitOf(EXIT_REFUSED_SIZE_UNREADABLE), carrier: exitOf(0) }) === EXIT_REFUSED_SIZE_UNREADABLE &&
+      groupExitCode({ governed: exitOf(0), size: exitOf(EXIT_REFUSED_SIZE_UNREADABLE), carrier: exitOf(EXIT_REFUSED_CARRIER_UNREADABLE) }) === EXIT_REFUSED_SIZE_UNREADABLE,
+  );
+  // The words on the clear path: the numbers are printed, so a log shows what a
+  // landing was judged on.
+  const clearWords = renderSizeVerdict(atOne);
+  assert(
+    'the-CLEAR-prints-the-number-read-and-the-threshold-and-names-the-sibling-as-the-source-of-both',
+    clearWords.includes(`${LINE} changed line(s) (+${LINE} / -0)`) && clearWords.includes('at or under') && clearWords.includes('check-governed-merges.mjs'),
+    clearWords,
+  );
+  assert(
+    'the-unreadable-refusal-says-the-size-DECIDES-unlike-the-head-and-separates-exit-8-from-9',
+    /DECIDES here/.test(renderSizeVerdict(unreadOne)) && /exit 8 vs 9/.test(renderSizeVerdict(unreadOne)),
+  );
+  // ⛔ IMPORTED, NEVER RESTATED — pinned against this file's own source.
+  let sizeOwnSource = '';
+  try {
+    sizeOwnSource = readFileSync(join(repoRoot, 'scripts', 'pm', 'check-governed-queue-guard.mjs'), 'utf8');
+  } catch {
+    /* asserted below */
+  }
+  assert('⛔ this-file-declares-NO-threshold-of-its-own', sizeOwnSource !== '' && !/HUMAN_MERGE_LINE_THRESHOLD\s*=/.test(sizeOwnSource));
+  assert(
+    '⛔ and-spells-NO-size-comparison-the-limb-is-reached-through-testVerdict-and-landsByHumanMerge',
+    !/(changedLines|additions\s*\+\s*deletions)\s*>=?\s*/.test(sizeOwnSource) && /testVerdict\(\[\], \{ size \}\)/.test(sizeOwnSource) && /landsByHumanMerge\(verdict\)/.test(sizeOwnSource),
+  );
+  // The scoped merge_group clear now names the size read; the pull_request one
+  // is pinned byte-identical above.
+  assert('the-merge_group-zero-cost-clear-names-the-SIZE-read-it-no-longer-avoids', clearMg.includes('for its SIZE') && clearMg.includes('An outage there DOES refuse this merge group.'), clearMg);
+  // The workflow: the pull object is already under `pull-requests: read`, so
+  // this leg widened NO scope — and the file is human-merge, untouched.
+  try {
+    const wfForSize = readFileSync(join(repoRoot, '.github', 'workflows', CHECK_WORKFLOW), 'utf8');
+    assert(
+      'the-size-leg-needs-NO-new-workflow-scope-the-pull-object-is-under-pull-requests-read-already',
+      /permissions:\n  contents: read\n  pull-requests: read\n/.test(wfForSize) && !/^\s+issues:\s*(read|write)/m.test(wfForSize),
+    );
+  } catch (error) {
+    assert('the-workflow-is-readable-for-the-size-scope-pin', false, String(error?.message ?? error).split('\n')[0]);
+  }
+
 
   // ── the WIRING pin: the workflow still spells this context name ──────────
   //
@@ -3253,23 +3921,30 @@ export async function selfTest() {
   // the REAL ones, loaded through the real lazy import, because a battery run
   // against hand-made stubs would keep passing the day an upstream rename broke
   // the live leg — which is the entire failure mode importing them avoids.
-  battery('⭐ #18020: the references tier — a review of record, not an approval');
-  const REF_A = `${REFERENCES_TIER_PREFIX}platform-readings.md`;
-  const REF_B = `${REFERENCES_TIER_PREFIX}lanes/skills.md`;
-  const RULES_PATH = '.claude/skills/pm-dispatch/SKILL.md';
-  // ⛔ The sibling one character away from the ruled directory. A bare
-  // `startsWith` without the trailing slash lands this in the tier.
-  const NEAR_MISS = '.claude/skills/pm-dispatch/references-draft/x.md';
+  battery('⭐ #18020 → #19133 Tier S: a review of record, not an approval');
+  // The fact layer that WAS the whole tier under #18020, and the siblings the
+  // 2026-09-18 ruling moved in beside it — skills, agents, hooks, settings.
+  const REF_A = '.claude/skills/pm-dispatch/references/platform-readings.md';
+  const REF_B = '.claude/skills/pm-dispatch/references/lanes/skills.md';
+  const SKILL_PATH = '.claude/skills/pm-dispatch/SKILL.md';
+  const AGENT_PATH = '.claude/agents/os-dev.md';
+  const HOOK_PATH = '.claude/hooks/guard-main-checkout.sh';
+  const SETTINGS_PATH = '.claude/settings.json';
+  // ⛔ The law. One of these in the diff and the whole entry is Tier H.
+  const RULES_PATH = 'AGENTS.md';
+  const TIER_H_PATHS = ['AGENTS.md', 'CLAUDE.md', 'docs/adr/0001-x.md', 'docs/NORTH-STAR.md', 'skills/objectstack-ui/SKILL.md'];
 
-  assert('a-references-only-path-set-is-the-REFERENCES-tier', governedTierFor([REF_A, REF_B]) === TIER_REFERENCES);
-  assert('⛔ the-adjacent-directory-is-NOT-the-tier-the-trailing-slash-is-the-control', governedTierFor([NEAR_MISS]) === TIER_RULES, NEAR_MISS);
-  assert('ONE-rules-layer-path-makes-the-WHOLE-entry-rules-layer', governedTierFor([REF_A, REF_B, RULES_PATH]) === TIER_RULES);
-  assert('a-rules-only-set-is-rules', governedTierFor([RULES_PATH]) === TIER_RULES);
-  assert('an-EMPTY-path-set-defaults-to-rules-never-to-the-tier', governedTierFor([]) === TIER_RULES && governedTierFor(undefined) === TIER_RULES);
+  assert('a-Tier-S-only-path-set-is-Tier-S', governedTierFor([REF_A, REF_B, SKILL_PATH, AGENT_PATH, HOOK_PATH, SETTINGS_PATH]) === TIER_S);
+  assert('⛔ the-old-references-boundary-is-GONE-SKILL-md-and-a-references-draft-sibling-are-Tier-S-alike', governedTierFor([SKILL_PATH]) === TIER_S && governedTierFor(['.claude/skills/pm-dispatch/references-draft/x.md']) === TIER_S);
+  assert('ONE-Tier-H-path-makes-the-WHOLE-entry-Tier-H', governedTierFor([REF_A, REF_B, RULES_PATH]) === TIER_H);
+  assert('each-Tier-H-surface-alone-is-Tier-H', TIER_H_PATHS.every((p) => governedTierFor([p]) === TIER_H), TIER_H_PATHS.join());
+  assert('an-EMPTY-path-set-defaults-to-Tier-H-never-to-S', governedTierFor([]) === TIER_H && governedTierFor(undefined) === TIER_H);
+  assert('the-tier-constants-are-the-registers-own-two-distinct-values', TIER_H === GOVERNED_TIER_H && TIER_S === GOVERNED_TIER_S && TIER_H !== TIER_S);
   assert(
     'the-tier-travels-on-the-decomposed-entry-so-the-verdict-never-re-derives-it',
-    decomposeGovernedWork([row(5, [REF_A])]).governed[0].tier === TIER_REFERENCES &&
-      decomposeGovernedWork([row(5, [REF_A, RULES_PATH])]).governed[0].tier === TIER_RULES,
+    decomposeGovernedWork([row(5, [REF_A])]).governed[0].tier === TIER_S &&
+      decomposeGovernedWork([row(5, [AGENT_PATH])]).governed[0].tier === TIER_S &&
+      decomposeGovernedWork([row(5, [REF_A, RULES_PATH])]).governed[0].tier === TIER_H,
   );
 
   // The real recognisers, and the tier VALUE read from the constant's one home
@@ -3345,6 +4020,21 @@ export async function selfTest() {
     'references-only-plus-a-valid-record-on-the-CURRENT-head-PASSES-with-zero-approvals',
     tierPass.exitCode === EXIT_CLEAR && tierPass.conclusion === 'cleared' && tierPass.entries[0].record.state === 'stands',
     JSON.stringify(tierPass.entries[0].record),
+  );
+  // ⭐ #19133, end to end: the generalised tier. An agents + settings diff lands
+  // on the same record — and its lit control, the same diff with NO record, is
+  // refused (the card's own acceptance line).
+  const agentPass = await tierRun({ files: [AGENT_PATH, SETTINGS_PATH], comments: [recordComment()] });
+  assert(
+    'a-claude-agents-plus-settings-PR-with-a-valid-record-PASSES-with-zero-approvals-Tier-S-generalised',
+    agentPass.exitCode === EXIT_CLEAR && agentPass.conclusion === 'cleared' && agentPass.entries[0].tier === TIER_S && agentPass.entries[0].record.state === 'stands',
+    JSON.stringify(agentPass.entries[0].record),
+  );
+  const agentNoRecord = await tierRun({ files: [AGENT_PATH, SETTINGS_PATH], comments: [] });
+  assert(
+    '⛔ CONTROL: the-same-Tier-S-PR-with-NO-record-is-REFUSED',
+    agentNoRecord.exitCode === EXIT_REFUSED_UNAPPROVED && agentNoRecord.entries[0].tier === TIER_S && agentNoRecord.entries[0].record.state === 'absent',
+    JSON.stringify(agentNoRecord.entries[0].record),
   );
   // The lit controls: the same fixture, one fact away, in five directions.
   const tierOldHead = await tierRun({ comments: [recordComment({ sha: REF_OLD.slice(0, 12) })] });
@@ -3510,11 +4200,11 @@ export async function selfTest() {
   );
 
   // ⭐ The BOUNDARY: one rules-layer path and the tier is not reachable at all.
-  battery('⭐ #18020: the references tier — a review of record, not an approval');
+  battery('⭐ #18020 → #19133 Tier S: a review of record, not an approval');
   const tierMixed = await tierRun({ files: [REF_A, RULES_PATH], comments: [recordComment()] });
   assert(
-    '⛔ a-MIXED-diff-with-one-rules-layer-path-is-REFUSED-even-with-a-perfect-record',
-    tierMixed.exitCode === EXIT_REFUSED_UNAPPROVED && tierMixed.entries[0].tier === TIER_RULES && tierMixed.entries[0].record === undefined,
+    '⛔ a-MIXED-diff-with-one-Tier-H-path-is-REFUSED-even-with-a-perfect-record',
+    tierMixed.exitCode === EXIT_REFUSED_UNAPPROVED && tierMixed.entries[0].tier === TIER_H && tierMixed.entries[0].record === undefined,
   );
   assert('and-the-mixed-entry-never-even-BOUGHT-the-thread-read', tierApiCalls === 2, `api calls: ${tierApiCalls}`);
 
@@ -3608,7 +4298,7 @@ export async function selfTest() {
 
   // The words a reader acts on — requirement (e) reaches the new leg too.
   const tierRefusalText = renderGuardVerdict(tierAbsent);
-  assert('the-refusal-names-the-tier-on-the-entry-so-a-reader-knows-why-a-record-would-help', /landing tier: REFERENCES/.test(tierRefusalText));
+  assert('the-refusal-names-the-tier-on-the-entry-so-a-reader-knows-why-a-record-would-help', /landing tier: S/.test(tierRefusalText), tierRefusalText);
   assert('and-offers-the-record-as-a-THIRD-remedy-naming-the-three-facts-it-must-carry', /3\. Or — ONLY for a pull request whose governed paths all lie under/.test(tierRefusalText) && /Reviewed-by:/.test(tierRefusalText) && /Served-tier:/.test(tierRefusalText));
   assert('⛔ and-a-RULES-layer-refusal-is-offered-no-such-remedy-the-control-for-the-line-above', !/3\. Or — ONLY for a pull request/.test(renderGuardVerdict(rulesDismissed)));
   assert('the-below-tier-refusal-names-the-reading-it-actually-got', /does not stand/.test(renderGuardVerdict(tierBelow)) && /a-lesser-tier/.test(renderGuardVerdict(tierBelow)));
@@ -3660,9 +4350,9 @@ export async function selfTest() {
     Object.keys(RECOGNISER_SOURCES).join(', '),
   );
   assert(
-    '⛔ the-tier-prefix-keeps-its-trailing-slash-and-is-NOT-written-as-a-register-glob',
-    REFERENCES_TIER_PREFIX.endsWith('/') && !REFERENCES_TIER_PREFIX.includes('*'),
-    REFERENCES_TIER_PREFIX,
+    '⛔ this-file-spells-NO-tier-prefix-Tier-S-is-the-register-rows-that-carry-S-and-today-that-is-the-whole-claude-tree',
+    GOVERNED_SURFACES.filter((s) => s.tier === TIER_S).map((s) => s.glob).join() === '.claude/**' && tierSGlobs() === '.claude/**',
+    tierSGlobs(),
   );
   assert(
     '⛔ and-this-leg-added-NO-surface-to-the-register-the-tier-is-a-landing-rule-not-a-membership-one',
@@ -3743,7 +4433,17 @@ export async function selfTest() {
       'top-level await in this file\'s dispatch) is pinned against this file\'s own source, refused on an older ' +
       'head, on a missing or below-tier or partially-stamped `Served-tier:`, on an unsigned record, on no record ' +
       'at all, and on one rules-layer path in the same diff — and MONOTONE by construction: measured with ' +
-      'throwing spies, an approved references PR never reads a thread and never loads a recogniser.',
+      'throwing spies, an approved references PR never reads a thread and never loads a recogniser — and the ' +
+      '#19036 SIZE line (the 2026-09-18 ruling, landed seat-side by #19033 and carried to the queue here): every ' +
+      'queued pull request\'s `additions` / `deletions` read off the same pull object the head read uses, one read ' +
+      'per PR, judged by the sibling\'s IMPORTED predicate (`testVerdict([], { size })` + `landsByHumanMerge`; this ' +
+      'file declares no threshold and spells no comparison, pinned against its own source) — the #18971 replay ' +
+      '(over the line, nothing governed) REFUSED on exit 8 with the two numbers, the threshold and the human-merge ' +
+      'remedy printed; exactly the threshold clear; a governed AND oversized group printing both limbs and exiting ' +
+      'on the governed code; an authorized approval lifting nothing from the size; a certified regeneration lifting ' +
+      'nothing from it either; an unreadable size or a pull object without the pair FAIL-CLOSED on exit 9; the ' +
+      'pull_request leg silent and read-free; and the three-leg exit precedence (governed, size, carrier) pinned on ' +
+      'every combination.',
   );
 
   selfTestReachedVerdict = true;
