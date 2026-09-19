@@ -703,6 +703,7 @@ import {
   labelNames,
   latestMarkedComment,
   markerMatches,
+  ownershipMarkerNearMisses,
   prDeliversCard,
   proxyRearmPlan,
   resolveSweepRepo,
@@ -826,7 +827,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#16833: an UNJUDGED refusal names the CHANNEL that answered, what it answered, and which carrier': 30,
   '#18456: the `--pair` input record — the same block on every exit, so two runs that disagree can be diffed': 38,
   '#18701: ONE thread set -- what the template STATES is what the queue guard READS': 16,
-  '#18719: a RETRACTED claim leaves the pool — a withdrawn claim never governs': 36,
+  '#18719: a RETRACTED claim leaves the pool — a withdrawn claim never governs': 46,
   '#18683: the card-comment read pages to a cap — past 100 is UNJUDGED, ⛔ never a truncated pool': 27,
   '#18764: a DECORATED claim ENTERS the pool — ONE reading, and it is the sibling\'s': 24,
   '#18828: a SECOND `Claim:` by ONE seat — the writer-side prohibition, finally READ': 52,
@@ -1585,40 +1586,67 @@ function applicableCorrection(commentRows, pool) {
 // exactly as invisible. What changes is MEMBERSHIP — the selector READS the
 // retraction.
 //
-// ## One predicate, two channels — the shape H4's blocker reader already has
+// ## One predicate, ONE channel — the `Release:` line, read the sibling's way
 //
-// A claim leaves the pool when a LATER comment BY THE SAME AUTHOR retracts it.
-// That one sentence is read through the two channels the protocol itself
-// writes, exactly as the sibling reads a block through a DIRECTIVE
-// (`Blocked-by:`) and through PROSE anchors (`PROSE_BLOCKER_ANCHORS`):
+// A claim leaves the pool when a LATER comment BY THE SAME AUTHOR retracts it,
+// and a retraction is the `Release:` line AGENTS.md and SKILL.md name as the
+// act that takes a card out of a seat's hands 「释放是显式动作:让卡离手者同笔清
+// assignee + `Release:` 行(会话/因/去向);下一任重新认领。」 It needs no id,
+// because it is a statement about its own author: it retracts that author's
+// OLDER claims. It is READ THROUGH `markerMatches` — the sibling's ONE reading
+// of an ownership marker (#18680, #18764): the bare marker first, then the
+// shared stripper per line with a markdown list item refused — so a seat that
+// writes `**Release:**` or `` `Release:` `` has released exactly as one that
+// writes it bare. The constant itself is IMPORTED rather than restated, for
+// `CLAIM_COMMENT_MARKER`'s reason: two readers of one thread must not drift.
 //
-//   directive — the `Release:` line AGENTS.md and SKILL.md already name as the
-//               act that takes a card out of a seat's hands 「释放是显式动作:
-//               让卡离手者同笔清 assignee + `Release:` 行(会话/因/去向);下一
-//               任重新认领。」 It needs no id, because it is a statement about
-//               its own author: it retracts that author's OLDER claims.
-//   prose     — a line carrying a retraction anchor AND NAMING the claim by its
-//               comment id. The id is what makes the prose channel safe: it
-//               says WHICH record is withdrawn instead of inferring one from a
-//               verb.
+// ⚠️ That the reading is the sibling's and ⛔ not the raw constant is MEASURED,
+// not tidiness. Before #18829 A this channel tested `RELEASE_COMMENT_MARKER`
+// against the raw body, and two of the twelve cross-author pairs #18862 counted
+// (2026-09-18T00:47Z) stood only because of it: `os-warren`'s backticked
+// `` `Release:` `` on #17852 (5700605769) and `claude[bot]`'s bolded
+// `**Release:**` on objectui#7848 (5617804323) were real releases the raw
+// constant could not see under their decoration, so the released claims stayed
+// LIVE in the pool and the later claimant read as a silent takeover. Both are
+// replayed in the self-test.
 //
-// ⛔ No new protocol text is declared here. `Release:` is already the act, and
-// `RELEASE_COMMENT_MARKER` is IMPORTED rather than restated for
-// `CLAIM_COMMENT_MARKER`'s reason — two readers of one thread must not drift.
-// Whether the protocol should REQUIRE the `Release:` spelling of a retraction,
-// so the prose channel could be retired, is a GOVERNED-text question: it is
-// raised on the card and ⛔ not answered from here.
+// ## The PROSE channel this section carried, and why it is GONE (#18773 A, #18829 A)
+//
+// PR #18770 taught this reader a second channel: a line OPENING with a
+// retraction act from a closed roster (`retract` · `withdraw` · 撤回 · 撤销 ·
+// 作废) AND naming the claim by comment id, undecorated by a stripper of this
+// file's own that removed `_` and then every leading non-letter/non-digit
+// character. It read one measured specimen — #18373's 「🚨 **撤回上一条认领
+// (`5717315121`)…」 — and in doing so inferred an act the governed text never
+// declared. The maintainer ruled (batch #156 item 3, letter A): a retraction
+// 「is a `Release:` line — the same act, the same three fields, 去向 =
+// 「让先到者」」, and 「⛔ B — a reader inferring an act from a verb replays the
+// next spelling; ⛔ C — a dated tolerance for a channel with one specimen」. In
+// the same batch (item 4, letter A) the file's second undecorator was ruled out
+// of existence: 「the protocol's definition of a decorated ownership line is
+// the shared claim reading」 — the two strippers had been run over one
+// twelve-spelling fixture set and disagreed on five (`__Claim:__`, `- Claim:`,
+// `* Claim:`, `🚨 Claim:`, `## Claim:` read as the directive through the
+// second stripper and as nothing through the shared reading).
+//
+// ⇒ the anchor roster, the comment-id scan and the second stripper are DELETED,
+// not disabled. The specimen is replayed in the self-test in the direction the
+// ruling accepted: the prose line retracts nothing, the withdrawn claim stands
+// again, and the thread is NAMED by the cross-author row below (#18862) rather
+// than read silently. The sigil-led shape the stripper used to swallow is the
+// SIBLING's named near miss (`leading-sigil` in
+// `OWNERSHIP_MARKER_NEAR_MISS_FORMS`), audible where every other refused
+// ownership spelling is. A seat that wants the #18373 outcome writes the act
+// the protocol names, in the spelling it names.
 //
 // ## Why SAME AUTHOR is load-bearing, not tidiness
 //
 // Only the seat that wrote a claim can withdraw it; anyone else's line is
-// DISCUSSION of a retraction, which is not one. That is not hypothetical on
-// this very thread: `os-litant` — the OTHER seat — wrote 「那条已撤回的
-// `5717315121`」 (5717775707) and 「now names a retracted claim … selects
-// comment 5717315121」 (5717738051). Both lines carry a retraction anchor AND
-// the claim's id. Without the author test each of them retracts another seat's
-// claim, and the reader becomes a way for any participant to void any owner's
-// record by describing it.
+// DISCUSSION of a release, which is not one. The measured shape is on the
+// #18373 thread itself: `os-litant` — the OTHER seat — wrote about the
+// withdrawn claim twice (5717775707, 5717738051), and a reader without the
+// author test becomes a way for any participant to void any owner's record by
+// describing it.
 //
 // An UNREADABLE author on either side retracts NOTHING. Fail-closed is the
 // direction that leaves the existing record standing, and it is the only
@@ -1629,90 +1657,6 @@ function applicableCorrection(commentRows, pool) {
 // 「per-seat identities are not introduced」), stated here rather than repaired
 // here: this reader cannot invent an identity the API does not carry.
 // ---------------------------------------------------------------------------
-
-/**
- * The prose spellings that RETRACT a claim, matched case-insensitively against
- * a line whose markdown decoration has been removed — the same judgement
- * `PROSE_BLOCKER_ANCHORS` makes one file over, for the same reason: authors
- * format these lines, and a decorated one means what the bare one means.
- *
- * All three Chinese spellings are MEASURED, not guessed: 「撤回」 opens the
- * #18373 retraction and 「作废」 carries its second sentence
- * (「**评论 `5717315121` 作废**」). The two English stems cover the inflections
- * (`retracts`/`retracted`/`retraction`, `withdraws`/`withdrawn`).
- *
- * ⛔ Bare `release` is deliberately ABSENT, exactly as bare `blocking` is from
- * the blocker anchors: in THIS repository a "release" is overwhelmingly a
- * VERSION release (Prime Directive #15), so admitting the word would read a
- * seat discussing the release train as a seat giving up a card. The `Release:`
- * DIRECTIVE is read by the other channel, where the colon is the discriminator.
- *
- * ⛔ `supersede` is absent too, and for the opposite reason: supersession is
- * what the recency rule ALREADY does, and a claim that supersedes another is a
- * claim, not a retraction. Reading the word here would collapse two states the
- * record keeps apart.
- *
- * ## ⛔ The anchor OPENS the line — it is not searched for inside it (MEASURED)
- *
- * `PROSE_BLOCKER_ANCHORS` asks `includes`, and correctly: that reader NOMINATES
- * candidates which it then resolves with a real read, so a sentence merely
- * discussing a block costs one request and no verdict. This reader DECIDES
- * ownership with nothing downstream to catch it, so it anchors.
- *
- * ⚠️ The cost of the loose form was measured on the very thread this rule comes
- * from, and it inverts the rule's purpose. `os-litant` — the seat whose claim
- * this reading has to PROTECT — wrote, in its own dev report (5717738051), the
- * line that REPORTED this defect:
- *
- *   「"question": "The governing-claim instrument now names a retracted claim.
- *     … marks my dispatch's 5717143021 as SUPERSEDED …"」
- *
- * Same author, later than the claim, an anchor and the claim's own id on one
- * line. Under `includes` that line RETRACTS the claim it is defending, and the
- * comment that filed the card silently voids the ownership the card exists to
- * restore. ⇒ the anchor must be what the line is ABOUT, which is what opening
- * it means. `os-litant`'s 5717775707 「⚠️ 但它暴露了一个工具缺陷…那条已撤回的
- * `5717315121`…」 is the same shape from the other direction and is excluded
- * twice over — by the author test and by this one.
- *
- * ⚠️ The accepted direction is UNDER-reading: a retraction written mid-sentence
- * leaves the claim standing, which is exactly today's behaviour, and the remedy
- * is the one line the protocol already names. Reading it would mean guessing
- * which of two seats a sentence is about — the call `claimedBranches` makes for
- * an unrecognised branch spelling, for its reason.
- */
-export const RETRACTION_PROSE_ANCHORS = Object.freeze([
-  'retract',
-  'withdraw',
-  '撤回',
-  '撤销',
-  '作废',
-]);
-
-/**
- * How a comment id is spelled inside a line — a run of digits long enough to be
- * one, with no digit on either side.
- *
- * ⛔ Not a dynamically built regex per claim: the ids are COMPARED as strings
- * after the scan, so nothing here interpolates a value into a pattern and the
- * `g` flag lives on one frozen literal that only `matchAll` reads.
- */
-const COMMENT_ID_SCAN = /(?<!\d)\d{6,}(?!\d)/gu;
-
-/**
- * What a line SAYS, with the decoration an author puts in front of it removed:
- * markdown emphasis anywhere, then every leading character that is neither a
- * letter nor a digit — the blockquote and list markers the sibling anchors
- * already tolerate, plus the sigils this fleet writes (「🚨 」, 「- ⚠️ 」, 「⇒ 」).
- *
- * ⛔ The strip is LEADING-only and stops at the first letter or digit, so it can
- * never reach inside a sentence to promote a word into the opening position: a
- * line beginning `"question": "The governing-claim…` still begins with
- * `question`, and a timeline row beginning `15:40:44Z` still begins with `15`.
- */
-function undecorateRetractionLine(line) {
-  return String(line ?? '').replace(/[`*_]/gu, '').replace(/^[^\p{L}\p{N}]+/u, '');
-}
 
 /**
  * The login that wrote one row, or `null` when the row carries none.
@@ -1740,43 +1684,38 @@ function laterOnThread(candidate, claim) {
 }
 
 /**
- * WHICH channel, if either, makes this comment a retraction of the claim whose
- * id is `claimId` — or `null` when it is not one.
+ * Does this comment carry the act that retracts its author's older claims — a
+ * `Release:` line, read the sibling's way — and if so, which channel does the
+ * record print? `null` when it is not one.
+ *
+ * ONE channel since #18773 A. The `Release:` line names its target by
+ * AUTHORSHIP, not by id: whoever writes it has released what they held, so no
+ * comment id is required or read. `markerMatches` is the reading, ⛔ never the
+ * raw constant (the two decorated live releases the raw test missed are in the
+ * section header above).
  *
  * @param {{ body?: string }} row
- * @param {string|null} claimId — the claim comment's id as a string; `null`
- *   when the row carries no readable id, which closes the PROSE channel (a
- *   retraction that cannot name its target is not read as one) and leaves the
- *   directive channel open (it names its target by authorship, not by id).
  * @returns {string|null} the channel, as the sentence the record prints.
  */
-function retractionChannel(row, claimId) {
-  const body = String(row?.body ?? '');
-  if (RELEASE_COMMENT_MARKER.test(body)) {
-    return 'the protocol `Release:` line — the act that takes a card out of a seat\'s hands';
-  }
-  if (claimId === null) return null;
-  for (const raw of body.split(/\r?\n/)) {
-    const line = undecorateRetractionLine(raw);
-    const lower = line.toLowerCase();
-    // ⛔ OPENS the line — see `RETRACTION_PROSE_ANCHORS` for the measured line
-    // that `includes` would have read as a retraction of the claim it defends.
-    if (!RETRACTION_PROSE_ANCHORS.some((anchor) => lower.startsWith(anchor))) continue;
-    for (const hit of line.matchAll(COMMENT_ID_SCAN)) {
-      if (hit[0] === claimId) return `a retraction line OPENING with the act and naming the claim by comment id (${claimId})`;
-    }
+function retractionChannel(row) {
+  if (markerMatches(RELEASE_COMMENT_MARKER, String(row?.body ?? ''))) {
+    return 'the protocol `Release:` line — the act that takes a card out of a seat\'s hands, read through the '
+      + 'sibling\'s one reading (a decorated `**Release:**` is the same act as a bare one)';
   }
   return null;
 }
 
 /** The rule the pool's MEMBERSHIP is judged by, written out once and PRINTED. */
 export const CLAIM_RETRACTION_RULE =
-  'A claim LEAVES the pool when a LATER comment BY THE SAME AUTHOR retracts it, read through two '
-  + 'channels: the protocol `Release:` directive (no id needed — it retracts its own author\'s older '
-  + 'claims) and a prose line that OPENS with the retraction act AND names the claim by comment id. ⛔ Never a DIFFERENT '
-  + 'author\'s line, ⛔ never a line older than the claim it names, and ⛔ never an unreadable author '
-  + 'on either side. A retracted claim is listed RETRACTED with the retracting comment id — ⛔ never '
-  + 'SUPERSEDED, ⛔ never dropped from the listing.';
+  'A claim LEAVES the pool when a LATER comment BY THE SAME AUTHOR retracts it, and a retraction is '
+  + 'the protocol `Release:` line — ONE channel, read through the sibling reader\'s ONE reading of the '
+  + 'marker (`markerMatches`: the bare marker first, then the shared stripper per line, a markdown LIST '
+  + 'ITEM refused), needing no id because it retracts its own author\'s older claims. ⛔ Never a prose '
+  + 'line, whatever act opens it (#18773 A: a reader inferring an act from a verb replays the next '
+  + 'spelling — a withdrawal before work is a `Release:` line with 去向 「让先到者」), ⛔ never a DIFFERENT '
+  + 'author\'s line, ⛔ never a line older than the claim it takes back, and ⛔ never an unreadable '
+  + 'author on either side. A retracted claim is listed RETRACTED with the retracting comment id — '
+  + '⛔ never SUPERSEDED, ⛔ never dropped from the listing.';
 
 /**
  * Every claim comment on this thread that a LATER comment RETRACTED, keyed by
@@ -1807,17 +1746,16 @@ export function claimRetractions(commentRows) {
   });
   const out = new Map();
   for (const claim of indexed) {
+    // The sibling's ONE reading of the claim marker (#18764) — ⛔ never a second one.
     if (!markerMatches(CLAIM_COMMENT_MARKER, String(claim.row?.body ?? ''))) continue;
     // Fail closed, twice: an unattributable claim cannot be matched against an
     // author, and an unattributable candidate cannot be the seat that wrote it.
     if (claim.author === null) continue;
-    const rawId = claim.row?.id;
-    const claimId = rawId === null || rawId === undefined || String(rawId) === '' ? null : String(rawId);
     for (const candidate of indexed) {
       if (candidate.row === claim.row) continue;
       if (candidate.author === null || candidate.author !== claim.author) continue;
       if (!laterOnThread(candidate, claim)) continue;
-      const channel = retractionChannel(candidate.row, claimId);
+      const channel = retractionChannel(candidate.row);
       if (channel === null) continue;
       out.set(claim.row, {
         id: String(candidate.row?.id ?? '(no id)'),
@@ -1861,9 +1799,9 @@ export function claimRetractions(commentRows) {
 // on 「retracted」, exactly as it is for governance (#18719) — and ⛔ never over
 // the raw claim listing. Two consequences, both deliberate:
 //
-//   · a re-claim AFTER a `Release:` (or the id-naming retraction) of the first
-//     is the protocol working: the first no longer stands, one live claim is
-//     left, and the thread reads exactly as it did before this row existed;
+//   · a re-claim AFTER a `Release:` of the first is the protocol working: the
+//     first no longer stands, one live claim is left, and the thread reads
+//     exactly as it did before this row existed;
 //   · a seat that ALREADY wrote a second claim has an act that clears the row —
 //     a `Release:` of what it holds, then one fresh claim. ⭐ That is the whole
 //     lesson of #17366 one screen up: a state whose only repair is an act no
@@ -2050,28 +1988,32 @@ export const CLAIM_SELECTION_RULE =
 // (`OWNERSHIP_MARKER_NEAR_MISS_FORMS`) kept where it lives. ⛔ That vocabulary
 // is the sibling's and is not re-declared here.
 //
-// ## The OTHER undecorator in this file stays where it is, and that is MEASURED
+// ## The OTHER undecorator this file kept is GONE, and that is a RULING (#18829 A)
 //
-// `undecorateRetractionLine` looks like the same job one section up, and the
-// card asked whether the file should end up with one undecoration path. It
-// should not, and the two paths were run over one fixture set to find out:
-// 5 of 12 fixtures read DIFFERENTLY. `undecorateRetractionLine` strips `_` and
-// then every leading non-letter/non-digit character, so it reads
-// `__Claim:__`, `- Claim:`, `* Claim:`, `## Claim:` and `🚨 Claim:` as the
-// directive; `markerMatches` reads none of those, deliberately — the list item
-// and the heading are NAMED refusals with pins behind them, and the underscore
-// form is a named near miss.
+// Until #18829 the retraction channel one section up read its lines through a
+// second stripper — `_` removed, then every leading non-letter/non-digit
+// character — and the card asked whether the file should end up with one
+// undecoration path. The two paths were run over one twelve-spelling fixture
+// set: 5 of 12 read DIFFERENTLY (`__Claim:__`, `- Claim:`, `* Claim:`,
+// `## Claim:`, `🚨 Claim:` read as the directive through the second stripper
+// and as nothing through `markerMatches`). Both directions carried a live
+// specimen — the #18373 retraction opens with a sigil, and H20 pins a list item
+// as not a claim — so the file pinned the divergence rather than closing it,
+// and filed the choice.
 //
-// ⭐ The divergence is load-bearing in BOTH directions, which is why unifying
-// by hand would be a regression whichever way it went. The #18373 retraction
-// this file's own battery replays opens `🚨 **撤回上一条认领…`, and the leading
-// sigil is exactly what the prose channel must strip before the anchor can
-// OPEN the line — narrowing the retraction stripper to the shared one would
-// stop reading the measured specimen #18719 landed for. Widening the shared
-// one the other way would make `- Claim:` a claim, which H20 pins as not one.
-// ⇒ two strippers, two jobs, and the difference is stated here rather than
-// discovered again. ⛔ Not unified from here: it is filed, with the fixture
-// table, for the seat to route.
+// The maintainer chose (batch #156 item 4, letter A): 「The protocol's
+// definition of a decorated ownership line is the shared claim reading. The
+// retraction channel adopts it; the 🚨-led #18373 line becomes a **named**
+// near-miss row with its own fixture … ⛔ B — 「one thread, two readings」
+// returns with the next spelling; ⛔ C — refused by `H20` and by #18680.」
+// With #18773 A landing in the same round the prose retraction channel itself
+// retired, so what adopted the shared reading is the `Release:` channel — the
+// only retraction channel left — and the sigil question shrank to that
+// spelling. ⇒ ONE path: every ownership line this file reads, claim or release,
+// goes through `markerMatches`; the twelve spellings read the SAME here as one
+// file over (5 disagreements → 0, pinned); the sigil-led shape is the sibling's
+// `leading-sigil` near-miss row, audible instead of stripped. ⛔ This file owns
+// no definition of 「decorated」 and grows none.
 // ---------------------------------------------------------------------------
 
 /**
@@ -8369,15 +8311,18 @@ export async function selfTest() {
   // The pool used to be closed under addition: a `Claim:` comment entered it
   // and nothing ever took one out, so the withdrawal that the protocol calls an
   // explicit act was the one act the arbiter could not see. These cases pin the
-  // MEMBERSHIP rule and its three shapes, each against the control that makes
-  // the shape a reading rather than a coincidence.
+  // MEMBERSHIP rule — ONE channel since #18773 A, the `Release:` line read the
+  // sibling's way — each shape against the control that makes it a reading
+  // rather than a coincidence.
   battery('#18719: a RETRACTED claim leaves the pool — a withdrawn claim never governs');
 
   // The #18373 thread, replayed OFFLINE and ⛔ never re-graded: that card is
-  // `needs-user-decision` and another seat's. Ids, stamps and logins are the
-  // REAL ones; each body carries the load-bearing LINES of the real comment,
-  // extracted from the REST rows rather than retyped — so a case here fails
-  // when the reader changes, ⛔ never when a transcription slipped.
+  // CLOSED and another seat's. Ids, stamps and logins are the REAL ones; each
+  // body carries the load-bearing LINES of the real comment, extracted from the
+  // REST rows rather than retyped — so a case here fails when the reader
+  // changes, ⛔ never when a transcription slipped. The six rows are the thread
+  // as PR #18770 read it; `os-try-charles` claimed the card later
+  // (5726117004, 2026-09-18T06:29:23Z) and is deliberately not replayed here.
   const RTX_18373 = [
   {
     // the triage comment — no `Claim:` line, so never a pool candidate
@@ -8411,21 +8356,21 @@ export async function selfTest() {
     ].join('\n'),
   },
   {
-    // THE RETRACTION — no `Claim:` line of its own, which is why the pool could not see it
+    // THE RETRACTION as the seat wrote it — prose, no `Claim:` line and no `Release:` line
     id: 5717333576,
     created_at: '2026-09-17T15:54:48Z',
     user: { login: 'os-bill' },
     body: '🚨 **撤回上一条认领(`5717315121`)—— 本卡已由 `os-litant` 在先认领,本席晚了 13 分钟。** `domain:spec` seat 2(`session_01JbZnqu8bt6YqfJsr9vaFb3`,座位贴 #18549)。⏱️ 本条读数取自同一动作:2026-09-17T15:54Z。',
   },
   {
-    // `os-litant`'s report line: an anchor and its OWN claim id, mid-line — the `includes` trap
+    // `os-litant`'s report line: a retraction verb and its OWN claim id, mid-line
     id: 5717738051,
     created_at: '2026-09-17T16:22:40Z',
     user: { login: 'os-litant' },
     body: '      "question": "The governing-claim instrument now names a retracted claim. check-clause2-carriers --pair 18708 (exit 0) selects comment 5717315121 as governing and marks my dispatch\'s 5717143021 as SUPERSEDED, because the retraction 5717333576 carries no `Claim:` line and so is not in the pool. Is that worth a rule change?",',
   },
   {
-    // `os-litant` describing the retraction: an anchor, another seat's claim id — shape (3)
+    // `os-litant` describing the retraction: a verb, another seat's claim id
     id: 5717775707,
     created_at: '2026-09-17T16:25:37Z',
     user: { login: 'os-litant' },
@@ -8437,11 +8382,17 @@ export async function selfTest() {
   const RTX_RETRACTION = 5717333576;
   const RTX_LIVE_BRANCH = 'claude/issue-18373-type-source-resolution-bare-dir-include';
   const RTX_GHOST_BRANCH = 'claude/issue-18373-include-bare-directory-provenance';
-  const RTX_AFTER = claimCarrierSelection(RTX_18373);
-  // ⛔ The BEFORE leg is the reading `main` takes, produced by REMOVING the
-  // retraction rather than by describing it: the same rows, minus the one
-  // comment the old pool could not see.
-  const RTX_BEFORE = claimCarrierSelection(RTX_18373.filter((r) => r.id !== RTX_RETRACTION));
+  const RTX_ROW_OF = (id) => RTX_18373.find((r) => r.id === id);
+  // The same thread with the retraction RE-SPELLED as the act the protocol
+  // names — the three fields, 去向 「让先到者」 (#18773 A) — once bare, once
+  // decorated exactly as the seat decorated its prose (a sigil, then bold), and
+  // once with the bold alone. Everything else byte-identical.
+  const RTX_RESPELL = (line) => RTX_18373.map((r) => (r.id === RTX_RETRACTION ? { ...r, body: line } : r));
+  const RTX_DECLARED_LINE = 'Release: session `session_01JbZnqu8bt6YqfJsr9vaFb3` · 因:本卡已由 `os-litant` 在先认领,本席晚了 13 分钟 · 去向:让先到者';
+  const RTX_18373_DECLARED = RTX_RESPELL(RTX_DECLARED_LINE);
+  const RTX_18373_SIGIL = RTX_RESPELL(`🚨 **${RTX_DECLARED_LINE.replace('Release:', 'Release:**')}`);
+  const RTX_18373_BOLD = RTX_RESPELL(`**${RTX_DECLARED_LINE.replace('Release:', 'Release:**')}`);
+  const RTX_NOW = claimCarrierSelection(RTX_18373);
   const RTX_REASON = (sel, id) => sel.rejected.find((r) => r.row.id === id)?.reason ?? '';
   const RTX_RECORD = (rows) => {
     const rec = pairInputRecord({ pr: 18708, card: 18373, cardComments: rows, headSha: 'offline' });
@@ -8449,47 +8400,74 @@ export async function selfTest() {
     return { selected: flat(rec['claim.selected']), rejected: flat(rec['claim.rejected']), rule: flat(rec['claim.rule']) };
   };
 
-  t('⭐ the #18373 counterfactual, AFTER: the pool is the LIVE claimant\'s claim alone', RTX_AFTER.pool.length === 1 && RTX_AFTER.pool[0].id === RTX_LIVE_CLAIM, JSON.stringify(RTX_AFTER.pool.map((r) => r.id)));
-  t('…and the branch it names is the ONE ref origin actually has', (RTX_AFTER.governing?.branches ?? []).join() === RTX_LIVE_BRANCH);
-  t('…while the branch the withdrawn claim named — absent from origin — governs nothing', !(RTX_AFTER.governing?.branches ?? []).includes(RTX_GHOST_BRANCH));
-  t('the withdrawn claim is listed RETRACTED, naming the comment that took it back', RTX_REASON(RTX_AFTER, RTX_WITHDRAWN).startsWith('RETRACTED') && RTX_REASON(RTX_AFTER, RTX_WITHDRAWN).includes(String(RTX_RETRACTION)));
-  t('⛔ …never as SUPERSEDED: a withdrawn record and an out-ranked one are two different facts', !/a SUPERSEDED claim/.test(RTX_REASON(RTX_AFTER, RTX_WITHDRAWN)));
-  t('⛔ …and never DROPPED: the full claim listing still carries both records', RTX_AFTER.claims.length === 2 && RTX_AFTER.claims.some((r) => r.id === RTX_WITHDRAWN));
-  t('…and the LIVE claim is no longer rejected at all', RTX_REASON(RTX_AFTER, RTX_LIVE_CLAIM) === '');
-  t('⛔ CONTROL — the #18373 counterfactual, BEFORE: drop the retraction and the withdrawn claim governs again', RTX_BEFORE.pool.length === 1 && RTX_BEFORE.pool[0].id === RTX_WITHDRAWN && (RTX_BEFORE.governing?.branches ?? []).join() === RTX_GHOST_BRANCH);
-  t('⛔ …and in that reading the real claimant is the one marked SUPERSEDED — the defect, replayed', /a SUPERSEDED claim/.test(RTX_REASON(RTX_BEFORE, RTX_LIVE_CLAIM)));
-  t('⭐ the two faces side by side: the record NAMES the author the pool selected', RTX_RECORD(RTX_18373).selected.includes('os-litant') && !RTX_RECORD(RTX_18373).selected.includes('os-bill'));
-  t('⛔ CONTROL: the BEFORE record named the other seat, which is how the contradiction went unread', RTX_RECORD(RTX_18373.filter((r) => r.id !== RTX_RETRACTION)).selected.includes('os-bill'));
-  t('the printed RULE carries the membership half, so two runs are comparable on it', RTX_RECORD(RTX_18373).rule.includes(CLAIM_RETRACTION_RULE) && CLAIM_SELECTION_RULE.includes(CLAIM_RETRACTION_RULE));
+  // ⭐ THE SPECIMEN, both ways (#18773 A · #18829 A).
+  t('⭐ #18773 A: the PROSE retraction retracts NOTHING — the anchor roster, the id scan and the second stripper are gone', !claimRetractions(RTX_18373).has(RTX_ROW_OF(RTX_WITHDRAWN)));
+  t('…so the withdrawn claim STANDS again and, being the newest live claim that parses a branch, governs — the cost ruling A priced and accepted (⛔ C: a dated tolerance for one specimen)', RTX_NOW.pool.length === 1 && RTX_NOW.pool[0].id === RTX_WITHDRAWN && (RTX_NOW.governing?.branches ?? []).join() === RTX_GHOST_BRANCH, JSON.stringify(RTX_NOW.pool.map((r) => r.id)));
+  t('…and the live claimant reads SUPERSEDED in the record, ⛔ never RETRACTED — the selector is untouched; what moved is what counts as a retraction', /a SUPERSEDED claim/.test(RTX_REASON(RTX_NOW, RTX_LIVE_CLAIM)) && RTX_NOW.rejected.every((r) => !r.reason.startsWith('RETRACTED')));
+  t('⛔ …and never DROPPED: the full claim listing still carries both records', RTX_NOW.claims.length === 2 && RTX_NOW.claims.some((r) => r.id === RTX_WITHDRAWN) && RTX_NOW.claims.some((r) => r.id === RTX_LIVE_CLAIM));
+  t('⭐ the DECLARED spelling: the same seat, the same stroke, writing the act the protocol names — `Release:` … 去向:让先到者 — takes the claim out', claimRetractions(RTX_18373_DECLARED).has(RTX_18373_DECLARED.find((r) => r.id === RTX_WITHDRAWN)) && claimCarrierSelection(RTX_18373_DECLARED).pool.map((r) => r.id).join() === String(RTX_LIVE_CLAIM));
+  t('…and the branch it then names is the ONE ref origin actually has', (claimCarrierSelection(RTX_18373_DECLARED).governing?.branches ?? []).join() === RTX_LIVE_BRANCH);
+  t('…with the withdrawn claim listed RETRACTED, naming the release comment, and the record naming the live claimant as selected', RTX_REASON(claimCarrierSelection(RTX_18373_DECLARED), RTX_WITHDRAWN).startsWith('RETRACTED') && RTX_REASON(claimCarrierSelection(RTX_18373_DECLARED), RTX_WITHDRAWN).includes(String(RTX_RETRACTION)) && RTX_RECORD(RTX_18373_DECLARED).selected.includes('os-litant') && !RTX_RECORD(RTX_18373_DECLARED).selected.includes('os-bill'));
+  t('⭐ decorated as the seat decorated it — 🚨 **Release:** — it is STILL not read: a sigil is not decoration; the shared stripper strips `*` and backticks and nothing else', !claimRetractions(RTX_18373_SIGIL).has(RTX_18373_SIGIL.find((r) => r.id === RTX_WITHDRAWN)));
+  t('…and that shape is NAMED by the sibling\'s vocabulary as `leading-sigil` — audible one file over, ⛔ not stripped here (#18829 A)', ownershipMarkerNearMisses([RTX_18373_SIGIL.find((r) => r.id === RTX_RETRACTION)]).map((m) => m.form).join() === 'leading-sigil');
+  t('⛔ CONTROL: the bold alone, sigil removed — **Release:** — IS read, through the sibling\'s one reading', claimRetractions(RTX_18373_BOLD).has(RTX_18373_BOLD.find((r) => r.id === RTX_WITHDRAWN)));
+  t('⛔ CONTROL: the raw constant refuses that same bolded body — the reading is `markerMatches`, ⛔ not a widened constant', RELEASE_COMMENT_MARKER.test(RTX_18373_BOLD.find((r) => r.id === RTX_RETRACTION).body) === false && markerMatches(RELEASE_COMMENT_MARKER, RTX_18373_BOLD.find((r) => r.id === RTX_RETRACTION).body) === true);
+  t('⛔ CONTROL: the three re-spellings really differ from the prose and from each other', new Set([RTX_ROW_OF(RTX_RETRACTION).body, RTX_DECLARED_LINE, RTX_18373_SIGIL.find((r) => r.id === RTX_RETRACTION).body, RTX_18373_BOLD.find((r) => r.id === RTX_RETRACTION).body]).size === 4);
 
-  // ⚠️ The measured trap, and the reason the anchor OPENS a line instead of
-  // being searched for inside one. Both lines below are real bytes off this
-  // thread; the first is the report that FILED this defect.
-  const RTX_OWN_REPORT = RTX_18373.find((r) => r.id === 5717738051);
-  const RTX_DESCRIPTION = RTX_18373.find((r) => r.id === 5717775707);
-  t('⛔ a seat REPORTING the defect does not commit it — an anchor and its own claim id, mid-line', !claimRetractions(RTX_18373).has(RTX_18373.find((r) => r.id === RTX_LIVE_CLAIM)));
-  t('⛔ …and the author test alone would NOT have saved it: that line is the claim\'s OWN author', RTX_OWN_REPORT.user.login === RTX_18373.find((r) => r.id === RTX_LIVE_CLAIM).user.login && /retract/i.test(RTX_OWN_REPORT.body) && RTX_OWN_REPORT.body.includes(String(RTX_LIVE_CLAIM)));
-  t('⛔ …and a THIRD seat describing the retraction retracts nothing either — anchor, id, wrong author', RTX_DESCRIPTION.body.includes('撤回') && RTX_DESCRIPTION.body.includes(String(RTX_WITHDRAWN)) && RTX_DESCRIPTION.user.login !== RTX_18373.find((r) => r.id === RTX_WITHDRAWN).user.login);
+  // ⭐ The two LIVE decorated releases #18862's sweep could not see (read
+  // 2026-09-19T03:30Z; ids, stamps, logins and lines are the REST rows'). Each
+  // is a real release by the earlier holder that the raw constant refused, so
+  // the released claim stayed in the pool and the later claimant read as a
+  // silent takeover. Two of the twelve pairs clear by THIS change alone.
+  const S2_17852_CLAIM = { id: 5700342438, created_at: '2026-09-16T15:46:37Z', user: { login: 'os-warren' }, body: [
+    'Claim: `domain:spec` execution seat, session `session_01KB5PFtxuy1x3dcR5gxudx6`, 2026-09-16T15:45Z. Assignee set in the same label write (`pm:queue` → `pm:dispatched`, read back and matched). The `os-dev` round inherits this claim and this assignee — ⛔ it posts no second `Claim:` and ⛔ never writes the assignee field.',
+    'Branch: `claude/issue-17852-zod-record-proto-drop`',
+    '**Clause-②: no** — the card\'s landable half is *pinning an invariant that already holds by accident*. No key is added to a published payload and no accept set moves. ⇒ the PR body carries its own line-initial `Clause-②: no` line, because there is no carrier label to declare it. ⚠️ If the measurement shows the fix needs an accept set or a published parse contract to move, **stop and report** — this seat re-declares here, ⛔ the dev does not, and ⛔ the dev neither hangs nor strips `needs:contract-review` (that carrier is the seat\'s).',
+  ].join('\n') };
+  const S2_17852_RELEASE = { id: 5700605769, created_at: '2026-09-16T16:05:46Z', user: { login: 'os-warren' }, body: '`Release:` session `session_01KB5PFtxuy1x3dcR5gxudx6` · 因 = 轮次证伪了卡片的 latent 前提,剩下的方向选择落在人工地板(契约变化 / 破坏性动作) · 去向 = 维护者决策箱。assignee 同笔清空,下一任重新认领。' };
+  const S2_7848_CLAIM = { id: 5617516036, created_at: '2026-09-10T10:53:27Z', user: { login: 'claude[bot]' }, body: [
+    'Claim: session `session_01FhBNJcLRZLe8M87VcUgpKr` · branch `claude/issue-7848-live-margin` · assignee `baozhoutao`',
+    'Clause-②: no',
+  ].join('\n') };
+  const S2_7848_RELEASE = { id: 5617804323, created_at: '2026-09-10T11:16:19Z', user: { login: 'claude[bot]' }, body: '**Release:** session `session_01FhBNJcLRZLe8M87VcUgpKr` · cause **re-priced on a new measurement** (the aggregate is healthy; the tight line is now `ui-components`) · destination **the decision box**. Assignee cleared and `pm:dispatched` → `needs-user-decision` in the same write.' };
+  t('⭐ #17852: os-warren\'s backticked `Release:` (5700605769) retracts his own claim (5700342438)', claimRetractions([S2_17852_CLAIM, S2_17852_RELEASE]).get(S2_17852_CLAIM)?.id === '5700605769');
+  t('⭐ objectui#7848: claude[bot]\'s bolded **Release:** (5617804323) retracts its own claim (5617516036)', claimRetractions([S2_7848_CLAIM, S2_7848_RELEASE]).get(S2_7848_CLAIM)?.id === '5617804323');
+  t('⛔ CONTROL: the raw constant refuses BOTH release bodies — exactly the reading that counted the pairs', RELEASE_COMMENT_MARKER.test(S2_17852_RELEASE.body) === false && RELEASE_COMMENT_MARKER.test(S2_7848_RELEASE.body) === false);
+  t('⛔ CONTROL: a DIFFERENT author\'s decorated release retracts nothing — the author test is untouched by the reading', claimRetractions([S2_17852_CLAIM, { ...S2_17852_RELEASE, user: { login: 'os-litant' } }]).size === 0);
+  t('…and the released claim then leaves the pool, so the record says RETRACTED rather than ranking it', says(RTX_RECORD([S2_17852_CLAIM, S2_17852_RELEASE]).selected, 'RETRACTED'));
 
-  // The three shapes, synthetic so each one varies exactly one thing.
+  // ⛔ No line of PROSE retracts, opening or not — the verb reading is the
+  // channel #18773 A retired. Both lines below are real bytes off the #18373
+  // thread; the first is the report that FILED #18719.
+  const RTX_OWN_REPORT = RTX_ROW_OF(5717738051);
+  const RTX_DESCRIPTION = RTX_ROW_OF(5717775707);
+  t('⛔ a seat REPORTING the defect does not commit it — a verb and its own claim id, mid-line, retract nothing', !claimRetractions(RTX_18373).has(RTX_ROW_OF(RTX_LIVE_CLAIM)) && RTX_OWN_REPORT.user.login === RTX_ROW_OF(RTX_LIVE_CLAIM).user.login && /retract/i.test(RTX_OWN_REPORT.body) && RTX_OWN_REPORT.body.includes(String(RTX_LIVE_CLAIM)));
+  t('⛔ …nor does a THIRD seat describing the withdrawal — verb, id, wrong author', RTX_DESCRIPTION.body.includes('撤回') && RTX_DESCRIPTION.body.includes(String(RTX_WITHDRAWN)) && RTX_DESCRIPTION.user.login !== RTX_ROW_OF(RTX_WITHDRAWN).user.login && !claimRetractions(RTX_18373).has(RTX_ROW_OF(RTX_WITHDRAWN)));
+
+  // The shapes, synthetic so each one varies exactly one thing.
   const RTX_ROW = (id, at, login, lines) => ({ id, created_at: at, user: { login }, body: [].concat(lines).join('\n') });
   const RTX_CLAIM = (id, at, login, value = 'no') => RTX_ROW(id, at, login, ['Claim: round 1', 'Branch: `claude/issue-4242-x`', `Clause-②: ${value}`]);
   const RTX_A = RTX_CLAIM(6000000011, '2026-09-17T10:00:00Z', 'seat-a');
   const RTX_B = RTX_CLAIM(6000000012, '2026-09-17T11:00:00Z', 'seat-b');
+  const RTX_RELEASE_B = (line = 'Release: session X, cause: 先到者是 seat-a, 去向: 让先到者') => RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', line);
   const RTX_POOL_IDS = (rows) => claimCarrierSelection(rows).pool.map((r) => r.id).join();
 
-  t('shape (1) — a retraction NAMING the claim by comment id takes it out of the pool', RTX_POOL_IDS([RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '撤回本席的认领 `6000000012` —— 先到者是 seat-a')]) === '6000000011');
-  t('⛔ shape (1) CONTROL: the SAME words from a DIFFERENT author retract nothing', RTX_POOL_IDS([RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-a', '撤回本席的认领 `6000000012` —— 先到者是 seat-a')]) === '6000000012');
-  t('shape (2) — a `Release:` line from the claim\'s own author, no id at all, takes it out', RTX_POOL_IDS([RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', 'Release: session X, cause: 先到者是 seat-a, 去向: back to the queue')]) === '6000000011');
-  t('⛔ shape (2) CONTROL: the same `Release:` posted BEFORE the claim retracts nothing', RTX_POOL_IDS([RTX_A, RTX_ROW(6000000013, '2026-09-17T10:30:00Z', 'seat-b', 'Release: session X, cause: y, 去向: queue'), RTX_B]) === '6000000012');
-  t('shape (3) — a `Release:` from a DIFFERENT author retracts nobody else\'s claim', RTX_POOL_IDS([RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-c', 'Release: session Z, cause: y, 去向: queue')]) === '6000000012');
-  t('⛔ shape (3) CONTROL: the live claimant\'s claim still GOVERNS, it is not merely un-rejected', (() => { const sel = claimCarrierSelection([RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-c', 'Release: session Z')]); return sel.governing?.createdAt === RTX_B.created_at && sel.rejected.every((r) => !r.reason.startsWith('RETRACTED')); })());
-  t('⛔ the anchor OPENS the line: the same act and id buried mid-sentence retract nothing', RTX_POOL_IDS([RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '本席读到工具把 `6000000012` 当作已撤回的认领,记一笔')]) === '6000000012');
-  t('…while decoration in FRONT of the act is not a difference — 「- ⚠️ **撤回** …」 reads', RTX_POOL_IDS([RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '- ⚠️ **撤回**了 `6000000012`,本席让行')]) === '6000000011');
-  t('⛔ a retraction naming SOME OTHER comment id retracts nothing here', RTX_POOL_IDS([RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '撤回 `6000009999` —— 另一张卡上的认领')]) === '6000000012');
-  t('⛔ an unreadable author on the RETRACTOR retracts nothing — fail closed, never a wildcard', RTX_POOL_IDS([RTX_A, RTX_B, { id: 6000000013, created_at: '2026-09-17T12:00:00Z', body: '撤回 `6000000012`' }]) === '6000000012');
-  t('⛔ an unreadable author on the CLAIM is not retractable either', RTX_POOL_IDS([RTX_A, { id: 6000000012, created_at: '2026-09-17T11:00:00Z', body: ['Claim: r', 'Branch: `claude/issue-4242-x`'].join('\n') }, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '撤回 `6000000012`')]) === '6000000012');
-  t('⛔ a RETRACTED claim\'s declaration is not the one read — the LIVE carrier\'s line is', cardDeclaration([RTX_CLAIM(6000000011, '2026-09-17T10:00:00Z', 'seat-a', 'no'), RTX_CLAIM(6000000012, '2026-09-17T11:00:00Z', 'seat-b', 'yes'), RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '撤回 `6000000012`')]).value === 'no');
+  t('⛔ #18773 A, pinned on purpose: a line OPENING with 撤回 and naming the claim\'s id — the exact shape PR #18770 read — retracts nothing now; the act has ONE spelling', RTX_POOL_IDS([RTX_A, RTX_B, RTX_RELEASE_B('撤回本席的认领 `6000000012` —— 先到者是 seat-a')]) === '6000000012');
+  t('⛔ …and the English stems with it — `retract` / `withdraw` opening a line are prose', RTX_POOL_IDS([RTX_A, RTX_B, RTX_RELEASE_B('retracted: my claim `6000000012`, seat-a was first')]) === '6000000012' && RTX_POOL_IDS([RTX_A, RTX_B, RTX_RELEASE_B('withdraw `6000000012`')]) === '6000000012');
+  t('shape (1) — a `Release:` line from the claim\'s own author, no id at all, takes it out', RTX_POOL_IDS([RTX_A, RTX_B, RTX_RELEASE_B()]) === '6000000011');
+  t('⛔ shape (1) CONTROL: the same `Release:` posted BEFORE the claim retracts nothing', RTX_POOL_IDS([RTX_A, RTX_ROW(6000000013, '2026-09-17T10:30:00Z', 'seat-b', 'Release: session X, cause: y, 去向: queue'), RTX_B]) === '6000000012');
+  t('shape (2) — a `Release:` from a DIFFERENT author retracts nobody else\'s claim', RTX_POOL_IDS([RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-c', 'Release: session Z, cause: y, 去向: queue')]) === '6000000012');
+  t('⛔ shape (2) CONTROL: the live claimant\'s claim still GOVERNS, it is not merely un-rejected', (() => { const sel = claimCarrierSelection([RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-c', 'Release: session Z')]); return sel.governing?.createdAt === RTX_B.created_at && sel.rejected.every((r) => !r.reason.startsWith('RETRACTED')); })());
+  t('shape (3) — a DECORATED `**Release:**` from the claim\'s own author takes it out — the one reading (#18829 A)', RTX_POOL_IDS([RTX_A, RTX_B, RTX_RELEASE_B('**Release:** session X, 去向: 让先到者')]) === '6000000011');
+  t('…and the backticked spelling with it, and the blockquoted bold', RTX_POOL_IDS([RTX_A, RTX_B, RTX_RELEASE_B('`Release:` session X, 去向: 让先到者')]) === '6000000011' && RTX_POOL_IDS([RTX_A, RTX_B, RTX_RELEASE_B('> **Release:** session X')]) === '6000000011');
+  t('⛔ shape (3) CONTROL: a markdown LIST ITEM `- Release:` is not a release, so it retracts nothing — the sibling\'s refusal (H20\'s shape) holds on this side too', RTX_POOL_IDS([RTX_A, RTX_B, RTX_RELEASE_B('- Release: session X, 去向: queue')]) === '6000000012');
+  t('⛔ …and a sigil-led `🚨 Release:` retracts nothing either — the shape the second stripper would have swallowed', RTX_POOL_IDS([RTX_A, RTX_B, RTX_RELEASE_B('🚨 Release: session X, 去向: 让先到者')]) === '6000000012');
+  t('⛔ …and `Released:` is a MALFORMED release, ⛔ not a dialect — the marker is the sibling\'s, unwidened', RTX_POOL_IDS([RTX_A, RTX_B, RTX_RELEASE_B('Released: session X')]) === '6000000012');
+  t('bare `release` PROSE is not the act — a version release is not a retraction; the word at line start with the colon is the whole discriminator', RTX_POOL_IDS([RTX_A, RTX_B, RTX_RELEASE_B('release 阻塞在 `6000000012` 上,等维护者')]) === '6000000012');
+  t('⛔ a `Release:` mentioned MID-LINE retracts nothing — the marker is anchored at line start', RTX_POOL_IDS([RTX_A, RTX_B, RTX_RELEASE_B('the seat will post Release: once the ruling lands')]) === '6000000012');
+  t('⛔ an unreadable author on the RETRACTOR retracts nothing — fail closed, never a wildcard', RTX_POOL_IDS([RTX_A, RTX_B, { id: 6000000013, created_at: '2026-09-17T12:00:00Z', body: 'Release: session X' }]) === '6000000012');
+  t('⛔ an unreadable author on the CLAIM is not retractable either', RTX_POOL_IDS([RTX_A, { id: 6000000012, created_at: '2026-09-17T11:00:00Z', body: ['Claim: r', 'Branch: `claude/issue-4242-x`'].join('\n') }, RTX_RELEASE_B()]) === '6000000012');
+  t('⛔ a RETRACTED claim\'s declaration is not the one read — the LIVE carrier\'s line is', cardDeclaration([RTX_CLAIM(6000000011, '2026-09-17T10:00:00Z', 'seat-a', 'no'), RTX_CLAIM(6000000012, '2026-09-17T11:00:00Z', 'seat-b', 'yes'), RTX_RELEASE_B()]).value === 'no');
   // ⭐ Every claim retracted ⇒ a state this file ALREADY has, ⛔ never a
   // fabricated carrier and ⛔ never the withdrawn record's own value. WHICH
   // existing state depends on what is left on the thread, and both are pinned
@@ -8497,15 +8475,17 @@ export async function selfTest() {
   // carried a declaration leaves that line ON the thread with no carrier under
   // it (`misplaced`, a C2 row, the value ⛔ not accepted), and one that carried
   // none leaves nothing to read at all (`absent`).
-  t('⭐ every claim retracted, declaration left on the thread ⇒ `misplaced` — a finding, ⛔ not a reading', (() => { const rows = [RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '撤回 `6000000012`')]; const d = cardDeclaration(rows); return claimCarrierSelection(rows).pool.length === 0 && d.state === 'misplaced'; })());
-  t('⛔ …and the withdrawn record\'s OWN value is never handed back as the card\'s declaration', (() => { const rows = [RTX_CLAIM(6000000012, '2026-09-17T11:00:00Z', 'seat-b', 'yes'), RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '撤回 `6000000012`')]; return cardDeclaration(rows).state !== 'declared'; })());
-  t('⭐ …and with nothing left to read the state is `absent` — the carrier is owed, ⛔ not invented', (() => { const rows = [RTX_ROW(6000000012, '2026-09-17T11:00:00Z', 'seat-b', ['Claim: r', 'Branch: `claude/issue-4242-x`']), RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '撤回 `6000000012`')]; return cardDeclaration(rows).state === 'absent'; })());
+  t('⭐ every claim retracted, declaration left on the thread ⇒ `misplaced` — a finding, ⛔ not a reading', (() => { const rows = [RTX_B, RTX_RELEASE_B()]; const d = cardDeclaration(rows); return claimCarrierSelection(rows).pool.length === 0 && d.state === 'misplaced'; })());
+  t('⛔ …and the withdrawn record\'s OWN value is never handed back as the card\'s declaration', (() => { const rows = [RTX_CLAIM(6000000012, '2026-09-17T11:00:00Z', 'seat-b', 'yes'), RTX_RELEASE_B()]; return cardDeclaration(rows).state !== 'declared'; })());
+  t('⭐ …and with nothing left to read the state is `absent` — the carrier is owed, ⛔ not invented', (() => { const rows = [RTX_ROW(6000000012, '2026-09-17T11:00:00Z', 'seat-b', ['Claim: r', 'Branch: `claude/issue-4242-x`']), RTX_RELEASE_B()]; return cardDeclaration(rows).state === 'absent'; })());
   t('⛔ CONTROL: without the retraction that same thread reads `missing` — the claim IS the carrier', cardDeclaration([RTX_ROW(6000000012, '2026-09-17T11:00:00Z', 'seat-b', ['Claim: r', 'Branch: `claude/issue-4242-x`'])]).state === 'missing');
-  t('…and the record SAYS that, instead of reporting a thread nobody claimed', RTX_RECORD([RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '撤回 `6000000012`')]).selected.includes('RETRACTED'));
+  t('…and the record SAYS that, instead of reporting a thread nobody claimed', RTX_RECORD([RTX_B, RTX_RELEASE_B()]).selected.includes('RETRACTED'));
   t('⛔ CONTROL: a thread with no claim at all still reads as the OTHER sentence', RTX_RECORD([RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', 'no claim here')]).selected.includes('no comment on this thread carries'));
-  t('ONE derivation: the map the selection rejects from is the map `claimRetractions` returns', (() => { const rows = [RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '撤回 `6000000012`')]; const sel = claimCarrierSelection(rows); return sel.retracted.size === 1 && sel.retracted.get(RTX_B)?.id === '6000000013' && claimRetractions(rows).get(RTX_B)?.id === '6000000013'; })());
+  t('ONE derivation: the map the selection rejects from is the map `claimRetractions` returns', (() => { const rows = [RTX_A, RTX_B, RTX_RELEASE_B()]; const sel = claimCarrierSelection(rows); return sel.retracted.size === 1 && sel.retracted.get(RTX_B)?.id === '6000000013' && claimRetractions(rows).get(RTX_B)?.id === '6000000013'; })());
   t('⛔ an unreadable thread retracts nothing and carries the empty halves', claimRetractions(null).size === 0 && claimCarrierSelection(null).live.length === 0 && claimCarrierSelection(null).retracted.size === 0);
-  t('the anchor roster is CLOSED, and bare `release` is not on it — a version release is not a retraction', RETRACTION_PROSE_ANCHORS.length === 5 && !RETRACTION_PROSE_ANCHORS.includes('release') && RTX_POOL_IDS([RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', 'release 阻塞在 `6000000012` 上,等维护者')]) === '6000000012');
+  t('the printed RULE carries the membership half, so two runs are comparable on it', RTX_RECORD(RTX_18373).rule.includes(CLAIM_RETRACTION_RULE) && CLAIM_SELECTION_RULE.includes(CLAIM_RETRACTION_RULE));
+  t('⭐ …and it says ONE channel and names the verb reading as refused, so a reader is not left to infer why prose no longer retracts', CLAIM_RETRACTION_RULE.includes('ONE channel') && CLAIM_RETRACTION_RULE.includes('Never a prose line') && CLAIM_RETRACTION_RULE.includes('让先到者'));
+  t('…and the channel sentence the record prints says the reading is the sibling\'s', (claimRetractions([RTX_A, RTX_B, RTX_RELEASE_B()]).get(RTX_B)?.channel ?? '').includes('sibling\'s one reading'));
 
   // -- #18683: the card-comment read pages like its two siblings -------------
   //
@@ -8664,13 +8644,26 @@ export async function selfTest() {
   t('⛔ and the `Clause-②-correction:` comment does not enter the pool through the new door either', D64_POOL([FIXED_CORRECTION('no')]) === '' && markerMatches(CLAIM_COMMENT_MARKER, FIXED_CORRECTION('no').body) === false);
   t('⛔ provably ADDITIVE: a bare claim this file already read reads exactly as before', claimCarrierSelection([CLAIM('Clause-②: no')]).pool.length === 1);
 
-  // ⭐ The file keeps TWO undecoration paths, and that is a measurement rather
-  // than an oversight: `undecorateRetractionLine` strips `_` and then every
-  // leading non-letter/non-digit character, which the shared stripper does not.
-  // 5 of 12 fixtures read differently. Both directions are load-bearing, so the
-  // pair below pins the divergence instead of quietly closing it.
-  t('⭐ the RETRACTION path still reads the sigil-led #18373 line — narrowing it to the shared reading would unland #18719', claimRetractions(RTX_18373).has(RTX_18373.find((r) => r.id === RTX_WITHDRAWN)));
-  t('⭐ …while the SHARED reading does not strip a leading sigil, so the two paths are ⛔ NOT interchangeable', markerMatches(CLAIM_COMMENT_MARKER, '🚨 Claim: PM loop round 1') === false);
+  // ⭐ ONE undecoration path (#18829 A). The file used to keep a second stripper
+  // for retraction lines — `_` removed, then every leading non-letter/non-digit
+  // character — and the two paths were run over one twelve-spelling fixture
+  // set: 5 of 12 read differently. The maintainer ruled the shared claim
+  // reading the protocol's ONE definition of a decorated ownership line and the
+  // second stripper deleted; the sigil-led shape it swallowed is the sibling's
+  // named near miss. The twelve are replayed below through the one path, on
+  // both sides it now serves — the pool and the retraction index.
+  const D64_TWELVE = [
+    ['Claim: seat.', true], ['**Claim:** seat.', true], ['`Claim:` seat.', true], ['> Claim: seat.', true], ['> **Claim:** seat.', true],
+    ['__Claim:__ seat.', false], ['- Claim: seat.', false], ['* Claim: seat.', false], ['🚨 Claim: seat.', false], ['## Claim: seat.', false],
+    ['Claim of ownership: seat.', false], ['Claiming: seat.', false],
+  ];
+  const D64_AS_CLAIM = (line) => D64(9, '2026-09-17T20:00:00Z', `${line}\nBranch: \`claude/issue-1-x\``);
+  t('⭐ the twelve spellings the card compared read the SAME through the one path — 5 disagreements → 0: the POOL agrees with `markerMatches` on every one', D64_TWELVE.every(([line, reads]) => markerMatches(CLAIM_COMMENT_MARKER, line) === reads && claimCarrierSelection([D64_AS_CLAIM(line)]).pool.length === (reads ? 1 : 0)), D64_TWELVE.map(([l]) => `${JSON.stringify(l)}:${claimCarrierSelection([D64_AS_CLAIM(l)]).pool.length}`).join(' '));
+  t('…and the retraction INDEX agrees on every one too — no second operand is left for a disagreement', D64_TWELVE.every(([line, reads]) => claimRetractions([D64_AS_CLAIM(line), D64_RELEASE]).size === (reads ? 1 : 0)));
+  t('⛔ CONTROL: the table is not vacuous — 5 of the 12 read and 7 do not', D64_TWELVE.filter(([, r]) => r).length === 5 && D64_TWELVE.length === 12);
+  t('⛔ `- Claim:` and `* Claim:` stay NOT a claim (H20) — the refusal is the sibling\'s, on both sides of this file', ['- Claim: seat.', '* Claim: seat.'].every((l) => markerMatches(CLAIM_COMMENT_MARKER, l) === false && claimCarrierSelection([D64_AS_CLAIM(l)]).pool.length === 0));
+  t('⭐ the sigil-led spelling is refused here AND named one file over as `leading-sigil` — audible, never stripped', markerMatches(CLAIM_COMMENT_MARKER, '🚨 Claim: PM loop round 1') === false && ownershipMarkerNearMisses([{ id: 1, body: '🚨 Claim: PM loop round 1' }]).map((m) => m.form).join() === 'leading-sigil');
+  t('⛔ the second stripper and the prose anchor roster are GONE from this module — absence pinned on the SOURCE, with the surviving reading as the control', (() => { const own = readFileSync(SELF_PATH, 'utf8'); return !own.includes('undecorate' + 'RetractionLine') && !own.includes('RETRACTION_PROSE' + '_ANCHORS') && own.includes('markerMatches(RELEASE_COMMENT_MARKER'); })());
 
   // -- #18828: a SECOND `Claim:` by ONE seat, NAMED -------------------------
   //
@@ -8721,10 +8714,10 @@ export async function selfTest() {
 
   // (c) MEMBERSHIP first — a re-claim after a release is the protocol working.
   const R28_RELEASE = R28(7100000010, '2026-09-18T01:30:00Z', R28_SEAT, 'Release: session `session_01DvvamiacK328idtBYJBxV3`, cause: 本卡改派, 去向: `pm:queue`');
-  const R28_NAMED_RETRACTION = R28(7100000011, '2026-09-18T01:30:00Z', R28_SEAT, '撤回本席的认领 `7100000001` —— 本卡改派');
+  const R28_BOLD_RELEASE = R28(7100000011, '2026-09-18T01:30:00Z', R28_SEAT, '**Release:** session `session_01DvvamiacK328idtBYJBxV3`, cause: 本卡改派, 去向: `pm:queue`');
   t('⭐ (c) a fresh claim AFTER a `Release:` of the first ⇒ silent — a retracted claim does not stand', R28_IDS([R28_A, R28_RELEASE, R28_B]) === '' && !R28_CODES([R28_A, R28_RELEASE, R28_B]).includes('C8'));
   t('…and the first is still listed RETRACTED, with the 「⛔ NOT superseded」 wording byte-unchanged', says(R28_FIELD([R28_A, R28_RELEASE, R28_B], 'claim.rejected'), 'RETRACTED') && says(R28_FIELD([R28_A, R28_RELEASE, R28_B], 'claim.rejected'), '⛔ NOT superseded: a withdrawn claim is not a candidate for governance at all, whatever its date'));
-  t('…and the id-naming retraction channel reads the same way — ⛔ not a `Release:`-only rule', R28_IDS([R28_A, R28_NAMED_RETRACTION, R28_B]) === '');
+  t('…and a DECORATED `**Release:**` clears it the same way — the one reading (#18829 A), ⛔ a `Release:`-only rule since #18773 A', R28_IDS([R28_A, R28_BOLD_RELEASE, R28_B]) === '' && RELEASE_COMMENT_MARKER.test(R28_BOLD_RELEASE.body) === false);
   t('⛔ CONTROL: drop the retraction and those same two claims are named — the release is what clears it', R28_IDS([R28_A, R28_B]) === '7100000001+7100000002');
   t('⭐ the repair is PERFORMABLE after the fact: `Release:` then ONE fresh claim leaves exactly one standing', R28_IDS([R28_A, R28_B, R28(7100000012, '2026-09-18T03:00:00Z', R28_SEAT, 'Release: session `x`, cause: 修复本席的双认领, 去向: `pm:queue`'), R28_CLAIM(7100000013, '2026-09-18T04:00:00Z', R28_SEAT, { round: 3 })]) === '');
 
@@ -8892,8 +8885,9 @@ export async function selfTest() {
       + 'of that property, the input record whose field roster is the same on exit 0, on exit 4 '
       + 'and on a refusal — with the selected carrier, its body fingerprint and the rejected '
       + 'candidates each stated, the DECORATED claim that enters the pool and governs through '
-      + 'the sibling\'s one reading — the constant unwidened, and the file\'s two undecoration '
-      + 'paths pinned as the two jobs they are, the SECOND `Claim:` by one seat named as the state '
+      + 'the sibling\'s one reading — the constant unwidened, and ONE undecoration path for claim and '
+      + 'release alike, the prose retraction channel retired and the twelve spellings replayed through it, '
+      + 'the SECOND `Claim:` by one seat named as the state '
       + 'the protocol forbids writing rather than ranked as a supersession — per direction, with a '
       + 'non-vacuity control each and the five measured instances replayed — the lane-keyed owed population, '
       + 'spec and skills owing the record on every round, other lanes owing none, a `yes` outside them routed to '
