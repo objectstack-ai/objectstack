@@ -265,33 +265,77 @@ function coverageEntryProblems(ids, statusOf) {
  * read driven BOTH ways over ONE text, so a green is the binding holding and
  * not a read that matched everything, or nothing.
  *
+ * ## ⛔ WHAT THIS PIN CANNOT SEE — read this before trusting it
+ *
+ * It is a TEXT pin over comment-masked source. It answers one question — "is
+ * this call site still written, in live code, exactly once?" — and ⛔ it is not
+ * a proof that the call EXECUTES. Three ordinary severings walk straight past
+ * it, and all three were measured leaving `--self-test` at exit 0 and the live
+ * gate at exit 0 on this file:
+ *
+ *   - **shadowing** — `const statusFieldProblems = () => [];` above the call,
+ *     which stays written and starts returning nothing;
+ *   - **a dead helper** — the call moved into a function nobody invokes;
+ *   - **a dead branch** — the call left under a condition that never holds.
+ *
+ * Those are SEMANTIC, and no text pin can reach them: the spelling is intact in
+ * every one. Closing them needs the walk driven over a fixture ledger, which
+ * needs a root knob (`AREAS_DIR` is fixed from `import.meta.url`) or the walk
+ * factored into a callable. That is deliberately NOT built here, and this
+ * paragraph is the disclosure that makes the omission a recorded trade rather
+ * than an implied guarantee. ⛔ Do not describe this function as proving the
+ * bindings execute.
+ *
+ * What masking DOES close is the form that defeated the first version of this
+ * pin: **commenting the call out in place**. The commented line was the one
+ * occurrence, the raw-source count read 1, and everything stayed green — the
+ * exact "commented-out draft" this function's own decoy note already named.
+ * `maskComments` is applied before counting for that reason, and three OFF legs
+ * below drive it.
+ *
  * ⚠️ This pin is SPELLING-SENSITIVE on purpose, and that is its whole cost:
  * rewording a call site reds it. ⛔ The repair is to update the pinned spelling
  * in the same edit — ⛔ never to delete the row, which is indistinguishable
  * from severing the call it guards.
  *
- * @param {string} source this module's own text
- * @returns {string[]} one message per binding that is not present
+ * Readings quoted above were taken on `claude/issue-19157-checklist-planned-status`
+ * at `b835196bc1` (this repo) — a count without the tree it came from is not a
+ * reading.
+ *
+ * @param {string} source this module's own text, raw; comments are masked here
+ * @returns {string[]} one message per binding that is not present in LIVE code
  */
 function statusBindingProblems(source) {
   const problems = [];
+  // ⭐ Comments are masked BEFORE counting, and that one call is the whole
+  // difference between a pin that fires on a commented-out call site and one
+  // that does not. It also fixes the decoy rule's own blind spot in the right
+  // direction: a copy of a pinned spelling sitting in a comment is not a live
+  // call site, so it must neither satisfy the count nor inflate it.
+  // ⛔ Do not switch this back to raw `source` to make a reword green.
+  const live = maskComments(String(source));
   /**
-   * EXACTLY ONE occurrence, not "at least one" — and the second direction is
-   * the one this was rewritten for. The OFF legs below sever a call site over
-   * a copy of this text, so anything that leaves a SECOND literal copy of a
-   * pinned spelling anywhere in this file (a needle written out longhand, a
-   * commented-out draft, a doc example) keeps this check green after the real
-   * call is gone. That is a decoy, and the first draft of this very function
-   * shipped one: its severing needles were plain string literals, the predicate
-   * matched THOSE, and both OFF legs read as passes. The OFF legs caught it.
+   * EXACTLY ONE occurrence in LIVE code, not "at least one" — and the second
+   * direction is the one this was rewritten for. The OFF legs below sever a
+   * call site over a copy of this text, so anything that leaves a SECOND
+   * literal copy of a pinned spelling in live code (a needle written out
+   * longhand, a doc example in a template string) keeps this check green after
+   * the real call is gone. That is a decoy, and the first draft of this very
+   * function shipped one: its severing needles were plain string literals, the
+   * predicate matched THOSE, and both OFF legs read as passes. The OFF legs
+   * caught it.
+   *
+   * A copy inside a COMMENT is neither a decoy nor a call site — masking removes
+   * it from both sides of the count, which is the only consistent reading: the
+   * same commented line must not satisfy the rule when the real call is gone.
    */
   const bound = (re, what) => {
-    const hits = source.match(re)?.length ?? 0;
+    const hits = live.match(re)?.length ?? 0;
     if (hits === 1) return;
     problems.push(
       hits === 0
         ? what
-        : `${what} — and this spelling occurs ${hits} times in the file; a second literal copy of a pinned call site is a DECOY that holds this check green after the real one is severed`,
+        : `${what} — and this spelling occurs ${hits} times in LIVE code; a second literal copy of a pinned call site is a DECOY that holds this check green after the real one is severed`,
     );
   };
   bound(
@@ -1019,10 +1063,17 @@ const SELF_TEST_BATTERIES = Object.freeze({
   //
   // 28 → 38: the fixtures above drive two PURE functions and so could say
   // nothing about whether anything CALLS them. Both call sites were severed and
-  // measured green at 207/207, so the G-rows pin the BINDINGS by a source read
-  // driven ON and OFF, and two F-rows pin the `since` rule's own limit in the
-  // direction it deliberately does not go.
-  [BATTERY_PLANNED_STATUS]: 38,
+  // measured green at 207/207 (this branch, `22453417e1`), so the G-rows pin the
+  // BINDINGS by a source read driven ON and OFF, and two F-rows pin the `since`
+  // rule's own limit in the direction it deliberately does not go.
+  //
+  // 38 → 42: that first pin counted RAW source, so commenting a pinned call out
+  // IN PLACE left it green — the commented line was the one occurrence. Counting
+  // over comment-MASKED source closes it; G9–G11 are what keep the mask, and
+  // G12 records in an assertion what the pin still cannot see. Measured on this
+  // branch at `b835196bc1`: reverting the mask reds G9, G10 and G11 and nothing
+  // else.
+  [BATTERY_PLANNED_STATUS]: 42,
 });
 const SELF_TEST_BATTERY_FLOOR = 7;
 
@@ -2339,9 +2390,25 @@ function selfTestPlannedStatus() {
    * counts occurrences precisely so such a decoy reds — and the split keeps this
    * battery from being the thing that trips it. Each break falls INSIDE an
    * identifier, so no contiguous copy exists in the source at rest.
+   *
+   * ⚠️ ORDER-SENSITIVE: `String.replace` with a string needle cuts the FIRST
+   * occurrence. Were a decoy copy ever to appear ABOVE the real call site, the
+   * cut would land on the decoy and the real call would survive — the leg still
+   * reds, but through the exactly-one row rather than the one it was written
+   * for. ⛔ Read the failure TEXT of a red leg, never just its exit code.
    */
   const sever = (head, tail) => {
     const text = OWN_SOURCE.replace(head + tail, '/* severed for the OFF leg */');
+    return { text, changed: text !== OWN_SOURCE };
+  };
+  /**
+   * Comment a line out IN PLACE — the severing gesture a RAW-text count misses
+   * entirely, because the commented line is still the one occurrence. Same
+   * two-half needle and the same first-occurrence caveat as `sever`.
+   */
+  const commentOut = (head, tail) => {
+    const needle = head + tail;
+    const text = OWN_SOURCE.replace(needle, `// ${needle}`);
     return { text, changed: text !== OWN_SOURCE };
   };
 
@@ -2372,6 +2439,45 @@ function selfTestPlannedStatus() {
   t('G8 CONTROL — the same read reaches this file and finds a landmark that is NOT one of the four pinned spellings, so G1 is the bindings holding rather than a read that matches anything it is handed',
     OWN_SOURCE.length > 10000 && /const COVERAGE_BEARING_STATUSES = new Set/.test(OWN_SOURCE),
     `${OWN_SOURCE.length} bytes read`);
+
+  // ── the COMMENT-OUT forms, which a raw-text count misses entirely ─────────
+  //
+  // Measured on this file before masking landed: commenting a pinned call out
+  // IN PLACE left `--self-test` at exit 0 with all 217 assertions passing AND
+  // the live gate at exit 0 over 264 active items, because the commented line
+  // IS the one occurrence a raw count finds. `maskComments` is what closes it,
+  // and these rows are what keep it closed — reverting the mask reds G9–G11
+  // instead of quietly restoring the hole.
+  const outWalk = commentOut('for (const msg of statusField', 'Problems(item)) where(msg);');
+  t('G9 OFF — commenting the item-walk call out IN PLACE FIRES, because the count is taken over comment-MASKED source',
+    outWalk.changed && statusBindingProblems(outWalk.text).some((p) => p.includes('statusFieldProblems(item)')),
+    statusBindingProblems(outWalk.text).join(' | '));
+
+  // ⭐ The nastiest of the set: comment the GATE out and add an ungated
+  // increment below it. The spelling survives in the comment, the behaviour
+  // inverts, and a kind mapped only to planned items is counted as covered on
+  // the OK line — silently, in the one number a reader trusts.
+  const gateLine = `if (bearing > 0) mapped${'Count++;'}`;
+  const ungated = `mapped${'Count++;'}`;
+  const outGateThenAdd = OWN_SOURCE.replace(gateLine, `// ${gateLine}\n        ${ungated}`);
+  t('G10 OFF — commenting the `mappedCount` gate out and adding an UNGATED increment in its place FIRES: the spelling survives in the comment while the behaviour inverts, and a kind mapped only to planned items would be counted as covered on the OK line',
+    outGateThenAdd !== OWN_SOURCE
+      && outGateThenAdd.includes(`// ${gateLine}`)
+      && maskComments(outGateThenAdd).includes(ungated)
+      && statusBindingProblems(outGateThenAdd).some((p) => p.includes('mappedCount')),
+    statusBindingProblems(outGateThenAdd).join(' | '));
+
+  t('G11 a copy of a pinned spelling inside a COMMENT neither satisfies the rule nor inflates it — the same masked line must not stand in for a call site that is gone',
+    statusBindingProblems(`${OWN_SOURCE}\n// for (const msg of statusField${'Problems(item)) where(msg);'}`).length === 0
+      && statusBindingProblems(`${outWalk.text}\n// a second commented copy changes nothing`).some((p) => p.includes('statusFieldProblems(item)')));
+
+  // ⛔ And the disclosure, asserted rather than left to the docblock: the three
+  // SEMANTIC severings this pin cannot see. Each keeps the spelling intact, so
+  // the predicate reports no problem — that is the honest answer, and the row
+  // exists so nobody reads a green G1 as "the bindings execute".
+  const shadowed = `const statusFieldProblems = () => [];\n${OWN_SOURCE}`;
+  t('G12 DISCLOSED LIMIT — a shadowing redefinition leaves the spelling intact and this pin reports NOTHING. It is a TEXT pin; ⛔ never read it as proof the call executes',
+    statusBindingProblems(shadowed).length === 0);
 
   // ── the live control ──────────────────────────────────────────────────────
   // The fixtures prove the rules; this reads the ledger the gate actually
@@ -2418,7 +2524,7 @@ if (process.argv.slice(2).includes('--self-test')) {
         ' and the `/meta` call-spelling refusal reads its vocabulary out of the live generated contract, fires on every folded spelling a `call` can instruct, and stays silent on the canonical singular, on parameter placeholders, and on the `why`/`expect`/`source`/`requires` prose that narrates the fold;' +
         ' and the line-citation limb DETECTS NOTHING ITSELF EITHER: the last forked grammar in this file went into the shared core at #18592, so what is pinned here is the BINDING — the corpus declaring `pathlessLineCitations`, a source read finding no citation regex and no detector while the same read DOES find the declaration, the binding driven ON and OFF against ONE text so the green is the declaration working rather than a text that would have matched anyway, the DARK case that a citation both grammars already agreed on keeps its verdict either way, the refusal to over-fire on this ledger\'s own HTTP statuses, config literals, URL ports, clock times and quoted JSON, and the live zero with the control that says it is a reading;' +
         ' and the symbol-anchor limb DETECTS NOTHING AND RESOLVES NOTHING ITSELF: it is a registered corpus (#18107), so the grammar, the walk and the verdict are all `scripts/symbol-anchors.mjs`\'s, pinned here by a source read that finds no local extension set, no anchor regex and no detector while the same read DOES find the registration, by the anchorable-extension vocabulary being the shared OBJECT rather than a copy of it, by the `runs/` exclusion driven three ways on the live corpus (the subtree holds files, none is swept, the areas beside it still are, and dropping the exclusion puts them back), and by the #16898 binding re-taken through the registration — a call site / import / local parameter / string-substring all reading ABSENT, the positive control that a declaration and a complete quoted token still resolve, a `.json` key resolving where a `.json` value does not, an INLINE object-literal key reading absent where one at the start of a line resolves — with the closed, grow-never residual and the per-file anchor floor held in both directions beside it;' +
-        ` and the \`planned\` status is driven on fixtures rather than on a ledger that carries none of it — the accept set widened without losing its closure, \`since: null\`/no-steps/personas relaxed for planned alone while the ${plannedStatus.liveItems} live items are judged exactly as before, and the coverage ratchet held BOTH ways: a planned item beside an active one is silent, a kind whose only items are planned is UNMAPPED, and the bearing set is pinned NOT to contain \`planned\`; and the two CALL SITES those rules ride on are pinned by a source read driven ON and OFF, because severing either one left this very self-test green.`,
+        ` and the \`planned\` status is driven on fixtures rather than on a ledger that carries none of it — the accept set widened without losing its closure, \`since: null\`/no-steps/personas relaxed for planned alone while the ${plannedStatus.liveItems} live items are judged exactly as before, and the coverage ratchet held BOTH ways: a planned item beside an active one is silent, a kind whose only items are planned is UNMAPPED, and the bearing set is pinned NOT to contain \`planned\`; and the two CALL SITES those rules ride on are pinned by a source read over comment-MASKED source driven ON and OFF, because severing either one — by deletion OR by commenting it out in place — left this very self-test green; \u26d4 that pin is a TEXT pin and G12 records the three semantic severings it cannot see.`,
     );
     process.exit(0);
   }
