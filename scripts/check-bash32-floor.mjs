@@ -212,6 +212,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 
+import { gitFreeEnv } from './git-env.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
 const REPO_ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
@@ -847,6 +848,11 @@ function unreadableReason(err) {
  */
 export function listPopulation(root) {
   const out = spawnSync('git', ['-C', root, 'ls-files', '-z', '--', ...WALK_ROOTS], {
+    // #16644: `-C root` is the ONLY thing that may decide which index is read. An
+    // inherited GIT_DIR outranks it, and this function is called with a mkdtemp fixture
+    // as `root` in every end-to-end leg below -- under a hook those legs would census
+    // the real repository and report a number about the wrong tree.
+    env: gitFreeEnv(),
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
   });
@@ -953,12 +959,15 @@ function reportUnreadable(unreadable, population, findings) {
  */
 function fixtureRepo(files) {
   const dir = mkdtempSync(join(tmpdir(), 'bash32-floor-'));
-  spawnSync('git', ['-C', dir, 'init', '-q'], { encoding: 'utf8' });
+  // #16644: `init` and `add -A` are the two commands the measured incident ran. With an
+  // inherited GIT_DIR the `init` writes core.bare into the SHARED .git/config and the
+  // `add -A` stages the real tree as deleted, both silently.
+  spawnSync('git', ['-C', dir, 'init', '-q'], { encoding: 'utf8', env: gitFreeEnv() });
   for (const [rel, body] of Object.entries(files)) {
     mkdirSync(join(dir, dirname(rel)), { recursive: true });
     writeFileSync(join(dir, rel), body);
   }
-  spawnSync('git', ['-C', dir, 'add', '-A'], { encoding: 'utf8' });
+  spawnSync('git', ['-C', dir, 'add', '-A'], { encoding: 'utf8', env: gitFreeEnv() });
   return dir;
 }
 
@@ -1402,7 +1411,7 @@ function selfTest() {
   // a fixture whose index also lost the path would make every case below pass
   // by testing nothing.
   rmSync(join(partialRepo, 'scripts/absent.sh'));
-  const stillIndexed = spawnSync('git', ['-C', partialRepo, 'ls-files', '--', ...WALK_ROOTS], { encoding: 'utf8' });
+  const stillIndexed = spawnSync('git', ['-C', partialRepo, 'ls-files', '--', ...WALK_ROOTS], { encoding: 'utf8', env: gitFreeEnv() });
   t(
     'the fixture really is INDEX-vs-DISK: the index still lists the removed path',
     stillIndexed.stdout.includes('scripts/absent.sh'),

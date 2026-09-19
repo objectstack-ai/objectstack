@@ -210,6 +210,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { gitFreeEnv } from './git-env.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 // #16421 — the `fw-gate` sandbox below copies `check-adr-0087-registration.mjs`
 // in and runs it. Its staging manifest is DERIVED from that gate's module graph,
@@ -316,6 +317,13 @@ const LEVEL_RANK = { patch: 1, minor: 2, major: 3 };
  */
 function git(cwd, args, { captureStderr = false } = {}) {
   return execFileSync('git', ['-C', cwd, ...args], {
+    // LOCAL-ONLY, every caller (#16644). This helper serves `rev-parse`, `log`, `show`,
+    // `cat-file`, `merge-base`, `update-ref`, `init`, `add` and `commit` -- all against
+    // the repository `-C cwd` names, which is the objectui checkout on a real run and a
+    // mkdtemp fixture throughout the self-test. ⛔ No caller fetches, clones or pushes
+    // through it, so no transport configuration is lost; the two `clone`s in this file
+    // are spawned separately and labelled where they stand.
+    env: gitFreeEnv(),
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
     ...(captureStderr ? { stdio: ['ignore', 'pipe', 'pipe'] } : {}),
@@ -1754,7 +1762,9 @@ function selfTest() {
       [join(fwRun, 'scripts', 'bump-objectui.sh'), '--no-commit', head],
       {
         encoding: 'utf8',
-        env: { ...process.env, OBJECTUI_ROOT: ui },
+        // #16644: `gitFreeEnv()` as the BASE -- `bump-objectui.sh` spawns `git` one frame
+        // down against the fixture, where an inherited GIT_DIR outranks its `cwd`.
+        env: { ...gitFreeEnv(), OBJECTUI_ROOT: ui },
       },
     );
     // #5960: the pin bump is the ONLY trigger of ADR-0082 D4's declaration-parity
@@ -1797,7 +1807,9 @@ function selfTest() {
     const unwalkableRun = spawnSync(
       'bash',
       [join(fwDegraded, 'scripts', 'bump-objectui.sh'), '--no-commit', head],
-      { encoding: 'utf8', env: { ...process.env, OBJECTUI_ROOT: ui, GIT_TERMINAL_PROMPT: '0' } },
+      // #16644: `gitFreeEnv()` as the BASE -- `bump-objectui.sh` spawns `git` one frame
+      // down against the fixture, where an inherited GIT_DIR outranks its `cwd`.
+      { encoding: 'utf8', env: { ...gitFreeEnv(), OBJECTUI_ROOT: ui, GIT_TERMINAL_PROMPT: '0' } },
     );
     const unwalkableCs = join(fwDegraded, '.changeset', `console-${head.slice(0, 12)}.md`);
     check(
@@ -1823,7 +1835,9 @@ function selfTest() {
     const initialRun = spawnSync(
       'bash',
       [join(fwInitial, 'scripts', 'bump-objectui.sh'), '--no-commit', head],
-      { encoding: 'utf8', env: { ...process.env, OBJECTUI_ROOT: ui, GIT_TERMINAL_PROMPT: '0' } },
+      // #16644: `gitFreeEnv()` as the BASE -- `bump-objectui.sh` spawns `git` one frame
+      // down against the fixture, where an inherited GIT_DIR outranks its `cwd`.
+      { encoding: 'utf8', env: { ...gitFreeEnv(), OBJECTUI_ROOT: ui, GIT_TERMINAL_PROMPT: '0' } },
     );
     const initialCs = join(fwInitial, '.changeset', `console-${head.slice(0, 12)}.md`);
     const initialBody = existsSync(initialCs) ? readFileSync(initialCs, 'utf8') : '';
@@ -2711,7 +2725,7 @@ function selfTest() {
     // and this run is also the opt-out's only coverage.
     const truncBump = spawnSync('bash', [join(fwTrunc, 'scripts', 'bump-objectui.sh'), '--no-commit', c6to], {
       encoding: 'utf8',
-      env: { ...process.env, OBJECTUI_ROOT: ui6, OBJECTUI_NO_DEEPEN: '1' },
+      env: { ...gitFreeEnv(), OBJECTUI_ROOT: ui6, OBJECTUI_NO_DEEPEN: '1' }, // #16644: see above
     });
     const truncCsPath = join(fwTrunc, '.changeset', `console-${c6to.slice(0, 12)}.md`);
     check(
@@ -2759,7 +2773,7 @@ function selfTest() {
     stageBumpDriver(fwTrunc2);
     const noopDeepen = spawnSync('bash', [join(fwTrunc2, 'scripts', 'bump-objectui.sh'), '--no-commit', c6to], {
       encoding: 'utf8',
-      env: { ...process.env, OBJECTUI_ROOT: ui6, GIT_TERMINAL_PROMPT: '0' },
+      env: { ...gitFreeEnv(), OBJECTUI_ROOT: ui6, GIT_TERMINAL_PROMPT: '0' }, // #16644: see above
     });
     const noopDeepenCsPath = join(fwTrunc2, '.changeset', `console-${c6to.slice(0, 12)}.md`);
     check(
@@ -2837,7 +2851,11 @@ function selfTest() {
       const args = ['clone', '-q'];
       if (depth) args.push('--depth', String(depth));
       args.push(pathToFileURL(uiUp).href, dir);
-      execFileSync('git', args, { encoding: 'utf8' });
+      // LOCAL-ONLY despite being a `clone` (#16644): the source is a `file://` URL under
+      // this battery's own mkdtemp root, so the transport settings this container carries
+      // in GIT_CONFIG_* / GIT_SSL_* are not in play -- while an inherited GIT_DIR would
+      // still decide where the clone lands.
+      execFileSync('git', args, { encoding: 'utf8', env: gitFreeEnv() });
       // A real checkout has this ref, and #10495's reachability report keys on
       // it — without it these cases would bury their assertions under warnings.
       git(dir, ['update-ref', 'refs/remotes/origin/main', upTo]);
@@ -2933,7 +2951,7 @@ function selfTest() {
     const runShellBump = (fwDir, uiRoot, extraEnv = {}) =>
       spawnSync('bash', [join(fwDir, 'scripts', 'bump-objectui.sh'), '--no-commit', upTo], {
         encoding: 'utf8',
-        env: { ...process.env, OBJECTUI_ROOT: uiRoot, GIT_TERMINAL_PROMPT: '0', ...extraEnv },
+        env: { ...gitFreeEnv(), OBJECTUI_ROOT: uiRoot, GIT_TERMINAL_PROMPT: '0', ...extraEnv }, // #16644: see above
       });
     const csName = `console-${upTo.slice(0, 12)}.md`;
 
@@ -3036,7 +3054,11 @@ function selfTest() {
       spawnSync('bash', [join(fwDir, 'scripts', 'bump-objectui.sh'), ...args], {
         encoding: 'utf8',
         env: {
-          ...process.env,
+        // #16644: `gitFreeEnv()` rather than `process.env` as the BASE. This child is
+        // `bash`, not `git`, but `bump-objectui.sh` spawns `git` one frame down against
+        // the fixture repositories below, and an inherited GIT_DIR outranks their `cwd`
+        // there exactly as it would here. The deliberate keys are re-applied ON TOP.
+          ...gitFreeEnv(),
           OBJECTUI_ROOT: uiRoot,
           OBJECTUI_NO_DEEPEN: '1',
           GIT_TERMINAL_PROMPT: '0',
@@ -3190,6 +3212,7 @@ function selfTest() {
     });
     const revParseMissing = spawnSync('git', ['-C', uiMiss.dir, 'rev-parse', 'HEAD'], {
       encoding: 'utf8',
+      env: gitFreeEnv(), // LOCAL-ONLY (#16644): the fixture `-C` names, never a hook's repo
     });
     check(
       '#10495 R5a `git rev-parse HEAD` exits 0 for a commit whose OBJECT is gone — so NEW_SHA arriving is no proof of presence',
@@ -3199,7 +3222,9 @@ function selfTest() {
     const isAncestorMissing = spawnSync(
       'git',
       ['-C', uiMiss.dir, 'merge-base', '--is-ancestor', missHead, 'origin/main'],
-      { encoding: 'utf8' },
+      // LOCAL-ONLY (#16644): `origin/main` here is a ref this fixture wrote with
+      // `update-ref`, not a remote to reach.
+      { encoding: 'utf8', env: gitFreeEnv() },
     );
     check(
       '#10495 R5b `merge-base --is-ancestor` exits 128 on an absent object — an ERROR, not the "no" that 1 means',

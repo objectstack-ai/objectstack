@@ -20,6 +20,7 @@
   "scripts/references-banner.test.ts",
   "scripts/root-index.test.ts",
   "scripts/schema-tree-freshness.test.ts",
+  "scripts/sharded-artifacts.test.ts",
   "scripts/solution-blueprint-header-row.test.ts",
   "scripts/strictness-ledger-doc.test.ts",
   "scripts/strictness-ledger.test.ts",

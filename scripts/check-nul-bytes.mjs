@@ -271,6 +271,7 @@ import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, w
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { gitFreeEnv } from './git-env.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
 /**
@@ -459,10 +460,14 @@ function locate(buf, offset) {
   return { line, column };
 }
 
-/** One `git ls-files` invocation, NUL-split, with EXCLUDED applied. */
+/** One `git ls-files` invocation, NUL-split, with EXCLUDED applied. LOCAL-ONLY. */
 function lsFiles(root, args) {
   return execFileSync('git', ['ls-files', '-z', ...args], {
     cwd: root,
+    // #16644: `root` is the real checkout on a gate run and a mkdtemp fixture in every
+    // self-test leg. GIT_DIR outranks `cwd`, so without the strip the fixture legs
+    // enumerate the real repository and the scan set is about the wrong tree.
+    env: gitFreeEnv(),
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
   })
@@ -562,7 +567,11 @@ export function scan(root) {
 }
 
 function repoRoot() {
-  return execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+  // LOCAL-ONLY (#16644), and the strip changes the ANSWER under a hook rather than only
+  // the blast radius: `pre-commit` exports GIT_DIR as this worktree's private
+  // `.git/worktrees/<name>` directory, and `--show-toplevel` derived from that names the
+  // wrong tree. Derived from `cwd` alone it is the checkout the gate was invoked in.
+  return execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8', env: gitFreeEnv() }).trim();
 }
 
 /**
@@ -785,7 +794,11 @@ function selfTest() {
   };
 
   try {
-    execFileSync('git', ['init', '-q'], { cwd: dir });
+    // #16644: every `git` in this self-test is LOCAL-ONLY against `dir`, a mkdtemp
+    // fixture, and is spawned with GIT_* stripped. The `init` right here is the measured
+    // incident's first command -- under an inherited GIT_DIR it writes `core.bare = true`
+    // into the SHARED .git/config that every linked worktree on the box reads.
+    execFileSync('git', ['init', '-q'], { cwd: dir, env: gitFreeEnv() });
     // Hermetic ignore rules (#6984). The untracked half of the scan set is
     // decided by `--exclude-standard`, which reads the USER's global excludes
     // file as well as this repo's .gitignore. A developer whose global excludes
@@ -795,7 +808,7 @@ function selfTest() {
     // INSIDE .git (never in the working tree, which is the scan surface) leaves
     // the temp repo's own .gitignore as the only ignore rule in play.
     writeFileSync(join(dir, '.git', 'empty-excludes'), '');
-    execFileSync('git', ['config', 'core.excludesFile', join(dir, '.git', 'empty-excludes')], { cwd: dir });
+    execFileSync('git', ['config', 'core.excludesFile', join(dir, '.git', 'empty-excludes')], { cwd: dir, env: gitFreeEnv() });
 
     // The #4890 case itself: agent instructions under .claude/, markdown, NUL
     // well past git's 8000-byte sniff window.
@@ -890,7 +903,7 @@ function selfTest() {
     // Excluded artifact directory.
     write('packages/x/dist/bundle.js', Buffer.concat([Buffer.from('var a='), NUL, Buffer.from(';\n')]));
 
-    execFileSync('git', ['add', '-A', '-f'], { cwd: dir });
+    execFileSync('git', ['add', '-A', '-f'], { cwd: dir, env: gitFreeEnv() });
 
     // ── #6984: everything BELOW this line is deliberately left unstaged ───────
     //
@@ -1051,7 +1064,7 @@ function selfTest() {
     // green on it for a reason unrelated to its bytes. Stated as the enumeration
     // fact rather than as a re-run, because that IS the change: same classifier,
     // same byte table, different list of paths.
-    const indexOnlyEnumeration = execFileSync('git', ['ls-files', '-z'], { cwd: dir, encoding: 'utf8' })
+    const indexOnlyEnumeration = execFileSync('git', ['ls-files', '-z'], { cwd: dir, encoding: 'utf8', env: gitFreeEnv() })
       // Split on the NUL delimiter built from its byte value: this file is in
       // its own scan surface, so the delimiter is never written as a literal.
       .split(String.fromCharCode(0))
@@ -1184,7 +1197,7 @@ function selfTest() {
     // test here, and it would turn the offender-set comparison below red for a
     // reason that has nothing to do with the enumeration widening.
     battery('#6984, the CI direction: on a fully tracked tree the widening is a no-op');
-    execFileSync('git', ['add', '-A'], { cwd: dir });
+    execFileSync('git', ['add', '-A'], { cwd: dir, env: gitFreeEnv() });
     const staged = scan(dir);
     assert(staged.untracked === 0, `#6984: a fully tracked tree has an empty untracked half, got ${staged.untracked}`);
     assert(
