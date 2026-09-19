@@ -102,6 +102,14 @@ const namesOf = (registry: any, type: string): string[] =>
  * The minimum `IDataEngine` surface the seeder's INSERT path touches, wired to
  * a real registry so `readDeclared` sees exactly what boot registered. No
  * secret is authored, so no CryptoProvider is needed.
+ *
+ * `update` is deliberately ABSENT rather than stubbed. `find` always answers
+ * empty here, so the seeder always takes the INSERT branch and never dispatches
+ * an update; a stub for it would be an engine double declaring a verb this file
+ * does not exercise, which `check:engine-double-contract` correctly treats as
+ * new surface to pin. A fake that stops where the path stops has nothing to be
+ * looser than, and a future change that DID reach the update branch would fail
+ * loudly here instead of passing against a permissive stub.
  */
 function seedingEngine(registry: any) {
   const rows: any[] = [];
@@ -114,9 +122,6 @@ function seedingEngine(registry: any) {
     async insert(_object: string, row: any) {
       rows.push(row);
       return row;
-    },
-    async update(_object: string, patch: any) {
-      return patch;
     },
   };
 }
