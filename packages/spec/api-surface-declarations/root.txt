@@ -44943,6 +44943,10 @@ declare const SpecChangesSchema: z.ZodObject<{
         removedIn: z.ZodNumber;
         replacement: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>>;
+    surfaceScope: z.ZodOptional<z.ZodObject<{
+        fromVersion: z.ZodString;
+        toVersion: z.ZodString;
+    }, z.core.$strip>>;
 }, z.core.$strip>;
 
 // ── SpecConverted (type) ──
@@ -45050,6 +45054,8 @@ type StoredConversionOptions = Omit<ApplyConversionsOptions, 'includeRetired'>;
 interface SurfaceDiff {
     added?: SpecSurfaceAdd[];
     removed?: SpecSurfaceRemove[];
+    /** The published-version pair `added`/`removed` were diffed between. */
+    scope?: SpecSurfaceScope;
 }
 
 // ── TemplateExpressionInputSchema (const) ──
