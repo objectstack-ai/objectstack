@@ -1090,9 +1090,42 @@
  * that budget is BOUNDED — one unit per removed line, so a surplus still fires
  * — while this decline silences EVERY member inside the bag at once. So the
  * identity is a PLACE: the frames the hunk shows open where each line begins,
- * compared opener-for-opener and head-text-for-head-text, plus the two lines'
- * indentation. Both halves are agreement tests, so every shape they cannot
- * decide keeps telling.
+ * compared opener-for-opener and head-text-for-head-text AND required to stand
+ * on CONTEXT lines, plus the two lines' indentation. Every half is an agreement
+ * test, so every shape they cannot decide keeps telling.
+ *
+ * ⛔ THE CONTEXT REQUIREMENT IS THE SECOND HALF OF THE SAME LESSON, and the
+ * first cut of the place predicate did not have it. Comparing opener + head
+ * TEXT is identity only while the two lines are the same line, and two KEYLESS
+ * parents can spell their opener identically: `discriminatedUnion` arms, tuple
+ * members, `.or()` / `.and()` arguments. `filter: z.unknown()` removed from arm
+ * a — whose opener is a context line — against `filter: strictObject({ newKey })`
+ * added to arm b — whose opener is an ADDED line respelled to the same text in
+ * the same edit, which a trailing comment is enough to do — compared EQUAL, and
+ * arm b is a strict object that could not accept `filter` at all before. The
+ * same unbounded silence, in the keyless class. ⇒ a frame on a CONTEXT line is
+ * one line shown twice and is the same construct on both sides; a frame on an
+ * added line against one on a removed line is two lines, and no text they share
+ * makes them one.
+ *
+ * ⛔ A HUNK MAY BEGIN INSIDE A COMMENT, and the flag above must not read that
+ * as a guess. The walk starts at the hunk's own first line with no comment
+ * state, so a doc comment opened above the hunk has its body read as code — and
+ * the ` */` that ends it was being taken for a bare slash. Measured on the same
+ * 250-diff corpus: 21 of the 88 readable T1 stacks went unreadable that way,
+ * 21 of 21 raised by ` */`, across 7 diffs — and one of them is an honest
+ * #18234 narrowing this file had ALREADY landed a decline for, turned back into
+ * a tell. ⇒ a `*/` outside a block comment, on a walk that has opened none of
+ * its own and raised no flag, is read as what it unambiguously is: the hunk
+ * began inside a comment. The frames the comment text pushed are discarded and
+ * the walk restarts after it. ⭐ No regex lexer, and no heuristic: outside a
+ * string and outside a comment, `*/` is not valid TypeScript.
+ *
+ * ⭐ The same measurement is why a LONE `/` no longer raises the flag either. A
+ * regex literal cannot span lines, so a `/` with no second `/` left on its line
+ * is arithmetic — it pushes and pops nothing, and the stack is as correct as it
+ * was. What remains loud, and is the whole residual: a real regex literal
+ * carrying a bracket, on a line the walk crosses. 0 of the 250 diffs.
  *
  * ⛔ The same PLACE is now required on #18234's SPEND path too, which reads the
  * identical predicate one call away: a wrapped acceptor removed from inside a
@@ -1149,11 +1182,15 @@
  *     context-line opener, or a removal in another block — is not this row;
  *     #16943's block discipline is untouched and that member fires.
  *   • a bag RE-INDENTED in the same edit, or one whose parent opener line the
- *     same block re-declares, no longer agrees with the removed key's place and
- *     keeps telling. The place is a textual agreement, ⛔ never a resolved path.
- *   • a hunk whose walk had to guess — a regex literal, a division, a
- *     type-blind pop, an unterminated string — certifies nothing from that byte
- *     on, and every member after it fires.
+ *     same block re-declares — or one whose parent opener is simply an added or
+ *     removed line rather than a context one — no longer agrees with the
+ *     removed key's place and keeps telling. The place is a textual agreement
+ *     between two CONTEXT lines, ⛔ never a resolved path.
+ *   • a hunk whose walk had to guess — a regex literal carrying a bracket, a
+ *     type-blind pop, an unterminated string, an unexplained `*/` — certifies
+ *     nothing from that byte on, and every member after it fires. ⛔ A division
+ *     and the ` */` of a hunk that began inside a comment are NOT that: both
+ *     are read, and both are pinned.
  *   • T2 is deliberately not extended, with its own overturn condition stated
  *     on {@link insideReplacedUniversalAcceptorBag}.
  *
@@ -1440,7 +1477,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#18640 — an inline closed set RE-SPELLED at the same binding is not a set that gained a value': 20,
   '#18702 — a declaring factory PRIVATE to one file, resolved through its own DEFINITION': 54,
   "#18721 — a hunk's LEADING CONTEXT is not a reason to abandon the parameter reading": 14,
-  '#19099 — a member BOUNDED inside a bag the block re-declared out of a universal acceptor': 53,
+  '#19099 — a member BOUNDED inside a bag the block re-declared out of a universal acceptor': 66,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -2312,17 +2349,39 @@ function topLevelMembers(s, open, close) {
  * tell on the answer: `.regex(/^\{\{/)` pushes two openers this scan never
  * closes, so the bag's own closers are consumed and a key at the OUTER level
  * reads as a member INSIDE the bag. ⇒ the flag is raised where the stack stops
- * being a reading and becomes a guess — a `/` that opens neither comment form
- * (a regex literal or a division), a closer whose type does not match the
- * opener it popped, a string literal that never closes — and ⛔ every reader
- * that SUPPRESSES anything must refuse when it is set.
+ * being a reading and becomes a guess, and THESE ARE ITS TRIGGERS, all of them,
+ * in the order a reader meets them:
+ *
+ *   • a `/` with another `/` left on its line — the only shape a single-line
+ *     regex literal can have, and this scan does not lex one. ⛔ A LONE `/` is
+ *     NOT a trigger: a regex literal cannot span lines, so one is arithmetic,
+ *     and division pushes and pops nothing.
+ *   • a closer whose type does not match the opener it popped.
+ *   • a string literal that never closes on its line.
+ *   • a `*/` this walk cannot explain — a second one, or one after the flag is
+ *     already up. ⛔ The FIRST `*/` on a clean walk is not a trigger at all: it
+ *     says the hunk began inside a comment (see the reset below).
+ *
+ * ⛔ Every reader that SUPPRESSES anything must refuse when the flag is set, and
+ * every trigger must be stated wherever this reading is described. A disclosure
+ * naming only the division operator — which raises nothing, and occurs zero
+ * times on this tree's corpus — while ` */` fired on 24% of readable T1 stacks
+ * is how the first cut of this flag regressed a landed #18234 decline in the
+ * commonest hunk shape there is.
  *
  * ⭐ Like `readToCloser`, raising the flag does NOT move the frames: a caller
  * that only ever makes a tell FIRE (⇒ {@link inParameterList}) reads the same
- * answer it read before this flag existed, byte for byte. ⛔ Fixing the stack
- * instead — lexing regex literals — was deliberately not attempted: telling a
- * regex literal from a division needs the preceding TOKEN, which is one more
- * guess in a reader whose whole safety property is that it makes none.
+ * ANSWER it read before this flag existed. ⛔ Not the same BYTES — this
+ * function's body and `enclosingDelimiter`'s both changed — and the claim is
+ * only worth what it is measured over: `enclosingDelimiter` and
+ * `inParameterList` agree on 431,750 side-lines (1,881 sides of 250 real commit
+ * diffs), 0 disagreements, taken both against the reading before this flag and
+ * against the reading before the whole family. ⛔ Fixing the stack instead —
+ * lexing regex literals in full — was deliberately not attempted: telling a
+ * regex literal from a division at every position needs the preceding TOKEN,
+ * which is one more guess in a reader whose whole safety property is that it
+ * makes none. The two cheap, SOUND discriminations above are taken; the rest is
+ * left loud, and the residual is one line in the header.
  *
  * ⭐ Positive evidence only, and `null` is the whole safety property. The scan
  * starts at the first line of the line's OWN hunk, so a construct opened before
@@ -2362,8 +2421,11 @@ export function enclosingDelimiters(side, index) {
   const frames = [];
   let unreadable = false;
   let inBlockComment = false;
+  let openedBlockComment = false;
+  let leadingCommentClosed = false;
   for (let j = start; j < index; j += 1) {
     const s = String(side[j]?.text ?? '');
+    const kind = side[j]?.kind ?? null;
     for (let k = 0; k < s.length; k += 1) {
       const ch = s[k];
       const next = s[k + 1];
@@ -2371,21 +2433,56 @@ export function enclosingDelimiters(side, index) {
         if (ch === '*' && next === '/') { inBlockComment = false; k += 1; }
         continue;
       }
-      if (ch === '/' && next === '*') { inBlockComment = true; k += 1; continue; }
+      if (ch === '/' && next === '*') { inBlockComment = true; openedBlockComment = true; k += 1; continue; }
       if (ch === '/' && next === '/') break;
+      // #19099 (rework 2) — `*/` OUTSIDE a block comment: the hunk BEGAN INSIDE
+      // one. A hunk's scan starts at the hunk's own first line, so a doc comment
+      // that opened above it is invisible and its body was being read as code —
+      // which is what raised the flag on ` */` for 24% of this tree's readable
+      // T1 stacks, in the commonest hunk shape there is. ⭐ It needs no regex
+      // lexer and it is not a heuristic: outside a string and outside a comment,
+      // `*/` is not valid TypeScript, so the only reading it has is a
+      // terminator. Everything scanned so far was comment text, so the frames it
+      // pushed are DISCARDED and the walk restarts after it.
+      //
+      // ⛔ Guarded on both sides. Once this walk has opened a block comment of
+      // its own, a later `*/` is unexplained; and once anything has made the
+      // walk unreadable, a `*/` may be bytes inside a string this scan mis-read,
+      // so the reset could throw away real frames — the QUIET direction. Either
+      // way the flag is raised instead.
+      if (ch === '*' && next === '/') {
+        if (!openedBlockComment && !leadingCommentClosed && !unreadable) {
+          leadingCommentClosed = true;
+          frames.length = 0;
+          k += 1;
+          continue;
+        }
+        unreadable = true;
+        k += 1;
+        continue;
+      }
       // #19099 — a `/` that opens neither comment form is a division operator or
-      // a REGEX LITERAL this scan does not lex, and from here on the stack it
-      // builds is a guess. The frames are left exactly where they were, so the
-      // firing-only readers are unmoved; the flag is what the suppressing ones
-      // refuse on.
-      if (ch === '/') { unreadable = true; continue; }
+      // a REGEX LITERAL this scan does not lex.
+      //
+      // ⭐ #19099 (rework 2) — and the two are TELLABLE APART without lexing
+      // either, because a regex literal cannot span lines: one with no second
+      // `/` left on this line does not exist. So a lone `/` is a DIVISION, which
+      // pushes and pops nothing and leaves the stack exactly as correct as it
+      // was — no flag. A `/` with another `/` after it on the same line may be a
+      // regex whose body carries brackets, and from there the stack is a guess.
+      // ⛔ The conservative half is deliberate: a division followed by a slash
+      // inside a string later on the line raises the flag it does not need to.
+      if (ch === '/') {
+        if (s.indexOf('/', k + 1) !== -1) unreadable = true;
+        continue;
+      }
       if (ch === "'" || ch === '"' || ch === '`') {
         const end = endOfStringLiteral(s, k);
         if (end === -1) return { frames: [], unreadable: true };
         k = end;
         continue;
       }
-      if (BRACKET_CLOSERS[ch] !== undefined) { frames.push({ opener: ch, head: s.slice(0, k), line: j }); continue; }
+      if (BRACKET_CLOSERS[ch] !== undefined) { frames.push({ opener: ch, head: s.slice(0, k), line: j, kind }); continue; }
       if (ch === ')' || ch === ']' || ch === '}') {
         // #18721 — UNDERFLOW: this closes an opener the hunk never showed. Drop
         // it and keep walking. The shown stack is a suffix of the real one, so
@@ -2480,13 +2577,30 @@ function framePlace(frames, f) {
  * Two facts, both textual, both carried by the hunk, and neither a parse:
  *
  *   ① the frames open where each line BEGINS are the same, opener for opener
- *     and head text for head text — context lines read identically on both
- *     sides, so agreement here is the hunk showing the same enclosing
- *     construct; and
+ *     and head text for head text, and every one of them stands on a CONTEXT
+ *     line; and
  *   ② the two lines are indented the same. ⛔ Not redundant with ①: when a
  *     hunk shows no opener at all (both framesets empty) the indent is the only
  *     nesting evidence left, and it is what separates a key removed four levels
  *     deep from a bag re-declared at the top.
+ *
+ * ⛔ The CONTEXT requirement in ① is PROVENANCE, and text cannot carry it. The
+ * first cut of this predicate compared `opener` + `head` + indent, which reads
+ * as identity only while the two lines are the same line — and two KEYLESS
+ * parents whose opener lines read identically are not: `discriminatedUnion`
+ * arms, tuple members, `.or()` / `.and()` arguments. A `filter: z.unknown()`
+ * removed from arm a, whose opener is a CONTEXT line, and a
+ * `filter: strictObject({ newKey })` added to arm b, whose opener is an ADDED
+ * line respelled in the same edit to the same text, compared EQUAL — and arm b
+ * is a strict object that could not accept `filter` at all before. That is the
+ * same unbounded silence, moved from the keyed-parent class to the keyless one.
+ * ⇒ a frame on a CONTEXT line is the same construct on both sides, because a
+ * context line IS one line shown twice; a frame on an added line and a frame on
+ * a removed line are two different lines, and no text they share makes them one
+ * construct. The one added frame that legitimately IS the same construct — the
+ * re-declared bag itself — never reaches here: {@link framePlace} drops the
+ * frame's own line, and a member nested deeper is reached by walking the stack
+ * outward to the bag whose own chain is context all the way down.
  *
  * ⛔ Both are AGREEMENT tests, so the residual is the loud direction in every
  * case they cannot decide: a re-indented bag, a parent opener re-declared in
@@ -2501,7 +2615,13 @@ export function samePlace(a, b) {
   if (!Array.isArray(a.frames) || !Array.isArray(b.frames)) return false;
   if (a.indent !== b.indent) return false;
   if (a.frames.length !== b.frames.length) return false;
-  return a.frames.every((f, i) => f.opener === b.frames[i].opener && f.head === b.frames[i].head);
+  return a.frames.every(
+    (f, i) =>
+      f.kind === 'context' &&
+      b.frames[i].kind === 'context' &&
+      f.opener === b.frames[i].opener &&
+      f.head === b.frames[i].head,
+  );
 }
 
 /**
@@ -5548,14 +5668,131 @@ export function selfTest() {
 
   // -- the readers the rework added -----------------------------------------
   t('`samePlace` is an AGREEMENT test on both halves — same frames and same indent', samePlace(placeAt('  '), placeAt('  ')) === true && samePlace(placeAt('  '), placeAt('    ')) === false);
-  const FRAME = (head) => ({ opener: '{', head, line: 0 });
+  const FRAME = (head, kind = 'context') => ({ opener: '{', head, line: 0, kind });
   t('⛔ …and a frame the other side does not show, or shows with other text, is not agreement', samePlace(placeAt('  ', [FRAME('  meta: z.object(')]), placeAt('  ', [FRAME('  meta: z.object(')])) === true && samePlace(placeAt('  ', [FRAME('  meta: z.object(')]), placeAt('  ', [FRAME('  other: z.object(')])) === false && samePlace(placeAt('  ', [FRAME('  meta: z.object(')]), placeAt('  ')) === false);
+  t('⭐ …and a frame that does NOT stand on a CONTEXT line is not agreement however identically it reads — an added line and a removed line are two lines, and two keyless parents can spell their opener the same way', samePlace(placeAt('  ', [FRAME('  strictObject(', 'context')]), placeAt('  ', [FRAME('  strictObject(', 'added')])) === false && samePlace(placeAt('  ', [FRAME('  strictObject(', 'removed')]), placeAt('  ', [FRAME('  strictObject(', 'added')])) === false && samePlace(placeAt('  ', [FRAME('  strictObject(', 'added')]), placeAt('  ', [FRAME('  strictObject(', 'added')])) === false);
   t('⛔ …and an UNREADABLE walk on either side is not agreement, nor is an absent place', samePlace({ ...placeAt('  '), unreadable: true }, placeAt('  ')) === false && samePlace(placeAt('  '), { ...placeAt('  '), unreadable: true }) === false && samePlace(placeAt('  '), null) === false && samePlace(null, placeAt('  ')) === false);
   t('⭐ `enclosingDelimiters` raises `unreadable` on a `/` that opens neither comment form, and leaves the frames it had exactly where they were', enclosingDelimiters([{ text: '  label: z.string().regex(/^x/),', hunk: 0 }, { text: '  next: z.string(),', hunk: 0 }], 1).unreadable === true && enclosingDelimiters([{ text: '  label: z.string(),', hunk: 0 }, { text: '  next: z.string(),', hunk: 0 }], 1).unreadable === false);
   t('⛔ …and a `/` inside a STRING or a comment raises nothing — the flag is for bytes this scan could not lex, never for every slash', enclosingDelimiters([{ text: "  label: z.string().describe('a/b'),", hunk: 0 }, { text: '  next: z.string(),', hunk: 0 }], 1).unreadable === false && enclosingDelimiters([{ text: '  // a/b', hunk: 0 }, { text: '  next: z.string(),', hunk: 0 }], 1).unreadable === false);
   t('⛔ …and a TYPE-BLIND pop is flagged too, while #18721’s UNDERFLOW is not: one says the stack was already wrong, the other says the hunk began inside something it never showed', enclosingDelimiters([{ text: '  f(x[0 }', hunk: 0 }, { text: '  next: z.string(),', hunk: 0 }], 1).unreadable === true && enclosingDelimiters([{ text: '  });', hunk: 0 }, { text: '  next: z.string(),', hunk: 0 }], 1).unreadable === false);
   t('⭐ `insideReplacedUniversalAcceptorBag` refuses on an unreadable walk, and the SAME side without the regex still declines — so the refusal is the flag and not the shape', insideReplacedUniversalAcceptorBag([{ text: '  pagination: z.looseObject({', hunk: 0 }, { text: '    label: z.string().regex(/^x/),', hunk: 0 }, { text: '    pageSize: z.number(),', hunk: 0 }], 2, ['  pagination: z.unknown(),'], [placeAt('  ')]) === false && insideReplacedUniversalAcceptorBag([{ text: '  pagination: z.looseObject({', hunk: 0 }, { text: '    label: z.string(),', hunk: 0 }, { text: '    pageSize: z.number(),', hunk: 0 }], 2, ['  pagination: z.unknown(),'], [placeAt('  ')]) === true);
   t('⛔ …and with no `removedPlaces` at all it certifies NOTHING — the absent-evidence answer is the loud one', insideReplacedUniversalAcceptorBag(BAG_SIDE, 1, ['  pagination: z.unknown(),']) === false && replacesUniversalAcceptorKey('  filter: z.union([', ['  filter: z.unknown(),']) === false);
+
+  // -- rework 2: PROVENANCE, and a hunk that begins inside a comment ---------
+  //
+  // ⭐ Both shapes below were found by attacking the reading above, ⛔ not by
+  // re-running the ones it already answers. Every hunk is again the body
+  // `git diff` EMITTED for a real pair of files, pasted verbatim.
+  const KEYLESS_ARMS = [
+    "@@ -3,9 +3,11 @@ import { z } from 'zod';",
+    " export const ThingSchema = z.discriminatedUnion('kind', [",
+    '   strictObject({',
+    "     kind: z.literal('a'),",
+    '-    filter: z.unknown(),',
+    '-  }),',
+    '-  z.object({',
+    "+  }).describe('arm a'),",
+    '+  strictObject({',
+    '+    filter: strictObject({',
+    '+      newKey: z.string(),',
+    '+    }),',
+    "     kind: z.literal('b'),",
+    '     label: z.string(),',
+    '   }),',
+    ' ]);',
+  ];
+  t('⭐ THE KEYLESS-PARENT LEAK — two `discriminatedUnion` arms whose opener lines read IDENTICALLY are not one place: arm a (a CONTEXT line) loses the acceptor, arm b (an ADDED line respelled to the same text) gains a strict bag of that name, and its member tells', pathTells(...KEYLESS_ARMS).length === 1 && pathTells(...KEYLESS_ARMS)[0]?.text === 'newKey: z.string(),');
+  t('⭐ …and a TRAILING COMMENT is enough to respell arm b’s opener into an added line, which changes no head text at all — still one row', pathTells(
+    "@@ -3,9 +3,11 @@ import { z } from 'zod';",
+    " export const ThingSchema = z.discriminatedUnion('kind', [",
+    '   strictObject({',
+    "     kind: z.literal('a'),",
+    '-    filter: z.unknown(),',
+    '-  }),',
+    '-  strictObject({',
+    "+  }).describe('arm a'),",
+    '+  strictObject({ // arm b',
+    '+    filter: strictObject({',
+    '+      newKey: z.string(),',
+    '+    }),',
+    "     kind: z.literal('b'),",
+    '     label: z.string(),',
+    '   }),',
+    ' ]);',
+  ).length === 1);
+  t('⛔ CONTROL — arm b’s opener UNTOUCHED: git emits two blocks, the removal pays for nothing across them, and both added key lines fire as they always did', pathTells(
+    "@@ -3,9 +3,11 @@ import { z } from 'zod';",
+    " export const ThingSchema = z.discriminatedUnion('kind', [",
+    '   strictObject({',
+    "     kind: z.literal('a'),",
+    '-    filter: z.unknown(),',
+    '-  }),',
+    "+  }).describe('arm a'),",
+    '   z.object({',
+    '+    filter: strictObject({',
+    '+      newKey: z.string(),',
+    '+    }),',
+    "     kind: z.literal('b'),",
+    '     label: z.string(),',
+    '   }),',
+    ' ]);',
+  ).length === 2);
+  t('⛔ CONTROL — an `.or()` chain whose arm openers read DIFFERENTLY was already refused by the head text, and still is: the provenance half is the one that had to be added, not a second spelling of the same test', pathTells(
+    "@@ -2,8 +2,10 @@ import { z } from 'zod';",
+    ' ',
+    ' export const ThingSchema = strictObject({',
+    "   kind: z.literal('a'),",
+    '-  filter: z.unknown(),',
+    '-}).or(z.object({',
+    "+}).describe('arm a').or(strictObject({",
+    '+  filter: strictObject({',
+    '+    newKey: z.string(),',
+    '+  }),',
+    "   kind: z.literal('b'),",
+    '   label: z.string(),',
+    ' }));',
+  ).length === 1);
+  const JSDOC_HUNK = [
+    "@@ -6,5 +6,5 @@ import { z } from 'zod';",
+    '  */',
+    ' export const ThingSchema = z.object({',
+    '   name: z.string(),',
+    '-  pagination: z.unknown().optional(),',
+    '+  pagination: z.union([A, B]).optional(),',
+    ' });',
+  ];
+  t('⭐ A HUNK THAT BEGINS INSIDE A JSDOC still certifies #18234’s narrowing — the ` */` in its leading context is a terminator, not a bare slash, and the decline this file landed before either rework is not regressed', pathTells(...JSDOC_HUNK).length === 0);
+  t('⛔ CONTROL — the same narrowing with NO comment above it declines too, so the case above measures the comment and nothing else', pathTells(
+    "@@ -3,4 +3,4 @@ import { z } from 'zod';",
+    ' export const ThingSchema = z.object({',
+    '   name: z.string(),',
+    '-  pagination: z.unknown().optional(),',
+    '+  pagination: z.union([A, B]).optional(),',
+    ' });',
+  ).length === 0);
+  t('⭐ …and a DIVISION in the leading context does not refuse either: a regex literal cannot span lines, so a `/` with no second `/` left on its line is arithmetic and the stack it did not touch is still a reading', pathTells(
+    "@@ -3,5 +3,5 @@ import { z } from 'zod';",
+    ' export const ThingSchema = z.object({',
+    '   name: z.string(),',
+    '   half: z.number().default(TOTAL / 2),',
+    '-  pagination: z.unknown().optional(),',
+    '+  pagination: z.union([A, B]).optional(),',
+    ' });',
+  ).length === 0);
+  t('⛔ …while a REAL regex literal carrying a brace in the leading context still refuses, and that residual false positive is the disclosed cost of not lexing one', pathTells(
+    "@@ -3,5 +3,5 @@ import { z } from 'zod';",
+    ' export const ThingSchema = z.object({',
+    '   name: z.string(),',
+    '   slug: z.string().regex(/^[a-z{]+$/),',
+    '-  pagination: z.unknown().optional(),',
+    '+  pagination: z.union([A, B]).optional(),',
+    ' });',
+  ).length === 1);
+  const CTX = (text) => ({ text, hunk: 0, kind: 'context' });
+  t('⭐ `enclosingDelimiters` reads a `*/` outside a block comment as "the hunk began inside one", and DISCARDS the frames the comment text pushed', enclosingDelimiters([CTX(' * see makeThing({ a, b'), CTX(' */'), CTX('  next: z.string(),')], 2).unreadable === false && enclosingDelimiters([CTX(' * see makeThing({ a, b'), CTX(' */'), CTX('  next: z.string(),')], 2).frames.length === 0);
+  t('⛔ …and it applies ONCE and only before anything made the walk unreadable: a second `*/`, or one after a regex, raises the flag instead', enclosingDelimiters([CTX(' */'), CTX(' */'), CTX('  next: z.string(),')], 2).unreadable === true && enclosingDelimiters([CTX('  slug: z.string().regex(/^[a-z{]+$/),'), CTX(' */'), CTX('  next: z.string(),')], 2).unreadable === true);
+  t('⛔ …and a `*/` that CLOSES a comment this walk opened itself is ordinary, flagging nothing', enclosingDelimiters([CTX('  /* note ({ */ name: z.string(),'), CTX('  next: z.string(),')], 1).unreadable === false);
+  t('⭐ a lone `/` is a DIVISION and raises nothing; a `/` with another `/` left on its line may be a regex and raises the flag', enclosingDelimiters([CTX('  half: z.number().default(TOTAL / 2),'), CTX('  next: z.string(),')], 1).unreadable === false && enclosingDelimiters([CTX('  slug: z.string().regex(/^x/),'), CTX('  next: z.string(),')], 1).unreadable === true);
 
   // -- T3 --------------------------------------------------------------------
   battery('T3 — a new row in a published entry point');
@@ -6451,7 +6688,7 @@ export function selfTest() {
       "#18640's inline closed set re-spelled at the same binding — bounded by the control set that IS the finding, the same edit spelled one member per line and at a keyed property, with the added-arm, different-binding, brand-new, widened-enum and new-key controls that still fire, " +
       "#18702's FILE-LOCAL declaring factory, resolved through its own definition at the head BLOB and classified by what its body returns — every factory the filing card names pinned against its own arm, the refusal arm read off a `z.never` definition rather than a name with its chained-arm control, the counterfactual bracketed by the same fixture with the resolver blind, and both boundaries (an imported factory, an unclassifiable body) pinned as a STATED silence the reader prints, " +
       "#18721's hunk LEADING CONTEXT — an underflowing closer drops and the walk goes on, so #17618's parameter decline reaches a real diff: PR #18720's own hunk silent at its reported line, bracketed by the same file's true-positive control that fires, by a new key behind the same underflowing context, by a key added after the parameter list closes, and by the removed side where a phantom budget disappearing makes a genuine key fire, " +
-      "#19099's member BOUNDED inside a bag the block re-declared out of a universal acceptor — read BEFORE the budget so the re-declared keys keep the units they are owed, with #18234's one-line reading given the rest of its own removed run, bracketed by the dark, never-universal, narrowing-continuation, different-key, other-block, un-re-declared-bag, surplus and spend controls that still fire, and by T2 left deliberately telling — and its identity a PLACE rather than a name: the git-emitted lift into a sibling bag, its mirror, and the indent-only shape all tell again, the spend path takes the same place, and the stack walk now says when a regex literal or a type-blind pop made it guess so a new OUTER key is never swallowed, " +
+      "#19099's member BOUNDED inside a bag the block re-declared out of a universal acceptor — read BEFORE the budget so the re-declared keys keep the units they are owed, with #18234's one-line reading given the rest of its own removed run, bracketed by the dark, never-universal, narrowing-continuation, different-key, other-block, un-re-declared-bag, surplus and spend controls that still fire, and by T2 left deliberately telling — and its identity a PLACE rather than a name: the git-emitted lift into a sibling bag, its mirror, and the indent-only shape all tell again, the spend path takes the same place, and the stack walk now says when a regex literal or a type-blind pop made it guess so a new OUTER key is never swallowed — with the place required to stand on CONTEXT lines so two keyless union arms spelled the same way are not one place, and with a hunk that begins inside a JSDoc read rather than refused, bracketed by the two-block, differing-head, no-comment, division and real-regex controls, " +
       "#16448's four positive controls each with its file:line, its negative controls — " +
       'the same diffs with `yes`, and a removal-only diff with `no` — the local path composed end ' +
       'to end so a binary change to a tell surface cannot read as clean, #17112\'s split count with ' +
