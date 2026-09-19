@@ -2643,3 +2643,96 @@ describe('managedBy: retiring the overloaded `system` bucket (#3355)', () => {
     });
   });
 });
+
+/**
+ * `ObjectSchema.fields` — the three JS-prototype names (objectstack#17852,
+ * maintainer ruling A/narrow, comment 5725370319).
+ *
+ * `z.record()`'s open-key branch skips `__proto__` with an unconditional
+ * `continue` ABOVE the key schema (zod v4 core, the record parser), so no key
+ * grammar — regex, `.refine()`, `.superRefine()` — can ever see it: a document
+ * whose `fields` carries `__proto__` used to parse as SUCCESS with the key
+ * silently missing from the output. `refuseRecordProtoKey` closes that by
+ * inspecting the RAW input before the record ever runs. `constructor` and
+ * `prototype` DO reach the key schema (they are ordinary lowercase words the
+ * snake_case regex already admitted) and are refused there instead.
+ *
+ * These pin BEHAVIOUR, not a version string (the ruling's own instruction):
+ * a zod bump that silently changed the `__proto__` skip, or that started
+ * letting `constructor`/`prototype` through some other path, breaks these
+ * without anyone reading zod's changelog first.
+ */
+describe('ObjectSchema.fields — __proto__ / constructor / prototype key refusal (#17852)', () => {
+  // `JSON.parse` is what makes `__proto__` land as an OWN enumerable key
+  // (an object literal's `{ __proto__: ... }` sets the actual prototype
+  // instead) — the exact shape the original defect report measured and the
+  // shape a JSON request body always produces.
+  const docWithProtoField = () =>
+    JSON.parse(
+      '{"name":"lead","label":"Lead","fields":{"title":{"type":"text","label":"Title"},"__proto__":{"type":"text","label":"P"}}}',
+    );
+
+  it('refuses a document whose `fields` carries a `__proto__` own key', () => {
+    const result = ObjectSchema.safeParse(docWithProtoField());
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    const issue = result.error.issues.find((i) => i.path.join('.') === 'fields.__proto__');
+    expect(issue).toBeDefined();
+    expect(issue?.message).toMatch(/__proto__/);
+    expect(issue?.message).toMatch(/z\.record\(\)/);
+  });
+
+  it('refuses a document whose `fields` is `__proto__` ALONE (no other key masks the drop)', () => {
+    const result = ObjectSchema.safeParse(
+      JSON.parse('{"name":"lead","label":"Lead","fields":{"__proto__":{"type":"text","label":"P"}}}'),
+    );
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.some((i) => i.path.join('.') === 'fields.__proto__')).toBe(true);
+  });
+
+  it('never lets `fields.__proto__` reach the key grammar\'s own regex message', () => {
+    // The regression this guards: a key-grammar-only fix (the withdrawn 甲
+    // ruling) cannot ever see `__proto__`, so if this ever starts asserting
+    // the SNAKE_CASE regex message instead of the pre-parse guard's own, the
+    // guard has been bypassed (e.g. reordered behind the record).
+    const result = ObjectSchema.safeParse(docWithProtoField());
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    const protoIssue = result.error.issues.find((i) => i.path.join('.') === 'fields.__proto__');
+    expect(protoIssue?.code).toBe('custom');
+  });
+
+  it.each(['constructor', 'prototype'])(
+    'refuses `%s` as a fields key via the key grammar (reaches def.keyType._zod.run, unlike `__proto__`)',
+    (reserved) => {
+      const result = ObjectSchema.safeParse({
+        name: 'lead',
+        label: 'Lead',
+        fields: {
+          title: { type: 'text', label: 'Title' },
+          [reserved]: { type: 'text', label: 'Reserved' },
+        },
+      });
+      expect(result.success).toBe(false);
+      if (result.success) return;
+      const issue = result.error.issues.find((i) => i.path.join('.') === `fields.${reserved}`);
+      expect(issue).toBeDefined();
+      expect(issue?.code).toBe('invalid_key');
+      // The key-grammar refusal's own message is nested under `.issues` —
+      // the top-level `invalid_key` issue's own `.message` is zod's fixed
+      // "Invalid key in record", so the reason lives one level down.
+      const nested = issue?.code === 'invalid_key' ? issue.issues : undefined;
+      expect(nested?.[0]?.message).toMatch(/constructor.*prototype|prototype.*constructor/s);
+    },
+  );
+
+  it('still accepts an ordinary document with no reserved field names', () => {
+    const result = ObjectSchema.safeParse({
+      name: 'lead',
+      label: 'Lead',
+      fields: { title: { type: 'text', label: 'Title' } },
+    });
+    expect(result.success).toBe(true);
+  });
+});
