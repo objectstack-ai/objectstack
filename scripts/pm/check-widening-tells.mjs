@@ -1024,6 +1024,86 @@
  * one closes the first bullet by reading the removed value's shape rather than
  * its text.
  *
+ * ## The thirteenth accidental variable #19099 removed — a member BOUNDED
+ * inside a bag that WAS the universe
+ *
+ * T1's sentence is "the accept set gains a spelling an author may now write",
+ * and PR #19095 raised it twice on a diff that takes spellings AWAY. The
+ * `object-grid` door carried `pagination: z.unknown().optional()` — every
+ * value, under every key — and the diff BOUNDS the two members its read points
+ * name, `pageSize` and `pageSizeOptions`, to `z.number().int().positive()`
+ * inside a `z.looseObject({…})` that leaves the bag itself open. `--declaration
+ * no` exited 4 at `component.zod.ts:2689` (`pageSizeOptions`) and `:2692`
+ * (`pageSize`), against a declaration an at-tier reviewer had MEASURED correct:
+ * 0 newly accepted inputs of 53, and no new export.
+ *
+ * ⭐ The finding is that the two reported rows are the two lines the diff did
+ * not add. `pageSizeOptions` is new TEXT inside a bag that accepted it — and
+ * every other spelling — before the diff; `:2692` is the flat `pageSize` key
+ * RE-DECLARED IN PLACE, the shape #16943's budget exists to pay for. The budget
+ * was earned (the block removes two T1-shaped key lines) and then SPENT, in
+ * patch order, by the two bag-internal members, leaving the two rows with
+ * nothing to pay with. ⇒ the arithmetic was right and the POPULATION was
+ * wrong: the units went to the lines that needed none.
+ *
+ * ⛔ It is not ruling A's subject re-opened. That ruling settled the subset
+ * test for a union member RENAMED to a narrower schema on a key line, and
+ * `references/lanes/spec.md` states 一个个案裁决不改判据那条线 — so it neither
+ * covers this shape nor is touched by it. The `Clause-②` criterion is
+ * unchanged, no licence is minted anywhere, and what moves is WHICH LINES this
+ * matcher reports.
+ *
+ * The evidence is what a hunk already carries, in two facts rather than a shape
+ * reading:
+ *
+ *   ① the member sits inside a `{` this HUNK showed open, on a line that names
+ *     a key — #18721's stack, now answered whole and walked innermost-OUT so a
+ *     member nested deeper than one level is reached by the same evidence; and
+ *   ② the same BLOCK removed that key carrying a universal acceptor — #18234's
+ *     reading, unchanged.
+ *
+ * ⇒ every value the new bag admits was admitted before, so no member declared
+ * inside it can add a spelling. ⭐ There is no "but this member widens" case
+ * left open: the removed value was the UNIVERSE, and a subset of it is a subset
+ * however the member is spelled — which is why this decline, unlike every other
+ * one in this file, needs no counterfactual about the added value at all.
+ *
+ * ⛔ Read BEFORE the budget, for #17955's reason and made concrete by this
+ * pair: a bag member that SPENDS exhausts the units the re-declared keys are
+ * owed, and which rows then fire depends on nothing but their order in the
+ * patch. A bag member must neither FIRE nor SPEND. The bag's OWN key line is
+ * not declined and still spends — it is a key re-declared in place, which is
+ * what the budget is for.
+ *
+ * Fact ② could not be certified at all until `declaresUniversalAcceptorKey` was
+ * given the rest of its own removed RUN to read: `pagination: z.unknown()
+ * .optional()` wraps its `.describe(…)` onto the next removed line, and the
+ * one-line reading answered `null` there by construction. #18234 wrote that
+ * down as its own OVERTURN CONDITION — "the first landed pair whose removed
+ * universal acceptor wraps onto a second line closes it by reading the block's
+ * removed run forward instead of one line" — and this is that pair. The run is
+ * walked only over inert steps in the measured vocabulary and bytes that are
+ * NOTHING; a `.refine()` below the key line, a second key, or any other text
+ * answers `null` on the spot. Measured at 1047fe1016 over
+ * `packages/spec/src/**`: of 130 universal-acceptor key lines 99 terminate on
+ * their own line and 31 do not, and of those 31 the run reading certifies 24.
+ *
+ * ⚠️ The residual directions, stated rather than left to be discovered, and all
+ * of them the LOUD one — no evidence, no decline:
+ *
+ *   • the 7 wrapped acceptors the run reading still cannot certify: 5 whose
+ *     chain step's own ARGUMENT wraps (`.describe(` opening on the key line),
+ *     which `matchingCloser` reports as unread rather than inert, and 2 that
+ *     are the LAST member of their shape and so end with no comma at all.
+ *   • a bag whose own key line does not NAME a key (`pagination: z` with
+ *     `.looseObject({` below it) shows nothing at ①. This reading declines to
+ *     certify and the members fall back to the budget exactly as before.
+ *   • a member added inside a bag the block did NOT re-declare — a
+ *     context-line opener, or a removal in another block — is not this row;
+ *     #16943's block discipline is untouched and that member fires.
+ *   • T2 is deliberately not extended, with its own overturn condition stated
+ *     on {@link insideReplacedUniversalAcceptorBag}.
+ *
  * ## The remedy with no reader — #17848, and a pin the shape never had
  *
  * #17848 filed two halves against this family. Re-measuring both on the tree
@@ -1307,6 +1387,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#18640 — an inline closed set RE-SPELLED at the same binding is not a set that gained a value': 20,
   '#18702 — a declaring factory PRIVATE to one file, resolved through its own DEFINITION': 54,
   "#18721 — a hunk's LEADING CONTEXT is not a reason to abandon the parameter reading": 14,
+  '#19099 — a member BOUNDED inside a bag the block re-declared out of a universal acceptor': 30,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -2155,15 +2236,26 @@ function topLevelMembers(s, open, close) {
 }
 
 /**
- * The innermost delimiter still OPEN where one side-line sits, as far as THIS
- * HUNK shows it — `{ opener: '(' | '[' | '{', head: <the text left of it> }`,
- * or `null` for "the hunk does not say".
+ * Every delimiter still OPEN where one side-line sits, as far as THIS HUNK
+ * shows it — outermost first, each `{ opener: '(' | '[' | '{', head: <the text
+ * left of it> }` — or `null` when the hunk cannot be read across this line. An
+ * EMPTY array is the other half of "the hunk does not say": no opener it
+ * showed is still open where the line sits.
+ *
+ * ⭐ #19099 — the STACK, where this reader answered only its TOP until the
+ * bag-internal reading below had to ask which key's value a member nested more
+ * than one level down sits inside. Every frame is an opener this hunk SHOWED
+ * and is genuinely open where the line sits — the shown stack is a SUFFIX of
+ * the real one, stated below — so reading a frame that is not the top adds no
+ * guess to the answer. ⛔ It is still not a shape reader: a frame says which
+ * delimiter opened and what text preceded it ON THAT LINE, never what
+ * construct that text names.
  *
  * ⭐ Positive evidence only, and `null` is the whole safety property. The scan
  * starts at the first line of the line's OWN hunk, so a construct opened before
  * the hunk is never guessed at, and a string literal that does not close on its
  * line means the state cannot be carried across it — that answers `null`, and
- * both callers read `null` as "keep the tell firing". The answer is ALWAYS an
+ * every caller reads `null` as "keep the tell firing". The answer is ALWAYS an
  * opener this hunk showed, never one inferred from a closer.
  *
  * ⭐ #18721 — a closer arriving with an EMPTY stack closes an opener the hunk
@@ -2187,8 +2279,9 @@ function topLevelMembers(s, open, close) {
  *
  * @param {{ text: string, hunk: number }[]} side — one SIDE of `patchLines`
  * @param {number} index — the line's index into that side
+ * @returns {{ opener: string, head: string }[]|null} the shown stack, or `null`
  */
-export function enclosingDelimiter(side, index) {
+export function enclosingDelimiters(side, index) {
   if (!Array.isArray(side) || typeof index !== 'number' || !side[index]) return null;
   const { hunk } = side[index];
   let start = index;
@@ -2224,7 +2317,20 @@ export function enclosingDelimiter(side, index) {
       }
     }
   }
-  return stack.length > 0 ? stack[stack.length - 1] : null;
+  return stack;
+}
+
+/**
+ * The INNERMOST delimiter a hunk shows open where one side-line sits — the top
+ * of {@link enclosingDelimiters}, and this reading's original shape.
+ *
+ * ⛔ `null` still covers both "unreadable" and "the hunk showed none still
+ * open", because its two callers ({@link inParameterList} and #17618's decline)
+ * read the two the same way: no positive evidence, so the tell keeps firing.
+ */
+export function enclosingDelimiter(side, index) {
+  const stack = enclosingDelimiters(side, index);
+  return stack !== null && stack.length > 0 ? stack[stack.length - 1] : null;
 }
 
 /**
@@ -2526,25 +2632,37 @@ const UNIVERSAL_ACCEPTOR_MENTION = /z\.(?:unknown|any)\(/;
  *   ③ what follows is inert chain steps and then the END of the value, proven
  *     by the terminating comma.
  *
- * ⛔ Fact ③ is why an unterminated line answers `null`. A value that has not
- * ended cannot be read: `exportOptions: z.unknown().optional()` with
- * `.describe(…)` wrapped onto the next line shows nothing about what the next
- * line does, and `.refine(…)` there would make the removed set NARROWER than
- * the universe. Measured on this tree, 99 of the 132 universal-acceptor key
- * lines terminate on their own line and 33 do not; the 33 keep telling.
+ * ⛔ Fact ③ is why a value that has not ENDED answers `null`: `.refine(…)`
+ * further along would make the removed set NARROWER than the universe, and an
+ * unread byte is not evidence of anything. Measured at 1047fe1016 over
+ * `packages/spec/src/**`: of 130 universal-acceptor key lines, 99 terminate on
+ * their own line and 31 do not.
  *
- * ⚠️ The residual QUIET direction is none — this predicate only ever declines
- * to certify, and the residual is a FALSE POSITIVE on the wrapped spelling,
- * which is the loud direction this file accepts by name. ⭐ The OVERTURN
- * CONDITION, so it needs no second discussion: the first landed pair whose
- * removed universal acceptor wraps onto a second line closes it by reading the
- * block's removed run forward instead of one line.
+ * ⭐ #19099 — where the value may END is what moved, and nothing else. Handed
+ * the lines that FOLLOW this one in its own run (`continuation`), the reading
+ * walks them for the end of the same value: inert steps in the vocabulary
+ * above, and bytes that are NOTHING once comments are stripped. Anything else —
+ * a `.refine()` wrapped below, a second key, a closer — answers `null` on the
+ * spot, so a chain that narrows on its continuation line is certified exactly
+ * as little as one that narrows on the key line. Called with no run, the
+ * reading is byte-identical to the one-line one. Of the 31 wrapped lines it
+ * certifies 24; the 7 it does not are named in the header, and they keep
+ * telling. ⇒ this is #18234's own
+ * OVERTURN CONDITION taken, on the pair that met it (#19095's
+ * `pagination: z.unknown().optional()`, whose `.describe(…)` is the next line
+ * the same block removes), and ⛔ not a second way to be a universal acceptor.
+ *
+ * ⚠️ The residual QUIET direction is still none — this predicate only ever
+ * declines to certify, and its residual is a FALSE POSITIVE on a spelling it
+ * cannot read, which is the loud direction this file accepts by name.
  *
  * @param {string} text — one patch line's text, with its `+` / `-` stripped
+ * @param {string[]|null} [continuation] — the lines FOLLOWING this one in its
+ *   own run (#19099); omitted, the value must end on its own line
  * @returns {string|null} the key, or `null` when the line declares no
  *   universal acceptor
  */
-export function declaresUniversalAcceptorKey(text) {
+export function declaresUniversalAcceptorKey(text, continuation = null) {
   const s = String(text ?? '');
   const key = keyedPropertyName(s);
   if (key === null) return null;
@@ -2554,16 +2672,28 @@ export function declaresUniversalAcceptorKey(text) {
   const head = UNIVERSAL_ACCEPTOR_CALL.exec(rest);
   if (head === null) return null;
   rest = rest.slice(head[0].length);
+  const run = Array.isArray(continuation) ? continuation : [];
+  let taken = 0;
   for (;;) {
     const step = INERT_CHAIN_STEP.exec(rest);
-    if (step === null) break;
-    // `matchingCloser` is string-aware, so a paren inside a `.describe()` string
-    // cannot close the step early and let a narrowing arm through.
-    const close = matchingCloser(rest, step[0].length - 1);
-    if (close === -1) return null; // the step's arguments continue on a later line
-    rest = rest.slice(close + 1);
+    if (step !== null) {
+      // `matchingCloser` is string-aware, so a paren inside a `.describe()` string
+      // cannot close the step early and let a narrowing arm through.
+      const close = matchingCloser(rest, step[0].length - 1);
+      if (close === -1) return null; // the step's arguments continue on a later line
+      rest = rest.slice(close + 1);
+      continue;
+    }
+    if (UNIVERSAL_ACCEPTOR_TAIL.test(withoutComments(rest))) return key;
+    // #19099 — the value has not ended here. Step onto the next line of the run
+    // ONLY across bytes that are nothing: a remainder that survives comment
+    // stripping is a step this vocabulary does not know, and an unknown step may
+    // narrow. Out of run is out of evidence, which is `null` like everything
+    // else this predicate cannot read.
+    if (taken >= run.length || withoutComments(rest).trim() !== '') return null;
+    rest = String(run[taken] ?? '').trimStart();
+    taken += 1;
   }
-  return UNIVERSAL_ACCEPTOR_TAIL.test(withoutComments(rest)) ? key : null;
 }
 
 /**
@@ -2584,7 +2714,11 @@ export function declaresUniversalAcceptorKey(text) {
 export function replacesUniversalAcceptorKey(text, removedTexts) {
   const key = keyedPropertyName(text);
   if (key === null || !Array.isArray(removedTexts)) return false;
-  return removedTexts.some((r) => declaresUniversalAcceptorKey(r) === key);
+  // #19099 — each removed line is read with the REST OF ITS OWN RUN behind it,
+  // so an acceptor whose chain wraps is certified out of lines the same block
+  // removed. ⛔ Not a wider class of acceptor: the same vocabulary, allowed to
+  // finish where the block shows it finishing.
+  return removedTexts.some((r, i) => declaresUniversalAcceptorKey(r, removedTexts.slice(i + 1)) === key);
 }
 
 /**
@@ -2627,6 +2761,57 @@ export function widensKeyIntoUniversalAcceptor(text, removedTexts) {
       keyedPropertyName(r) === key &&
       !UNIVERSAL_ACCEPTOR_MENTION.test(withoutComments(String(r ?? ''))),
   );
+}
+
+/**
+ * Is this added key line a member BOUNDED inside a bag the same change block
+ * re-declared OUT of a universal acceptor? (#19099)
+ *
+ * T1's sentence is "the accept set gains a spelling an author may now write",
+ * and a key declared inside a bag whose removed value was `z.unknown()` gains
+ * none: that bag admitted every value under every spelling, so whatever the new
+ * one admits it admitted before. ⭐ The direction needs no judgement and leaves
+ * no "but this member widens" case open — a subset of the universe is a subset
+ * of the universe however the member is spelled.
+ *
+ * Two facts, both carried by the block, absent by default like every decline
+ * in this file:
+ *
+ *   ① a delimiter this HUNK showed open where the line sits is a `{` whose own
+ *     line NAMES a key — {@link enclosingDelimiters}, walked innermost-out, so
+ *     a member nested deeper than one level is reached by the same evidence;
+ *     and
+ *   ② the same BLOCK removed that key carrying a value that accepted
+ *     everything — {@link replacesUniversalAcceptorKey}, the one reading
+ *     #18234 certifies a removed acceptor with.
+ *
+ * ⛔ The bag's OWN key line is not declined here and must not be: it is a key
+ * re-declared in place, which is exactly what #16943's budget pays for out of
+ * the removal that certifies fact ②. Declining it would take the row out of the
+ * arithmetic on the side where it belongs and hand its unit to something else.
+ *
+ * ⛔ And it is deliberately not extended to T2. A closed-set element declared
+ * inside such a bag is a narrowing by the identical argument, but no pair has
+ * been measured and this file narrows a tell only on evidence a hunk actually
+ * carries. ⭐ The OVERTURN CONDITION, so it needs no second discussion: the
+ * first landed pair whose bag-internal member is a closed-set element closes it
+ * by reading `kind === 'T2'` at this call too.
+ *
+ * @param {{ text: string, hunk: number }[]} side — the NEW side of `patchLines`
+ * @param {number} index — the added line's index into that side
+ * @param {string[]} removedTexts — the lines this change block REMOVED
+ * @returns {boolean} true when the block carries positive evidence that this
+ *   member was bounded inside a bag that already accepted everything
+ */
+export function insideReplacedUniversalAcceptorBag(side, index, removedTexts) {
+  if (!Array.isArray(removedTexts) || removedTexts.length === 0) return false;
+  const stack = enclosingDelimiters(side, index);
+  if (stack === null) return false;
+  for (let f = stack.length - 1; f >= 0; f -= 1) {
+    if (stack[f].opener !== '{') continue;
+    if (replacesUniversalAcceptorKey(stack[f].head, removedTexts)) return true;
+  }
+  return false;
 }
 
 /**
@@ -3564,6 +3749,15 @@ export function tellsInFile(
     // takes nothing from the block, so a genuine key beside it still has the
     // full budget to pay with — and fires when it cannot.
     if (kind === 'T1' && declaresUnwritableKey(text, localRefusal)) continue;
+    const removedHere = removedOfLine.get(i);
+    // #19099 — a member BOUNDED inside a bag this block re-declared out of a
+    // universal acceptor. Read BEFORE the budget for #17955's reason, made
+    // concrete by the pair that filed it: PR #19095 removes two T1-shaped key
+    // lines and re-declares both, and its two bag members took those two units
+    // in patch order — so the gate reported `pageSizeOptions`, which the bag
+    // already accepted, and the flat `pageSize` RE-DECLARED IN PLACE, which the
+    // budget exists to pay for. A bag member must neither FIRE nor SPEND.
+    if (kind === 'T1' && insideReplacedUniversalAcceptorBag(newFile, newAt.get(i), removedHere)) continue;
     // #16943 — a member or key this block REPLACED is not a net addition.
     //
     // ⛔ A line that DECLARES a closed set is never spent against the budget,
@@ -3585,7 +3779,6 @@ export function tellsInFile(
     // an inline set widened in place still has no removed universal acceptor to
     // name, and still fires on this row.
     const declaresClosedSet = CLOSED_SET_OPENER.test(text);
-    const removedHere = removedOfLine.get(i);
     const spendable =
       !declaresClosedSet ||
       respellsExistingClosedSetKey(text, removedHere) ||
@@ -4902,6 +5095,76 @@ export function selfTest() {
   t('⛔ …and a `removedTexts` that is not an array is not evidence', widensKeyIntoUniversalAcceptor('  filter: z.unknown(),', null) === false);
   t('⭐ …and it is the MIRROR of `replacesUniversalAcceptorKey`: one pair of lines, read from either end, and the neutral pair is a replacement to one and a widening to neither', widensKeyIntoUniversalAcceptor('  filter: z.unknown(),', ['  filter: z.union([A, B]),']) === true && replacesUniversalAcceptorKey('  filter: z.union([A, B]),', ['  filter: z.unknown(),']) === true && widensKeyIntoUniversalAcceptor('  filter: z.unknown(),', ['  filter: z.unknown(),']) === false);
 
+  // -- #19099: a member bounded inside a bag that WAS the universe ----------
+  //
+  // The pair is PR #19095's own block, in the bytes it pushed. ⭐ The FIRING
+  // half is read first, as every battery above it is: a reading that can only
+  // suppress is untestable in the direction that matters, so the decline is
+  // bracketed on every side — nothing removed, a removed bag that was never
+  // universal, a continuation line that NARROWS, a removal on another key, a
+  // removal in another block, a bag the block never re-declared, and a genuine
+  // new key riding along.
+  battery('#19099 — a member BOUNDED inside a bag the block re-declared out of a universal acceptor');
+  const BAG_FILE = 'packages/spec/src/ui/component.zod.ts';
+  const bag = (...lines) => ({
+    filename: BAG_FILE,
+    status: 'modified',
+    patch: ['@@ -2629,4 +2644,9 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({', ...lines, ' '].join('\n'),
+  });
+  const bagTells = (...lines) => tells(bag(...lines));
+  const bagAt = (...lines) => at(bag(...lines));
+  const BAG_REMOVED = '-  pagination: z.unknown().optional()';
+  const BAG_REMOVED_DESC = "-    .describe('Pagination config ({ pageSize, pageSizeOptions, … }); its presence enables paging'),";
+  const BAG_REMOVED_FLAT = "-  pageSize: z.number().optional().describe('Flat page-size shorthand'),";
+  const BAG_ADDED = [
+    '+  pagination: z.looseObject({',
+    '+    pageSize: GridPageSizeSchema.optional(),',
+    '+    pageSizeOptions: z.array(GridPageSizeSchema).optional(),',
+    '+  }).optional()',
+    "+    .describe('Pagination config ({ pageSize, pageSizeOptions, … }); its presence enables paging'),",
+    '+  pageSize: GridPageSizeSchema.optional()',
+    "+    .describe('Flat page-size shorthand, a positive integer'),",
+  ];
+  const LIVE_BAG = [BAG_REMOVED, BAG_REMOVED_DESC, BAG_REMOVED_FLAT, ...BAG_ADDED];
+  const BAG_SIDE = [{ text: '  pagination: z.looseObject({', hunk: 0 }, { text: '    pageSize: z.number(),', hunk: 0 }];
+
+  // -- the firing half: what a re-declared bag must NOT buy ------------------
+  t('⛔ DARK CONTROL — the same added bag with NOTHING removed fires on every key line: the silence is bought by the removal, never by the nesting', bagTells(...BAG_ADDED).length === 4);
+  t('…and the four rows are the bag, its two members and the flat key, each with its own file:line', bagAt(...BAG_ADDED).join(' ') === `${BAG_FILE}:2644 ${BAG_FILE}:2645 ${BAG_FILE}:2646 ${BAG_FILE}:2649`);
+  t('⛔ a removed bag that was never universal buys its members nothing — `z.object({ … })` had a member list, and adding to it is what T1 is for', bagTells('-  pagination: z.object({ pageSize: z.number() }).optional(),', BAG_REMOVED_FLAT, ...BAG_ADDED).length === 2);
+  t('⛔ nor does one whose CONTINUATION line narrows: a `.refine()` below the key line is not an inert step, and the removed set is then not the universe', bagTells(BAG_REMOVED, '-    .refine(isPaginationish),', BAG_REMOVED_FLAT, ...BAG_ADDED).length === 2);
+  t('⛔ a removed acceptor on a DIFFERENT key pays nothing here either — a removed `other` says nothing about what `pagination` now carries', bagTells('-  other: z.unknown().optional()', BAG_REMOVED_DESC, BAG_REMOVED_FLAT, ...BAG_ADDED).length === 2);
+  t('⛔ BLOCK DISCIPLINE — a removal separated by a context line is a different edit and buys nothing, exactly as #16943 says', bagTells(BAG_REMOVED, BAG_REMOVED_DESC, ' ', '+  pagination: z.looseObject({', '+    pageSize: z.number(),', '+  }),').length === 2);
+  t('⛔ DEPTH CONTROL — a member nested inside a bag the block did NOT re-declare out of an acceptor still fires', bagTells('-  pagination: z.object({}),', '+  pagination: z.looseObject({', '+    limits: z.object({', '+      max: z.number(),', '+    }),', '+  }),').length === 2);
+  const BAG_SURPLUS = [...LIVE_BAG, '+  pageSizeStrategy: z.string(),'];
+  t('⭐ SURPLUS CONTROL — a genuinely new key at the OUTER level still fires, exactly once', bagTells(...BAG_SURPLUS).length === 1);
+  t('…and the row it reports is that key, never one of the bounded members', bagTells(...BAG_SURPLUS)[0]?.text === 'pageSizeStrategy: z.string(),');
+  t('⭐ SPEND CONTROL — the bag’s own key line is NOT declined and still spends its unit, so one removal pays for the re-declaration and a new key beside it fires', bagTells(BAG_REMOVED, BAG_REMOVED_DESC, '+  pagination: z.looseObject({', '+    pageSize: z.number(),', '+  }),', '+  gridMode: z.string(),').length === 1);
+  t('⛔ T2 is NOT extended — a closed-set element inside the same bag keeps telling, one row per member, with its overturn condition on the predicate', bagTells(BAG_REMOVED, BAG_REMOVED_DESC, '+  pagination: z.looseObject({', '+    mode: z.enum([', "+      'fixed',", "+      'auto',", '+    ]),', '+  }),').length === 2);
+  t('⛔ a bag whose own key line NAMES no key shows nothing at fact ①, and its members fall back to the budget exactly as before', bagTells(BAG_REMOVED, BAG_REMOVED_DESC, '+  pagination: z', '+    .looseObject({', '+      pageSize: z.number(),', '+      pageSizeOptions: z.array(z.number()),', '+    }),').length === 1);
+
+  // -- the declining half: PR #19095's two rows ------------------------------
+  t('⭐ THE LIVE PAIR — the two members bounded inside a previously-`z.unknown()` bag read no tell', bagTells(...LIVE_BAG).length === 0);
+  t('⭐ …and the block reads CLEAN end to end, which is the exit code the criterion-honest `Clause-②: no` could not reach', wideningRefusal({ declaration: 'no', files: [bag(...LIVE_BAG)] }).state === 'clean');
+  t('⭐ …and the SAME narrowing with the removed acceptor terminating on its own line declines too: the two spellings of one narrowing now agree', bagTells("-  pagination: z.unknown().optional().describe('Pagination config'),", '+  pagination: z.looseObject({', '+    pageSize: GridPageSizeSchema.optional(),', '+    pageSizeOptions: z.array(GridPageSizeSchema).optional(),', '+  }).optional(),').length === 0);
+  t('⭐ `z.any()` is in the class on the SAME measurement #18234 read it by — both accept every value', bagTells('-  pagination: z.any(),', '+  pagination: z.looseObject({', '+    pageSize: z.number().int().positive(),', '+  }),').length === 0);
+  t('⭐ …and the ADDED bag’s spelling decides nothing — `strictObject({` reads exactly as `z.looseObject({` does', bagTells('-  pagination: z.unknown(),', '+  pagination: strictObject({', '+    pageSize: z.number(),', '+  }),').length === 0);
+  t('⭐ …and a member nested TWO levels inside the re-declared bag declines too: the stack is walked innermost-OUT', bagTells(BAG_REMOVED, BAG_REMOVED_DESC, '+  pagination: z.looseObject({', '+    limits: z.object({', '+      max: z.number(),', '+    }),', '+  }),').length === 0);
+
+  // -- the readers themselves ------------------------------------------------
+  t('`insideReplacedUniversalAcceptorBag` needs the SAME key at fact ②', insideReplacedUniversalAcceptorBag(BAG_SIDE, 1, ['  pagination: z.unknown(),']) === true && insideReplacedUniversalAcceptorBag(BAG_SIDE, 1, ['  other: z.unknown(),']) === false);
+  t('⛔ …and a frame whose head names no key is not evidence, nor is a PAREN frame — a shape body is `{`-delimited by construction', insideReplacedUniversalAcceptorBag([{ text: '    .looseObject({', hunk: 0 }, { text: '      pageSize: z.number(),', hunk: 0 }], 1, ['  pagination: z.unknown(),']) === false && insideReplacedUniversalAcceptorBag([{ text: '  pagination: z.looseObject(', hunk: 0 }, { text: '    pageSize: z.number(),', hunk: 0 }], 1, ['  pagination: z.unknown(),']) === false);
+  t('⛔ …and an empty or absent `removedTexts` is not evidence', insideReplacedUniversalAcceptorBag(BAG_SIDE, 1, []) === false && insideReplacedUniversalAcceptorBag(BAG_SIDE, 1, null) === false);
+  t('`enclosingDelimiters` answers the whole SHOWN stack, outermost first, where it used to answer only its top', enclosingDelimiters(BAG_SIDE, 1)?.length === 2 && enclosingDelimiters(BAG_SIDE, 1)?.[1]?.opener === '{' && enclosingDelimiter(BAG_SIDE, 1)?.opener === '{');
+  t('⛔ …and `null` still means unreadable, while an EMPTY stack is "the hunk showed none still open"', enclosingDelimiters([{ text: "const s = 'opens here", hunk: 0 }, { text: '  extra: z.string(),', hunk: 0 }], 1) === null && enclosingDelimiters([{ text: '  });', hunk: 0 }, { text: '  extra: z.string(),', hunk: 0 }], 1)?.length === 0);
+  t('⭐ `declaresUniversalAcceptorKey` reads its own RUN forward — #18234’s overturn condition, met by the wrapped spelling #19095 removes', declaresUniversalAcceptorKey('  pagination: z.unknown().optional()', ["    .describe('Pagination config'),"]) === 'pagination' && declaresUniversalAcceptorKey('  pagination: z.unknown().optional()') === null);
+  t('⛔ …and declines a NARROWING step on the continuation line, which is the direction that must never be certified', declaresUniversalAcceptorKey('  p: z.unknown()', ['    .refine(isThing),']) === null && declaresUniversalAcceptorKey('  p: z.unknown()', ['    .pipe(z.string()),']) === null);
+  t('⛔ …and stops at the first line that is not a chain step — a second KEY is not a continuation of the first value', declaresUniversalAcceptorKey('  p: z.unknown()', ['  q: z.string(),']) === null);
+  t('⛔ …and out of run is out of evidence: the value never ended, so nothing is certified', declaresUniversalAcceptorKey('  p: z.unknown()', []) === null && declaresUniversalAcceptorKey('  p: z.unknown()', ['    .optional()']) === null);
+  t('…a trailing COMMENT is not a step, on the key line or on a continuation line', declaresUniversalAcceptorKey('  p: z.unknown() // wrapped below', ['    .optional(),']) === 'p');
+  t('`replacesUniversalAcceptorKey` certifies the wrapped pair out of the block’s own removed run', replacesUniversalAcceptorKey('  pagination: z.looseObject({', ['  pagination: z.unknown().optional()', "    .describe('x'),"]) === true);
+  t('⭐ SIBLINGS INTACT — #18234’s live pair still declines and #18629’s inverse still fires under this reading', uaTells(UNIVERSAL_ACCEPTOR_NARROWED).length === 0 && invTells(INV_REMOVED, INV_ADDED).length === 1);
+
   // -- T3 --------------------------------------------------------------------
   battery('T3 — a new row in a published entry point');
   t('a new export row is a tell', tells(FILE_API_SURFACE)[0]?.tell === 'T3');
@@ -5796,6 +6059,7 @@ export function selfTest() {
       "#18640's inline closed set re-spelled at the same binding — bounded by the control set that IS the finding, the same edit spelled one member per line and at a keyed property, with the added-arm, different-binding, brand-new, widened-enum and new-key controls that still fire, " +
       "#18702's FILE-LOCAL declaring factory, resolved through its own definition at the head BLOB and classified by what its body returns — every factory the filing card names pinned against its own arm, the refusal arm read off a `z.never` definition rather than a name with its chained-arm control, the counterfactual bracketed by the same fixture with the resolver blind, and both boundaries (an imported factory, an unclassifiable body) pinned as a STATED silence the reader prints, " +
       "#18721's hunk LEADING CONTEXT — an underflowing closer drops and the walk goes on, so #17618's parameter decline reaches a real diff: PR #18720's own hunk silent at its reported line, bracketed by the same file's true-positive control that fires, by a new key behind the same underflowing context, by a key added after the parameter list closes, and by the removed side where a phantom budget disappearing makes a genuine key fire, " +
+      "#19099's member BOUNDED inside a bag the block re-declared out of a universal acceptor — read BEFORE the budget so the re-declared keys keep the units they are owed, with #18234's one-line reading given the rest of its own removed run, bracketed by the dark, never-universal, narrowing-continuation, different-key, other-block, un-re-declared-bag, surplus and spend controls that still fire, and by T2 left deliberately telling, " +
       "#16448's four positive controls each with its file:line, its negative controls — " +
       'the same diffs with `yes`, and a removal-only diff with `no` — the local path composed end ' +
       'to end so a binary change to a tell surface cannot read as clean, #17112\'s split count with ' +
