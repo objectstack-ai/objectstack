@@ -1,5 +1,495 @@
 # @objectstack/driver-turso
 
+## 17.5.0
+
+### Minor Changes
+
+- be5c602: fix(driver-sql,driver-turso): eight more `IDataDriver` doors publish their declared return type, not a nested `any` (#17690)
+  
+  **BREAKING** for TypeScript consumers — a published TYPE-surface narrowing, shipped as `minor` under the launch-window convention (PR #15280 for `SqlDriver.update()` and the `TursoDriver.update()` override, PR #14434 before it on `@objectstack/driver-memory`, PR #17258 for the five `SqlDriver` doors of #15267, PR #17689 for `aggregate()`). No runtime behaviour changes.
+  
+  Eight doors published an annotation whose `any` sat **inside** a wider type, while `packages/spec/src/contracts/data-driver.ts` had already declared each one narrower. A consumer holding one of these classes got `any` back and the compiler stopped checking:
+  
+  | class | door | published | now |
+  |---|---|---|---|
+  | `SqlDriver` | `find` | `Promise<any[]>` | `Promise<Record<string, unknown>[]>` |
+  | `SqlDriver` | `upsert` | `Promise<Record<string, any>>` | `Promise<Record<string, unknown>>` |
+  | `SqlDriver` | `bulkUpdate` | `Promise<Record<string, any>[]>` | `Promise<Record<string, unknown>[]>` |
+  | `SqlDriver` | `temporalFilterValue` | `any` | `unknown` |
+  | `TursoDriver` | `find` (override) | `Promise<any[]>` | `Promise<Record<string, unknown>[]>` |
+  | `TursoDriver` | `upsert` (override) | `Promise<Record<string, any>>` | `Promise<Record<string, unknown>>` |
+  | `TursoDriver` | `bulkUpdate` (override) | `Promise<Record<string, any>[]>` | `Promise<Record<string, unknown>[]>` |
+  | `RemoteTransport` | `beginTransaction` | `Promise<any>` | `Promise<unknown>` |
+  
+  The `TursoDriver` rows are separate sites, not consequences: an override re-declares the door in that package's own `.d.ts`, so the `@objectstack/driver-sql` narrowing does not reach a consumer holding a `TursoDriver`.
+  
+  **What a consumer does.** A cell read off a row now arrives as `unknown` and is typed before use (`String(row.name)`, `Number(cell)`, or a `typeof` narrowing); `Array.prototype.find` over a result set answers `… | undefined` and the absent arm is separated rather than asserted past. Measured across the whole consumer closure of both packages at this change's tree — 115 `typecheck` tasks — the repo-wide cost is **11 sites**, all inside `@objectstack/driver-sql` (9) and `@objectstack/driver-sqlite-wasm` (2), and **zero** outside the driver packages.
+  
+  `TursoDriver.beginTransaction` is deliberately NOT narrowed here and stays `Promise<any>`. It overrides `SqlDriver.beginTransaction(): Promise<Knex.Transaction>` — narrower than the contract, the honest direction, and the binding declaration for an override — so the contract's `Promise<unknown>` does not compile there (TS2416). That `any` masks an LSP violation, not an un-narrowed door, and closing it is a separate decision.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable moves. No metadata key, no authored property, no config field, no accepted request shape and no stored artifact changes spelling or shape: the edit is eight declared RETURN TYPES on two driver classes and one transport class, plus their docblocks, so `objectstack migrate meta` has nothing to rewrite, `spec-changes.json` has nothing to project and the upgrade guide has no row to gain. The party this change addresses is a TYPESCRIPT CONSUMER and the delivery channel is the compiler at their own call site — the audience the ADR-0087 ledger explicitly does not serve. This changeset carries no FROM/TO rewrite block for stored metadata; the "what a consumer does" paragraph above is a source-code prescription, which is exactly the distinction #13080 records this refusal cannot make on its own.
+       `type-surface-only` is the category built for this class of change, and it is NOT claimed here because it is UNAVAILABLE on ALL EIGHT doors — measured by driving the gate, not assumed, and refused on TWO INDEPENDENT legs.
+       Leg 1 — the six record-shaped doors. Predicate 4 (`narrowed-from-erased`) reads the base annotation through `isErasedType`, whose line is "the type IS `any`/`unknown`", never "the type CONTAINS `any`". Driven with `packages/drivers/driver-sql/src/sql-driver.ts#find`, the gate answers: "[predicate 4: narrowed-from-erased] is FALSE: at the merge base the return annotation of `find` was already CONCRETE (`Promise<any[]>`), not `any` / `unknown` / unannotated." `Promise<Record<string, any>>` and `Promise<Record<string, any>[]>` read the same way. That is this card's own subject one layer up: the predicate cannot express the question, so its refusal is about the spelling rather than about the change.
+       Leg 2 — the two `unknown`-destination doors, `SqlDriver.temporalFilterValue` (`any` to `unknown`) and `RemoteTransport.beginTransaction` (`Promise<any>` to `Promise<unknown>`). Their BASE side is erased, so leg 1 does not reach them; their HEAD side is refused instead. Driven with `packages/drivers/driver-turso/src/remote-transport.ts#beginTransaction`, the gate answers: "[predicate 4: narrowed-from-erased] is false at HEAD: the return annotation of `beginTransaction` is still `Promise<unknown>`. This category is for a surface that MOVED OFF an erased type. One that is still erased narrowed nothing." `unknown` is a real narrowing to a TypeScript consumer — it admits no property read, which is the whole break — but `isErasedType` groups it with `any`.
+       The two legs are each other's control: the same citation form and the same marker grammar produce two DIFFERENT refusals naming two different revs, so the probe is discriminating rather than rejecting everything handed to it. The **BREAKING** banner is carried rather than dropped — that erosion is what #13080 was filed about. Leg 2 is the erased-destination wrinkle #15267's changesets already had to write around; both legs are filed separately rather than worked around here. An instrument's silence is only evidence if the instrument could have spoken. -->
+- 5ba2ec3: feat(spec,core,objectql,driver-sql,driver-turso): a transport can declare it has no transactions, and every transaction gate reads the declaration instead of method presence (#18063)
+  
+  Maintainer ruling, decision batch #148 item 3, letter B, 「同意」 2026-09-17, verbatim and untranslated:
+  
+  > `packages/spec`: the driver contract gains a way for a transport to **declare 「no transactions」** (the dev picks the smallest spelling the existing capability/contract surface already has — a capability bit is preferred over a new key), and the engine's transaction gating reads the declaration instead of method presence.
+  
+  **`DriverCapabilities` gains one live bit, `transactionsUnsupported`.** A transport sets it to say that a handle it issued would be a FALSE SUCCESS rather than a missing feature: the caller gets a handle, the writes execute and are already durable, `rollback()` resolves and undoes nothing. Absence means `false`, exactly like `batchSchemaSync`, so a driver that declares nothing keeps the behaviour it has today.
+  
+  **⛔ This is not `DriverCapabilities.transactions` un-retired, and the difference is not cosmetic.** That key was tombstoned in 17.0.0 under ADR-0049 enforce-or-remove and STAYS tombstoned — writing it is still a compile error and still a parse refusal carrying its prescription. It claimed "I support transactions" and nothing read it; this one declares "my transport cannot honour one" and the engine dispatches on it. Reviving the name would have inverted the record's own `absence = false` convention into a tri-state, turned a documented refusal into silent acceptance of a value whose meaning had changed underneath it, and made the tombstone's published text ("no code in any repository ever read it") false. A new key costs one bit; the name costs all of that.
+  
+  **Adding a bit to a record enforce-or-remove has pruned SATISFIES that ADR rather than reversing it.** The audit removed thirty-one bits for one stated reason — no code anywhere read them — and kept the three where method presence provably cannot carry the signal. This change is the creation of the missing reader: `driverSupportsTransactions()` (exported from `@objectstack/spec`) is the one definition of the gate, and all FOUR places that used to spell `typeof driver.beginTransaction === 'function'` ask it — `ObjectQL.transaction()`, `ScopedContext.transaction`, the `ScopedContext` begin/commit/rollback trio, and `@objectstack/core`'s `engineCanRollBack`. The bit arrives WITH its reader, in the same change, which is the honest order the ADR asks for.
+  
+  **Why method presence could not carry it.** `TursoDriver extends SqlDriver`, whose `beginTransaction()` opens a real knex transaction, so the inherited method reported the libSQL REMOTE transport as transactional. It is not — `RemoteTransport`'s data methods take no `options` argument at all, so a handle cannot reach the statement that would have to join it. A subclass cannot opt out of a door it did not open. This is the mirror of `batchSchemaSync`, which exists because a subclass can inherit `syncSchemasBatch` from a base whose transport batches while its own cannot.
+  
+  **What changes for a caller.** On a datasource whose driver declares the bit, `engine.transaction()` now takes the DECLARED non-transactional path (ADR-0119 D1) instead of opening a transaction it cannot honour: the degrade warns once per datasource — naming the declaration, not a missing method — and `{ require: true }` throws `TransactionUnsupportedError` before the callback writes anything. `ScopedContext.transaction` and the discrete begin/commit/rollback trio read the same predicate; the trio's `begin` returns `null`. Both are the answers a driver with no `beginTransaction` already received.
+  
+  **`driver-turso`.** The remote face declares `transactionsUnsupported: true`; local and embedded-replica inherit `false` from the base and are untouched. `TursoDriver.beginTransaction()` publishes the inherited declaration instead of `Promise<any>` — the annotation the earlier `any` was masking an LSP violation to avoid, dissolved rather than widened: the remote arm returns `never` (it refuses), so the only arm that still returns is the base's. `SqlDriver.beginTransaction()` keeps its narrow `Promise<Knex.Transaction>`; nothing in the base was widened.
+  
+  **`@objectstack/core`.** `engineCanRollBack()` — the ADR-0119 D4 gate that `@objectstack/metadata-protocol` uses for `batchData` / `updateManyData` / `deleteManyData` under `options.atomic`, and that `runMigrationJournal()` uses to decide whether to start at all — reads the same predicate. It has to: it does not open the transaction itself, it vouches that `engine.transaction()` will, and on a driver that declares the bit the engine now takes its non-transactional path. A gate still reading method presence would vouch for a runtime that is about to run the callback with no transaction, so the atomic batch would answer `rollback` over writes that stayed on disk and the journal would write `chunk_done` rows its own contract says mean "committed". What a caller sees on such a datasource instead: `batchData({ atomic: true })` refuses with `501 NOT_IMPLEMENTED` — retry without `atomic`, or probe `capabilities.transactionalBatch` on `/discovery` first — and `runMigrationJournal()` refuses with `MigrationJournalRefusal('NOT_IMPLEMENTED')` before writing a single journal row. Both are the answers a driver with no `beginTransaction` already received.
+  
+  **`RemoteTransport` loses `beginTransaction()`, `commit()` and `rollback()`.** They are a published surface, and this is **minor** rather than major on the ruling's own stated ground: that transport never honoured a transaction, so no working behaviour is withdrawn. They had already become unreachable from every caller in the repository when the driver started refusing them; they are now gone, and the declaration keeps them gone by design rather than by audit.
+- 62bce5c: `TursoDriver` in **remote** mode now **refuses** transactions with `NOT_IMPLEMENTED` / `501` instead of accepting them and silently doing nothing with them. Local and embedded-replica modes are unchanged — they inherit `SqlDriver`'s knex transactions and still honour `options.transaction`.
+  
+  **What was wrong.** `@objectstack/spec`'s `driver.zod.ts` states the delivery mechanism verbatim: *"A transaction handle to be passed to subsequent operations via `options.transaction`."* On the remote transport nothing could receive it. `RemoteTransport` names a transaction in exactly three members (`beginTransaction()`, `commit(t)`, `rollback(t)`) and **zero** of its data methods take an `options` argument at all — against 13 data methods present in the file, which is what makes that zero a reading. So a write issued between `beginTransaction()` and `rollback()` executed on the plain connection, was **already durable**, and the rollback resolved having undone nothing. Every step reported success.
+  
+  **What refuses now**, on the remote arm only:
+  
+  - `beginTransaction()`, `commit()` and `rollback()` — the capability is never handed out, so the sequence above cannot start.
+  - Any driver method that arrives carrying `options.transaction` — `find`, `findOne`, `count`, `aggregate`, `create`, `update`, `upsert`, `delete`, the three bulk methods, `updateMany`, `deleteMany`, `execute`, `syncSchema`, `syncSchemasBatch`, `dropTable`. This second door is not redundant: the engine's `buildDriverOptions` reads `execCtx.transaction` **first**, so a handle threaded through `ExecutionContext` reaches a data method without ever passing through `beginTransaction()`.
+  
+  The refusal fires on the **handle**, not on remote mode: a remote call with no transaction in it is untouched, which is every call the platform makes today. It is raised before any statement is built, so a refused call costs no round trip and leaves no partial write.
+  
+  **If this refusal now fires for you, it is telling you that you never had the transaction.** The remedies, in order: use the **local or embedded-replica** transport for work that needs atomicity; or take the non-transactional path deliberately — `engine.transaction()` without `require: true` on a driver with no transactions runs the callback with no rollback and says so (ADR-0119 D1). `NOT_IMPLEMENTED` / `501` rather than a `400` because the request is spelled correctly and the spec declares the members: the gap is the backend's, the same two-class taxonomy this driver already applies to remote `auto_number`, aggregate functions and date buckets.
+  
+  Implementing real transactions on the remote transport is a separate, larger piece of work and is deliberately **not** part of this change.
+- 88a9330: feat(driver-turso): the `aggregate()` override publishes its declared return type, not `any` (#17277)
+  
+  **BREAKING** for TypeScript consumers — a published TYPE-surface narrowing, shipped as `minor` under the launch-window convention. `TursoDriver` does not merely inherit this door from `SqlDriver` — it OVERRIDES `aggregate()`, and the override was written out with its own explicit `Promise<any>`. So this package's emitted `.d.ts` re-declared the door as `any` on its own and would NOT have picked up the `@objectstack/driver-sql` narrowing — the same shape PR #15280 had to fix separately for `update()` and PR #15267 for four more doors.
+  
+  Both branches already answered the contract's type: the remote branch passes `RemoteTransport.aggregate()`, already declared `Promise<Record<string, unknown>[]>`, and the local branch forwards to `SqlDriver.aggregate()`, narrowed alongside (#17277). The override now declares what it has always answered. A caller that read a cell straight off an aggregate row through the `any` now types what it reads. No runtime behaviour changes.
+  
+  Out of scope and deliberately unmoved: `upsert()` and `beginTransaction()` keep their annotations.
+  
+  <!-- adr-0087: not-required (type-surface-only packages/drivers/driver-turso/src/turso-driver.ts#aggregate) A published driver method override's declared return moves off an explicit `any` onto the contract's own shape; no metadata key moves, `packages/spec` is untouched, and the obligation is a TypeScript narrowing at the consumer's own call site, delivered by the compiler. -->
+- 3cbcedb: feat(driver-turso): the overridden `IDataDriver` doors publish their honest types, not `any` (#15267)
+  
+  **BREAKING** for TypeScript consumers — a published TYPE-surface narrowing, shipped as `minor` under the launch-window convention. `TursoDriver` does not merely inherit these doors from `SqlDriver` — it OVERRIDES `findOne()`, `create()`, `bulkCreate()` and `execute()`, and each override was written out with its own explicit `Promise<any>`. So this package's emitted `.d.ts` re-declared four of the five doors as `any` on its own and would NOT have picked up the `@objectstack/driver-sql` narrowing — the same shape PR #15280 had to fix separately for `update()`.
+  
+  Both branches of every one of the four already answered the contract's type: the local branch forwards to `SqlDriver`'s door (narrowed alongside, #15267) and the remote branch passes `RemoteTransport`'s result — already declared `Record<string, unknown> | null`, `Record<string, unknown>`, `Record<string, unknown>[]` and `unknown` respectively — through the generic `formatRemoteRow` / `formatRemoteRows`. Each override now declares what it has always answered. A caller that read fields off `findOne()` through the `any` now narrows the `null` arm first. No runtime behaviour changes.
+  
+  `explain()` is not overridden here and reaches these consumers through `@objectstack/driver-sql`. Out of scope and deliberately unmoved: `upsert()`, `aggregate()` and `beginTransaction()` keep their annotations.
+  
+  <!-- adr-0087: not-required (type-surface-only packages/drivers/driver-turso/src/turso-driver.ts#findOne, packages/drivers/driver-turso/src/turso-driver.ts#create, packages/drivers/driver-turso/src/turso-driver.ts#bulkCreate) Published driver method overrides' declared returns move off an explicit `any` onto the contract's own shapes; no metadata key moves, `packages/spec` is untouched, and the obligation is a TypeScript narrowing at the consumer's own call site, delivered by the compiler. The same change to `execute` is not named above because its destination is the contract's own `unknown`, which `isErasedType` counts as erased (TSO-U6), so predicate 4 cannot read it as narrowed-from-erased; it carries the identical disposition and the body states it in full. -->
+- 51efbf1: feat(driver-sql)!: a text operator over a column whose DECLARED type is temporal answers the type-gated no-match on every SQL face (#15683)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is renamed, retired or re-typed. No `packages/spec` key changes its name, its type or its optionality, no stored shape moves, and every object definition and filter body parses byte-identically to before — so `objectstack migrate meta` has nothing to rewrite and this changeset carries no rewrite instructions. What changes is the ANSWER a published filter surface gives at request time: a text operator aimed at a `date` / `datetime` / `time` column returns the declared no-match instead of the ISO-substring match SQLite happened to give it. The remedy for a caller who was leaning on that match is a different FILTER — the range operators, which are data the caller holds rather than an authored artifact with a stored representation — and it is spelled in the banner below. The one spec change is the membership of an existing exported set (`NON_TEXT_STORED_VALUE_TYPES`), which adds no export and removes none. -->
+  
+  **BREAKING** in the answer sense, on every SQL face, landing in the launch
+  window as `minor` under the lockstep convention this cluster's siblings use.
+  
+  **The behaviour that GOES AWAY, by name: searching a date as a string.** On the
+  SQLite family — `driver-sql` on any SQLite connection, `driver-sqlite-wasm`, and
+  `driver-turso`'s local transport — a `Field.date` / `Field.datetime` /
+  `Field.time` column stores canonical ISO TEXT (ADR-0053), and a text operator
+  matched that text. `{ signed_on: { $contains: '2026' } }` returned every 2026
+  row; `{ made_at: { $startsWith: '2026-01' } }` returned that January's rows;
+  `{ shift_at: { $contains: ':30' } }` returned every half-past shift. **All three
+  now return nothing**, and their `$notContains` mirrors now return every valued
+  row. If you are relying on any of them, this is a row-set change and the
+  replacement is a range filter — spelled out below. The behaviour was never
+  declared by any contract row and it never worked outside SQLite: the same three
+  filters were a `DATABASE_ERROR` 500 on live Postgres.
+  
+  Nothing that was refused becomes admitted, and no new error code is minted — the
+  refusal reused is the one `NON_TEXT_STORED_VALUE_TYPES` already carried for the
+  numeric and boolean classes.
+  
+  Maintainer ruling, 2026-09-05 on #15683, quoted rather than paraphrased:
+  「a text operator over a column whose DECLARED type is temporal is type-gated
+  exactly like the numeric and boolean classes; the SQLite ISO-text match is not
+  a contract」.
+  
+  ## What was wrong — one filter, three answers across one driver family
+  
+  `{ on_day: { $contains: '2026' } }` over a column declared `Field.date` holding
+  `2026-01-05`:
+  
+  | face | before | mechanism |
+  |:--|:--|:--|
+  | `driver-sql` / `driver-sqlite-wasm` / `driver-turso` local (SQLite) | **the row** | the column stores canonical ISO TEXT (ADR-0053), so `GLOB '*2026*'` matched it |
+  | `driver-sql` on live PostgreSQL 16.13 | **`DATABASE_ERROR` 500** | `operator does not exist: date ~~ unknown` (SQLSTATE 42883) — the same for `timestamptz` and `time` |
+  | `driver-sql` on MySQL | **NOT MEASURED** | no server was provisionable; reads as coercion via `CAST(col AS BINARY) LIKE` |
+  
+  Three answers to one filter, and no face declared which was canonical. The
+  SQLite answer was the accident of a storage form, not a capability: the same
+  query against Postgres was a 500.
+  
+  ## What it does now
+  
+  The three temporal classes join `NON_TEXT_STORED_VALUE_TYPES`
+  (`@objectstack/spec`), the set the SQL compilers consult at compile time
+  because the stored value is not visible until run time. Every face that reads
+  it — `SqlDriver` (and everything that inherits its compiler),
+  `driver-turso`'s remote transport, `service-analytics`' three SQL lowerings —
+  compiles the positive operators (`$contains` / `$startsWith` / `$endsWith` /
+  `$icontains` / `$like` / `$ilike`) to the FALSE constant and `$notContains` to
+  the TRUE constant. Postgres's 500 becomes that declared answer; complementarity
+  holds; the constants compose with the existing NULL-safe rules and the `$not`
+  rewrite unchanged.
+  
+  **The SQLite ISO-substring match is RETIRED.** A caller who was using it to ask
+  for "records in 2026" writes a range instead, which every dialect has always
+  answered the same way:
+  
+  ```ts
+  // before — matched only on the SQLite family, 500 on Postgres
+  { on_day: { $contains: '2026' } }
+  // after — the prescription, identical on every backend
+  { on_day: { $gte: '2026-01-01', $lt: '2027-01-01' } }
+  ```
+  
+  ## Boundaries, so a reader does not over-read this
+  
+  - **A MULTI-VALUED temporal field is untouched.** `multiple: true` stores a JSON
+    TEXT array, where `$contains` is the MEMBERSHIP spelling #7398 left working on
+    a JSON column — not a substring test. It keeps compiling exactly as before.
+  - **The value-keyed JS evaluators do not move, and they DIVERGE — measured, not
+    caveated.** `driver-memory` canonicalises a declared temporal write to ISO
+    TEXT (#4047), for a `Date` input and a string input alike, so a positive text
+    operator MATCHES there — the exact complement of the answer this changeset
+    declares. That divergence is filed as #17348 and pinned by name in that
+    driver's conformance suite, alongside a correction: the two rows previously
+    read as pinning the no-match answer pass because their comparand omits the
+    milliseconds, not because anything type-gates. `formula` and `having` cannot
+    key on the declaration at all — `matchesFilterCondition(record, filter)` takes
+    a bare record ("this evaluator sees a bare record and has no schema to
+    consult", its own docblock), and `having` filters AGGREGATED rows whose columns
+    carry no field declaration. ⛔ So "on every face" is NOT delivered by this
+    change, and this changeset does not claim it: the SQL family answers the
+    declared rule, the JS faces do not yet.
+  - **`FILTER_TEXT_CASES` grows no temporal column**, deliberately. Every row there
+    is keyed on the STORED value — which is why its non-string column is a number
+    and not a date — so a temporal fixture would assert one stored form across all
+    five drivers that import it, the stored-form guarantee the ruling refused
+    option (b) for.
+  - **MySQL is NOT MEASURED**, not "passing": no server was provisionable, so its
+    cell rests on the compiled-shape pin, which reads the constant a statement
+    would carry without executing one.
+
+### Patch Changes
+
+- ef67b47: fix(objectql,driver-turso): "is this field multi-valued" is `isMultiValueField` here too — the `domain:engine` half of the one-definition ruling (#18408)
+  
+  Maintainer ruling, 2026-09-13 (decision batch #128 item 5, option 1′): there is
+  ONE definition of 「is this field multi-valued」, `@objectstack/spec`'s
+  `isMultiValueField`, and storage follows it. `driver-sql` was aligned by #17469
+  and `os generate migration` by #18199. These four sites were the remainder: they
+  read `field.multiple` raw, which answers `true` on types the predicate calls
+  single-valued (`text`, `master_detail`, `tree`, `number`, …) and `false` on the
+  inherently-multi option types (`multiselect` / `checkboxes` / `tags`) that carry
+  no flag at all.
+  
+  **`@objectstack/driver-turso`** — `RemoteTransport.mapFieldTypeToSQL` short-
+  circuited its whole type switch on the raw flag, so a `{ type: 'number',
+  multiple: true }` field was declared `TEXT` in remote mode while the SAME
+  driver's local transport (`SqlDriver`, aligned since #17469) declared `float`:
+  one declaration, two storage classes, chosen by which URL the deployment
+  happens to hold. New columns for such a field are now declared by the field's
+  own type. Genuinely multi-valued fields (`lookup` / `select` / `file` / `image`
+  / `user` flagged `multiple`, and the inherently-multi option types with or
+  without it) are unchanged — still the JSON-array `TEXT` column.
+  
+  **`@objectstack/objectql`** — three sites, all deciding the SHAPE of a stored
+  value:
+  
+  - the option-derived insert default (`resolveOptionDefault`) assembles an array
+    for a multi-valued field. A `multiselect` / `checkboxes` / `tags` field with an
+    option marked `default: true` and no `multiple` flag was defaulted to a bare
+    scalar, which this engine's own validator then refused as
+    `invalid_type_array` on the insert the default was resolved for;
+  - the referential-integrity dependents probe (`referenceProbeFilter`) composes
+    `$contains` for a multi-valued reference and bare equality for a scalar one. A
+    `master_detail` flagged `multiple` is outside `MULTI_CAPABLE_TYPES`, so every
+    aligned storage side builds it a scalar column — the probe now asks that column
+    the question it can answer, instead of a substring match repaired afterwards by
+    a second narrowing pass;
+  - the cascade-delete `multiValued` verdict, which that probe, the `set_null`
+    write shape and the required-FK escalation all read.
+  
+  **What a deployment feels.** Only declarations that are already off-spec move:
+  `FieldSchema` has refused `multiple` on a non-capable type since #17469 (ADR-0087
+  semantic entry 18), so these shapes now reach the engine and the driver only
+  through doors that never run it — `registerExternalObject` / `initObjects` and a
+  driver's own unvalidated input. Existing columns are untouched: the remote
+  transport only ever declares types for columns it is creating. A deployment
+  holding one of these shapes should re-declare the field — drop the flag if the
+  value really is single, or move the field to a multi-capable type if it is not —
+  which is the same prescription entry 18 already carries.
+  
+  No export is added, removed or renamed in either package, and no authorable key
+  changes its name, type or optionality.
+- a484966: The TypeScript examples in these packages' **published** `README.md` now compile against the package they document — 43 of the 44 blocks the `measure-markdown-ts-blocks` census reported as syntactically valid and wrong, in documents that ship inside the npm tarball.
+  
+  `README.md` is listed in every one of these packages' `files[]`, so these bytes are the artefact a consumer — or a consumer's AI — reads and copies. What the census counted was not style: the examples named options the packages no longer accept, chained a method that returns a promise, and implemented interfaces they never imported.
+  
+  The corrections, by class:
+  
+  - **Legacy option vocabulary.** `@objectstack/client-react`'s hooks take `fields` / `orderBy` / `limit` / `where`, not `select` / `sort` / `top` / `filters`, and `PaginatedResult` carries `records`, not `value`. `@objectstack/service-job` takes `timeoutMs`, `@objectstack/service-queue` takes `maxAttempts`, and `IDataEngine.find` takes `where`.
+  - **Async registration used synchronously.** `ObjectKernel.use()` returns `Promise<this>`, so `kernel.use(a).use(b)` does not chain; the examples now `await` each registration. `ObjectKernelConfig` has no `plugins` member.
+  - **Interfaces implemented but never imported.** Several plugin examples wrote `implements Plugin` with no import, which bound to the DOM's `Plugin`; they now import `Plugin` / `PluginContext` and declare the required `init`. `PluginContext.getService<T>()` has no default type argument, so the examples that read a service now name its contract.
+  - **Removed or never-existing API.** `@objectstack/driver-memory`'s default export is a legacy `onEnable` object that `kernel.use()` refuses — the quick start now registers through `DriverPlugin`; its persistence adapters take an options bag under `persistence.adapter`. `defineStack` has no `driver` key. `@objectstack/rest`'s `RestServer` takes the host `IHttpServer` first and `registerRoutes()` takes no arguments; `RouteManager` is constructed on a server. `@objectstack/spec`'s `ObjectSchema.parse()` returns the value — the `{ success, data }` envelope is `safeParse`'s. `useMutation` has no `onMutate` / mutation context.
+  
+  No runtime code changed and no gate was added (#18715 ruling F). One block is deliberately left: `@objectstack/knowledge-ragflow`'s README writes `source.options.datasetId`, which is what the shipped adapter reads and what `KnowledgeSourceSchema` does not declare — correcting the document either way would contradict one of the two, so the conflict is reported rather than papered over.
+- bdea10a: fix(driver-turso): remote mode materializes every declared object-level index, not only field-level `unique` (#17609)
+  
+  ## What was wrong
+  
+  In remote mode (`libsql://` / `https://`), `TursoDriver` provisions tables through `RemoteTransport`, and the only index DDL that path could emit came from field-level `unique`. An object's declared `indexes: [...]` — unique or not — had no consumer there, so no remote database ever carried one. The local face (`SqlDriver`) created all of them, so nothing failed and no local test noticed: on a remote tenant database `sys_notification_delivery` (five declared indexes) and `sys_job_queue` (three) held only their primary-key autoindex, and the delivery claim query answered every poll with a full table scan (`SCAN sys_notification_delivery` + `USE TEMP B-TREE FOR ORDER BY`).
+  
+  ## What changes
+  
+  - Remote mode now creates **every** declared index: field-level `unique` plus the object's own `indexes`, unique and non-unique, including `unique: 'organization'` with its NULL-safe `COALESCE(<tenant>, '__global__')` key part. Names and keys come from the same shared normalizers `SqlDriver` and the drift differ use (`uniqueIndexesFromFields`, `normalizeDeclaredIndex`, `buildIndexName`), so both faces land the same index set — pinned by a new local/remote parity suite that compares `sqlite_master` on both.
+  - New tables get their indexes in the same batch as `CREATE TABLE`.
+  - **Existing tables are retrofitted on the next schema sync** with `CREATE [UNIQUE] INDEX IF NOT EXISTS`. No row is read-modified or rewritten.
+  - An index the retrofit cannot create is reported once at `error`, naming the index, the table and the database's own cause. A declared `unique` index over rows that already violate it is **not** forced and no data is repaired: de-duplicate the key's values and re-run schema sync.
+  - Steady-state cost goes down: a sync now reads the existing index names once (one statement, folded into the column-probe batch it already sends) and issues no index DDL when every declared index exists. Before, every boot re-sent one `CREATE UNIQUE INDEX IF NOT EXISTS` per field-level unique index on an existing table.
+  
+  ## Upgrading
+  
+  Nothing to change in metadata or configuration. The first kernel build after upgrading creates the missing indexes on each existing remote database — on a large table that one build pays the index build time. Watch the boot log for `could not create the declared` lines at `error`: each names an index that is still absent and why.
+- Updated dependencies [863c7c4]
+- Updated dependencies [0f95f43]
+- Updated dependencies [825d70f]
+- Updated dependencies [abc4b83]
+- Updated dependencies [7382c5d]
+- Updated dependencies [ea2940d]
+- Updated dependencies [245f360]
+- Updated dependencies [324968e]
+- Updated dependencies [7843663]
+- Updated dependencies [ce57857]
+- Updated dependencies [c7d4825]
+- Updated dependencies [4844840]
+- Updated dependencies [fe71032]
+- Updated dependencies [d8b12fc]
+- Updated dependencies [74eaab8]
+- Updated dependencies [0b788da]
+- Updated dependencies [482d34d]
+- Updated dependencies [839d1b0]
+- Updated dependencies [2fc092b]
+- Updated dependencies [6059b29]
+- Updated dependencies [88a072e]
+- Updated dependencies [d4a1a28]
+- Updated dependencies [baf9745]
+- Updated dependencies [3d8779d]
+- Updated dependencies [0bd7dae]
+- Updated dependencies [d34f9b6]
+- Updated dependencies [57343f7]
+- Updated dependencies [271d6bb]
+- Updated dependencies [1e20f81]
+- Updated dependencies [38472ce]
+- Updated dependencies [8b48903]
+- Updated dependencies [2d235bc]
+- Updated dependencies [aaacf1d]
+- Updated dependencies [6548118]
+- Updated dependencies [146c291]
+- Updated dependencies [e0e4a56]
+- Updated dependencies [7aae005]
+- Updated dependencies [bdb247d]
+- Updated dependencies [d5c91dd]
+- Updated dependencies [32be735]
+- Updated dependencies [0e51278]
+- Updated dependencies [48203ff]
+- Updated dependencies [ada2869]
+- Updated dependencies [d88a47d]
+- Updated dependencies [2f1a6f6]
+- Updated dependencies [23fc5d6]
+- Updated dependencies [2d34f32]
+- Updated dependencies [9e3c485]
+- Updated dependencies [82cb69f]
+- Updated dependencies [e1796ad]
+- Updated dependencies [c9eb773]
+- Updated dependencies [4342c99]
+- Updated dependencies [132dd13]
+- Updated dependencies [d285bf0]
+- Updated dependencies [dfeba25]
+- Updated dependencies [0a88a80]
+- Updated dependencies [12bb672]
+- Updated dependencies [97233b9]
+- Updated dependencies [182bbde]
+- Updated dependencies [0252320]
+- Updated dependencies [2eb4724]
+- Updated dependencies [d46deba]
+- Updated dependencies [e04a0af]
+- Updated dependencies [6b97a20]
+- Updated dependencies [e7ff9c2]
+- Updated dependencies [75237a9]
+- Updated dependencies [920f887]
+- Updated dependencies [497655f]
+- Updated dependencies [7c2c5ae]
+- Updated dependencies [3a9ad22]
+- Updated dependencies [be5c602]
+- Updated dependencies [2bf6ef1]
+- Updated dependencies [09e16a5]
+- Updated dependencies [98bd798]
+- Updated dependencies [cbcae14]
+- Updated dependencies [8261ff7]
+- Updated dependencies [24489f1]
+- Updated dependencies [fc28c1d]
+- Updated dependencies [6d64785]
+- Updated dependencies [00c332b]
+- Updated dependencies [b3b43b6]
+- Updated dependencies [d93400f]
+- Updated dependencies [9ccc417]
+- Updated dependencies [134b410]
+- Updated dependencies [84e6b05]
+- Updated dependencies [cb1f274]
+- Updated dependencies [5c28cc7]
+- Updated dependencies [b0eb9a5]
+- Updated dependencies [176b035]
+- Updated dependencies [a83dbb6]
+- Updated dependencies [51297e9]
+- Updated dependencies [156792e]
+- Updated dependencies [5ba2ec3]
+- Updated dependencies [abb01f1]
+- Updated dependencies [e64ae15]
+- Updated dependencies [02bdeaa]
+- Updated dependencies [66abef3]
+- Updated dependencies [25c9a83]
+- Updated dependencies [ee5812a]
+- Updated dependencies [68fea8b]
+- Updated dependencies [c049e74]
+- Updated dependencies [bb9794a]
+- Updated dependencies [d402e32]
+- Updated dependencies [9a910c4]
+- Updated dependencies [340b6dc]
+- Updated dependencies [fe0ae5c]
+- Updated dependencies [99fcb4a]
+- Updated dependencies [0f1cd83]
+- Updated dependencies [a3d4c59]
+- Updated dependencies [74832b6]
+- Updated dependencies [1aa5026]
+- Updated dependencies [b9d5422]
+- Updated dependencies [627382b]
+- Updated dependencies [0b31d90]
+- Updated dependencies [559041d]
+- Updated dependencies [e0d0553]
+- Updated dependencies [5100c42]
+- Updated dependencies [5380daa]
+- Updated dependencies [00b38d7]
+- Updated dependencies [47a9002]
+- Updated dependencies [5eebc9e]
+- Updated dependencies [72c1640]
+- Updated dependencies [5e5ec9f]
+- Updated dependencies [922923b]
+- Updated dependencies [e6c34f6]
+- Updated dependencies [062f5cd]
+- Updated dependencies [5d8319f]
+- Updated dependencies [43f4766]
+- Updated dependencies [8e8ea99]
+- Updated dependencies [a484966]
+- Updated dependencies [021755a]
+- Updated dependencies [dbd4744]
+- Updated dependencies [14a762f]
+- Updated dependencies [b146102]
+- Updated dependencies [75c0dac]
+- Updated dependencies [9bb059d]
+- Updated dependencies [07c6f82]
+- Updated dependencies [362035c]
+- Updated dependencies [74554a3]
+- Updated dependencies [4c42fd1]
+- Updated dependencies [5f392f0]
+- Updated dependencies [a362e0e]
+- Updated dependencies [f26fb8e]
+- Updated dependencies [bc2ec80]
+- Updated dependencies [0da638c]
+- Updated dependencies [041d9fd]
+- Updated dependencies [f03f6c7]
+- Updated dependencies [b8ec127]
+- Updated dependencies [cf79182]
+- Updated dependencies [e81c4e5]
+- Updated dependencies [929d9e3]
+- Updated dependencies [8a5240a]
+- Updated dependencies [c1d54db]
+- Updated dependencies [c7af6bd]
+- Updated dependencies [1f0b565]
+- Updated dependencies [23aa83c]
+- Updated dependencies [357f499]
+- Updated dependencies [80aef80]
+- Updated dependencies [65ad77d]
+- Updated dependencies [88a9330]
+- Updated dependencies [3cbcedb]
+- Updated dependencies [a61ae59]
+- Updated dependencies [a54ecaa]
+- Updated dependencies [854639b]
+- Updated dependencies [44c917a]
+- Updated dependencies [613d35a]
+- Updated dependencies [e08c8b0]
+- Updated dependencies [0ee32ed]
+- Updated dependencies [2bed4c3]
+- Updated dependencies [77c801e]
+- Updated dependencies [58b36fa]
+- Updated dependencies [4792049]
+- Updated dependencies [53ec0b1]
+- Updated dependencies [71629a1]
+- Updated dependencies [0a56d3b]
+- Updated dependencies [f8e5790]
+- Updated dependencies [d2c1d19]
+- Updated dependencies [681871e]
+- Updated dependencies [54e8234]
+- Updated dependencies [d127f9b]
+- Updated dependencies [4bbf766]
+- Updated dependencies [c17b494]
+- Updated dependencies [d414e2b]
+- Updated dependencies [af98a04]
+- Updated dependencies [43cbe14]
+- Updated dependencies [c4d1759]
+- Updated dependencies [f7a9740]
+- Updated dependencies [0f38ab0]
+- Updated dependencies [9cdffbe]
+- Updated dependencies [331a1a2]
+- Updated dependencies [9788f1e]
+- Updated dependencies [2bd53f1]
+- Updated dependencies [5f9f846]
+- Updated dependencies [5a95b0e]
+- Updated dependencies [5d527f7]
+- Updated dependencies [5bf2330]
+- Updated dependencies [9165d5c]
+- Updated dependencies [d9e1587]
+- Updated dependencies [07150b3]
+- Updated dependencies [143c715]
+- Updated dependencies [fb2bccf]
+- Updated dependencies [d2badf7]
+- Updated dependencies [d64bcb6]
+- Updated dependencies [d4f5232]
+- Updated dependencies [396eae3]
+- Updated dependencies [ecdfc94]
+- Updated dependencies [f04be62]
+- Updated dependencies [de1a611]
+- Updated dependencies [db76982]
+- Updated dependencies [3b1dab9]
+- Updated dependencies [7607076]
+- Updated dependencies [1555ed4]
+- Updated dependencies [776d64c]
+- Updated dependencies [ab450f4]
+- Updated dependencies [025588a]
+- Updated dependencies [a49e8ae]
+- Updated dependencies [f3e3d59]
+- Updated dependencies [9bd4344]
+- Updated dependencies [51efbf1]
+- Updated dependencies [9c44eed]
+- Updated dependencies [bbca441]
+- Updated dependencies [7cd5874]
+- Updated dependencies [7887077]
+- Updated dependencies [29dd1a6]
+  - @objectstack/spec@17.5.0
+  - @objectstack/core@17.5.0
+  - @objectstack/driver-sql@17.5.0
+
 ## 17.4.0
 
 ### Minor Changes

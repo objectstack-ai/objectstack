@@ -1,5 +1,326 @@
 # @objectstack/service-storage
 
+## 17.5.0
+
+### Minor Changes
+
+- 6ff5b56: **Clause-②: yes** — a new REQUIRED member on two published option types (`S3StorageAdapterOptions.keyPrefix`, and the `s3` member of `StorageServicePluginOptions`), so the accept set a consumer writes against narrows. Contract-review tier.
+  
+  **BREAKING** — `S3StorageAdapterOptions` and `StorageServicePluginOptions.s3` now require `keyPrefix: string | null`. Shipped as `minor` under the repo's launch-window convention, in which `major` is refused by `check-changeset-no-major` and breaking-ness is carried by this banner plus the ADR-0087 disposition rather than by the level.
+  
+  The **S3 adapter can now be confined to a key namespace**, and the confinement is structural rather than conventional: a caller holding the adapter has no door through which it can reach an unprefixed key.
+  
+  `keyPrefix` is applied on `upload` / `download` / `delete` / `exists` / `getInfo`, on both presigned doors, on every multipart door, and into `list()`'s `Prefix` — and it is stripped off every key and every `list()` cursor coming back. Callers therefore supply and receive unprefixed keys at every door, in both directions, and `list('')` enumerates this adapter's namespace and nothing else. Keys are concatenated, never path-joined, so a caller key such as `../elsewhere` stays a literal key inside the namespace instead of escaping it.
+  
+  **Why it is required rather than optional.** A shared bucket with no namespace has one thing keeping one deployment out of another's objects: that every `sys_file` metadata check above the adapter was written correctly. On a route that takes an identifier out of a request, one missed check is a cross-deployment read the object store cannot refuse, because what it sees is a well-formed key. An optional prefix reproduces exactly that gap the first time a host forgets to set it, silently — so the choice is made at the call site or the code does not compile. `null` is the written, greppable way to ask for bucket-root keys, and it produces byte-identical keys to those written before this option existed.
+  
+  For the same reason an empty or whitespace-only string is **refused at construction** rather than treated as "no prefix": that is what an unset environment variable looks like after interpolation. A leading `/` and any `..` segment are refused too, and a missing trailing `/` is appended — the last of those is load-bearing, not tidiness: S3 `Prefix` is a raw string match, so `tenant_1` without the delimiter also matches `tenant_10/...`, and one namespace would enumerate its neighbour through the isolation mechanism itself.
+  
+  Two further seams move with it:
+  
+  - `StorageServicePlugin` carries the **host's** namespace onto every adapter a `storage` settings re-read rebuilds, and deliberately reads no prefix out of the settings values. A boundary an administrator inside the deployment can set or clear is a preference, not a boundary; without this, one settings save returned a hosted deployment to a shared, unprefixed key space. A host that declared no `s3` constructor options expressed no namespace, and settings-configured S3 stays bucket-root as before.
+  - `resolveStorageTarget` puts the namespace in the target's **`location`**, not merely its fingerprint: two prefixes in one bucket are two disjoint object sets, so moving the prefix strands what the old one held exactly as moving the bucket does, and the swap must print the migration warning. `env_7` and `env_7/` normalise to one target, so the same namespace spelled two ways is not read as a move.
+  
+  `LocalStorageAdapterOptions` is deliberately unchanged: `resolvePath()` already refuses any `..` and joins every key under `rootDir`, so the local adapter's containment boundary exists and a second mechanism would be two ways to say one thing.
+  
+  **Migrating:** every `new S3StorageAdapter({ ... })` and every `new StorageServicePlugin({ adapter: 's3', s3: { ... } })` gains one member. Single-tenant deployments write `keyPrefix: null` and their keys do not move. Deployments sharing a bucket write the namespace they want and should treat the change as a store move — existing objects are not migrated into the new namespace.
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/services/service-storage/src/s3-storage-adapter.ts#S3StorageAdapterOptions) a storage adapter is CODE, never stack metadata: nothing ever runs an `S3StorageAdapterOptions` through a `.parse()`, there is no stored `sys_metadata` shape for `objectstack migrate meta` to rewrite, and no schema tombstone would reach anyone. The affected party is a TypeScript host constructing the adapter and the delivery channel is tsc, which reports at their own call site. Same disposition, and the same reason, as this adapter's `list(prefix)` retirement. -->
+
+### Patch Changes
+
+- a484966: The TypeScript examples in these packages' **published** `README.md` now compile against the package they document — 43 of the 44 blocks the `measure-markdown-ts-blocks` census reported as syntactically valid and wrong, in documents that ship inside the npm tarball.
+  
+  `README.md` is listed in every one of these packages' `files[]`, so these bytes are the artefact a consumer — or a consumer's AI — reads and copies. What the census counted was not style: the examples named options the packages no longer accept, chained a method that returns a promise, and implemented interfaces they never imported.
+  
+  The corrections, by class:
+  
+  - **Legacy option vocabulary.** `@objectstack/client-react`'s hooks take `fields` / `orderBy` / `limit` / `where`, not `select` / `sort` / `top` / `filters`, and `PaginatedResult` carries `records`, not `value`. `@objectstack/service-job` takes `timeoutMs`, `@objectstack/service-queue` takes `maxAttempts`, and `IDataEngine.find` takes `where`.
+  - **Async registration used synchronously.** `ObjectKernel.use()` returns `Promise<this>`, so `kernel.use(a).use(b)` does not chain; the examples now `await` each registration. `ObjectKernelConfig` has no `plugins` member.
+  - **Interfaces implemented but never imported.** Several plugin examples wrote `implements Plugin` with no import, which bound to the DOM's `Plugin`; they now import `Plugin` / `PluginContext` and declare the required `init`. `PluginContext.getService<T>()` has no default type argument, so the examples that read a service now name its contract.
+  - **Removed or never-existing API.** `@objectstack/driver-memory`'s default export is a legacy `onEnable` object that `kernel.use()` refuses — the quick start now registers through `DriverPlugin`; its persistence adapters take an options bag under `persistence.adapter`. `defineStack` has no `driver` key. `@objectstack/rest`'s `RestServer` takes the host `IHttpServer` first and `registerRoutes()` takes no arguments; `RouteManager` is constructed on a server. `@objectstack/spec`'s `ObjectSchema.parse()` returns the value — the `{ success, data }` envelope is `safeParse`'s. `useMutation` has no `onMutate` / mutation context.
+  
+  No runtime code changed and no gate was added (#18715 ruling F). One block is deliberately left: `@objectstack/knowledge-ragflow`'s README writes `source.options.datasetId`, which is what the shipped adapter reads and what `KnowledgeSourceSchema` does not declare — correcting the document either way would contradict one of the two, so the conflict is reported rather than papered over.
+- 71629a1: refactor(core): one `classifyAdmissionTenancyPosture`, so six admission seams cannot each get the classification wrong (#16013)
+  
+  Six admission doors each hand-wrote the same try/catch on the `tenancy` read that
+  feeds `resolveAuthzContext`: the registry's branded "never registered" rejection
+  (`isServiceNotRegisteredError`, #13905) resolves quietly to `undefined` — the
+  supported no-tenancy composition, where no posture-conditional refusal runs at
+  all — and every other rejection becomes `AuthzStoreUnavailableError('tenancy', err)`
+  (ADR-0112 `SERVICE_UNAVAILABLE` / 503), because the posture is an authorization
+  INPUT and admission was therefore never DECIDED. That is #13906 decision 1
+  option A, and it is the part nobody may get wrong: a quiet `catch` at any one of
+  the six re-opens the defect, where a failure reads as "this check does not apply"
+  and an ex-member's org-stamped API key is admitted.
+  
+  Nothing is broken today — every copy was correct — so this removes a standing
+  hazard rather than fixing a defect. **No admission verdict changes**, on any
+  wiring: the classification is byte-for-byte the decision the six copies made,
+  now made once.
+  
+  - **`@objectstack/core` gains `classifyAdmissionTenancyPosture`** (and the
+    `TenancyServiceResolver` type), exported from the package index beside
+    `effectiveTenancyPosture`. It takes a THUNK and owns the classification only.
+    The thunk is not a style choice: the REJECTION is what gets classified, so the
+    resolution has to happen inside the helper's `try` — a caller that awaited the
+    service first would need a `catch` of its own, which is the thing being
+    deleted.
+  - **The RESOLUTION deliberately did not move.** `rest-server.ts` branches on
+    kernel-vs-provider, and asking twice would let a provider bound to the local
+    kernel answer for a request that resolved to another environment; four seams
+    read `ctx.getKernel()`; `service-storage` reads an already-normalised gate
+    registry; and each seam's reason why a MISSING async accessor must stay quiet
+    is its own argument (the storage door's is its declared degrade-to-ungated
+    contract, the others' is the `KernelBase`/`LiteKernel` host shape). A helper
+    that also owned how the service is reached would be wrong for one of them or
+    grow a flag per seam — the copies again, with an extra step. Every one of
+    those reasons stays written at its seam.
+  - **Folded**: `packages/rest/src/rest-server.ts` (both wirings),
+    `packages/cloud-connection/src/marketplace-install-local-plugin.ts`,
+    `packages/plugins/plugin-sharing/src/sharing-plugin.ts`,
+    `packages/services/service-datasource/src/admin-routes.ts`,
+    `packages/services/service-settings/src/settings-service-plugin.ts`,
+    `packages/services/service-storage/src/storage-service-plugin.ts`.
+  - **Pinned where the decision now lives**:
+    `packages/core/src/security/admission-tenancy-posture.test.ts` drives both
+    rejections at the production seam — a real `ObjectKernel` that never
+    registered `tenancy`, and one whose `tenancy` factory throws — each beside the
+    brand predicate's own answer on that same rejection, so "the outage throws" is
+    distinguishable from a helper that throws at everything. It also holds the
+    constraint mechanically: the helper's source may not name an accessor, a
+    kernel or a plugin context, and it takes exactly one parameter.
+- Updated dependencies [863c7c4]
+- Updated dependencies [0f95f43]
+- Updated dependencies [825d70f]
+- Updated dependencies [7f62536]
+- Updated dependencies [abc4b83]
+- Updated dependencies [7382c5d]
+- Updated dependencies [ea2940d]
+- Updated dependencies [245f360]
+- Updated dependencies [324968e]
+- Updated dependencies [7843663]
+- Updated dependencies [ce57857]
+- Updated dependencies [c7d4825]
+- Updated dependencies [4844840]
+- Updated dependencies [fe71032]
+- Updated dependencies [d8b12fc]
+- Updated dependencies [74eaab8]
+- Updated dependencies [0b788da]
+- Updated dependencies [482d34d]
+- Updated dependencies [305e7fc]
+- Updated dependencies [839d1b0]
+- Updated dependencies [2fc092b]
+- Updated dependencies [6059b29]
+- Updated dependencies [88a072e]
+- Updated dependencies [9c577c1]
+- Updated dependencies [d4a1a28]
+- Updated dependencies [baf9745]
+- Updated dependencies [3d8779d]
+- Updated dependencies [0bd7dae]
+- Updated dependencies [d34f9b6]
+- Updated dependencies [57343f7]
+- Updated dependencies [271d6bb]
+- Updated dependencies [1e20f81]
+- Updated dependencies [38472ce]
+- Updated dependencies [8b48903]
+- Updated dependencies [2d235bc]
+- Updated dependencies [aaacf1d]
+- Updated dependencies [6548118]
+- Updated dependencies [146c291]
+- Updated dependencies [e0e4a56]
+- Updated dependencies [7aae005]
+- Updated dependencies [bdb247d]
+- Updated dependencies [d5c91dd]
+- Updated dependencies [0e51278]
+- Updated dependencies [48203ff]
+- Updated dependencies [b6471ba]
+- Updated dependencies [ada2869]
+- Updated dependencies [d88a47d]
+- Updated dependencies [2f1a6f6]
+- Updated dependencies [23fc5d6]
+- Updated dependencies [2d34f32]
+- Updated dependencies [9e3c485]
+- Updated dependencies [e1796ad]
+- Updated dependencies [c9eb773]
+- Updated dependencies [4342c99]
+- Updated dependencies [132dd13]
+- Updated dependencies [d285bf0]
+- Updated dependencies [dfeba25]
+- Updated dependencies [0a88a80]
+- Updated dependencies [12bb672]
+- Updated dependencies [97233b9]
+- Updated dependencies [182bbde]
+- Updated dependencies [0252320]
+- Updated dependencies [2eb4724]
+- Updated dependencies [e04a0af]
+- Updated dependencies [6b97a20]
+- Updated dependencies [e7ff9c2]
+- Updated dependencies [75237a9]
+- Updated dependencies [920f887]
+- Updated dependencies [8a017af]
+- Updated dependencies [497655f]
+- Updated dependencies [3a9ad22]
+- Updated dependencies [758ac40]
+- Updated dependencies [a2c2852]
+- Updated dependencies [2bf6ef1]
+- Updated dependencies [c744c0a]
+- Updated dependencies [09e16a5]
+- Updated dependencies [98bd798]
+- Updated dependencies [cbcae14]
+- Updated dependencies [8261ff7]
+- Updated dependencies [24489f1]
+- Updated dependencies [fc28c1d]
+- Updated dependencies [6d64785]
+- Updated dependencies [00c332b]
+- Updated dependencies [b3b43b6]
+- Updated dependencies [d93400f]
+- Updated dependencies [134b410]
+- Updated dependencies [84e6b05]
+- Updated dependencies [cb1f274]
+- Updated dependencies [5c28cc7]
+- Updated dependencies [b0eb9a5]
+- Updated dependencies [176b035]
+- Updated dependencies [a83dbb6]
+- Updated dependencies [51297e9]
+- Updated dependencies [156792e]
+- Updated dependencies [5ba2ec3]
+- Updated dependencies [abb01f1]
+- Updated dependencies [e64ae15]
+- Updated dependencies [02bdeaa]
+- Updated dependencies [66abef3]
+- Updated dependencies [25c9a83]
+- Updated dependencies [ee5812a]
+- Updated dependencies [68fea8b]
+- Updated dependencies [c049e74]
+- Updated dependencies [bb9794a]
+- Updated dependencies [d402e32]
+- Updated dependencies [9a910c4]
+- Updated dependencies [340b6dc]
+- Updated dependencies [fe0ae5c]
+- Updated dependencies [99fcb4a]
+- Updated dependencies [0f1cd83]
+- Updated dependencies [a3d4c59]
+- Updated dependencies [74832b6]
+- Updated dependencies [1aa5026]
+- Updated dependencies [b9d5422]
+- Updated dependencies [627382b]
+- Updated dependencies [0b31d90]
+- Updated dependencies [559041d]
+- Updated dependencies [e0d0553]
+- Updated dependencies [5100c42]
+- Updated dependencies [5380daa]
+- Updated dependencies [00b38d7]
+- Updated dependencies [47a9002]
+- Updated dependencies [5eebc9e]
+- Updated dependencies [72c1640]
+- Updated dependencies [5e5ec9f]
+- Updated dependencies [922923b]
+- Updated dependencies [e6c34f6]
+- Updated dependencies [062f5cd]
+- Updated dependencies [5d8319f]
+- Updated dependencies [43f4766]
+- Updated dependencies [8e8ea99]
+- Updated dependencies [a484966]
+- Updated dependencies [021755a]
+- Updated dependencies [dbd4744]
+- Updated dependencies [14a762f]
+- Updated dependencies [b146102]
+- Updated dependencies [75c0dac]
+- Updated dependencies [9bb059d]
+- Updated dependencies [07c6f82]
+- Updated dependencies [362035c]
+- Updated dependencies [74554a3]
+- Updated dependencies [4c42fd1]
+- Updated dependencies [5f392f0]
+- Updated dependencies [a362e0e]
+- Updated dependencies [f26fb8e]
+- Updated dependencies [bc2ec80]
+- Updated dependencies [0da638c]
+- Updated dependencies [041d9fd]
+- Updated dependencies [f03f6c7]
+- Updated dependencies [b8ec127]
+- Updated dependencies [cf79182]
+- Updated dependencies [e81c4e5]
+- Updated dependencies [929d9e3]
+- Updated dependencies [8a5240a]
+- Updated dependencies [c1d54db]
+- Updated dependencies [c7af6bd]
+- Updated dependencies [1f0b565]
+- Updated dependencies [23aa83c]
+- Updated dependencies [357f499]
+- Updated dependencies [80aef80]
+- Updated dependencies [c3ebe4a]
+- Updated dependencies [65ad77d]
+- Updated dependencies [a61ae59]
+- Updated dependencies [a54ecaa]
+- Updated dependencies [854639b]
+- Updated dependencies [44c917a]
+- Updated dependencies [613d35a]
+- Updated dependencies [e08c8b0]
+- Updated dependencies [0ee32ed]
+- Updated dependencies [58b36fa]
+- Updated dependencies [4792049]
+- Updated dependencies [53ec0b1]
+- Updated dependencies [71629a1]
+- Updated dependencies [0a56d3b]
+- Updated dependencies [f8e5790]
+- Updated dependencies [d2c1d19]
+- Updated dependencies [681871e]
+- Updated dependencies [54e8234]
+- Updated dependencies [288fe9c]
+- Updated dependencies [d127f9b]
+- Updated dependencies [4bbf766]
+- Updated dependencies [c17b494]
+- Updated dependencies [d414e2b]
+- Updated dependencies [af98a04]
+- Updated dependencies [43cbe14]
+- Updated dependencies [6e3462d]
+- Updated dependencies [c4d1759]
+- Updated dependencies [f7a9740]
+- Updated dependencies [9cdffbe]
+- Updated dependencies [331a1a2]
+- Updated dependencies [9788f1e]
+- Updated dependencies [2bd53f1]
+- Updated dependencies [5f9f846]
+- Updated dependencies [5a95b0e]
+- Updated dependencies [5d527f7]
+- Updated dependencies [5bf2330]
+- Updated dependencies [9165d5c]
+- Updated dependencies [d9e1587]
+- Updated dependencies [07150b3]
+- Updated dependencies [143c715]
+- Updated dependencies [fb2bccf]
+- Updated dependencies [d2badf7]
+- Updated dependencies [d64bcb6]
+- Updated dependencies [d4f5232]
+- Updated dependencies [396eae3]
+- Updated dependencies [ecdfc94]
+- Updated dependencies [f04be62]
+- Updated dependencies [de1a611]
+- Updated dependencies [db76982]
+- Updated dependencies [3b1dab9]
+- Updated dependencies [7607076]
+- Updated dependencies [1555ed4]
+- Updated dependencies [776d64c]
+- Updated dependencies [ab450f4]
+- Updated dependencies [025588a]
+- Updated dependencies [a49e8ae]
+- Updated dependencies [f3e3d59]
+- Updated dependencies [9bd4344]
+- Updated dependencies [4215417]
+- Updated dependencies [51efbf1]
+- Updated dependencies [9c44eed]
+- Updated dependencies [bbca441]
+- Updated dependencies [7cd5874]
+- Updated dependencies [7887077]
+- Updated dependencies [29dd1a6]
+  - @objectstack/spec@17.5.0
+  - @objectstack/platform-objects@17.5.0
+  - @objectstack/core@17.5.0
+  - @objectstack/types@17.5.0
+  - @objectstack/observability@17.5.0
+
 ## 17.4.0
 
 ### Minor Changes

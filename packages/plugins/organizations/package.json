@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/organizations",
-  "version": "17.4.0",
+  "version": "17.5.0",
   "license": "Apache-2.0",
   "description": "Multi-organization runtime for ObjectStack — registers the `org-scoping` service that turns single-database row-level Organization isolation on: `organization_id` auto-stamp on insert, per-org seed replay, default-organization bootstrap, and the walled-posture membership-policy gate.",
   "main": "dist/index.js",
