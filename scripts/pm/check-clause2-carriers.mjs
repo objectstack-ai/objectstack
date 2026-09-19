@@ -646,7 +646,11 @@
  *      as well: the lane owes the record on every round) — or, since #17915
  *      and on every pair carrying a record since #18174,
  *      the record's `Served-tier:` line does not read at the declared tier (row
- *      C7). One exit code with several
+ *      C7) — or, since #18862, two or more LIVE claims by DIFFERENT authors
+ *      stand on the card with no `Release:` from the earlier holder between
+ *      them and the taking claim is dated after
+ *      `CROSS_AUTHOR_CLAIM_ROW_EFFECTIVE_AT` (row C9; a hand-over dated at or
+ *      before it is a note, never the exit). One exit code with several
  *      adverse reasons is the shape this table already had: the ROW says which,
  *      and the exit says only "a verdict about this pair, adverse".
  *      Deliberately NOT 3: a verdict about the PAIR must be
@@ -832,6 +836,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#18764: a DECORATED claim ENTERS the pool — ONE reading, and it is the sibling\'s': 24,
   '#18828: a SECOND `Claim:` by ONE seat — the writer-side prohibition, finally READ': 52,
   '#18536: the lane-keyed owed population — spec and skills owe the record on EVERY round, other lanes owe none, a `yes` outside them is spec-lane work': 30,
+  '#18862: cross-author LIVE claims with no `Release:` between — the hand-over the protocol never wrote, named; judged only after its effective instant': 52,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -844,8 +849,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // one #18174 adds, and by the one #18141 adds, and by the one #17919 adds, and
 // by the one #16833 adds, and by the one #18456 adds, and by the one #18719
 // adds, and by the one #18683 adds, and by the one #18764 adds, and by the one
-// #18828 adds, and by the one #18536 adds.
-const SELF_TEST_BATTERY_FLOOR = 33;
+// #18828 adds, and by the one #18536 adds, and by the one #18862 adds.
+const SELF_TEST_BATTERY_FLOOR = 34;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1823,11 +1828,11 @@ export function claimRetractions(commentRows) {
 //      `**Claim:**` is counted here exactly as a bare one is counted there, and
 //      ⛔ this file does not grow a second reader of the marker.
 //   3. **Not a cross-seat ownership rule.** Two live claims by DIFFERENT
-//      authors are a real and separate question — the triage's p1 escalation
-//      condition — and this row is deliberately silent on it: refusing an
-//      ownership transfer between sessions is not this card's to do, and a row
-//      that answered both would make one sentence out of two states. The probe
-//      is reported in the PR body, with its population and its time.
+//      authors are a separate state — the triage's p1 escalation condition —
+//      and this row stays silent on it: a row that answered both would make
+//      one sentence out of two states. That state has its own reader since
+//      #18862: row C9 (`claimHandovers`, one section down), with its own
+//      remedy and its own effective instant.
 //   4. **Not a NOTE.** The `--pair` path answers `EXIT_PAIR_ADVERSE`. An
 //      adverse fact rendered as 0-with-a-message is the silence this file
 //      exists against, and it is what the old SUPERSEDED reading already was.
@@ -1844,7 +1849,7 @@ export const CLAIM_REPEAT_RULE =
   + 'transition the protocol designed. MEMBERSHIP comes first: a RETRACTED claim does not stand, so a '
   + 'fresh claim after a `Release:` of the first is the protocol working and reads exactly as it did '
   + 'before. ⛔ Two live claims by DIFFERENT authors are not this state — that is a separate reading '
-  + 'and this row does not make it. ⛔ An unattributable row is never counted, the way `claimRetractions` '
+  + 'and this row does not make it (row C9 does, #18862). ⛔ An unattributable row is never counted, the way `claimRetractions` '
   + 'fails closed on one.';
 
 /** The repair, in the seat's own acts — printed with every instance of the row. */
@@ -1925,7 +1930,239 @@ function claimRepeatSentences(groups) {
   );
 }
 
-/** The key as prose, for the sentences above — declared once, beside the regex that reads it. */
+// ---------------------------------------------------------------------------
+// #18862 — cross-author LIVE claims with no `Release:` between: the hand-over
+// the protocol never wrote, NAMED.
+//
+// The protocol sanctions exactly ONE way a card changes hands: the holder's
+// `Release:` line (AGENTS.md's release clause; SKILL.md 「释放是显式动作:让卡
+// 离手者同笔清 assignee + `Release:` 行(会话/因/去向);下一任重新认领。」; the
+// dead-claim reclaim is a `Release:` with cause too). What the reader did with
+// a thread on which a SECOND seat claimed under a first seat's live claim was
+// RANK it: `claimCarrierSelection` took the newest live claim that parses a
+// branch as governing and printed the older one as 「a SUPERSEDED claim」 at
+// exit 0 — the newer seat's `Branch:` and `Clause-②` handed to every
+// downstream reader, and nothing anywhere saying that ownership had moved
+// without the act the protocol names.
+//
+// ⚠️ Measured (the #18828 dev's sweep, 2026-09-18T00:47:37Z–00:48:42Z, both
+// boards this gate reads — 529 open cards in objectstack, 413 in objectui, 163
+// carrying at least one claim comment; three rows re-read by the triage seat
+// at 02:09Z): TWELVE open cards carried live `Claim:` comments from two or
+// more DIFFERENT authors with no retraction between — objectstack #13503,
+// #14026, #15811, #17852; objectui #4730, #7070, #7696, #7804, #7848, #7924,
+// #8115, #9370. #17852's pair was eight hours apart: two running seats on one
+// card. objectui#9370's second claim says 「⛔ NOT a re-claim」 in its own
+// first line and was ranked governing anyway — the reader reads order, not
+// intent. #15811's assignee had moved to the second claimant with no
+// `Release:` anywhere. Five of the twelve involve `claude[bot]`, the retired
+// automation identity.
+//
+// ## The ruling (batch #154 item 2, letter b — maintainer 「同意」 2026-09-18T04:56Z)
+//
+// 「**Reader**: `check-clause2-carriers.mjs` gains one named state beside
+// `claimRepeats` (C8, same-author): **cross-author live claims with no
+// `Release:` between** — its own row, its own remedy sentence (the holder
+// posts `Release:`; the taker posts nothing until then), exit 4. ⛔ Not a
+// widening of C8 (a correction cannot repair a hand-over). **Effective date**:
+// the row judges only pairs whose second `Claim:` is dated after the PR
+// carrying the row lands; earlier pairs are listed as informational, never
+// red.」 And: 「⛔ **a** — reds twelve cards on history the readers themselves
+// created; ⛔ **c** — the next silent hand-over has no reader.」
+//
+// ## MEMBERSHIP first — the same authority C8 and governance read
+//
+// The state is read over the LIVE claims: `claimRetractions` decides what
+// stands, and since #18773 A a retraction is the `Release:` line read the
+// sibling's way. Two consequences, both deliberate:
+//
+//   · a `Release:` by the earlier holder — BEFORE the taker's claim or AFTER
+//     it — retracts the holder's claim, one author is left holding a live
+//     claim, and the row is silent: the repair is an act the holder can
+//     perform at any time, which is what makes the state REPAIRABLE (the
+//     #17366 lesson C8 states one section up). A taker that yields writes its
+//     OWN `Release:` with 去向 「让先到者」 (#18773 A) and clears it the same
+//     way;
+//   · two of the twelve measured pairs — objectui#7848 and #7924 — carried the
+//     holder's `Release:` all along, decorated (`**Release:**`, a backticked
+//     one), and stood only because the retraction reader tested the raw
+//     constant. They clear by #18829 A alone, with no seat posting anything;
+//     the self-test replays both.
+//
+// ## The EFFECTIVE INSTANT, and why it is a constant in this file
+//
+// The ruling splits history from the rule: a pair whose SECOND claim is dated
+// after the rule landed is JUDGED (row C9, exit 4); one whose second claim is
+// dated before it is LISTED — a note and an input-record field, never a row,
+// never the exit. `CROSS_AUTHOR_CLAIM_ROW_EFFECTIVE_AT` below is that instant:
+// the UTC minute at which this row was authored, frozen. It names the rule's
+// LANDING WINDOW — the `domain:skills` seat reconciles by hand every pair whose
+// second claim falls between this instant and the PR's merge, exactly as it
+// reconciles the twelve before it (ruling item 2: the seat's act, ⛔ not the
+// reader's) — and it is a constant rather than a merge date read from git
+// because a reader that consulted history to decide what it judges would
+// judge differently in every checkout. ⛔ Strictly AFTER: a claim stamped at
+// the instant itself is history. An unreadable stamp cannot be shown to be
+// after it and is LISTED, never judged — fail-closed in the direction that
+// leaves the record standing.
+//
+// ## Hand-overs, not pairs of authors
+//
+// The reading walks the live, attributable claims in thread order and names a
+// HAND-OVER at every point where the author changes from the previous live
+// claim's author — so A, B, A' is two hand-overs (B took from A, A took back
+// from B) and A, B, B' is one hand-over (B's second claim is C8's row, ⛔ not
+// a second hand-over). ONE row per thread naming every hand-over, exactly as
+// C8 names every repeat in one row; the row is JUDGED when ANY hand-over's
+// claim is dated after the instant, and the sentence says which ones are.
+//
+// ## ⛔ What this row is NOT
+//
+//   1. **Not a widening of C8.** The remedies differ — a correction repairs a
+//      declaration and cannot repair a hand-over — and the states are
+//      disjoint by construction: C8 groups live claims BY ONE author, this row
+//      reads the author CHANGES between them. A thread can earn both (A, B,
+//      B'), and then it earns both rows, ⛔ never one sentence out of two
+//      states. C8's own pin that it is silent on the cross-author shape
+//      stands; what changed is that the shape now has a reader.
+//   2. **Not a second selector.** `CLAIM_SELECTION_RULE` and the governing
+//      claim are untouched for every shape: the newer claim still governs and
+//      the older is still listed SUPERSEDED in the record. This is an
+//      ADDITIONAL reading of the same thread, and `claimCarrierSelection`
+//      keeps its return shape.
+//   3. **Not a judgement of history.** The twelve measured rows, and every
+//      pair dated before the instant, are LISTED — a `C9-BEFORE-EFFECTIVE`
+//      note and the `claim.handover` field — so the record is complete and
+//      the exit is unmoved. ⛔ Never red on them (ruling ⛔ a).
+//   4. **Not an identity rule.** `claude[bot]` is an author like any other
+//      here; that its claims are dead is the seat's knowledge and the seat's
+//      `Release:` with cause (SKILL.md's dead-claim reclaim), ⛔ not a special
+//      case in the reader. An unattributable row is never counted, the way
+//      `claimRetractions` fails closed on one.
+//   5. **Not a NOTE when judged.** The `--pair` path answers
+//      `EXIT_PAIR_ADVERSE` on a judged hand-over. An adverse fact rendered as
+//      0-with-a-message is the silence this file exists against.
+// ---------------------------------------------------------------------------
+
+/**
+ * The instant this row became a rule — the UTC minute at which it was authored.
+ *
+ * Frozen. It names the rule's LANDING WINDOW: a hand-over whose taking claim is
+ * dated strictly after it is JUDGED, one dated at or before it is LISTED; the
+ * `domain:skills` seat reconciles by hand every pair whose second claim falls
+ * between this instant and the PR's merge, together with the twelve before it.
+ * ⛔ Never moved forward to quieten a row and ⛔ never derived from git.
+ */
+export const CROSS_AUTHOR_CLAIM_ROW_EFFECTIVE_AT = '2026-09-19T03:45Z';
+const CROSS_AUTHOR_CLAIM_ROW_EFFECTIVE_STAMP = Date.parse(CROSS_AUTHOR_CLAIM_ROW_EFFECTIVE_AT);
+
+/** The rule this row is judged by, written out once and PRINTED beside it. */
+export const CLAIM_HANDOVER_RULE =
+  'The protocol sanctions ONE way a card changes hands: the HOLDER\'s `Release:` line (会话 / 因 / 去向). '
+  + 'TWO OR MORE LIVE claim comments BY DIFFERENT AUTHORS on one thread with no `Release:` from the '
+  + 'earlier holder between them is therefore a hand-over the protocol never wrote, and it is NAMED here — '
+  + 'every live claim, its author, its date, each point where the author changes, and the repair — '
+  + '⛔ never printed as a SUPERSESSION, which is the word for a transition the protocol designed. '
+  + 'MEMBERSHIP comes first: a RETRACTED claim does not stand, so a holder\'s `Release:` (posted before '
+  + 'or after the taker\'s claim, bare or decorated) leaves one author holding and reads as the protocol '
+  + 'working. EFFECTIVE INSTANT: a hand-over is JUDGED (row C9, exit 4) only when the taking claim is '
+  + `dated strictly after ${CROSS_AUTHOR_CLAIM_ROW_EFFECTIVE_AT}; one dated at or before it, or with no `
+  + 'readable date, is LISTED as informational and moves no exit. ⛔ Two live claims by ONE author are '
+  + 'C8\'s state, not this one. ⛔ An unattributable row is never counted.';
+
+/** The repair, in the seats' own acts — printed with every judged instance of the row. */
+export const CLAIM_HANDOVER_REMEDY =
+  'Repair, by the seats that hold the claims and ⛔ by nobody else: the HOLDER (the earlier live claimant) '
+  + 'posts `Release:` — 会话 / 因 / 去向 naming the taker — which is the one hand-over the protocol '
+  + 'sanctions; the TAKER posts nothing until then: no work under a claim the holder has not released, '
+  + '⛔ never a second `Claim:`, ⛔ never a `Release:` on the holder\'s behalf. A taker that yields '
+  + 'instead posts its OWN `Release:` with 去向 「让先到者」 (a withdrawal before work is a `Release:` '
+  + 'line), which retracts its claim and clears this row the same way. ⛔ No `Clause-②-correction:` '
+  + 'repairs this state: a correction fixes a declaration, and a hand-over is not a declaration.';
+
+/**
+ * The cross-author hand-over state of one thread, or `null` when the live,
+ * attributable claims are all one author's (or there are none, or the thread
+ * is unread).
+ *
+ * A sibling pure reader beside `claimRepeats`, built on the same
+ * `claimRetractions` map, so governance, C8 and this row cannot describe three
+ * different retractions. ⛔ It resolves no state, no row and no exit code —
+ * `c9CrossAuthorLiveClaims` renders the judged verdict, `c9HandoverNote` the
+ * informational listing and `pairInputRecord` the reading, all from this one
+ * derivation.
+ *
+ * Ordering is the file's one recency rule (`laterOnThread`), used to ORDER the
+ * live claims: `holder` is the claim that stood, and every hand-over is a
+ * later live claim whose author differs from the live claim before it.
+ *
+ * @param {{ id?: number|string, body?: string, created_at?: string,
+ *   user?: { login?: string } }[]|null} commentRows
+ * @returns {{ holder: object, holderAuthor: string, live: object[], authors: string[],
+ *   handovers: { from: object, to: object, fromAuthor: string, toAuthor: string,
+ *     at: string, dated: 'after'|'at-or-before'|'unreadable', judged: boolean }[],
+ *   judged: boolean, effectiveAt: string }|null}
+ */
+export function claimHandovers(commentRows) {
+  if (!Array.isArray(commentRows)) return null;
+  const retracted = claimRetractions(commentRows);
+  const indexed = commentRows.map((row, index) => {
+    const parsed = Date.parse(row?.created_at ?? '');
+    return { row, index, stamp: Number.isFinite(parsed) ? parsed : null, author: rowAuthor(row) };
+  });
+  const live = indexed.filter((c) =>
+    // The sibling's ONE reading of the marker (#18764); a withdrawn claim does
+    // not stand (#18719); an unattributable row is never counted.
+    markerMatches(CLAIM_COMMENT_MARKER, String(c.row?.body ?? '')) && !retracted.has(c.row) && c.author !== null);
+  const ordered = [...live].sort((a, b) => (laterOnThread(a, b) ? 1 : laterOnThread(b, a) ? -1 : 0));
+  const authors = [...new Set(ordered.map((c) => c.author))];
+  if (authors.length < 2) return null;
+  const handovers = [];
+  for (let i = 1; i < ordered.length; i += 1) {
+    const from = ordered[i - 1];
+    const to = ordered[i];
+    if (from.author === to.author) continue;
+    const dated = to.stamp === null ? 'unreadable' : to.stamp > CROSS_AUTHOR_CLAIM_ROW_EFFECTIVE_STAMP ? 'after' : 'at-or-before';
+    handovers.push({
+      from: from.row,
+      to: to.row,
+      fromAuthor: from.author,
+      toAuthor: to.author,
+      at: to.row?.created_at ?? '(no readable date)',
+      dated,
+      judged: dated === 'after',
+    });
+  }
+  return {
+    holder: ordered[0].row,
+    holderAuthor: ordered[0].author,
+    live: ordered.map((c) => c.row),
+    authors,
+    handovers,
+    judged: handovers.some((h) => h.judged),
+    effectiveAt: CROSS_AUTHOR_CLAIM_ROW_EFFECTIVE_AT,
+  };
+}
+
+/**
+ * The hand-over state as ONE sentence — shared by the row that judges, the note
+ * that lists and the input record that reports what was read, so the three
+ * cannot disagree about which claims are involved or which are judged.
+ */
+function claimHandoverSentence(state) {
+  const when = (row) => `${String(row?.id ?? '(no id)')} at ${row?.created_at ?? '(no readable date)'}`;
+  const judgedCount = state.handovers.filter((h) => h.judged).length;
+  const datedWord = (h) => (h.dated === 'after'
+    ? `dated AFTER the effective instant ${state.effectiveAt} — JUDGED`
+    : h.dated === 'unreadable'
+      ? 'with NO readable date — listed, informational, never judged'
+      : `dated at or before the effective instant ${state.effectiveAt} — listed, informational`);
+  return `${state.authors.length} authors hold LIVE claim comments here with no \`Release:\` from the earlier holder `
+    + `between them — \`${state.holderAuthor}\`'s ${when(state.holder)} is the claim that stood; `
+    + state.handovers.map((h) => `\`${h.toAuthor}\`'s ${when(h.to)} took the card from \`${h.fromAuthor}\` (${datedWord(h)})`).join('; ')
+    + ` — ${state.handovers.length} hand-over(s), ${judgedCount} judged, ${state.handovers.length - judgedCount} informational`;
+}
+
 /**
  * The rule that picks the declaration limb's CARRIER, written out once.
  *
@@ -4444,6 +4681,54 @@ export function c8SecondClaimSameSeat(pair) {
 }
 
 /**
+ * C9 — cross-author LIVE claims with no `Release:` between, JUDGED (#18862).
+ *
+ * ⭐ A VERDICT, for C8's reason: the row is a fact about THIS pair — two seats
+ * holding live claims on the thread the declaration limb is judged over, with
+ * no sanctioned hand-over between them — and an adverse fact rendered as
+ * 0-with-a-message is the silence this file exists against. It is also,
+ * precisely, what the old reading WAS: `rejected: 1 … a SUPERSEDED claim`,
+ * exit 0, on twelve cards.
+ *
+ * ⛔ It judges NOTHING dated at or before `CROSS_AUTHOR_CLAIM_ROW_EFFECTIVE_AT`:
+ * that half is `c9HandoverNote`, a note, and the ruling's 「earlier pairs are
+ * listed as informational, never red」 is the line between the two.
+ *
+ * ⛔ Never prescribes WHICH seat acts: the holder's `Release:` and the taker's
+ * own yielding `Release:` are both named, and the file writes nothing.
+ */
+export function c9CrossAuthorLiveClaims(pair) {
+  const state = claimHandovers(pair?.cardComments ?? null);
+  if (state === null || !state.judged) return null;
+  return (
+    `card #${pair?.card} (delivering open PR #${pair?.pr}) — ${claimHandoverSentence(state)}. `
+    + `${CLAIM_HANDOVER_RULE} ${CLAIM_HANDOVER_REMEDY} ${NEVER_WRITES}`
+  );
+}
+
+/**
+ * The informational half of C9 — a hand-over whose every taking claim is dated
+ * at or before the effective instant (#18862). A NOTE: it prints in full, on
+ * the sweep and on `--pair`, and moves no exit.
+ *
+ * ⭐ It PRINTS rather than going quiet, for the reason the fourth reading does:
+ * the twelve measured rows are history the readers themselves created, and a
+ * record that dropped them would replace one invisible fact with another. The
+ * reconciliation is the `domain:skills` seat's, by hand, on the cards.
+ */
+export function c9HandoverNote(pair) {
+  const state = claimHandovers(pair?.cardComments ?? null);
+  if (state === null || state.judged) return null;
+  return (
+    `card #${pair?.card} (delivering open PR #${pair?.pr}) — ${claimHandoverSentence(state)}. `
+    + `LISTED, ⛔ not judged: every hand-over here is dated at or before the effective instant ${state.effectiveAt} `
+    + '(or carries no readable date), and the ruling reads 「earlier pairs are listed as informational, never red」. '
+    + 'The reconciliation is the domain:skills seat\'s, by hand: the holder posts `Release:`, or the taker yields '
+    + 'with its own (去向 「让先到者」). This note moves no exit.'
+  );
+}
+
+/**
  * Every FINDING row for one pair, in reporting order.
  *
  * `pairs` — the derived set this pair came from — is optional and defaults to
@@ -4485,6 +4770,12 @@ export function pairRows(pair, pairs = null) {
   // states (#18828).
   const repeatClaim = c8SecondClaimSameSeat(pair);
   if (repeatClaim) rows.push({ code: 'C8', text: repeatClaim });
+  // ⭐ Beside C8 and disjoint from it: C8 reads one author's repeats, this row
+  // reads the author CHANGES between live claims — a hand-over the protocol
+  // never wrote — and judges only those dated after its effective instant; an
+  // earlier one is `pairNotes`' `C9-BEFORE-EFFECTIVE`, never a row (#18862).
+  const handover = c9CrossAuthorLiveClaims(pair);
+  if (handover) rows.push({ code: 'C9', text: handover });
   return rows;
 }
 
@@ -4520,6 +4811,10 @@ export function pairNotes(pair, pairs = null) {
   if (correction) notes.push({ code: 'C2-CORRECTION', text: correction });
   const record = c6RecordNote(pair);
   if (record) notes.push({ code: 'C6-RECORD', text: record });
+  // The informational half of C9: a cross-author hand-over dated at or before
+  // the effective instant is LISTED here and moves no exit (#18862).
+  const handover = c9HandoverNote(pair);
+  if (handover) notes.push({ code: 'C9-BEFORE-EFFECTIVE', text: handover });
   return notes;
 }
 
@@ -5700,6 +5995,7 @@ export const INPUT_RECORD_PAIR_FIELDS = Object.freeze([
   'claim.selected',
   'claim.rejected',
   'claim.repeat',
+  'claim.handover',
   'claim.clause2-line',
   'pr-body.clause2-line',
 ]);
@@ -5942,6 +6238,21 @@ export function pairInputRecord(pair) {
         `${repeats.length} author(s) holding more than one LIVE claim comment — the protocol forbids a `
         + 'second `Claim:` (row C8 is the verdict; this line is what was read)',
         ...claimRepeatSentences(repeats),
+      ];
+
+  // ⭐ The same derivation the C9 row and note render (#18862). A READING —
+  // ⛔ not the verdict, which is the row, and not the listing, which is the note.
+  const handover = claimHandovers(pair?.cardComments ?? null);
+  out['claim.handover'] = !Array.isArray(pair?.cardComments)
+    ? 'UNREAD — the thread could not be read, so no hand-over reading was taken'
+    : handover === null
+      ? `none — every LIVE claim comment on this thread is one author's (effective instant ${CROSS_AUTHOR_CLAIM_ROW_EFFECTIVE_AT})`
+      : [
+        `${handover.authors.length} author(s) hold LIVE claim comments with no \`Release:\` between — `
+        + (handover.judged
+          ? 'JUDGED (row C9 is the verdict; this line is what was read)'
+          : 'LISTED, informational (every hand-over is dated at or before the effective instant; note C9-BEFORE-EFFECTIVE)'),
+        claimHandoverSentence(handover),
       ];
 
   out['claim.clause2-line'] = pool.length === 0
@@ -8705,12 +9016,15 @@ export async function selfTest() {
   t('⛔ CONTROL: the SELECTOR did not move — the newest still governs and the older is still listed SUPERSEDED', claimCarrierSelection([R28_A, R28_B]).pool.map((r) => r.id).join() === '7100000002' && says(R28_FIELD([R28_A, R28_B], 'claim.rejected'), 'a SUPERSEDED claim'));
   t('⛔ …and the refusal is an ADDITIONAL reading, ⛔ not a new selector: same pool, same rejected count as before', claimCarrierSelection([R28_A, R28_B]).rejected.length === 1 && claimCarrierSelection([R28_A, R28_B]).claims.length === 2 && CLAIM_SELECTION_RULE.includes('the GOVERNING claim'));
 
-  // (b) the p1 shape — REPORTED in the filing round, ⛔ not refused here.
+  // (b) the p1 shape — a SEPARATE reading since #18862 (row C9), ⛔ never this one.
   const R28_OTHER = R28_CLAIM(7100000003, '2026-09-18T02:00:00Z', 'os-litant', { round: 2, branch: 'claude/issue-4242-second' });
-  t('⭐ (b) two live claims by DIFFERENT authors ⇒ ⛔ NOT this state — an ownership transfer is a separate reading', R28_IDS([R28_A, R28_OTHER]) === '' && !R28_CODES([R28_A, R28_OTHER]).includes('C8'));
-  t('…and that thread still reads exactly as it did: the newer governs, the older is SUPERSEDED, exit 0', claimCarrierSelection([R28_A, R28_OTHER]).pool.map((r) => r.id).join() === '7100000003' && says(R28_FIELD([R28_A, R28_OTHER], 'claim.rejected'), 'a SUPERSEDED claim'));
-  t('⛔ CONTROL: make those two authors ONE and the same thread is named — the author test is what decides', R28_IDS([R28_A, { ...R28_OTHER, user: { login: R28_SEAT } }]) === '7100000001+7100000003');
-  t('…and the rule PRINTED with the row says so in as many words, so a reader is not left to infer it', CLAIM_REPEAT_RULE.includes('DIFFERENT authors are not this state'));
+  const R28_OTHER_AFTER = { ...R28_OTHER, created_at: '2026-09-20T02:00:00Z' };
+  t('⭐ (b) two live claims by DIFFERENT authors ⇒ ⛔ NOT this state — C8 is silent on the hand-over', R28_IDS([R28_A, R28_OTHER]) === '' && !R28_CODES([R28_A, R28_OTHER]).includes('C8'));
+  t('⭐ …and the reader that SPEAKS on it is C9 (#18862): dated after its instant the thread earns C9 and ⛔ not C8 — one state, one row, never both from two authors with one claim each', R28_CODES([R28_A, R28_OTHER_AFTER]).includes('C9') && !R28_CODES([R28_A, R28_OTHER_AFTER]).includes('C8') && claimHandovers([R28_A, R28_OTHER_AFTER])?.judged === true);
+  t('…dated before it (as this fixture is) the same thread is LISTED by C9\'s note, and C8 still says nothing', pairNotes(R28_PAIR([R28_A, R28_OTHER])).some((n) => n.code === 'C9-BEFORE-EFFECTIVE') && !R28_CODES([R28_A, R28_OTHER]).includes('C9') && R28_IDS([R28_A, R28_OTHER]) === '');
+  t('⛔ CONTROL: the SELECTOR reads as it did — the newer governs and the older is listed SUPERSEDED in the record; what moved is the VERDICT, from exit 0 to C9\'s row', claimCarrierSelection([R28_A, R28_OTHER]).pool.map((r) => r.id).join() === '7100000003' && says(R28_FIELD([R28_A, R28_OTHER], 'claim.rejected'), 'a SUPERSEDED claim'));
+  t('⛔ CONTROL: make those two authors ONE and the same thread is named by C8 — the author test is what decides', R28_IDS([R28_A, { ...R28_OTHER, user: { login: R28_SEAT } }]) === '7100000001+7100000003');
+  t('…and the rule PRINTED with the row says so in as many words, and names the row that makes the other reading', CLAIM_REPEAT_RULE.includes('DIFFERENT authors are not this state') && CLAIM_REPEAT_RULE.includes('row C9'));
 
   // (c) MEMBERSHIP first — a re-claim after a release is the protocol working.
   const R28_RELEASE = R28(7100000010, '2026-09-18T01:30:00Z', R28_SEAT, 'Release: session `session_01DvvamiacK328idtBYJBxV3`, cause: 本卡改派, 去向: `pm:queue`');
@@ -8816,6 +9130,186 @@ export async function selfTest() {
   t('⭐ ONE derivation: the ids the ROW names are the ids the RECORD names', (claimRepeats([R28_A, R28_B])[0]?.ids ?? []).length === 2 && (claimRepeats([R28_A, R28_B])[0]?.ids ?? []).every((id) => says(R28_ROW([R28_A, R28_B]), id) && says(R28_FIELD([R28_A, R28_B], 'claim.repeat'), id)));
   t('⛔ the row is not in the sweep\'s NOTE family and the record carries no verdict word for it', !says(R28_FIELD([R28_A, R28_B], 'claim.repeat'), 'exit 4') && says(R28_FIELD([R28_A, R28_B], 'claim.repeat'), 'row C8 is the verdict'));
 
+  // -- #18862: cross-author LIVE claims with no `Release:` between ------------
+  //
+  // The ruling's shape, pinned per DIRECTION with a non-vacuity control each
+  // (a thread that is silent proves nothing unless the SAME thread, with one
+  // thing changed, is named), then the twelve measured rows replayed from the
+  // REST rows. Judged / listed is the effective instant's line, and both halves
+  // are pinned on the same fixture with only the taker's date moved.
+  battery('#18862: cross-author LIVE claims with no `Release:` between — the hand-over the protocol never wrote, named; judged only after its effective instant');
+  const X62 = (id, at, login, lines) => ({ id, created_at: at, user: { login }, body: [].concat(lines).join('\n') });
+  const X62_CLAIM = (id, at, login, branch = 'claude/issue-4343-first') => X62(id, at, login, ['Claim: PM loop round 1', `Branch: \`${branch}\``, 'Clause-②: no']);
+  const X62_BEFORE = '2026-09-18T10:00:00Z';
+  const X62_BEFORE2 = '2026-09-18T11:00:00Z';
+  const X62_AFTER = '2026-09-20T10:00:00Z';
+  const X62_AFTER2 = '2026-09-20T11:00:00Z';
+  const X62_HOLDER = X62_CLAIM(7200000001, X62_BEFORE, 'seat-holder');
+  const X62_TAKER_AFTER = X62_CLAIM(7200000002, X62_AFTER, 'seat-taker', 'claude/issue-4343-second');
+  const X62_TAKER_BEFORE = X62_CLAIM(7200000003, X62_BEFORE2, 'seat-taker', 'claude/issue-4343-second');
+  const X62_PAIR = (rows) => ({ pr: 19999, card: 18862, draft: true, prLabels: [], cardLabels: [], cardComments: rows });
+  const X62_CODES = (rows) => pairRows(X62_PAIR(rows)).map((r) => r.code);
+  const X62_NOTES = (rows) => pairNotes(X62_PAIR(rows)).map((n) => n.code);
+  const X62_ROW = (rows) => pairRows(X62_PAIR(rows)).find((r) => r.code === 'C9')?.text ?? '';
+  const X62_NOTE = (rows) => pairNotes(X62_PAIR(rows)).find((n) => n.code === 'C9-BEFORE-EFFECTIVE')?.text ?? '';
+  const X62_FIELD = (rows, key) => [pairInputRecord(X62_PAIR(rows))[key]].flat().join('\n');
+  const X62_CHAIN = (rows) => (claimHandovers(rows)?.handovers ?? []).map((h) => `${h.fromAuthor}>${h.toAuthor}${h.judged ? '!' : ''}`).join(' ');
+  const X62_SHIFT = (rows, days) => rows.map((r) => ({ ...r, created_at: new Date(Date.parse(r.created_at) + days * 86400000).toISOString().replace(/\.\d{3}Z$/, 'Z') }));
+
+  // (a) the judged shape — the taker dated AFTER the instant.
+  t('⭐ (a) two LIVE claims by DIFFERENT authors, the taker dated AFTER the instant ⇒ ONE named hand-over, JUDGED', X62_CHAIN([X62_HOLDER, X62_TAKER_AFTER]) === 'seat-holder>seat-taker!' && claimHandovers([X62_HOLDER, X62_TAKER_AFTER])?.judged === true, X62_CHAIN([X62_HOLDER, X62_TAKER_AFTER]));
+  t('…and `--pair` earns a C9 FINDING, which is its exit 4', X62_CODES([X62_HOLDER, X62_TAKER_AFTER]).includes('C9') && EXIT_PAIR_ADVERSE === 4 && EXIT_PAIR_ADVERSE !== EXIT_OK, X62_CODES([X62_HOLDER, X62_TAKER_AFTER]).join());
+  t('⛔ …a VERDICT and never a NOTE: no `C9-BEFORE-EFFECTIVE` note rides beside a judged row', !X62_NOTES([X62_HOLDER, X62_TAKER_AFTER]).includes('C9-BEFORE-EFFECTIVE'));
+  t('…the ROW names both authors, both comment ids and the instant it judged against', says(X62_ROW([X62_HOLDER, X62_TAKER_AFTER]), 'seat-holder') && says(X62_ROW([X62_HOLDER, X62_TAKER_AFTER]), 'seat-taker') && says(X62_ROW([X62_HOLDER, X62_TAKER_AFTER]), '7200000001') && says(X62_ROW([X62_HOLDER, X62_TAKER_AFTER]), '7200000002') && says(X62_ROW([X62_HOLDER, X62_TAKER_AFTER]), CROSS_AUTHOR_CLAIM_ROW_EFFECTIVE_AT));
+  t('…and carries the ruling\'s remedy sentence: the HOLDER posts `Release:`, the TAKER posts nothing until then, and a yield is the taker\'s own `Release:` with 去向 「让先到者」', says(X62_ROW([X62_HOLDER, X62_TAKER_AFTER]), 'the HOLDER (the earlier live claimant) posts `Release:`') && says(X62_ROW([X62_HOLDER, X62_TAKER_AFTER]), 'the TAKER posts nothing until then') && says(X62_ROW([X62_HOLDER, X62_TAKER_AFTER]), '让先到者'));
+  t('…and says a correction cannot repair it — ⛔ not a widening of C8, in the row\'s own words', says(X62_ROW([X62_HOLDER, X62_TAKER_AFTER]), 'a hand-over is not a declaration') && says(X62_ROW([X62_HOLDER, X62_TAKER_AFTER]), 'never printed as a SUPERSESSION'));
+  t('⛔ C8 is SILENT on that same thread — the new row is the one that speaks, never both for two authors with one claim each', !X62_CODES([X62_HOLDER, X62_TAKER_AFTER]).includes('C8') && claimRepeats([X62_HOLDER, X62_TAKER_AFTER]).length === 0);
+  t('⛔ CONTROL: the SELECTOR did not move — the newer still governs and the older is still listed SUPERSEDED in the record; the verdict is the row\'s', claimCarrierSelection([X62_HOLDER, X62_TAKER_AFTER]).pool.map((r) => r.id).join() === '7200000002' && says(X62_FIELD([X62_HOLDER, X62_TAKER_AFTER], 'claim.rejected'), 'a SUPERSEDED claim') && CLAIM_SELECTION_RULE.includes('the GOVERNING claim'));
+  t('…and the input record READS the same state beside the carrier it selected', says(X62_FIELD([X62_HOLDER, X62_TAKER_AFTER], 'claim.handover'), '7200000001') && says(X62_FIELD([X62_HOLDER, X62_TAKER_AFTER], 'claim.handover'), '7200000002') && says(X62_FIELD([X62_HOLDER, X62_TAKER_AFTER], 'claim.handover'), 'JUDGED'));
+
+  // (b) the informational shape — the SAME pair, the taker dated BEFORE the instant.
+  t('⭐ (b) the SAME pair with the taker dated at or before the instant ⇒ LISTED, ⛔ not judged', X62_CHAIN([X62_HOLDER, X62_TAKER_BEFORE]) === 'seat-holder>seat-taker' && claimHandovers([X62_HOLDER, X62_TAKER_BEFORE])?.judged === false);
+  t('…no C9 row and no C8 row, so the exit is unmoved', !X62_CODES([X62_HOLDER, X62_TAKER_BEFORE]).includes('C9') && !X62_CODES([X62_HOLDER, X62_TAKER_BEFORE]).includes('C8'));
+  t('…and a `C9-BEFORE-EFFECTIVE` NOTE instead, naming both ids and saying in as many words that it moves no exit', X62_NOTES([X62_HOLDER, X62_TAKER_BEFORE]).includes('C9-BEFORE-EFFECTIVE') && says(X62_NOTE([X62_HOLDER, X62_TAKER_BEFORE]), '7200000001') && says(X62_NOTE([X62_HOLDER, X62_TAKER_BEFORE]), '7200000003') && says(X62_NOTE([X62_HOLDER, X62_TAKER_BEFORE]), 'This note moves no exit') && says(X62_NOTE([X62_HOLDER, X62_TAKER_BEFORE]), 'listed as informational, never red'));
+  t('…and the record says LISTED, informational, and names the note', says(X62_FIELD([X62_HOLDER, X62_TAKER_BEFORE], 'claim.handover'), 'LISTED') && says(X62_FIELD([X62_HOLDER, X62_TAKER_BEFORE], 'claim.handover'), 'C9-BEFORE-EFFECTIVE'));
+  t('⛔ CONTROL: the note and the row are ONE derivation — move only the taker\'s date and the same sentence moves from note to row', says(X62_NOTE([X62_HOLDER, X62_TAKER_BEFORE]), 'took the card from `seat-holder`') && says(X62_ROW([X62_HOLDER, X62_TAKER_AFTER]), 'took the card from `seat-holder`') && X62_ROW([X62_HOLDER, X62_TAKER_BEFORE]) === '' && X62_NOTE([X62_HOLDER, X62_TAKER_AFTER]) === '');
+
+  // (c) the instant itself.
+  const X62_AT = `${CROSS_AUTHOR_CLAIM_ROW_EFFECTIVE_AT.slice(0, -1)}:00Z`;
+  const X62_AT_PLUS_ONE = new Date(Date.parse(X62_AT) + 60000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+  t('⭐ (c) the instant is STRICT: a taker stamped exactly AT it is history; one minute later is judged', X62_CHAIN([X62_HOLDER, X62_CLAIM(7200000004, X62_AT, 'seat-taker')]) === 'seat-holder>seat-taker' && X62_CHAIN([X62_HOLDER, X62_CLAIM(7200000004, X62_AT_PLUS_ONE, 'seat-taker')]) === 'seat-holder>seat-taker!');
+  t('…and the constant is a UTC minute in ISO shape, parseable, and in the PAST — a future instant would list every pair forever', /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z$/.test(CROSS_AUTHOR_CLAIM_ROW_EFFECTIVE_AT) && Number.isFinite(Date.parse(CROSS_AUTHOR_CLAIM_ROW_EFFECTIVE_AT)) && Date.parse(CROSS_AUTHOR_CLAIM_ROW_EFFECTIVE_AT) < Date.now());
+  t('…and the rule PRINTED with the row carries the instant, so two runs are comparable on it', CLAIM_HANDOVER_RULE.includes(CROSS_AUTHOR_CLAIM_ROW_EFFECTIVE_AT) && says(X62_ROW([X62_HOLDER, X62_TAKER_AFTER]), CLAIM_HANDOVER_RULE.slice(0, 80)));
+  t('⛔ an UNREADABLE date on the taker is LISTED, never judged — fail closed toward the standing record; give it a date after and it is judged', claimHandovers([X62_HOLDER, { ...X62_TAKER_AFTER, created_at: 'not a date' }])?.handovers.map((h) => h.dated).join() === 'unreadable' && claimHandovers([X62_HOLDER, { ...X62_TAKER_AFTER, created_at: 'not a date' }])?.judged === false && says(X62_NOTE([X62_HOLDER, { ...X62_TAKER_AFTER, created_at: 'not a date' }]), 'NO readable date') && claimHandovers([X62_HOLDER, X62_TAKER_AFTER])?.judged === true);
+
+  // (d) MEMBERSHIP first — a release by the holder, or by the taker, clears it.
+  const X62_RELEASE = (id, at, login, line = 'Release: session `session_x`, 因: 交接, 去向: `seat-taker`') => X62(id, at, login, line);
+  t('⭐ (d) the holder\'s `Release:` AFTER the taker\'s claim clears it — one author left, silent, no note', claimHandovers([X62_HOLDER, X62_TAKER_AFTER, X62_RELEASE(7200000010, X62_AFTER2, 'seat-holder')]) === null && !X62_CODES([X62_HOLDER, X62_TAKER_AFTER, X62_RELEASE(7200000010, X62_AFTER2, 'seat-holder')]).includes('C9') && X62_NOTES([X62_HOLDER, X62_TAKER_AFTER, X62_RELEASE(7200000010, X62_AFTER2, 'seat-holder')]).length === 0);
+  t('…and the holder\'s `Release:` BEFORE the taker\'s claim is the protocol working — a re-claim after a release', claimHandovers([X62_HOLDER, X62_RELEASE(7200000010, '2026-09-19T12:00:00Z', 'seat-holder'), X62_TAKER_AFTER]) === null);
+  t('…and a DECORATED `**Release:**` by the holder clears it the same way — the one reading (#18829 A); the raw constant refuses that body', claimHandovers([X62_HOLDER, X62_TAKER_AFTER, X62_RELEASE(7200000010, X62_AFTER2, 'seat-holder', '**Release:** session `session_x` · 去向 `seat-taker`')]) === null && RELEASE_COMMENT_MARKER.test('**Release:** session `session_x` · 去向 `seat-taker`') === false);
+  t('…and the TAKER\'s own `Release:` (去向 「让先到者」) clears it too — the #18773 A withdrawal', claimHandovers([X62_HOLDER, X62_TAKER_AFTER, X62_RELEASE(7200000011, X62_AFTER2, 'seat-taker', 'Release: session `session_y`, 因: 先到者在先, 去向: 让先到者')]) === null);
+  t('⛔ CONTROL: a `Release:` by a THIRD author clears nothing — the pair is still judged', claimHandovers([X62_HOLDER, X62_TAKER_AFTER, X62_RELEASE(7200000012, X62_AFTER2, 'seat-third')])?.judged === true);
+  t('⛔ CONTROL: a PROSE withdrawal by the taker (「撤回…」, the claim\'s id named) clears nothing now — the act has one spelling (#18773 A)', claimHandovers([X62_HOLDER, X62_TAKER_AFTER, X62(7200000013, X62_AFTER2, 'seat-taker', '撤回本席的认领 `7200000002` —— 先到者是 seat-holder')])?.judged === true);
+
+  // (e) same-author and mixed threads — C8 and C9 are disjoint states.
+  const X62_A2 = X62_CLAIM(7200000020, X62_AFTER2, 'seat-holder', 'claude/issue-4343-third');
+  const X62_B2 = X62_CLAIM(7200000021, X62_AFTER2, 'seat-taker', 'claude/issue-4343-third');
+  const X62_C = X62_CLAIM(7200000022, X62_AFTER2, 'seat-third', 'claude/issue-4343-third');
+  t('⭐ (e) two live claims by ONE author ⇒ C8\'s alone — no hand-over, no note', claimHandovers([X62_HOLDER, X62_A2]) === null && X62_CODES([X62_HOLDER, X62_A2]).includes('C8') && !X62_CODES([X62_HOLDER, X62_A2]).includes('C9') && X62_NOTES([X62_HOLDER, X62_A2]).length === 0);
+  t('⭐ A, B, B′ ⇒ ONE hand-over (A→B) beside C8\'s row for B — both rows, never one sentence out of two states', X62_CHAIN([X62_HOLDER, X62_TAKER_AFTER, X62_B2]) === 'seat-holder>seat-taker!' && X62_CODES([X62_HOLDER, X62_TAKER_AFTER, X62_B2]).includes('C8') && X62_CODES([X62_HOLDER, X62_TAKER_AFTER, X62_B2]).includes('C9'));
+  t('⭐ A, B, A′ ⇒ TWO hand-overs (A→B, B→A) — the author CHANGES are what is named, ⛔ not the distinct author pairs', X62_CHAIN([X62_HOLDER, X62_TAKER_AFTER, X62_A2]) === 'seat-holder>seat-taker! seat-taker>seat-holder!');
+  t('⭐ three authors A, B, C ⇒ two hand-overs in ONE row — ⛔ never one row per hand-over', X62_CHAIN([X62_HOLDER, X62_TAKER_AFTER, X62_C]) === 'seat-holder>seat-taker! seat-taker>seat-third!' && X62_CODES([X62_HOLDER, X62_TAKER_AFTER, X62_C]).filter((c) => c === 'C9').length === 1);
+  t('…and a thread judged on ONE hand-over among several is judged — the informational ones are still listed in the same sentence', X62_CHAIN([X62_HOLDER, X62_TAKER_BEFORE, X62_C]) === 'seat-holder>seat-taker seat-taker>seat-third!' && says(X62_ROW([X62_HOLDER, X62_TAKER_BEFORE, X62_C]), '1 judged, 1 informational'));
+
+  // (f) fail closed on an unattributable row — the way `claimRetractions` does.
+  t('⭐ (f) an unattributable LATER row is never counted — ⛔ `null` is a refusal, never a wildcard', claimHandovers([X62_HOLDER, { id: 7200000030, created_at: X62_AFTER, body: X62_TAKER_AFTER.body }]) === null);
+  t('…nor an unattributable FIRST row', claimHandovers([{ id: 7200000031, created_at: X62_BEFORE, body: X62_HOLDER.body }, X62_TAKER_AFTER]) === null);
+  t('⛔ CONTROL: give that same row a login and it is named — the attribution is what was missing', X62_CHAIN([X62_HOLDER, { id: 7200000030, created_at: X62_AFTER, user: { login: 'seat-taker' }, body: X62_TAKER_AFTER.body }]) === 'seat-holder>seat-taker!');
+
+  // The unread and empty halves — ⛔ never a clean reading.
+  t('⛔ an UNREAD thread names nobody: null state, no row, no note, and the record says UNREAD', claimHandovers(null) === null && c9CrossAuthorLiveClaims({ pr: 1, card: 2, cardComments: null }) === null && c9HandoverNote({ pr: 1, card: 2, cardComments: null }) === null && says(X62_FIELD(null, 'claim.handover'), 'UNREAD'));
+  t('⛔ an EMPTY thread and a one-author thread are silent, and say the other sentence', claimHandovers([]) === null && says(X62_FIELD([], 'claim.handover'), 'none — every LIVE claim comment') && says(X62_FIELD([X62_HOLDER], 'claim.handover'), 'none — every LIVE claim comment'));
+
+  // ⭐ THE TWELVE MEASURED ROWS, replayed from the REST rows (read
+  // 2026-09-19T03:30Z through the proxy; ids, stamps, logins and the
+  // load-bearing LINES are the real ones — the claim line, its `Branch:` /
+  // `Clause-②` lines where the comment carried them, and every `Release:`
+  // line). ⚠️ Threads move: #15811 and #18373 have CLOSED since, #17852 gained
+  // a third claimant (os-elon-musk, 2026-09-18T22:04Z) — which is why the
+  // reading below carries its time and names the pair it finds TODAY.
+  const X62_LIVE = {
+    'objectstack#13503': [
+      { id: 5511498840, created_at: '2026-09-02T14:51:25Z', user: { login: 'claude[bot]' }, body: 'Claim: session `session_01WLJQhde67SeTccsmnBVarV` (domain:devx execution seat, seat post #6023) — R1 wave 8. **Measurement card — the deliverable is a classification report on this issue, not a PR.**' },
+      { id: 5511828156, created_at: '2026-09-02T15:14:17Z', user: { login: 'claude[bot]' }, body: 'Claim: session `session_01WLJQhde67SeTccsmnBVarV` (domain:devx execution seat, seat post #6023) — R1 wave 8. Measurement card, no repo change. Deliverable below.' },
+      { id: 5534928818, created_at: '2026-09-04T02:45:07Z', user: { login: 'claude[bot]' }, body: ['Claim: PM loop round R7 — **PR 1 only (the base-ref guard); the deletion is NOT dispatched**', 'Branch: `claude/issue-13503-reaper-base-ref-guard`', 'Clause-②: no (per the ruling)'].join('\n') },
+      { id: 5534987871, created_at: '2026-09-04T02:53:29Z', user: { login: 'baozhoutao' }, body: 'Claim: session `session_012zGPuVVX3deAx9LdjK8jCk` (domain:devx execution seat, os-dev subagent) — **PR 1 only: the reaper\'s base-ref guard + its self-test row.**' },
+    ],
+    'objectstack#14026': [
+      { id: 5486688759, created_at: '2026-09-01T00:26:07Z', user: { login: 'hotlong' }, body: '`Claim:` session `9474bf6f-d90c-5a21-b347-0245cc7e5487` · branch `claude/issue-14026-wizard-named-mapping`' },
+      { id: 5552047289, created_at: '2026-09-05T13:11:17Z', user: { login: 'claude[bot]' }, body: ['Claim: `domain:cli` execution seat, session `session_01ARYe3yQTQCUFm5qPYNgKaJ`', 'Branch: `claude/issue-14026-import-mapping-selector-probe`', 'Clause-②: no'].join('\n') },
+    ],
+    'objectstack#15811': [
+      { id: 5629615394, created_at: '2026-09-11T04:45:52Z', user: { login: 'os-bill' }, body: ['Claim: session_01MkQhmuuJAVDjmeWNixwDDH', 'Branch: `claude/issue-15811-evaluated-slot-census`', 'Clause-②: no'].join('\n') },
+      { id: 5712959532, created_at: '2026-09-17T10:37:05Z', user: { login: 'os-litant' }, body: ['Claim: PM loop round 3', 'Branch: `claude/issue-15811-evaluated-slot-narrowing`', 'Clause-②: no'].join('\n') },
+    ],
+    'objectstack#17852': [
+      { id: 5700342438, created_at: '2026-09-16T15:46:37Z', user: { login: 'os-warren' }, body: ['Claim: `domain:spec` execution seat, session `session_01KB5PFtxuy1x3dcR5gxudx6`, 2026-09-16T15:45Z. Assignee set in the same label write (`pm:queue` → `pm:dispatched`, read back and matched). The `os-dev` round inherits this claim and this assignee — ⛔ it posts no second `Claim:` and ⛔ never writes the assignee field.', 'Branch: `claude/issue-17852-zod-record-proto-drop`', '**Clause-②: no** — the card\'s landable half is *pinning an invariant that already holds by accident*. No key is added to a published payload and no accept set moves. ⇒ the PR body carries its own line-initial `Clause-②: no` line, because there is no carrier label to declare it. ⚠️ If the measurement shows the fix needs an accept set or a published parse contract to move, **stop and report** — this seat re-declares here, ⛔ the dev does not, and ⛔ the dev neither hangs nor strips `needs:contract-review` (that carrier is the seat\'s).'].join('\n') },
+      { id: 5700605769, created_at: '2026-09-16T16:05:46Z', user: { login: 'os-warren' }, body: '`Release:` session `session_01KB5PFtxuy1x3dcR5gxudx6` · 因 = 轮次证伪了卡片的 latent 前提,剩下的方向选择落在人工地板(契约变化 / 破坏性动作) · 去向 = 维护者决策箱。assignee 同笔清空,下一任重新认领。' },
+      { id: 5722689444, created_at: '2026-09-17T23:37:05Z', user: { login: 'os-litant' }, body: ['Claim: PM loop round 2026-09-17 R2', 'Branch: `claude/issue-17852-zod-record-proto-drop`', 'Clause-②: yes'].join('\n') },
+      { id: 5736740985, created_at: '2026-09-18T22:04:12Z', user: { login: 'os-elon-musk' }, body: ['Claim: the `domain:spec` execution seat takes this card at 2026-09-18T22:04Z under the maintainer\'s ruling **A, narrow** (batch #154 item 1, comment 5725370319, 「同意」). Both serial constraints seat 4 recorded at 5725825370 have cleared. ⛔ The ruling is implemented as written and is not re-argued; ⛔ neither 甲, nor 乙, nor this card\'s B / C / D is implemented.', 'Branch: `claude/issue-17852-record-key-preparse-guard`', 'Clause-②: yes — the ruling states it outright (「Accept set narrows for three names nobody writes ⇒ `Clause-②: yes`;spec lane at-tier review;changeset `@objectstack/spec` minor」). It is also what the maintainer\'s own take-order test returns: a document whose `fields` carry `__proto__` is ACCEPTED today and REFUSED after the fix — the same input, a different answer, in the tightening direction.'].join('\n') },
+    ],
+    'objectui#4730': [
+      { id: 5395356257, created_at: '2026-08-24T12:43:47Z', user: { login: 'yinlianghui' }, body: ['Claim: PM loop round 38', 'Branch: `claude/issue-4730-console-objectview-dead-keys`', 'Clause-②: **no** — deleting locale keys with zero readers changes no contract accept/reject behaviour and widens no public surface. It is a removal executed under a recorded maintainer ruling.'].join('\n') },
+      { id: 5451169358, created_at: '2026-08-28T10:01:53Z', user: { login: 'os-sales' }, body: 'Claim: `domain:ui` execution seat, PM session `session_01CRJge11jso9TpXRWFt1Z49`, branch `claude/issue-4730-i18n-dead-key-batch`.' },
+    ],
+    'objectui#7070': [
+      { id: 5486631561, created_at: '2026-09-01T00:18:59Z', user: { login: 'os-warren' }, body: ['Claim: PM loop round 3 (`domain:ui` seat)', 'Branch: `claude/issue-7070-gantt-fabricated-date-fields`', 'Clause-②: **no** as scoped. Removing a fabricated default narrows what the *view layer invents*, not what a published contract accepts. ⚠️ If your measurement shows the gantt renderer has no refusal path and the honest fix turns out to move a published surface, say so — the tier follows the finding.'].join('\n') },
+      { id: 5524602206, created_at: '2026-09-03T10:52:52Z', user: { login: 'claude[bot]' }, body: 'Claim: step ③ of the 2026-09-01 ruling (总监批 #28, comment 5494805467) — delete the two `created_at` floors at the plugin faces.' },
+    ],
+    'objectui#7696': [
+      { id: 5562678212, created_at: '2026-09-06T22:38:38Z', user: { login: 'os-justin' }, body: '`Claim:` session `session_01YBWFb5YgMU5dw8p2VKj16S` · branch `claude/issue-7696-analytics-local-select-dimension-i18n`' },
+      { id: 5662680923, created_at: '2026-09-14T10:40:21Z', user: { login: 'os-tesla' }, body: ['Claim: PM loop round R37', 'Branch: `claude/issue-7696-analytics-starvation-path-measurement`', 'Clause-②: no'].join('\n') },
+    ],
+    'objectui#7804': [
+      { id: 5649902688, created_at: '2026-09-13T01:17:51Z', user: { login: 'os-tesla' }, body: ['Claimed: objectstack-ai/objectui#7804 — the **`plugin-kanban`** slice, dispatched to an `os-dev` seat by the `domain:ui` PM seat (`os-tesla`) at R33.', 'Clause-②: yes'].join('\n') },
+      { id: 5650183110, created_at: '2026-09-13T02:19:14Z', user: { login: 'os-tesla' }, body: ['Claimed: objectstack-ai/objectui#7804 — the **`plugin-detail`** slice, dispatched to an `os-dev` seat by the `domain:ui` PM seat (`os-tesla`) at R34.', 'Clause-②: yes'].join('\n') },
+      { id: 5652400741, created_at: '2026-09-13T09:16:42Z', user: { login: 'os-sam' }, body: ['Claimed: objectstack-ai/objectui#7804 — the **`plugin-detail`** slice, dispatched to an `os-dev` seat by the `domain:ui` PM seat (`os-tesla`) at R34.', 'Clause-②: yes', 'Branch: `claude/issue-7804-detail-arm`'].join('\n') },
+      { id: 5672230114, created_at: '2026-09-14T23:28:09Z', user: { login: 'os-tesla' }, body: ['Claim: `domain:ui` execution seat — slice 1 of the handler-key burn-down, `DataTableSchema`', 'Branch: `claude/issue-7804-data-table-handler-keys`', 'Clause-②: yes'].join('\n') },
+      { id: 5672790801, created_at: '2026-09-15T00:26:33Z', user: { login: 'os-tesla' }, body: ['Claim: `domain:ui` execution seat — slice 2 of the handler-key burn-down, the `objectql.ts` plain-interface group', 'Branch: `claude/issue-7804-objectql-handler-keys`', 'Clause-②: yes'].join('\n') },
+      { id: 5681570956, created_at: '2026-09-15T14:07:49Z', user: { login: 'os-justin' }, body: ['Claim: PM loop round R1', 'Branch: `claude/issue-7804-listview-handler-keys-slice3`', 'Clause-②: yes — declared `yes` because this slice is **mixed-direction** and the widening half is real: the released note measures that `ListViewRuntimeProps` declares `onNavigate` and `onDensityChange` but **not** `onAddRecord` / `onBulkAction` / `onPageSizeChange`, so 「some keys want **adding** to `ListViewRuntimeProps`」 — adding a member to a published TypeScript interface **widens a declared public surface**, even though the zod-arm half (refusing keys the passthrough currently accepts and KEEPS) narrows. ⛔ The narrowing half does not cancel the widening half, and 「拿不准 ⇒ 按 `yes`」 applies to the mix. ⚠️ Per this lane\'s recorded tier ruling (`5612097546`, objectstack#17285) a `yes` here obliges the **carrier plus an in-seat review record of the required shape**, ⛔ not a contract-review-tier build'].join('\n') },
+      { id: 5683570146, created_at: '2026-09-15T16:01:31Z', user: { login: 'os-justin' }, body: 'Release: PM loop round R1' },
+      { id: 5706734325, created_at: '2026-09-17T00:50:47Z', user: { login: 'os-justin' }, body: ['Claim: PM loop round 2', 'Branch: `claude/issue-7804-handler-key-ledger-next-slice`', 'Clause-②: yes'].join('\n') },
+      { id: 5707789209, created_at: '2026-09-17T02:58:27Z', user: { login: 'os-justin' }, body: '`Release:` `session_012EpHzwH4wTy5sd7ibkD2yq` · **partial landing** — objectui#9647 (slice 4, the `TreeViewSchema` arm, merged `604476d97de7`) · remainder **stays on this card**, ⛔ no re-homing, ⛔ no `pm:retriage`.' },
+      { id: 5710581530, created_at: '2026-09-17T07:19:50Z', user: { login: 'os-justin' }, body: ['Claim: `domain:ui` execution seat, `session_012EpHzwH4wTy5sd7ibkD2yq` — **slice 6** of the handler-key burn-down: the `form.zod.ts` group. ⛔ Partial, ⛔ no closing keyword; this card stays open with the rest of its ledger.', 'Branch: `claude/issue-7804-form-handler-keys-slice6`', 'Clause-②: yes'].join('\n') },
+      { id: 5710740327, created_at: '2026-09-17T07:34:45Z', user: { login: 'os-justin' }, body: '`Release:` `session_012EpHzwH4wTy5sd7ibkD2yq` · 因 = **前提证伪(派发席的过失,非 dev 的)** · 去向 = **回 `pm:queue`,⛔ 不加 `pm:retriage`** —— 卡的路由没问题,错的是本席选的 slice。闸门 `needs:contract-review` 同笔清除:⛔ 无交付、⛔ 无复核发生、⛔ 无记录可引。' },
+    ],
+    'objectui#7848': [
+      { id: 5617516036, created_at: '2026-09-10T10:53:27Z', user: { login: 'claude[bot]' }, body: ['Claim: session `session_01FhBNJcLRZLe8M87VcUgpKr` · branch `claude/issue-7848-live-margin` · assignee `baozhoutao`', 'Clause-②: no'].join('\n') },
+      { id: 5617804323, created_at: '2026-09-10T11:16:19Z', user: { login: 'claude[bot]' }, body: '**Release:** session `session_01FhBNJcLRZLe8M87VcUgpKr` · cause **re-priced on a new measurement** (the aggregate is healthy; the tight line is now `ui-components`) · destination **the decision box**. Assignee cleared and `pm:dispatched` → `needs-user-decision` in the same write.' },
+      { id: 5638718748, created_at: '2026-09-11T18:06:36Z', user: { login: 'baozhoutao' }, body: '**Claim:** PM seat `domain:devx @ objectui`, session `session_01FhBNJcLRZLe8M87VcUgpKr`, dispatching **ruling item (1) only** to branch `claude/issue-7848-ui-components-slimming-census`.' },
+      { id: 5639098952, created_at: '2026-09-11T18:40:59Z', user: { login: 'baozhoutao' }, body: '**Claim:** PM seat `domain:devx @ objectui`, session `session_01FhBNJcLRZLe8M87VcUgpKr`, dispatching **ruling item (2)** to branch `claude/issue-7848-record-absorbed-drift`.' },
+    ],
+    'objectui#7924': [
+      { id: 5612023012, created_at: '2026-09-10T03:05:10Z', user: { login: 'os-warren' }, body: ['Claim: session `session_01Jmxdo7bmeqCQHLSfmLVX9w` (PM seat `domain:spec`, dispatching `os-dev`) · branch `claude/issue-7924-namedlistview-liveness-census`', 'Clause-②: no'].join('\n') },
+      { id: 5613413938, created_at: '2026-09-10T04:58:10Z', user: { login: 'os-warren' }, body: '`Release:` **PR #8933 MERGED** — verified on the tree by content, ⛔ not from an API field. `pm:dispatched` → **`pm:queue`**, assignee cleared. ⛔ **The card does NOT close** (`Refs`, not `Fixes`): the census is done, the **disposition is not**, and it lives on objectui#7928.' },
+      { id: 5719639605, created_at: '2026-09-17T18:55:52Z', user: { login: 'os-sales' }, body: ['Claim:', 'Branch: `claude/issue-7924-named-list-view-unread-members`', 'Clause-②: no'].join('\n') },
+    ],
+    'objectui#8115': [
+      { id: 5577907812, created_at: '2026-09-08T01:54:03Z', user: { login: 'claude[bot]' }, body: ['Claim: PM loop round R46 — `domain:devx @ objectui` execution seat.', 'Branch: `claude/issue-8115-doc-type-exemptions`'].join('\n') },
+      { id: 5594703484, created_at: '2026-09-09T02:09:54Z', user: { login: 'yinlianghui' }, body: ['Claim: PM loop round 1 (consolidated seat, maintainer-ordered takeover from `session_01FhBNJcLRZLe8M87VcUgpKr`) — ruled execution under option A, reading A₁ (answered above); start gate: the dev starts when a slot frees under the cap of 5 and after objectui#8114 is claimed ahead of it; the claim is posted now so the slot is held', 'Branch: `claude/issue-8115-doc-type-exemptions-a1`', 'Clause-②: no — a documentation gate over package READMEs; no published package surface moves (objectui `scripts/**` is not shipped)'].join('\n') },
+    ],
+    'objectui#9370': [
+      { id: 5652138683, created_at: '2026-09-13T08:11:05Z', user: { login: 'os-tesla' }, body: ['Claim: objectui#9370 — move the three published `skills/objectui` guides off the retired `data` root and the retired `bind` resolution', 'Clause-②: yes'].join('\n') },
+      { id: 5689310818, created_at: '2026-09-15T23:07:33Z', user: { login: 'os-justin' }, body: ['Claim: objectui#9370 — branch-line recovery of the standing claim (⛔ NOT a re-claim, ⛔ NOT a re-judgement)', 'Branch: `claude/issue-9370-skills-data-root`', 'Clause-②: yes'].join('\n') },
+    ],
+  };
+  const X62_TEN = ['objectstack#13503', 'objectstack#14026', 'objectstack#15811', 'objectstack#17852', 'objectui#4730', 'objectui#7070', 'objectui#7696', 'objectui#7804', 'objectui#8115', 'objectui#9370'];
+  const X62_TWO = ['objectui#7848', 'objectui#7924'];
+  t('⭐ (h) the twelve are all here, and the two lists partition them', X62_TEN.length + X62_TWO.length === 12 && [...X62_TEN, ...X62_TWO].every((k) => Array.isArray(X62_LIVE[k]) && X62_LIVE[k].length >= 2) && Object.keys(X62_LIVE).length === 12);
+  t('⭐ TEN still carry a cross-author hand-over today — every one LISTED, ⛔ none judged: all predate the instant', X62_TEN.every((k) => claimHandovers(X62_LIVE[k]) !== null && claimHandovers(X62_LIVE[k]).judged === false && X62_NOTES(X62_LIVE[k]).includes('C9-BEFORE-EFFECTIVE') && !X62_CODES(X62_LIVE[k]).includes('C9')), X62_TEN.map((k) => `${k}:${X62_CHAIN(X62_LIVE[k]) || '(none)'}`).join(' | '));
+  t('⭐ …and TWO — objectui#7848 and #7924 — clear by #18829 A ALONE: the holder\'s decorated `Release:` is now READ, one author is left, nothing is named and no seat posted anything', X62_TWO.every((k) => claimHandovers(X62_LIVE[k]) === null && X62_NOTES(X62_LIVE[k]).every((c) => c !== 'C9-BEFORE-EFFECTIVE')), X62_TWO.map((k) => `${k}:${X62_CHAIN(X62_LIVE[k]) || '(none)'}`).join(' | '));
+  t('⛔ CONTROL: drop that release row and each of the two is named again — the release is what clears it, and the raw constant refused it', X62_TWO.every((k) => { const rel = X62_LIVE[k].filter((r) => markerMatches(RELEASE_COMMENT_MARKER, r.body) && !markerMatches(CLAIM_COMMENT_MARKER, r.body)); return rel.length >= 1 && rel.every((r) => RELEASE_COMMENT_MARKER.test(r.body) === false) && claimHandovers(X62_LIVE[k].filter((r) => !rel.includes(r))) !== null; }));
+  t('⭐ #17852: os-warren\'s backticked `Release:` takes his claim out, so the hand-over named TODAY is os-litant → os-elon-musk (2026-09-18T22:04Z), ⛔ not the os-warren / os-litant pair the sweep counted', X62_CHAIN(X62_LIVE['objectstack#17852']) === 'os-litant>os-elon-musk' && says(X62_FIELD(X62_LIVE['objectstack#17852'], 'claim.rejected'), 'RETRACTED'));
+  t('⭐ objectui#9370: the second claim says 「⛔ NOT a re-claim」 in its first line and is named anyway — the reader reads order, ⛔ not intent', X62_CHAIN(X62_LIVE['objectui#9370']) === 'os-tesla>os-justin' && X62_LIVE['objectui#9370'].some((r) => r.body.includes('NOT a re-claim')));
+  t('⭐ objectui#7804: os-justin\'s two backticked releases take his claims out; what stands is os-tesla ×4 (C8) and os-sam — C8 AND a listed hand-over each way, both from one thread', X62_CHAIN(X62_LIVE['objectui#7804']) === 'os-tesla>os-sam os-sam>os-tesla' && X62_CODES(X62_LIVE['objectui#7804']).includes('C8') && claimRepeats(X62_LIVE['objectui#7804']).map((g) => g.author).join() === 'os-tesla');
+  t('⭐ objectstack#13503: three claude[bot] claims (C8) then baozhoutao — the retired identity is an author like any other here; its dead-claim `Release:` is the seat\'s act', X62_CHAIN(X62_LIVE['objectstack#13503']) === 'claude[bot]>baozhoutao' && X62_CODES(X62_LIVE['objectstack#13503']).includes('C8'));
+  t('⭐ the three rows the triage seat re-read — #15811, #17852, objectui#9370 — each read GREEN before, as a SUPERSESSION: the measurement this row answers', ['objectstack#15811', 'objectstack#17852', 'objectui#9370'].every((k) => says(X62_FIELD(X62_LIVE[k], 'claim.rejected'), 'a SUPERSEDED claim')));
+  t('⭐ every one of the ten, re-dated three days forward as if after the instant, is JUDGED — the row is reachable on the real shapes, ⛔ not only on synthetic ones', X62_TEN.every((k) => claimHandovers(X62_SHIFT(X62_LIVE[k], 3))?.judged === true && X62_CODES(X62_SHIFT(X62_LIVE[k], 3)).includes('C9')), X62_TEN.map((k) => `${k}:${X62_CHAIN(X62_SHIFT(X62_LIVE[k], 3))}`).join(' | '));
+  t('⛔ CONTROL: the shift is not vacuous — every real taking claim is dated BEFORE the instant as written', X62_TEN.every((k) => claimHandovers(X62_LIVE[k]).handovers.every((h) => h.dated === 'at-or-before')));
+  // ⭐ #18373 — the #18719 specimen under #18773 A. The prose line no longer
+  // retracts, so the thread carries two live authors, and THIS row is what
+  // keeps that visible: listed, ⛔ not silent, and cleared by the act the
+  // protocol names.
+  t('⭐ #18373 after #18773 A: two live authors — os-litant, then os-bill — LISTED by this row, so the retired channel\'s cost is visible rather than silent', X62_CHAIN(RTX_18373) === 'os-litant>os-bill' && X62_NOTES(RTX_18373).includes('C9-BEFORE-EFFECTIVE') && !X62_CODES(RTX_18373).includes('C9'));
+  t('…and the taker\'s own `Release:` (os-bill yields, 去向 让先到者) is what clears it — the same thread in the declared spelling names nobody', claimHandovers(RTX_18373_DECLARED) === null);
+
+  // ONE derivation — the row, the note and the record cannot disagree.
+  t('the hand-over field is DECLARED in the pair roster, so it renders on every block, filled or not', INPUT_RECORD_PAIR_FIELDS.includes('claim.handover'));
+  t('⭐ ONE derivation: the ids the ROW names are the ids the RECORD names', ['7200000001', '7200000002'].every((id) => says(X62_ROW([X62_HOLDER, X62_TAKER_AFTER]), id) && says(X62_FIELD([X62_HOLDER, X62_TAKER_AFTER], 'claim.handover'), id)));
+  t('⛔ the informational note is not in the FINDING family and the record carries no verdict word for it', !says(X62_FIELD([X62_HOLDER, X62_TAKER_BEFORE], 'claim.handover'), 'exit 4') && says(X62_FIELD([X62_HOLDER, X62_TAKER_BEFORE], 'claim.handover'), 'LISTED'));
+  t('⛔ C8\'s rule text still says the cross-author shape is not its state — and now names the row that reads it', CLAIM_REPEAT_RULE.includes('DIFFERENT authors are not this state') && CLAIM_REPEAT_RULE.includes('row C9'));
+  t('the row is REPORT-ONLY, in the words every row prints', says(X62_ROW([X62_HOLDER, X62_TAKER_AFTER]), NEVER_WRITES));
+
   // -- The floor: every declared battery RAN, and ran its cases (#13489) -----
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -8891,7 +9385,10 @@ export async function selfTest() {
       + 'the protocol forbids writing rather than ranked as a supersession — per direction, with a '
       + 'non-vacuity control each and the five measured instances replayed — the lane-keyed owed population, '
       + 'spec and skills owing the record on every round, other lanes owing none, a `yes` outside them routed to '
-      + 'the spec lane rather than self-reviewed — and the exit register).',
+      + 'the spec lane rather than self-reviewed — the cross-author hand-over, two seats holding live claims on '
+      + 'one card with no `Release:` between, named as the state the protocol never wrote, judged only after '
+      + 'its effective instant and LISTED before it, the twelve measured rows replayed with the two that clear '
+      + 'by the one reading alone — and the exit register).',
   );
 
   selfTestReachedVerdict = true;
