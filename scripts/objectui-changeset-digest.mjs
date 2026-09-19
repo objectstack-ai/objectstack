@@ -1762,7 +1762,9 @@ function selfTest() {
       [join(fwRun, 'scripts', 'bump-objectui.sh'), '--no-commit', head],
       {
         encoding: 'utf8',
-        env: { ...process.env, OBJECTUI_ROOT: ui },
+        // #16644: `gitFreeEnv()` as the BASE -- `bump-objectui.sh` spawns `git` one frame
+        // down against the fixture, where an inherited GIT_DIR outranks its `cwd`.
+        env: { ...gitFreeEnv(), OBJECTUI_ROOT: ui },
       },
     );
     // #5960: the pin bump is the ONLY trigger of ADR-0082 D4's declaration-parity
