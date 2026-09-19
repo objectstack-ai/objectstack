@@ -78,6 +78,7 @@ import { dirname, join } from 'node:path';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { classifyRange, clampSummary } from './objectui-changeset-digest.mjs';
+import { gitFreeEnv } from './git-env.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
 const FRAMEWORK_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -134,8 +135,12 @@ function die(msg) {
   process.exit(1);
 }
 
+// LOCAL-ONLY, every caller (#16644): `show`, `log` and `rev-parse` against the
+// repository `-C cwd` names -- the objectui checkout on a real run, a mkdtemp fixture in
+// the self-test. ⛔ Nothing here fetches, clones or pushes, so the blanket strip takes no
+// transport configuration away; an inherited GIT_DIR would otherwise outrank `-C`.
 function git(cwd, args) {
-  return execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8' }).trim();
+  return execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', env: gitFreeEnv() }).trim();
 }
 
 // Resolve the objectui SHA pinned at a given framework rev (or the working tree).
@@ -658,7 +663,9 @@ function selfTest() {
     const run = (args) =>
       execFileSync('node', [cli, ...args], {
         encoding: 'utf8',
-        env: { ...process.env, OBJECTUI_ROOT: ui },
+        // #16644: `gitFreeEnv()` as the BASE. The child re-enters this file against the
+        // fixture at `ui`; its own helper strips too, and this closes the frame above it.
+        env: { ...gitFreeEnv(), OBJECTUI_ROOT: ui },
       });
     const cliMd = run(['--from', base, '--to', head]);
     check(
