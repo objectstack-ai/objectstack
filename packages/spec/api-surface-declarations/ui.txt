@@ -132,39 +132,71 @@ interface ActionEngineFacade {
      */
     delete(object: string, idOrIds: string | string[]): Promise<void>;
     /**
-     * Read the rows of `object` that match `filter`.
+     * Read the rows of `object` that `query` selects.
      *
-     * `filter` is a FILTER — the `where` HALF of an ObjectQL query, the same
-     * {@link FilterCondition} that `QueryAST.where` carries: implicit equality
-     * `{ field: value }`, explicit operators `{ field: { $in: [...] } }`,
-     * `$and` / `$or` / `$not`. It is NOT the query ENVELOPE
-     * (`{ where, fields, orderBy, limit }`) that `DataEngine.find` and ObjectQL's
-     * own `engine.find` take — the shape this parameter's former name, `query`,
-     * invited. The runtime builds the envelope itself: `buildActionEngineFacade`'s
-     * `find` arm (`packages/runtime/src/action-execution.ts`, `:1183` on
-     * `369da918`) wraps a non-empty filter as `{ where: filter }` and passes an
-     * EMPTY filter (`{}`) through unwrapped — the unfiltered read.
+     * ## One platform, one query shape
      *
-     * Two consequences, both silent (#14175):
+     * `query` is the ENGINE's query envelope — {@link EngineQueryOptions}, the
+     * very type `IDataEngine.find` and ObjectQL's own `engine.find` take, named
+     * here by identity rather than restated. The filter goes under `where`, and
+     * the rest of the envelope (`fields`, `orderBy`, `limit`, `offset`,
+     * `expand`, `search`, …) means exactly what it means on the engine:
      *
-     * - An envelope passed here becomes `{ where: { where: … } }`. No object has
-     *   a field named `where`, so the read matches nothing and resolves to `[]`
-     *   with no error. A handler that made this mistake ran to completion over
-     *   zero rows for as long as it shipped, and its own hand-written test
-     *   double — written to the same belief, reading `query.where` — passed
-     *   every assertion.
-     * - Because `{}` skips the wrap, an unfiltered call works under EITHER
-     *   reading, so a handler mixing one unfiltered read with envelope-shaped
-     *   ones looks partially alive rather than uniformly dead.
+     * ```ts
+     * await ctx.engine.find('todo_task', { where: { status: 'completed' } });
+     * await ctx.engine.find('todo_task', { where: { status: 'open' }, fields: ['id', 'subject'], limit: 50 });
+     * await ctx.engine.find('todo_task', {});   // the unfiltered read
+     * ```
      *
-     * What the type buys, exactly: `FilterCondition` refuses a primitive and a
-     * mistyped logical operator (`$and` / `$or` not arrays, `$not` not a
-     * filter). It does NOT refuse `{ where: … }` — its string index signature is
-     * what lets any field name stand as a key, and `where` is a string — so the
-     * envelope mistake still compiles, and this doc comment, not the type, is
-     * the contract of record. Both halves are pinned in `action-params.test.ts`.
+     * ## What changed, and why it is a WITHDRAWAL rather than a narrowing
+     *
+     * Until #15124 this slot took a bare `FilterCondition` — the `where`
+     * half alone — and the runtime wrapped it. That parameter shape differed
+     * from the engine's for no reason a caller could see, and the cost was
+     * silent: an author who wrote the engine's own envelope got
+     * `{ where: { where: … } }`, which matches no row (no object has a field
+     * named `where`) and resolves to `[]` with no error. A handler that made
+     * that mistake ran to completion over zero rows for as long as it shipped,
+     * and its hand-written test double — written to the same belief — passed
+     * every assertion. `{}` skipped the wrap, so one unfiltered read kept
+     * working under either belief and a dead handler looked partially alive.
+     *
+     * #14175 declared the bare filter and pinned the gap; #15124 withdraws the
+     * shape instead. Closing the gap the other way would have had to assert a
+     * vocabulary fact the spec declares nowhere — that no object may carry a
+     * field named `where` — and that is a word taken from every customer's data
+     * model to buy one parameter's compile-time check. Aligning the parameter
+     * removes the ambiguity at its root: the most natural spelling is now the
+     * correct one, and nothing is reserved.
+     *
+     * Migration is lossless and mechanical: `find(o, f)` → `find(o, { where: f })`
+     * (ADR-0087 semantic migration `action-engine-facade-find-query-envelope`).
+     * An unfiltered `find(o, {})` is unchanged.
+     *
+     * ## What the type refuses, measured
+     *
+     * A bare filter no longer type-checks, on BOTH paths a caller can reach it
+     * by: an object literal (`{ status: 'completed' }`) fails the excess-property
+     * check, because a field name is not an envelope key; and a filter held in a
+     * variable typed `FilterCondition` fails TS2559 — `EngineQueryOptions` is a
+     * weak type, every key optional, and a filter of field names has no property
+     * in common with it. The refusal is a compile error at the call site, never a
+     * runtime surprise. The envelope's own keys are typed, so `where: 'a = b'`,
+     * `fields: 'id,subject'` and `limit: '50'` are refused too.
+     *
+     * ## `context` is the caller's to pass and NOT the caller's to choose
+     *
+     * The envelope carries `context` because every engine option bag does. This
+     * facade is TRUSTED and context-less by design (#2849, ADR-0096): the
+     * runtime stamps its own elevated `ExecutionContext` last, so a
+     * caller-supplied `context` is overridden rather than honoured. Do not write
+     * one — it reads as authorization and is none.
+     *
+     * Every clause above is pinned in `action-params.test.ts`, and the
+     * pass-through is pinned against the runtime in
+     * `packages/runtime/src/action-engine-facade-find-envelope.test.ts`.
      */
-    find(object: string, filter: FilterCondition): Promise<Array<Record<string, unknown>>>;
+    find(object: string, query: EngineQueryOptions): Promise<Array<Record<string, unknown>>>;
 }
 
 // ── ActionHandler (type) ──
@@ -2878,8 +2910,8 @@ declare const ComponentPropsMap: {
         }>>;
         type: z.ZodOptional<z.ZodNever>;
         position: z.ZodDefault<z.ZodEnum<{
-            left: "left";
             top: "top";
+            left: "left";
         }>>;
         alwaysShowStrip: z.ZodOptional<z.ZodBoolean>;
         items: z.ZodArray<z.ZodObject<{
@@ -3101,8 +3133,8 @@ declare const ComponentPropsMap: {
         sort: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodArray<z.ZodObject<{
             field: z.ZodString;
             order: z.ZodEnum<{
-                desc: "desc";
                 asc: "asc";
+                desc: "desc";
             }>;
         }, z.core.$strict>>]>>;
         limit: z.ZodDefault<z.ZodNumber>;
@@ -3251,8 +3283,8 @@ declare const ComponentPropsMap: {
             email: "email";
             system: "system";
             note: "note";
-            approval: "approval";
             sharing: "sharing";
+            approval: "approval";
             event: "event";
             comment: "comment";
             field_change: "field_change";
@@ -3309,8 +3341,8 @@ declare const ComponentPropsMap: {
                 email: "email";
                 system: "system";
                 note: "note";
-                approval: "approval";
                 sharing: "sharing";
+                approval: "approval";
                 event: "event";
                 comment: "comment";
                 field_change: "field_change";
@@ -3385,8 +3417,8 @@ declare const ComponentPropsMap: {
                 email: "email";
                 system: "system";
                 note: "note";
-                approval: "approval";
                 sharing: "sharing";
+                approval: "approval";
                 event: "event";
                 comment: "comment";
                 field_change: "field_change";
@@ -4288,8 +4320,8 @@ declare const ComponentPropsMap: {
         sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
             field: z.ZodString;
             order: z.ZodEnum<{
-                desc: "desc";
                 asc: "asc";
+                desc: "desc";
             }>;
         }, z.core.$strip>>>;
         limit: z.ZodOptional<z.ZodNumber>;
@@ -4471,8 +4503,8 @@ declare const ComponentPropsMap: {
         sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
             field: z.ZodString;
             order: z.ZodEnum<{
-                desc: "desc";
                 asc: "asc";
+                desc: "desc";
             }>;
         }, z.core.$strip>>>;
         defaultSort: z.ZodOptional<z.ZodNever>;
@@ -4717,8 +4749,8 @@ declare const ComponentPropsMap: {
         sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
             field: z.ZodString;
             order: z.ZodEnum<{
-                desc: "desc";
                 asc: "asc";
+                desc: "desc";
             }>;
         }, z.core.$strip>>>;
         data: z.ZodOptional<z.ZodArray<z.ZodUnknown>>;
@@ -4780,9 +4812,9 @@ declare const ComponentPropsMap: {
         }>>]>>;
         defaultTab: z.ZodOptional<z.ZodString>;
         tabPosition: z.ZodOptional<z.ZodEnum<{
+            top: "top";
             left: "left";
             right: "right";
-            top: "top";
             bottom: "bottom";
         }>>;
         allowSkip: z.ZodOptional<z.ZodBoolean>;
@@ -4794,9 +4826,9 @@ declare const ComponentPropsMap: {
         splitSize: z.ZodOptional<z.ZodNumber>;
         splitResizable: z.ZodOptional<z.ZodBoolean>;
         drawerSide: z.ZodOptional<z.ZodEnum<{
+            top: "top";
             left: "left";
             right: "right";
-            top: "top";
             bottom: "bottom";
         }>>;
         drawerWidth: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>;
@@ -5015,8 +5047,8 @@ declare const ComponentPropsMap: {
         sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
             field: z.ZodString;
             order: z.ZodEnum<{
-                desc: "desc";
                 asc: "asc";
+                desc: "desc";
             }>;
         }, z.core.$strip>>>;
         map: z.ZodOptional<z.ZodObject<{
@@ -5104,8 +5136,8 @@ declare const ComponentPropsMap: {
         sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
             field: z.ZodString;
             order: z.ZodEnum<{
-                desc: "desc";
                 asc: "asc";
+                desc: "desc";
             }>;
         }, z.core.$strip>>>;
         gantt: z.ZodOptional<z.ZodObject<{
@@ -7135,8 +7167,8 @@ declare const ElementRecordPickerPropsSchema: z.ZodObject<{
     sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
         field: z.ZodString;
         order: z.ZodEnum<{
-            desc: "desc";
             asc: "asc";
+            desc: "desc";
         }>;
     }, z.core.$strip>>>;
     limit: z.ZodOptional<z.ZodNumber>;
@@ -10684,8 +10716,8 @@ declare const ObjectCalendarPropsSchema: z.ZodObject<{
     sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
         field: z.ZodString;
         order: z.ZodEnum<{
-            desc: "desc";
             asc: "asc";
+            desc: "desc";
         }>;
     }, z.core.$strip>>>;
     data: z.ZodOptional<z.ZodArray<z.ZodUnknown>>;
@@ -10752,9 +10784,9 @@ declare const ObjectFormPropsSchema: z.ZodObject<{
     }>>]>>;
     defaultTab: z.ZodOptional<z.ZodString>;
     tabPosition: z.ZodOptional<z.ZodEnum<{
+        top: "top";
         left: "left";
         right: "right";
-        top: "top";
         bottom: "bottom";
     }>>;
     allowSkip: z.ZodOptional<z.ZodBoolean>;
@@ -10766,9 +10798,9 @@ declare const ObjectFormPropsSchema: z.ZodObject<{
     splitSize: z.ZodOptional<z.ZodNumber>;
     splitResizable: z.ZodOptional<z.ZodBoolean>;
     drawerSide: z.ZodOptional<z.ZodEnum<{
+        top: "top";
         left: "left";
         right: "right";
-        top: "top";
         bottom: "bottom";
     }>>;
     drawerWidth: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>;
@@ -10937,8 +10969,8 @@ declare const ObjectGanttPropsSchema: z.ZodObject<{
     sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
         field: z.ZodString;
         order: z.ZodEnum<{
-            desc: "desc";
             asc: "asc";
+            desc: "desc";
         }>;
     }, z.core.$strip>>>;
     gantt: z.ZodOptional<z.ZodObject<{
@@ -11098,8 +11130,8 @@ declare const ObjectGridPropsSchema: z.ZodObject<{
     sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
         field: z.ZodString;
         order: z.ZodEnum<{
-            desc: "desc";
             asc: "asc";
+            desc: "desc";
         }>;
     }, z.core.$strip>>>;
     defaultSort: z.ZodOptional<z.ZodNever>;
@@ -12035,8 +12067,8 @@ declare const ObjectMapPropsSchema: z.ZodObject<{
     sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
         field: z.ZodString;
         order: z.ZodEnum<{
-            desc: "desc";
             asc: "asc";
+            desc: "desc";
         }>;
     }, z.core.$strip>>>;
     map: z.ZodOptional<z.ZodObject<{
@@ -18270,8 +18302,8 @@ declare const PageTabsProps: z.ZodObject<{
     }>>;
     type: z.ZodOptional<z.ZodNever>;
     position: z.ZodDefault<z.ZodEnum<{
-        left: "left";
         top: "top";
+        left: "left";
     }>>;
     alwaysShowStrip: z.ZodOptional<z.ZodBoolean>;
     items: z.ZodArray<z.ZodObject<{
@@ -18472,8 +18504,8 @@ declare const RecordActivityProps: z.ZodObject<{
         email: "email";
         system: "system";
         note: "note";
-        approval: "approval";
         sharing: "sharing";
+        approval: "approval";
         event: "event";
         comment: "comment";
         field_change: "field_change";
@@ -18651,8 +18683,8 @@ declare const RecordChatterProps: z.ZodObject<{
             email: "email";
             system: "system";
             note: "note";
-            approval: "approval";
             sharing: "sharing";
+            approval: "approval";
             event: "event";
             comment: "comment";
             field_change: "field_change";
@@ -18940,8 +18972,8 @@ declare const RecordRelatedListProps: z.ZodObject<{
     sort: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodArray<z.ZodObject<{
         field: z.ZodString;
         order: z.ZodEnum<{
-            desc: "desc";
             asc: "asc";
+            desc: "desc";
         }>;
     }, z.core.$strict>>]>>;
     limit: z.ZodDefault<z.ZodNumber>;
@@ -27058,13 +27090,13 @@ declare const actionForm: {
     title?: string | undefined;
     description?: string | undefined;
     defaultTab?: string | undefined;
-    tabPosition?: "left" | "right" | "top" | "bottom" | undefined;
+    tabPosition?: "top" | "left" | "right" | "bottom" | undefined;
     allowSkip?: boolean | undefined;
     showStepIndicator?: boolean | undefined;
     splitDirection?: "vertical" | "horizontal" | undefined;
     splitSize?: number | undefined;
     splitResizable?: boolean | undefined;
-    drawerSide?: "left" | "right" | "top" | "bottom" | undefined;
+    drawerSide?: "top" | "left" | "right" | "bottom" | undefined;
     drawerWidth?: string | undefined;
     modalSize?: "default" | "full" | "sm" | "lg" | "xl" | undefined;
     data?: {
@@ -27258,13 +27290,13 @@ declare const appForm: {
     title?: string | undefined;
     description?: string | undefined;
     defaultTab?: string | undefined;
-    tabPosition?: "left" | "right" | "top" | "bottom" | undefined;
+    tabPosition?: "top" | "left" | "right" | "bottom" | undefined;
     allowSkip?: boolean | undefined;
     showStepIndicator?: boolean | undefined;
     splitDirection?: "vertical" | "horizontal" | undefined;
     splitSize?: number | undefined;
     splitResizable?: boolean | undefined;
-    drawerSide?: "left" | "right" | "top" | "bottom" | undefined;
+    drawerSide?: "top" | "left" | "right" | "bottom" | undefined;
     drawerWidth?: string | undefined;
     modalSize?: "default" | "full" | "sm" | "lg" | "xl" | undefined;
     data?: {
@@ -27515,13 +27547,13 @@ declare const dashboardForm: {
     title?: string | undefined;
     description?: string | undefined;
     defaultTab?: string | undefined;
-    tabPosition?: "left" | "right" | "top" | "bottom" | undefined;
+    tabPosition?: "top" | "left" | "right" | "bottom" | undefined;
     allowSkip?: boolean | undefined;
     showStepIndicator?: boolean | undefined;
     splitDirection?: "vertical" | "horizontal" | undefined;
     splitSize?: number | undefined;
     splitResizable?: boolean | undefined;
-    drawerSide?: "left" | "right" | "top" | "bottom" | undefined;
+    drawerSide?: "top" | "left" | "right" | "bottom" | undefined;
     drawerWidth?: string | undefined;
     modalSize?: "default" | "full" | "sm" | "lg" | "xl" | undefined;
     data?: {
@@ -27715,13 +27747,13 @@ declare const datasetForm: {
     title?: string | undefined;
     description?: string | undefined;
     defaultTab?: string | undefined;
-    tabPosition?: "left" | "right" | "top" | "bottom" | undefined;
+    tabPosition?: "top" | "left" | "right" | "bottom" | undefined;
     allowSkip?: boolean | undefined;
     showStepIndicator?: boolean | undefined;
     splitDirection?: "vertical" | "horizontal" | undefined;
     splitSize?: number | undefined;
     splitResizable?: boolean | undefined;
-    drawerSide?: "left" | "right" | "top" | "bottom" | undefined;
+    drawerSide?: "top" | "left" | "right" | "bottom" | undefined;
     drawerWidth?: string | undefined;
     modalSize?: "default" | "full" | "sm" | "lg" | "xl" | undefined;
     data?: {
@@ -27994,13 +28026,13 @@ declare const pageForm: {
     title?: string | undefined;
     description?: string | undefined;
     defaultTab?: string | undefined;
-    tabPosition?: "left" | "right" | "top" | "bottom" | undefined;
+    tabPosition?: "top" | "left" | "right" | "bottom" | undefined;
     allowSkip?: boolean | undefined;
     showStepIndicator?: boolean | undefined;
     splitDirection?: "vertical" | "horizontal" | undefined;
     splitSize?: number | undefined;
     splitResizable?: boolean | undefined;
-    drawerSide?: "left" | "right" | "top" | "bottom" | undefined;
+    drawerSide?: "top" | "left" | "right" | "bottom" | undefined;
     drawerWidth?: string | undefined;
     modalSize?: "default" | "full" | "sm" | "lg" | "xl" | undefined;
     data?: {
@@ -28200,13 +28232,13 @@ declare const reportForm: {
     title?: string | undefined;
     description?: string | undefined;
     defaultTab?: string | undefined;
-    tabPosition?: "left" | "right" | "top" | "bottom" | undefined;
+    tabPosition?: "top" | "left" | "right" | "bottom" | undefined;
     allowSkip?: boolean | undefined;
     showStepIndicator?: boolean | undefined;
     splitDirection?: "vertical" | "horizontal" | undefined;
     splitSize?: number | undefined;
     splitResizable?: boolean | undefined;
-    drawerSide?: "left" | "right" | "top" | "bottom" | undefined;
+    drawerSide?: "top" | "left" | "right" | "bottom" | undefined;
     drawerWidth?: string | undefined;
     modalSize?: "default" | "full" | "sm" | "lg" | "xl" | undefined;
     data?: {
@@ -28420,13 +28452,13 @@ declare const viewForm: {
     title?: string | undefined;
     description?: string | undefined;
     defaultTab?: string | undefined;
-    tabPosition?: "left" | "right" | "top" | "bottom" | undefined;
+    tabPosition?: "top" | "left" | "right" | "bottom" | undefined;
     allowSkip?: boolean | undefined;
     showStepIndicator?: boolean | undefined;
     splitDirection?: "vertical" | "horizontal" | undefined;
     splitSize?: number | undefined;
     splitResizable?: boolean | undefined;
-    drawerSide?: "left" | "right" | "top" | "bottom" | undefined;
+    drawerSide?: "top" | "left" | "right" | "bottom" | undefined;
     drawerWidth?: string | undefined;
     modalSize?: "default" | "full" | "sm" | "lg" | "xl" | undefined;
     data?: {
