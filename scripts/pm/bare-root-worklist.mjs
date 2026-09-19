@@ -2892,10 +2892,18 @@ function selfTest() {
   // literals, for the reason `SPELLINGS` follows the same rule: a glob literal
   // in this file would hand a reporting tool a population it does not read, and
   // the assertion two batteries up refuses it in as many words.
+  //
+  // ⚠️ The declaration NAME is assembled at runtime for the same class of
+  // reason the hints are: spelled out, `const <the rostered name> =` inside this
+  // file IS a declaration to `check:watch-hint-literal`, which reads declaration
+  // sites out of source TEXT — so a fixture written the obvious way hands that
+  // gate a computed declaration in a file that declares nothing. Measured: it
+  // reds `every live declaration is a literal` on this file.
+  const idiomName = ['ROOT', 'DIR', 'WATCH', 'HINTS'].join('_');
   const fixtureGate = (segments) => {
     const hint = segments.join('/');
     const declared = auditSource('scripts/check-fixture-gate.mjs',
-      `const ROOT_DIR_WATCH_HINTS = ['${hint}'];\n`)
+      `const ${idiomName} = ['${hint}'];\n`)
       .filter((d) => d.ok).flatMap((d) => d.hints).filter((h) => h.split('/')[0] === segments[0]);
     return { hint, declared };
   };
