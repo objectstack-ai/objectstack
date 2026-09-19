@@ -1091,6 +1091,8 @@ View filter rule
 | **hideFields** | `string[]` | optional | Field names to omit from the body — applied to `fields` and to every section's `fields` (used to dedupe fields already shown in `record:highlights` or as the page title) |
 | **inlineEdit** | `boolean` | optional | Allow inline field editing in the detail body (renderer default: on, where the object itself is editable — set `false` to force it off). |
 | **showHeader** | `boolean` | optional | Render the detail body's own heading (renderer default: off). |
+| **enforceFieldSecurity** | `boolean` | optional | Fold this block's field list through the caller's FIELD-read permissions before rendering, so a field the permission set denies leaves no empty row behind (renderer default: off). Presentation only: it re-applies the same field-read answer the server already enforced (ADR-0066 D3) and never widens access — with it off a denied field still arrives masked or stripped, and with it on the server still decides every value. |
+| **redactFields** | `string[]` | optional | Field names this block never renders, whatever the permission answer (renderer default: render everything authored). Presentation only, evaluated in the browser after the record is fetched — the values are still in the page, so this is NOT a data-access control and NOT the object's `publicSharing.redactFields`, which removes them server-side. To keep a value from the caller, gate the field itself (`requiredPermissions` / `maskingRule`, ADR-0066 D3) or the permission set. Neighbours `hideFields`, which is the dedupe channel the renderer also writes to. |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 ### Nested Shape: `RecordDetailsProps.sections[number]`
@@ -1159,6 +1161,8 @@ Type: `string`
 | :--- | :--- | :--- | :--- |
 | **fields** | `(string \| { name: string; label?: string; type?: string; readonly?: boolean })[]` | ✅ | Key fields to highlight (1-7 fields max, typically displayed as prominent cards). Each item may be a bare field name or `{name, label?, type?, readonly?}` for inline overrides. |
 | **layout** | `Enum<'horizontal' \| 'vertical'>` | optional (default: `"horizontal"`) | Layout orientation for highlight fields |
+| **enforceFieldSecurity** | `boolean` | optional | Fold this block's highlight chips through the caller's FIELD-read permissions before rendering, so a field the permission set denies leaves no empty chip behind (renderer default: off). Presentation only: it re-applies the same field-read answer the server already enforced (ADR-0066 D3) and never widens access — the record is fetched either way and the server still decides every value. |
+| **redactFields** | `string[]` | optional | Field names this block never renders as a chip, whatever the permission answer (renderer default: render every field authored). Presentation only, evaluated in the browser after the record is fetched — the values are still in the page, so this is NOT a data-access control and NOT the object's `publicSharing.redactFields`, which removes them server-side. To keep a value from the caller, gate the field itself (`requiredPermissions` / `maskingRule`, ADR-0066 D3) or the permission set. |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 ### Nested Shape: `RecordHighlightsProps.fields[number]`
@@ -1279,6 +1283,8 @@ Type: `string`
 | **showViewAll** | `boolean` | optional (default: `true`) | Show "View All" link to see all related records |
 | **actions** | `string[]` | optional | Action IDs available for related records |
 | **add** | `{ picker: object; linkField?: string; label?: string \| Record<string, string> }` | optional | Add-existing-via-picker config (generic m2m/junction assignment). |
+| **enforceFieldSecurity** | `boolean` | optional | Fold this list's `columns` through the caller's FIELD-read permissions on the RELATED object before rendering (renderer default: off). Presentation only: it re-applies the same field-read answer the server already enforced (ADR-0066 D3) and never widens access — the rows are fetched either way and the server still decides every value. |
+| **redactFields** | `string[]` | optional | Field names this list never renders, whatever the permission answer (renderer default: render every column authored or derived). Applies to the authored `columns` AND to the columns the list derives for itself when none are authored. Presentation only, evaluated in the browser after the rows are fetched — the values are still in the page, so this is NOT a data-access control and NOT the object's `publicSharing.redactFields`, which removes them server-side. To keep a value from the caller, gate the field itself (`requiredPermissions` / `maskingRule`, ADR-0066 D3) or the permission set. |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 ### Nested Shape: `RecordRelatedListProps.filter[number]`

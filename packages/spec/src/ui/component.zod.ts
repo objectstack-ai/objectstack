@@ -1069,6 +1069,55 @@ export const RecordDetailsProps = strictObject({
   showHeader: z.boolean().optional().describe(
     'Render the detail body\'s own heading (renderer default: off).',
   ),
+  /**
+   * ── The record-block field-security pair (#18159, spec half of
+   * objectui#8649). Declared on `record:details`, `record:highlights` and
+   * `record:related_list`; this is the family header the other two point at.
+   *
+   * WHAT THEY ARE. Two filters over the field list THIS BLOCK draws, applied
+   * in the browser after the record has been fetched.
+   * `RecordDetailsRenderer` folds both through one `filterList` pass:
+   * `enforceFieldSecurity` re-applies the caller's FIELD-read answer — the
+   * platform's own `checkField`, resolved server-side and handed down, never a
+   * second opinion — and `redactFields` drops the names it lists outright. An
+   * entry the fold cannot NAME is dropped too (objectui#9054), so the pair
+   * fails closed on input it does not understand.
+   *
+   * WHAT THEY ARE NOT. A data-access control. The record is fetched whole, so
+   * a filtered value is in the page either way and neither key keeps it from a
+   * caller who reads the response. The gates that do are the field's own
+   * `requiredPermissions` / `maskingRule` (ADR-0066 D3) and the permission
+   * set — the server applies those before the payload leaves it. Prime
+   * Directive #10 is why each `describe()` below says that in the text an
+   * author actually reads, rather than leaving the key names to imply it.
+   *
+   * ⚠️ `redactFields` NEIGHBOURS `hideFields` on this block and the two are
+   * not the same channel: `hideFields` is the DEDUPE list (the renderer merges
+   * the live `record:highlights` registrations and the page-title field into
+   * it), while `redactFields` is the author's deliberate omission and is the
+   * arm that participates in the fail-closed fold above. On a well-formed
+   * field list they remove the same rows. Converging them is a contract
+   * question this card did not open.
+   *
+   * ⚠️ The THIRD key objectui reads on these three blocks —
+   * `requiredPermissions` — is deliberately NOT declared here. Its read is
+   * `perms.can(objectName, name)`, whose second parameter is the closed
+   * `PermissionActionSchema` enum (`create`/`read`/…/`admin`), not the
+   * ADR-0066 capability set every other `requiredPermissions` in this spec
+   * names. Measured: under the backend-backed provider an unmapped name falls
+   * to the object's `allowRead` bit, so a capability nobody holds passes for
+   * every reader; under the role-based provider the same name is denied for
+   * everyone whenever the object carries a permission config. Declaring it
+   * would mint the ADR-0049 fail-open access gate this repo retired on
+   * `app.areas[].requiredPermissions` in 17.0.0. The exit is the spec seat's
+   * to rule.
+   */
+  enforceFieldSecurity: z.boolean().optional().describe(
+    'Fold this block\'s field list through the caller\'s FIELD-read permissions before rendering, so a field the permission set denies leaves no empty row behind (renderer default: off). Presentation only: it re-applies the same field-read answer the server already enforced (ADR-0066 D3) and never widens access — with it off a denied field still arrives masked or stripped, and with it on the server still decides every value.',
+  ),
+  redactFields: z.array(z.string()).optional().describe(
+    'Field names this block never renders, whatever the permission answer (renderer default: render everything authored). Presentation only, evaluated in the browser after the record is fetched — the values are still in the page, so this is NOT a data-access control and NOT the object\'s `publicSharing.redactFields`, which removes them server-side. To keep a value from the caller, gate the field itself (`requiredPermissions` / `maskingRule`, ADR-0066 D3) or the permission set. Neighbours `hideFields`, which is the dedupe channel the renderer also writes to.',
+  ),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 });
@@ -1162,6 +1211,26 @@ export const RecordRelatedListProps = strictObject({
     linkField: z.string().optional().describe('Field on `objectName` that stores the picked record id (junction case). Omit for a 1:m re-parent.'),
     label: I18nLabelSchema.optional().describe('Label for the Add button (default "Add").'),
   }).optional().describe('Add-existing-via-picker config (generic m2m/junction assignment).'),
+  /**
+   * The record-block field-security pair — see the family header on
+   * `RecordDetailsProps` for what the two keys are, what they are not, and why
+   * the third key objectui reads on this block is not declared.
+   *
+   * On THIS block the pair folds `columns` rather than a field list, and
+   * `redactFields` is additionally handed down to `RelatedList` itself: the
+   * component derives its own columns when none are authored, so filtering the
+   * authored array alone let a redacted field return through the derivation
+   * (objectui#9053). The fold fails closed on a column it cannot name
+   * (objectui#8793) — the table library's own `accessorKey` spelling is not an
+   * identity this fold accepts, and an entry it cannot check is one it must
+   * not pass.
+   */
+  enforceFieldSecurity: z.boolean().optional().describe(
+    'Fold this list\'s `columns` through the caller\'s FIELD-read permissions on the RELATED object before rendering (renderer default: off). Presentation only: it re-applies the same field-read answer the server already enforced (ADR-0066 D3) and never widens access — the rows are fetched either way and the server still decides every value.',
+  ),
+  redactFields: z.array(z.string()).optional().describe(
+    'Field names this list never renders, whatever the permission answer (renderer default: render every column authored or derived). Applies to the authored `columns` AND to the columns the list derives for itself when none are authored. Presentation only, evaluated in the browser after the rows are fetched — the values are still in the page, so this is NOT a data-access control and NOT the object\'s `publicSharing.redactFields`, which removes them server-side. To keep a value from the caller, gate the field itself (`requiredPermissions` / `maskingRule`, ADR-0066 D3) or the permission set.',
+  ),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 });
@@ -1243,6 +1312,24 @@ export const RecordHighlightsProps = strictObject({
 }, {
   fields: z.array(RecordHighlightsField).min(1).max(7).describe('Key fields to highlight (1-7 fields max, typically displayed as prominent cards). Each item may be a bare field name or {name, label?, type?, readonly?} for inline overrides.'),
   layout: z.enum(['horizontal', 'vertical']).default('horizontal').describe('Layout orientation for highlight fields'),
+  /**
+   * The record-block field-security pair — see the family header on
+   * `RecordDetailsProps` for what the two keys are, what they are not, and why
+   * the third key objectui reads on this block is not declared.
+   *
+   * On THIS block the pair folds the normalized `fields` chips. The renderer
+   * expresses the fail-closed arm by dropping unnameable entries BEFORE the
+   * allow-list rather than inside the filter — the same semantics as
+   * `record:details`, not a third policy. A chip dropped here is also dropped
+   * from the `HighlightFieldsContext` registration, so `record:details` does
+   * not go on hiding a body row for a highlight this block never drew.
+   */
+  enforceFieldSecurity: z.boolean().optional().describe(
+    'Fold this block\'s highlight chips through the caller\'s FIELD-read permissions before rendering, so a field the permission set denies leaves no empty chip behind (renderer default: off). Presentation only: it re-applies the same field-read answer the server already enforced (ADR-0066 D3) and never widens access — the record is fetched either way and the server still decides every value.',
+  ),
+  redactFields: z.array(z.string()).optional().describe(
+    'Field names this block never renders as a chip, whatever the permission answer (renderer default: render every field authored). Presentation only, evaluated in the browser after the record is fetched — the values are still in the page, so this is NOT a data-access control and NOT the object\'s `publicSharing.redactFields`, which removes them server-side. To keep a value from the caller, gate the field itself (`requiredPermissions` / `maskingRule`, ADR-0066 D3) or the permission set.',
+  ),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 });

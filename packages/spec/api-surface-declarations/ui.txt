@@ -3073,6 +3073,8 @@ declare const ComponentPropsMap: {
         hideFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
         inlineEdit: z.ZodOptional<z.ZodBoolean>;
         showHeader: z.ZodOptional<z.ZodBoolean>;
+        enforceFieldSecurity: z.ZodOptional<z.ZodBoolean>;
+        redactFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
         aria: z.ZodOptional<z.ZodObject<{
             ariaLabel: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
                 key?: never;
@@ -3192,6 +3194,8 @@ declare const ComponentPropsMap: {
                 defaultValue?: never;
             }>>]>>;
         }, z.core.$strict>>;
+        enforceFieldSecurity: z.ZodOptional<z.ZodBoolean>;
+        redactFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
         aria: z.ZodOptional<z.ZodObject<{
             ariaLabel: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
                 key?: never;
@@ -3221,6 +3225,8 @@ declare const ComponentPropsMap: {
             vertical: "vertical";
             horizontal: "horizontal";
         }>>;
+        enforceFieldSecurity: z.ZodOptional<z.ZodBoolean>;
+        redactFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
         aria: z.ZodOptional<z.ZodObject<{
             ariaLabel: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
                 key?: never;
@@ -18753,6 +18759,8 @@ declare const RecordDetailsProps: z.ZodObject<{
     hideFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
     inlineEdit: z.ZodOptional<z.ZodBoolean>;
     showHeader: z.ZodOptional<z.ZodBoolean>;
+    enforceFieldSecurity: z.ZodOptional<z.ZodBoolean>;
+    redactFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
     aria: z.ZodOptional<z.ZodObject<{
         ariaLabel: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
             key?: never;
@@ -18795,6 +18803,8 @@ declare const RecordHighlightsProps: z.ZodObject<{
         vertical: "vertical";
         horizontal: "horizontal";
     }>>;
+    enforceFieldSecurity: z.ZodOptional<z.ZodBoolean>;
+    redactFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
     aria: z.ZodOptional<z.ZodObject<{
         ariaLabel: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
             key?: never;
@@ -19023,6 +19033,8 @@ declare const RecordRelatedListProps: z.ZodObject<{
             defaultValue?: never;
         }>>]>>;
     }, z.core.$strict>>;
+    enforceFieldSecurity: z.ZodOptional<z.ZodBoolean>;
+    redactFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
     aria: z.ZodOptional<z.ZodObject<{
         ariaLabel: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
             key?: never;
