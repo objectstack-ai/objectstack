@@ -102,6 +102,38 @@ export const fieldForm = defineForm({
           { label: 'Cascade (delete children)', value: 'cascade' },
           { label: 'Restrict (block the delete)', value: 'restrict' },
         ] },
+        // #19085 — `relatedListFilter` gets the row its declaration always
+        // implied. The served schema DECLARED the key and no form offered it,
+        // so an author's only door was the Source tab's free-text JSON, where
+        // nothing validates the sibling key they invent until the runtime
+        // refuses it.
+        //
+        // The face is `filter-condition`, ⛔ NOT `filter-builder`: the two
+        // widgets speak different wires. `filter-builder` consumes a rule
+        // ARRAY (what `view.filter`, `dataset.filter` and `page.filterBy`
+        // store); this key is a canonical Query-DSL `FilterCondition` — an
+        // object keyed by field, with `$and`/`$or`/`$not`. Routing it to the
+        // array widget would write metadata the runtime refuses, which is the
+        // authoring trap this row exists to close, re-created one layer up.
+        // `filter-condition` is the widget whose storage contract IS that
+        // object shape, and this file already uses it one section down for
+        // `summaryOperations.filter`, the sibling FilterConditionSchema key.
+        //
+        // An explicit widget is the only face that can work here: the served
+        // node is `{ $ref: '#/$defs/…' }` onto the recursive FilterCondition,
+        // whose derivation is `allOf: [open record, { $and/$or/$not }]` with
+        // NO top-level `type`, so the generic renderer has nothing to derive a
+        // control from (objectui#9912 measured the same for 12 of the 14
+        // served pointer rows).
+        //
+        // `visibleWhen` mirrors the key's own contract text — "it is
+        // meaningful on a child's `master_detail`/`lookup` field" — and the
+        // `reference` row above. The schema accepts the key on every type, so
+        // this is a MEANINGFULNESS gate, not a parse gate: on a non-reference
+        // field the related-list derivation never reads it, and offering a
+        // knob the runtime does not deliver is what Prime Directive #10
+        // forbids.
+        { field: 'relatedListFilter', widget: 'filter-condition', visibleWhen: "data.type in ['lookup','master_detail']", helpText: "Default filter for this relationship's related list on the parent's detail page — AND-composed with the parent-record match, and the tab badge counts the same set" },
       ],
     },
     {
