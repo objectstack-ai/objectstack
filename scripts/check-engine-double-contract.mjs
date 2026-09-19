@@ -323,6 +323,7 @@ import { fileURLToPath } from 'node:url';
 import { requireDefaultExport } from './import-prerequisite.mjs';
 const ts = await requireDefaultExport('typescript', () => import('typescript'), import.meta.url);
 import { parseSourceFile } from './ts-parse.mjs';
+import { definePopulationFloor } from './population-floor.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BASELINE_PATH = join(ROOT, 'scripts', 'engine-double-contract.baseline.json');
@@ -3069,59 +3070,53 @@ const MIN_DISCOVERED_FILES = 700;
 const MIN_PINNED_ROWS = 600;
 
 /**
- * The first floor a run falls below, as a refusal message -- or `null` when
- * every count clears. Pure, so `--self-test` drives every row with no tree.
+ * The POPULATION FLOORS and the provenance line, over the row table THIS gate
+ * declares. The row-walk, the refusal wording and the provenance formatting are
+ * shared with the two other gates that carry the same mechanism
+ * (`scripts/population-floor.mjs`); the rows stay HERE, because each `why` is a
+ * claim about this gate's internals and is true of nothing else.
  *
  * ⛔ Each `why` names ONLY the stage its own count measures. A row that fell
  * says which walk or which reader went quiet and nothing else: the other three
  * stages are reported by their own rows, and blaming them here would put causes
  * that did not occur in front of the reader.
  *
- * @param {{testFiles?: number, productionFiles?: number, discoveredFiles?: number, pinnedRows?: number}} counts
- * @returns {string | null}
- *
  * ⛔ NOT exported, deliberately. `check:entry-guard` refuses a `scripts/**` file
  * that exports a binding AND runs on import -- whatever its top level does then
  * runs inside the importer -- and this file's top level IS its dispatch. The
- * self-test lives in this same module and reaches it directly, so an export
- * would buy nothing and cost that rule. (The precedent this shape is copied
- * from, `check-dual-build-cjs-loads.mjs`, exports because it already guards its
- * dispatch with `isEntrypoint`; retrofitting that here is a change to two large
- * gates' argv handling and not this card's subject.)
+ * self-test lives in this same module and reaches these directly, so an export
+ * would buy nothing and cost that rule. The shared module is the other half of
+ * the same rule: it only ever exports and never runs, so importing it costs
+ * this file nothing.
+ *
+ * @type {{populationFloorProblem: (counts?: object) => string | null,
+ *         populationProvenanceLine: (counts?: object) => string}}
  */
-function populationFloorProblem(counts) {
-  const rows = [
-    [counts?.testFiles ?? 0, MIN_TEST_FILES, MEASURED_POPULATION.testFiles,
-      'test file(s) offered by the discovery walk',
-      'This is the population all three slices iterate. `walk()` swallows a readdir failure and '
+const { populationFloorProblem, populationProvenanceLine } = definePopulationFloor({
+  ref: MEASURED_POPULATION.ref,
+  rows: [
+    { key: 'testFiles', min: MIN_TEST_FILES, measured: MEASURED_POPULATION.testFiles,
+      what: 'test file(s) offered by the discovery walk',
+      why: 'This is the population all three slices iterate. `walk()` swallows a readdir failure and '
         + 'returns what it has, so a scan root that stopped being readable narrows this set in '
-        + 'silence and every verdict below becomes a statement about the remainder.'],
-    [counts?.productionFiles ?? 0, MIN_PRODUCTION_FILES, MEASURED_POPULATION.productionFiles,
-      'non-test source file(s) offered by the seam walk',
-      'This is the population the consumer-seam scan iterates, and it is a SEPARATE walk with a '
+        + 'silence and every verdict below becomes a statement about the remainder.' },
+    { key: 'productionFiles', min: MIN_PRODUCTION_FILES, measured: MEASURED_POPULATION.productionFiles,
+      what: 'non-test source file(s) offered by the seam walk',
+      why: 'This is the population the consumer-seam scan iterates, and it is a SEPARATE walk with a '
         + 'separate filter -- REFUSES and SEAMS_RETAINED are statements about whatever it hands '
-        + 'over. SEAMS_DISCOVERED only sees this reach zero.'],
-    [counts?.discoveredFiles ?? 0, MIN_DISCOVERED_FILES, MEASURED_POPULATION.discoveredFiles,
-      '(file, verb) pair(s) in which a double was discovered',
-      'The walk offered files and the pre-filter or the parser read almost nothing in them. '
+        + 'over. SEAMS_DISCOVERED only sees this reach zero.' },
+    { key: 'discoveredFiles', min: MIN_DISCOVERED_FILES, measured: MEASURED_POPULATION.discoveredFiles,
+      what: '(file, verb) pair(s) in which a double was discovered',
+      why: 'The walk offered files and the pre-filter or the parser read almost nothing in them. '
         + 'DISCOVERED only fires when a slice finds zero, so a reader that went quiet on most of '
-        + 'the tree while still answering somewhere passes it.'],
-    [counts?.pinnedRows ?? 0, MIN_PINNED_ROWS, MEASURED_POPULATION.pinnedRows,
-      'pinned (file, verb) row(s) in the RETAINED census',
-      'Doubles were discovered and almost none of them read as pinned. That is guard recognition '
+        + 'the tree while still answering somewhere passes it.' },
+    { key: 'pinnedRows', min: MIN_PINNED_ROWS, measured: MEASURED_POPULATION.pinnedRows,
+      what: 'pinned (file, verb) row(s) in the RETAINED census',
+      why: 'Doubles were discovered and almost none of them read as pinned. That is guard recognition '
         + 'going quiet rather than the tree getting worse -- and it is the count `--write` '
-        + 'rewrites the RETAINED ledger down to, so the ledger cannot report it.'],
-  ];
-  for (const [got, min, measured, what, why] of rows) {
-    if (got >= min) continue;
-    return `measured only ${got} ${what}, below the floor of ${min} `
-      + `(${measured} on ${MEASURED_POPULATION.ref}).\n`
-      + `  ${why}\n`
-      + '  ⛔ NOT a pass: nothing, or nearly nothing, was read. This says WHICH population fell and\n'
-      + '  nothing about why the others stand — they are reported by their own rows.';
-  }
-  return null;
-}
+        + 'rewrites the RETAINED ledger down to, so the ledger cannot report it.' },
+  ],
+});
 
 /**
  * Refuse a run whose population fell below a floor -- the ONE place this file
@@ -3160,43 +3155,6 @@ function refusePopulationFloor(population, what) {
   if (problem === null) return;
   console.error(`check-engine-double-contract REFUSES — ${problem}\n  ${what}`);
   process.exit(EXIT_POPULATION_REFUSED);
-}
-
-/**
- * The provenance footer for a PASSING run: what this run read, the floors it
- * cleared, and the census those floors were derived from, side by side.
- *
- * The floors are inequalities on purpose, so no run can contradict the record.
- * Without this line the record could stop describing the tree with nothing
- * anywhere saying so, and every green log would look identical either way. The
- * delta is INFORMATION, never a verdict: this population moves in both
- * directions for good reasons -- a package leaving the workspace, a fake engine
- * replaced by a real one -- and only the floors decide. Pure.
- *
- * @param {{testFiles?: number, productionFiles?: number, discoveredFiles?: number, pinnedRows?: number}} counts
- * @returns {string}
- *
- * ⛔ NOT exported, deliberately. `check:entry-guard` refuses a `scripts/**` file
- * that exports a binding AND runs on import -- whatever its top level does then
- * runs inside the importer -- and this file's top level IS its dispatch. The
- * self-test lives in this same module and reaches it directly, so an export
- * would buy nothing and cost that rule. (The precedent this shape is copied
- * from, `check-dual-build-cjs-loads.mjs`, exports because it already guards its
- * dispatch with `isEntrypoint`; retrofitting that here is a change to two large
- * gates' argv handling and not this card's subject.)
- */
-function populationProvenanceLine(counts) {
-  const got = [counts?.testFiles ?? 0, counts?.productionFiles ?? 0,
-    counts?.discoveredFiles ?? 0, counts?.pinnedRows ?? 0];
-  const rec = [MEASURED_POPULATION.testFiles, MEASURED_POPULATION.productionFiles,
-    MEASURED_POPULATION.discoveredFiles, MEASURED_POPULATION.pinnedRows];
-  const floors = [MIN_TEST_FILES, MIN_PRODUCTION_FILES, MIN_DISCOVERED_FILES, MIN_PINNED_ROWS];
-  const delta = got.map((g, i) => (g === rec[i] ? '=' : `${g > rec[i] ? '+' : ''}${g - rec[i]}`));
-  return `  provenance — testFiles/productionFiles/discoveredFiles/pinnedRows: this run ${got.join('/')}`
-    + ` · floors ${floors.join('/')} · derived from ${rec.join('/')} measured on ${MEASURED_POPULATION.ref}`
-    + ` (${delta.join('/')} vs the record).\n`
-    + '  ⚠ The delta is information, not a verdict — this population grows AND shrinks for good'
-    + ' reasons, and only the floors decide.';
 }
 
 function audit() {
