@@ -1867,11 +1867,12 @@ const CORPUS = defineCorpus({
 //   string-substring   the symbol survives only INSIDE a longer string token:
 //                      `saveItem` in `client: 'meta.saveItem'`, `:shareId` in a
 //                      route pattern, a name inside an `it(...)` title or a
-//                      `.describe(...)` sentence. 21 rows, the largest class.
+//                      `.describe(...)` sentence. 12 rows, still the largest
+//                      class.
 //   import-only        the cited file IMPORTS the symbol; the declaration is in
-//                      another file. 8 rows.
+//                      another file. 6 rows.
 //   member-access      the symbol survives only as `x.symbol` on some other
-//                      object — `manifest.objectExtensions`. 3 rows.
+//                      object — `manifest.objectExtensions`. 2 rows.
 //   json-value-not-key the `.json` target carries the symbol as a VALUE; the
 //                      shared rule reads JSON KEYS. 3 rows.
 //   regex-literal      the symbol survives only inside a regex literal. 1 row.
@@ -1881,8 +1882,22 @@ const CORPUS = defineCorpus({
 //                      truncated an item-id reference at its first hyphen and
 //                      produced a phantom `#access`, which the permissive rule
 //                      then resolved against the spelling `access-security`.
-//                      1 row — the sharpest single illustration of what a
-//                      looser second resolver buys.
+//                      the sharpest single illustration of what a looser second
+//                      resolver buys. 0 rows — DRAINED by the second slice, and
+//                      the reading is kept because the shape is not: its one row
+//                      was `bad-citation` BY VERDICT, and `shape` only ever said
+//                      why the withdrawn rule used to resolve it. ⚠️ A reader who
+//                      takes the shape for the disposition is sent at the
+//                      DETECTOR, which since #18107 is `scripts/symbol-anchors.mjs`
+//                      — the file this card forbids by name. Repaired
+//                      citation-side like the other twelve: the truncation was
+//                      not even happening any more — the citation's fragment
+//                      was followed by a SPACE — so the symbol it named was
+//                      simply a key `areas/access-security.json` does not
+//                      declare. ⚠️ That fragment is spelled in WORDS here and
+//                      not in a code span: a lone fragment span is a
+//                      CONTINUATION anchor, so writing it would file this
+//                      comment as the citation the row was.
 //
 // ⭐ THE DRAIN (#18104). The `bad-citation` half is a population with an owner,
 // and it leaves this ledger ONE WAY: the citation is re-pointed at what the
@@ -1900,11 +1915,18 @@ const CORPUS = defineCorpus({
 // `areas/api-backend.json` and `areas/automation.json` — 9 rows, all of them
 // citations naming a route table's client-method names or route path
 // parameters where the declaration the item means is the ledger export itself.
+// Second slice landed (#18104): `areas/identity-auth.json` — 13 rows, the
+// largest single-file block, the same reading applied plus three of its own: an
+// import-only persona whose constant had MOVED to another file (the path was
+// re-pointed, not the symbol), a `.json` cross-area citation re-pointed at the
+// `items` block it means, and the `detector-artifact` row above. ⚠️ That file
+// still carries its 2 `accept-set` rows and that is CORRECT, not half-done:
+// they are #18101's, and reaching them means widening the shared core.
 //
 // `verdict` is the classification #16898's acceptance asks for, and there are
 // exactly two:
 //
-//   bad-citation  (38 rows) the anchor names a symbol the cited file does not
+//   bad-citation  (25 rows) the anchor names a symbol the cited file does not
 //                 declare. The repair is in the LEDGER: re-point the anchor at
 //                 what the file carries, or drop to a bare citation. ⚠️ Dropping
 //                 costs the file an anchor and most floors have no headroom, so
@@ -1930,19 +1952,6 @@ const SHARED_RESOLVER_RESIDUAL = Object.freeze([
   { doc: 'areas/cli.json', anchor: 'packages/verify/src/verify.ts#VALIDATION_FAILED', shape: 'regex-literal', verdict: 'bad-citation' },
   { doc: 'areas/dashboards.json', anchor: 'examples/app-showcase/src/data/seed/index.ts#sales_region', shape: 'inline-key', verdict: 'accept-set' },
   { doc: 'areas/dashboards.json', anchor: 'examples/app-showcase/src/data/seed/index.ts#signed_on', shape: 'inline-key', verdict: 'accept-set' },
-  { doc: 'areas/identity-auth.json', anchor: 'docs/qa/platform-checklist/areas/access-security.json#access', shape: 'detector-artifact', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'examples/app-showcase/src/security/seed-approval-demo.ts#PHONE_DEMO_USER', shape: 'import-only', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/platform-objects/src/identity/sys-member.object.ts#BUILTIN_MEMBERSHIP_ROLE_OPTIONS', shape: 'import-only', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/platform-objects/src/identity/sys-oauth-application.object.ts#OAuth', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/plugins/plugin-auth/src/auth-route-ledger.ts#bootstrapStatus', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/plugins/plugin-auth/src/auth-route-ledger.ts#linkSocial', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/plugins/plugin-auth/src/auth-route-ledger.ts#revokeOthers', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/plugins/plugin-auth/src/auth-route-ledger.ts#sendVerificationEmail', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/plugins/plugin-auth/src/auth-route-ledger.ts#setActive', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/plugins/plugin-auth/src/auth-route-ledger.ts#updateUser', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/plugins/plugin-security/src/security-plugin.ts#__referentialFieldClear', shape: 'member-access', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/qa/dogfood/test/membership-role-vocabulary.dogfood.test.ts#PermissionSet', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/rest/src/rest-route-ledger.ts#describeDelegableScope', shape: 'string-substring', verdict: 'bad-citation' },
   { doc: 'areas/identity-auth.json', anchor: 'packages/spec/src/kernel/public-auth-features.ts#sys_invitation', shape: 'dotted-string-head', verdict: 'accept-set' },
   { doc: 'areas/identity-auth.json', anchor: 'packages/spec/src/kernel/public-auth-features.ts#sys_user', shape: 'dotted-string-head', verdict: 'accept-set' },
   { doc: 'areas/integration-system.json', anchor: 'examples/app-showcase/objectstack.config.ts#declarativeStdio', shape: 'inline-key', verdict: 'accept-set' },
@@ -1971,7 +1980,7 @@ const SHARED_RESOLVER_RESIDUAL = Object.freeze([
 // fail), so this is the belt on the braces: a silent append — the one edit that
 // would turn a closed ledger back into a permissive rule, one row at a time —
 // refuses here rather than validating.
-const SHARED_RESOLVER_RESIDUAL_CEILING = 46;
+const SHARED_RESOLVER_RESIDUAL_CEILING = 33;
 
 const residualKey = (doc, anchor) => `${doc}::${anchor}`;
 const SHARED_RESOLVER_RESIDUAL_INDEX = new Map(
