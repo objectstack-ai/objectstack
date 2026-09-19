@@ -56,7 +56,7 @@ import type {
 // fields the caller had already supplied.
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
-import { isFileIdToken } from '@objectstack/spec/data';
+import { isFileIdToken, referenceCarrierOf } from '@objectstack/spec/data';
 // [#11993] The SANCTIONED renderer for OPERATION-level refusal copy. The
 // Operation Message Catalog is the ONE seat for these sentences — its own
 // header bars both a package-local string table and a second rendering
@@ -5769,9 +5769,37 @@ export class ApprovalService implements IApprovalService {
       const fields = schema?.fields ?? {};
       const out: Array<{ key: string; reference: string }> = [];
       for (const [key, f] of Object.entries<any>(fields)) {
-        if ((f?.type === 'lookup' || f?.type === 'master_detail' || f?.type === 'user') && f?.reference) {
-          out.push({ key, reference: String(f.reference) });
+        if (f?.type !== 'lookup' && f?.type !== 'master_detail' && f?.type !== 'user') continue;
+        // The carrier is read through the ONE arbiter instead of a truthiness
+        // gate. `String()` on an object-valued `reference` produced the literal
+        // target name `'[object Object]'`, and the sole consumer below hands
+        // `reference` straight to `engine.find(<object name>)` — so an
+        // unreadable carrier became a query for an object that can never exist,
+        // swallowed by that consumer's own `catch`. Absence is the contract's
+        // answer (`FieldSchema.reference` is an optional STRING) and is what
+        // this now yields.
+        //
+        // The throw is caught PER FIELD, which is the deliberate difference
+        // between this reader and the cascade seams in `@objectstack/objectql`
+        // that let `referenceCarrierOf` propagate: those assert something
+        // positive about the schema on a write path, while this is a
+        // best-effort display enrichment whose outer `catch` returns `[]` —
+        // letting the throw reach it would drop EVERY lookup field of the
+        // object over one unreadable carrier. The entry is dropped rather than
+        // pushed with `reference` absent because the consumer uses `reference`
+        // as the object name argument and has nothing to do with an entry that
+        // carries none.
+        let reference: string | undefined;
+        try {
+          reference = referenceCarrierOf(f, 'ApprovalService.resolveLookupFields');
+        } catch (err: any) {
+          this.logger?.warn?.(
+            `[approvals] lookup field "${object}.${key}" left out of inbox display enrichment: `
+            + `${err?.message ?? err}`,
+          );
+          continue;
         }
+        if (reference) out.push({ key, reference });
       }
       return out;
     } catch { return []; }
