@@ -34,7 +34,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           login: "Inicio de sesión",
           logout: "Cierre de sesión",
           config_change: "Cambio de configuración",
-          import: "Importar"
+          import: "Importar",
+          platform_admin_standing_change: "Cambio de acceso de administrador de plataforma"
         }
       },
       user_id: {

@@ -79,6 +79,11 @@ const ACTIONS_WITH_WRITERS: ReadonlyArray<readonly [action: string, writer: stri
   ['logout', 'plugin-audit/src/auth-event-audit.ts — createAuthEventAuditSink (#8144)'],
   ['config_change', 'service-settings/src/config-change-audit.ts — CONFIG_CHANGE_ACTION (#8145)'],
   ['import', 'plugin-auth/src/admin-import-users.ts — run-level row, record_id null'],
+  [
+    'platform_admin_standing_change',
+    'plugin-security/src/bootstrap-platform-admin.ts — recordPlatformAdminStandingChange, '
+      + 'row shape in plugin-security/src/platform-admin-standing-audit.ts (#18412)',
+  ],
 ];
 
 /** Option values declared by the `action` select field. */
