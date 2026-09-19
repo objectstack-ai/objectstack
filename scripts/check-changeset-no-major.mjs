@@ -919,7 +919,8 @@ export function render(result) {
 //   * PR #16347 (head `23443ce169af`) — `@objectstack/lint` graded `minor`, and
 //     that is where the widening is (a new field-typed refusal arm on
 //     `filter-preset-comparand`); `@objectstack/spec` graded `patch`, and what
-//     it received is ONE re-worded TSDoc comment at `date-range-presets.ts:101`.
+//     it received is ONE re-worded TSDoc comment in
+//     `packages/spec/src/data/date-range-presets.ts` (line 101 as measured).
 //     The gate refused, and it refused the SPEC line — the package that did not
 //     grow — while never naming the package that did.
 //
