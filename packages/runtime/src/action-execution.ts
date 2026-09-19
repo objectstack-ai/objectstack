@@ -1505,9 +1505,29 @@ export function buildActionEngineFacade(_deps: ActionExecutionDeps, ql: any, ec?
                 await ql.delete(object, { where: { id }, context });
             }
         },
-        async find(object: string, query: Record<string, unknown>): Promise<Array<Record<string, unknown>>> {
-            const where = query && Object.keys(query).length ? { where: query } : {};
-            const rows = await ql.find(object, { ...where, context } as any);
+        // [#15124] The ENVELOPE goes through — this arm no longer builds one.
+        //
+        // It used to take the `where` half alone and wrap it
+        // (`{ where: query }`, with an empty bag passed through unwrapped), so
+        // the facade's parameter shape differed from the engine's for no reason
+        // a caller could see. The cost was silent: an author who wrote the
+        // engine's own envelope got `{ where: { where: … } }`, which matches no
+        // row and resolves to `[]` with no error. The director seat withdrew
+        // that parameter shape rather than reserving the field name `where`
+        // across every customer's data model to refuse it — one platform, one
+        // query shape. The spec member (`ActionEngineFacade.find`,
+        // `packages/spec/src/ui/action-params.zod.ts`) now declares
+        // `EngineQueryOptions` by identity, so the handler writes what the
+        // engine reads and this arm only adds the identity.
+        //
+        // `context` is spread LAST on purpose: the facade is trusted and
+        // context-less by design (#3914, ADR-0096), so the elevated context it
+        // built wins over any `context` a caller put in the envelope. The
+        // envelope admits the key because every engine option bag does; it is
+        // not an authorization the caller gets to choose. Pinned in
+        // `action-engine-facade-find-envelope.test.ts`.
+        async find(object: string, query?: Record<string, unknown>): Promise<Array<Record<string, unknown>>> {
+            const rows = await ql.find(object, { ...(query ?? {}), context } as any);
             return Array.isArray(rows) ? rows : ((rows as any)?.value ?? []);
         },
     };
