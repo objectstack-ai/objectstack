@@ -1477,7 +1477,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#18640 — an inline closed set RE-SPELLED at the same binding is not a set that gained a value': 20,
   '#18702 — a declaring factory PRIVATE to one file, resolved through its own DEFINITION': 54,
   "#18721 — a hunk's LEADING CONTEXT is not a reason to abandon the parameter reading": 14,
-  '#19099 — a member BOUNDED inside a bag the block re-declared out of a universal acceptor': 66,
+  '#19099 — a member BOUNDED inside a bag the block re-declared out of a universal acceptor': 67,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -5792,6 +5792,7 @@ export function selfTest() {
   t('⭐ `enclosingDelimiters` reads a `*/` outside a block comment as "the hunk began inside one", and DISCARDS the frames the comment text pushed', enclosingDelimiters([CTX(' * see makeThing({ a, b'), CTX(' */'), CTX('  next: z.string(),')], 2).unreadable === false && enclosingDelimiters([CTX(' * see makeThing({ a, b'), CTX(' */'), CTX('  next: z.string(),')], 2).frames.length === 0);
   t('⛔ …and it applies ONCE and only before anything made the walk unreadable: a second `*/`, or one after a regex, raises the flag instead', enclosingDelimiters([CTX(' */'), CTX(' */'), CTX('  next: z.string(),')], 2).unreadable === true && enclosingDelimiters([CTX('  slug: z.string().regex(/^[a-z{]+$/),'), CTX(' */'), CTX('  next: z.string(),')], 2).unreadable === true);
   t('⛔ …and a `*/` that CLOSES a comment this walk opened itself is ordinary, flagging nothing', enclosingDelimiters([CTX('  /* note ({ */ name: z.string(),'), CTX('  next: z.string(),')], 1).unreadable === false);
+  t('⛔ …and once the walk is UNREADABLE the reset is REFUSED, which is the frames that guard protects: every suppressing reader has already refused on the flag, but `enclosingDelimiter` ignores it and would otherwise lose a frame the hunk really showed', enclosingDelimiter([CTX('  wrap: z.object({'), CTX('  slug: z.string().regex(/^x/),'), CTX(' */'), CTX('  next: z.string(),')], 3)?.opener === '{' && enclosingDelimiters([CTX('  wrap: z.object({'), CTX('  slug: z.string().regex(/^x/),'), CTX(' */'), CTX('  next: z.string(),')], 3).frames.length === 2);
   t('⭐ a lone `/` is a DIVISION and raises nothing; a `/` with another `/` left on its line may be a regex and raises the flag', enclosingDelimiters([CTX('  half: z.number().default(TOTAL / 2),'), CTX('  next: z.string(),')], 1).unreadable === false && enclosingDelimiters([CTX('  slug: z.string().regex(/^x/),'), CTX('  next: z.string(),')], 1).unreadable === true);
 
   // -- T3 --------------------------------------------------------------------
