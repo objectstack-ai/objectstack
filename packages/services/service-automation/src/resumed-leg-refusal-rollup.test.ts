@@ -256,6 +256,12 @@ describe('#18714 — a resumed child run that REFUSES rolls up on both legs', ()
         });
 
         it('downstream nodes do NOT run — the parent refuses instead of continuing', async () => {
+            // ⚠️ Measured: this one does NOT redden when the up-bubble arm is
+            // ablated away — a parent that is never resumed also never walks
+            // on, so both the defect and the fix satisfy it. It is kept as the
+            // pin on the WRONG FIX: bubbling this refusal as if it were a
+            // completion resolves the parent and runs `downstream`. The three
+            // reddening leg-2 assertions are the ones next door.
             const [, childRunId] = await startPair('gate_refuses');
 
             await engine.resume(childRunId, { variables: { kind: 'vip' } });
@@ -268,6 +274,11 @@ describe('#18714 — a resumed child run that REFUSES rolls up on both legs', ()
             // The bubble is best-effort at the engine layer and never rewrites
             // what the child's resumer is told: this caller resumed the child,
             // and the child refused.
+            //
+            // ⚠️ An INVARIANCE pin, and measured green on both sides of the
+            // ablation on purpose — the defect answered the child's caller
+            // correctly too. What it holds is that adding the bubble did not
+            // move that answer, which is the half a fix here could break.
             const [, childRunId] = await startPair('gate_refuses');
 
             const res = await engine.resume(childRunId, { variables: { kind: 'vip' } });
