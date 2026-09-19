@@ -5842,11 +5842,18 @@ async function selfTest() {
     govLegacy !== null && govLegacy.surfaces[0].id === 'agents-md' && govLegacy.size.measured === false && govLegacy.humanMerge === true);
   const govBig = classifyCommit(commitAt('7'.repeat(40), 'docs: b (#7)'), ['AGENTS.md', 'packages/x.ts'], GOVERNED_REPOS[0], { additions: LINE + 5, deletions: 0 });
   assert('a-governed-AND-oversized-landing-is-ONE-entry-carrying-both-limbs', govBig.surfaces.length === 1 && govBig.size.exceeds === true);
+  // ⚠️ Every pin below that reads a classified entry guards the null first: under
+  // the landing PR's ablation (the comparison inverted in `sizeVerdict`) the
+  // oversized fixture classifies to NOTHING, and a pin that dereferenced it
+  // would abort the whole run with a TypeError — a self-test that crashes hides
+  // every other failure it had already collected. A red case must be a NAMED one.
   assert('⭐ classifyCommit-IS-the-landed-predicate-landsByHumanMerge-on-testVerdict-never-a-restated-comparison',
-    [bigPlain, govSmall, govLegacy, govBig].every((e) => landsByHumanMerge(testVerdict(e.surfaces.flatMap((s) => s.files), { size: e.size.measured ? e.size : null })) === true));
+    [bigPlain, govSmall, govLegacy, govBig].every((e) => e !== null && landsByHumanMerge(testVerdict(e.surfaces.flatMap((s) => s.files), { size: e.size.measured ? e.size : null })) === true));
   // The report an operator reads.
-  const bigEntry = { ...bigPlain, attribution: { mergedBy: 'os-elon-musk', mergedAt: '2026-09-18T09:00:00Z', title: 'x', size: { additions: 238310, deletions: 119 } }, attributionChannel: 'rest' };
-  const bigReport = renderReport({ window: dateWindowFor('2026-09-18T00:00:00Z'), repos: allAudited, scanned: 3, entries: [bigEntry], lookups: 1 });
+  const bigEntry = bigPlain === null
+    ? null
+    : { ...bigPlain, attribution: { mergedBy: 'os-elon-musk', mergedAt: '2026-09-18T09:00:00Z', title: 'x', size: { additions: 238310, deletions: 119 } }, attributionChannel: 'rest' };
+  const bigReport = bigEntry === null ? '' : renderReport({ window: dateWindowFor('2026-09-18T00:00:00Z'), repos: allAudited, scanned: 3, entries: [bigEntry], lookups: 1 });
   assert('⭐ the-head-counts-the-oversized-landing-APART-from-the-governed-merges',
     bigReport.includes('governed-merges sweep: 0 governed merge(s) and 1 oversized landing(s) with no governed path since'), bigReport);
   assert('and-the-row-names-the-PR-the-number-the-threshold-the-limb-and-the-HUMAN-MERGE-it-was-due',
@@ -5856,10 +5863,12 @@ async function selfTest() {
     bigReport);
   assert('and-still-carries-the-attribution-column-the-audit-asks-of-every-row', bigReport.includes('merged_by os-elon-musk'), bigReport);
   assert('and-a-GitHub-pair-EQUAL-to-the-landed-number-prints-nothing-extra', !bigReport.includes('GitHub reports'), bigReport);
-  const skewed = renderReport({
-    window: dateWindowFor('2026-09-18T00:00:00Z'), repos: allAudited, scanned: 3, lookups: 1,
-    entries: [{ ...bigEntry, attribution: { ...bigEntry.attribution, size: { additions: 238000, deletions: 119 } } }],
-  });
+  const skewed = bigEntry === null
+    ? ''
+    : renderReport({
+        window: dateWindowFor('2026-09-18T00:00:00Z'), repos: allAudited, scanned: 3, lookups: 1,
+        entries: [{ ...bigEntry, attribution: { ...bigEntry.attribution, size: { additions: 238000, deletions: 119 } } }],
+      });
   assert('a-GitHub-pair-that-DIFFERS-from-the-landed-number-is-printed-beside-it-and-decides-nothing', skewed.includes('GitHub reports +238000 / -119') && skewed.includes('⛔ SIZE: 238429'), skewed);
   const smallReport = renderReport({ window: dateWindowFor('2026-09-18T00:00:00Z'), repos: allAudited, scanned: 3, entries: [govSmall], lookups: 0 });
   assert('a-governed-row-under-the-line-keeps-its-head-byte-for-byte-and-prints-its-size-as-a-plain-reading',
