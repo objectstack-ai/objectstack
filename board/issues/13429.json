@@ -1,0 +1,36 @@
+{
+  "number": 13429,
+  "kind": "issue",
+  "title": "[finding] Sibling copies of the wrong-pipe-shape exit-code advisory survive #12979: five more banners name `| tail` and leave `| head` — the shape that defeats PIPESTATUS/pipefail — unnamed",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T11:33:39Z",
+  "updated_at": "2026-08-31T15:06:53Z",
+  "closed_at": "2026-08-31T15:06:25Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13429",
+  "body": "Filed unassigned by the #12979 dev, session `session_01EXxTW8mvPBhoHxmyPZ63de`, while fixing that card (PR #13427). Out of scope there: the 2026-08-28 grading on #12979 permitted exactly one cross-domain half (`scripts/check-i18n-bundles.mjs`); these are the remaining copies of the same wrong fact. #12979 is not addressed here beyond that pointer, and PR #13427 does not touch these files.\n\n## Census (git grep on 9f1652c69, the #12979 fix branch head; line numbers from that tree)\n\nExact copies of the corrected banner's old text, still claiming `| tail -4` \"reads green either way\":\n\n- `scripts/import-prerequisite.mjs:409` — HIGH LEVERAGE: this is the shared prerequisite-banner module; every gate script that imports it inherits the wrong advisory line verbatim (the printed text interpolates the calling gate's name via `scripts/${gate}.mjs`).\n- `scripts/check-i18n-coverage.mjs:1137`, `:1192`, `:1221`\n- `scripts/pm/check-half-states.mjs:7597`\n- `scripts/pm/ci-failure.mjs:1540`, `:2424` (phrased \"Piping reports the PIPE's status, so backticked dot-dot-dot pipe tail reads green either way\")\n- `scripts/check-test-completeness.mjs:481-483` — half-corrected variant: it already says capture the exit code BEFORE any pipe (good), but still names only `| tail -4` as the lying shape and leaves `| head` unnamed.\n\nNot a copy, do not touch: `docs/qa/platform-checklist/areas/attachments-storage.json:359` uses the phrase \"reads green either way\" about a fixture clause, unrelated to pipes.\n\n## Why these mislead (measured, #12979 and re-measured on 94efa2a5a)\n\n- For a reader using bare `$?` after the pipe, the claim is literally true — `$?` is the pipe's status.\n- For a reader following the os-dev discipline (now: redirect-then-capture; formerly `PIPESTATUS[0]`), `| tail -4` forwards the TRUE status (measured: 1 on a refusing gate) — so the advisory names the safe shape as the dangerous one.\n- The shape that actually lies to every reader, `| head -N`, is unnamed in all of these: `head` closes the read end early, the producer takes EPIPE/SIGPIPE and exits 0, so even `PIPESTATUS[0]` and `set -o pipefail` read green (measured: 0 on the same refusing gate). An agent steered away from `tail` toward `head` gets the only false green there is.\n\n## Suggested shape\n\nSame fix the #12979 grading prescribed and PR #13427 applied to `check-i18n-bundles.mjs`: name the true hazard (`| head -N`, with the EPIPE mechanism), name the safe capture (redirect-then-capture, exit code taken before any pipe), and do not reduce it to \"do not pipe\". Fixing `scripts/import-prerequisite.mjs:409` corrects every importer in one edit; the literal copies in the other four files need their own lines. Each of those gate scripts has a self-test (`--self-test`) that must stay green, and none of the edits may change exit codes.\n\nSeverity not judged; the banners only mislead humans and agents reading refusal output — no gate verdict is computed from them."
+}

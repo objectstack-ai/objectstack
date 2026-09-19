@@ -1,0 +1,36 @@
+{
+  "number": 13602,
+  "kind": "issue",
+  "title": "mongo `options.autoEncryption.kmsProviders` secret material (CSFLE: secretAccessKey / privateKey / clientSecret / local.key) is not on `passthroughSecretPaths` and is served cleartext on datasource reads",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-31T03:00:23Z",
+  "updated_at": "2026-08-31T11:15:48Z",
+  "closed_at": "2026-08-31T11:06:17Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13602",
+  "body": "Found while implementing #13405 (nested credential positions off the passthrough table). That fix closes the class of nested positions that MIRROR a top-level credential spelling (`password`, `authToken`, and former aliases, judged at every object depth on both doors). It deliberately does NOT invent new secret NAMES: the client-measured residue stays `passthroughSecretPaths` in `packages/spec/src/data/datasource-credential-redaction.ts`, whose #9040 discipline is that every entry is measured against the client the driver spreads `config.options` into, never inferred from documentation.\n\nThe residue class has at least one more likely member family. The mongodb client's CSFLE surface reads secret material from the options passthrough at nested positions whose leaf names mirror no top-level credential spelling, so neither the name judgment nor the table covers them today:\n\n- `options.autoEncryption.kmsProviders.aws.secretAccessKey` (and `sessionToken`)\n- `options.autoEncryption.kmsProviders.azure.clientSecret`\n- `options.autoEncryption.kmsProviders.gcp.privateKey`\n- `options.autoEncryption.kmsProviders.local.key`\n\nMechanically true today (measured on the #13405 branch): `redactDatasourceConfig('mongodb', ...)` serves these positions back verbatim with no `redactedKeys` entry, because the leaf names are not credential-spelled and no table row names them.\n\nWhat this card needs before any table edit: the #9040-style measurement against `mongodb@7.5.0` (the pinned client) — does the client actually read these positions when spread from `config.options` (CSFLE requires the optional `mongodb-client-encryption` dependency, which may itself change the answer), and what does a redacted round-trip do to a working CSFLE config? Entries land on `passthroughSecretPaths` only with that measurement quoted, per the module docblock.\n\nNot #13405's class (that card is the mirrored-spelling class, fixed by derivation); this is the client-measured-name residue the table exists for."
+}

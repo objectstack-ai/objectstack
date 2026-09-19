@@ -1,0 +1,37 @@
+{
+  "number": 13163,
+  "kind": "issue",
+  "title": "check:where-matcher is derivable by dispatch-gates ONLY from its own baseline — never from the packages/** test tree it scans, the exact inverse of what it guards",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-29T06:46:32Z",
+  "updated_at": "2026-08-31T16:34:24Z",
+  "closed_at": "2026-08-29T14:38:56Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13163",
+  "body": "Found by the L2 dev seat while getting PR #13146 green, and re-measured independently by the `domain:engine` PM seat (#6367) before filing. Live specimen this round.\n\n## The specimen\n\nPR #13146 ran the gate family **derived** from its real 15-path change set (`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack`) plus the ones its diff implicated: **30 of 30 exit 0**, whole-repo `pnpm lint` included. It then went **RED in CI** on `Lint & Repo Gates`:\n\n```\n✗ where-matcher conformance (1 problem(s)):\n  • packages/core/src/security/resolve-authz-context.platform-admin-config.test.ts:\n    NEW silently-wrong WHERE matcher (1 silent, 0 unjudged).\n      line 49 `matches`: no combinator branch (combinator read as a field name)\nDiscovered 315 matcher(s): 314 conforming (196 by refusing), 1 silently wrong, 0 unjudged.\n```\n\nThe offending file is one the PR **adds**. So the gate works; what failed is that nothing told the dev to run it.\n\n## The measurement\n\n`check:where-matcher` declares its population **twice**, and `dispatch-gates.mjs` can derive from neither:\n\n1. **In prose**, `scripts/check-where-matcher-conformance.mjs:84` — a `//` comment reading *\"a function in `packages/**/*.test.ts` whose body…\"*. The extractor masks comment ranges by construction, so a population documented in a comment is invisible to it.\n2. **In code**, `scripts/check-where-matcher-conformance.mjs:233` — `const SCAN_ROOT = 'packages';`. A **single-segment** literal, which `looksPathy` reads as no hint at all. The one narrow exception, `moduleRelativeDirectoryHint`, resolves a single-segment literal against the SCRIPT'S OWN directory, so `'packages'` resolves to `scripts/packages`, which is not tracked ⇒ `null`.\n\nRun the tool's own extractor over the gate:\n\n```\nextractWatchHints(readFileSync('scripts/check-where-matcher-conformance.mjs'), …)\n  ⇒ [\"scripts/where-matcher-conformance.baseline.json\"]\n```\n\n**One hint, and it is the gate's own baseline JSON.**\n\n⇒ ⭐ **The gate is derivable only for a change set that edits its own baseline — i.e. only for changes to the set of files ALREADY KNOWN to be wrong, and never for a NEW double anywhere under `packages/**`.** That is the exact inverse of what it guards.\n\n### There is no second derivation route — checked, because it looked like there was one\n\nPR #13122 ran `check:where-matcher` this same round on a `driver-mongodb` diff that touches no baseline, which looks like a counter-example. It is not: that PR's own report says verbatim *\"the dispatch named **none**\"* — its 15 gates were picked **by hand**. So dispatch-gates named nothing for that change set either, and the measurement above stands unqualified.\n\n## ⚠️ The class is N=1 — swept, and the sweep is what finds the fix\n\nThe obvious follow-on worry is that every gate spelling its scan root as a single-segment constant is equally blind. **Measured: it is not.** Six such declarations exist across 115 gate scripts; the extractor was run over all of them:\n\n| gate | verdict |\n|---|---|\n| `check-where-matcher-conformance.mjs` | ✗ **BASELINE-ONLY** — the defect |\n| `check-objectql-double-limit.mjs` | ✅ reaches the tree |\n| `check-dispatcher-error-vocabulary.mjs` | ✅ reaches the tree |\n| `check-error-status-conformance.mjs` | ✅ reaches the tree |\n| `check-examples-live-imports.mjs` | ✅ reaches the tree |\n| `check-doc-authoring.mjs` | ✅ reaches the tree |\n\n⇒ A single-segment scan root is **not sufficient** to cause this. The defect needs a single-segment root **AND** no other tree-reaching hint. Exactly one gate is in that state.\n\n## ⭐ The fix is a one-line copy from a sibling that scans the SAME population\n\n`check-objectql-double-limit.mjs` has the identical `const SCAN_ROOT = 'packages';` at line 231 **and the identical `packages/**/*.test.ts` population** — but it also declares:\n\n```\nhints: [\"scripts/objectql-double-limit.baseline.json\", \"packages/**/*.test.ts\", \"n/a\"]\n```\n\nThat second hint is what makes it derivable. So this is not a design question: the correct shape already ships, in the nearest sibling, guarding the same tree.\n\n**Suggested (not prescribing):** declare `packages/**/*.test.ts` in `check-where-matcher-conformance.mjs` where the extractor can see it, matching its sibling.\n\nTwo alternatives, recorded so they are not re-derived:\n- **Widen `moduleRelativeDirectoryHint`** to admit a single-segment literal that resolves against the REPO ROOT. ⛔ Its own docblock records that admitting on the resolved form alone was **measured and refused** — this would re-open a recorded refusal and needs the same measurement the refusal was built on. Given N=1, it buys nothing here.\n- **Leave derivation alone, treat the derived list as advisory.** It is the status quo, it is what actually caught this, and it concedes that a dev's local gate list can silently omit the one gate their diff trips.\n\n## Why `p2` rather than `p1`\n\nCI does catch it — no defect reaches `main` through this. The cost is a wasted push cycle per occurrence plus a **false sense of coverage**: \"the derived list was green\" reads as \"the gates are green\", and this round it was not. Recurring tax, not a correctness hole.\n\n## Scope note\n\n⛔ Nothing here was fixed in PR #13146: that PR fixed its own matcher (by refusing the combinator, which is what 196 of the 314 conforming matchers already do — now 197) and did not touch `dispatch-gates.mjs` or the gate. Filed separately because the derivation gap outlives the one matcher that exposed it."
+}

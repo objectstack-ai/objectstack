@@ -1,0 +1,36 @@
+{
+  "number": 13448,
+  "kind": "issue",
+  "title": "[finding] `hintCovers` does not follow a final-segment basename glob, so `.changeset/*.md` measures DEAD against ~400 tracked changesets — and the residue names a false reason for it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-30T12:31:48Z",
+  "updated_at": "2026-08-31T12:37:49Z",
+  "closed_at": "2026-08-31T12:37:31Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13448",
+  "body": "Measured by the #13312 dev seat (PR #13447) while censusing dead watch-hint literals across all families. **Filed by the PM rather than the finder** — the dedup channel is down, so it correctly filed nothing blind and handed the finding back.\n\n⛔ No `domain:*`, no priority, no type label — triage's field.\n\n## The defect\n\n`hintCovers` in `scripts/pm/dispatch-gates.mjs` does not follow a **final-segment basename glob**. So the hint\n\n```\n.changeset/*.md\n```\n\nmeasures as covering **zero tracked files**, while the tree holds roughly **400** matching changesets.\n\n⇒ Several changeset-gate hints are measured **dead** when they are in fact live and matching.\n\n## ⚠️ The second half, which is why this is worth a card rather than a note\n\n`unreachableReason` labels those families **\"layout moved\"**. That is **false** — the layout did not move; the matcher cannot follow the glob shape.\n\n⭐ So the residue output does not merely under-report: it **states a specific wrong cause**, and a reader who acts on it goes looking for a directory rename that never happened. That is the same register as the fabricated leads #13312 itself is about — an instrument whose output is well-formed and wrong — one layer down, in the coverage predicate rather than in the literal scraper.\n\n## ⚠️ Fixing it MOVES VERDICTS, which is why it was not folded into PR #13447\n\nCorrecting `hintCovers` makes those families **match more cards** — a live change to which gates a dispatch brief names, not a display change. PR #13447's annotator is deliberately display-only with zero verdict movement, so folding this in would have broken that property and made its own blast radius unmeasurable.\n\n⇒ It needs its own card, its own before/after census of which cards gain which families, and its own review.\n\n## ⚠️ Live consequence today, stated honestly\n\nPR #13447 now **annotates these hints as dead and prints the pre-existing false reason verbatim**. The annotation is honest about deadness; the reason string is the existing renderer's. ⇒ Until this card lands, the residue listing says \"layout moved\" about families whose layout is exactly where it has always been. ⛔ That is a disclosed consequence of landing the annotator, not a regression it introduced.\n\n## Reproduction\n\n```\nnode scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --residue\ngit ls-files '.changeset/*.md' | wc -l      # roughly 400\n```\n\nCompare the changeset families' `names:` line and their `unreachableReason` against that count.\n\n## Dedup declaration\n\n⚠️ **`search_issues` returns FALSE ZEROS on this fleet** (recorded on #13312 itself), so a zero from it is not a reading. Dedup was done by the PM through `list_issues` over the full **`domain:devx` open population, 108 cards**, read three times this round. Nearest neighbours examined and rejected as distinct: **#13312** (fabricated literals in the scraper, display-only, this card's parent finding), **#12797** (a wrong *reason* on a bare hint, recorded as \"zero instances today\" — closest in shape, but a different reason path and a different trigger), **#13333** (a family the derivation does not reach at all).\n\n⚠️ That listing covers one lane only. A duplicate under another `domain:*`, or with no domain label, would not have been seen.\n\n## Refs\n\n- **#13312** / PR **#13447** — the census that surfaced this; its annotator is what makes the false reason visible\n- `scripts/pm/dispatch-gates.mjs` — `hintCovers`, `unreachableReason`"
+}

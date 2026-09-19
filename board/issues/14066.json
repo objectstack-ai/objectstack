@@ -1,0 +1,36 @@
+{
+  "number": 14066,
+  "kind": "pull_request",
+  "title": "feat(spec,plugin-auth): declare plugins.scim/sso/ssoDomainVerification, explicit config wins over env",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:system",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T02:21:15Z",
+  "updated_at": "2026-09-01T03:10:40Z",
+  "closed_at": "2026-09-01T03:10:38Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": "2026-09-01T03:10:38Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/14066",
+  "body": "Fixes #13439\n\nClause-②: yes — path limb `packages/spec/src/**` (auth-config.zod.ts) + content limb (three new declared keys widen the accept set; documented precedence change). Dispatched at CONTRACT_REVIEW_TIER; `needs:contract-review` hung on this PR and the card at creation.\n\nImplements the maintainer ruling of 2026-08-31 (card comment 5479233268), quoted there verbatim; decision A of the card, admin amplification split out.\n\n## What changed\n\n**1. Declaration (packages/spec/src/system/auth-config.zod.ts).** `AuthPluginConfigSchema` now declares `scim`, `sso` and `ssoDomainVerification` as tri-state `z.boolean().optional()`, following the `dynamicClientRegistration` template, with docstrings spelling out the unset semantics. Previously the keys were read through an `as any` cast while no schema declared them — a key an author could write, that typechecked only because of the cast, that no publish-time check would ever reject or confirm.\n\n**2. Precedence flip (packages/plugins/plugin-auth/src/auth-manager.ts).** For these three keys an EXPLICIT config value now wins over the env var; the env var decides only where the config leaves the key unset (absent env means off). The flipped read points, re-derived on current main rather than taken from the card (line numbers at merge time):\n\n```\nbuildPluginList  scimEffective            = pluginConfig.scim ?? scimFromEnv ?? false\nbuildPluginList  sso                      = pluginConfig.sso ?? ssoFromEnv ?? false\nbuildPluginList  ssoDomainVerification    = pluginConfig.ssoDomainVerification ?? ssoDomainVerifyFromEnv ?? false\ngetPublicConfig  admin default            = pluginConfig.admin ?? (pluginConfig.scim ?? readBooleanEnv('OS_SCIM_ENABLED') ?? false)\nisSsoWired                                = this.config.plugins?.sso ?? ssoFromEnv ?? false\nisSsoDomainVerificationEnabled            = this.config.plugins?.ssoDomainVerification ?? fromEnv ?? false\n```\n\nThe `as any` casts on these three keys are gone — the declaration is what makes them typecheck. The stale docstring on `isSsoWired` (which documented the old env-wins order) is updated, and a comment block above the chains documents the new precedence and why it deliberately differs from the env-wins order the OIDC / DCR / 2FA / HIBP keys keep.\n\n**Named consequence — the ADR-0071 admin coupling.** The coupling SHAPE is untouched: `admin: pluginConfig.admin ?? scimEffective` still forces the better-auth admin plugin on when SCIM is effective and `admin` is unset (ADR-0071's recorded behavior: SCIM active-false to ban runs through the admin plugin). What flows through it is the flipped scim resolution — in both the plugin list and the `/auth/config` features block's inline recomputation — so an explicit `plugins.scim: false` now also declines the admin plugin that SCIM would have dragged in. I measured no conflict between the ruled flip and ADR-0071: the ADR pins the coupling (effective SCIM forces admin), not the resolution order of scim itself, and the coupling holds identically after the flip. The coupling itself is out of scope here per the ruling — #13816 tracks it and remains open; nothing in this PR pins its behavior.\n\n**Known risk, named (per the ruling):** a deployment that writes BOTH an explicit value and the env var and depends on the env winning will flip. The only known explicit writer is the cloud control plane, which requires the new order — its plan-derived `plugins.scim` becomes authoritative, cloud#1265's refuse-to-build workaround can retire, and cloud#1451 unblocks.\n\n**Scope discipline:** behavior changes only where a host explicitly sets one of the three keys. Deployments that leave them unset see zero change — the operator per-environment env override is preserved for that case, pinned by tests. The dogfood suites that set OS_SCIM_ENABLED with no explicit config key sit entirely in that unchanged quadrant (their own comments note bootStack exposes no auth-plugin override).\n\n## Tests\n\n- New pins (auth-manager.test.ts), full matrix per the acceptance criteria: explicit false + env truthy stays false (the cloud case, for scim via plugin registration AND the features.admin mirror, for sso via features.sso and isSsoWired, for ssoDomainVerification via isSsoDomainVerificationEnabled); explicit true + env falsy stays true; unset + env set follows env; unset + env absent stays off; explicit false beats the EMPTY-STRING env value (a present value under readBooleanEnv).\n- The pre-existing pin of the OLD order (\"env disabled even when plugins.sso true\") is rewritten to pin the new order; the unset-config env tests are retitled to say what they now prove.\n- Reverse verification, committed-state, direction observed red: reverting the isSsoWired chain to env-first turned exactly the 9 explicit-config-wins pins red (all others untouched); restore proven by empty git diff against HEAD plus blob-hash identity, then re-run green. Mutation was proven on disk by anchor-string counts before each leg.\n- Reverse type verification: a bogus key read on the config went red with TS2339 whose reported type listed the three new keys — the compiler is reading the rebuilt spec declarations, not a cache.\n- Suites on the final tree (67ab1187, after merging origin/main): plugin-auth 87 files / 1796 tests green; spec 447 files / 11991 tests green; both package typechecks green; spec `check:generated` — all 15 artifacts up to date (docs references + authorable-surface regenerated for the three keys).\n- Gate union at 67ab1187: full derived list green, including `check:type-check-debt` re-measure (\"28 ledger entries re-measured, none above its recorded number\" — plugin-auth's TEST_DEBT entry did not move; a scoped probe reproduced its 94-total / 43-in-auth-manager.test.ts split exactly), `check:dual-build-cjs-loads` and spec `check:skill-examples` after a full workspace build, `check:adr-0087-registration` (\"no declared-breaking changeset\"), `check:nul-bytes`. CI-context gates (shard-attestation, test-completeness, docs drift comment) are CI-owned runs.\n\nChangeset: minor for @objectstack/spec and @objectstack/plugin-auth, behavior change and risk stated, ADR-0087 disposition marker included (not-required, no migration prescription — nothing removed or renamed).\n\n_Generated by [Claude Code](https://claude.ai/code/session_01Mciyv38maJ6HYVMiaM26T1)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Mciyv38maJ6HYVMiaM26T1)_"
+}

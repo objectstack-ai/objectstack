@@ -1,0 +1,35 @@
+{
+  "number": 12698,
+  "kind": "issue",
+  "title": "docs deploy: Vercel's dashboard Ignored Build Step skips dependency-only changes — the merged OOM fix (#12684) has never been built in production; one dashboard visit: Redeploy + fix the ignore rule",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "priority:p1",
+    "repo:objectstack"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-27T10:31:55Z",
+  "updated_at": "2026-08-31T16:33:53Z",
+  "closed_at": "2026-08-28T05:25:03Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12698",
+  "body": "Found at the 2026-08-27 10:29Z verification of the #12677 fix. **Maintainer-only: both actions are Vercel dashboard settings; nothing in-repo can perform or fix this** (`apps/docs/vercel.json` carries `installCommand`/`buildCommand` but **no `ignoreCommand`** — verified on current `main`).\n\n## Measured\n\n- PR #12684 merged to `main` at 09:56Z (merge commit `0d4a6a85`). At 10:29Z production still serves `data-dpl-id=\"dpl_2nfWjGjSwZjakVEmUG1kBWD6697r\"` (age ≈41.5 h) — the pinned pre-outage build.\n- The mechanism, read from the commit status Vercel posted on PR #12684's head (`a0a64684`), verbatim: **`Vercel — Canceled by Ignored Build Step`** (08:14:19Z). That PR's diff is `packages/spec` build config + a changeset — **a change to the docs site's own dependency graph** (`@objectstack/spec` is `@objectstack/docs`'s only workspace dependency), and the ignore step canceled its build anyway.\n- Since the fix merged, `main` has received only `0d4a6a85` (packages/spec + changeset) and `284fc22d` (`.claude/**` only). Neither touches `apps/docs/**` or `content/docs/**` — so under a path-scoped ignore rule, **no production build has run since the fix landed**. The dpl-id not moving is fully explained; there is no evidence of a new build failure.\n\n## Why the ignore rule is itself a defect for this monorepo\n\nThe docs build is `turbo run build --filter=@objectstack/docs` — its output depends on everything in that turbo graph, not only on files under `apps/docs`/`content/docs`. A path-scoped ignore rule therefore skips exactly the class of commit that fixes a broken build in a dependency (this one), and will also serve stale pages whenever a dependency change alters generated content. It also interacts badly with the outage class #12333 measured: a two-day-invisible failure, now followed by an invisible non-build.\n\n## Maintainer actions (one dashboard visit)\n\n1. **Redeploy now**: docs project → Deployments → Redeploy from latest `main` (`0d4a6a85` or newer), build cache off. ~5–10 min later the re-check below must move off `dpl_2nfW…` — that is the real end of the #12333/#12677 outage, and epic #12243's site verification resumes.\n2. **Fix the Ignored Build Step**: replace the path rule with the turbo-aware form — `npx turbo-ignore @objectstack/docs` — so any commit that changes the docs app's dependency graph builds, and everything else is still skipped. (Minimum fallback: add `packages/**` to the watched paths, at the cost of some spurious builds.)\n3. Optional but same visit: #12683's option A (build machine memory) if ruled A.\n\n## Re-check\n\n```\ncurl -s https://objectstack.ai/ | grep -o 'data-dpl-id=\"[^\"]*\"'\n```\n\nAny id other than `dpl_2nfWjGjSwZjakVEmUG1kBWD6697r` closes this card.\n\nRefs: #12677 (fix, merged as PR #12684) · #12333 (original measurement) · #12683 (memory-margin decision card) · epic #12243."
+}

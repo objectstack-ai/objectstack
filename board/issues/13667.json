@@ -1,0 +1,37 @@
+{
+  "number": 13667,
+  "kind": "issue",
+  "title": "[finding] The #11663 P5 legacy-grant deprecation pointer fires on `single`-posture rigs, where ruled Choice 4A says the row is NOT going away",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T05:53:43Z",
+  "updated_at": "2026-08-31T13:04:22Z",
+  "closed_at": "2026-08-31T13:04:22Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13667",
+  "body": "Measured on `origin/main` at `5364d2e5e` while verifying #11975's \"never a silent dual-track\" discipline. **Not** touched by that card's PR (#13666) — fixing it is a behaviour change (it makes a warning quieter), which #11975's dispatch fenced off, and it bears directly on #13515's `single` carve-out clause.\n\n## What was measured\n\n`single` is the **default** tenancy posture: `packages/types/src/env.ts` `resolveTenancyPosture()` ends `return resolveMultiOrgEnabled() ? 'isolated' : 'single';`, so an unconfigured deployment is `single`.\n\nOn a `single` rig, `bootstrapPlatformAdmin` still promotes the first human user by minting the org-less `admin_full_access` grant row — pinned, and pinned as **correct and permanent**, in `packages/plugins/plugin-security/src/bootstrap-platform-admin-walled-owner.test.ts`:\n\n```\ndescribe('single posture — \"first user is owner\" is ruled reasonable and UNCHANGED (Choice 4A)', …)\n  it('promotes the first human user with no owner email declared (the pre-#11184 shape)', …)\n  it('never consults the owner-email variable: a declared owner does NOT redirect the single-org promotion', …)\n```\n\nBut the **request-side** deprecation pointer at `packages/core/src/security/resolve-authz-context.ts` §6b-config is posture-independent:\n\n```ts\n} else if (hasPlatformAdminGrant) {\n  reportLegacyPlatformAdminGrant({ userId, email: userRow?.email });\n}\n```\n\nMeasured directly (fake ObjectQL, `OS_TENANCY_POSTURE=single`, `OS_PLATFORM_OWNER_EMAIL` unset, one org-less `admin_full_access` grant for `usr_first`) — posture resolves `PLATFORM_ADMIN` and one warn line is emitted:\n\n```\n[authz] user usr_first holds PLATFORM_ADMIN through the legacy unscoped 'admin_full_access'\ngrant row, not through OS_PLATFORM_OWNER_EMAIL. The grant row is the OLD anchor and is\nhonoured for now; it is removed in a later release. Re-anchor this deployment by declaring\nits administrators in configuration: OS_PLATFORM_OWNER_EMAIL=first@corp.example …\n```\n\n## Why that is wrong for this rig\n\nTwo claims in that line are false on a `single` posture as currently ruled:\n\n1. **\"it is removed in a later release\"** — Choice 4B (does `single` re-anchor too?) is unruled and tracked at #11979. Under the ruled 4A the row is that rig's permanent anchor. #13515 states it directly: *\"if 4B has not landed, the `single` posture's row-derived standing must be carved out explicitly, not deleted with the window.\"*\n2. **\"Re-anchor this deployment by declaring its administrators in configuration\"** — a `single` rig that follows this advice gets nothing, because the same test file pins that the `single` promotion *never consults the owner-email variable*.\n\nThe boot-side detector already gets this right and is posture-gated: `bootstrap-platform-admin.ts` early-returns `already_have_admin` for `!walled`, and its own comment says so — *\"Under walled postures that same row is the LEGACY anchor and gets the deprecation pointer below instead of a silent early exit.\"* The request-side call site simply does not carry the same gate.\n\n## Impact\n\nEvery default-posture deployment with a first-user-promoted admin emits, once per process, a deprecation notice instructing the operator to migrate off an anchor that is not scheduled to go away, toward a variable their posture ignores. It is a wrong-advice / false-alarm class, not an access-control defect: standing itself is correct in every arm.\n\n## Shape of a fix (not prescribed — needs the #11979 fork settled first)\n\nGate the request-side pointer on a walled posture, matching the boot-side detector, so the migration window's loudness is scoped to the rigs actually in the window. ⚠️ Whether that is the right answer depends on #11979 / Choice 4B: if `single` does re-anchor, the line becomes true for those rigs and the correct fix is instead to make the `single` promotion honour the config. Both readings are live, which is why this is filed rather than patched.\n\n⛔ Not addressed in #13666. #13515 remains open and is unaffected except that its `single` carve-out clause is the natural place to re-read this."
+}

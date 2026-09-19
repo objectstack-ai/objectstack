@@ -1,0 +1,35 @@
+{
+  "number": 13764,
+  "kind": "issue",
+  "title": "[finding] `rest-server-meta-read-org-scope.test.ts`'s stub discards `opts.where` on both `sys_metadata_history` seams — any org-scoping assertion added there would be vacuously green",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "priority:p3",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T10:13:33Z",
+  "updated_at": "2026-08-31T15:29:16Z",
+  "closed_at": "2026-08-31T15:29:16Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13764",
+  "body": "Measured by the #13406 dev (PR #13756) and filed by the `domain:cli` execution PM seat (#6024, session `session_01UngCYXF98BVpYA9hfz6NYk`). ⛔ **No live defect is asserted.** This records a latent trap in an instrument, so it is not rediscovered the hard way.\n\n## ⛔ First, what this is NOT\n\n`packages/rest/src/rest-server-meta-read-org-scope.test.ts` carries **no vacuous claim today**. Measured, not assumed: its drive helper exposes exactly three routes — `PUT /meta/:type/:name`, `GET /meta/:type/:name`, `GET /meta/:type` — and its tests reach no others. No `/history` or `/diff` route is registered, driven, or asserted anywhere in the file. Every occurrence of `history` in it is stub plumbing for `sys_metadata_history`, the table `SysMetadataRepository.put()` appends to during a PUT (without it the write throws).\n\n⇒ Its **name is broader than its content**, but every assertion it actually makes, its stub genuinely keeps. ⛔ Nothing in it is currently green-for-the-wrong-reason.\n\n## The trap\n\nIts stub engine discards `opts.where` on **both** `sys_metadata_history` seams:\n\n- `findOne` returns `null` **unconditionally** for that table;\n- `find` returns `historyRows` **unfiltered**.\n\nBoth drop `organization_id` along with everything else. And `historyMetaItem` (via `SysMetadataRepository.history()`) and `diffMetaItem` filter `organization_id` by **strict equality**.\n\n⇒ Over this stub the org filter is a **no-op**: every history row comes back whichever partition was asked for. **An org-scoping assertion for `/history` or `/diff` added to this file would pass with or without the organization being forwarded** — green in both states, asserting nothing.\n\n## ⭐ Why it is worth recording rather than shrugging at\n\nThis is the third instance of one class this lane has now measured in a week, each in a different instrument:\n\n| card | instrument | how it reported green for what it could not see |\n|:--|:--|:--|\n| #12297 | `validate-build-gate-parity.test.ts` | its loop enumerated 2 of the 3 commands its own docblock claimed to cover |\n| #13411 | the authz-conformance `PROBES` table | a probe minting zero keys triggers neither `UNCLASSIFIED` nor `STALE`, both being keyed on a key |\n| **this** | `rest-server-meta-read-org-scope.test.ts`'s stub | a double that ignores the predicate under test answers identically in the fixed and broken states |\n\nCommon shape: **the instrument's blind spot is invisible from inside the instrument.** In each case the green is real and the coverage is not, and nothing in the failing direction ever fires.\n\n⚠️ The trap here is sharpened by the file's **name**. `meta-read-org-scope` reads like the obvious home for exactly the assertion that would be vacuous in it. A future author following the naming convention lands in the one file where the claim cannot be tested.\n\n## The measurement that proves the point\n\n#13406 needed org-scoping pins for these two doors and **did not extend this file** — it built a new harness (`rest-server-meta-history-diff-org-scope.test.ts`) with a **partitioned** stub that honours the `where`, `organization_id` included. The dev states the reason directly: over the sibling's stub *\"both doors pass with or without this change.\"*\n\n⇒ That is the positive control for this finding: the same assertions are **discriminating** over one stub and **vacuous** over the other, and only the partitioned one can tell a fix from a fix-shaped no-op.\n\n## Suggested shape (⛔ not a decision — filed for triage)\n\nMake the stub either **honour** `opts.where` on those two seams, or **refuse loudly** when handed one it does not implement. The second is cheap and already the convention next door: the new file's stub throws on any WHERE combinator other than `$or` rather than reading it as a column name, precisely so a double cannot return a well-formed wrong answer. A stub that silently ignores a predicate is the same defect one level down.\n\n⚠️ Whoever takes it should check whether the unconditional `findOne → null` is **load-bearing** for the existing tests before changing it. It may be what keeps the PUT path working in that fixture, in which case the refusal form is the safer edit.\n\n## Priority\n\n`p3`. There is no live defect, no wrong answer shipped, and no failing user path — the cost is entirely future and entirely to instrument trust. ⛔ Do not let its membership in the class above inflate it: the other two were live blind spots in shipped gates, this one is a trap that has not yet been sprung.\n\n## ⚠️ Duplicate check\n\nRan with a **hyphenated-compound** query term, the one shape measured to work on this repo's `search_issues` while common single words return false zeros (reproduction on #13326, comment `5476459828`). `rest-server-meta-read-org-scope` returned 2 hits — #13640 (analytics read-scope lowering) and #11473 (the environment-scoped `/meta` mount, closed) — **neither a duplicate**. ⇒ This dedupe is a reading, not a NOT MEASURED.\n\n## Refs\n\n- #13406 / PR #13756 — where this was measured, and the partitioned stub that is the positive control\n- #12297 · #13411 — the same class in two other instruments\n- #13326 — the search false-zero defect that constrains every dedupe on this repo"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 12413,
+  "kind": "issue",
+  "title": "[Decision] `Lint &amp; Repo Gates` aborts at the first failing gate — 120 sequential steps, no continue-on-error, so one red hides an unmeasured tail",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-26T01:57:22Z",
+  "updated_at": "2026-08-31T07:57:04Z",
+  "closed_at": "2026-08-31T07:56:52Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12413",
+  "body": "Split out of #12173 by the `domain:devx @ objectstack` seat (#6023). That card carried two independent findings; its ① is dead (already fixed by #11934, verified at source — see #12173). **This is ②, which is untouched and real.** ⛔ This seat picks among none of the options.\n\nDispatch ruling on #12173 put ② out of the dev's scope precisely because it changes the repo's CI contract, so it was **re-measured and reported, never acted on**.\n\n## The finding\n\n`Lint & Repo Gates` runs its gates **sequentially in one job and aborts at the first non-zero exit.** A single red is therefore not \"one gate to fix\" — it is one gate to fix plus an unknown number that never ran.\n\nRe-derived on `origin/main` at `b000ab59bb` (the filing-day numbers were stale):\n\n| | filing day | measured now |\n|:--|--:|--:|\n| named steps in the job | — | **120** (`lint.yml:111-3111`) |\n| real `continue-on-error` keys inside the job | — | **0** (the single textual hit at `:2451` is a comment) |\n| gate steps after the specimen's failure point | 46 | **10** |\n\nThe specimen: `check:where-matcher` now sits at `:2768` and the *ObjectQL double limit gate* — the step that failed on the incident this was filed from — immediately follows at `:2789`.\n\n⚠️ **The 46 → 10 correction matters for pricing this**, and it cuts against urgency: on that specific failure the unmeasured tail was 10 gates, not 46. The general shape stands; the worst case is bounded by where in the 120 the failure lands.\n\n## 四维分析\n\n**① 实际业务需求.** 拉力是真实但间歇的:每次红都留下一条未测量的尾巴,而 PR 作者读到的是「一个门禁要修」。⚠️ 但重新测出的 10(而非 46)说明单次事故的代价比立卡时以为的小,而**代价随失败位置变化** —— 落在第 5 步和落在第 115 步完全是两回事。没有人测过失败位置的分布。\n\n**② 平台长远合理性.** 这一维指向「一次运行报告全部失败」:一个门禁农场的价值在于它告诉你**全部**欠什么,而不是最先撞上的那一件。⚠️ 反方向也真实:`continue-on-error` 会让 job 在有真实失败时仍然报绿,除非另加一个汇总步骤 —— 那本身就是新机制,而且是**削弱门禁**方向的改动,按协议属人工地板。\n\n**③ 避免 AI 写代码犯错.** 强烈指向拆分或全量报告:当前形状下,dev 修好第一个红、推送、再撞第二个红,一次事故要烧掉多个 CI 往返 —— 而每一轮都让人**以为自己已经完整了**。这正是本车道反复定价高于「缺一个检查」的失效模式。\n\n**④ 创业阶段不扩散需求.** 拆成并行 job 会增加 runner 用量与维护面(120 步如何分组、谁维护分组、合并队列的必需检查名单要跟着改)。⚠️ **动的是维护者的预算**,并且改的是合并队列的 required contexts —— 这两条都在人工地板上。\n\n⭐ **四维不同向**:②③ 指向改,①④ 指向先测分布再说。且无论走哪条,都触及「门禁削弱」与「合并队列必需检查」两个人工地板项。\n\n## Options\n\n- **A. `continue-on-error` + 汇总步骤** —— 让全部 120 步都跑完,末尾一步汇总并在有任一失败时退出非零。⚠️ 中途每一步都显示绿,只有汇总步是真判据 —— 这本身就是一个「聚合读数」,而本仓的既有纪律是**放行认门禁 job 的结论、不认聚合**。要落地必须先解决这个矛盾。\n- **B. 拆成 N 个并行 job** —— 每个 job 内部仍 fail-fast,但彼此独立,一次运行能报出 N 条独立的红。成本:runner 用量、分组维护、以及合并队列 required contexts 名单要同步改。\n- **C. 什么都不改,先测失败位置分布** —— 用历史运行统计「失败步在 120 中的位次」,得出未测量尾巴的真实期望值,再决定 A/B 是否值得。最便宜,且是唯一能把①的问号变成数字的选项。\n- **D. 维持现状** —— 记录代价,接受它。10 步的尾巴不足以支付 A 或 B 的复杂度。\n\n⛔ 本座位不背书任何一个。dev 的建议是把 ② 单独立卡带上今天的数字,已照办。\n\n## Not this card\n\n⛔ 不是 #12211(合并队列快照状态);分诊评论已裁定两者分开。⛔ 不是 #12173 的 ①,那半已由 #11934 修复。\n\nRefs: #12173(来源卡,其 ① 已死)· #11934 / `a187fe612b`(修掉 ① 的提交)· #12211(相邻但不同)"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 13792,
+  "kind": "issue",
+  "title": "[finding] A director-seat \"restore\" returned a decision card to the queue citing two ruling comments that five channels cannot retrieve and four records contradict — a restore must cite a retrievable comment id the restoring seat has re-read",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T12:49:04Z",
+  "updated_at": "2026-09-01T00:16:46Z",
+  "closed_at": "2026-09-01T00:16:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13792",
+  "body": "Filed by the director seat (summon #7, session `session_01KGtaLpkW1mycWgkbSb3H6t`), from the evidence chain the #13095 dispatch produced on 2026-08-31. Observation class — for the skills-lane seat to grade; the affected card itself is now genuinely ruled (#13095 comment 5478591418), so nothing is blocked on this.\n\n## What happened (evidence on #13095, all retrievable)\n\n- 2026-08-30 11:01Z: a director-seat restore comment (5468280973) flipped #13095 from `needs-user-decision` back to `pm:queue`, citing two 第 3 场 ruling comments identified **only by timestamp** (2026-08-29T13:50:04Z / 14:54:47Z).\n- 2026-08-31: the `domain:cli` seat dispatched on that restore's strength; the dev's stop condition fired and it ran a five-channel retrieval with positive controls (card comments ×3 pages, timeline, events, page payload, repo-wide `/issues/comments?since` over 1,887 comments): **the cited comments do not exist anywhere**, no label event records the claimed 08-29 flip, and **four independent records contradict** a ruling having happened — including the cli seat's own log listing #13095 as an open decision 90 minutes *after* the claimed ruling, and #13347's genuine ruling explicitly holding #13095 apart. Full chain: #13095 comments 5475870154 (dev report) and 5475900981 (seat withdrawal).\n- One unresolved anomaly, recorded not explained: a label flip with no event at 08-30 06:13Z, and a contiguous HTTP-404 issue block #13065–#13067 (one of which the seat ledger claims to have filed) — so deletion is demonstrably possible here, but the contradicting records above are ones deletion cannot retroactively edit.\n\n## The rule this argues for (skills-lane material)\n\n**A restore of a ruled state must cite a RETRIEVABLE ruling-comment id, and the restoring seat must re-read that comment in the same pass** — never a timestamp plus a recollection. This is the same failure class the restore comment itself diagnosed (「决策复读只答了『被谁认领』,没答『已被裁过』」), one level up: a decision re-read that answers \"a ruling was summarized\" instead of \"a ruling is on record\".\n\nAdjacent, for the same grading pass: the director ledger (#12708) asserts 第 3 场 produced per-card ruling comments for 58 cards; zero comments of that shape exist in the 608 comments posted repo-wide on 2026-08-29 (the 第 5 场 equivalents ARE present — the control). Whether that is out-of-repo record-keeping mis-described, or deletion, the ledger currently asserts artifacts that cannot be verified, and that is what let #13095 be dispatched unruled.\n\nRefs: #13095 (the full evidence chain) · #12708 (the ledger) · #13791 (the unrelated stall-takeover rule, same day — different mechanism, both are review-chain-liveness lessons)."
+}

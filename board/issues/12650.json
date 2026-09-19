@@ -1,0 +1,35 @@
+{
+  "number": 12650,
+  "kind": "issue",
+  "title": "docs(react-pages): html tier requires kebab-case registered names (`<list-view>`) — PascalCase table reads as if it applies to both tiers",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-27T03:08:23Z",
+  "updated_at": "2026-08-31T09:33:24Z",
+  "closed_at": "2026-08-31T09:32:21Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12650",
+  "body": "**Docs-clarity finding from promo-video production recon (internal ref: steedos-labs/video-studio#61). Not claiming; filing for triage.**\n\n## Observed (17.1.0, hotcrm dev)\n\nIn a `kind: 'html'` page, `<list-view>` works but `<ListView>` fails to compile with `is not an allowed component`. The PascalCase component table in `content/docs/ui/react-pages.mdx` is the **react-tier** convention; the html-tier section never states that html pages must use the kebab-case registered type names instead.\n\n## Why it matters\n\nAn author (human or AI) reading the docs' component table and then writing an html-tier page will naturally copy the PascalCase names and hit a compile error with no pointer to the naming rule. Since the html tier is explicitly positioned for AI-drafted pages, the docs are effectively the AI's prompt — one sentence in the html section (\"use registered kebab-case names, e.g. `<list-view>`; PascalCase applies to react pages\") would remove the trap."
+}

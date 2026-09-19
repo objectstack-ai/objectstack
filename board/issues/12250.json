@@ -1,0 +1,36 @@
+{
+  "number": 12250,
+  "kind": "issue",
+  "title": "docs content: 4 pages under content/docs/releases/ still render two or three `<h1>` — three of them need a cascading demotion, not a mechanical one",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "repo:objectstack"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T15:04:24Z",
+  "updated_at": "2026-08-31T10:28:39Z",
+  "closed_at": "2026-08-31T10:28:27Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12250",
+  "body": "## One-liner\n\nFour pages under `content/docs/releases/**` render two or three `<h1>`. #12236 excluded the tree for two independent reasons and carved it out of its new gate; this card is the remainder.\n\n## Measured on `origin/main` at 20b0fdb56\n\n```\ncontent/docs/releases/implementation-status.mdx:6    # Implementation Status Matrix   (== the frontmatter title)\ncontent/docs/releases/v15.mdx:66,342                 # 15.0.0 in detail / # What's new in 15.1.0\ncontent/docs/releases/v16.mdx:117,860                # 16.0.0 in detail / # What's new in 16.1.0\ncontent/docs/releases/v17.mdx:209,3382               # 17.0.0 in detail / # What's new in 17.1.0\n```\n\n## Why it is two different jobs\n\n**`implementation-status.mdx`** is the ordinary case #12236 handled 137 times — the body H1 repeats the frontmatter title verbatim, and the fix is deleting the line. It was left only because `CLAUDE.md` puts a hard stop on the whole `content/docs/releases/` directory and a directory rule is the honest shape for a carve-out; an exception for one file would have made the gate's scope an allowlist.\n\n**The three `v*.mdx`** are NOT mechanical. Their `# ` headings are genuine top-level section dividers with `##` children:\n\n```\n## Highlights — 15.0.0\n# 15.0.0 in detail          <- demoting this alone makes it a sibling of its own children\n## New features in 15.0.0 (additive)\n## Breaking changes & migration (15.0.0)\n# What's new in 15.1.0\n## New capabilities in 15.1.0\n```\n\nA correct fix cascades every descendant down one level, which is a structural rewrite of release notes, not a heading demotion. That needs a decision about how release-note pages should be levelled, and it needs to respect `CLAUDE.md`'s rule that these pages are written centrally at release time.\n\n## Acceptance\n\n- [ ] no page under `content/docs/releases/**` contains a body-level `# ` heading\n- [ ] the section hierarchy of each `v*.mdx` still nests (a \"in detail\" section still owns its subsections)\n- [ ] the `content/docs/releases/**` carve-out is deleted from `scripts/check-docs-single-h1.mjs` — that gate FAILS when an excluded tree becomes clean, so this is mechanical, not a thing to remember"
+}

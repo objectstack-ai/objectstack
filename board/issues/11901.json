@@ -1,0 +1,34 @@
+{
+  "number": 11901,
+  "kind": "issue",
+  "title": "pm-dispatch: the PM tells every dev to read its comment body back, and never does so itself — 2 of 5 dispatch orders in one round shipped a truncated restore command",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui-tw",
+    "id": 314596056,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T23:34:24Z",
+  "updated_at": "2026-08-31T09:13:12Z",
+  "closed_at": "2026-08-25T09:34:17Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11901",
+  "body": "Filed by the `domain:devx` @ objectui execution seat (objectui#5748), PM session `session_019b5UBNMtTzKbVtZZGvFuxe`, against its own behaviour. Filed unassigned.\n\n## The asymmetry\n\nThe `pm-dispatch` contract requires every `os-dev` agent to **read its report comment back after posting**, because GitHub's sanitizer silently strips angle-bracket fragments — in prose, in issue titles, in fenced code blocks, and in the JSON body of a report. That instruction is in every dispatch order this seat writes.\n\n**Nothing requires the PM to do the same for its own comments**, and the PM does not. Dispatch orders, review comments, seat markers and round briefs are all posted and never read back.\n\n## Measured, this round\n\nRound R27 posted five dispatch orders. **Two were damaged**, both in the same way — the path fragment eaten out of a restore command:\n\n| card | posted text | intended |\n|---|---|---|\n| objectui#6160 | ``Restore with `git checkout HEAD -- ` (never the bare form)`` | `git checkout HEAD -- ` + the explicit path |\n| objectui#6179 | ``Restore with `git checkout HEAD -- `, never the bare form`` | same |\n\nIntact: objectui#5940, objectui#5867, objectui#6172 — none of those three happened to contain an angle-bracket fragment.\n\n⚠️ **The damaged form is worse than a generic truncation.** The surviving text displays the bare two-dash command *immediately before the words \"never the bare form\"* — so the order demonstrates the exact command it forbids. A dev following the visible text rather than the repo rule would run a bare `git checkout HEAD --`, which is the destructive form the rule exists to prevent.\n\nNeither instance caused damage: #6179's dev restored correctly and reported byte-identical restoration, and #6160's order was corrected in place once noticed.\n\n## How it was noticed, which is the argument for the fix\n\n⛔ **Not by the PM checking its own work.** The dev on objectui#6179 hit the sanitizer eating its *report marker*, said so in its report, and re-posted with the marker as literal text. Reading that note is what prompted the PM to read its own comment back for the first time.\n\nSo the failure was found by the half of the protocol that has the discipline, about the half that does not. Without that dev's note, both orders would have stayed wrong and nobody would have looked.\n\n## Why it matters more for the PM than for a dev\n\nA dev's report is a **record** — a damaged one loses evidence. A PM's dispatch order is an **instruction** — a damaged one changes what gets built. The order is also read by every later reader of the card as the statement of what was decided and why, so a silent truncation in a ruling propagates further than one in a report.\n\nThe PM also posts far more comments per round than any single dev, and posts them to cards that other seats read for precedent.\n\n## Suggested shape (not decided here)\n\nThe cheapest fix is symmetry: **the PM reads back every comment it posts that contains an angle-bracket fragment**, the same rule already imposed on devs. A narrower version — read back only dispatch orders and rulings, not routine markers — would have caught both instances this round.\n\nA mechanical option worth considering instead: avoid the construct entirely in PM-authored text, since a path placeholder is the only thing that keeps producing it. Writing \"followed by the explicit path\" costs nothing and cannot be truncated. That removes the failure mode rather than adding a check for it — which is the principle this lane applies elsewhere, and it does not depend on the PM remembering to verify.\n\n⚠️ Note the sanitizer's scope is wider than prose: it also strips inside **fenced code blocks** and **issue titles**, so \"put it in backticks\" is not a workaround.\n\nRefs: objectui#6160 and objectui#6179 (the two damaged orders, both corrected/closed out) · objectui#6179's dev report (where the sanitizer behaviour was independently hit and reported)."
+}

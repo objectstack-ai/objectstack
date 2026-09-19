@@ -1,0 +1,33 @@
+{
+  "number": 14002,
+  "kind": "pull_request",
+  "title": "docs(pm): express the entry guard's self-test size as a floor, not a reading",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T23:03:11Z",
+  "updated_at": "2026-08-31T23:39:09Z",
+  "closed_at": "2026-08-31T23:39:08Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": "2026-08-31T23:39:08Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/14002",
+  "body": "Fixes #13963\n\nThe docblock above this file's `--self-test` entry guard carried **two** figures frozen at PR #9897, and both had rotted. The card names one; reading the sentence turned up the other sitting beside it.\n\n| figure as written | true at PR #9897 | true today | drift |\n|:--|:--|:--|:--|\n| \"THIS file's **77** assertions\" | 77 (measured, see below) | **255** | factor 3.3 |\n| \"for the same reason **line 810** carries it\" | line 810 really was the main-invocation guard | line 810 is an unrelated `try {` in the regeneration predicate; the guard is at line 2336 | points at the wrong code |\n\nBoth were true when written and neither is anchored to the moment that made it true, so both read as present-tense claims about this file. That is exactly the defect class #13536 describes.\n\n## The shape, copied from the sibling\n\nPer triage, this follows what landed in `dispatch-gates.mjs` as `010518bb` rather than inventing a shape:\n\n- the **77 is kept and anchored to PR #9897** as the historical fact it is (it was true there);\n- **today's size is a FLOOR** — \"more than three times that\" — written as a floor on purpose, pointing at `--self-test`'s `checked` as the live reading;\n- the **line number is replaced by a reference to the guard itself**, which cannot drift;\n- a sentence says why it is a floor, and asks the next reader not to \"helpfully\" refresh either figure back into a reading.\n\nRefreshing 77 to 255 was explicitly not done: it re-arms the identical defect one value later. No gate pins the figure to the live count either — #13536 rules that out, and this PR adds none.\n\n## The floor premise, re-measured on THIS file\n\nTriage required this premise be re-run here rather than inherited from the sibling. Across **all 13 commits that have ever touched this file** (introduced 2026-08-18, never renamed), static `assert(` call sites went:\n\n```\n22 -> 70 -> 70 -> 74 -> 74 -> 83 -> 112 -> 122 -> 153 -> 185 -> 198 -> 223 -> 248\nUP: 10   FLAT: 2   DOWN: 0\n```\n\n**It has never once gone down**, so a floor stays true where a reading rots. The counting method reproduces both independent readings already on record — 70 static at `a065e46550b4` and 223 at `9c4c431fd` — which is what makes the sweep trustworthy rather than merely self-consistent.\n\nThe historical 77 is measured, not assumed: the file at `a065e46550b4` was run directly and printed `77 assertions`.\n\nTwo notes worth recording. The clone this ran in arrived **shallow** (floor 2026-08-30, 208 commits), where this file has only 2 commits of history and PR #9897's commit does not resolve at all — the premise is unmeasurable in that state and a sweep run there would have \"confirmed\" a 2-commit history. It was unshallowed first (28s, strictly additive; `--shallow-since` was avoided because it can silently *shorten*, as `scripts/pm/git-history.mjs` documents). Second, the live count is not even constant across environments: `--self-test` prints 255 in an installed tree and 253 without `node_modules`, where the generator-provenance row fails closed and says so on its `live:` line. Both are green and truthful — a further reason the prose should not carry a number as a reading.\n\n## Verification\n\nGate union derived from the change set by `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` (no hand-fed paths), run on final head **`226bbc000`**:\n\n- **15 of 16 green**, including `pnpm check:pm-governed-merges` (`✓ 255 assertions`), `pnpm check:entry-guard`, `pnpm check:pm-dispatch-gates`, `node scripts/pm/bare-root-worklist.mjs --self-test` (both convention-triggered gates for editing a gate script), and `node scripts/check-skills-token-ratchet.mjs`.\n- `node scripts/check-test-completeness.mjs` exits **3 = PREREQUISITE NOT MET**, recorded as **NOT MEASURED**, not as a red: it grades a saved `turbo run test` log, none exists locally, and CI passes the path on every invocation, so the branch is unreachable there.\n\nNo behaviour change: the guard and the self-test are untouched, and the count is identical either side of the diff — **255 at the merge base, 255 at head**. The diff is comment-only, one hunk, 17 insertions / 7 deletions.\n\nSibling card #13896 (same file) is closed, and no open PR touches this file, so nothing serialises against this one.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01Msg17tAHJ3jVTYFgHydCm2)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Msg17tAHJ3jVTYFgHydCm2)_"
+}

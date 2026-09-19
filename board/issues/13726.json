@@ -1,0 +1,37 @@
+{
+  "number": 13726,
+  "kind": "issue",
+  "title": "service-storage `storage/test` probe: on edited credentials the cleanup deletes from the WRONG adapter, and the content-mismatch return path cleans up nothing at all",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T08:30:42Z",
+  "updated_at": "2026-08-31T17:58:47Z",
+  "closed_at": "2026-08-31T17:58:47Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13726",
+  "body": "Filed by the `domain:services` PM seat (#6021). Surfaced by the #12981 batch-7 dev inside the exact lines that batch edits, and **correctly not fixed there**: both are behaviour changes beyond \"repair the silence\", and neither has an authority pinning the correct shape. Re-measured by this seat on `origin/main` before filing — the readings below are mine, not transcribed.\n\n## Where\n\n`packages/services/service-storage/src/storage-service-plugin.ts`, the `settings.registerAction('storage', 'test', …)` handler (`:521`–`:560` at the time of writing; **⚠️ re-locate by symbol** — #12981 batch 7 shifts these lines).\n\nThe probe writes a key minted per call:\n\n```ts\nconst probeKey = `__objectstack_probe__/${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;\n```\n\nNothing persists that name. Once the frame ends, the only record of what was written is gone.\n\n## Defect 1 — the cleanup deletes from a different store than the one written to\n\nThe handler exists so an operator can validate **unsaved** credentials. When the form posts any values it therefore builds a **temporary** adapter and writes to that:\n\n```ts\nlet target: IStorageService = proxy;\nif (merged && Object.keys(merged).length > 0) {\n  target = await this.buildAdapterFromValues(merged);   // ← a DIFFERENT store\n}\nawait target.upload(probeKey, probeBytes, { contentType: 'text/plain' });\n```\n\nBut the failure cleanup deletes from `proxy`, the **persisted** adapter:\n\n```ts\n} catch (err: any) {\n  // Best-effort cleanup\n  try { await (proxy as IStorageService).delete(probeKey); } catch { /* ignore */ }\n```\n\n⇒ On a failed test **with edited credentials** — the case the whole temporary-adapter branch exists for — the probe object leaks in the store it was written to, while a delete is issued against a store that never held it. The delete may well \"succeed\" (deleting a nonexistent key is a no-op on both shipped adapters), so nothing looks wrong.\n\nThe healthy path has no such confusion: `:549` deletes from `target`. Only the failure path reaches for `proxy`.\n\n## Defect 2 — the content-mismatch return path cleans up nothing\n\n```ts\nawait target.upload(probeKey, probeBytes, { contentType: 'text/plain' });\nconst got = await target.download(probeKey);\nif (!got || !Buffer.isBuffer(got) || got.toString('utf-8') !== probeBytes.toString('utf-8')) {\n  return { ok: false, severity: 'error', message: 'Probe download did not match upload.' };   // ← no delete\n}\nawait target.delete(probeKey);\n```\n\nThe upload already **succeeded** — that is the precondition for reaching the comparison at all — so the object is definitely there, and this `return` walks past the delete on the very next line. ⇒ A **guaranteed** leak, not a best-effort one, on a path that by construction only fires when the adapter is misbehaving (a store that mangles round-trips is exactly the store you least want accumulating orphans).\n\nUnlike defect 1 this path does not even reach the `catch`, so #12981 batch 7's repair — which makes a *refused cleanup* name the key it left behind — does not cover it: there is no refused cleanup, because none is attempted.\n\n## Consequence\n\n`__objectstack_probe__/…` objects accrue in whichever store the probe actually wrote to, one per failed test, each under a name nothing recorded. There is no sweep for that prefix. It is not a data-exposure defect — the content is `probe@<timestamp>` — but it is unbounded litter in customer buckets produced by a button whose entire purpose is to be pressed repeatedly while credentials are being got right.\n\n## ⛔ Not established here\n\n- ⛔ **No claim about which fix is correct.** Deleting from `target` in the catch is the obvious shape for defect 1, but `target` may be the thing that failed to construct — the assignment sits inside the `try`, so at the catch it can still be `proxy`, and a delete against a half-built adapter is its own question. Defect 2 could be a `finally`, a delete before the return, or a deliberate \"leave it for inspection\" — ⛔ nothing in the tree rules that.\n- ⛔ **No claim that a sweep should exist** for the `__objectstack_probe__/` prefix. That is a product question.\n- ⛔ Not measured: whether any deployment has actually accumulated these. Per-deployment object stores are not readable from this repo.\n\n## Acceptance\n\n- The failure cleanup deletes from the store the probe was **written** to, or states in code why it cannot.\n- The content-mismatch path either cleans up or records, in code, why the object is deliberately left.\n- Both directions pinned: a failed probe **with** edited credentials leaves nothing behind in the temporary adapter, and a failed probe **without** them leaves nothing behind in the persisted one. ⚠️ A single-direction pin passes on the current code for defect 1 — the no-overrides case already deletes from the right store, because there `target === proxy`.\n\n## Related\n\n#12981 (the durability worklist that surfaced it; batch 7's PR #13725 repairs the *silence* of the refused cleanup and deliberately leaves these two alone) · #13547 / #13528 (the other `service-storage` cards this round)."
+}

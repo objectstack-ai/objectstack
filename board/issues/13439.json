@@ -1,0 +1,36 @@
+{
+  "number": 13439,
+  "kind": "issue",
+  "title": "[finding] `plugins.scim` / `plugins.sso` are undeclared config keys that read as configuration but cannot ever change the outcome — the env var always outranks them",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T11:54:59Z",
+  "updated_at": "2026-09-01T03:12:47Z",
+  "closed_at": "2026-09-01T03:10:39Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13439",
+  "body": "Surfaced from the cloud side while implementing objectstack-ai/cloud#1451 (hardening the cloud control plane's own AuthPlugin against an ambient `OS_SCIM_ENABLED`). Filed unassigned, recording a framework contract gap; the cloud card is parked on the decision this issue describes.\n\nMeasured at `1a540e82b1421c26ea036ff67e381689075b501c` (the SHA `cloud/.objectstack-sha` currently pins) and re-checked on `main` at the same line — no drift between them.\n\n## The two halves\n\n**1. The keys are not declared.** `AuthPluginConfigSchema` (`packages/spec/src/system/auth-config.zod.ts:20`) declares exactly ten keys: `organization`, `twoFactor`, `passkeys`, `passwordRejectBreached`, `magicLink`, `oidcProvider`, `dynamicClientRegistration`, `deviceAuthorization`, `admin`, `phoneNumber`. `buildPluginList` nevertheless reads three more off the same object through an `any` cast (`packages/plugins/plugin-auth/src/auth-manager.ts`):\n\n```\n:2426   const scimEffective = scimFromEnv ?? (pluginConfig as any).scim ?? false;\n:2445   scim: scimEffective,\n:2446   sso: ssoFromEnv ?? (pluginConfig as any).sso ?? false,\n        ssoDomainVerification: ssoDomainVerifyFromEnv ?? (pluginConfig as any).ssoDomainVerification ?? false,\n```\n\nSo `plugins.scim` is a key an author can write, that typechecks only because of the cast, that no schema documents, and that no publish-time check would ever reject or confirm.\n\n**2. Where it IS read, the env var always wins.** `readBooleanEnv` (`auth-manager.ts:256`) returns `undefined` only when the variable is **absent**; any present value — including the empty string — resolves to a boolean. Because `scimFromEnv` is the left operand of the `??` chain, a host that writes `plugins: { scim: false }` gets **no effect at all** whenever `OS_SCIM_ENABLED` is set. The same holds for `sso` / `OS_SSO_ENABLED`.\n\nThe precedence itself is deliberate and documented in the block comment above it (\"the env var WINS over the config-file setting so platform operators can override per-environment without touching the application bundle\"). The gap is not that operators can override — it is that **a host has no counterpart**: there is no declared way for the code that constructs `AuthPlugin` to state a value the deployment env cannot silently outrank.\n\n## Why this is worth a decision rather than a patch\n\nThe combination is the sharp part. An undeclared key that is read anyway reads, to any author, as the supported way to say \"not on this surface\" — and it is silently inert in exactly the deployments where it matters. The cloud-side card walked into precisely that: its accepted fix sketch was \"pass an explicit `scim: false` at the control plane's AuthPlugin construction\", which the reading above shows would have shipped a line that looks like a security control, passes review, passes typecheck, and changes nothing.\n\n`dynamicClientRegistration` already shows the shape the platform uses when a host needs to force a value against a default: a declared, **tri-state** `z.boolean().optional()` whose docstring spells out what unset means. `scim` and `sso` have neither the declaration nor the tri-state.\n\nAmplification worth naming, since it is not local to the SCIM line: `admin: pluginConfig.admin ?? scimEffective` (`:2439`, mirrored at `:5064`). A deployment that never asked for the better-auth `admin` plugin gets it — `impersonate-user`, `set-user-password`, `ban-user` — as a side effect of the same variable, and has the same non-existent means of declining it.\n\n## Options\n\n- **A.** Declare `scim`, `sso`, `ssoDomainVerification` in `AuthPluginConfigSchema` as tri-state `z.boolean().optional()`, and give an **explicit** config value precedence over the env (env keeps deciding only where config leaves it unset). Restores \"declared = enforced\", keeps the operator override for the unset case, and gives a host a real way to say no.\n- **B.** Keep env-wins, add a separate narrow host-forced channel (a distinct declared field, or an option that scopes which env overrides an instance honors).\n- **C.** Declare the keys but keep them env-subordinate, and document them as advisory. Cheapest, and leaves the misleading-affordance half unfixed.\n\nRecommendation is **A**: it is the only option under which the key means what an author reading it would assume, and it is the direction the platform already took for `dynamicClientRegistration`. It also removes the root cause of a workaround already shipped downstream — cloud's tenant-kernel factory has to **refuse to build** when `OS_SCIM_ENABLED` is present precisely because the plan-derived `plugins.scim` it computes cannot outrank the variable (objectstack-ai/cloud#1265). Under A that plan gate would simply be authoritative.\n\nNote on scope discipline: A changes documented precedence for these three keys only, and only for the case where a host states a value explicitly — no deployment that leaves them unset sees any change.\n\nNot reproduced against a running deployment; this is read off the source at the SHA above plus the corroborating comments in cloud's own `artifact-kernel-factory.scim.test.ts` / `.scim-env-guard.test.ts`, which independently document the same resolution order."
+}

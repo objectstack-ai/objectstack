@@ -1,0 +1,36 @@
+{
+  "number": 13639,
+  "kind": "issue",
+  "title": "[finding] an RLS denial caused by an unresolved variable logs NOTHING and `explain` reports it as `narrows` rather than `denies` — the operator debugging &quot;this user sees no rows&quot; gets no signal",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-31T04:24:49Z",
+  "updated_at": "2026-09-01T00:17:32Z",
+  "closed_at": "2026-09-01T00:13:03Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13639",
+  "body": "Filed by the `domain:engine` lane PM, from a measurement made during the clause ② contract review of PR #13630 (#13496). **Recording only — no severity asserted, routing is triage's.**\n\n⚠️ **PRE-EXISTING and low-urgency.** This is the observability of the long-standing scalar \"no active org\" fail-closed path. PR #13630 neither introduced nor degraded it — that PR was measured to *inherit* this behaviour, which is why it was accepted rather than held. Ranking it is triage's; I am filing it because it now has a precise measurement and would otherwise be lost with the review thread.\n\n## Measured, at `1cdf3c14ef`\n\nWhen `compileCelToFilter` refuses (a `current_user.*` variable resolving to `null`/`undefined`, and now also a null MEMBER of a membership array), the compiler produces a useful `detail` — *\"unresolved member at index N\"*, naming the variable path. Three things then happen to it:\n\n| stage | what happens |\n|:--|:--|\n| `plugin-security/rls-compiler.ts:343` | the `detail` is **discarded** — only `!ok` is consumed |\n| the drop-warn beside it | gated on `!isSupportedRlsExpression`, which is **true for membership shapes** ⇒ **nothing logs** |\n| `explain` | reports the sentinel with verdict **`narrows`**, not `denies` — its `isDenyAll` matches only its own `__deny_all__`, never `__rls_deny__` |\n\nSo the denial is real and correct — record attribution excludes properly, and `__rls_deny__` *is* visible in `readFilter` — but the **reason** is thrown away at the one place that could surface it, and the one diagnostic tool that exists mislabels the outcome.\n\n## Why it matters more than an ordinary missing log\n\nThe failure mode this produces is the worst-shaped one for an operator: **a user sees zero rows, no error is raised, nothing appears in the log, and the built-in explanation tool says the policy \"narrows\" rather than \"denies\".** Every signal available points away from the actual cause.\n\n⭐ And the denial is *deliberate* — it is the fail-closed path working as designed. That is exactly why it needs a trace: a correct refusal that is indistinguishable from \"the data genuinely doesn't match\" costs an operator hours, and the information needed to end that search was computed and then dropped one line before it could be used.\n\n## Scope NOT established\n\n- ⛔ Whether other `!ok` consumers discard the same `detail` is **unmeasured** — I checked this one path.\n- ⛔ Whether `explain`'s `isDenyAll` should recognise `__rls_deny__`, or whether the two sentinels are deliberately distinct, is **a design question I am not answering**.\n- ⛔ No claim that an operator *has* been bitten. What is measured is that the signal does not exist.\n\n## Suggested shape, not a prescription\n\nTwo candidates, both small, neither costed here: surface the discarded `detail` at the drop site (the warn is already there, only mis-gated), and/or teach `explain`'s `isDenyAll` about `__rls_deny__`. Which, and whether either is worth doing now, is triage's and the maintainer's.\n\n## Related\n\n#13496 / PR #13630 (where the clause ② review measured it) · #13552 (the polarity-blind deny guard on the same seam) · ADR-0056 / ADR-0058"
+}

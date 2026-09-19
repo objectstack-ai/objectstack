@@ -1,0 +1,35 @@
+{
+  "number": 13664,
+  "kind": "issue",
+  "title": "[finding] `packages/spec` cloud docblock lists `sys_metadata` as a control-plane table \"(with `environment_id`)\" — the column is deprecated on the metadata tables, and the line ships to both the docs site and the published .d.ts",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-31T05:45:10Z",
+  "updated_at": "2026-08-31T10:26:27Z",
+  "closed_at": "2026-08-31T10:17:14Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13664",
+  "body": "Surfaced while correcting the stale `environment_id` JSDoc sites for #13434. Filed unassigned — recording only, not claimed, and deliberately NOT fixed in that PR: the fix lands in `packages/spec`, a different package from that card's three files, and the correct wording depends on a fact this tree cannot settle (see \"What is NOT claimed\").\n\n## The reading\n\n`packages/spec/src/cloud/environment.zod.ts:26-31` — the module docblock — lists `sys_metadata` among the Control-Plane tables **\"(with `environment_id`)\"**, on `origin/main` at `eaba72e48c`:\n\n```\n * Split of concerns:\n * - **Control Plane**: `sys_environment` (includes physical DB addressing),\n *   `sys_package_installation` (with `environment_id`), `sys_environment_credential`,\n *   `sys_environment_member`, `sys_metadata` (with `environment_id`).\n * - **Data Plane**: each environment DB contains only business objects\n *   (account, task, …). No system tables, no `environment_id` columns.\n```\n\nIt reaches two audiences beyond the source file:\n\n- **The published docs site**, verbatim: `content/docs/references/cloud/environment.mdx:26-31`. That page carries `AUTO-GENERATED — DO NOT EDIT` at line 6, so the docblock above is its only editable source.\n- **The published `.d.ts`**: `packages/spec/dist/cloud/index.d.ts:1688` (and the `.d.mts` twin), so it is also an editor tooltip for consumers of `@objectstack/spec/cloud`.\n\n## What contradicts it\n\nOn the metadata tables, `environment_id` is retired, not live:\n\n- `AGENTS.md:8` — \"DB column `environment_id` [control-plane tables; **on the metadata tables since deprecated in favour of `organization_id`, ADR-0006 v4**]\".\n- `packages/metadata-core/src/objects/sys-metadata.object.ts:138-148` — `@deprecated` … \"no longer written by saveMetaItem and not consulted by overlay reads. Kept for legacy rows; new writes leave it NULL.\"\n- `packages/metadata/src/loaders/database-loader.ts:82-89` — `@deprecated` … \"accepted for back-compat but ignored — writes do not set `environment_id` and filters do not constrain on it.\"\n- `packages/metadata/src/loaders/database-loader.test.ts` pins it: the create call carries `organization_id` and **not** `environment_id`, and no `findOne` where-clause has the property.\n- Card #13434 itself: the JSDoc sites that taught the same retired stamp/filter, now corrected.\n\nSo the parenthetical reads as a live tenancy column to anyone deciding whether to write it — the same defect class as #13434 and #13433, one surface further out (published docs plus published types, rather than an in-repo docstring).\n\n## What is NOT claimed\n\n- **Not claimed that the whole line is wrong.** The `sys_package_installation` parenthetical on the previous line is correct — that IS a control-plane table keyed by `environment_id` (ADR-0003, UNIQUE `(environment_id, package_id)`), and ADR-0002 lists it the same way.\n- **Not claimed which way the correction goes, and this is why it was not repaired inline.** Whether the CLOUD control plane's own `sys_metadata` still carries a live `environment_id` is a fact about the cloud deployment's schema, not about this tree. Two readings, needing different wording:\n  1. The column is retired everywhere, so drop the parenthetical or restate it as deprecated / legacy-rows-only.\n  2. The cloud control-plane copy of `sys_metadata` genuinely still keys by it while the per-environment metadata tables do not, in which case the line needs to SAY that — as written a reader cannot tell the two apart.\n- **Not claimed that the generated page should be edited.** It is auto-generated; the docblock is the source.\n\n## Re-check\n\n```\ngit grep -n 'sys_metadata` (with `environment_id`)' -- packages content\nsed -n '26,31p' packages/spec/src/cloud/environment.zod.ts\nsed -n '1,10p' content/docs/references/cloud/environment.mdx\ngit grep -n 'environment_id' -- packages/metadata-core/src/objects/sys-metadata.object.ts packages/metadata/src/loaders/database-loader.ts\n```\n\n## Duplicate check\n\nFull enumeration of all **366** open non-PR issues via the REST list endpoint (4 pages, page 5 empty — complete, not truncated), grepped locally. Positive control in the same pass: **33** open cards contain \"AGENTS.md\", so the instrument is not returning a false zero. Five open cards mention `environment_id`: #13434 (the JSDoc sites this fell out of), #13433 (`sys_activity`'s live-looking twin), and #12412 / #12036 / #3739 (control-plane casing and dead request fields — a different subject). Nearest neighbour on the same FILE is **#12485**, which reports `environment.mdx:20`'s \"`sys_environment` was renamed to `sys_environment`\" tautology — the same generated page and plausibly the same generator-source repair, but a different sentence and a different defect. No open card covers this parenthetical.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

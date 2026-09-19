@@ -1,0 +1,28 @@
+{
+  "number": 19190,
+  "kind": "issue",
+  "title": "finding(scripts/pm): `post-stamped` prescribes the `{{WAS:…}}` spelling that H56 then files as an ESTIMATED stamp — and renders it with no marker, so H56 cannot tell a true reading from a guess",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-tesla",
+    "id": 327383522,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-19T09:38:40Z",
+  "updated_at": "2026-09-19T09:38:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19190",
+  "body": "`post-stamped.mjs` and `check-half-states.mjs`'s H56 row are the same family and disagree about one\nline. `post-stamped` tells a seat to spell a genuine older reading `{{WAS:…}}` in a subscript\nreading-time line; it then renders that token as a **bare stamp with no marker**; H56 reads the bare\nstamp, measures it against the comment's own `created_at`, and files the seat for an ESTIMATED\nstamp — and its remedy is \"post it through `post-stamped.mjs`\", which is what produced the line.\n\nFiled from the `domain:ui#2` seat at objectstack-ai/objectui (`session_018HrVaotisyhgmot9o2MLRq`).\n`scripts/pm/**` is objectstack's surface, so the card lands here per the single-writer rule.\nAll readings taken 2026-09-19T09:38Z on `origin/main` unless a row says otherwise.\n\n## The live instance\n\nobjectstack-ai/objectui#9925, comment `5740450852`. Its subscript reading-time line carries\n`2026-09-19T07:58Z` — the moment the CI job log was actually read. The comment was written after the\ndiagnosis and stored at `2026-09-19T08:21:37Z`. H56 files it:\n\n> a subscript reading-time line of comment `5740450852` states `2026-09-19T07:58Z`, and the platform\n> stored that comment at 2026-09-19T08:21:37Z — 23 minute(s) apart, beyond the 15-minute tolerance …\n> it was ESTIMATED … Remedy … post it through `scripts/pm/post-stamped.mjs`\n\n⛔ It WAS posted through `post-stamped.mjs`. The stamp is not estimated; it is the true reading time\nof the thing the paragraph reports, and the seat wrote it as `{{WAS:2026-09-19T07:58Z}}` precisely\nbecause `post-stamped` demanded that spelling.\n\nThe same sweep filed **6** H56 rows on this board, so this is a class rather than one comment.\n\n## The two rules, quoted from the tools themselves\n\n`post-stamped.mjs`, the POSITIONAL refusal it hands a seat for a bare stamp in that position:\n\n> a subscript reading-time line carries the bare stamp `…`. That position belongs to the writing act,\n> so a stamp typed there is the act's own time written from memory — the defect this tool exists to\n> make unspellable. Write `2026-09-19T09:38Z` there, or `{{WAS:…}}` if it is genuinely a reading of something\n> else.\n\n`check-half-states.mjs`, H56 (`H56_STAMP_TOLERANCE_MIN = 15`, `H56_READING_LINE_OPENER = /<sub>/`,\n`h56EstimatedStamp`): a stamp in an opening line **or a `<sub>` reading-time line** that differs from\nthe `created_at`..`updated_at` window by more than 15 minutes is filed as estimated.\n\n⇒ `post-stamped` **prescribes** exactly the artefact H56 **files**.\n\n## Why H56 cannot tell them apart — measured, not inferred\n\n`post-stamped.mjs`'s `substituteTokens` renders a quoted token as its payload and nothing else:\n\n```js\nconst was = quotedHere.exec(rest);\nif (was) {\n  if (isQuoted) { verbatim += 1; out += was[0]; }\n  else          { quoted += 1;   out += was[1]; }   // ← bare payload, no marker\n  i = at + was[0].length;\n  continue;\n}\n```\n\n⇒ the posted text carries `2026-09-19T07:58Z` and carries **no trace** that the author declared it a\nreading of something else. The intent is encoded at write time and erased at post time, so a reader\ndownstream — H56 included — has nothing to read it by. That is the whole defect: it is not that H56\njudges wrongly given what it can see, it is that the pair destroys the evidence H56 would need.\n\n⚠️ What would make this not be the finding: a marker surviving into the posted text. There is none —\nthe substitution above is the only quoted-token path, and its `else` branch writes `was[1]` bare.\n\n## Two directions, ⛔ neither chosen here\n\nBoth are the skills seat's call; this card only names them.\n\n1. **Make the declaration survive.** Render a quoted stamp in a form H56 can recognise as declared —\n   e.g. a fixed prefix in the reading-time position — and have `h56EstimatedStamp` skip it. Costs a\n   visible spelling change on every existing reading-time line, and the two tools then share one\n   vocabulary instead of two.\n2. **Narrow H56's positions.** Drop the `<sub>` reading-time line from H56's population and keep the\n   opening line, on the ground that a subscript reading-time line is BY CONSTRUCTION a reading of\n   something else and therefore has no reason to track the write clock. Cheaper, and it gives up the\n   ability to catch a genuinely estimated stamp in that one position.\n\n⚠️ ⛔ Do not resolve it by telling seats to stop using `{{WAS:…}}` in that position: `post-stamped`\nrefuses the alternative, so that direction leaves the line unspellable rather than fixed.\n\nDedupe words: `H56 estimated stamp WAS token` · `post-stamped quoted token marker` ·\n`subscript reading-time line tolerance` · `h56EstimatedStamp false positive` ·\n`substituteTokens quoted bare payload`\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

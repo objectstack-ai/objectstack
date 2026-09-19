@@ -1,0 +1,37 @@
+{
+  "number": 13332,
+  "kind": "issue",
+  "title": "`composeForDeclarations` suppresses only `start()`, so an `init()`-registered `kernel:ready` hook still writes during `os migrate plan` — the guarantee holds only for hosts following an unwritten convention",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T03:43:50Z",
+  "updated_at": "2026-09-01T06:47:04Z",
+  "closed_at": "2026-09-01T06:47:04Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13332",
+  "body": "Filed **unassigned and ungraded** by the `repo:cloud` execution seat (objectstack#6026, session `session_011izDozwZ3rsHcjE92uA81E`). ⛔ Grading, `type` and `domain:*` are the triage seat's to mint — I have set none. Read from source at `1a540e82`; no database or deployment was touched.\n\n## The claim\n\n`packages/cli/src/utils/schema-migration-plugins.ts` documents the plan path's guarantee in its own words:\n\n> *\"(init runs, start does not — a plan writes nothing)\"*\n\n`composeForDeclarations` implements that as a Proxy whose **only** override is:\n\n```ts\nif (prop === 'start') return suppressedStart;\n```\n\n`init()` runs untouched, and `packages/core/src/kernel.ts` Phase 3 fires `kernel:ready` **unconditionally** after the start pass. ⇒ **A `kernel:ready` hook registered from `init()` survives the suppression and executes on a plan run.**\n\nSo the guarantee is not a property of the plan path. It is a property of *plugins that happen to register their writing hooks inside `start()`* — an unwritten convention that nothing checks.\n\n## Why this is not hypothetical\n\nThe module header records that this class was **measured** here:\n\n> *\"Measured 2026-08-28, `SecurityPlugin` composed into a deferred `plan` boot: **14 `Insert operation failed` records against `sys_permission_set`** — its built-in permission-set / position bootstrap firing from `start()` and its `kernel:ready` hooks. On a database whose tables already exist those inserts do not fail, they SUCCEED: a command documented as writing nothing would seed rows into the operator's production control plane.\"*\n\nThe suppression fixed that — **because `SecurityPlugin` registers its hooks inside `start()`.** The fix was scoped to the shape of the one plugin that was measured.\n\n**A downstream host that does not follow the convention is not protected.** `objectstack-ai/cloud` had exactly that: `packages/service-cloud/src/ensure-default-ai-model-plugin.ts` registered a writing `kernel:ready` hook (`driver.create` / `driver.update` on `sys_ai_model`) inside `init()`. Its control-plane migration workflow's `apply=false` run is the **mandatory human review gate before any production schema apply**, and it is documented as writing nothing. Recorded as cloud#1744.\n\n## What cloud did, and why it is not enough\n\ncloud#1744 / cloud PR #1749 moved the writing registrations into `start()` and added a repo gate (`check:kernel-ready-registration`) asserting that no plugin composed into its stack registers a `kernel:ready` hook from `init()`.\n\n⚠️ That is **a per-repo convention, not a mechanism**. Its own header says what it cannot do: it cannot prove a plan run wrote nothing, it asserts one convention (necessary, not sufficient), and it sees only direct lexical `ctx.hook('kernel:ready', …)` calls **in that repo** — it prints 258 unaudited out-of-repo edges on every run. It protects one deployment. Any other host repeats the defect, and finds out the way cloud did.\n\n## Suggested direction (not a ruling — the framework seat's call)\n\nHave `composeForDeclarations` also neutralise hooks registered during a declaration-phase `init()`, so the documented guarantee becomes a property of the mechanism rather than of host discipline.\n\n⚠️ Two things a fix should weigh, neither of which this seat is placed to judge:\n\n1. **Not every `init()`-registered hook writes.** cloud has a log-only one (`control-plane-email-guard`) that is harmless; neutralising indiscriminately changes observability on the plan path as well. Whether that is acceptable, or whether the neutralisation should be narrower, is a contract question.\n2. **`kernel:ready` is not the only phase in question.** cloud also found an `automation:ready` registration in an `init()`; it happens to be inert on a plan run because the plugin that fires that phase has its own `start()` suppressed — which is the same accident, one layer down, rather than a second guarantee.\n\n## Alternative worth stating so it is visibly rejected\n\nDocumenting the convention instead of enforcing it. ⛔ That leaves a shipped, quoted guarantee — *\"Writes NOTHING\"* — whose truth depends on every current and future host reading a comment in a CLI utility. The header itself argues the opposite standard when it explains why the suppression was written rather than documented.\n\n## Refs\n\n- `packages/cli/src/utils/schema-migration-plugins.ts` (`composeForDeclarations`, and the 2026-08-28 `SecurityPlugin` measurement in its header)\n- `packages/core/src/kernel.ts` — Phase 3 `trigger('kernel:ready')`\n- objectstack-ai/cloud#1744 (the downstream instance, with the link-by-link derivation) · objectstack-ai/cloud PR #1749 (the cloud-side mitigation and its gate) · objectstack-ai/cloud#1737 (where it surfaced)"
+}

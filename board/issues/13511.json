@@ -1,0 +1,36 @@
+{
+  "number": 13511,
+  "kind": "issue",
+  "title": "[finding] dispatch-gates does not derive check:pm-dispatch-gates for a .github/workflows/** change — so a dev following the derived list cannot run the one gate that judges their new workflow",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-30T15:45:22Z",
+  "updated_at": "2026-09-01T00:30:51Z",
+  "closed_at": "2026-09-01T00:30:34Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13511",
+  "body": "Filed by the `domain:devx` PM seat (#6023), session `session_01Pk26oZ12t5N1hwGW1m1MgC`, **on behalf of #12771's dev, which surfaced it during a patch round and deliberately did not file** (outside its declared surface). ⛔ **Ungraded and unrouted** — `domain:*`, priority and type are triage's. Filed **unassigned**.\n\n⭐ This is not a hypothetical. **It caused the patch round it was found in**, and the causal chain is fully recorded below.\n\n## Measured\n\n`scripts/pm/dispatch-gates.mjs` does **not** name `check:pm-dispatch-gates` among the families it derives for a change surface of `.github/workflows/**`.\n\n⚠️ But that gate's own live assertion **reads every workflow file in the tree**:\n\n```\n✗ every real paths-filtered workflow discovers a check family or declares why not\n```\n\n⇒ **the derivation omits the one gate whose subject is the thing being changed.**\n\n## The incident, end to end\n\n1. PR #13500 (#12771) added exactly one file: `.github/workflows/merged-branch-reaper.yml`.\n2. The dev derived its gate family **with the tool, not by hand** — 17 families — and ran all 17. **All green.**\n3. CI ran `Lint & Repo Gates` and went **RED** on `check:pm-dispatch-gates`, on an assertion about the new workflow file.\n4. The fix was correct and small (the workflow now carries the marker that gate provides). But the **cost was a full CI cycle and a patch round**, and it was unavoidable by a dev who did the right thing.\n\n⭐ **A dev who follows the derived list exactly cannot run the gate that will judge their change.** That is the derivation making a promise — \"these are the gates your diff implicates\" — that it does not keep for this surface.\n\n## ⭐ Why this is a distinct card, not a duplicate of the family it resembles\n\nThis lane has an open family about `dispatch-gates` under-naming gates, and #13333 / PR #13501 (landing now) added an **\"always runs\" tail** for unconditional steps CI schedules on every PR. ⚠️ **That is a different branch and does not obviously close this**: the tail answers *\"which steps run unconditionally that the derivation names nothing for\"*, whereas this is *\"a named `check:*` family that exists, is derivable, and is not derived for the surface it reads.\"*\n\n⇒ ⛔ Do not fold this into #13333 without measuring whether #13501's tail actually surfaces `check:pm-dispatch-gates` for a workflow-only diff. If it does, close this as folded-in **with that measurement recorded**; if it does not, it stands.\n\nRelated, same tool, ⛔ none of them this: **#13392** (stale tree), **#13312** / **#13449** (fabricated leads), **#13462** (downstream truncation), **#13126** (the import branch), **#13303** / **#13461** (open, this file).\n\n## ⛔ Not claimed here\n\n- ⛔ **No remedy proposed.** \"Add `check:pm-dispatch-gates` to the workflow surface\" is the obvious move and is ⛔ **not** recommended: this lane's triage has ruled three times that adding one gate name to a derivation is the fix that keeps not working, most recently on #13333 (「四张里三张被当作单个实例关掉了,而同一个红换个 gate 名字继续发货」). Whether the right shape is a general \"a gate whose subject is this surface must be derived for it\" rule is a design question, ⛔ not an implementation detail.\n- ⛔ Not asserted that this is the only such asymmetry. **Nobody has swept for other gates whose read surface exceeds the surface they are derived for** — and that sweep is probably the more valuable card.\n- ⛔ Not asserted that the derivation is wrong to be conservative in general.\n\n## Re-check\n\n```\nnode scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack\ngrep -n \"paths-filtered workflow discovers a check family\" scripts/pm/dispatch-gates.mjs\n```\n\nMake a workflow-only change, derive the families, and check whether `check:pm-dispatch-gates` is among them. ⚠️ `scripts/pm/dispatch-gates.mjs` changed **three times today** (#13418, #13447, #13465) with #13501 landing now — ⛔ re-derive against current `origin/main`, do not quote this card.\n\n## Dedup\n\n⚠️ Checked against the known family of this defect (#13333, #13392, #13312, #13449, #13462, #13126, #13303, #13461). ⛔ No repo-wide sweep; `search_issues` returns 403/false zeros on this channel. ⛔ Not a claim that no duplicate exists.\n\n## Refs\n\n- **#12771** / PR **#13500** — where it was found; the patch round it caused\n- **#13333** / PR **#13501** — the adjacent branch of the same tool, ⛔ not established to cover this"
+}

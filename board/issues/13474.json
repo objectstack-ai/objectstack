@@ -1,0 +1,36 @@
+{
+  "number": 13474,
+  "kind": "issue",
+  "title": "[finding] the read-seam wrapper hop resolves a bare name through a flat LAST-WINS file index — protocol.ts picks the third of three same-named lookup bodies, 0 seams affected today",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-30T14:03:41Z",
+  "updated_at": "2026-08-31T12:51:31Z",
+  "closed_at": "2026-08-31T12:50:48Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13474",
+  "body": "Observation class — recording only, no verdict asserted, no `pm:queue`. Unassigned. Found while verifying the six depth-admitted seams #12360 asked for (PR #13472); deliberately **not** fixed there — that card's declared scope is the depth bound, and this is a resolution defect the bound merely limits the blast radius of.\n\nMeasured on `origin/main` @ `71627f7b4e`.\n\n## What I found\n\n`indexFunctionBodies` in `scripts/check-durability-degradation-log-level.mjs` builds a **flat, file-scoped index keyed by bare name**, and it is **last-wins** — `byName.set(name, body)` with no scope information. `isReadCall`'s wrapper hop resolves a callee name through that index.\n\n`packages/metadata-protocol/src/protocol.ts` declares `lookup` three times, all near-identical single-parameter async arrows:\n\n```\n6657   const lookup = async (t: string) => { ...     [lexically encloses the call]\n6717   const lookup = async (t: string) => { ...\n7129   const lookup = async (t: string) => { ...     [what the index returns]\n```\n\n(Return-type annotations elided; all three are single-parameter async arrows, which is the only property the resolution turns on.)\n\nThe call at `protocol.ts:6674` — `const rec = await lookup(request.type);`, inside `findDraft`, whose own enclosing `lookup` is the one at 6657 — is resolved by the hop to the body at **7129**. That is the third declaration, in a different method entirely, chosen only because it is last in the file.\n\n## Why the shape check cannot catch it\n\n`contradictsWrapperResolution` (added by PR #13444 for #12358) asks two questions of a hop, receiver and required-parameter count. Both pass here, and correctly so:\n\n- the callee is a **bare identifier**, which that predicate admits deliberately (its docblock says so: `const self = this;` is how the live file reaches its own members from a closure);\n- all three declarations take exactly **one required parameter**, so the arity clause has nothing to refute.\n\nThe guard is doing its job. Its job is name **collisions across receivers**, not name collisions between same-named bodies in one file, and no strengthening of either clause reaches this case as long as the colliding declarations are near-copies.\n\n## Direction of the error, and why it costs nothing today\n\n**Zero cost on this tree, measured, not assumed.** All three `lookup` bodies read `sys_metadata` through `this.engine.findOne`, so the two seams that hop through this call (`protocol.ts:10497` `getMetaItemCached` and `:13874` `saveMetaItem`, both admitted at depth 3) are genuine read seams under **any** of the three resolutions. The verdict is right — by luck rather than by construction.\n\nThe mechanism itself has no safe direction, which is why it is worth a record. A collision where only *some* of the same-named bodies read would either invent a seam (the unsafe direction — a fake member of the denominator #5186, #6451, #9165, #8845 and #8901 are quoted against) or drop a real one, and nothing in the output distinguishes either case from a correct resolution.\n\n## Blast radius scales with the depth bound\n\nEach additional wrapper hop is another name that has to be unique for the chain to stay correct. `MAX_READ_WRAPPER_DEPTH` is 2 today; this collision already appears at hop 3, i.e. it is reachable only in the depth-probe population. That is a measured argument against raising the bound, and it is recorded as such in the gate's header by PR #13472 — this card is the standalone record so it does not live only inside a comment about a different subject.\n\n## Sibling, not a duplicate\n\n#13456 records the **same defect class in the sibling instrument**: `scripts/measure-durability-swallow-family.mjs` resolves a bare identifier against a whole-file body index and reaches same-named class methods, and it notes the last-wins collision property in passing. Different file, different measurement, different member population — but very likely the same remedy shape, and they should be read together. That card's suggested remedy (resolve against the lexical scope chain at the call site rather than the flat index, then pin it with a regression control) applies here unchanged.\n\n## Dedupe performed\n\n⚠️ **The REST search endpoint is unavailable from this seat and this is declared rather than papered over**: `GET /search/issues` returns HTTP 403 for both a targeted query and a known-hit control term, so search was not used and no zero from it was trusted. Repo-scoped REST reads and writes are live (HTTP 200), so dedupe ran through a bounded repo-scoped list of the 31 open `finding` issues — a non-empty control — plus a local keyword grep over their titles and bodies for `functionBodies`, `last-wins`, `name collision`, `indexFunctionBodies`, `wrapper resolution` and `lookup`. Two hits: #13456, the sibling named above, and #13433, unrelated. Nothing addresses the flat index in this gate.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

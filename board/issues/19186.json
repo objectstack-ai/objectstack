@@ -1,0 +1,28 @@
+{
+  "number": 19186,
+  "kind": "issue",
+  "title": "[Decision] `requiredPermissions` 在 record 块上到底是对象动作还是 ADR-0066 能力？—— 已发布的 `record:quick_actions` 那一半今天是 fail-open",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "needs-user-decision"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-19T09:21:49Z",
+  "updated_at": "2026-09-19T09:22:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19186",
+  "body": "立卡席:`domain:spec` **seat 2** 执行席(座位贴 #18549,`session_01JbZnqu8bt6YqfJsr9vaFb3`),从 #18159 本轮施工席的 `needs_decision` 接出,2026-09-19T09:22Z。⛔ 无 `domain:*`、⛔ 无 `priority:*`:路由与定级归分诊。\n\n**Governing text**:`AGENTS.md` Prime Directive #12(消费端不得宽容,缺陷在上游)· ADR-0066(能力集)· ADR-0049(enforce-or-remove;17.0.0 已按此退役 `app.areas[].requiredPermissions`)· `docs/NORTH-STAR.md`「声明了的对象、动作、agent / tool / skill 元数据在运行时兑现」与「安全与数据完整性永远最高,不等路」。\n\n## 一句话\n\n同一个词 `requiredPermissions`,在 `record:quick_actions`(**已发布**)上按 ADR-0066 **能力**声明,在渲染器里却按**对象动作**枚举求值;两个出厂 provider 对同一个名字给出相反答案,其中一个 **fail-open**。先裁这个词是什么,再决定三个 record 块要不要跟着声明。\n\n## ⚠️ 读数归属 —— 本席**没有**复现下面这组\n\n以下 provider 行为全部是 **#18159 施工席**在本轮的实测(`os-dev-report`,PR #19185),逐条带自测腿;**本席只核了它落在契约面的那一半**(三个块的 props schema 仍按名拒该键),⛔ 没有重跑 provider。裁决前若要更硬的底,这一组值得由复核席重测。\n\n- 渲染器读的是 `perms.can(objectName, name)`,第二参是本包的**闭合枚举** `PermissionActionSchema`(create/read/update/delete/execute/manage/configure/share/export/import/admin),⛔ 不是同一个词在 `action` / `app` / `field` / `bulkAction` 上所指的 ADR-0066 能力集。\n- `MePermissionsProvider`:未映射的名字**回落到对象的 `allowRead` 位**。实测 `systemPermissions` 为空集时,`crm.manage` → `true`、`manage` → `true`、`admin` → `true` —— **一个谁都不持有的能力,对每一个能读该对象的人都放行**。\n- 基于角色的 `PermissionProvider`:同一个名字,只要对象带 permission config 就**对所有人拒绝**,不带 config 就**对所有人放行**。\n- ⇒ 两个 provider 互相矛盾,且**都不查调用者的能力集**。\n\n⭐ **已发布的那一半今天就是活的**:`record:quick_actions.requiredPermissions` **已经**声明为 `z.array(z.string())`,describe 写的是 「Hide the whole bar unless the current user holds every named permission on this object」。按上面的读数,在 backend-backed provider 下这句话是假的。这是 criterion (b) —— 违背已声明契约,**在已发布面上**。\n\n## 选项\n\n- **A —— 按对象动作声明**:`requiredPermissions: z.array(PermissionActionSchema)`。这是 `record-highlights.tsx` 自己的注释教作者写的形状,也是两个 provider 唯一都能兑现的读法。**代价**:同一个词在三个 record 块上是对象动作、在另外四个面(含同族的 `record:quick_actions`)上是 ADR-0066 能力 —— 一词两义,正是 PD#12 拒绝的方言。\n- **B —— 按 ADR-0066 能力声明,并同时修渲染器**(改走 `hasCapabilities` / `systemPermissions`,不再走 `can()`)。**代价**:spec 半边**不能单独落地** —— 先声明后修渲染器,等于把 fail-open 的门按 ADR-0049 退役掉的那个形状再发布一次,窗口长度 = objectui 半边的工期。需要一张配对的 objectui 卡与一条**落地次序**裁定(渲染器先行,或两边同落)。\n- **C —— 判为宿主组装面**:三个块继续拒,加 `strictObject` guidance 写明处方(去 gate 对象 / 字段 / action),并让 objectui 退掉那三处读。**代价**:删掉一个作者可能已经在用的门,而**没有任何读数说有没有人在用**;形状与 17.0.0 退 `app.areas[].requiredPermissions` 完全一致,套件是现成的。\n- **D —— 本仓不声明,整个问题路由回 objectui**,本卡挂在它后面。\n\n## 四维\n\n- **① 实际业务需求** —— ⚠️ **未测**。没有任何读数说今天有谁写这个键(三个块上写了会被 parse 拒,但 raw-node 路径绕得过;`record:quick_actions` 上写了是合法的)。⛔ 本席不把「没测到」说成「零拉动」——这条轴**现在答不了**,而它恰好是 C 与 B 的分水岭。\n- **② 项目长远合理性** —— 指向 **B**。协议为基准:一个词在一个组件家族里必须只有一种语义;A 把分裂固化进契约,是把今天的实现缺陷写成明天的规格。\n- **③ 防 AI 犯错** —— **决定性,指向 B 或 C,⛔ 明确反对 A 的现状与维持现状**。今天一个 AI 作者在 `record:quick_actions` 上写 `requiredPermissions: ['crm.manage']`,得到的是一个**对每个读者都放行**的门,而它以为自己加了一道闸。这正是北极星那句「绝不让 AI 声明一个运行时不兑现的能力」的反面,且是**静默**的:没有拒绝、没有告警、没有日志。⇒ **无论选哪条,fail-open 这一半都必须关掉,它不是选项的一部分。**\n- **④ 创业阶段不扩散** —— 指向 **C**。B 要开一张跨仓卡加一条次序裁定;C 有现成套件。⚠️ 但 C 不是「不扩散」,它是**删掉一个已发布的能力**,而 ① 未测 ⇒ 这条轴的前提不成立时不该由它定调。\n\n**推荐:B,且 objectui 半边先落。** 理由按长远权重领起(②):这个词已经带着能力语义发布在 `record:quick_actions` 上了,A 是把分裂写进契约,C 是在不知道有没有人用的情况下删已发布能力。③ 是硬约束而不是权衡项。**置信缺口:① 完全未测** —— 若实测出零拉动,④ 会把推荐翻到 C,而那需要一次「谁在写这个键」的普查(本仓 examples + hotcrm + cloud + 外部应用),本卡未做。\n\n⛔ 本席不代裁:这落在人工地板的「安全/权限边界」一格。\n\n## 维护者速读\n\n**改了什么** —— 还没改。#18159 本轮只落了三个 record 块上的另外两个键(`enforceFieldSecurity` / `redactFields`,纯展示过滤,PR #19185),第三个键 `requiredPermissions` 施工席**没有猜,停下来报了分叉**。\n\n**为什么改** —— 查这个键的时候顺带量出来:**已经发布**的 `record:quick_actions.requiredPermissions`,它的说明书写着「不持有这些权限就把整条操作栏藏起来」,但实际求值会在一种出厂配置下**对每个能读这条记录的人都放行**。也就是说,作者以为设了一道权限闸,实际没有。\n\n**风险与代价(含回滚)** —— 现在的风险是**已经在产的**:任何按那句说明书加过闸的应用,闸可能是空的。三条路:跟着能力语义修渲染器(要动 objectui,spec 这边不能先发,否则等于把这个洞再发布一次)、改成对象动作(一词两义,便宜但把缺陷写成规格)、或者整个退役这个键(和 17.0.0 退 `app.areas[].requiredPermissions` 一模一样的做法)。三条都可回滚;第二条最难回,因为它进了契约。\n\n**席位意见** —— 建议第一条(修渲染器、按能力声明、objectui 先落)。但有一个洞我没堵上:**没人量过今天到底有没有应用在用这个键**,如果量出来是零,那退役更合理。\n\n**你要做的(一个动作)** —— 回一个字母:**A**(对象动作)/ **B**(能力 + 先修渲染器,席位推荐)/ **C**(退役)/ **D**(整个丢回 objectui);或者回「先查有没有人在用」,我就先去做那次普查再回来。\n\n## 查重词\n\n`requiredPermissions capability gate` · `perms.can PermissionAction allowRead fail-open` · `record:quick_actions requiredPermissions` · `app.areas requiredPermissions retirement` · `ADR-0066 capability vs PermissionActionSchema`\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

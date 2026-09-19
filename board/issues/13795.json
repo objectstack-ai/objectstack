@@ -1,0 +1,36 @@
+{
+  "number": 13795,
+  "kind": "issue",
+  "title": "[skill] pm-dispatch 条款② 复核改制:席内 fable contract review 取代「停靠等外部评审链」,缺位死等成为历史",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T12:53:02Z",
+  "updated_at": "2026-08-31T17:13:10Z",
+  "closed_at": "2026-08-31T16:23:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13795",
+  "body": "## 维护者裁定(provenance,2026-08-31 本席 Claude Code 会话 session_01PBjwYLS6BciTQW3c9xQiD2)\n\n三句原话,按序:\n\n1. 「draft + needs:contract-review,但是你本身就是fable啊,是不是skills有问题?」\n2. (本席分析:fable 档位=能力控制,停靠=独立性控制,缺陷在无活性兜底;给出 A 超时兜底 / B 免停靠两选项后)\n3. 「项目经理是fable 或者可以派fable的子任务都可以自己contract view吧?」\n\n⇒ 裁定:**条款② 的 contract review 由派发席在席内完成**(PM 本身是 fable,且可派 fable 复核子任务),不再以「停靠等待外部评审链」为默认流程。\n\n## 要改的文件\n\n`.claude/skills/pm-dispatch/SKILL.md`(及其 references/ 下引用同一流程的段落,以 grep `needs:contract-review` / `停靠` / `评审链` 为准)。\n\n## 修订实质(方向,由 dev 对照现行文本落笔)\n\n1. **派发档位不变**:条款② 卡 ⇒ claude-fable-5 派发强制,照旧。\n2. **交付后复核改制**:派发席收集复核**升格**为含契约判断清单(derived judgments 逐项、semver/T4 定级、边界旗处置);当契约判断存在真分叉或 dev 挂旗待裁时,派发席起**上下文隔离的 fable 复核子代理**出第二意见——只喂卡片/裁定/PR 本体,⛔ 不喂派发令与派发席结论,简报写成对抗性(找拒绝理由)。\n3. **放行**:席内复核 PASS ⇒ 派发席剥 `needs:contract-review`(双载体)、ready、auto-merge,provenance 引用本裁定;FAIL ⇒ 补丁轮。draft+标签仍在 **PR 创建时**挂(复核完成前的短暂停靠保留,防止复核前误入队)——去掉的是「等外部席位」这个无限期状态。\n4. **外部评审链降级为可选**:存在时可做事后审计/抽查;其 PASS/裁决仍被尊重,但不再是放行的必要条件。\n5. **维护者决策箱保留**:真正的设计分叉(如需求本体、跨卡取舍)仍升级,⛔ 席内复核不替代维护者裁定。\n6. **动机记录**(写进修订说明,不写进规则正文):2026-08-31 评审链整体缺位致 #13669(>4h)与 #13733(>3h)全绿双停,维护者三次以个人词解锁(早间五张绿 PR、#13669、#13733);同档复核不增加能力冗余,独立性由上下文隔离的复核子代理提供。\n\n## 影响面\n\n本 skill 为多席共用章程(spec/cli/…全部执行席),修订对所有席生效。本卡由 spec 执行席按维护者词立卡;修订 PR 非契约面(`.claude/skills/**`,internal agent tooling),正常流程放行。"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 13416,
+  "kind": "issue",
+  "title": "createFieldPresenceProbe's docstring still says organization_id is injected \"only in multi-tenant mode\" — applySystemFields provisions it unconditionally",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-30T10:53:09Z",
+  "updated_at": "2026-08-31T14:18:29Z",
+  "closed_at": "2026-08-31T14:16:33Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13416",
+  "body": "Found while building the tenancy write-call-site census for #13178. Not fixed there: that card is scoped to a measurement and forbids source changes.\n\n## The claim, and what falsifies it\n\n`packages/metadata-core/src/record-organization.ts:56-58` justifies `createFieldPresenceProbe` like this:\n\n> Why the probe exists at all: the SchemaRegistry auto-injects `organization_id` only in multi-tenant mode (`applySystemFields({ multiTenant })`), so on single-tenant stacks the `sys_audit_log` / `sys_activity` tables have no such column.\n\nThat is no longer true. `applySystemFields` (`packages/objectql/src/registry.ts`, comment at lines 509-517) states the opposite in the present tense:\n\n> The `organization_id` COLUMN is provisioned unconditionally (subject only to the explicit opt-outs above) — its existence no longer depends on the global multi-tenant flag. ... The multi-tenant flag now governs only whether the column is INDEXED\n\nThe derivation agrees: `resolveInjectedSystemColumns` (`packages/spec/src/data/injected-system-column-provenance.ts`) computes `tenant` from `systemFields`, `managedBy` and `tenancy.enabled` only. It takes no `multiTenant` input at all, and its own docstring says so (\"the flag cannot change what EXISTS, only what is indexed\").\n\nMeasured on `origin/main` at `090f2302e`: of 117 object declarations in the tree, 92 resolve a tenant field and 25 do not — and all 25 are excluded by `managedBy: 'better-auth'` or `tenancy.enabled: false`, never by posture.\n\n## Why it is worth recording rather than ignoring\n\nThe docstring is the stated REASON the probe exists. Read literally it says the probe is a single-tenant-posture workaround, which invites two wrong moves: deleting the probe as dead once someone checks that the column is always provisioned, or hand-rolling a fresh posture-conditional probe elsewhere on the same false premise. The probe does still have real work to do — external objects and `getSchema`-less test doubles, per its own \"best-effort in both directions\" paragraph — so the fix is to the stated reason, not to the code.\n\nThis is the family `sql-driver.ts` names in its own `applyTenantScope` docstring: \"which is exactly how a docstring becomes the last place a wrong fact survives.\"\n\n## Not established here\n\n- No claim that the probe should be removed or changed. Only that its recorded justification is falsified.\n- No claim about which commit decoupled the column from the flag. `registry.ts` cites the decoupling; #6810 is cited nearby for removing `indexed: opts.multiTenant`, but I did not measure which change moved the provisioning itself.\n\n## Re-check\n\n```\nsed -n '50,64p' packages/metadata-core/src/record-organization.ts\nsed -n '509,518p' packages/objectql/src/registry.ts\ngit grep -n \"multiTenant\" packages/spec/src/data/injected-system-column-provenance.ts\n```\n\nThe third command prints nothing, which is the point."
+}

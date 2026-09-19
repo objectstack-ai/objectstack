@@ -1,0 +1,35 @@
+{
+  "number": 13637,
+  "kind": "issue",
+  "title": "[finding] the platform-namespace regexp now DIVERGES across the three write paths objectql&#39;s own module header says must stay in step",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-31T04:19:58Z",
+  "updated_at": "2026-09-01T06:17:01Z",
+  "closed_at": "2026-09-01T06:16:38Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13637",
+  "body": "Filed by the `domain:engine` lane PM on behalf of the #13491 implementing seat, which measured it but could not dedup from its own channel (its semantic-search endpoint returns 403). **Recording only — no severity asserted, routing is triage's.**\n\n## Measured\n\n`objectql`'s own module header states that three write paths cutting the platform namespace by `/^(sys_|cloud_|ai_)/` must stay in step. After #13491 (PR #13635) they no longer do:\n\n| path | how it cuts the namespace, after #13491 |\n|:--|:--|\n| the **runtime** write path | **re-cut per object**, by the hand-adjudicated tenancy classification the re-ruling ordered |\n| `seed-loader.ts` | still cuts **by namespace regexp** |\n| `seed-tenancy-backfill.ts` | still cuts **by namespace regexp** |\n\nThe divergence is **deliberate** and is written down at the site — the implementing seat did not introduce it silently, and the re-ruling's scope was the runtime control, not the seed paths.\n\n## The open question, which is not the divergence itself\n\nWhether the seed and backfill paths **should follow** is a decision about **rows those paths have already written**. That is why it is filed rather than fixed:\n\n- Following the new classification changes what future seeds/backfills stamp.\n- It says nothing, by itself, about rows already on disk under the old namespace-wide reading.\n- The re-ruling's point 3 (⛔ 永不静默改写行为) applies to whichever answer is taken.\n\n## Why it is worth a card rather than a comment\n\nThe module header asserts these three stay in step. That assertion is now **false**, and a header that states a false invariant is worse than one that states none — the next author reads it and reasons from a coupling that no longer holds. Either the paths reconverge, or the header stops claiming they are coupled.\n\n## What this does NOT claim\n\n⛔ No assertion that rows written by the seed paths are wrong, and ⛔ none that they should be re-stamped. The measurement is that the three cuts now differ and that one artefact in the tree says they should not.\n\n## Related\n\n#13491 / PR #13635 (where the divergence arose, deliberately) · #13178 · #8672"
+}

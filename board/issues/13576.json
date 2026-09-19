@@ -1,0 +1,35 @@
+{
+  "number": 13576,
+  "kind": "issue",
+  "title": "[finding] `If-Match: &quot;&quot;` silently DISABLES optimistic concurrency — a quoted-empty entity-tag is read as &quot;no token&quot; and the guarded write proceeds unguarded",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "priority:p1"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-31T02:04:26Z",
+  "updated_at": "2026-08-31T21:55:36Z",
+  "closed_at": "2026-08-31T21:54:40Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13576",
+  "body": "Filed unassigned by the `domain:engine` lane PM. **Recording only — no severity asserted, routing is triage's.** Surfaced by the clause ② contract review of PR #13569 (#13382); I verified the mechanism in source independently before filing. **This predates that PR and is not caused by it.**\n\n## Measured on `70fe54891e` (pre-#13569 `main`)\n\n`packages/metadata-protocol/src/protocol.ts:1378`:\n\n```ts\nfunction normaliseVersionToken(v: unknown): string | null {\n    if (v === null || v === undefined) return null;\n    const s = String(v).trim();\n    if (!s) return null;                                   // ← emptiness checked HERE\n    if (s.length >= 2 && s.startsWith('\"') && s.endsWith('\"')) {\n        return s.slice(1, -1);                             // ← …then stripped to '' HERE\n    }\n    return s;\n}\n```\n\nand its caller, the guarded-DELETE door at `:10037`:\n\n```ts\nif (!normaliseVersionToken(expectedVersion)) return;       // ← falsy '' reads as \"no token\"\n```\n\nFor the token `\"\"` — a **valid RFC-7232 entity-tag** with an empty opaque value:\n\n1. `s = '\"\"'` is non-empty, so `if (!s) return null` does **not** fire;\n2. the quote-strip returns `''`;\n3. nothing re-checks emptiness after the strip;\n4. the caller's falsiness test reads that `''` as *\"the client sent no version\"* and **returns early**.\n\n⇒ **The concurrency check is skipped and the write or delete proceeds unguarded.**\n\n## Why this is a defect rather than a quirk\n\nThe whole point of `If-Match` is to make a write conditional. A client that sends `If-Match: \"\"` is asking for a **guarded** write — it is not declining the guard. The current behaviour grants the opposite of what the header requests, and it does so **silently**: there is no refusal, no warning, and the response is indistinguishable from a successful guarded write.\n\nNote the asymmetry: an unparseable or opaque token (`v2`, `rowversion-7`) fails **toward** 409, which is the safe direction for a concurrency primitive. `\"\"` fails toward **accept**. It is the one token shape that opts *out* of the guard rather than failing it.\n\n## Reachability\n\n- Header path: REST forwards `If-Match` into `expectedVersion`.\n- Body path: `expectedVersion` is declared `z.string().optional()`, so `'\"\"'` passes schema validation, and REST's truthiness check passes the non-empty string `'\"\"'` through.\n\nNot reachable from the first-party Console: `occSave` / `InlineEditSaveBar` only attach a truthy token they received from a prior read. So the exposure is to third-party and hand-rolled clients, not to the shipped UI.\n\n## Relationship to PR #13569 — read this before acting\n\n#13569 (the Postgres OCC repair) **incidentally closes this**, as a side effect of returning a wrapper object instead of a bare string: `{ token: '', instant: null }` is truthy, so the caller stops short-circuiting and the guard runs, yielding a 409.\n\n⚠️ **That PR is being changed to restore the current behaviour, deliberately** — because turning this accept into a refusal is a contract decision, that PR is a p1 bug fix, and #6479 established that new rejections are not installed silently. So #13569 will land with `\"\"` still disabling the guard, and this card is what carries the question.\n\n**The question for triage / the maintainer:** should `If-Match: \"\"` be able to disable optimistic concurrency at all? Three shapes, not costed here:\n\n1. **Keep as-is** — `\"\"` means \"no guard\". Cheapest, and it is today's shipped behaviour; but it means an empty entity-tag silently turns off a concurrency primitive.\n2. **Fail closed** — `\"\"` is a token that matches nothing ⇒ 409. Safer direction, and it is what #13569 would have done by accident. It is a new rejection on a shipped API and needs to be announced.\n3. **Refuse the shape** — reject `\"\"` at the schema/ingress as a malformed entity-tag, with a message saying so. Loudest, and distinguishes \"you sent something meaningless\" from \"you lost a race\".\n\n## What this does NOT claim\n\nI did not find a deployed client that sends `If-Match: \"\"`, and I do not assert anyone has been bitten. What is measured is that the platform accepts the shape and answers it by dropping the guard. Nor do I assert which of the three options is right — that is exactly why it is filed rather than fixed.\n\n## Related\n\n#13382 / PR #13569 (where the clause ② review surfaced it) · #6479 (precedent: new rejections are not installed silently) · ADR-0055 / ADR-0058"
+}

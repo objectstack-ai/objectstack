@@ -1,0 +1,33 @@
+{
+  "number": 14097,
+  "kind": "pull_request",
+  "title": "docs(objectql): make the PLATFORM_NAMESPACE docblock describe the post-#13491 reality",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T04:57:31Z",
+  "updated_at": "2026-09-01T06:16:39Z",
+  "closed_at": "2026-09-01T06:16:37Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": "2026-09-01T06:16:37Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/14097",
+  "body": "Fixes #13637\n\n`objectql`'s `PLATFORM_NAMESPACE` docblock still asserted a coupling that #13491 (PR #13635) had made false. Comment-only: the docblock is rewritten to describe reality. No behaviour change, no cut logic touched, zero executable bytes changed.\n\n## What was false, and where\n\nThe card named \"the module header\". `packages/objectql/src/tenancy/system-write-organization.ts` has two docblocks in play, and #13491's own landing (`e49d988`, 2026-08-31) updated one of them but not the other:\n\n| docblock | state on `origin/main` before this PR |\n|:--|:--|\n| the top-of-file module header (lines 68-86) | already TRUE — `e49d988` added the passage naming the divergence as deliberate and out of that PR's scope |\n| the `PLATFORM_NAMESPACE` const docblock (lines 125-136) | untouched since 2026-08-15 (`ff08691`), and FALSE |\n\nSo the card's premise still held, but its target was narrower than its wording. The stale docblock carried two assertions the 2026-08-31 re-ruling had withdrawn:\n\n1. \"Platform namespaces whose rows are deliberately global / cross-organization and must never be adopted into one\" — the wholesale reading. The re-ruling made it a per-object verdict.\n2. \"This is the third write path to carry it, and the three have to stay in step\" — `objectql` is not a write-path cut at all any more. `PLATFORM_NAMESPACE` now has exactly one reader, `isPlatformNamespaceObject`, which `isPlatformObjectOutOfTenantAuditScope` uses only as a cheap name-shape pre-filter.\n\nBoth are the same defect class in the same block, from the same withdrawn ruling, so both are repaired here.\n\n## Rewritten, not deleted\n\nDeleting the passage would leave three near-identical regexps in the tree with nothing recording that the coupling existed and was broken **deliberately** — which reads as drift and invites a \"repair\". The new docblock keeps that history, states the three current cuts, and names the runtime side's hand-adjudicated classification **by code location** — the `PLATFORM_OBJECT_TENANCY` ledger in `packages/objectql/src/tenancy/platform-object-tenancy.ts`, read through `classifyPlatformObjectTenancy` / `isPlatformObjectOutOfTenantAuditScope` — rather than by issue number.\n\n## Sweep: is there a fourth write path?\n\nNo. Three sites cut the namespace to decide organization stamping; two of them still do. Every other carrier of the same three-namespace spelling was checked and is not a write cut:\n\n- `packages/spec/src/system/constants/platform-object-names.ts` — `PLATFORM_OBJECT_PREFIXES`, a fourth hard-coded copy of the same three prefixes, consumed by `stack.zod.ts` (a cross-reference allowance behind a hard `defineStack` throw) and by `packages/cli/src/utils/unmanaged-tables.ts` (reporting). Neither stamps an organization, so neither is in this coupling.\n- `packages/plugins/plugin-security/src/bootstrap-system-capabilities.ts` — a quotation of the seed loader's rule inside an analysis docblock. It is the file's only occurrence and it sits inside a comment.\n\n## Out of scope, filed separately\n\nWhether the seed loader and #8686's backfill should follow the per-object classification is a decision about rows already on disk. It is untouched here and filed as its own decision card: #14096.\n\n## Verification\n\n**No behavioural ablation is reported, and none was run** — there is no behaviour to ablate, because the diff changes zero executable bytes. Fabricating a mutate/restore leg over a comment would measure nothing. What stands in its place is a mechanical proof rather than an assertion: every added and removed line in `git diff -U0` is a docblock line (`*`, `/**` or `*/`), the filter returns empty, and a repo-wide grep finds no test or gate that reads this docblock's text.\n\nGate family derived from the real change set with `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` — 21 path-derived families plus 1 convention-triggered. Exit codes captured before any pipe.\n\n- Union of all 22: **20 exit 0**. Two returned **exit 3 = NOT MEASURED, which is not a pass**: `scripts/check-test-completeness.mjs` (its own text: \"There is no local log to hand it, so the local reading for this gate is NOT MEASURED\") and `pnpm check:dual-build-cjs-loads` (\"PREREQUISITE NOT MET — this gate reads built output... Run `pnpm build` first. ⛔ This is NOT a pass: nothing was measured\"). Both need a whole-workspace artifact a comment cannot affect; CI runs both.\n- `pnpm lint` — the full repo population (`eslint . --no-inline-config`), not narrowed: **exit 0**.\n- `pnpm --filter @objectstack/objectql typecheck` — **exit 0**, after building the dependency closure (`pnpm --workspace-concurrency=2 --filter '@objectstack/objectql^...' build`, exit 0). The edited file is confirmed present in that tsc program (`tsc --noEmit --listFiles` names it), so the green covers this change instead of skipping it.\n- `pnpm --filter @objectstack/objectql exec vitest run --maxWorkers=2 src/system-write-organization.test.ts src/tenancy-by-object-classification.test.ts` — **2 files, 39 tests passed**.\n\nEvery run above was made at `34ea618`, which is this branch's HEAD and its final commit.\n\n**`skip-changeset`**: this diff publishes nothing from any package — comment-only, no behaviour, no API, no types.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01F3jdziLbAPGeceVNmSox5L)_"
+}

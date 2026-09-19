@@ -1,0 +1,33 @@
+{
+  "number": 19200,
+  "kind": "pull_request",
+  "title": "chore(devx): migrate six scripts/** line citations to file-level anchors",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-try-charles",
+    "id": 313893388,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-19T11:58:10Z",
+  "updated_at": "2026-09-19T12:54:34Z",
+  "closed_at": "2026-09-19T12:54:33Z",
+  "closed_by": {
+    "login": "os-try-charles",
+    "id": 313893388,
+    "type": "User"
+  },
+  "merged_at": "2026-09-19T12:54:33Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/19200",
+  "body": "Third round of the `scripts/**` unresolvable-citation migration (PRs #15806 and #16338 were rounds one and two), **devx-lane slice only**.\n\n`scripts/check-scripts-symbol-anchors.mjs` registers `scripts/**` `.mjs` comment prose as a symbol-anchor corpus with `judgeUntrackedLineAnchors: false`, so a citation naming no tracked file is seen, counted and enumerated — and judged by nothing. This PR migrates **six** of those, by the gate's own repair form (its header, under `[line-anchor]`):\n\n> ANCHOR FORM: name the file as a file-level anchor and put the number beside it as data\n\nNot one digit is repaired or repointed. Every number that was part of an anchor is still on its page, as data.\n\n## The six, and why each target is unambiguous\n\n| site | citation | resolves to |\n|---|---|---|\n| `scripts/check-changeset-no-major.mjs` | `date-range-presets.ts:101` | `packages/spec/src/data/date-range-presets.ts` |\n| `scripts/cross-package-test-inputs.mjs` | `:102`, `:92`, `:484-485` (continuations) | `packages/spec/src/shared/retired-key-migrate-sentence.test.ts` |\n| `scripts/ts-parse.mjs` | `tenant-audit-census.mjs:459`, `:723` | `scripts/tenant-audit-census.mjs` |\n\n- **`date-range-presets.ts`** — one tracked file of that basename (`date-range-presets.test.ts` is a different basename), and line 101 is inside the TSDoc block the surrounding prose describes.\n- **`retired-key-migrate-sentence.test.ts`** — one tracked file, and all three numbers still land on what the prose says they do: `PUBLISHED_SKILLS_ROOT` on line 102, the \"plus every `.md` file under `skills/`\" sentence on line 92, and the `skills:`-prefixed `files.push` on lines 484-485.\n- **`tenant-audit-census.mjs`** — one tracked file of that basename (`check-tenant-audit-census.mjs` is a different basename). It carries both cited constructs, the `.replace(/\\s+/g, ' ')` collapse and the synthetic `type CensusReceiver = ...` alias; both have drifted off the cited lines, which is precisely why those lines are kept as dated data rather than repointed.\n\n## The gate's own dated record is corrected in the same edit\n\nBoth prior rounds did this, and it had gone stale in a way that matters: the header claimed a residual of **8** and named holders (PRs #16215, #16202) that have since merged, while the live command printed **18**.\n\nThat regrowth — 8 back up to 18 between rounds, because gate-header prose written in the interval added citations faster than round two removed them — is the most load-bearing reading here, and the header now says so. **This is not a burn-down; it is a quantity that grows.**\n\n## Acceptance, measured on this branch\n\n```\nnode scripts/check-scripts-symbol-anchors.mjs --list-unresolvable   EXIT 0   18 -> 12\nnode scripts/check-scripts-symbol-anchors.mjs --self-test           EXIT 0\nnode scripts/check-scripts-symbol-anchors.mjs                       EXIT 0\n```\n\nRow-by-row `diff` of the before and after listings: the **only** lines removed are the six above, plus the summary line changing from `18 ... 10 bare-filename, 5 continuation, 3 directory-qualified` to `12 ... 8 bare-filename, 1 continuation, 3 directory-qualified`. The other twelve rows are byte-identical and still listed.\n\n## What is deliberately NOT here\n\n- **`judgeUntrackedLineAnchors` stays `false`.** Whether it should flip is the open question this card exists to put in front of triage, and it is now a sharper question than a counting one — see below.\n- **The remaining twelve rows are untouched**, every one of them on another seat's surface: `scripts/pm/check-governed-merges.mjs`, `scripts/pm/check-skill-line-ratchet.mjs`, `scripts/pm/check-prior-rulings.mjs`, `scripts/pm/check-half-states.mjs`, `scripts/pm/check-widening-tells.mjs` (governed-surface and `pm` patrol instruments) and `scripts/check-spec-docblock-symbol-anchors.mjs` (SUBJECT is `packages/spec` docblocks). No card is filed for them here.\n\n## Open question for triage\n\nA flag that flips at residual zero flips into a gate that reds on the **next** author's first bare citation — and the 8 -> 18 regrowth measured above says there will be a next author, soon. So what the flip needs is a **remedy for an unbindable abbreviation** (a bare `engine.ts` a resolver cannot bind to one of several files of that name), not a smaller number. Reaching zero and flipping the same day would hand the repo the permanently-red gate its own header says it retired.\n\nPart of #15809\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017ef78bLdybu3AffehKkhfk)_"
+}

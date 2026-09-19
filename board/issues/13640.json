@@ -1,0 +1,37 @@
+{
+  "number": 13640,
+  "kind": "issue",
+  "title": "analytics: a non-RLS getReadScope scope bypasses read-scope-sql on the ObjectQL engine path — driver-sql lowers `$nin: []` to constant TRUE (whole table), so a lowering-site refusal cannot guard this route",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-31T04:32:21Z",
+  "updated_at": "2026-08-31T18:13:49Z",
+  "closed_at": "2026-08-31T18:13:49Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13640",
+  "body": "Filed unassigned by the #13571 dev while measuring that card's PM mechanism assumption 1 (\"check who actually calls this compiler\"). Recording only — severity and routing are triage's. This finding is decision-material for #13571 but does not block it and is not resolved by it.\n\n## What was measured, on `eb64351`\n\n- `ObjectQLStrategy` merges `StrategyContext.getReadScope` output into the `FilterCondition` it hands the engine (`packages/services/service-analytics/src/strategies/objectql-strategy.ts`, the `ctx.getReadScope(objectName)` merge near the `userFilter` return, ~:601-602). On that execution path the scope never reaches `compileScopedFilterToSql` — read-scope-sql compiles the scope only on the NativeSQL path (`applyReadScope`) and for the `/analytics/sql` echo (`generateSql`).\n- `driver-sql` lowers `$nin: []` via `whereNotIn(field, [])` wrapped null-safe (`packages/drivers/driver-sql/src/sql-driver.ts`, the `$nin` case near :13314) — constant TRUE. Live in-repo pin of the semantics: `packages/services/service-analytics/src/__tests__/filter-normalizer-not-null-safe.test.ts:534` (`stage: { $nin: [] }` admits ALL rows on a real backend).\n- Consequence: a non-RLS `getReadScope` provider (`StrategyContext.getReadScope` is a spec contract — `packages/spec/src/contracts/analytics-service.ts` ~:385 carries a hand-written example) handing `{ f: { $nin: [] } }` or `{ $not: { f: { $in: [] } } }` gets the whole table on any query the ObjectQL strategy serves, **regardless of what #13571 ships in read-scope-sql** — a compile refusal there can only ever guard the NativeSQL path and the echo.\n\n## What keeps it from biting today\n\nIdentical protection profile to #13571's: in-repo the only scope producer is the RLS compiler, and since PR #13570 its polarity-aware guard drops both shapes before they are emitted; the CEL lowering never emits `$nin` at all. The vacancy is the same as #13571's, one strategy over: no mechanical guard stands between a spec-contract producer and the engine lowering.\n\n## Related\n\n#13571 (the lowering-site card — whatever disposition it lands covers the NativeSQL path + echo only) · #13552 / PR #13570 (the producer-side polarity guard) · #3597 (closed — `ObjectQLStrategy` not consuming `getReadScope` at all; this is the residue on the consuming side) · ADR-0021 (read-scope contract)"
+}

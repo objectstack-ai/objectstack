@@ -1,0 +1,35 @@
+{
+  "number": 13708,
+  "kind": "pull_request",
+  "title": "fix(plugin-auth): ensureDefaultOrganization resolves the L4 config-derived owner when no grant row exists (#13514 follow-through)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T07:48:23Z",
+  "updated_at": "2026-08-31T12:32:17Z",
+  "closed_at": "2026-08-31T12:32:17Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/13708",
+  "body": "## What\n\nThe ADR-0081 D1 default-org bootstrap still resolved the platform admin **by the grant row** (`admin_full_access` set → oldest cross-tenant grant). #13514 (L4) retired that row under walled postures — standing is config-derived at the one derivation site — so on every walled deployment the helper dead-ends on `no_admin` forever. The open AuthPlugin never hits this (its runner is gated on non-walled postures), but the enterprise organizations package invokes this same helper under walled postures **by design** (the runner comment: \"every WALLED posture keeps its existing owner: the enterprise organizations package\").\n\n**How it surfaced**: cloud's pin bump to current main took its EE guided-path suite red — `signup-membership-policy.e2e`: *\"the platform admin never received their default-organization owner row\"* — the walled founder signs up, verifies, and no default org ever appears.\n\n## The fix\n\nWhen the grant lookup answers nothing, fall back to the **declared verified owner**, asked with the same public predicates the derivation site asks: `resolvePlatformAdminEmails()` + `isConfiguredPlatformAdminEmail` (`@objectstack/core`) + the #11343 verified-email allow-list (`@objectstack/types`); oldest verified owner wins — the bootstrap's own tiebreak. The grant row stays **primary** where it exists. Fail-closed everywhere else: no declared owner, unverified match, or no matching row all still answer `no_admin`.\n\n## Pins\n\nFour new cases in the package suite (16/16 green): the walled L4 shape resolves the owner · unverified stays `no_admin` · undeclared stays `no_admin` · a grant row wins over the config fallback.\n\nConsumer chain verified end-to-end on cloud's rig with this exact patch: the EE guided-path suite goes 5/5, full EE pass 156/156, full cloud pass 285/285 (cloud pairs this with a trigger widening in its organizations plugin — re-run ensure on the verifying `sys_user` write, since no permission-set insert exists to listen to any more).\n\n## Gates\n\nplugin-auth build + check-dts-emitted green · full-repo lint green · changeset (patch).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

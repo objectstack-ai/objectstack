@@ -1,0 +1,34 @@
+{
+  "number": 13734,
+  "kind": "pull_request",
+  "title": "docs(react-pages): state the html tier's registered-name rule and scope the PascalCase one",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T08:54:18Z",
+  "updated_at": "2026-08-31T09:32:22Z",
+  "closed_at": "2026-08-31T09:32:20Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-31T09:32:20Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/13734",
+  "body": "Fixes #12650\n\n## What was wrong\n\n`content/docs/ui/react-pages.mdx` is the documentation home for **both** source-authoring\ntiers — `content/docs/ui/pages.mdx` sends the html-tier reader here for \"the `html` and\n`react` source-authoring tiers in full\" — but everything from the security-gate section\ndown is react-tier material carrying no tier marker. The naming sentence was unqualified:\n\n> Blocks are referenced by the **PascalCase form of their registered type**: `object-form`\n> to `ObjectForm`, `list-view` to `ListView`, `object-chart` to `ObjectChart`.\n\nSo an author who reads the page top to bottom and then writes a `kind:'html'` page copies\n`ListView`, is rejected at save time with \"is not an allowed component\", and finds nothing\non the page naming the rule they broke. The html-tier section already said \"only tags in\nthe public block manifest are accepted\" and \"an unknown tag is a hard error at save time\"\nwithout ever saying how those tags are **spelled** — that is the exact gap.\n\n## Evidence from the registration code\n\nThe html tier's whitelist is the registry's own type names, compared by exact string:\n\n- `packages/sdui-parser/src/index.ts` — `compile()` builds\n  `const allowedTags = new Set(Object.keys(manifest.components))`.\n- `packages/sdui-parser/src/index.ts` — `manifestFromConfigs()` keys the manifest by the\n  registry config's own `type`: `components[c.type] = { type: c.type, ... }`.\n- `packages/sdui-parser/src/parse.ts:61` — the check is\n  `!this.opts.allowedTags.has(tag)`. An exact `Set.has`; there is no case folding\n  anywhere in the parser, and the parsed node keeps `type: tag` verbatim.\n- `sdui.manifest.json` (objectui's registry-inputs dump, 57 components) — **zero** keys\n  begin with an uppercase letter. `list-view` present, `ListView` absent; `object-form`\n  present, `ObjectForm` absent.\n- `packages/spec/src/ui/react-blocks.ts` — `ReactBlockDef.tag` is documented as \"PascalCase\n  name the author writes in JSX\" and `schemaType` as \"The registry/render type, e.g.\n  `object-form`\". PascalCase is a react-tier projection, not a registered name.\n\nCompiled against that real manifest (`compile(source, sdui.manifest.json)`):\n\n| tag in source | ok | diagnostic |\n| :--- | :--- | :--- |\n| `ListView` | false | `ListView is not an allowed component` |\n| `list-view` | true | tag accepted |\n| `ObjectForm` | false | `ObjectForm is not an allowed component` |\n| `object-form` | true | tag accepted |\n| `RecordRelatedList` | false | `RecordRelatedList is not an allowed component` |\n| `record:related_list` | — | tag accepted (fails later on a required prop, not on the tag) |\n| `flex` | true | tag accepted |\n\n## One correction to the card's wording\n\n\"kebab-case\" is the shape of the plain block names but not the whole rule: 28 of the 57\nregistered names carry a namespace prefix (`record:`, `page:`, `element:`, `action:`), and\nfour are snake_case after the colon — `record:related_list`, `record:line_items`,\n`record:quick_actions`, `record:reference_rail`. Writing only \"kebab-case\" would have sent\nan author to `record:related-list`, which is not registered either. The page therefore says\n**registered type names, written verbatim**, with kebab-case named as the shape and a\nnamespaced example shown.\n\n## The change\n\nTwo body edits, no restructuring of either tier section:\n\n1. The html-tier section gains one paragraph naming the registered spelling (with the\n   plain, namespaced and layout-container examples) and naming the error a borrowed\n   PascalCase tag produces.\n2. The react-tier naming sentence is scoped with \"On this tier\" and points at the html\n   spelling.\n\nHeadings, frontmatter and every table are untouched — this stays clear of epic #12243's\n`content/docs/**` frontmatter/headings slice.\n\n## Verification\n\n`pnpm check:doc-anchors`, `check:doc-authoring`, `check:docs-single-h1`,\n`check:doc-frontmatter`, `check:react-page-adapter-contract` and the rest of the derived\nfamily: **25 GREEN, 0 RED, 1 NOT MEASURED**, run at `6c5a1a754` (the final commit). The\n26-family list came from `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack`\nre-derived after the commit; NOT MEASURED is `scripts/check-test-completeness.mjs`, which\nprints \"PREREQUISITE NOT MET\" because it grades a saved `turbo run test` log that no local\nrun produced — its own text says to record it as NOT MEASURED locally.\n\n`check:nul-bytes` green (7572 files); the edited file also scanned directly for raw ASCII\ncontrol bytes, none found. The MDX itself compiles (`@mdx-js/mdx` `compile()` on the edited\nfile, frontmatter stripped, output 33002 chars) — worth checking because the added text puts\ntag names with angle brackets and a colon inside inline code spans.\n\n**Declared narrowing — repo-wide ESLint.** `pnpm lint` was not run whole. Measured instead:\n`eslint --no-inline-config --format json content/docs/ui/react-pages.mdx` reports 1 entry,\n0 errors, and its single message is \"File ignored because no matching configuration was\nsupplied\" — the population comes from ESLint's own config, not my guess, so this `.mdx`\npath is outside the linted set entirely. The diff touches that one file and no ESLint\nconfig, and no type-aware linting is involved, so no untouched file's verdict can move.\n\n## Not addressed here\n\nDocs-only, so no changeset — the diff publishes nothing from any package, and the\n`skip-changeset` label carries that (recent `content/docs/**`-only merges land the same\nway). objectstack-ai/objectui#6598, the html-tier `columns` binding defect from the same\nrecon, is out of scope: this documents naming only and papers over nothing.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Pk26oZ12t5N1hwGW1m1MgC)_"
+}

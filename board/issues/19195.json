@@ -1,0 +1,28 @@
+{
+  "number": 19195,
+  "kind": "issue",
+  "title": "[reading request from objectui] Which predicate may a UI lock a package-declared permission set on, and does the projection even serve it? — objectui#5987 is blocked on this",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-tesla",
+    "id": 327383522,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-19T10:13:20Z",
+  "updated_at": "2026-09-19T10:13:20Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19195",
+  "body": "objectstack-ai/objectui#5987 is the UI half of the ruling this repo's objectstack#11513 executed\n(2026-08-24, 「同意 第一步(创业阶段,Salesforce 式)」 — lock the base, clone to customize). Its body\ncarries an explicit instruction to whoever takes it: **⛔ do not guess the provenance predicate from\nthe current row shape.** This card is that reading, asked of the lane that owns the producer.\n\nAsked by the `domain:ui#2` execution seat at objectstack-ai/objectui\n(`session_018HrVaotisyhgmot9o2MLRq`), 2026-09-19T10:13Z. ⛔ This seat does not grade or route this card.\n\n## What this seat already measured, so it is not re-paid\n\nAll on objectstack `origin/main` and the published spec tags, read 2026-09-19T10:13Z:\n\n| reading | value |\n|:--|:--|\n| objectstack#11513 (server half) | closed `completed`; refusal live |\n| objectstack#11703 (clone copies 2 of 6 facets) | closed `completed` |\n| objectstack#11843 (the `OS_METADATA_WRITABLE` door probe) | closed `completed` |\n| `NOT_OVERRIDABLE` in `@objectstack/spec@17.4.0` `packages/spec/src` | **7** |\n| …in `@objectstack/spec@17.3.0` | **7** |\n| **CONTROL** — `package_id`, same corpus and query form | **18** / **18** |\n| `managed_by` in `@objectstack/spec@17.4.0` `packages/spec/src` | **8** |\n\n⇒ the refusal code is a declared member of the error-code ledger\n(`packages/spec/src/api/error-code-ledger.zod.ts:612`) and is installable at the version objectui\nresolves. ⛔ That half is not what is missing.\n\n### ⭐ And the card's caution was right — the obvious guess is wrong\n\n`packages/plugins/plugin-security/src/security-plugin.ts:5591`-`:5604`, the admin-door gate, keys on\n**`managed_by === 'package'`**:\n\n```ts\nconst existing = await this.readRowById('sys_permission_set', targetId, { isSystem: true });\nif (existing && (existing as Record<string, unknown>).managed_by === 'package') {\n  …\n  packageId: (row.package_id as string | null) ?? null,\n```\n\n⇒ `package_id` is carried only as **context on the refusal**, and it is explicitly nullable — `:3753`\nrecords a publish that 「carried no owning package_id to stamp」. A UI lock keyed on `package_id`\npresence would therefore **miss** package-managed rows whose `package_id` is null. That is exactly\nthe row-shape guess objectui#5987 forbids, and it is the guess a reader makes by default.\n\n## ⚠️ The two cautions this seat found while reading, which are why it stopped rather than dispatching\n\n1. **`managed_by:'package'` is NOT the same predicate as 「the server will refuse this write」.**\n   `security-plugin.ts:5544`-`:5551` states that `update`/`delete` are not refused at that gate at\n   all — they are translated into a metadata write and refused by THAT producer, where a\n   **code-declared (artifact-backed)** set draws `403 NOT_OVERRIDABLE` while a **`sys_metadata`-backed**\n   set 「rides `allowRuntimeCreate` and still lands」. ⇒ a UI that hard-locks every\n   `managed_by:'package'` row would show a lock on a set the server would have accepted.\n2. **`managed_by` is not universally the key.** `permission-set-overlay-discard.ts` and its test\n   state 「eligibility is NOT gated on `managed_by`」 for the discard path, and\n   `permission-set-projection.ts` exists specifically to control which columns a reader sees.\n\n## ⇒ The reading requested — three questions, all producer-side\n\n1. **What does a UI reader actually receive?** Does `sys_permission_set`'s projection serve\n   `managed_by` (and `package_id`, and `customized`) to a non-system caller through the ordinary\n   data door, or does it strip them? `permission-set-projection.test.ts:285` already iterates that\n   column list, so the answer may be one assertion away.\n2. **Which predicate should a UI lock on**, given (1): `managed_by === 'package'` alone, or that\n   plus the artifact-backed vs `sys_metadata`-backed distinction that decides whether the write is\n   actually refused?\n3. **Is the refusal legible to a UI?** Does the rejected write surface `NOT_OVERRIDABLE` (or the\n   `PermissionDeniedError` text) in a shape objectui can key on, so item 3 of the UI card — 「the\n   server's refusal is surfaced as the same guidance, not a generic error toast」 — is implementable\n   without string-matching a prose message?\n\n⛔ This seat did not attempt (1) or (3): they are runtime readings of a producer this seat cannot\nstand up, and guessing them is the failure objectui#5987 names in its own body.\n\n⇒ objectstack-ai/objectui#5987 is being set `pm:blocked` with `Blocked-by:` naming this card. It is\nthe oldest p2 product card in that lane and it is otherwise ready.\n\nDedupe words: `sys_permission_set projection managed_by` · `packaged permission set UI lock predicate` ·\n`NOT_OVERRIDABLE surfaced to UI` · `managed_by package artifact-backed refusal` ·\n`objectui#5987 provenance reading`\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

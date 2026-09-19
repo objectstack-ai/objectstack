@@ -1,0 +1,34 @@
+{
+  "number": 13947,
+  "kind": "issue",
+  "title": "[finding] The half-state patrol's anchor body drops 157 of its 231 findings to fit GitHub's issue-body limit — a gate row can be computed and then omitted, and the anchor reads clean",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T18:24:48Z",
+  "updated_at": "2026-09-01T03:20:56Z",
+  "closed_at": "2026-09-01T03:20:44Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13947",
+  "body": "Measured while implementing #13922 (draft PR #13944), on the anchor issue #9857 as it stood after the scheduled run of **2026-08-31T13:42:41Z** (`updated_at` 13:45:01Z, body 59,925 chars).\n\n## The reading\n\nThe sweep's own summary line in that body says **231 half-state(s) found**. Counting the rendered rows (`- **H` plus the family number, as bullets) gives **74**. The body then says so, in one line near the end:\n\n> `- _… 157 further row(s) omitted to fit GitHub's issue-body limit; the full list is in the workflow run log._`\n\n⇒ **68% of what the patrol computed never reaches the page that is supposed to be the archive.** The rendered rows spanned 18 of the sweeper's row families; the ones that did not appear at all cannot be told, from the page, apart from families that found nothing.\n\n## Why this is worth a card and not just a note\n\nThe patrol's own workflow header states the invariant this violates, in its own words: silent non-delivery would leave a body \"that reads exactly like a clean board — the #4690 failure ('could not read the input' must never look like 'input is clean') with a timestamp on it\". The `Swept` heartbeat is deliberately refreshed even when findings are unchanged, precisely so a reader can tell a live patrol from a dead one. **Row omission is the same failure one layer in**: the patrol is alive, the timestamp advances, and the finding is gone.\n\nThe truncation is by **position in one flat list**, so a row's survival depends on how many unrelated rows precede it. Two consequences:\n\n1. **A gate-semantic row competes on equal terms with board hygiene.** H31 is the two-carrier comparison of `needs:contract-review` — the row family whose own header says a stripped gate is a green light (「闸门被剥不是红灯是放行」). It sits in the same list as H14/H22/H5 inventory rows. On the run above, H31 rendered **zero** rows, and the page gives a reader no way to tell \"no split on the board\" from \"the split rows were among the 157\".\n2. **The escape hatch is not a channel a reader has.** \"The full list is in the workflow run log\" is true, and the log is retention-bounded, unlinked from the body, and not something a triage round reads. The anchor exists so nobody has to go there.\n\n## Not claimed\n\n- ⛔ No claim that the omission is a bug in the *sweeper's* predicates. Every row was computed correctly; this is about delivery.\n- ⛔ No claim about which 157 rows were dropped — the run log was not retrieved, so the family breakdown of the omission is unmeasured. What is measured is 231 computed, 74 rendered, and the omission notice quoted verbatim.\n- ⛔ No remedy proposed and none is implied. Several shapes exist (order rows by family severity so gate rows survive; render per-family counts for every family so an omitted family is still legible as non-zero; split the anchor per family; land a companion artifact). Choosing among them is a call for the lane, not this card.\n\n## Neighbours, checked before filing\n\nDeduped by one targeted issue search (repo-scoped REST search is 403 from this container — sessions are bound to repository-scoped endpoints — so the MCP search was the channel, and it returned 24 results including known controls #11217 and #12994, so this was not a false zero of the #13326 shape). Nearest neighbours are all truncation in **other** channels and none is this one: #13573 (MCP `issue_read` truncating a body on read), #13900 (the REST issues-list pagination cursor), #13373 (the zero-quota payload channel dropping the newest timeline items). This card is about a body the patrol itself WRITES short.\n\n## Refs\n\n- `.github/workflows/half-state-patrol.yml` — the caller, and the header that states the non-delivery invariant\n- `scripts/pm/check-half-states.mjs` — `--format=markdown`, the renderer that emits the omission notice\n- #9857 — the anchor issue whose body carries the reading\n- #13922 / PR #13944 — where this was measured; that work routes around it by giving the clause-② rows their own single-purpose reader rather than adding a row family to this list\n\n_Generated by [Claude Code](https://claude.ai/code)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

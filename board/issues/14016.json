@@ -1,0 +1,34 @@
+{
+  "number": 14016,
+  "kind": "pull_request",
+  "title": "test(objectql,verify,runtime): declare OS_REGISTRY_LOG=warn in each suite's own vitest harness",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T23:58:33Z",
+  "updated_at": "2026-09-01T00:48:50Z",
+  "closed_at": "2026-09-01T00:48:49Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": "2026-09-01T00:48:49Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/14016",
+  "body": "Part of #13517 — item 1 of the three-part remainder that card carries. It stays open: the `packages/rest` stack-dump residual and the deferred log-level ratchet are still on it, and the structured-logger half is #13986.\n\n`b79ddf17df` quieted `packages/qa/dogfood` with one declarative `OS_REGISTRY_LOG=warn` in that suite's own vitest harness. This applies the same seam to the other three app-booting suites — `packages/objectql`, `packages/verify`, `packages/runtime` — each in its own config, each with its own measurement in the docblock.\n\n## Measured per suite, not inferred from dogfood\n\nOne full `pnpm --filter PKG test` per suite per side, all six runs through the shared verify lock. Baseline at `origin/main` `b1b7d6088a`; after-side at this branch's head `0fc8e11c18`.\n\n| suite | stdout lines | `[Registry]` lines | console-carried lines | test outcome |\n|:--|--:|--:|--:|:--|\n| `objectql` before | 16,194 | 4,744 | 5,189 | 250 files / 4,322 tests passed |\n| `objectql` after | 11,502 | **65** | **510** | 250 files / 4,322 tests passed |\n| `verify` before | 5,670 | 2,323 | 2,551 | 9 files / 48 tests passed |\n| `verify` after | 3,347 | **0** | **228** | 9 files / 48 tests passed |\n| `runtime` before | 6,730 | 1,155 | 1,964 | 202 files / 3,011 tests passed |\n| `runtime` after | 5,584 | **9** | **818** | 202 files / 3,011 tests passed |\n\n\"console-carried\" excludes the structured logger's `TIMESTAMP INFO ...` lines, which never go through `console` and are a different question (#13986). Test outcomes are identical on both sides of every suite, and the non-`[Registry]` line counts are identical to the line — 445 / 228 / 809 before and after — so this key moved exactly the family it names and nothing else.\n\nThe zero in the `verify` row is a real reading, not an unfired grep: the same pattern on the same suite's baseline log counts 2,323, and `grep -c \"Test Files\"` on the after-side log answers 1.\n\n## Where the route does NOT do what dogfood did\n\n⚠️ `packages/runtime` is not a second dogfood, and its docblock says so. `[Registry]` is **59%** of that suite's console-carried output, not dogfood's 94.9%. The ~800 lines left are a mixed tail no log level reaches: `[sql-driver] while creating/syncing table ...` column reports, `[HonoServerPlugin] Server stopped`, `Paged read of ... is NOT deterministic`, `[action-audit] ...`, `[Protocol] DB hydration skipped ...`. The declaration still earns its line there (1,155 lines removed), and it is also not the whole story there.\n\n`objectql` (91.5%) and `verify` (91.3%) do behave like dogfood.\n\n## One repair the declaration made necessary, named here because it is a test edit\n\n`packages/objectql/src/registry-log-level.test.ts` is the pin for how `OS_REGISTRY_LOG` resolves — so this package's harness key lands on that file's own subject. The file already deleted the variable in `afterEach`; the symmetric `beforeEach` was missing, so the FIRST case ran at `warn` under a name that says `info`, and stayed **green**, because both of its expectations are negative (\"not called\").\n\nMeasured, not reasoned. With a premise assertion added and the `beforeEach` withheld:\n\n```\nAssertionError: expected 'warn' to be 'info'\n Test Files  1 failed (1)\n      Tests  1 failed | 6 passed (7)\n```\n\nWith the `beforeEach` in place: `2 passed (2) / 19 passed (19)` for that file plus `registry-collision-order.test.ts`. Both \"default level\" cases now assert the level they actually run at, so no future harness key can silently re-point them. No test was skipped, disabled or re-baselined; two assertions were added and one hook body was widened. No rebuild leg applies to that measurement — the file imports `./registry` by relative path, so vitest transforms the source and no `dist` is in the path.\n\n## The near-miss, measured rather than trusted\n\n`registry-collision-order.test.ts` asserts on `[Registry] Collision` lines. Those go through a bare `console.warn` the level never gates, and the file sets `logLevel = 'silent'` per registry anyway. Both sides pass identically, and the after-side logs still carry the collision lines — 16 in `objectql`, 2 in `runtime`. A real shadowing still speaks.\n\n## What this deliberately is not\n\nThe engine's shipped default is untouched — still `'info'` at `packages/objectql/src/registry.ts:1265` — and no library code learns what a test runner is. The request lives in each harness, declaratively, where the test author can see it. `check-console-intercept-disarm.mjs` is green: the `disableConsoleIntercept` line is untouched in all three configs and the new key sits beside it.\n\n## Verification\n\nAll gates run at `0fc8e11c18`, exit codes captured before any pipe.\n\n- `pnpm lint` (repo-wide `eslint . --no-inline-config`) — exit 0, no narrowing claimed\n- `pnpm check:nul-bytes` — exit 0, `7667 text file(s) ... no raw ASCII control bytes`\n- 26 of the 27 families named by `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack`, plus `check-console-intercept-disarm` — all exit 0\n- `pnpm --filter` typecheck on all three packages — exit 0\n- NOT MEASURED here, owned by CI, all three exit 3 = PREREQUISITE NOT MET rather than a finding: `check-test-completeness` (wants a saved `turbo run test` log), `check:dual-build-cjs-loads` and `check:type-check-debt` (want the whole workspace built)\n- `packages/objectql`'s `tsc` program excludes `**/*.test.ts`, so its green typecheck says nothing about the edited test file — verified with `--listFiles` (0 test files in the program, `registry.ts` present as the control). The edited file was type-checked directly instead, in a throwaway project over the package's own options: 0 errors, file present in the program.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01F3jdziLbAPGeceVNmSox5L)_"
+}

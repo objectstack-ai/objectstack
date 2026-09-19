@@ -1,0 +1,36 @@
+{
+  "number": 13996,
+  "kind": "issue",
+  "title": "service-storage: the stranded-orphan inventory drops every sample's `createdAt` on Postgres/MySQL — a `typeof === 'string'` guard the driver's `Date` cannot pass",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-31T22:44:09Z",
+  "updated_at": "2026-09-01T06:11:08Z",
+  "closed_at": "2026-09-01T06:04:06Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13996",
+  "body": "Found by the driver-materialisation consumer census on #13973 (class (c) — genuinely wrong on one side). That sweep is not addressed by this card and does not close it.\n\n## The site\n\n`packages/services/service-storage/src/stranded-orphan-inventory.ts:261-268`:\n\n```ts\nreport.samples.push({\n  fileId: id,\n  key:  typeof row.key  === 'string' ? row.key  : undefined,\n  name: typeof row.name === 'string' ? row.name : undefined,\n  size,\n  createdAt: typeof row.created_at === 'string' ? row.created_at : undefined,   // <-- here\n});\n```\n\n`row` comes from `engine.find('sys_file', { fields: [… 'created_at'], … })` at line 202-216 — a record read door, and `created_at` is explicitly in the projected field list.\n\n## Why it is wrong on the production default driver\n\n`created_at` is a builtin audit column: not in `datetimeFields`, and `SqlDriver#formatOutput` repairs it only inside `if (this.isSqlite)`. Pinned in `packages/drivers/driver-sql/src/sql-driver-13567-audit-stamp-materialisation.test.ts` — the live dialects hand it out as a JS `Date`, SQLite as canonical ISO-Z text.\n\nSo `typeof row.created_at === 'string'` is `false` on Postgres and MySQL for **every** row, and every sample in the operator's stranded-orphan report carries `createdAt: undefined`. On SQLite it is populated. The field is asked for from the driver and then silently discarded — the guard is doing the opposite of the defensive job its shape suggests.\n\nThe sibling guards on the same object (`key`, `name`) are correct: those are text columns on every dialect. Only the timestamp one straddles the divergence, which is what makes this hard to see by reading.\n\nSeverity is \"operator report loses a field\", not data loss — but the *shape* is the most legible instance of the class in the repo: a `typeof v === 'string'` test standing directly on a value whose runtime type is driver-dependent.\n\n## Why this is not a `??` fallback\n\nPer #13973's standing prohibition, the question is which side owes the canonical spelling:\n\n- **A — accept both shapes at the consumer**, as `packages/metadata-protocol/src/protocol.ts:7710-7715` already does for `occurred_at` (`typeof … === 'string' ? … : … instanceof Date ? …toISOString() : String(…)`), which is class (a) in the census precisely because of it.\n- **B — normalise at the producer** so the read door presents one shape per dialect — fixes every sibling site, but reverses a deliberate driver decision (`withPostgresCalendarDayAsText`) and is a maintainer call.\n\n## Re-run\n\n```\nrg -n \"typeof row\\.created_at === 'string'\" packages/services/service-storage/src/\n```\n\nBacklink: #13973 (census), #13382 (the OCC seam, the same class). Neither is addressed here."
+}

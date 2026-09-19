@@ -1,0 +1,34 @@
+{
+  "number": 13899,
+  "kind": "pull_request",
+  "title": "test(service-automation): pin that a node failing mid-resume strands the run (#13807 step 1 measurement)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T16:37:38Z",
+  "updated_at": "2026-08-31T17:41:21Z",
+  "closed_at": "2026-08-31T17:41:20Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": "2026-08-31T17:41:20Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/13899",
+  "body": "Part of #13807 — step 1 only (the measurement slice). **No repair is included, deliberately.**\n\nThe card's step 1 asks one question: *does any workflow node failing mid-resume strand the run, or is `stranded` specific to the approval resume path?* The card is explicit that the generalisation was a **hypothesis, not its premise**. This PR carries the instrument that answers it; the full written answer, with all four deliverables, is posted as a comment on #13807.\n\n## Verdict: general to the workflow engine, not approval-path-specific\n\n`AutomationEngine.resumeInternal` consumes the suspension **before** it runs any downstream work:\n\n```\nawait this.forgetSuspendedRun(run, 'resumed');   // packages/services/service-automation/src/engine.ts\n...\nawait this.traverseNext(node, flow, variables, context, steps, signal?.branchLabel);\n```\n\nSo a downstream node that throws throws with the pause already gone. The `catch` arm records the run `failed` and returns; nothing puts the suspension back. The word \"stranded\" never appears in the engine — it is prose in a `plugin-approvals` error message wrapped around this engine outcome.\n\n## What the new test measures\n\n`packages/services/service-automation/src/resume-node-failure-strands-run.test.ts` reproduces the strand with **zero approvals involvement**: a plain pausing node declaring `resumeAuthority: 'any'` (the deliberate opposite of the `approval` node's `resumeAuthority: 'service'`), continued through the generic `engine.resume()` door — the same door `POST /:name/runs/:runId/resume` serves — with a downstream node that throws the reporter's own `update_record ... not found` shape.\n\nCharacterization assertions, all passing against `main` today:\n\n1. the suspension is gone (`hasSuspendedRun` is false);\n2. the run is recorded `failed`;\n3. a second resume answers `RUN_NOT_FOUND`;\n4. `cancelRun` returns false — a no-op, since it needs a suspended run to consume.\n\n**Two reverse controls** keep those from being constants. A resume refused *before* the consumption point (`INVALID_SIGNAL`) leaves the pause intact and still resumable, so the same probes read `true` where they read `false` above. And a clean resume also ends unsuspended — so the strand is the **`failed` status**, not merely the missing pause.\n\nThese are characterization assertions, not desired behaviour. **A repair for #13807 should turn the first test red.** That is why it is pinned now: the repair then has to state which of these facts it changed.\n\n## Scope\n\n- ⛔ No atomicity fix, no operator escape hatch, no change to the reject door.\n- ⛔ `/reject` still returns 500. Making it green would hide the defect, which the card names explicitly.\n- out of scope: #13568 — that card is ruled and dispatch-ready, and nothing here touches it.\n- `packages/objectql/src/engine.ts` was read only, never edited (it is held by another open PR).\n- Test-only diff, so no changeset; labelled `skip-changeset`.\n\n## Gates\n\nRe-derived from the actual diff with `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack`, both output sections read whole — 22 path-matched families plus the convention-triggered set for adding a test file.\n\nUnion run at **`69d9b14f8`** (the final commit): 23 families green, including every convention-triggered ratchet — `check:engine-double-contract`, `check:where-matcher`, `check:cross-package-test-inputs`, `check:query-options-erasure`, `check:type-check-coverage`, `check:test-source-alias`, `check:published-files`.\n\n`check:type-check-debt` — the ledger entry for `@objectstack/service-automation` reads `errors: 3`; `tsc --noEmit` on the package at `69d9b14f8` measures exactly 3, all three the ledgered `TS2341`s in `nested-region-parity.test.ts`, and **0** from the new file. `--listFiles` confirms the new test is in the tsc program (so this is a measurement, not an exclusion reading).\n\nTwo gates returned **exit 3 = NOT MEASURED**, by their own printed verdict lines, neither a pass nor a red: `check-test-completeness.mjs` (needs a saved `turbo run test` log, which CI tees and a local run cannot produce) and `check:dual-build-cjs-loads` (`PREREQUISITE NOT MET` — needs a full `pnpm build`; 49 packages have no `dist/`). Both are CI's to run.\n\nVitest: `Test Files 1 passed (1) · Tests 3 passed (3)`.\n\n_Generated by [Claude Code](https://claude.ai/code/session_016ZC5rNQj3WEet5HAmmAkMs)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016ZC5rNQj3WEet5HAmmAkMs)_"
+}

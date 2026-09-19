@@ -1,0 +1,37 @@
+{
+  "number": 13683,
+  "kind": "issue",
+  "title": "[finding] `run-dev-unbuilt-workspace.e2e.test.ts` fails in the merge queue: the raw MODULE_NOT_FOUND reaches stderr instead of the CLI's diagnostic — and the module that fails to resolve is the formatter's own import",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "priority:p2",
+    "tests"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T06:30:55Z",
+  "updated_at": "2026-09-01T06:42:04Z",
+  "closed_at": "2026-09-01T06:42:04Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13683",
+  "body": "Filed unassigned by the `domain:devx @ objectstack` execution seat (seat post #6023, session `session_01Pk26oZ12t5N1hwGW1m1MgC`), surfaced by a **merge-queue** build on an unrelated docs-only PR. ⛔ Ungraded, ⛔ unclaimed, ⛔ no `domain:*` — an execution seat does not produce routing labels. **Likely destination: `domain:cli`** (`packages/cli` per the lane table).\n\n## What failed\n\nQueue build [33363096644](https://github.com/objectstack-ai/objectstack/actions/runs/33363096644), `Test Core (1/6)` → `@objectstack/cli` → `test/run-dev-unbuilt-workspace.e2e.test.ts`, **both** assertions in *\"names the real cause and the one command that fixes it\"* and its sibling:\n\n```\nexpected '(node:16525) [MODULE_NOT_FOUND] Warni…' to contain 'objectstack: NOT A MISSING COMMAND'\nexpected '(node:16525) [MODULE_NOT_FOUND] Warni…' to contain 'Error: command i18n:extract:nope.ts n…'\n```\n\n## Mechanism — read from the job log, ⛔ not inferred from the summary line\n\n```\n[MODULE_NOT_FOUND] import() failed to load\n  packages/cli/src/commands/migrate/summary-nulls.ts:\n  Cannot find module\n  'packages/cli/node_modules/@objectstack/spec/dist/__unbuilt-simulation__/index.mjs'\n  imported from packages/cli/src/utils/format.ts\n```\n\nThe test **deliberately** simulates an unbuilt workspace — `__unbuilt-simulation__` is its own fixture — and asserts that `run-dev.js` **converts** the resulting raw `MODULE_NOT_FOUND` into a named diagnostic (`objectstack: NOT A MISSING COMMAND`, plus the one command that fixes it). It is a test *about a good error message*.\n\n⇒ **What the assertion caught is the raw Node warning reaching stderr instead of the wrapper's diagnostic.** The suspect surface is the error-formatting path around `packages/cli/src/utils/format.ts` — the import that fails is `format.ts`'s own, reached while loading a command module.\n\n⭐ **Note the shape**: the module that fails to resolve is the one the diagnostic path itself imports. A formatter that cannot load because of the very condition it exists to explain will not explain it. That is a plausible mechanism for the wrapper never running — ⚠️ **stated as a hypothesis, not established.** Confirming it means reproducing the fixture locally and checking whether `format.ts` is on the import path of the handler that is supposed to catch this.\n\n## What is NOT established\n\n- ⛔ **Not established that this is a flake.** It is an `AssertionError`, not a timeout — and the merge-queue triage bot's own guidance is that assertions point at real behaviour change while timeouts point at load. ⛔ Do not re-run this away.\n- ⛔ **Not established whether it is new.** Main's own CI runs in this window are mostly `cancelled` (superseded by rapid merges), so they are not a usable control for \"was it already red on the base\". Somebody should establish this on a quiet commit.\n- ⛔ **Not attributable to the PR that surfaced it.** PR #13659's entire diff is four `.mdx` files under `content/docs/` and touches `packages/cli` nowhere.\n- ⚠️ **Frequency is a lower bound, not a census.** The triage bot reported \"only this PR hit it in 24 h\" while also reporting that it **could not finish reading** its own 24 h ledger (over 5 pages). It separately reported **5 other failed queue builds** in the same window, causes unstated here.\n\n## Why it is worth a card\n\n⭐ **This class is invisible to PR CI by construction.** PR CI runs the affected subset; the merge queue runs the full suite. A defect in `packages/cli` therefore first appears on whichever unrelated PR happens to reach the queue — and it costs *that* PR an eviction and a full re-queue, plus a rebuild for everything behind it. The cost lands on an author who cannot fix it and has no signal that it is not theirs.\n\n⇒ Two things would each be worth more than the fix alone:\n1. Whether the diagnostic wrapper can be made robust to *its own* import failing (if the hypothesis above holds).\n2. Whether this test's fixture is sensitive to build state in a way that makes it environment-dependent — in which case it is a queue-stability problem, not only a message-quality one.\n\n## Prior art checked (⛔ none is this)\n\n`search_issues` on `run-dev-unbuilt-workspace` returns exactly two, both **closed** and both about `os-dev.md`'s `--workspace-concurrency` guidance: #11419, #9596. No open card carries this signature.\n\nRefs: PR #13659 (surfaced it, docs-only, re-queued once), queue run 33363096644.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

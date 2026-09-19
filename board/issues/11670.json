@@ -1,0 +1,37 @@
+{
+  "number": 11670,
+  "kind": "issue",
+  "title": "auto-org-admin-grant resolves the `organization_admin` set id by name alone (limit 1, unscoped, process-cached), so walled org-admin grants can point at the organization-less row",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-24T11:19:12Z",
+  "updated_at": "2026-08-31T16:28:12Z",
+  "closed_at": "2026-08-31T16:28:12Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11670",
+  "body": "Measured while designing #11663 (platform-admin re-anchor). Filed unassigned; **no fix\nattempted** — scoping a grant resolver is not that design card's surface, and the card's own\nreap leg depends on this being settled first.\n\n## What the code says\n\n`packages/plugins/plugin-security/src/auto-org-admin-grant.ts:212-229` resolves the\n`organization_admin` permission-set row id that every auto-provisioned org-admin grant points at:\n\n```\nconst rows = await tryFind(ql, 'sys_permission_set', { name }, 1, logger);\nconst id = rows[0]?.id;\n```\n\nThree properties, all deliberate-looking, that combine badly under a walled posture:\n\n1. **name-only** — no `organization_id` predicate, and the read is not threaded through\n   `resolveOwnOrganizationRow`, which `per-organization-catalog.ts` documents as *\"the one read\n   that distinguishes 'this organization has its row' from 'somebody's organization-less row is\n   visible here'\"* and which every seeder in that catalog routes through;\n2. **`limit: 1`** — so whichever row the driver returns first *is* the answer, with no way to\n   notice a second one existed;\n3. **cached per ObjectQL instance** (`permissionSetIdCache` WeakMap) — so the first answer of the\n   process is the answer for every organization for the rest of the process.\n\n## Why the combination matters\n\nPost-#10103 the catalog is materialized **per organization**: `sys_permission_set.name` is unique\nper organization (ADR-0120 D3, `COALESCE(organization_id, '__global__')`), so one name legitimately\nhas a row per organization *plus* the organization-less platform-bucket row.\n\n#11532 measured, on a fresh walled rig, that the organization-less rows are written **1.3 s before\nthe first `sys_organization` exists** — i.e. the organization-less `organization_admin` row is the\n**oldest** row bearing that name. A name-only `limit: 1` read under a system context has no reason\nto prefer any other one.\n\n⇒ On a walled deployment, `sys_user_permission_set` rows granting `organization_admin` can point at\nthe **organization-less** row by id, rather than at the granting organization's own copy. Reads\nstill resolve (`resolve-authz-context.ts:570` resolves permission sets by id **without** tenant\nscoping, unlike the `sys_position` read one block above at `:538`), which is exactly why this is\ninvisible today.\n\n## Two consequences\n\n- **A reap of the organization-less platform bucket is not safe on the arithmetic the summaries\n  use.** \"Only `admin_full_access` is pointed at by row id; the other seven have per-organization\n  copies\" does not follow — *having* a per-organization copy does not mean the grants point at it.\n  `per-organization-catalog.ts` already warns in its own header that these rows are grant TARGETS\n  and that deleting them \"revokes standing access with no signal at the moment of loss\"; this\n  finding says the target set is wider than `admin_full_access`.\n- **The organization answer is decided by process-startup ordering**, not by the granting\n  organization — a per-instance cache over an unscoped read means the first organization\n  reconciled in a process picks the row every later organization gets.\n\n## Not claimed\n\n- ⛔ **Not measured on a live rig.** This is a code-shape reading: name-only + `limit: 1` +\n  unscoped + cached. Which row a real driver returns first on a real walled deployment was not\n  observed. That observation is the first thing a fix should take, and it decides the severity.\n- No user-visible defect is claimed. Under the current reads the grant still resolves, so the\n  symptom today is a mis-targeted foreign key, not a denied request.\n\n## Suggested shape\n\nThread `organizationId` into `resolvePermissionSetId` and route it through\n`resolveOwnOrganizationRow` (the governed spelling), keying the cache on\n`(name, organizationId)` rather than `name`. Under `single` posture the unscoped answer stays\ncorrect and unchanged — that carve-out is already how the catalog handles this split.\n\n## Refs\n\nRelated: #11663 (its reap leg is gated on this) · #11532 (the 1.3 s ordering and the 8 rows) ·\n#10103 (the per-organization ruling) · ADR-0120 D3. #11663 remains open and is not addressed here.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 13946,
+  "kind": "pull_request",
+  "title": "docs(nav): stop listing \"index\" in content/docs/releases/meta.json",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T18:22:58Z",
+  "updated_at": "2026-08-31T19:07:13Z",
+  "closed_at": "2026-08-31T19:07:11Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-31T19:07:11Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/13946",
+  "body": "Fixes #13711\n\n## This is the dedicated docs-only PR the `content/docs/releases/` fence names\n\n`content/docs/releases/**` is fenced unconditionally by AGENTS.md and CLAUDE.md — *never edit it in a code PR.* That fence names its own escape hatch, verbatim:\n\n> If a releases page has a factual error, file an issue or **make it a dedicated docs-only PR** — never a rider on code changes.\n\nThis PR takes that route and nothing else. It is **one file, one line**, so it cannot be a rider on anything:\n\n```\ncommit c941f94fa\n\n content/docs/releases/meta.json | 1 -\n 1 file changed, 1 deletion(-)\n```\n\nNo changeset, no script, no doc page, no test. The `skip-changeset` label carries the \"this PR declares no release of its own\" declaration, which is what keeps the diff at one file — `content/docs/**` belongs to no publishable package, and `@objectstack/docs` is `private: true`. Precedent for the route: #12507 / PR #13707 (also one file under `content/docs/releases/`, no changeset).\n\n## The change\n\nRemoves `\"index\"` from the `pages` array of `content/docs/releases/meta.json`.\n\nFumadocs attaches a folder's `index.mdx` as that folder's tree `index` node **only when the folder's `meta.json` does not list `\"index\"`** in `pages`. Listing it makes the landing page an ordinary child and leaves the folder node with a name and no url — `fumadocs-core@16.14.4`, `buildFolder()`:\n\n```js\nif (indexPath) {\n  if (excludedPaths.has(indexPath)) delete node.index;   // \"index\" was listed\n  else excludedPaths.add(indexPath);\n}\n```\n\nTwo surfaces read that one node:\n\n- **Breadcrumb.** `getBreadcrumbItems()` emits the ancestor with `url: undefined`, and `docsTrail()` in `apps/docs/app/[lang]/docs/[[...slug]]/page.tsx` drops any crumb without a url (Google requires `item` on every `BreadcrumbList` entry but the last).\n- **Sidebar.** `node.index ? SidebarFolderLink : SidebarFolderTrigger`.\n\nPR #13710 removed `\"index\"` from 16 of the 17 `meta.json` files that listed it, taking short trails 172 → 8. This file is the 17th, left alone then precisely because of the fence.\n\n## Measured, not asserted\n\nDriven through the real `fumadocs-core@16.14.4` loader over `content/docs` (405 pages), with `\"index\"` re-inserted **in memory only** for the before-leg, so nothing was mutated on disk:\n\n| | before | after |\n|---|---|---|\n| short breadcrumb trails | 8 | **0** |\n| Releases folder header | `TRIGGER` | **`LINK`** |\n| Releases `indexUrl` | `null` | **`/docs/releases`** |\n| pages in tree | 405 | 405 |\n\nThe 8 fixed are exactly the non-landing pages under `/docs/releases`: `v9`, `v12`–`v17`, `implementation-status`. Exactly one sidebar folder header flips and only the 9 `/docs/releases` trails change; no page is added or removed.\n\n**The landing page does not disappear from navigation.** After the change `/docs/releases` is still in `getPages()`, `source.getPage(['releases'])` still resolves, and the page becomes the section header's own link rather than a child beneath a label identical to it. This was checked explicitly because a nav change that silently unlisted a published page would be worse than the defect being fixed.\n\n## Gates\n\nBoth gates that read this file were re-derived at their current line numbers and run:\n\n- `scripts/check-release-notes.mjs:83-97` requires only the `v(major)` slugs (`metaPages.has(slug)`); `\"index\"` is never consulted. The section-reachability check at `:62-82` reads `content/docs/meta.json` and `content/docs/index.mdx`, not this file. → `check-release-notes: OK — every released major has a curated, navigable release page.`\n- `scripts/check-section-landing-index.mjs:178` filters `\"index\"` out of the `pages` array before comparing: `raw.filter((p) => typeof p === 'string' && p !== 'index' && !p.startsWith('---'))`. `releases` is additionally documented at `:66` as a narrative page, not an index, so it is in the not-held set either way. → `✓ check-section-landing-index: 8 section index block(s) enumerate their meta.json pages, in order, both directions; 26 landing page(s) of 34 declare no index block and are not held.`\n\n39 gate commands run in total, covering the family `node scripts/pm/dispatch-gates.mjs` derives for this path, plus `pnpm check:ratchet-remedy-authority` (which path derivation cannot name, #13813). All green except three that measured nothing and report so themselves: `check-test-completeness` (exit 3, `PREREQUISITE NOT MET` — it grades a saved turbo log), `check-half-states` (HTTP 502, no network egress from this runner), and `check:skill-examples` (needs built `packages/client-react/dist` .d.ts). CI measures all three.\n\nESLint is narrowed to the changed file on its own evidence: `eslint --format json content/docs/releases/meta.json` reports `\"File ignored because no matching configuration was supplied.\"` — the file is outside ESLint's population by ESLint's own config resolution, and nothing in this diff touches `eslint.config.mjs`, so no untouched file's verdict can move.\n\n## Not closed by this PR\n\n#12352 remains open and is another dispatch's to close — the unlock scan handles it.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01Pk26oZ12t5N1hwGW1m1MgC)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Pk26oZ12t5N1hwGW1m1MgC)_"
+}

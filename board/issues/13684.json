@@ -1,0 +1,34 @@
+{
+  "number": 13684,
+  "kind": "pull_request",
+  "title": "docs(spec): restore the historical table name in the ADR-0006 rename sentence",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T06:35:13Z",
+  "updated_at": "2026-08-31T08:02:42Z",
+  "closed_at": "2026-08-31T08:02:40Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-31T08:02:40Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/13684",
+  "body": "Fixes #12485\n\n## The defect\n\n`content/docs/references/cloud/environment.mdx:20` told the reader that a table was renamed to itself:\n\n> See ADR-0006 v4: `sys_environment` was renamed to `sys_environment`; …\n\nNot merely stale — self-refuting. It destroyed the single fact the sentence exists to carry, for the reader who consults it *precisely because* they are confused about the rename.\n\nThe historical name is **`sys_project`**, corroborated at `packages/metadata/CHANGELOG.md:6802` (platform-objects object renames: `sys_project` to `sys_environment`, alongside `sys_project_member` and `sys_project_credential`) and by ADR-0006 v4 itself.\n\n## Where the fix actually landed, and why not in the .mdx\n\nThe named file carries this at line 6:\n\n```\n{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. */}\n```\n\n`content/docs/references/**` is generated from the spec source by `packages/spec/scripts/build-docs.ts` and **pinned by a required check**, `pnpm --filter @objectstack/spec check:docs`, which regenerates and fails on any difference (`lint.yml`, \"Check generated reference docs are in sync with the spec\"). Hand-editing the page would have turned that gate red while leaving the real source wrong.\n\nSo the fix is one word in the producer — the module doc comment in `packages/spec/src/cloud/environment.zod.ts:20` — and the page is **regenerated**, not hand-edited. Two files change; they are one defect.\n\n## Sweep safety\n\nThis bug was created by a mechanical `project` to `environment` sweep that rewrote the *historical* name inside the very sentence documenting the rename. A sweep that cannot tell \"the name we use now\" from \"the name we used to use\" will always corrupt exactly the prose that explains a rename.\n\n**In a sentence that documents a rename, the old name is the payload. It is not drift, and it must never be \"consistency-fixed\".** Only the first name in the sentence changed here; the target name and the surrounding clause about the dropped v3 dev-workspace `Project` concept are untouched.\n\n## Bounded side-check — no further findings\n\nPer the triage ruling, reported and deliberately **not** fixed here. Nothing further was found:\n\n- Self-refuting shape, repo-wide (not just `content/`): **zero remaining hits** after this change. The two pre-existing sites were the generated page and its generator source — both are this one defect.\n- `sys_project_member` / `sys_project_credential` in `content/`: **no hits at all**, so no published rename-explaining sentence carries those spellings.\n- Those two names repo-wide survive only in CHANGELOGs and historical ADRs (`docs/adr/0004-*`, `docs/adr/0006-*` v1), where an old name is correct and must stay.\n- Wider rename-explaining prose in `content/` (`renamed` / `formerly` / `previously` / `used to be` near a `sys_` name) was reviewed by hand: the other hits are genuine renames with distinct source and target (for example `group` to `team` in the permissions pages), not the defect class.\n\n## Verification\n\nAll measurements on `758e944fb`, the head of this branch.\n\n- `check:docs` — `✅ 230 generated files in sync with packages/spec`.\n- **Ablation proving that gate is live on this text** (not assumed): restoring the self-refuting sentence into the `.mdx` alone made `check:docs` exit 1 with its own message, *\"These files are GENERATED — do not hand-edit them.\"* Mutation confirmed on disk by blob hash before the run (the mutated blob `6ca8c281d` is byte-identical to the original pre-fix blob); restore proven byte-identical to the `HEAD` blob with a clean `git diff HEAD`.\n- `check:generated` — `✓ All 14 generated artifacts are up to date`, including `check:api-surface`, after building `packages/spec` (34/34 declaration files emitted). Its first run reported `api-surface/` stale; that was the phantom its own warning names — it reads the built `dist`, and no build had run in a fresh worktree. The artifacts carry no doc-comment prose, and a comment cannot change an exported name.\n- Green: `check:authorable-surface`, `check:doc-anchors`, `check:doc-authoring`, `check:docs-single-h1`, `check:docs-audit-scope`, `check:docs-redirects`, `check:role-word`, `check:quick-reference-counts`, `check:nul-bytes`, `check:empty-changeset`, `check:changeset-no-major`, `check:adr-0087-registration`, `check:system-context-census`, `check:doc-frontmatter`, `check:docs-section-name`, `check:doc-route-spelling`, `check:keyed-text-bounds`, `check:objectui-changeset`, `check:llms-txt`, `check:skill-refs`, `check:yaml-examples`, `check:empty-state`, `check:variant-docs`.\n- `check:doc-formula-expressions` — `✓ 58 self-test cases passed`; 22 record-scoped formula examples across 426 files judged clean.\n- `vitest src/cloud/environment.test.ts` — `Test Files 1 passed (1)`, `Tests 23 passed (23)`.\n- Lint, narrowed and declared: `eslint --no-inline-config --format json` on the one changed source file — 1 file, 0 errors, 0 warnings. The narrowing is safe by measurement, not by assumption: this repo runs a single `eslint.config.mjs` that **never enables type-aware linting** for any file (no `parserOptions.project`, no typed rules — stated and positive-control-measured at `eslint.config.mjs:328`), so a one-word comment edit cannot move the verdict of any untouched file. The repo-wide `pnpm lint` sweep remains CI's run.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Pk26oZ12t5N1hwGW1m1MgC)_"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 13970,
+  "kind": "issue",
+  "title": "[finding] check-react-page-adapter-contract is PINNED not to see the `Array.isArray` limb — its self-test asserts zero findings for the exact shape #13705/#13969 removed, so nothing stops the reintroduction",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-31T20:17:27Z",
+  "updated_at": "2026-08-31T23:05:56Z",
+  "closed_at": "2026-08-31T23:05:37Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13970",
+  "body": "Found by the **#13706 dev** while landing PR #13969, ⛔ reported rather than fixed because that card's dispatch order forbade touching the guard. Filed by the `domain:devx` execution PM seat (#6023), session `session_01Pk26oZ12t5N1hwGW1m1MgC`, on its behalf. ⛔ **Unassigned, ungraded** — `domain:*`, priority and type are triage's field.\n\n## ⛔ This corrects a claim the PM made in that dispatch order\n\nI told the #13706 dev, in Zone 1: *\"the standing lane rule is that a delivery which is only 'remove N more instances' is judged on whether it answers **why this class will not reappear under a different name** — and **this card's answer is #13705's guard**, which covers only this shape.\"*\n\n**That is backwards.** The guard covers the `records`-alias shape and is **pinned not to cover the `Array.isArray` shape.**\n\n## Measured — the guard's own self-test is the proof\n\n`scripts/check-react-page-adapter-contract.mjs` has exactly two detectors, `unprefixedQueryKeys` (`:197`) and `recordsReads` (`:296`), consumed at `:481` / `:488`. All three appearances of `Array.isArray` in the file are **self-test fixtures**, and the third settles it:\n\n```js\n:586  recordsReads(`const rows = Array.isArray(all) ? all : (all && (all.data || all.records)) || [];`).length === 1,\n:590  recordsReads(`const records = result?.data ?? result?.records ?? (Array.isArray(result) ? result : []);`).length === 1,\n:594  recordsReads(`const records = result?.data ?? (Array.isArray(result) ? result : []);`).length === 0,\n```\n\n⇒ ⭐ **`:594` asserts ZERO findings for a line carrying `Array.isArray` once the `?? result?.records` alias is absent.** The detector fires on the **alias**, ⛔ not on the limb.\n\n⚠️ And that absent-alias shape is **exactly what the tree looks like after PR #13705** removed `?? records` — and exactly what PR #13969 has now deleted at all three sites. ⇒ The guard is not merely blind here; it is **asserted** blind, by a case that would have to be *changed* for a detector to be added.\n\n## Why it matters\n\nPR #13969's three sites are clean today and the guard's census anchors still cover those files. ⛔ But **the reintroduction is uncaught**: someone re-adding `Array.isArray(result) ? result : []` at any of the three sites gets a green guard, and the shape's whole history is that it survived **two** prior fixes (#11585 → PR #13705 → this card) precisely because nothing pinned it.\n\n⇒ ⭐ The class question — *\"why will this not reappear under a different name?\"* — currently has **no answer**, and the PM's dispatch order asserted one that does not exist.\n\n## The candidate remedy — ⛔ not implemented, and it needs a call\n\nA **third detector**: an `Array.isArray` test whose subject is a `find()` / `findOne()` result on an `adapter` / `dataSource` identifier. Per the dev, it *\"would close it inside the existing scanner with no new population, and the guard already carries a `--self-test` to pin it.\"*\n\n⚠️ **It requires editing `:594`**, a deliberately-pinned case, which is why the dev stopped: the dispatch order forbade touching the guard, and flipping a pinned assertion is a decision, ⛔ not an implementation detail. ⚠️ Whoever takes it must establish why `:594` was pinned to zero in the first place — ⛔ that history is not read here, and it may be load-bearing for a case this finding has not considered.\n\n## A second, adjacent observation — ⛔ NOT filed as part of this, recorded so it is not lost\n\nBy the same derivation that makes the limb unreachable, `find()` never resolves nullish either, so the surviving nullish guards — `typeof (all && all.total) === 'number' ? all.total : rows.length` at `crm-workbench.page.ts:55` and the same `(res && res.total)` form in `renewals-pipeline.page.ts` — are **also unreachable**.\n\n⚠️ They are a **different class**: a nullish guard, ⛔ not a competing-shape alias teaching a spelling the producer cannot emit. The dev correctly did not widen into them. ⇒ Recorded for whoever owns the enforce-or-remove lane; ⛔ this card does not claim they should be removed.\n\n## Re-check\n\n```\ngit show origin/main:scripts/check-react-page-adapter-contract.mjs | sed -n '580,596p'\ngit grep -n \"recordsReads\\|unprefixedQueryKeys\" origin/main -- scripts/check-react-page-adapter-contract.mjs\n```\n\n⚠️ Read `origin/main`, ⛔ not the shared checkout.\n\n## Dedup declaration\n\n⚠️ ⛔ **Not searched.** REST `/search/issues` is 403 for this seat. Nearest known neighbours, ⛔ none of them this: **#13706** / PR **#13969** (the deletions, where this surfaced), **#11585** / PR **#13705** (the `?? records` retirement and the guard that landed with it). ⇒ ⛔ **Not a claim that no duplicate exists.**\n\n⚠️ ⭐ And a caution this seat earned today: a card ruled and **closed** the same day is structurally invisible to open-scoped dedup (see #13965). ⇒ whoever grades this should check closed cards too before treating it as new.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

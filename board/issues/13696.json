@@ -1,0 +1,34 @@
+{
+  "number": 13696,
+  "kind": "issue",
+  "title": "[finding] 报表构建器只接受已声明的 dataset，不接受对象——AI 长出的新模块在报表里选不到，必须另写一份 dataset 声明",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T07:05:59Z",
+  "updated_at": "2026-09-01T00:23:08Z",
+  "closed_at": "2026-09-01T00:22:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13696",
+  "body": "> **来源**：宣传视频车道 #147（一句话新模块·请假管理）为改版取景所做的只读侦察。**未改动任何平台代码、未改任何配置**，本单为纯只读观察。\n>\n> **本单只描述现象，不预设修正方向。** 是否算缺陷、以及该往哪个方向处理（对象自动可报表、按需生成 dataset、保持显式声明并在别处补齐、或仅改文档与提示），全部留给负责人裁定。**故不带 `pm:queue`——请先分级，不要被自动流程当成待开发任务直接领走。**\n\n## 现象\n\n一位 AI agent 依据一句业务需求，在既有 CRM 应用里长出了一个完整的请假模块：对象 `crm_leave_request`（15 字段）、审批流、5 个 profile 的权限声明、4 个视图、写进既有应用导航的菜单项。这些**在应用里都能用**。\n\n**但这个新模块在报表里选不到。**\n\n报表构建器本身是齐全的——Report type（Matrix）、Dataset、Values(measures)、Rows/Columns(dimensions)、Chart type，左侧还有带合计行的实时预览。**问题在它的数据源入口：它只接受 dataset，不接受对象。**\n\nDataset 下拉里共 13 项：\n\n| 类别 | 数量 | 说明 |\n|---|---|---|\n| 平台级 `sys_*` | 4 | User / Organization / Session / Audit Log Metrics |\n| 业务对象的 | 9 | account / case / contact / event / forecast / lead / opportunity / product / task —— **每一个都在 `src/datasets/` 里逐个声明过** |\n| 请假的 | **0** | —— |\n\n机械核查：`src/dashboards/`、`src/reports/`、`src/datasets/` 三个目录里**零 leave 声明**（唯一 grep 命中是 `shared-widgets.ts` 注释里的英文单词 \"leave\"，假阳性）。\n\n于是「本季度各人请假天数」这类报表**现在出不来**；要出，必须**先另写一份 leave dataset 声明**。\n\n## 为什么记下来\n\n同一个模块，**运行时的那一面是齐的**（表单、审批、视图、导航、记录权限都能用），**分析的那一面是空的**——两者的开通方式不同：前者由对象与视图声明带出，后者要再声明一次 dataset。\n\n对一个「按描述长出模块」的平台，这意味着**任何新长出来的对象，其分析能力都不随模块一起到位**，需要第二次声明。这是本次侦察观察到的事实；**是否属于有意的设计取舍（例如 dataset 承担了治理、RLS、度量语义等对象本身不表达的东西），本单不判断。**\n\n## 相关的界面观察（同为只读）\n\n- widget 属性面板的 **DATASET BINDING** 帮助文本原文：「Bind a governed dataset. When set, **it takes precedence over the inline object query above** …」——即 widget **另有一条直接查对象的 inline query 路径**。\n  ⚠ **未验证**该路径能否指向 `crm_leave_request`：验证需要新建或修改一个 widget，属改配置，超出本次只读范围。**如实记为未验证，不作推断。**\n\n## 复现最小路径\n\n1. 在一个已有若干 dataset 的应用里，新建一个对象（本例 `crm_leave_request`，15 字段），并为它声明视图与菜单项；\n2. 打开报表构建器，展开 Dataset 下拉；\n3. 新对象不在列表中——列表里只有 `sys_*` 与那些已被显式声明过 dataset 的业务对象。\n\n## 取证环境\n\n2026-08-31，载体 `objectstack-ai/hotcrm`，钉 `@objectstack/* 17.1.0`。纯只读 + 截图，未改数据、未改配置、未改源码。\n\n## 邻近既有单（已查，非重复）\n\n- #5144 `Analytics: a dataset dimension on a dotted relationship path renders raw stored values …`（已声明 dataset 之后的维度渲染问题，与本条的**入口可用性**不同；已以 `not_planned` 关闭）\n- #13533 / #13568 —— 同一次 #147 取证中发现的另两条，均与本条无关"
+}

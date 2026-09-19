@@ -1,0 +1,34 @@
+{
+  "number": 13707,
+  "kind": "pull_request",
+  "title": "docs(releases): qualify the v17 notify-template locale as one per notification, not per recipient",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T07:40:14Z",
+  "updated_at": "2026-08-31T08:38:56Z",
+  "closed_at": "2026-08-31T08:38:55Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-31T08:38:54Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/13707",
+  "body": "Fixes #12507\n\nA **deliberately releases-docs-only PR**, and the only file it touches is `content/docs/releases/v17.mdx`. The standing rule — never edit `content/docs/releases/` in a code PR — carries its own stated exception for exactly this shape (\"if a releases page has a factual error, file an issue or make it a dedicated docs-only PR\"), and the maintainer ruled that route on 2026-08-27 (Option A).\n\n## What changed\n\nThe v17 page still carried the retired promise for flow `notify` nodes:\n\n> resolved by `(name, recipient locale)` at delivery time (#9205).\n\nPer the maintainer ruling of 2026-08-13 there is **no per-recipient locale**: `payload.locale` is interpolated **once, before fan-out**, its fallback is the deployment default (`II18nService.getDefaultLocale()`), and `sys_user` carries no locale column. #12178 corrected `packages/spec` and #12446 / PR #12505 corrected the five live doc sites; this page was the residue — read by exactly the audience the wording misleads, for whom acting on it is a net regression (`TEMPLATE_*` failures classify `permanent` and dead-letter).\n\nThe sentence now reads:\n\n> resolved by `(name, locale)` at delivery time (#9205). **The locale is one value for the whole notification, not one per recipient**: `payload.locale` if the producer set one, else the deployment default (`II18nService.getDefaultLocale()`) — the platform has no per-user locale, so recipients whose personal languages differ all receive the same row (a per-user locale is deferred by the 2026-08-13 ruling).\n\n### Wording provenance — matched, not invented\n\nTwo different qualifiers for one fact is the defect class this card belongs to, so every clause is copied from a site already corrected:\n\n| Clause | Copied from |\n| --- | --- |\n| \"The locale is one value for the whole notification, not one per recipient\" | `content/docs/automation/email-templates.mdx:167` (the hand-written live page corrected by #12446 / PR #12505), bolded there too |\n| \"`payload.locale` if the producer set one, else the deployment default (`II18nService.getDefaultLocale()`)\" | same page, lines 168-169, and `content/docs/references/automation/io-node-config.mdx:101` (generated from the spec corrected by #12178) |\n| \"the platform has no per-user locale, so recipients whose personal languages differ all receive the same row\" | `content/docs/automation/email-templates.mdx:170-171` |\n| \"deferred by the 2026-08-13 ruling\" | `content/docs/references/automation/io-node-config.mdx:101` |\n| tuple spelled `(name, locale)` | every corrected site — `io-node-config.zod.ts:276,298`, both live doc pages |\n\nThe bare phrase \"recipient locale\" is now absent from the page: leaving it while appending \"not one per recipient\" would have left the page contradicting itself, and the pins added by #12178 / #12446 refuse that bare phrase everywhere they reach.\n\n## Deliberately NOT in this diff\n\n- **`packages/spec/CHANGELOG.md:2745`** carries the same sentence and stays untouched by ruling — a generated CHANGELOG is history, a record of what the release said at the time. Confirmed still present and unmodified.\n- **No changeset.** Nothing here publishes from any package, so this PR carries `skip-changeset` (the repo's only path-independent exemption in `pr-automation.yml`; that job has no docs-only carve-out).\n- Rider from the ruling — same-page sweep for other wording narrowed by later rulings: **nothing found.** `content/docs/releases/v17.mdx` has 13 other `locale` occurrences and zero \"per recipient\" / \"each person\" / \"own language\" phrasing; this bullet was the page's only per-recipient-locale claim.\n\n## Gates\n\nLocal union re-run **after** the final commit, on `05b429955` — all 28 derived families green; the 29th is not locally measurable:\n\n`pnpm check:role-word` (the ratchet that pins this page: baseline `content/docs/releases/v17.mdx` = 2, unchanged — the new prose adds no reserved word) · `check:release-notes` · `check:release-page-status` · `check:release-section-coverage` · `check:docs-single-h1` · `check:doc-anchors` · `check:doc-authoring` · `check:doc-frontmatter` · `check:doc-route-spelling` · `check:docs-section-name` · `check:docs-redirects` · `check:docs-audit-scope` · `check:section-landing-index` · `check:published-readme-links` · `check:react-page-adapter-contract` · `check:cross-package-test-inputs` · `check:ci-filter-parity` · `check:shard-attestation` · `check:nul-bytes` · `@objectstack/spec` `check:docs`, `check:yaml-examples`, `check:skill-examples`, `check:empty-state`, `check:liveness`, `check:strictness-ledger`, `check:variant-docs` · `@objectstack/lint` `check:doc-formula-expressions`, `check:doc-security-posture`. Gate list derived by `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack`, not recalled.\n\n`check-test-completeness` is **NOT MEASURED**: it grades a saved `turbo run test` log that only CI produces (its own exit-3 prerequisite branch says so).\n\nRepo-wide `pnpm lint` is **narrowed, declared**: eslint's own configuration supplies no matching config for `.mdx`, so the single edited file is outside the lint population — measured, not assumed, via `pnpm exec eslint --no-inline-config --format json content/docs/releases/v17.mdx` → 1 result, 0 errors, message \"File ignored because no matching configuration was supplied\". No eslint config and no JS/TS source changed, and no type-aware linting spans this file, so no untouched file's verdict can move.\n\nDraft on purpose — the `domain:devx` PM seat arms it after review.\n\nSession: https://claude.ai/code/session_01Pk26oZ12t5N1hwGW1m1MgC\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Pk26oZ12t5N1hwGW1m1MgC)_"
+}

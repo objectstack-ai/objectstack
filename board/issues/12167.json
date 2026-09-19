@@ -1,0 +1,33 @@
+{
+  "number": 12167,
+  "kind": "issue",
+  "title": "Report the tsup DTS-worker silent death upstream — a `worker.on('error')` / `worker.on('exit')` pair would end the class at its source",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T11:41:28Z",
+  "updated_at": "2026-08-31T16:42:51Z",
+  "closed_at": "2026-08-31T02:25:11Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12167",
+  "body": "Filed out of #12078 (the rollout of `scripts/check-dts-emitted.mjs` across every tsup-built package), on the dispatching PM's ruling that patching a third-party dependency is a maintainer decision and not an implementer's. Nothing here is a patch; this card asks for a **decision to report the defect upstream**, and carries the reproduction so the report can be written from it.\n\n## The defect, in tsup's own code\n\ntsup 8.5.1 runs DTS generation in a `worker_threads.Worker` (`node_modules/tsup/dist/index.js`, the `dtsTask` inside `Promise.all([dtsTask(), mainTasks()])`) and settles the build promise **only** from that worker's `message` events:\n\n```js\nawait new Promise((resolve, reject) => {\n  const worker = new Worker(path.join(__dirname, './rollup.js'));\n  worker.postMessage({ ... });\n  worker.on('message', (data) => {\n    if (data === 'error') { terminateWorker(); reject(...); }\n    else if (data === 'success') { terminateWorker(); resolve(); }\n    ...\n  });\n  // no worker.on('error'), no worker.on('exit')\n});\n```\n\nThere is no `error` handler and no `exit` handler. A worker that dies without posting a message — OOM under memory pressure is the observed shape — settles neither branch: the promise never settles, the event loop drains, and **node exits 0** with the esbuild pass having already written `dist/`. The run leaves a `dist/` holding `index.js` / `index.mjs` / maps and **zero** `.d.ts`, and reports success.\n\n## Why it matters to us specifically\n\nturbo caches only successful tasks. Exit 0 on a run with `OS_SKIP_DTS` unset hashes as — because it is — an ordinary full build, so the declaration-less `dist/**` is cached under the ordinary hash and replayed on every later run; a plain rebuild is a cache HIT that restores it, and only `--force` replaces the entry. The symptom lands on someone else's diff, as `TS7016: Could not find a declaration file for module '...'`.\n\nReproduced end to end on `@objectstack/plugin-auth` in #11907 / PR #12076: build exit 0, turbo `26 successful, 26 total`, `dist/` with zero declarations, cached under the same hash a healthy build produces.\n\n## The upstream fix being proposed for report\n\nRegister both missing handlers on the worker, so a death that posts no message rejects the build promise instead of leaving it pending:\n\n- `worker.on('error', reject)` — the worker threw or failed to start.\n- `worker.on('exit', code)` — reject when the promise has not already settled, whatever the code, since a clean exit without a `success` message is still a DTS pass that produced nothing.\n\nEither one alone closes the observed OOM shape; the pair closes the class.\n\n## What we already have, and why this is a complement\n\nPR #12076 landed `scripts/check-dts-emitted.mjs` (asserts every declaration path the manifest promises is present and non-empty, no-op under `OS_SKIP_DTS`), and #12078 rolls it into all 67 tsup-built packages' build scripts. That protects this repo now, on our schedule. An upstream fix ends the class for everyone and lets the guard become redundancy rather than the only barrier. They are complements, not alternatives — this card does not propose removing the guard.\n\n## Decision asked for\n\nWhether to open the upstream report (tsup issue / PR), and by whom. ⛔ Note what is explicitly **not** proposed here: carrying a patched tsup in this repo. A patched third-party dependency is a standing supply-chain and maintenance obligation, and that call belongs to the maintainer.\n"
+}

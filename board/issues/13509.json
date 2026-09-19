@@ -1,0 +1,36 @@
+{
+  "number": 13509,
+  "kind": "issue",
+  "title": "`check-dts-emitted.mjs` header names OOM as the silent-build shape — measured, an OOM'd DTS worker is the LOUD path (exit 1), and only a message-less exit is silent",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T15:32:26Z",
+  "updated_at": "2026-08-31T18:00:55Z",
+  "closed_at": "2026-08-31T18:00:15Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13509",
+  "body": "Observation-class finding, no behaviour change proposed. Found while drafting the upstream tsup report on 12167 (the guard's header is the repo's most accurate written description of the defect, so it is the text the next debugger will read).\n\n## What the guard says — in two places\n\n1. **Header comment**, in the block titled `THE DEFECT IT EXISTS TO CLOSE`:\n\n> If the worker dies without posting a message -- OOM under memory pressure, a hard `process.exit`, a terminated thread -- neither branch ever runs, the promise NEVER SETTLES, the event loop drains, and **Node exits 0**.\n\n2. **The failure message the guard prints to the engineer who trips it** (same file, the `console.error` block):\n\n> A worker that dies (OOM under memory pressure is the observed one) posts neither \"success\" nor \"error\" [...]\n> Re-run the build. If it keeps failing here, build with more headroom:\n> `NODE_OPTIONS=--max-old-space-size=8192 pnpm --filter PKG build`\n\nThe same attribution is carried in 12167's body. Both quotes verified against `origin/main`, not a working tree.\n\n## What is actually measured\n\nNode v22.22.2, Linux x64, four runs of a harness that mirrors tsup's promise structure exactly (only `worker.on('message')` registered):\n\n| Worker death mode | Event that fires | Process outcome |\n| --- | --- | --- |\n| `process.exit()` inside the worker, CJS caller | `'exit'` only | **exit 0, zero output** — the silent false-success class |\n| `process.exit()` inside the worker, ESM caller with top-level await | `'exit'` only | exit 13, `Warning: Detected unsettled top-level await` |\n| Heap OOM, per-worker `resourceLimits: { maxOldGenerationSizeMb: 16 }` | `'error'` `ERR_WORKER_OUT_OF_MEMORY` | **exit 1**, `Unhandled 'error' event` |\n| Heap OOM, process-wide `--max-old-space-size=64`, no `resourceLimits` | `'error'` `ERR_WORKER_OUT_OF_MEMORY` | **exit 1**, `Unhandled 'error' event` |\n\nNode has emitted `ERR_WORKER_OUT_OF_MEMORY` as an `'error'` event for many major versions, and an `'error'` event with no listener is rethrown by `EventEmitter` — so an OOM'd DTS worker fails loudly and non-zero. A non-zero build is never cached by turbo, which is precisely the property the header says OOM lacks.\n\nThe silent exit-0 shape requires a worker that ends **without** an `'error'` event: `process.exit()` reached inside the worker, a terminated thread, a thread that ends message-less for any other reason. The caller's module system is load-bearing too: the same message-less death exits 13 with a warning from an ESM top-level `await`, and 0 in silence from CJS. tsup's CLI is CJS, which is why the observed shape was silent.\n\n## Why it is worth correcting\n\nTwo distinct costs, and the second is the sharper one:\n\n- **The header** is written as a debugging aid and is cited from 12167. Someone who hits a declaration-less `dist/` will follow it to \"we were memory-starved\", try to reproduce under memory pressure, get a loud crash, and conclude the guard's premise is wrong.\n- **The printed remediation** tells the engineer who trips the guard to retry with `--max-old-space-size=8192`. On the measurement above, that is advice for the path that does **not** produce this failure. Raising the heap cannot be shown to address a message-less exit, so the guidance is likely to send someone through a retry loop that never converges — while the genuinely useful half of that message (the `turbo --force` cache-clearing step) sits below it.\n\nThe correct lede is the class, not the trigger: **any DTS worker death that posts no message leaves the promise pending, and from a CJS caller that is exit 0.**\n\nNote what is *not* claimed here: this does not identify what actually killed the worker in the original plugin-auth observation. It establishes only that whatever killed it ended the thread without an `'error'` event, because the run exited 0 — and that memory pressure is not a demonstrated cause of that shape.\n\n## Suggested change (docs and one printed message; no logic)\n\nReword the header sentences and the printed \"Most likely cause\" paragraph to name the class first, list OOM as the loud sibling rather than the observed shape, and stop leading the remediation with the heap-size retry. The guard's logic, its self-test, and its rollout are all unaffected — declared declaration paths must exist and be non-empty regardless of what killed the worker.\n\nLeft unassigned and unfixed deliberately: the round that found it was a drafting task with an explicit report-only scope."
+}

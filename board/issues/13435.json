@@ -1,0 +1,37 @@
+{
+  "number": 13435,
+  "kind": "issue",
+  "title": "driver-memory: `bulkUpdate` and `bulkDelete` are still `Promise.all(map(...))`, so a refused row leaves the earlier rows of the batch applied — the third and fourth batch doors of the driver #13340 did not reach",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T11:49:32Z",
+  "updated_at": "2026-08-31T16:43:15Z",
+  "closed_at": "2026-08-31T16:43:15Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13435",
+  "body": "Found while implementing #13340 (which made `bulkCreate` all-or-nothing). Not folded into that PR — different methods, and the fix is **not** the mechanical one #13340 got, for the reason set out below. Unassigned; grading and routing are triage's.\n\n## The observation\n\n#13340 fixed `bulkCreate`, and #13197 had already fixed `updateMany`. Two batch doors of `InMemoryDriver` are still the pre-#13340 shape, in `packages/drivers/driver-memory/src/memory-driver.ts` (line numbers against `c4e841368b`, the #13340 branch head — re-derive them, they move):\n\n```ts\n// ~line 741 -- \"Compatibility aliases\"\nasync bulkUpdate(object, updates, options) {\n  const results = await Promise.all(updates.map(u => this.update(object, u.id, u.data, options)));\n  return results;\n}\n\nasync bulkDelete(object, ids, options) {\n  await Promise.all(ids.map(id => this.delete(object, id, options)));\n}\n```\n\n`update` writes into the table synchronously and calls `assertUnique`, so `bulkUpdate` has exactly the defect #13340 measured on `bulkCreate`: when one row of the batch is refused with `UNIQUE_VIOLATION` / 409, every row applied **before** it stays mutated, and the caller gets a rejection describing a batch that partly landed. `bulkDelete` is the same shape against `delete`, which throws on a missing row when `strictMode` is on.\n\nSo after #13340 the driver has four batch doors giving **two different answers** to \"is a batch atomic?\":\n\n| door | posture | since |\n|:---|:---|:---|\n| `updateMany` | check-then-mutate | #13197 |\n| `bulkCreate` | check-then-push | #13340 |\n| `bulkUpdate` | `Promise.all(map(update))` — prefix survives | — |\n| `bulkDelete` | `Promise.all(map(delete))` — prefix survives | — |\n\n## Why this was NOT folded into #13340\n\nIt fails the bounded-in-place-fix test on one criterion: **the fix is not mechanical**, so copying `updateMany`'s shape into it would be forcing the pattern rather than transferring it. Three things have to be decided first, and none of them is settled by existing evidence:\n\n1. **`bulkUpdate` applies a DIFFERENT patch per id.** `updateMany` stamps one `data` onto every matched row, and `bulkCreate` has no pre-image to exclude. `bulkUpdate` needs, per pending row, its own `exceptId` **and** a projected row set holding the other rows' post-images while dropping their pre-images. That construction exists nowhere in the file yet.\n2. **Non-strict missing rows.** `update` returns `null` rather than throwing when the id is absent and `strictMode` is off. Check-then-mutate has to decide whether a missing id refuses the whole batch or is skipped, which changes what the returned array means to callers.\n3. **`bulkDelete` returns `void`** and swallows per-row outcomes entirely, so \"atomic delete\" needs a decision about what it reports before it can be about what it does.\n\nThese are semantics questions, not a transcription. #13340's dispatch was explicit that if the `updateMany` pattern needs something the target method does lazily, that is a finding to report rather than a shape to force — this is that case, one method further on.\n\n## Scope note\n\nAlso worth deciding as part of this: `bulkCreate`/`bulkUpdate`/`bulkDelete` are labelled \"Compatibility aliases\" in the source. If they are genuinely legacy surface, \"these three are not atomic, use the non-alias doors\" is a legitimate answer — it is simply not the answer anywhere in the tree today, and the docstring on `InMemoryDriver` now advertises batch atomicity in general terms after #13340, which reads as covering all four doors.\n\n## Where it is\n\n`packages/drivers/driver-memory/src/memory-driver.ts` — `bulkUpdate` and `bulkDelete`, with `bulkCreate` (post-#13340) and `updateMany` in the same file as the two proven patterns.\n\n## Related\n\n#13340 (made `bulkCreate` all-or-nothing; found there) · #13197 / #13239 (the uniqueness cards; `updateMany`'s check-before-mutate came from the first)"
+}

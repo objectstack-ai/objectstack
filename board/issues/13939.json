@@ -1,0 +1,36 @@
+{
+  "number": 13939,
+  "kind": "pull_request",
+  "title": "spec: generate declaration-map/ — TS declaration names to spec registry names (docs-audit option D, spec half)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T17:37:34Z",
+  "updated_at": "2026-08-31T18:35:15Z",
+  "closed_at": "2026-08-31T18:35:13Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": "2026-08-31T18:35:13Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/13939",
+  "body": "Fixes #13712\n\n## What\n\nA new generated artifact, `packages/spec/declaration-map/` (14 category shards), mapping **TS declaration names of authorable containers to their spec registry names** — produced by the spec generation chain, covered by `check:generated`, never hand-edited. It unblocks docs-audit option D (#13713, which is `Blocked-by:` the card this PR closes): diff-side tooling holds a changed line's enclosing declaration name (`ObjectSchemaBase`) and can now ask which authorable container it declares (`data/Object`).\n\nPhase discipline per the card and triage: the ruled first deliverable was a cost estimate, posted before any code as issue comment 5480770862 (verdict SMALL, with measurements). This PR is the implementation it green-lit.\n\n**Clause-②: no** — emitting a new generated artifact neither changes an accept/reject verdict nor widens the authorable surface (triage reading, adopted in the claim).\n\n## How the mapping is derived (no manual entries — the card's premise holds)\n\nComposition of two committed artifacts plus one bounded syntactic pass, in `scripts/build-declaration-map.ts`:\n\n1. **Export half**: `json-schema.manifest/` supplies every def key; `export-origins/` supplies which source declaration each entry-point export resolves to. The export-key candidates for a def are the closed inverse of `schemaNameFromExportKey` (bare name, and name plus the `Schema` suffix). Measured: all 1,597 def keys reverse-resolve with zero misses.\n2. **Base half**: module-private shape providers (the `ObjectSchemaBase` case) are recovered by syntactically unwinding the exported declaration's initializer — `lazySchema` factories, `Object.assign` first argument, method-chain receivers, returned identifiers — recording same-file top-level consts so reached. Single `ts.createSourceFile`, no type checker. Survivors on this tree: `ObjectSchemaBase`, `BaseQuerySchema`, `FormFieldBaseSchema`, `MetadataTypeRegistryEntryBaseSchema`.\n3. **Ambiguity is dropped, never guessed**: a name pointing at two def keys is narrowed by the home rule (def key whose category matches the declaring file's `src/CATEGORY/` segment), and otherwise recorded in the shard's `collisions` list (5 names on this tree, e.g. `RetryPolicy`, declared in `src/shared/` and published under both `system/` and `automation/`). A lookup miss therefore means \"not known to be an authorable container\" — precision over recall, the right trade for the consumer.\n\nPremise nuance recorded on the card: the card's example declaration `DatasourceDef` does not exist in spec source — the declaration enclosing `schemaMode` is `DatasourceSchema` (`src/data/datasource.zod.ts`), so the second pin is `DatasourceSchema` resolving to `data/Datasource`.\n\n## Executable criterion (path per implementation)\n\n`node -e \"console.log(require('./packages/spec/declaration-map/data.json').entries['ObjectSchemaBase'])\"` prints `data/Object` — verified on this branch. `check:generated` covers the artifact via a new GATED ledger row (`check:declaration-map` / `gen:declaration-map`), same regime as the other artifacts.\n\n## Wiring (every registry has its own reconciliation gate)\n\n- `packages/spec/package.json`: `gen:declaration-map` / `check:declaration-map` (self-test then byte-compare)\n- `packages/spec/scripts/check-generated.ts`: GATED row placed after its two input artifacts, so a `--fix` regenerates inputs first — ledger reconciles (15 gated)\n- `.gitattributes` + `scripts/regen-artifacts.mjs`: `merge=os-regen` routing, reconciled by `check:merge-driver`\n- `packages/spec/scripts/declaration-map.test.ts`: pins over the committed bytes — `ObjectSchemaBase` to `data/Object`, `DatasourceSchema` to `data/Datasource`, a 1,000-entry non-empty floor, a positive control (the known-absent `DatasourceDef` spelling really misses), manifest cross-consistency (every value is a published def key), and entry/collision disjointness\n- changeset (patch; repo-internal artifact, not added to the npm `files` whitelist — same posture as `export-origins/`)\n\n## Verification — all at head eee45483c (the final commit; no code changed after these runs)\n\n- `check:declaration-map` self-test: every unwinding rule pinned on fixtures (wrapper chains, nested returns, imports and inline shapes stop the walk, precedence, home rule, collision drop) — green\n- Idempotency: regenerate at head rewrote 0 shards, `git status` clean; check mode green (\"declaration-map/ is current: 2978 declaration name(s) across 14 categor(ies), 5 dropped as ambiguous\")\n- Red-to-green, both legs: deleting a shard makes the gate print \"missing shard declaration-map/data.json\" and exit 1; hand-editing an entry makes it print the stale verdict and exit 1; both restored from HEAD, gate green again\n- `pnpm --filter @objectstack/spec run check:generated`: all 15 gated artifacts green, `check:declaration-map` among them\n- `pnpm --filter @objectstack/spec typecheck` (src + scripts + test programs): green\n- Pins: `vitest run scripts/declaration-map.test.ts` — 6 passed (6)\n- Edited-gate-script suites: `check-generated-ledger.test.ts` + `build-schemas-check-mode.test.ts` — 71 passed; `liveness/check-liveness.test.ts` — 37 passed\n- Derived gate farm (`scripts/pm/dispatch-gates.mjs`, changeset derived from merge base 9b21037d4): 55 commands — 50 green, 5 PREREQUISITE NOT MET by the gates' own printed verdicts, none a red: `check-dev-prereqs`, `check:dual-build-cjs-loads`, `check:type-check-debt` re-measure (all three need the whole-workspace build CI performs; the coverage half of the last is green), `check-test-completeness` (grades a saved CI test log; its own text says record NOT MEASURED locally), `check-half-states` (needs repo-scoped REST this session's gate refuses, measured 403)\n\nCI convergence review is the PM's per the dispatch contract; gate status as of this report is the local evidence above. Authored in session `session_01PBjwYLS6BciTQW3c9xQiD2`.\n\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

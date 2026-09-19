@@ -1,0 +1,34 @@
+{
+  "number": 13670,
+  "kind": "issue",
+  "title": "`EXPRESSION_BINDABLE_TEXT_KEYS_BY_COMPONENT` has no `text` row, but `ui:text` reads `schema.value` at the node top level — and the guides teach it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-31T06:02:58Z",
+  "updated_at": "2026-09-01T01:47:51Z",
+  "closed_at": "2026-08-31T15:07:32Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13670",
+  "body": "Found while implementing the objectui half of the expression-bindable text keys (objectui#4795, consuming this module; PR objectstack-ai/objectui#6981). Filing rather than fixing: the module's own docblock says a row is \"additive and spec-first; do it here, never as a renderer-side inference\", so this is not the renderer's to decide.\n\n## The gap\n\n`src/ui/expression-bindable-text-keys.zod.ts` declares rows for `statistic`, `card` and `button`. The docblock justifies the omissions as follows (verbatim):\n\n> Other registered renderers also read keys from this closed set at the top level (`alert`/`empty`/`dialog` `title`+`description`, `badge` `label`, form inputs' `value`/`label`, …) — those rows are deliberately NOT declared yet\n\n`text` is not in that list of known-omitted readers, and it should be. `packages/components/src/renderers/basic/text.tsx` in objectui renders:\n\n```tsx\n{schema.content || schema.value}\n```\n\nSo `value` on a `text` node **is** a top-level read-back site — the exact property the rows are described as recording (\"a RECORD of what each component renderer already reads back from the node's top level\"). It reads back, it is in the closed key vocabulary, and it has no row, so `expressionBindableTextKeysFor('text')` returns the empty set and the memo leaves it inert.\n\n## Why it matters more than the other omissions\n\nThe omitted rows the docblock names are unused shapes. This one is **actively taught**. A census of objectui's authored corpus (736 JSON documents plus `json` doc fences, 2747 typed nodes) found **23 occurrences** of `type: \"text\"` with a `${…}` expression in `value` — the single largest class of expression-bearing top-level keys in the repo, concentrated in the platform's own expression guide:\n\n```\ncontent/docs/guide/expressions.md   type=text value='Hello, ${user.name}!'\ncontent/docs/guide/expressions.md   type=text value='${user.firstName}'\ncontent/docs/guide/expressions.md   type=text value='${user.address.city}'\ncontent/docs/guide/expressions.md   type=text value='Total: ${price * quantity}'\ncontent/docs/guide/architecture.md  type=text value='Welcome, ${user.firstName} ${user.lastName}!'\n… 18 more\n```\n\nEvery one of those renders the literal `${user.name}` on screen today. This is the same silent-literal shape objectui#4795 was filed for, on the surface most likely to be copied by a human or an AI following the docs.\n\n## Why this blocks something concrete\n\nobjectui#4795's second ruled half is a **build-time rejection** of `${…}` in keys outside the declared set. Its scope is ambiguous precisely here:\n\n- Reject by **key name** (the ruling's literal wording) — `text.value` is accepted, because `value` is in the closed four. It then keeps rendering a literal, so the ruling's stated goal (\"no more … literal `${data.n}` reaching users\") is missed on its largest class.\n- Reject by **carriage map** (what the memo will actually evaluate for that type) — `text.value` is rejected, which fails 23 of the platform's own documented examples.\n\nA `text` → `value` row would dissolve that tension for the largest class: the examples become correct rather than either broken-and-accepted or broken-and-rejected.\n\n## Options\n\n1. **Add the row** `text: ['value']`. Additive, spec-first, matches the measured read point, and makes the existing documented examples work. Cost: it widens the accept surface, and `text` already has `content` as its evaluated channel — so `text` would carry two evaluated text keys with `content` winning the `||`.\n2. **Declare `text.value` deliberately out**, and record it in the docblock's known-omitted list. Then objectui's docs must stop teaching `text.value` with expressions (a docs change of ~23 occurrences), and the build-time gate can reject it with a clear conscience.\n3. Leave as-is — but then the omission is undocumented, which is what makes it a finding rather than a decision already taken.\n\nRecommendation: **(1) or (2), not (3)** — either is defensible, but the current state has the docs and the declaration disagreeing with no record that anyone weighed it. (2) is the more scope-disciplined answer if `content` is considered the intended channel for `text`; (1) is the lower-friction answer for existing authors. Maintainer's call — it changes the accepted authoring surface either way.\n\n## Provenance\n\nMeasured on objectui `origin/main` `7a5da1414` with `@objectstack/spec@17.2.0` installed. The renderer read point and the corpus counts are both reproducible from that tree; the census script is recorded in PR objectstack-ai/objectui#6981's discussion.\n"
+}

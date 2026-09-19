@@ -1,0 +1,36 @@
+{
+  "number": 13520,
+  "kind": "issue",
+  "title": "[finding] artifactOnlySilence misclassifies a family whose roster is extensionless module specifiers — collapseHint cannot resolve them, so a roster prints as an ordinary silence",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-30T16:09:19Z",
+  "updated_at": "2026-08-31T16:20:59Z",
+  "closed_at": "2026-08-31T16:20:01Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13520",
+  "body": "Filed by the `domain:devx` PM seat (#6023), session `session_01Pk26oZ12t5N1hwGW1m1MgC`, **on behalf of #13303's dev, which surfaced it while doing the census and correctly did not fold it into that card's scope.** ⛔ **Ungraded and unrouted** — `domain:*`, priority and type are triage's. Filed **unassigned**.\n\n## Measured\n\n`artifactOnlySilence` in `scripts/pm/dispatch-gates.mjs` decides its question as *\"every declared literal collapses to a tracked FILE\"*. But **`collapseHint` does not resolve extensionless module specifiers.**\n\n⇒ a family whose entire roster is extensionless import targets — the `packages/spec/scripts/lib/…` helpers, **six of #13303's confirmed thirteen** — **escapes the artifact-roster classification and prints as an ordinary silence.**\n\n## ⭐ How it was caught: two instruments disagreed, and the disagreement was the finding\n\nRunning #13303's census produced two classifications of the same population:\n\n| method | result |\n|---|---|\n| **mechanical** (`artifactOnlySilence`) | 21 artifact-only vs 11 \"has a directory literal\" |\n| **header reading** (a human-equivalent read of each gate's own words) | the `packages/spec` cluster are **rosters too** |\n\n⇒ the mechanical answer was wrong for six gates, and it was wrong **silently** — an artifact roster reported as an ordinary silence is a **different claim**, and `dispatch-gates`' own header is explicit that those are *\"a different fact.\"*\n\n⚠️ Note the failure direction: it does not report an error, it reports the **wrong kind of correct-looking answer**. A reader trusting the mechanical split gets a coherent, plausible classification that happens not to be true of six of its members.\n\n## The fix appears to be in-file\n\n⭐ `dispatch-gates` **already exports `extensionlessModuleTarget`** — so the resolver this predicate needs exists in the same module. ⛔ That is an observation, **not a prescription**: whether routing `collapseHint` through it is correct, and what it does to the other 183 families' classifications, is unmeasured. **Measure the blast radius before widening** — a classifier change moves every row, not just the six.\n\n## ⛔ Not claimed here\n\n- ⛔ Not asserted that the six are the only affected families. Nobody swept for other rosters made of extensionless specifiers.\n- ⛔ Not asserted that the mechanical classification is wrong in any other direction.\n- ⛔ Not a duplicate of #13303: that card is under-match of a gate's **population**; this is a **classifier** returning the wrong category for a family it does see.\n\n## Re-check\n\n```\ngrep -n \"artifactOnlySilence\\|collapseHint\\|extensionlessModuleTarget\" scripts/pm/dispatch-gates.mjs\n```\n\nThen classify the `packages/spec/scripts/lib/…` families both ways and compare. ⚠️ This file moves several times a day — ⛔ re-derive rather than quoting this card.\n\n## Refs\n\n- **#13303** — the census that surfaced it, with the full 30-source classification\n- **#13518** — the six-gate `packages/spec` cluster, the affected members\n- **#13519** — the seven remaining confirmed under-matching gates"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 13567,
+  "kind": "issue",
+  "title": "[finding] No live-Postgres coverage of the record-data OCC seam — the driver shape that broke it is only ever a hand-made fixture",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "priority:p2",
+    "tests"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T01:44:43Z",
+  "updated_at": "2026-08-31T21:34:36Z",
+  "closed_at": "2026-08-31T21:16:08Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13567",
+  "body": "Recording a coverage gap found while fixing #13382. **Not a defect in current behaviour** — #13382's own repair is landed with pins that fail loudly. This is about which backends those pins ever run against, which is a CI-topology decision rather than a bug fix, so it is filed instead of expanded into that PR.\n\n## What #13382 was\n\nThe record-data optimistic-concurrency gate (`assertVersionOf` / `assertVersionMatch` in `packages/metadata-protocol/src/protocol.ts`) compared the record's `updated_at` against the caller's token with `String(v)` on both sides. On Postgres — the production default driver — `updated_at` arrives as a JS `Date`, so the comparison ran against `Sun Aug 30 2026 18:19:25 GMT+0800 (China Standard Time)` while the client echoed back the `2026-08-30T10:19:25.947Z` its own GET had served. Every guarded save conflicted, on records nobody had touched.\n\n## Why it survived, stated as a coverage fact\n\nEvery existing OCC pin drives ISO text on **both** sides of the comparison — a memory or mocked engine, or SQLite, all of which round-trip canonical ISO strings. Those pins were green the entire time the production default driver refused every write. The discriminating input is the driver's `Date`, and nothing in the repo ever produced it into this seam.\n\n## The gap that is still open after the fix\n\n`Temporal Conformance (live PG + MySQL)` — the required job where a real Postgres exists — runs `pnpm --filter @objectstack/driver-sql test`. The OCC seam lives in `@objectstack/metadata-protocol`, which has **no driver dependency and must not grow one** (the layering runs the other way). So:\n\n* the seam's new regression suite pins the behaviour given each input shape, using a hand-made `Date` — which is correct and sufficient to catch a revert of the repair;\n* but the composed fact that made it a production bug — *this driver, against this seam, hands over a `Date`* — is asserted by nothing. It was measured by hand against a real PostgreSQL 16 while fixing the card, and that measurement is not something the repo carries.\n\nThe class is the one AGENTS.md already names elsewhere: a green suite that is not a suite, on the path a double was introduced for.\n\n## Options, for whoever triages this\n\n1. **A driver-side characterisation pin in `driver-sql`.** Assert, under the live matrix, that a row's `updated_at` read back on Postgres/MySQL is a `Date` whose `String()` loses milliseconds and carries the process zone. Cheapest by a wide margin, lands in a package already inside the job, and pins the exact fact the seam's assumption was wrong about. It pins a decision the driver states deliberately (`withPostgresCalendarDayAsText`: \"`timestamptz` / `timestamp` are deliberately untouched: those are instants, a `Date` is the right materialisation for them\"), so it is not over-pinning.\n2. **An end-to-end OCC cell in the live job**, from a package that legitimately depends on both sides (`packages/rest` and `packages/runtime` both do). Highest fidelity, but it widens a required job's package set, which is why this is a decision and not a patch.\n3. **Accept the gap** and rely on the seam-level pins. Defensible; worth recording as a decision rather than leaving it as an accident.\n\nRecommendation: option 1, and only option 1 unless someone wants the wider cell for its own reasons.\n\n## Wider question this raises, deliberately not answered here\n\n`updated_at` is not the only value whose runtime type differs between the `Date`-returning drivers (Postgres, MySQL, MongoDB) and the ISO-text ones (the SQLite family, memory). Whether other consumers compare or format it while only ever being tested on the text side is a sweep, not a fix, and would be its own card.\n"
+}

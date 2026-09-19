@@ -1,0 +1,36 @@
+{
+  "number": 12935,
+  "kind": "issue",
+  "title": "[finding] docs teach a field-level `visible` key in three shapes, none of which exists — `FieldSchema` refuses the spelling by name",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-28T09:43:54Z",
+  "updated_at": "2026-08-31T16:34:02Z",
+  "closed_at": "2026-08-29T05:34:47Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12935",
+  "body": "Found while implementing objectui#6514 (the two app-shell call sites moving off the\nspec-refused `fields[].visible` onto the declared `hidden` / `visibleWhen`). Filed\nunassigned, recording only — not graded, no type. Related to objectui#6514 but not part\nof it: that card is a renderer call-site change in objectui; this is a docs defect here.\n\nMeasured on `origin/main` @ `aef1b7e641e7cead90f35db7cd1e06c46a021944`.\n\n## What was measured\n\n`FieldSchema` is a `strictObject` and `visible` is not one of its keys. It appears in\n`FIELD_KEY_GUIDANCE` (`packages/spec/src/data/field.zod.ts`) as prose that REFUSES the\nspelling, deliberately not as an alias:\n\n> `visible` is not a field key, and which key you want depends on the form: a static\n> boolean is `hidden` — INVERTED, so `visible: false` is `hidden: true` — while a\n> per-record CEL predicate is `visibleWhen` (shown only when TRUE). Its siblings are\n> `readonlyWhen` and `requiredWhen`.\n\nThe guidance's own comment says the prose form was chosen over a rename deliberately,\nbecause \"this surface declares BOTH forms and the two answers have opposite polarity\".\n\nScanning the 453 `content/docs/**` and `skills/**` markdown files at that ref for a\n`visible:` key appearing inside a `fields:` block finds **3 occurrences across 2 files**,\nin **three mutually incompatible shapes**, and not one of them is spec-valid:\n\n- `content/docs/protocol/objectui/concept.mdx:614` — section \"3. Conditional Field\n  Visibility\" teaches a filter-object form:\n\n  ```yaml\n  fields:\n    - name: shipping_address\n      type: textarea\n      visible: { shipping_required: true }  # Show only if checkbox checked\n  ```\n\n- `content/docs/protocol/objectui/layout-dsl.mdx:530` and `:537` — section\n  \"Device-Specific Visibility\" teaches a breakpoint map:\n\n  ```yaml\n  fields:\n    - name: detailed_description\n      visible:\n        desktop: true\n        tablet: true\n        mobile: false\n  ```\n\nNeither shape exists anywhere. `FieldSchema` rejects the KEY before either value shape is\nreached, so both examples produce a save-blocking validation error naming `visible` — and\nthe guidance the author then reads points at `hidden` / `visibleWhen`, neither of which\ntakes a filter object or a breakpoint map. The responsive intent in the second example is\nspelled `hiddenOn` at the tier that has breakpoints (objectui `packages/types/src/mobile.ts`),\nnot `visible`.\n\n## Why it is worth recording\n\nThis is the phantom-key family that objectstack#8251 and objectstack#8306 already worked\non `layout-dsl.mdx` — same file, same defect shape, different keys — and it survived both\nsweeps. It is worse than an inert key, for two reasons:\n\n- The docs are the *reason the spelling circulates*. objectui#6514's census found ZERO\n  field-level `visible` keys in the framework's 113 `*.object.*` files, yet the renderer\n  had been gating on the key for its whole life. Published examples teaching it are the\n  most plausible remaining source of an author writing one.\n- It bears directly on the two confidence gaps objectui#6514's analysis declared and could\n  not close: whether deployments carry stored `visible` data written past schema\n  validation, and whether third parties read the same key name. A documented spelling is\n  exactly what a hand-written YAML or a third-party producer that never calls\n  `FieldSchema.safeParse` would carry.\n\nAn AI author following either page writes metadata that cannot publish, and the polarity\ntrap in the guidance means the mechanical repair (`visible: false` becomes `hidden: true`)\nis the one an author is most likely to get backwards.\n\n## Suggested repair, not a decision\n\nDocs-only, in this repo. `concept.mdx` §3's example becomes `visibleWhen` with a CEL\npredicate (`P` + backtick + `record.shipping_required` + backtick); `layout-dsl.mdx`'s\nresponsive example either moves to the key that tier actually declares or is dropped if no\nfield-level breakpoint visibility exists there. No spec change is implied: objectui#6514\ndeclined adding field-level `visible` to the contract (maintainer ruling 2026-08-27), so\nthe docs are the side that is wrong.\n\nRe-check commands:\n\n- `git grep -n \"visible\" -- content/docs/protocol/objectui/concept.mdx content/docs/protocol/objectui/layout-dsl.mdx`\n- `git grep -n \"visible\" -- packages/spec/src/data/field.zod.ts` (FIELD_KEY_GUIDANCE, refusal prose)\n"
+}

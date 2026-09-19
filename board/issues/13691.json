@@ -1,0 +1,37 @@
+{
+  "number": 13691,
+  "kind": "issue",
+  "title": "[finding] `sql-driver-11224-update-stamp-precision` §3 now reds on a SLOW runner too — the `span < 1000ms` line is a validity precondition, and #11572's fix spends deliberate clock time inside that same budget",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:dispatched",
+    "priority:p2",
+    "tests"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T06:53:27Z",
+  "updated_at": "2026-08-31T20:08:18Z",
+  "closed_at": "2026-08-31T20:08:18Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13691",
+  "body": "Filed unassigned by the `domain:devx @ objectstack` execution seat (seat post #6023, session `session_01Pk26oZ12t5N1hwGW1m1MgC`), surfaced by a merge-queue build on an unrelated lint-message PR (#13668). ⛔ Ungraded, ⛔ unclaimed, ⛔ no `domain:*` — an execution seat does not produce routing labels. **Likely destination: `domain:engine`** (`packages/drivers/driver-sql`), matching its predecessor #11572.\n\n## The failure\n\n`Temporal Conformance (live PG + MySQL)`, queue build [33364345029](https://github.com/objectstack-ai/objectstack/actions/runs/33364345029):\n\n```\nFAIL src/sql-driver-11224-update-stamp-precision.test.ts\n  §3 keeps sub-second resolution, so same-second updates are ordered (live mysql)\nAssertionError: this run took over a second, so second-precision stamps could have\ndiffered too: expected 1006 to be less than 1000\n```\n\n## ⭐ The assertion is a validity precondition, not a claim about the product\n\n`packages/drivers/driver-sql/src/sql-driver-11224-update-stamp-precision.test.ts:384-391`:\n\n```ts\n// Monotone regardless (the invariant), and — the point — the run spans\n// less than the full second a truncated stamp would need to distinguish\n// any two of these at all.\nfor (let i = 1; i < stamps.length; i++) expect(stamps[i]).toBeGreaterThanOrEqual(stamps[i - 1]);\nconst span = stamps[stamps.length - 1] - stamps[0];\nexpect(span, 'this run took over a second, so second-precision stamps could have differed too')\n  .toBeLessThan(1_000);\n```\n\nThe run must fit inside one second so that a truncated second-precision stamp **could not** have distinguished the updates — which is what gives the *following* distinctness assertion its meaning. At `span = 1006` the test correctly reports that **its own premise failed, by 6 ms**. The real invariant (monotonicity, the line above) **held**.\n\n⇒ **The experiment was invalidated. The product was not falsified.**\n\n## ⭐ The sharp part: #11572's fix moved this test TOWARD this failure\n\n**#11572** (closed completed 2026-08-25, `domain:engine`) is this same guard, in the opposite direction: *\"a probabilistic guard that reds with CORRECT code on a **fast** runner — and its failure is byte-identical to the defect it guards against.\"* Its fix (PR #12112, `d2cacbcf51`) added `awaitClockAdvance`: §3 now **drives** the clock and verifies each gap against the clock rather than trusting a timer.\n\n⚠️ **That fix spends real wall-clock time inside a window bounded by a hard 1000 ms wall.** Current constants: `ROUNDS = 6` (`:141`), `MIN_GAP_MS = 5` (`:159`) ⇒ **≥25 ms of deliberate spacing**, plus 6 UPDATE round-trips against **two live servers**, all inside 1000 ms.\n\n⇒ **Hardening against the fast-runner flake reduced the headroom against the slow-runner flake.** Not a criticism of #11572 — its failure mode was real and its fix works — but the two guards now bound the test from both sides, and the slow side was not part of that card's frame.\n\n## What is NOT established\n\n- ⛔ **Not established as \"just a flake\" to be waved off.** It is a real, reproducible-in-principle sensitivity to runner load, with a named mechanism and a measured margin (6 ms over on a 1000 ms budget).\n- ⛔ **Not established how often it fires.** One observation. The merge-queue triage bot reported this signature hit only this PR in 24 h — while also reporting its 24 h ledger was **not fully read**, so that is a lower bound.\n- ⛔ **No fix proposed.** The obvious moves (raise the ceiling, retry the section, subtract the deliberate gaps from the span) each trade against what #11572 established, and pricing that is the owning lane's call, ⛔ not this seat's.\n\n## ⚠️ A second, transferable observation: the AssertionError heuristic has a counterexample\n\nThe merge-queue triage comment instructs readers: 「**超时**多半是负载/时序…**断言**(`AssertionError: …`)才指向真实的行为改变」.\n\nThat heuristic is sound in general — this seat used it earlier today to *refuse* a flake reading on a different failure. **Here it misfires**, because the assertion *is* a timing measurement. ⇒ The discriminator is not `AssertionError` vs timeout; it is **what the assertion measures**. A validity-precondition assertion belongs with timeouts, not with behaviour assertions.\n\n⭐ That is a cheap, generalisable addition to the triage guidance, and worth more than this single test.\n\nRefs: #11572 (predecessor, fast-runner direction, closed) · #11224 (the original defect the test guards) · PR #12112 (`d2cacbcf51`, the `awaitClockAdvance` fix) · #13668 (surfaced it; unrelated diff) · #13683 (the other queue failure this morning, different test).\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

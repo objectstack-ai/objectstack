@@ -1,0 +1,36 @@
+{
+  "number": 13688,
+  "kind": "issue",
+  "title": "driver-sql (live MySQL): the two #13056 orphan-shadow-cleanup tests run 3–4 connect→DDL→disconnect round trips under vitest's DEFAULT 5000ms, so `Temporal Conformance` reddens unrelated PRs",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T06:46:44Z",
+  "updated_at": "2026-08-31T17:27:33Z",
+  "closed_at": "2026-08-31T17:27:33Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13688",
+  "body": "Filed by the `domain:services` PM seat (#6021) as a **cross-lane finding** — the defect is in `packages/drivers/driver-sql`, which is `domain:engine`'s surface, not mine. Unassigned: recording only.\n\n## What was measured\n\n`Temporal Conformance (live PG + MySQL)` failed on PR #13685 — a PR whose entire diff is `packages/plugins/plugin-auth/**` + one changeset + one `content/docs/permissions/*.mdx` page. It touches no driver, no SQL, no schema-sync path.\n\nJob [99403609711](https://github.com/objectstack-ai/objectstack/actions/runs/33364955298/job/99403609711), `@objectstack/driver-sql`:\n\n```\nTest Files  1 failed | 155 passed (156)\nFAIL src/sql-driver-13056-orphan-shadow-column-cleanup.test.ts\n  > a retired shadow-carried UNIQUE leaves no column behind (#13056)\n    > drops the orphaned generated column, and keeps the one still carrying a constraint\n    > converges — a second detect finds neither the index nor an orphan column\nError: Test timed out in 5000ms.\n```\n\nBoth failures are **timeouts**, not assertion failures. Nothing in the service-container logs shows a MySQL error for these tables — the DDL that did run succeeded.\n\n## Root cause (this is not \"a flake\")\n\nThe two tests live in a `declareDialectCell(MYSQL_CELL, …)` block and each drives **three to four full `new SqlDriver(...)` → `initObjects(...)` → `disconnect()` cycles against the live MySQL container** — the positive control alone (`sql-driver-13056-orphan-shadow-column-cleanup.test.ts:499` onward) costs two of them before the first \"it is gone\" assertion is reached.\n\nThey declare **no per-test timeout**, and `packages/drivers/driver-sql/vitest.config.ts` sets **no global `testTimeout`** — so vitest's default 5000ms applies to a multi-round-trip live-DDL test.\n\nThat is out of line with how every other multi-round-trip live test in this same package is budgeted:\n\n| file | budget |\n| --- | --- |\n| `sql-driver-12380-json-roundtrip.test.ts:215,336` | `60_000` |\n| `sql-driver-12380-json-roundtrip.test.ts:509` | `120_000` |\n| `sql-driver-connect-bound.test.ts:224` | `40_000` |\n| `sql-driver-diagnostic-value-probe.test.ts:357` | `60_000` |\n| `sql-driver-value-roundtrip-conformance.test.ts:62` | `60_000` |\n| **`sql-driver-13056-orphan-shadow-column-cleanup.test.ts` (both MySQL-cell tests)** | **default 5000ms** |\n\nFour files in the package carry explicit budgets; this one shipped with #13056's fix without one. Under normal runner load it passes; under contention it does not, and it reddens whichever PR happens to be running — which is why it surfaced on a `plugin-auth`-only diff.\n\n## Proposed patch (small, matches the existing convention)\n\nGive both MySQL-cell tests an explicit budget in the same shape the four sibling files use:\n\n```diff\n-    });\n+    }, 60_000);\n```\n\non each of the two `it(...)` blocks in the `orphan shadow column cleanup (#13056)` cell.\n\n## ⛔ What this card is NOT asking for\n\n- **Not** skip / `.skip` / quarantine. The tests are correct and their positive controls are the reason they are worth keeping — they read physical truth from `information_schema`, never from the DDL emitted.\n- **Not** a blanket global `testTimeout` for the package. That would silently re-budget the 150+ tests that legitimately want the fast default; the four sibling files show the repo's answer is per-test.\n\n## Acceptance\n\n- Both tests carry an explicit budget in line with the sibling live-DDL files.\n- A control that the budget is what was missing: the same two tests, run against the live MySQL cell, pass; and the change touches no assertion, no control, and no production code (`git diff` on `packages/drivers/driver-sql/src/*.ts` excluding the one test file is empty)."
+}

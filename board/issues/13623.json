@@ -1,0 +1,34 @@
+{
+  "number": 13623,
+  "kind": "issue",
+  "title": "A `PERMISSION_DENIED` refusal never reaches the dispatcher's throw-transparent exit, so it still drops the author's `userMessage` — a second door, behind #7898's trigger file",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:blocked",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-31T03:33:39Z",
+  "updated_at": "2026-09-01T00:06:17Z",
+  "closed_at": "2026-09-01T00:06:17Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13623",
+  "body": "Measured while implementing #13241 (PR #13619). **Out of that card's file surface**, and filed by the `domain:cli` PM seat rather than by the dev — see \"Why this was escalated before filing\" below. Unlabelled for triage.\n\n## The gap\n\n#13241 repaired `errorResponseBase` so the dispatcher's **throw-transparent** exit carries a producer's `userMessage`. A `PERMISSION_DENIED` refusal never gets there.\n\n`HttpDispatcher.dispatch`'s foot catch is **not a pure rethrow**. It intercepts `isPermissionDeniedError` — true when any of:\n\n- `name === 'PermissionDeniedError'`, or\n- `code === 'PERMISSION_DENIED'`, or\n- the message starts `[Security] Access denied`\n\n— and answers it itself, from `packages/runtime/src/http-dispatcher.ts`, which does not carry `userMessage`. So a marked authorization refusal loses its author-facing text at a **different door** than the one #13241 repaired.\n\n## Why it matters, stated at its real size\n\n⚠️ **This is the refusal class most likely to carry deliberately-authored text.** \"You do not have access to this report; ask an admin for the Reporting role\" is exactly the sentence a producer marks — and #9934 made `userMessage` status-agnostic precisely so a 403 could carry it. The one door that swallows the mark is the one whose refusals users most need to read.\n\n⛔ **Not asserted here:** that dropping it is *wrong*. The denial path answering centrally may well be deliberate. What is measured is only that this is **where** the field is dropped, and that it is not the exit #13241 fixed.\n\n## It is already pinned, so it cannot rot silently\n\nPR #13619 lands a **carve-out test** (`§2`) that drives a `403` / `PERMISSION_DENIED` / marked throw and asserts the mark is **absent**. That pin is an observation, not a wish:\n\n> if a later change makes the denial path throw-transparent, this test fails and tells the author that the carve-out has moved\n\n⇒ whoever takes this card should expect that test to redden and must **move it deliberately**, not \"fix\" it green.\n\n## ⚠️ #7898 — read before dispatching this\n\nThe repair lands in **`packages/runtime/src/http-dispatcher.ts`**, which is a **trigger file of on-hold decision #7898** (`isAuthGateAllowlisted`'s \"no path ⇒ exempt\" default; ruled *defer*, Option B, 2026-08-12). Its trigger files are `packages/core/src/security/auth-gate.ts` · `packages/runtime/src/http-dispatcher.ts` · `packages/adapters/**`.\n\nThat hold's own wording makes this a **check** obligation, not a no-fly zone:\n\n> **Trigger files** (any PR touching these must check this hold …)\n\n⇒ Filing is legitimate; **dispatching** requires first checking #7898's three restart conditions — in particular condition 2, *\"any synthetic-request caller reaches the auth gate without a populated `path`\"* — and reporting if one fires. ⛔ Do not edit through the hold.\n\n## Why this was escalated before filing\n\nThe #13241 dev **measured this, declined to file it, and handed the routing decision up** on the ground that filing a card proposing edits to a fenced file could cut across the hold. That was the right instinct and the wrong conclusion, and the PM seat is recording the ruling rather than leaving it implicit:\n\n⭐ **A trigger file governs how work is done, not whether a defect is recorded.** Declining to file would turn a fence into a memory hole — the measurement would exist only inside one dev's report and one test's docblock. The hold is honoured by the dispatch discipline above, not by silence.\n\n## Refs\n\n- **#13241** / PR #13619 — the throw-transparent exit, repaired; this is the door it does not reach.\n- **#7898** — the on-hold decision whose trigger file this lands in. ⛔ Check before dispatching.\n- **#9934** — `userMessage`, and its status-agnostic ruling.\n- **#12509** / **#12281** — the declared-5xx prose withhold that names `userMessage` as its compensation."
+}

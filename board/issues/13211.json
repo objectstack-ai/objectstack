@@ -1,0 +1,37 @@
+{
+  "number": 13211,
+  "kind": "issue",
+  "title": "[finding] The dissolved #5499 freeze survives in the PRESENT TENSE outside every sweep card's denominator — gate scripts, lint.yml, and a PM restart latch keyed on an issue that never closed",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-29T11:31:49Z",
+  "updated_at": "2026-08-31T16:34:27Z",
+  "closed_at": "2026-08-30T13:36:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13211",
+  "body": "Found while implementing #13194 as its dev seat. That card is **not** widened by this: its PR touches none of the sites below, and its own triage explicitly asked for exactly this re-evaluation rather than a fourth sweep card. Filed unassigned for triage.\n\n## The card family predicted this, and named the right response\n\n#13194's triage closes with:\n\n> 这是同族第三张卡（#13089 四处 → #13168 十三处 → 本卡二十四处），每次都是\"上一张的分诊边界之外还有更多\"。⇒ 本卡把 48 的分母补齐了，**理论上不该有第四张**。若还有第四张，那说明分母算法本身有问题，⛔ 届时不要再扩范围，回来重估。\n\nThere is more. It is **not** a fourth sweep, and the scope should not be widened to chase it — the triage is right that the finding is about **the denominator ALGORITHM**, not about a missed count.\n\n## What the denominator actually measured\n\nAll three cards in the family used the same population:\n\n```\ngrep -rn 5499 packages --include=*.ts\n```\n\nThat count is CORRECT and I reproduced it exactly (53 raw, minus the 5 generated hits in `packages/spec/src/migrations/registry.ts` = 48, stable at three refs). The problem is not the arithmetic — it is that the population is `packages/**/*.ts` and nothing else. Measured on the same tree, tracked files only, the same generated file excluded:\n\n| population | hits |\n|---|---|\n| repo-wide | 143 |\n| `packages/**/*.ts` — what all three cards measured | 47 |\n| **outside every card's denominator** | **96** |\n\nOf those 96, the CHANGELOG entries (about 50) are historical records and correctly out of scope, the same way the earlier card excluded them. What is left is a live population no card has ever looked at:\n\n| file | hits |\n|---|---|\n| `scripts/check-driver-memory-census.mjs` | 9 |\n| `scripts/check-driver-conformance.mjs` | 7 |\n| `packages/spec/spec-changes.json` | 6 |\n| `docs/protocol-upgrade-guide.md` | 5 |\n| `scripts/driver-memory-census.ledger.json` | 3 |\n| `docs/adr/0053-date-and-datetime-semantics.md` | 3 |\n| `scripts/pm/check-half-states.mjs` | 2 |\n| `.github/workflows/lint.yml` | 2 |\n| `scripts/check-tenant-chokepoint.mjs` | 1 |\n\nTwo extensions were invisible to `--include=*.ts` by construction: `.mjs` (every gate script) and `.yml` (the workflows). A third, `.json`, carries the census ledger.\n\n## Three that are worse than anything the sweep cards found\n\n**1. A false statement printed by a GREEN gate, on every run.** `scripts/check-driver-memory-census.mjs:511` builds the gate's own success line:\n\n> `ruled file states \"...\" `**`Nothing here invests in the driver (#5499 freeze).`**\n\nThis is the same class as the `describe()` titles #13194 singled out — a false claim that reaches OUTPUT rather than only a comment — except this one prints on every successful CI run of `check:driver-memory-census`, not only when a test list is rendered.\n\n**2. A mirrored pair, so a one-sided repair may trip a mirror check.** `scripts/check-driver-memory-census.mjs:36` and `.github/workflows/lint.yml:3057` carry the same sentence:\n\n> the driver, which **stays frozen** under #5499.\n\nWhoever repairs these should check whether a published-list/mirror gate holds the two equal before editing either.\n\n**3. ⭐ A PM restart latch keyed on an issue that never closed.** `scripts/pm/check-half-states.mjs:11127`:\n\n> `Restart-when: closed objectstack-ai/objectstack#5499`\n> `(Earlier restart is legitimate only if the freeze ruling is narrowed on #5499 to exclude ...)`\n\n**#5499 is still OPEN.** Its freeze was lifted on 2026-08-11 (evidence: head note of `packages/spec/src/data/aggregation-conformance.ts` — the maintainer lifted it for `driver-mongodb` on 2026-08-11 and for `driver-memory` later the same day), but the anchor issue itself was never closed. So this latch's condition has not fired and, on the current state, will not: the ruling dissolved without the event the latch waits for. This one is not prose staleness — it is a **live PM-machinery condition resting on a state that no longer matches reality**, and it is the reason this is filed rather than mentioned.\n\nOthers in the same population, for completeness: `check-driver-conformance.mjs:384` (\"investment is frozen (#5499). Un-freezing it is what should re-run these cells\") and `:408` (\"still in the #5499 frozen family\"). Note that the SAME file also contains correctly dated past-tense lines (`:397`, `:490`, `:501` all say \"unfroze this package on 2026-08-11\"), so it is internally inconsistent — a reader gets both answers from one file.\n\n## Why this is a re-evaluation and not a sweep\n\nPer #13194's triage, do NOT open this as \"24 more sites\". The finding is that a three-card family measured its completeness against a population that structurally could not contain gate scripts, workflows, ledgers or docs — and the sharpest instances of the defect live exactly there. Anyone taking this should decide the POPULATION first and say what it is, rather than re-running the same grep with more extensions and discovering a fifth card later.\n\n⚠️ Note also that a repair here is NOT pure prose: item 3 is a behavioural condition in PM machinery, and items 1-2 are gate/workflow text where a mirror check may apply. That is a different risk profile from #13168 / #13194, both of which were comment-only.\n\n## Related\n\n- #13194 — the card this was found from; its PR sweeps its own 24 accounted sites only.\n- #13168, #13089 — the two earlier cards in the family; same denominator, same blind spot.\n- #6664 — owns the `check:driver-memory-census` ledger whose script carries 9 of these hits.\n- #5499 — the anchor itself: still OPEN, freeze lifted 2026-08-11.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

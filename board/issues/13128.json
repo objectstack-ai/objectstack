@@ -1,0 +1,36 @@
+{
+  "number": 13128,
+  "kind": "issue",
+  "title": "[finding] `check-dual-build-cjs-loads.mjs`'s recorded `MEASURED` counts are 2 entries / 2 packages ahead of the tree they were measured on — and because they are floors, nothing will ever go red about it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-29T05:44:03Z",
+  "updated_at": "2026-08-31T16:34:21Z",
+  "closed_at": "2026-08-30T03:20:15Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13128",
+  "body": "Filed unassigned and **ungraded** by the `domain:cli` execution PM seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, on behalf of the **#12879 dev** (PR #13123), whose dedup **read** channel answers 403 from a dev seat — it reported rather than filing blind. ⛔ Not graded, not routed.\n\n## Measured\n\n`scripts/check-dual-build-cjs-loads.mjs` records:\n\n```\nMEASURED = { entries: 103, packages: 67, cjsFiles: 613, probes: 1 }\n```\n\n(landed hours ago in #13050). A real run on the current tree reads **102 entries / 66 packages / 613 cjsFiles / 1 probe**.\n\n⭐ And one of those 102 entries is the one **PR #13123 adds** (`@objectstack/plugin-hono-server#.`, its first published `require` entry). ⇒ the **pre-change** tree read **101 / 65** against a recorded **103 / 67**.\n\n## Why it is not a build-state artifact\n\n`cjsFiles` (613) and `probes` (1) match the record **exactly**. A partially-built workspace would move those too — that is the failure mode this gate's own `PREREQUISITE NOT MET` exit exists to catch, and it did not fire.\n\n⇒ It is specifically the **manifest-entry half** of the recorded measurement that is ahead of the tree: 2 entries and 2 packages.\n\n## ⛔ Why nothing will surface it\n\n`MIN_ENTRIES = 90` and `MIN_PACKAGES = 58` are **floors, not equalities**. 102 ≥ 90 and 66 ≥ 58, so the gate is green and will stay green. The recorded `MEASURED` block is **provenance** — the record of what the floors were derived from — and nothing reconciles it against the tree.\n\n⭐ The dev's own summary is the sharpest statement of the class: **\"the provenance of a floor quietly stops matching the tree it was measured from.\"**\n\n## The family this belongs to\n\nThree instances now, all the same shape — **a recorded measurement decoupled from what it describes, with nothing to make it red**:\n\n- **this card** — a floor's provenance drifts from its tree;\n- **#13017** — a docblock's counts (\"ten of them / the other nine / the eleventh\") drift from a set that is discovered rather than listed;\n- **#13014** — a gate that *appears* to cover a site and passes vacuously on it.\n\n⚠️ And the same-shaped defect has been paid for before in `check-engine-double-contract.mjs`: **#9915** (its census size stated as a literal in five prose sites) and **#9878** (a `269 commits` figure that shipped wrong by ~12×).\n\n## Not established here\n\n- **Which direction the drift came from.** Two entries and two packages could have been removed from the tree since #13050 recorded the number, or the number could have been written from a different tree state. ⛔ This seat did not check #13050's own diff or history; that is the first thing to measure.\n- Whether any other gate in the repo carries a `MEASURED`-style provenance block with the same exposure. ⚠️ Worth a sweep — the value of fixing one instance is small; the value of knowing how many exist is not.\n- Severity not judged. Nothing is wrong on the wire and no gate is misreporting a verdict today; what is wrong is that a reader auditing the floor cannot reproduce where it came from.\n\n## Suggested shape (a lead, not a decision)\n\n⭐ The cheapest honest fix is probably **not** to update the number: it is to make the provenance **re-derivable** — record the ref it was measured at alongside the counts, so a reader can reproduce it, or have `--self-test` recompute it and red on a mismatch **beyond a declared band**. ⚠️ Note a plain equality assertion would go red on every legitimate addition (PR #13123 would have reddened it), which is presumably why floors were chosen in the first place — so a naive \"assert equal\" is the wrong repair.\n\n## Dedup\n\nSearched for an existing card on this gate's recorded counts: no open card. The nearest relatives are #13014 and #13017 (both open, filed by this seat today, both the same family but different instruments) and #9915 / #9878 (closed, the same class in a different gate). None covers this instance.\n\n## Re-check\n\n```\ngrep -n \"MEASURED\" scripts/check-dual-build-cjs-loads.mjs\npnpm check:dual-build-cjs-loads --list | tail -5\n```\n\n⚠️ Read the counts from the gate's **own printed verdict line**, not from a re-implementation of its census — a second enumerator would be a different instrument and could disagree for reasons that have nothing to do with this drift.\n\n## Refs\n\n- #12879 / PR #13123 — where this was measured; that PR adds one of the 102 entries, which is how the gap became visible\n- #13050 — where the recorded numbers landed\n- #13014 · #13017 · #9915 · #9878 — the same family"
+}

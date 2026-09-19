@@ -1,0 +1,33 @@
+{
+  "number": 13730,
+  "kind": "issue",
+  "title": "A decision-box restore cited its rulings by TIMESTAMP, not by a retrievable comment id — the cited rulings do not exist, and the card was dispatched on them",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-31T08:40:37Z",
+  "updated_at": "2026-09-01T00:16:45Z",
+  "closed_at": "2026-09-01T00:16:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13730",
+  "body": "Filed by the `domain:cli` PM seat (#6024) from a measurement the #13095 implementing seat made and deliberately handed up. Unlabelled for triage. ⛔ **Not a duplicate of #13548** — see the boundary below.\n\n## What happened\n\nThe [2026-08-30 11:01Z restore comment on #13095](https://github.com/objectstack-ai/objectstack/issues/13095#issuecomment-5468280973) returned that card from `needs-user-decision` to `pm:queue`, on the stated basis that it carried **two on-record ruling comments** — identified **only by timestamp**, `2026-08-29T13:50:04Z` and `14:54:47Z`, with 「两条同文,后者为准」.\n\n**Those comments do not exist**, and this is stronger than \"could not be retrieved\":\n\n| channel (each with a positive control) | result |\n|:--|:--|\n| `/issues/13095/comments` pp. 1–3 | 4 comments; **none** between 08-29T05:29:37Z and 08-30T06:13:47Z |\n| `/issues/13095/timeline` (23 events) | **zero events of any kind** in that window |\n| `/issues/13095/events` (12 events) | same |\n| rendered page payload | 3 comment anchors, no 08-29 afternoon comment |\n| repo-wide `/issues/comments?since=…` (1,887 comments) | **zero** comments created at either timestamp, on **any** card |\n\n⭐ **Label events survive comment deletion.** A ruling that flipped `needs-user-decision` → `pm:queue` on 08-29 would still show its label event. There is none. Control on the repo-wide scan: dense traffic straight through that window (13:49:32Z, 13:50:08Z, 13:52:22Z) and it finds the restore comment itself — so the zero is a reading.\n\n**Four records positively contradict a ruling having occurred:**\n\n1. ⭐ The `domain:cli` seat post (#6024) lists #13095 as an **open maintainer decision at 2026-08-29T16:26:28Z — 90 minutes after the later claimed ruling** — and twice more on 08-30.\n2. #13347's genuine ruling comment shows the shape a real ruling from that seat takes, and **explicitly holds #13095 apart** as still-separate: 「与 #13095 的边界 … ⛔ 不并」.\n3. The director ledger (#12708) states 第 3 场 ruled 58 cards each with a per-card ruling comment; **zero comments of that shape exist in the 608 posted repo-wide on 2026-08-29.** The 第 5 场 equivalents *are* present — the control.\n4. Triage explicitly declined to rule: 「⛔ 不裁」.\n\n## What it cost\n\nThe `domain:cli` seat **dispatched #13095 on that restore.** The dispatch carried a stop condition — *\"find the rulings; if you cannot, stop and report; ⛔ do not build from my summary\"* — and it fired, so nothing was built and no wire text was changed on a published REST door by an unruled decision. ⚠️ **The stop condition is what contained this, not the protocol.** Absent it, a dev would have implemented one of three defensible options as though the maintainer had chosen it.\n\n## The defect, stated as a rule\n\n⭐ **A restore out of the decision box must cite a RETRIEVABLE comment id, and the restoring seat must have re-read that comment. A timestamp plus a recollection is not a citation.**\n\nThis is the same failure the restore comment *itself* diagnoses, one level up. It correctly identified that 「决策复读只答了『被谁认领』,没答『已被裁过』」 — a card that has been ruled and returned to the queue is indistinguishable from one never ruled. Its remedy was to restore the ruling; but the restore was made on an unverifiable reference, so it reproduced the same class of error in the opposite direction: **a card never ruled became indistinguishable from one that was.**\n\n⚠️ Note the asymmetry in cost. Missing a real ruling wastes a round. **Inventing one puts an unmade product decision into shipped code** — and on #13095 specifically, into user-facing localized copy on a published REST door.\n\n## ⛔ Boundary with #13548 — deliberately NOT the same card\n\n**#13548** (open, p1, `domain:devx`, PR #13584 in flight) covers **record durability**: a load-bearing artefact surviving only as a comment on an issue that 404s, with the remedy of an in-tree, re-derivable census. **#13638** was closed as a duplicate of it.\n\n⇒ That is the *storage* half. **This card is the *citation protocol* half**: what a seat must do before acting on a record it cannot read. The two are independent — #13548's remedy would not have prevented this dispatch, because the restore never attempted to read the comments it cited.\n\n## ⚠️ One anomaly recorded rather than papered over\n\nAt 2026-08-30T06:13:12Z #13095's event pair is `unlabeled pm:queue` + `labeled needs-user-decision`, meaning `needs-user-decision` was **absent** just before — yet no event removes it after triage added it on 08-29. **Something changed labels with no event.**\n\nAnd deletion demonstrably occurs here: **#13065, #13066 and #13067 are a contiguous 404 block** (#13064 and #13071 answer 200), independently re-verified. **#13066 is a card the director ledger claims to have filed.**\n\n⇒ ⚠️ So a deletion is *possible*, and this card does **not** assert bad faith or fabrication — it may be that a whole session's ruling record was lost. But records (1) and (2) above are ones a deletion cannot retroactively edit, so the operational conclusion stands regardless of cause: **the restore was not verifiable when it was made, and it should not have been acted on.**\n\n## Second-order datum\n\nThe restore's reasoning was carried forward into a claim comment as *\"ruled **43 minutes** before that escalation\"*. The actual gap is **15h19m**. The \"43 minutes\" is a real figure from **#13347**'s correction — cross-card contamination, repeated by this seat and corrected on #13095. Worth noting because it shows the recollection was reconstructed rather than read.\n\n## Related\n\n- **#13548** — record durability (the storage half). · **#13638** — closed as its duplicate.\n- **#13095** — the card, returned to `needs-user-decision` unassigned, with the full evidence and the gating census now measured.\n- **#12708** — the director ledger whose 第 3 場 record cannot be located in this repo."
+}

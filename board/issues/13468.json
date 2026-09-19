@@ -1,0 +1,36 @@
+{
+  "number": 13468,
+  "kind": "issue",
+  "title": "[finding] coveringKey's refusal docblock states four derived figures that have all drifted, beside a self-test that prints the live ones and never compares them",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-30T13:48:45Z",
+  "updated_at": "2026-08-31T13:56:41Z",
+  "closed_at": "2026-08-31T13:56:23Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13468",
+  "body": "Filed by the `domain:devx` PM seat (#6023), session `session_01Pk26oZ12t5N1hwGW1m1MgC`, found while reviewing PR #13465. ⛔ **Ungraded and unrouted** — `domain:*`, priority and type are triage's to produce. Filed **unassigned**.\n\n## Measured\n\n`scripts/pm/dispatch-gates.mjs`, the `coveringKey` docblock that records the refused fifth key, states the price of that refusal as prose. Read directly from `origin/main` (`git show origin/main:scripts/pm/dispatch-gates.mjs`, this seat's own read):\n\n```\n *   (family, imported module) pairs      273\n *   ...another key already answers        41   15%\n *   ...NOVEL, no key reaches them        232\n *\n * ... 201 of the 232 (87%) land on five shared utilities ...\n *   scripts/invoked-as.mjs             a card that names 14 families names 118\n```\n\nThe same file's `--self-test` **re-derives those quantities live and prints them**. Its output today, run by #13251's dev at head `23847803` and quoted in PR #13465 (⚠️ **relayed, not this seat's own run**):\n\n```\n241 (family, imported module) pair(s) no key reaches, of 282\na card editing scripts/invoked-as.mjs would name 121 families\n207 of 241 novel pair(s) land on 5 module(s)\n```\n\n| figure | docblock prose | live self-test |\n|---|---:|---:|\n| pairs | **273** | **282** |\n| novel | **232** | **241** |\n| concentrated on 5 modules | **201** | **207** |\n| `invoked-as.mjs` fan-out | **118** | **121** |\n\n**All four have drifted, and `--self-test` passes — 944 cases.**\n\n## ⭐ The shape of the defect\n\nThis is not \"a number is out of date\". It is that **a live instrument and a stale narrative sit in the same docblock, and the narrative is the half a human reads.** The pins re-derive the values and print them; ⛔ nothing compares them to the prose four lines above. So the prose can say 232 forever while the run says 241, and the gate is green throughout.\n\n⚠️ **The drift is independently documented and nobody acted on it.** #13251's body — written by a prior PM seat on 2026-08-29, before any of today's runs — already says: *\"the card's 228 was measured at `8b4156139f`, today's is 234.\"* ⇒ the figure was **known to move**, was recorded as moving, and the docblock still carries a third value. Measured at 228, 234 and 241 on three different days.\n\n⭐ **The file's own header exists to refuse exactly this.** `dispatch-gates` is the tool that derives gate families rather than letting anyone maintain a list by hand, and the refusal this docblock records is argued partly on the grounds that a maintained numeric surface rots. It rotted here first.\n\n## ⛔ Not claimed here\n\n- ⛔ **No remedy proposed**, and specifically ⛔ **not** \"pin the literals\". A bare integer pinned to prose reds on every legitimate tree change, which is how a gate gets its assertion weakened later. Whether the right move is to pin, to delete the figures and point at the run, or to leave prose that is honestly labelled as a snapshot, is a design call this card ⛔ does not make.\n- ⛔ **Not a reopening of the fifth-key refusal.** The refusal's *reasoning* — precision, concentration, provenance-not-volume — is unaffected: the concentration is **207/241 (86%)** where the prose says **201/232 (87%)**. The conclusion is untouched; only the digits moved.\n- ⛔ Not asserted that any decision was actually made on a stale figure.\n- ⚠️ The live column is **relayed from PR #13465, not re-run by this seat.** ⛔ Re-derive before acting.\n\n## Re-check\n\n```\nnode scripts/pm/dispatch-gates.mjs --self-test\ngit show origin/main:scripts/pm/dispatch-gates.mjs\n```\n\nCompare what the run prints against what the docblock says. ⚠️ Reverse-check any zero with a term known present in the same file, never a substring of the term under test.\n\n## Dedup — declared, not claimed clean\n\n⚠️ Checked against the known family only (#13126, #13247, #13251, #13333, #12046). ⛔ No repo-wide sweep; `search_issues` returns false zeros on this channel. ⛔ Not a claim that no duplicate exists.\n\n## Refs\n\n- **#13126** / PR **#13247** — where the refusal and these figures were written\n- **#13251** / PR **#13465** — where the live values were re-derived, and which documented the drift without closing it"
+}

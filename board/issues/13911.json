@@ -1,0 +1,37 @@
+{
+  "number": 13911,
+  "kind": "issue",
+  "title": "driver-memory `bulkUpdate`: strict `touchedIds.has` vs loose `findIndex ==` — a mixed id-type batch false-refuses with UNIQUE_VIOLATION",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T16:44:38Z",
+  "updated_at": "2026-08-31T17:51:03Z",
+  "closed_at": "2026-08-31T17:51:03Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13911",
+  "body": "Introduced by #13875 (issue #13435), which landed at `4642f4c64c`. Found in PM review before the merge, but the PR was already in the merge queue and landed anyway — disabling auto-merge does not dequeue an already-enqueued PR.\n\n## The defect\n\nIn `InMemoryDriver.bulkUpdate` (`packages/drivers/driver-memory/src/memory-driver.ts`, lines ~910–917 on `main`), two lookups over the same ids disagree:\n\n```js\nconst touchedIds = new Set(updates.map((u) => u.id));        // ids from the CALLER\nconst settled = table.filter((r) => !touchedIds.has(r.id));  // STRICT Set.has\n...\nconst index = table.findIndex((r) => r.id == u.id);          // LOOSE ==\n```\n\n`IDataDriver.bulkUpdate` declares `id: string | number`, so a caller may legitimately pass an id whose JS type differs from the stored row's. When that happens:\n\n- `touchedIds.has(r.id)` is **false** (strict), so the row stays in `settled` carrying its **pre-image**;\n- `findIndex` still **resolves** it (loose `==`), so the row *is* updated and its post-image enters `pending`.\n\nThe row is therefore represented **twice** in the projected row set passed to `assertUnique` — once with the value it is vacating, once with the value it is taking. `exceptId` only excludes the row currently being checked, so it does not help a *sibling* row in the same batch.\n\n### Failure scenario\n\n- Table: `{id: 1, doc_no: 'D-0001'}`, `{id: 2, doc_no: 'D-0002'}` — **numeric** ids.\n- Call: `bulkUpdate('doc', [{id: '1', data: {doc_no: 'D-0900'}}, {id: 2, data: {doc_no: 'D-0001'}}])` — first id a **string**.\n- Row 1 vacates `D-0001`; row 2 takes it. This must succeed.\n- Actual: row 1's stale pre-image sits in `settled` still holding `D-0001`, so row 2's check sees a collision and throws a **false `UNIQUE_VIOLATION` / 409**.\n\n## Why the sibling door does not have it\n\n`updateMany` (#13197) performs the same check-then-mutate discipline without the gap, because both its comparisons agree by construction:\n\n```js\nconst targetIds = new Set(targetRecords.map((r) => r.id));  // ids from TABLE ROWS\nconst settled = table.filter((r) => !targetIds.has(r.id));\nconst index = table.findIndex(r => r.id === record.id);     // STRICT ===\n```\n\nIts ids originate from the table itself, so strict membership is correct there. #13875 generalized the *discipline* (check everything before writing anything) to per-row patches, but not that internal consistency.\n\n## Regression, not pre-existing\n\nThe pre-#13875 shape was `Promise.all(updates.map(u => this.update(object, u.id, u.data, options)))`. It had **no `settled` set at all** — each `update()` did its own loose lookup against the live table — so it could not false-refuse this way. The false-refusal path is new.\n\n## Direction\n\nDerive `settled` from the **same resolution the write uses**: resolve each update to its table index first (as #13875's own `bulkDelete` already does), then build the touched set from the resolved rows' own ids (`table[index].id`) rather than from caller input.\n\n⛔ **Not** by tightening `findIndex` to `===`. That would silently narrow which ids resolve at all — a behaviour change well beyond this defect — and `update()` itself (line ~525) uses `==`, so this door must keep matching its sibling's resolution semantics.\n\n## Also to check\n\n- Whether `bulkDelete` in the same PR has the analogous gap. It resolves indices with the same loose `findIndex` into a `Set<number>` of indices; reason it through rather than assuming symmetry either way.\n- Whether `assertNoUniqueViolation`'s `exceptId` filtering is strict or loose, which interacts with the same question.\n\nA regression test using **mixed id types**, plus a positive control with consistent id types, is required — the existing suite uses string ids throughout, which is why this passed 36/36.\n\nRefs: #13875 (introduced it) · #13435 (the card it closed) · #13197 (the sibling door that does it right)"
+}

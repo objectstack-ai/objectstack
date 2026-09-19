@@ -1,0 +1,34 @@
+{
+  "number": 13855,
+  "kind": "issue",
+  "title": "[Decision] 字段分组漂移已裁定为平台问题(hotcrm#806)—— 定统一机制:lint 镜像规则(不动契约)与/或 section 差量引用形式(契约扩宽)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-31T14:55:06Z",
+  "updated_at": "2026-08-31T19:16:03Z",
+  "closed_at": "2026-08-31T19:16:03Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13855",
+  "body": "维护者裁定(2026-08-31,逐字):「#806 我认为就是协议的问题，元数据应用应该是简化的业务实现，不应该编码处理这中 lint，要处理也是平台统一处理。」\n\n⇒ 定性已裁:hotcrm#806 测到的三套分组漂移是**平台/协议缺口**,应用仓⛔不自建诊断;本卡承载**平台统一机制的形状选择**。\n\n## 机制根因(总监席 2026-08-31 实测,记录于 hotcrm#806)\n\n协议在 ADR-0085 里把五种页面布局方言收敛为一个正典 + 逃生舱:\n\n- **正典** = `fieldGroups` + `Field.group`(object.zod.ts:1125 起),成员关系声明在字段上,组装单源 `deriveFieldGroupLayout`(ADR-0085 §5);\n- **逃生舱 1** = 自定义 record Page(`record:details` 的 `properties.sections`)—— 整页接管;\n- **逃生舱 2** = view 级 `form.sections` —— 编辑表单编排。\n\n缺口:**两个逃生舱都是整体接管 + 逐字段枚举 + 零派生** —— section 语法无法写「这一节 = 对象的 `contact_info` 组」,组装 helper 在树上但 section 够不到;作者一拉逃生舱就必须把同一份成员事实手抄第二、三遍,抄本与正典零机械联系,对象每加一个字段抄本静默旧一分。且**无互检**:「哪些已声明字段组在此页/表单无处安放」机器可算而无人算(#715 的 `field-group-shadowed` 管相反方向)。实测后果:hotcrm `crm_lead` 三套分组互不相同,详情页看不到重复管理/禁止致电字段,间接参与 hotcrm#1207(p1,疑似重复线索被转成第二套客户)。\n\n## 形状选项\n\n- **A · lint 镜像规则(平台 lint 包,不动契约)**:`field-group-shadowed` 的姊妹规则 ——「自定义 record page / view form 使已声明字段组无处安放」逐组点名报告。纯诊断、读既有声明、对所有应用统一生效,把静默漂移变响亮。\n- **B · section 差量引用形式(spec 契约扩宽,条款②)**:page/form 的 section 增加按组引用(如 `group: contact_info`),成员经 `deriveFieldGroupLayout` 派生,作者只写差量 —— 从根上消灭手抄。需要 spec 设计(与逐字段枚举的混用规则、优先级、两个逃生舱是否同批)。\n- **C · 两者都做,A 先行**:A 立刻关掉「静默」,B 关掉「手抄」;B 的设计期间 A 已在守。\n\n## 拉动\n\nhotcrm#806(实测三套漂移 + #1207 实害)+ 维护者本裁的架构立场本身(「元数据应用应该是简化的业务实现」⇒ 协议必须给出不产生抄写债的编排形式)。\n\n**总监席推荐:C(A 先行)。** A 无契约变化可直接入队;B 为 spec 设计卡、按条款②走契约复审档。\n\nRefs: hotcrm#806 · hotcrm#1207 · #13848(应用仓基本原则落编,本裁为第二条原则的出处)· ADR-0085。"
+}

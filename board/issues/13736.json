@@ -1,0 +1,33 @@
+{
+  "number": 13736,
+  "kind": "pull_request",
+  "title": "fix(scripts): list the 17th error in @objectstack/formula's TEST_DEBT note",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T09:00:53Z",
+  "updated_at": "2026-08-31T09:36:32Z",
+  "closed_at": "2026-08-31T09:36:30Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-31T09:36:30Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/13736",
+  "body": "Fixes #13631\n\nThe `@objectstack/formula` `TEST_DEBT` entry recorded `errors: 17` above a per-code tally\nthat summed to 16. Which of the two numbers was wrong was established by measurement, not\nby picking the easier edit.\n\n## Which number was right: the recorded 17\n\nThe gate's own `--re-measure` was run, not replicated. Its refusal path (a ledgered\npackage whose dependency closure has no built type entry point) was cleared by building\nthe closure first, exactly as `lint.yml` does:\n\n```\npnpm exec turbo run build --filter='./packages/*' --filter='./packages/*/*'\npnpm check:type-check-debt\n```\n\n```\ncheck-type-check-coverage --re-measure: OK — 29 ledger entr(ies) re-measured in 376.3s,\n1542 raw tsc error(s) total, none above its recorded number.\n  surplus: none — every entry sits exactly at its measurement, so any new error is red.\n```\n\n`surplus: none` is the load-bearing line: every entry, this one included, measures\n**exactly** its recorded number. So `@objectstack/formula` measures 17, the field was\nright, and the tally was one line short.\n\nThe per-code breakdown was taken separately, through the gate's own `measureTestDebt` and\n`remeasureProject` (a verbatim copy of the gate with a reporting block appended, so no\nhelper was re-implemented), at base `cc837dbfec` with the closure built:\n\n```\nTS2591 x6, TS2345 x3, TS2352 x3, TS1470 x2, TS2339 x2, TS2739 x1\nSUM=17  measureTestDebt=17  RECORDED=17\n```\n\nThe unlisted 17th is\n\n```\npackages/formula/src/cel-to-filter.test.ts(173,52): error TS2739: Type\n'{ org_user_ids: never[]; }' is missing the following properties from type\n'{ id: string; organization_id: string; org_user_ids: string[];\nteam_member_ids: string[]; department: string; }': id, organization_id,\nteam_member_ids, department\n```\n\nwhich reproduces the reporter's reading to the character position.\n\n## Why no gate had caught it\n\nCOMPOSITION (#10722) is the mechanical half that exists for exactly this shape — an\nitemisation contradicting its own field. It reads **tier** itemisations\n(`code-tier` / `config-tier` / `noise`) and, by an explicitly reasoned decision in its\nown docblock, never sums per-code tallies, which are \"partial by construction\". This\nentry's note is a pure per-code tally, so `tierItemisation()` returns `null` and the\nentry is unguarded — measured in both directions, with a positive control proving the\nprobe was live:\n\n```\n[probe]   OLD note -> null (no tier itemisation -> ENTRY UNGUARDED)\n[probe]   NEW note -> null (no tier itemisation -> ENTRY UNGUARDED)\n[probe]   compositionProblems over the WHOLE live TEST_DEBT ledger -> []\n[probe] POSITIVE CONTROL — a tier itemisation the same code DOES read\n[probe]   \"code-tier 30, config-tier 25, noise 34.\" -> sum=89\n[probe]   contradicting tier note over errors:80 -> 1 problem(s)\n```\n\nThat is a documented, deliberate false negative rather than a defect in the gate, and it\nis not touched here. It is written into the corrected note so the next reader does not\nmistake the entry's silence for a check.\n\n## The change\n\nOne `TEST_DEBT` entry's `note`. `errors: 17` is untouched, no baseline moves, and the\nentry is reflowed into the multi-line form its longer-noted siblings already use.\n\n## Gates\n\nDerived from the real change set with `node scripts/pm/dispatch-gates.mjs --repo\nobjectstack-ai/objectstack` (not from a hand-written list), re-derived after merging\n`origin/main` so the answer comes from a tree at `origin/main`. All run at\n`a8a9374b6`, exit codes captured before any pipe:\n\n| result | gate |\n| --- | --- |\n| 0 | `pnpm check:type-check-coverage` |\n| 0 | `pnpm check:type-check-debt` (full `--re-measure`, 29 entries) |\n| 0 | `pnpm check:pm-dispatch-gates` |\n| 0 | `node scripts/pm/bare-root-worklist.mjs --self-test` |\n| 0 | `pnpm check:agent-test-spelling` |\n| 0 | `pnpm check:bash32-floor` |\n| 0 | `pnpm check:cli-command-ids` |\n| 0 | `pnpm check:cross-package-test-inputs` |\n| 0 | `pnpm check:entry-guard` |\n| 0 | `pnpm check:parse-guard` |\n| 0 | `pnpm check:pnpm-filter-targets` |\n| 0 | `pnpm check:watch-hint-literal` |\n| 0 | `node scripts/check-ci-filter-parity.mjs` |\n| 0 | `node scripts/check-cross-package-test-inputs.mjs` |\n| 0 | `node scripts/check-shard-attestation.mjs` |\n| 0 | `pnpm lint` (repo-wide, 108s — not narrowed) |\n| 0 | `pnpm check:nul-bytes` |\n| NOT MEASURED | `node scripts/check-test-completeness.mjs` |\n\nThe last one exits 3 on its own documented PREREQUISITE NOT MET branch — it grades a\nsaved `turbo run test` log and the derived family names it with no argument. Its own text\nrules that branch NOT MEASURED rather than red.\n\nThe two convention-triggered obligations for editing a gate script\n(`bare-root-worklist --self-test`, `check:pm-dispatch-gates`) were run, not just the\npath-derived families.\n\n## Changeset\n\nNone, and `skip-changeset` is applied. This PR releases nothing: the only file is a\nrepo gate script under the private root package `@objectstack/spec-monorepo`, and\n`scripts/` appears in no package's published `files`.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01Pk26oZ12t5N1hwGW1m1MgC)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Pk26oZ12t5N1hwGW1m1MgC)_"
+}

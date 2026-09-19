@@ -1,0 +1,36 @@
+{
+  "number": 13353,
+  "kind": "issue",
+  "title": "[finding] error-code ledger: five more packages stamp a registered code with no provenance row — the #13254 class, swept",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T06:04:24Z",
+  "updated_at": "2026-09-01T05:42:32Z",
+  "closed_at": "2026-09-01T05:42:04Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13353",
+  "body": "Filed from #13254, which asked for exactly this while the row for `@objectstack/driver-memory` was being added: *\"Worth checking while in there whether any other emitter added since the ledger's last sweep is missing a row; report rather than widen if so.\"* Reported, not widened — PR for #13254 carries the driver-memory row only.\n\n## What was measured\n\nA read-only literal scan over the 71 workspace packages under `packages/**` (non-test sources only), on `origin/main` at `881f8d8e`: for every literal in a code-stamping position (`code: 'X'`, `.code = 'X'`, `X_CODE = 'X'`) whose value is one of the ledger's 248 registered codes, does the stamping package's own owner key list it?\n\n22 raw hits, triaged by hand. Discarding prose/comment matches, the `STANDARD_SYNONYM_WAIVERS` table inside the ledger file itself, and the two cases the ledger already explains in writing (`UPDATE_ID_MISMATCH` stamped by `metadata-core` and registered under `objectql`; `FLOW_DISABLED` / `FLOW_NO_START_NODE` stamped by `service-automation` and registered under `runtime`, both recorded as deliberate \"the door, not the producer, names the wire vocabulary\" decisions), five real candidates remain — four of them literal HTTP responses.\n\n| package | code | site | shape |\n|:---|:---|:---|:---|\n| `@objectstack/plugin-webhooks` | `INVALID_REQUEST` | `packages/plugins/plugin-webhooks/src/webhook-outbox-plugin.ts:399` | `c.json({ success: false, error: { code, message } })` — the package has **no owner key at all** |\n| `@objectstack/cloud-connection` | `FORBIDDEN` | `packages/cloud-connection/src/marketplace-install-local-plugin.ts:1719` | `c.json(..., 403)` on the plugin's own Hono route; owner key exists, code missing |\n| `@objectstack/cli` | `ENVIRONMENT_NOT_FOUND` | `packages/cli/src/commands/serve.ts:4798` | `c.json(..., 404)`; the package has no owner key |\n| `@objectstack/trigger-api` | `INVALID_REQUEST` | `packages/triggers/trigger-api/src/api-trigger.ts:195` | `{ status: 400, body: { error: { code } } }`; owner key exists, code missing |\n| `@objectstack/service-datasource` | `EXTERNAL_IMPORT_ERROR` | `packages/services/service-datasource/src/external-datasource-service.ts:333` | `err.code = ...`; owner key exists with two sibling codes, this one registered only under `@objectstack/rest` |\n\nOne further hit is a different sub-class and is listed separately rather than folded in: `@objectstack/client` stamps `UPLOAD_SESSION_EXPIRED` at `packages/client/src/index.ts:3765` on an error the SDK **synthesises client-side** (status `'expired'` read from a poll, `httpStatus = 410` set by hand). The ledger's scope prose is about the **serving** side, so this may well be correctly unregistered — but it is the one site where \"who emits this code\" has an answer nobody has written down either way.\n\n## Why nothing is red\n\nExactly #13254's argument, one grade wider. `check:dispatcher-error-vocabulary` is green on all of these (its own line on this tree: *\"OK — 22 unregistered code-stamping site(s), all classified\"*), because every code above **is** registered — just under another package. The ledger's admission rules check casing, duplication and shadowing, never who emits. So the provenance half of the ledger drifts silently by construction, and this sweep is the only thing that has looked.\n\n## Not adjudicated here\n\nEach row still needs the wire-reachability test the ledger's own \"Retiring a code\" section applies (the #8035 test that unregistered `MONGODB_MULTI_TENANT_UNSUPPORTED`), and each needs the \"door, not producer\" question answered the way `FLOW_DISABLED` and `UPDATE_ID_MISMATCH` already have been — a row is wrong if the wire vocabulary is genuinely named at a door in another package. Four of the five are literal HTTP envelopes from the package's own route, which is the shape that usually survives that test, but this seat did not rule on any of them.\n\nWorth considering alongside the rows: the recurring fix is a gate. Nothing mechanical asks \"does the package stamping this code list it?\", and a detector for it is roughly the scan above — the same source-text approach `check:dispatcher-error-vocabulary` already takes, with the same declared blindness to constants, object-literal helpers and class methods.\n\nRepro (read-only, no build): the scan is a ~90-line script over `ERROR_CODE_LEDGER` plus a walk of `packages/**/src`; the three stamp patterns and the triage above are its whole method.\n\nRelated: #13254 (the driver-memory row) · #7504 (the same class, one code, closed) · #10860 (a ledger annotation gone stale against its emitters)"
+}

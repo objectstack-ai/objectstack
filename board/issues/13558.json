@@ -1,0 +1,34 @@
+{
+  "number": 13558,
+  "kind": "issue",
+  "title": "[finding] A dead-claim reclaim declared \"no merged commit across 711 commits\" for a card whose PR had merged 17h earlier — the two-leg staleness test re-dispatched already-merged work",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-31T00:53:37Z",
+  "updated_at": "2026-09-01T00:18:50Z",
+  "closed_at": "2026-09-01T00:18:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13558",
+  "body": "Found while executing a re-dispatch that this defect caused. Filed unassigned; the\nwasted round is already spent, so this is about stopping the next one.\n\n## What happened, with dates\n\n- **2026-08-24T14:30Z** — objectui#5872 class (1) implemented; PR objectstack-ai/objectui#6047 opened.\n- **2026-08-24T15:00:26Z** — **PR #6047 MERGED** (`state: closed`, `merged: true`, `merged_at:\n  2026-08-24T15:00:26Z`). The branch was deleted on merge, as this repo family always does.\n- **2026-08-25T08:44Z** — a PM seat posted a *dead-claim reclaim* on objectui#5872, moving it\n  `pm:dispatched` back to `pm:queue`, on this recorded evidence:\n\n  > Both legs of the corrected stale-claim test are satisfied:\n  > - No branch under any naming.\n  > - **No merged commit referencing this card across 711 commits of `main`.**\n  > Nothing was pushed; nothing is lost.\n\n  Leg 2 is **false**. The squash commit for #6047 is titled\n  `test(test-support): confine the spec enum-vocabulary reader to one module (#5872 class 1)` —\n  it references the card in its subject line, and it was on `main` when the sweep ran.\n\n- **2026-08-31** — the card was re-dispatched in full, with an explicit instruction that the\n  work \"is NOT in the tree\". A fresh seat re-derived the premise and measured every artifact of\n  #6047 present on the merge-base: 11 of the PR's 13 changed files **byte-identical** by blob\n  hash, the other two diverged only by later unrelated work. Zero of the card's work remained\n  to do.\n\n## Why the test failed the way it did\n\nThe reclaim comment states the correct rule and then violates it:\n\n> The single-leg test must not be used here. \"Empty `ls-remote` implies stale\" is **false** in a\n> squash-merging repo — a **completed** card looks identical. Both legs, every time.\n\nExactly right, and exactly what happened — but the *second* leg was also mis-measured, so having\ntwo legs bought nothing. Both legs failed in the **same direction** (toward \"nothing landed\"),\nwhich is what makes the pair non-redundant only on paper:\n\n1. **Leg 1 is structurally uninformative after a merge.** `--delete-branch` is this family's\n   standard landing path, so a merged card and an abandoned card both present zero branches. Leg\n   1 can only ever *fail to exclude*; it can never distinguish.\n2. **Leg 2 was a commit-message scan**, and commit-message scans are fragile in ways that are\n   invisible when they return empty: history rewrites, a bounded window (\"711 commits\"), subject\n   vs body placement, and card references that survive only in a PR body. An empty result reads\n   as proof of absence and is indistinguishable from a mis-aimed query.\n\nBoth legs are proxies for the question. The question itself is directly answerable.\n\n## The probe that cannot fail this way\n\nThe authoritative answer is one API read of the card's own PR list — merge state is a\nfirst-class field, not something to infer from history:\n\n```\nGET /repos/OWNER/REPO/issues/NUMBER/timeline    # cross-referenced + closed-by PRs\n# or, from the issue payload already in hand:\n#   closed_by_pull_requests[].  -> then read each PR's  merged / merged_at\n```\n\n`issue_read` with `method: get` already returns `closed_by_pull_requests`, and\n`pull_request_read` returns `merged` and `merged_at` directly. For objectui#5872 that read\nanswers in one call and cannot go stale, get windowed, or be defeated by a rewritten history.\n\n⚠️ Note the one wrinkle this card also exhibits: `closed_by_pull_requests` was **empty** here,\nbecause #6047 deliberately said `Refs #5872` rather than `Fixes #5872` (correct — classes (2)\nto (4) remain). So the probe must be **\"search PRs that reference this issue and read their\nmerged flag\"**, not \"read the closes-list\". A card intentionally left open by a partial PR is\nprecisely the shape that the commit-scan and the closes-list both miss.\n\n## Cost, so the severity is not guessed\n\nOne full M-sized dispatch re-run: a fresh worktree, a full `pnpm install`, a complete premise\nre-derivation, two vitest runs, and a seat's round — to conclude that the tree already contained\nthe work. The **worse** branch was live the whole time: had the re-dispatched seat trusted the\norder's \"the work is NOT in the tree\" instead of re-deriving, it would have re-implemented a\nlanded module and opened a **duplicate PR** against code identical to its own output. The only\nthing that prevented that was the re-dispatch order separately insisting the premise be\nre-derived — a mitigation that is not part of the reclaim mechanism and does not always apply.\n\n## Suggested disposition\n\nA judgement call, not a prescription: make the merged-PR read the **primary** leg of the\nstaleness test, and demote the branch check and the commit scan to corroboration that can only\n*support* a \"stale\" verdict, never establish one alone. A reclaim that cannot find the card's\nPRs at all is the case that should stop and ask, rather than concluding \"nothing landed\".\n\nWorth stating plainly for whoever fixes this: the reclaim comment's own warning was correct and\nwell-written, and it still produced a false negative — so the lesson is not \"read the rule more\ncarefully\", it is that **both available legs are proxies with a common failure direction**, and\nthe non-proxy read was available the whole time.\n"
+}

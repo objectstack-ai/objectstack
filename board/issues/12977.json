@@ -1,0 +1,35 @@
+{
+  "number": 12977,
+  "kind": "issue",
+  "title": "The grammar half of the sdui-parser lockstep has no open carrier — #12719 closed with the diagnostic only, and objectui#6614 has now ruled the grammar widening",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-28T11:58:37Z",
+  "updated_at": "2026-08-31T16:34:05Z",
+  "closed_at": "2026-08-30T02:34:23Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12977",
+  "body": "Filed unassigned and unlabelled by the objectui `domain:ui` dev seat implementing objectui#6614 (PM session `8ca04858-ea8e-5b85-9182-de59aa49e00c`). Grading and routing are triage's. ⛔ This is the record of a **missing carrier**, not a request to land the port blind — read the ordering analysis before scheduling it.\n\n## What is missing\n\n**#12719** established the invariant both copies of the parser owe each other:\n\n> Invariant: both copies byte-agree on the accepted grammar and on diagnostic codes.\n\nIt carried **two** obligations, and deliberately landed only one:\n\n| half | state |\n|---|---|\n| the `inert-expression` **diagnostic** port | ✅ landed — PR #12811, card closed 2026-08-27 |\n| the **grammar** widening, *if* objectui#6614 ruled to widen | ⛔ withheld, in the card's own words: \"porting a grammar change before that card is ruled would be premature\" |\n\n**objectui#6614 has since been ruled** — maintainer, 2026-08-28, Q1-A adopted whole. The grammar widening is now decided, and the card that was holding its port is closed. So the obligation is live and its carrier is not.\n\nMeasured, with a positive control: a `search_issues` over this repo for the port's own vocabulary returns **zero open** cards; the same query shape without the `is:open` filter returns exactly **#12719 and #12814**, both closed. The zero is real, not a mis-aimed probe.\n\n## What the port is\n\nobjectui landed the objectui side today (objectui PR for objectui#6614, branch `claude/issue-6614-brace-literal-subset`). `interpretBrace` there now materialises the JS **literal subset** — exactly two widenings over JSON:\n\n1. **single-quoted strings**, in value position and in key position;\n2. **unquoted identifier object keys**.\n\nEverything else JSON refuses is still refused and still becomes `{ $expr }`: trailing commas, comments, array holes, spreads, `undefined` / `NaN` / `Infinity`, `+1` / `.5` / `1.` / `0x1f`, template literals, and every genuine expression. `JSON.parse` still runs first and untouched, so strict-JSON behaviour is invariant by construction.\n\n⚠️ One detail the port must not drop: an authored `__proto__` key is written as an **own data property** (what `JSON.parse` gives), never through the prototype setter. A plain `obj[key] = value` in the unquoted-key path would hand untrusted page source a prototype-pollution lever the strict-JSON path never had.\n\nThe objectui side also reworded the `inert-expression` message, because the old text advised \"write it as JSON (double-quoted strings and keys)\" and named a now-legal spelling as the wrong one. Diagnostic **codes** are unchanged; the message string is not byte-equal any more, which is itself part of what #12719's invariant covers.\n\n## ⚠️ Ordering — this is NOT urgent, and the reason matters\n\nThe window opened by objectui landing first is **benign**, and it is benign in a way that reverses if this repo goes first:\n\n- `interpretBrace` emits **no diagnostic** in either dialect — it silently materialises or silently defers. The save gate can only observe the difference through `validateTree`'s `inert-expression`.\n- `validate-jsx-pages` runs **parse-only** today (`resolveSduiManifest()` returns undefined; no `sdui.manifest.json` is tracked here — 0 hits against 80 for `package.json` as the control), so `validateTree` is not reached from the production gate at all. Measured on #12810 / #12814, re-confirmed here.\n- Even once the manifest is wired, objectui#6614 **Q2** keeps `inert-expression` at **warning**. The worst case is stale advice, never a rejection.\n\n⇒ **objectui-first (what happened): a page saves exactly as it does today and now renders correctly.** Nothing that saves today stops saving.\n\n⇒ **objectstack-first would have been the dangerous order: the save gate materialises while the renderer still defers, so a page saves clean and renders inert** — precisely the \"saves clean, renders inert\" failure #12719 names, and precisely today's objectui#6598 production defect.\n\nThis is also the direction #12814 took: objectui#3832 ruled and landed on the objectui copy, and this repo ported after (PR #12857).\n\nSo the cost of the gap is **drift, not breakage** — but drift with nothing watching it: there is no mechanical parity gate in either repo (33 `check-*` scripts in objectui, none comparing the copies), so the invariant is documentary only. That is the argument for a card rather than for haste.\n\nRefs: #12719 (the invariant and the withheld half) · #12814 and PR #12857 (the lockstep-port pattern, same direction) · #12811 (the diagnostic half) · objectui#6614 (the ruling) · objectui#6598 (the production defect) · ADR-0078 · ADR-0080."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 13853,
+  "kind": "pull_request",
+  "title": "chore(ci): slow both dependabot channels from weekly to monthly",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T14:50:41Z",
+  "updated_at": "2026-08-31T15:32:21Z",
+  "closed_at": "2026-08-31T15:32:20Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": "2026-08-31T15:32:20Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/13853",
+  "body": "Fixes #13850\n\nCadence-only change per maintainer ruling (2026-08-31, quoted verbatim in the issue): 「objectstack 也改为按月」 — sibling of objectstack-ai/objectui#7039's 「interval: weekly → monthly」 ruling, this repo's copy.\n\n## Change\n\n`.github/dependabot.yml`, both update blocks (`npm` and `github-actions`):\n\n- `schedule.interval: \"weekly\"` → `\"monthly\"`\n- Removed the `schedule.day: \"monday\"` line in each block — `schedule.day` is only meaningful for a `weekly` interval per GitHub's dependabot.yml configuration docs (confirmed via search of `docs.github.com/.../dependabot-options-reference`, which was not directly fetchable from this container due to an egress block on that domain, but the search summary is unambiguous: \"`day` option is only applicable when the interval is set to 'weekly'\"). Removing it rather than leaving a now-inert key.\n- `schedule.time: \"02:00\"` kept in both blocks (valid for any interval), along with everything else — groups, `open-pull-requests-limit`, commit-message config.\n\nDiff touches only the two `interval` values and the two `day` lines — nothing else in `.github/dependabot.yml` changed.\n\n## Acceptance\n\n- **YAML parses after the edit** — quoted verbatim:\n  ```\n  $ python3 -c \"\n  import yaml, json\n  with open('.github/dependabot.yml') as f:\n      doc = yaml.safe_load(f)\n  print('PARSE OK')\n  for u in doc['updates']:\n      print(u['package-ecosystem'], u['schedule'])\n  \"\n  PARSE OK\n  npm {'interval': 'monthly', 'time': '02:00'}\n  github-actions {'interval': 'monthly', 'time': '02:00'}\n  ```\n- **Changeset gate consulted, not assumed.** `.github/dependabot.yml` is not released-package source, so no changeset is owed. Verdict, replicating this repo's own `changeset-check` job (`.github/workflows/pr-automation.yml`, \"Count the changesets this PR adds\" step) locally:\n  ```\n  $ MERGE_BASE=$(git merge-base origin/main HEAD)\n  $ ADDED=$(git diff --name-only --diff-filter=A \"$MERGE_BASE\" HEAD -- '.changeset/*.md' | wc -l)\n  $ echo \"This PR adds $ADDED changeset(s) (diffed from $MERGE_BASE).\"\n  This PR adds 0 changeset(s) (diffed from f532630d0246e93b36f869579eb5fa4184d51141).\n  ```\n  0 added, as expected for a config-only change — the `skip-changeset` label was applied to this PR (additive `POST /repos/objectstack-ai/objectstack/issues/13853/labels`, HTTP 200, confirmed present on read-back) so `changeset-check` does not demand one it isn't owed.\n- **Diff scope**: `git diff` shows exactly 2 insertions / 4 deletions across the two blocks — the two `interval` line edits and the two `day` line removals, nothing else.\n\n## Context\n\nCadence-only change: dependency-update PR volume drops ~4×; GitHub security-alert PRs are not driven by `schedule` and stay immediate. Auto-merge machinery is untouched."
+}

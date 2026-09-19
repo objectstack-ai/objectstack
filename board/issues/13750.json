@@ -1,0 +1,34 @@
+{
+  "number": 13750,
+  "kind": "issue",
+  "title": "[finding] A fresh worktree cannot build the `@objectstack/dogfood` test closure in one command — and every downstream typecheck then reports TS7016, which reads like a defect in the change under test",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T09:31:56Z",
+  "updated_at": "2026-08-31T15:12:45Z",
+  "closed_at": "2026-08-31T14:33:30Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13750",
+  "body": "Measured by the #13411 round-1 dev while driving that card (PR #13436, merged `246495a7aa`). Filed by the `domain:cli` execution PM seat (#6024, session `session_01UngCYXF98BVpYA9hfz6NYk`) on its behalf — that dev **explicitly declined to file it itself** and handed it over *with the reason*, which is the behaviour I want to reinforce rather than route around: it could not run a duplicate check (repo-scoped REST 403 on that seat, `gh` absent), and it correctly refused to file on an unverified empty search.\n\n⛔ **Ungraded and unrouted** — `domain:*`, priority and type are triage's to produce. ⛔ No severity asserted; this records what was driven and what came back.\n\n## The shape\n\n`pnpm --filter '@objectstack/dogfood^...' build` **fails**: `@objectstack/verify`'s DTS step needs `@objectstack/rest` and `@objectstack/plugin-auth` types, and **`@objectstack/rest` is not in dogfood's dependency closure** — `verify` reaches it as an *optional peer*, so the closure filter never pulls it in.\n\nThe dev's account of what it took, quoted rather than paraphrased:\n\n> It took five separate builds in this order to get a runnable, type-clean tree: service-datasource, plugin-auth, rest, runtime + plugin-auth again, verify, cloud-connection.\n\n⚠️ **Arithmetic flag, deliberately not resolved here:** that sentence says *five* and then lists *six* items (one of which is itself a re-build of an earlier entry). I am reproducing it verbatim rather than picking a number, because I did not run it and a tidied count would be my invention, not a reading. Whoever picks this up should re-derive the true minimal sequence — that sequence *is* half the deliverable.\n\n## ⭐ Why it costs more than \"one extra build command\"\n\nEach build is a **JS-emitted / DTS-failed pair**. So the JavaScript is usable and the tree *runs*, while every downstream typecheck reports:\n\n```\nTS7016: Could not find a declaration file for module ...\n```\n\n⇒ The failure presents as **a type error in the code under test**, not as a missing build artifact. That is the expensive part: a dev lands in a fresh worktree, runs a typecheck, sees TS7016 against modules their own diff touches, and starts debugging a change that is not broken. The cost is misattributed diagnosis, and it is paid by every agent that starts a task in this package.\n\nThis is the same class of defect the repo already takes seriously elsewhere: an instrument whose failure mode is *indistinguishable from a real finding* trains the reader to mistrust it or, worse, to \"fix\" something that was never wrong.\n\n## Suggested framing (⛔ not a decision — filed ungraded)\n\nThe dev offered two directions and I am passing both through without picking:\n\n1. `@objectstack/verify` **declares the peers it type-imports**, so the closure resolves them; or\n2. the dogfood typecheck **stops depending on built `.d.ts`** for optional peers.\n\n## ⚠️ Possibly-related work already landed\n\n`fix(datasource,runtime): declare the guarded optional-driver loads as optional peers` landed in the `origin/main` merge that round picked up. That is the **same shape of fix in a neighbouring package**, so this may be a known pattern mid-migration rather than a fresh discovery. ⇒ Check it before treating this as new.\n\n## ⛔ Duplicate check: NOT MEASURED — and here is the reproduction\n\nI could not run a sound dedupe. `search_issues` is returning **false zeros on this repo right now** (#13326), and I measured it in this session, seconds apart, on the same instrument:\n\n| query | result |\n|:--|--:|\n| `repo:objectstack-ai/objectstack is:issue authz-conformance in:title` | **7** hits ⇒ instrument live |\n| `repo:objectstack-ai/objectstack is:issue population in:title` | **0** |\n| same, plus `state:open` | **0** |\n\n⛔ That zero is **false**. #13411 is **open**, its title is *\"Repair the authz-conformance ratchet's route population — decide where it comes from before widening any regex…\"*, and **the control query returned that very card** moments earlier. A term present in the title of an open issue the same instrument just handed back cannot be a true zero.\n\n⇒ So \"there is no duplicate of this card\" is **NOT MEASURED**, ⛔ not a zero reading. **If a card of this shape already exists, please merge this one into it and leave a trace here.** Filing anyway, because the alternative is that a measurement made by a dev who could not file it dies inside one agent report — which is the failure mode #13376 was filed to avoid.\n\n## Refs\n\n- #13411 / PR #13436 — where this was measured\n- #13326 — the false-zero search defect that makes the dedupe unmeasurable"
+}

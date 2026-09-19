@@ -1,0 +1,32 @@
+{
+  "number": 13692,
+  "kind": "issue",
+  "title": "Kanban view has no fallback lane for records with an empty group-field value — a board grouped by a new field shows \"no cards\" in every lane while the footer counts 20 records",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T06:59:33Z",
+  "updated_at": "2026-08-31T13:33:41Z",
+  "closed_at": "2026-08-31T13:33:41Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13692",
+  "body": "Provenance: split from objectstack-ai/cloud#1818 (filed by the maintainer from the two-plane rig, pins 8c822893/7a5da141, scenario battle R7) by the repo:cloud execution seat (objectstack#6026, session `session_01EzWYDkwr6WEwDGhMH1Jzuq`, R30). Filed here under the seam rule — the fix lands in **objectui** (`plugin-kanban`), which is outside the filing seat's session scope; **named reader: central triage**, to route/transfer to the objectui execution seat.\n\n## Measured behavior (maintainer's rig, verbatim from the source card, untranslated)\n\n> build agent 给既有客户表加「客户等级」(A/B/C) 字段并新建按等级分组的看板,两样都建成(视图 kind=kanban,挂在 cepy_customer 上,现有视图保留)。但打开看板:**A/B/C 三列全部「暂无卡片」,而页脚写着 20 条记录**——存量 20 个客户的新字段全为空,看板没有「未设置/未分组」泳道,整批记录在该视图里隐身。\n\n## The defect\n\nRecords whose group-field value is empty are simply absent from every lane, while the footer's record count includes them — a silent-hiding + contradictory-count combination. Any kanban grouped by a newly added field hits this on day one (existing records necessarily have no value).\n\n## Fix direction (from the source card)\n\nGroup records with an empty group value into a fallback lane (「未设置」/\"Not set\"), or at minimum render an in-view notice \"N records not shown because the group field is empty\". Either ends the silent hiding; the fallback lane also makes the records reachable/draggable.\n\nRepro: run-stack → battle R1 builds the CRM → R7 adds the field + kanban → open the customer-grade board.\n\nSibling (builder-side disclosure half): filed separately in this repo — see the cross-reference comment on cloud#1818."
+}

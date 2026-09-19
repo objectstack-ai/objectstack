@@ -1,0 +1,36 @@
+{
+  "number": 13785,
+  "kind": "issue",
+  "title": "[finding] the swallow-family census resolves a bare name through a flat LAST-WINS file index — 209 collision inserts, sibling of #13474 whose own record (#13456) is a 404",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T12:19:07Z",
+  "updated_at": "2026-08-31T18:24:04Z",
+  "closed_at": "2026-08-31T18:13:28Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13785",
+  "body": "Observation class — recording only, no verdict asserted, no `pm:queue`. Unassigned.\n\nFound while implementing #13474 (PR #13784), which fixed the identical mechanism in the sibling instrument. Deliberately **not** fixed there: that card's declared landing site is `scripts/check-durability-degradation-log-level.mjs`, and this file has neither a workflow wiring it nor a fixture harness a regression control could live in — the two things #13474's ruling required of the fix.\n\nMeasured on `origin/main` @ `597020aa5`.\n\n## What I found\n\n`indexFunctionBodies` in `scripts/measure-durability-swallow-family.mjs` (around line 479) builds a **flat, file-scoped index keyed by bare name**, and it is **last-wins** — `bodies.set(name, body)` with no scope information, over function declarations, class methods and `const f = () => {}` bindings alike. `analyzeFile` passes that index to `walkWithHelpers`, which follows a callee name into whatever body the index holds for it.\n\nThis is the same defect #13474 recorded and PR #13784 fixed one file over. The two instruments were written against each other and the resolution code is near-identical.\n\n## Measured collision population\n\nInstrumenting the index to record an insert over an existing key, and running the census unchanged over its own scan surface:\n\n```\nSWALLOW-INDEX COLLISIONS: 209\n```\n\n209 collision inserts, spread across `packages/**` — `sql-driver.ts` (`asciiLower`, `caseExact`), `registry.ts` (`apply`, `mapFields`, `mapSections`, `mapForm`), `settings-service-plugin.ts` (`insert`, `update`), `memory-driver.ts` (`store`), and many more. That is a substantially larger collision population than the gate's, because this tool scans a wider corpus.\n\n⚠️ **What is NOT measured here, stated rather than glossed:** a collision only misresolves something if a hop actually reaches that name. I did not measure how many of the 209 are reached by `walkWithHelpers`, nor whether any census membership moves. So this card asserts the collision population and the mechanism, and asserts **nothing** about today's census being wrong.\n\n## Why it is worth a record even at unknown cost\n\nThe argument is the one the maintainer accepted when promoting #13474, quoted there:\n\n> The mechanism itself has no safe direction.\n\nA collision where only some of the same-named bodies carry the shape being looked for either invents a member or drops a real one, and nothing in the output distinguishes either case from a correct resolution. This instrument is a **census** whose numbers are quoted into a repair-first worklist (#12981), so a wrong denominator here propagates into that programme rather than into a merge-blocking gate.\n\n## The remedy shape is already landed next door\n\nPR #13784 carries it: record each declaration with the scope it is visible from, resolve by walking outward from the call site, keep a name declared exactly ONCE resolving from anywhere (so the census does not silently narrow), and refuse an ambiguous name rather than answering with the last one in the file. It also carries the regression-control shape — fixtures that go red in **both** directions, dropped member and invented member, separately.\n\n⚠️ This file has **no self-test fixture list** of the kind `selfTestReadSeams` provides, and it is wired into **no workflow** (its own header says so: *\"It is NOT a gate\"*). So a fix here needs a home for its regression control decided first. That is the real work, and it is why this is a record rather than a drive-by.\n\n## Prior record is GONE, which is part of why this is filed\n\nThe sibling card that recorded this exact defect in this exact file, **#13456**, returns **HTTP 404** — confirmed twice, by the triage seat and again during this dispatch, against a live control. It belongs to the dangling-reference class aggregated in **#13634** (issues taken away with a deactivated account). Its content survived only because #13474's body transcribed the remedy shape. ⇒ Without this card, the defect in `measure-durability-swallow-family.mjs` has **no live record at all**.\n\n## Dedupe performed\n\n⚠️ **Channel switch declared:** `GET /search/issues` returns **HTTP 403** from this seat (*\"sessions are bound to their configured repositories\"*), so no zero from it was trusted and it was not used. Dedupe ran over repo-scoped list endpoints instead (`labels=finding`, `labels=tooling`, both HTTP 200 — 94 distinct open issues) plus a local grep of their titles and bodies for `measure-durability-swallow-family`, `swallow-family`, `indexFunctionBodies`, `last-wins`, `flat index`, `lexical scope`, `name collision`, `walkWithHelpers`.\n\n**Control: the read is non-empty** — it returns #13474 itself, matching 7 of the 8 terms. One hit, and it is the sibling card this one is filed alongside. Nothing open records the defect in `measure-durability-swallow-family.mjs`.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

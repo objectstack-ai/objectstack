@@ -1,0 +1,35 @@
+{
+  "number": 13917,
+  "kind": "pull_request",
+  "title": "fix(driver-memory): bulkUpdate's touched-row set must agree with its own id resolution",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T16:53:33Z",
+  "updated_at": "2026-08-31T17:51:03Z",
+  "closed_at": "2026-08-31T17:51:02Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": "2026-08-31T17:51:01Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/13917",
+  "body": "Fixes #13911\n\n## The defect\n\n`InMemoryDriver.bulkUpdate` used two lookups over the same ids, and they disagreed:\n\n```js\nconst touchedIds = new Set(updates.map((u) => u.id));        // ids from the CALLER\nconst settled = table.filter((r) => !touchedIds.has(r.id));  // STRICT Set.has\nconst index = table.findIndex((r) => r.id == u.id);          // LOOSE ==\n```\n\n`IDataDriver.bulkUpdate` declares `id: string | number`, and this driver resolves an id to\na row with a loose comparison — as `update` and `delete` always have — so naming a stored\n`1` as `'1'` finds the same row. But `Set` membership is always strict. For a mixed-type\nid the row was therefore resolved and updated **and** left in `settled` carrying its\n**pre-image**, so it entered the projected row set twice: once with the value it was\nvacating, once with the value it was taking. `exceptId` does not help — it excludes only\nthe row currently being checked, never a *sibling* row of the same batch.\n\nNet effect: a batch that merely **hands a unique value from one row to another** was\nrefused with a false `UNIQUE_VIOLATION` / 409.\n\n## The fix\n\nResolve every id to its table index first, then derive the touched set from the\n**resolved rows' own ids** rather than from caller input:\n\n```js\nconst resolvedIndexes = updates.map((u) => table.findIndex((r) => r.id == u.id));\nconst touchedIds = new Set(\n  resolvedIndexes.filter((index) => index !== -1).map((index) => table[index].id),\n);\n```\n\nBoth lookups now read the same stored value and cannot drift apart — the property\n`updateMany` gets for free by drawing its target ids from table rows.\n\n⛔ Deliberately **not** fixed by tightening `findIndex` to `===`. That would silently\nnarrow which ids resolve at all — a behaviour change far wider than this defect — and\n`update()` one method up uses `==`, so this door must keep matching its sibling's\nresolution semantics. The bug is the *disagreement*; the resolution side is the side that\nhad to be preserved.\n\nThe main loop now reads each id's already-resolved index instead of resolving a second\ntime, which is what let the two lookups drift apart in the first place. Error precedence\nis unchanged: the missing-id throw and the uniqueness refusal still fire at the same point\nin batch order as before.\n\n## Correcting the record on the construction\n\nThe PR that introduced this (#13875, landed at `4642f4c64c`) described its `bulkUpdate` as\ngeneralizing `updateMany`'s posture. It generalized the **discipline** — check every\npending row's post-image before writing any of them — but not `updateMany`'s **internal\nconsistency**. That is the one way it diverged: `updateMany`'s `targetIds` come from table\n**rows** and its `findIndex` is strict `===`, so both of its comparisons agree by\nconstruction; `bulkUpdate` drew one side from caller input and the other from a loose\nresolution. The landed changeset is left untouched (it is already merged); this note is\nthe correction.\n\n## `bulkDelete` — checked, not assumed\n\n`bulkDelete` has **no** analogous gap, and the reason is structural rather than\ncoincidental: it performs exactly **one** id comparison (the resolving `findIndex`), and\neverything downstream is keyed on that comparison's **result** — a table index — never on\ncaller input. There is no second lookup to disagree with the first.\n\nThat also makes its de-duplication type-proof: `['1', 1]` against a stored `1` collapses to\none index. Had the set been keyed on caller ids instead, those would be two distinct\nentries and the two splices would remove index 0 twice, taking a neighbouring row with it.\nBoth properties are now pinned by test rather than left to inspection.\n\n## `exceptId` semantics\n\n`assertNoUniqueViolation` filters `exceptId` **strictly** (`row.id === exceptId`).\n`bulkUpdate` already passed the **stored** `table[index].id` there rather than the caller's\nid, so self-exclusion was type-consistent and is unaffected by this fix — worth recording,\nsince passing caller input there would have been a second instance of the same class.\n\n## Tests\n\nAdded to `memory-bulk-update-delete-atomicity.test.ts` (the existing suite used string ids\nthroughout, which is why this passed 36/36):\n\n- **the regression** — mixed id types, the vacate-and-take batch that must succeed;\n- **a positive control** — the same batch shape with consistent id types, so the\n  regression cannot pass vacuously;\n- the stored id keeps its own type (a string id in the batch does not restamp it);\n- a **genuine** collision is still refused with mixed id types (the fix does not turn the\n  check off);\n- `bulkDelete` with a mixed-type id, and the same row named twice in two id types.\n\nBefore the fix: `1 failed | 23 passed`, the failure being exactly the mixed-type case with\n`Unique constraint violated on doc.doc_no: a record with the value \"D-0001\" already\nexists` — a value the batch had just vacated. After: `24 passed`.\n\nFull `driver-memory` package suite: **38 files, 1018 tests, all passing.**\n\nAblation on the committed fix: reverting the touched-set derivation to caller input,\nproven on disk with anchored greps in both directions plus a changed blob hash, turns the\nnew test red and only that test; restored under `trap` with absolute paths, verified by an\nempty `git diff HEAD` and a blob-hash match.\n\n\n_Generated by [Claude Code](https://claude.ai/code/session_01F3jdziLbAPGeceVNmSox5L)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01F3jdziLbAPGeceVNmSox5L)_"
+}

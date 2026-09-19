@@ -1,0 +1,37 @@
+{
+  "number": 12353,
+  "kind": "issue",
+  "title": "docs site: 4 doc pages have zero inbound links from anywhere on the site (sitemap-only orphans)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "priority:p2",
+    "repo:objectstack"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T19:46:10Z",
+  "updated_at": "2026-08-31T12:18:47Z",
+  "closed_at": "2026-08-31T12:18:34Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12353",
+  "body": "## One-liner\n\nFour doc pages are listed in `/sitemap.xml` and reachable by URL, but no other page on the site links to them — crawlers reach them only via the sitemap, and readers not at all.\n\n## The four\n\n```\n/docs/concepts/metadata-driven\n/docs/kernel/contracts/auth-service\n/docs/kernel/contracts/cache-service\n/docs/protocol/backward-compatibility\n```\n\n## How it was measured\n\nLocal production build (`next build && next start`) of `origin/main`. Every URL in the site's own `/sitemap.xml` was fetched, all internal `href=\"/...\"` values collected (fragment and query stripped, trailing slash normalised), and each sitemap URL scored by how many *other* sitemap pages link to it:\n\n```\nsitemap URLs crawled: 408\norphans (zero inbound links from any sitemap page): 4\n```\n\nPositive control: `/docs/data-modeling` and `/docs/ai` — which I expected to be orphans and are not — score inbound links from `/docs`, from sibling pages, and from `/docs/capabilities`. So a zero here means zero, not a broken query.\n\n## Why it matters\n\nAn orphan page is discoverable only by the sitemap. It accrues no internal link signal, and a reader following the docs' own navigation can never arrive at it. Whether the answer is a link from the section index, a `meta.json` entry, or deletion is a per-page call.\n\n## Note\n\n`/docs/kernel/contracts/auth-service` and `/docs/kernel/contracts/cache-service` are two of a set — the other pages under `content/docs/kernel/contracts` are linked. Worth checking whether `content/docs/kernel/contracts/meta.json` is simply missing two entries.\n\n## Source\n\nFound while implementing #12240 (JSON-LD), when checking whether a separate breadcrumb hypothesis about orphaned folder indexes held. It did not — but this did."
+}

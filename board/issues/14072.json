@@ -1,0 +1,34 @@
+{
+  "number": 14072,
+  "kind": "issue",
+  "title": "[finding] H22 files 94 of the patrol's 247 rows against a population the 2026-08-31 ruling says needs no cleanup — the census clause and the row family now disagree inside one file",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T02:39:18Z",
+  "updated_at": "2026-09-01T05:54:03Z",
+  "closed_at": "2026-09-01T05:53:50Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14072",
+  "body": "Measured while implementing #13947 (PR #14071), from a real sweep run out of this container on 2026-09-01 (`node scripts/pm/check-half-states.mjs`, exit 0, 247 half-states found).\n\n## The reading\n\nThe per-family breakdown of that sweep's 247 findings:\n\n```\nH22=94  H2=37  H14=14  H19=13  H24=13  H26=12  H9=11  H5=10  H30=8  H6=6\nH4=5    H36=5  H11=4   H8=3    H13=2   H20=2   H35=2  H38=2  H1=1   H15=1\nH23=1   H28=1\n```\n\n**`H22` alone is 94 of 247 — 38% of everything the patrol computes.** H22 is \"a CLOSED card still carrying a `pm:*` STATE label\" (#10688), bounded to a 3-day closure window.\n\nIn the *same rendered body*, the H39 census clause says, verbatim:\n\n> `Closed-card pm:* residue (H39 census, informational): pm:dispatched 2075, pm:queue 850, pm:blocking 29, pm:blocked 20, pm:on-hold 13, pm:awaiting-maintainer 2, oldest closed 2026-08-02; 555 carrying both pm:queue and pm:dispatched. Archive, not state — no cleanup is owed and none is planned (ruled 2026-08-31, 批 #13); readers scope pm:* queries to open cards.`\n\nSo one clause of the report tells a reader that this residue is archive and no cleanup is owed, while another files ninety-four individual finding rows about members of it.\n\n## What is and is not claimed\n\n- ⛔ **No claim that H22's predicate is wrong.** Every one of the 94 rows is correctly computed; the question is whether the row should still be FILED after the ruling, not whether the state was read correctly.\n- ⛔ **No claim that the ruling settles it.** There is a real reading in which it does not: H22's window is the *fresh* 3-day residue, and its header argues the point explicitly — 「`pm:dispatched` is not descriptive, it is a claim of in-flight-ness … If that is a defect at 09:00 while the card is open and not a defect at 09:01 once it closes, the rule is about the board's tidiness rather than about the duty」. That argument predates the ruling (H22 is #10688; the census ruling landed 2026-08-31) and nothing has reconciled the two since.\n- ⛔ **No remedy proposed.** Several shapes exist (fold H22 into the census as a count; keep it and record why the ruling does not reach the 3-day window; narrow it to the labels the ruling did not cover). Choosing is a call for the lane.\n\n## Why it is worth a card\n\nThe patrol's body is budget-bound and its rows compete for that budget. Whichever way this is ruled, the answer moves 38% of the corpus. With the severity ordering landing in PR #14071, `H22` sits in the `inventory` band and is trimmed first — so if the rows are wanted, they will now be the first thing omitted; if they are not wanted, the patrol is spending 38% of its computation and part of its render budget on them either way.\n\n## Neighbours, checked before filing\n\nOne targeted MCP semantic search (repo-scoped REST `/search/*` is 403 from this container — `sessions are bound to their configured repositories`), with a positive control in the same session: a control query returned #13947, so the empty-ish result below is a reading rather than a silent zero. 15 results. The nearest neighbours are the cards that produced the ruling and are all CLOSED — #13605 (the decision card that ruled the cleanup shape), #13526 and #13901 (the census findings behind it), #12907 (the prose that contradicted the strip-on-close convention). None of them asks whether H22 should keep filing rows afterwards. No open card covers this.\n\n## Refs\n\n- `scripts/pm/check-half-states.mjs` — H22's header (its own counterargument), and `renderClosedResidueCensus` (the census clause quoting the ruling)\n- #9857 — the anchor whose body carries both clauses at once\n- #13947 / PR #14071 — where this was measured\n"
+}

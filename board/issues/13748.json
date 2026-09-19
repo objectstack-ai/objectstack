@@ -1,0 +1,34 @@
+{
+  "number": 13748,
+  "kind": "issue",
+  "title": "视图声明 calendar 可视化但缺 calendar 配置块时，平台不报错——直接渲染成一屏错位画面（全部记录堆在今天）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T09:24:07Z",
+  "updated_at": "2026-08-31T13:43:48Z",
+  "closed_at": "2026-08-31T13:43:48Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13748",
+  "body": "> **来源**：宣传视频车道 #147 为排镜所做的只读实拍。**未改动任何平台代码、未改任何配置**。\n>\n> **本单只描述现象，不预设修正方向。** 是否算缺陷、以及该往哪个方向处理（构建期校验、运行期报错、界面降级提示、或视为可接受的宽松默认），留给负责人裁定。**故不带 `pm:queue`——请先分级。**\n\n## 现象\n\n同一个对象 `crm_leave_request` 下的两个视图，都能切到日历呈现，**但只有一个真的能用**：\n\n| 视图 | 声明 | 切到日历后的画面 |\n|---|---|---|\n| `all_leave_requests` | 只写了 `appearance.allowedVisualizations: ['grid','calendar']`，**没有 `calendar:` 配置块**（无 `startDateField` / `endDateField`） | **整月空白；全部 9 条记录堆在「今天」那一格**（标题显示 `LR-00008` / `LR-00007` / … / `+5 more`）。翻到下一月则整月全空 |\n| `team_leave_calendar` | 有 `calendar:` 配置块（`startDateField: 'start_date'` / `endDateField: 'end_date'` / `titleField` / `colorField`） | 正常月历，请假条按起止日期落在对应格子，跨天条正常 |\n\n**关键在于前者没有任何提示**：工具条上的 Grid ⇄ Calendar 切换按钮**正常显示、正常可点**，点下去也不报错——直接渲染出一屏在业务上完全错误的画面（所有人的假看起来都在同一天）。\n\n## 为什么记下来\n\n**声明是不完整的，但不完整没有被任何环节拦下**：\n\n- 构建期没有报错——`allowedVisualizations` 里写了 `calendar`，但没有配套的日期字段映射，元数据校验放行了；\n- 运行期没有报错——切换按钮照常可用，没有禁用、没有提示、没有空态说明；\n- 呈现层做了**静默兜底**——拿不到 `startDateField` 就把记录都落到当天，而这个兜底的结果**看起来像数据本身的样子**，不像故障。\n\n对一个「按描述长出模块」的平台，这个组合的后果是：**一份写了一半的声明，会渲染出一个看起来能用、实际全错的界面**，而搭建方没有任何信号知道自己漏了什么。\n\n⚠ 另有一层：这两个视图是**同一次 AI agent 依据一句业务需求生成的**（同一批产出、同一个视图文件）——即 agent 在一个视图里写全了日历配置、在另一个里只写了 `allowedVisualizations`。**本单不评价 agent 的产出质量**，只记录平台在收到这种不完整声明时的行为。\n\n## 复现最小路径\n\n1. 在一个对象上声明两个列表视图；\n2. 视图 A：`appearance.allowedVisualizations: ['grid','calendar']`，**不写 `calendar:` 块**；视图 B：同样允许 calendar，并写全 `startDateField` / `endDateField`；\n3. 准备若干条记录，其日期字段分布在**不是今天**的若干天上；\n4. 打开视图 A → 点工具条的 Calendar 切换 → **所有记录堆在今天那一格，其余日期全空**；\n5. 打开视图 B → 记录按各自日期正常分布。\n\n## 取证环境\n\n2026-08-31，载体 `objectstack-ai/hotcrm`，钉 `@objectstack/* 17.1.0`。纯只读实拍，未改数据、未改配置、未改源码。\n\n## 邻近既有单（已查，非重复）\n\n- #13696 报表构建器只接受已声明的 dataset，不接受对象（同为「声明缺一环则该能力不可用」，但那条是**入口里根本看不到**，本条是**入口可用却渲染错误**——前者失败得明显，后者失败得安静）\n- #13533 / #13568 —— 同一次 #147 取证中发现的另两条，与本条无关"
+}

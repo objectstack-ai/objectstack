@@ -1,0 +1,35 @@
+{
+  "number": 12820,
+  "kind": "issue",
+  "title": "[finding] detach-then-call on a logger channel has now been fixed card-by-card three times, and no gate watches the class",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-28T00:11:37Z",
+  "updated_at": "2026-08-31T16:33:57Z",
+  "closed_at": "2026-08-29T07:06:38Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12820",
+  "body": "Filed unassigned and **ungraded** by the `os-dev` seat working #12792, session `session_01LZbWd2jNV1FErXTPSS4Dry`. ⛔ Not graded, not routed, ⛔ not fixed. Recording an observation, not a defect — the sweep below found **no live instance left**.\n\n## The observation\n\n`(logger.error ?? logger.warn)(…)` — and its siblings `const fn = logger.error; fn(…)`, `const { error } = logger; error(…)`, `run(logger.warn)` — evaluate to the bare function and then call it, so the call runs with `this === undefined`. `@objectstack/core`'s `ObjectLogger` dereferences `this` on every channel (`error`/`fatal` via `this.writeErrorLike`, `debug`/`info`/`warn` via `this.write`), so any host that injects one turns those lines into a `TypeError`.\n\nThe class has now been closed three times, one card at a time:\n\n| card | package | sites | how it was found |\n|:--|:--|:--|:--|\n| #12773 (landed as #12803) | `plugin-auth` | 3 | a real composed EE boot — every audience refusal became `HTTP 500 null` |\n| #12792 | `driver-sql` | 9 | a `git grep` sweep prompted by #12773's closing line |\n| — | ? | ? | nothing is watching |\n\nEach round found the next round's population by hand, and each hand instrument was weaker than the last: #12773's regex could not see the two-step form, which is how that package's own family went from 1 to 3 mid-card; the count on #12792 was published twice as a **floor** and once had to be corrected in public because `grep -c` counted a docblock line quoting the shape in prose.\n\n## What is measured today\n\nSwept on `origin/main` at `23843d3f4` with a TypeScript-AST instrument over **5,096 tracked `.ts` files** — comments are not nodes and line breaks are not syntax, so both regex blind spots are closed — for all four shapes:\n\n- **live receiver-detach defects outside `driver-sql` and the landed `plugin-auth` fix: 0.**\n- 2 remaining parenthesized-callee sites are on `console`, whose methods are bound in Node and in browsers: `packages/rest/src/log.ts:16`, `packages/cli/src/utils/dev-restart.ts:275`.\n- 25 remaining two-step sites are the idiomatic options-callback shape — a caller-supplied plain function with a `console` default (`opts.warn`, `opts.info`) in `objectql/registry.ts`, `spec/data/object.zod.ts`, `runtime/artifact-reference.ts`, `cli/utils/console.ts`, `cli/utils/artifact-boot-migration.ts`, `service-datasource/sqlite-driver-fallback.ts` — not a method lifted off a receiver-sensitive class.\n- 0 destructured channels and 0 channels handed on as a bare callback argument, in non-test source.\n\n⚠️ Note the shape of the *return path*, which is the reason this is worth recording rather than forgetting: those 25 options APIs are typed `warn?: (msg: string) =` a void return, which invites a caller to write `warn: logger.warn` at the call site. That spelling detaches at the caller, where no reviewer of the callee will ever see it. Today no in-repo caller does it (measured: 0), and nothing would notice if one started.\n\n## Why a gate is plausible and what it would cost\n\nThe instrument is small and mechanical: walk each source file, flag ① a `CallExpression` whose callee is a `ParenthesizedExpression` resolving to log-channel property reads, ② a local assigned such a read and later called bare, ③ a channel destructured off a sink, ④ a channel passed as a bare argument. #12792's PR checks a version of exactly this into `driver-sql` as a package-local pin (`logger-receiver-detach.test.ts` §3), with a control sample proving it fires, which is the working prototype — but it only ever reads one file.\n\n⛔ Not proposed here, deliberately: the false-positive surface is the whole question and it has not been measured. The `console` and options-callback populations above are both **legitimate**, and a gate that flags them is a gate people turn off. Any real proposal has to say how it tells \"a method off a receiver-sensitive object\" apart from \"a plain function in an options bag\" — probably by anchoring the receiver vocabulary the way `DURABILITY_CRITICAL_CALLEES` anchors its own, rather than by matching the channel names.\n\n## Also unrecorded: the ADR-0120 D4 note is now stale in one direction\n\nThe docblock at `sql-driver.ts:4290` said `check-durability-degradation-log-level.mjs` cannot see a call on a parenthesized expression, so the inline form read to it as a false silent-swallow. That is still true of the matcher, and the blind spot is still unfiled as fixed. #12792 measured that it costs nothing in `driver-sql` today — none of the nine sat inside a `catch` guarding a `DURABILITY_CRITICAL_CALLEES` operation, so the checker never discovered them and the audit output is byte-identical before and after the conversion. Recording that here so the next reader does not re-derive it: the matcher limit is real, and it is currently costing zero findings.\n\n## Dedup\n\nSearched open issues for a repo-wide guard on this class: no hit (control query on the same session returns #12792, #9609, #5785, #4436, so the empty result is a reading rather than a broken search). #12773 and #12792 are the two per-package fixes and are not duplicates of this — both are scoped to one package and neither proposes a guard.\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01LZbWd2jNV1FErXTPSS4Dry)_"
+}

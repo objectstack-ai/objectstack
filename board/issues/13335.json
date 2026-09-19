@@ -1,0 +1,36 @@
+{
+  "number": 13335,
+  "kind": "issue",
+  "title": "[finding] `skills/**/references/_index.md` is generator-owned but not routed to `merge=os-regen` — two branches that regenerate it text-merge instead",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-30T03:52:14Z",
+  "updated_at": "2026-08-31T17:04:31Z",
+  "closed_at": "2026-08-31T17:04:09Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13335",
+  "body": "Observation-class finding, hit while merging `origin/main` into the #13263 branch. Filed unassigned; not fixed there — that PR's diff is the docs-generator selection rule, and adding a `.gitattributes` route is a merge-infrastructure change with its own gate to reconcile.\n\n## What happened\n\n`skills/objectstack-*/references/_index.md` is written by `pnpm --filter @objectstack/spec gen:skill-refs` and gated by `check:skill-refs`. It is one of the 14 artifacts `check:generated` covers. But it is **not** listed in `.gitattributes` — the `merge=os-regen` block there names 13 patterns and stops at `content/docs/references/**` — and it is **not** in `scripts/regen-artifacts.mjs`'s `NOT_DRIVER_MANAGED`, the roster of artifacts deliberately left to git's text merge with a per-path reason. So its absence is a gap rather than a decision: nothing records why this one generated artifact merges textually.\n\nMeasured: PR #13262 regenerated `skills/objectstack-ui/references/_index.md`, this branch regenerated the same file, and `git merge origin/main` produced a real conflict —\n\n```\n<<<<<<< HEAD\n- node_modules/@objectstack/spec/src/ui/report.zod.ts — Exports: ReportType, ReportChartSchema, ...\n- node_modules/@objectstack/spec/src/ui/view.zod.ts — HTTP Method Enum & HTTP Request Schema\n=======\n- node_modules/@objectstack/spec/src/ui/report.zod.ts — Report Type Enum\n- node_modules/@objectstack/spec/src/ui/view.zod.ts — View protocol schemas — the `view` metadata type and ...\n>>>>>>> origin/main\n```\n\n`scripts/pm/os-regen-merge.sh` then stopped with \"merge stopped on conflicts in NON-generated files — resolve those by hand\", because from `.gitattributes`'s point of view this file is not a generated one. The resolution that is actually correct here — take either side, commit the merge, regenerate, let `check:skill-refs` prove it — is precisely what the driver plus the script's step 4 automate for every other artifact.\n\n## Why it is worth recording\n\nThis is not a \"the merge got hard\" complaint. The failure mode `merge=os-regen` exists to prevent is the **silent** one: two branches whose regenerated rows do not overlap textually merge with exit 0 and no markers, and the result is a file that reflects neither branch's source. That is invisible locally until someone runs `check:skill-refs`, and it is invisible in review because nobody reads a generated index diff line by line. This time it conflicted loudly only because both branches happened to touch adjacent rows of the same file.\n\nThe blast radius is the published skill bundles, which under the standing \"judged whole-package\" principle is the same surface #13263 was graded p1 for.\n\n## What a fix looks like\n\nAdd the pattern to `.gitattributes` beside the others, or add a `NOT_DRIVER_MANAGED` entry recording why it must stay a text merge:\n\n```\nskills/*/references/_index.md                                merge=os-regen\n```\n\n⚠️ `pnpm check:merge-driver` reconciles `.gitattributes` against the driver's roster in both directions, so the two halves have to move together; that gate is green today, which means it does not currently know this artifact exists. Confirming which of the two dispositions is right is the substance of the card — the parallel-spec-PR sharding argument in AGENTS.md (\"The driver is a LOCAL facility\") may apply to this file too, since these indexes are exactly the kind of one-row-per-module artifact that parallel spec PRs both rewrite."
+}

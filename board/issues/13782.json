@@ -1,0 +1,33 @@
+{
+  "number": 13782,
+  "kind": "pull_request",
+  "title": "docs-audit: let a SCREAMING_SNAKE literal mint an anchor, and pin the predicate pair",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T11:52:54Z",
+  "updated_at": "2026-08-31T12:30:53Z",
+  "closed_at": "2026-08-31T12:30:52Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-31T12:30:52Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/13782",
+  "body": "Fixes #13471\n\n`isCodeShaped` has called `OS_MODE` an identifier since the shape guard was written — it is\npinned as `SCREAMING_SNAKE` in the self-test's own shape cases — while\n`literalAnchorsFromLines` accepted only three lowercase-initial shapes and so declined to mint\nany anchor from it. One predicate in the pair called the token an identifier, the other\nsilently called it prose, and nothing reported the split. This makes the pair agree on that\nshape, and then pins the agreement so neither side can drift back out of step quietly.\n\n## Re-derived against today's file first\n\nThe card warned its own shape description might be stale, and it was worth checking: the file\nhas drifted three times since the record window (blob `0a42496…` to `61e0f44c…` to\n`be1584869` today, the last move being #13738 at 09:40Z). The description survived — the\nliteral test was still exactly three lowercase-initial regexes. Both predicates, run on the\nsame tokens, on today's implementation:\n\n```\nOS_CLOUD_URL           isCodeShaped=true  literalAnchorsFromLines=false  DISAGREE\nOS_MODE                isCodeShaped=true  literalAnchorsFromLines=false  DISAGREE\nOS_TENANCY_POSTURE     isCodeShaped=true  literalAnchorsFromLines=false  DISAGREE\nERROR_CODE_LEDGER      isCodeShaped=true  literalAnchorsFromLines=false  DISAGREE\ncontrolled_by_parent   isCodeShaped=true  literalAnchorsFromLines=true   agree\nauditMetaItem          isCodeShaped=true  literalAnchorsFromLines=true   agree\nmeta.getAudit          isCodeShaped=true  literalAnchorsFromLines=true   agree\nlabel                  isCodeShaped=false literalAnchorsFromLines=false  agree\n```\n\n## Measured before changing anything\n\nTwo arms of the real tool over the 60 most recent `packages/**` commits, with every added row\nattributed to the declaration that minted it — the per-row provenance published by #13738 is\nwhat turned \"will widening get noisier?\" from a judgement call into a count.\n\n| | baseline | accepting SCREAMING_SNAKE |\n|---|---|---|\n| rows across 60 runs | 374 | **383** (+9, +2.4%) |\n| rows lost | — | **0** |\n| `overbroadAnchors` (hub terms the corpus-share guard caught) | 8 | **8** (+0) |\n| runs that moved at all | — | **2 of 60** |\n\nEvery new anchor named its declaration: `FlowRefusalCode`, `AUTHZ_STORE_UNAVAILABLE_CODE`,\n`codes`. Four of the nine were vendor MySQL driver codes (`ER_DUP_KEYNAME` and friends) which\nmatched no page at all, so they cost nothing — an anchor no doc names is not a row.\n\n**Ground truth.** On `b6d3d76b5`, whose own commit edited three docs pages, the advisory went\nfrom **0 of those 3** (it listed two `releases/**` pages and nothing else) to **2 of 3** —\n`api/client-sdk.mdx` and `automation/flows.mdx`, both minted from `FlowRefusalCode`.\n\n## The structural alternative was measured too, and rejected\n\nCollapsing the literal test into `isCodeShaped` looks like the tidier fix — one predicate\ninstead of two — and the same 60 commits say no: rows 374 to **408 (+9.1%)**, and it admits\n`'unchanged.'`, `'means.'` and `'version.'`, quoted sentence fragments that reach\n`isCodeShaped`'s `.` arm. The two predicates run over **different populations** — a\ndeclaration NAME versus an arbitrary quoted span that may be prose — so they must stay\nseparate. Those three fragments are now pinned as non-anchors, so a future collapse goes red\nwith the reason attached.\n\n## Blast radius, kept as small as the card measured it\n\n⛔ The card's own pull commit `4d98d9eab` gains **zero rows** from this. That page was already\nlisted there, through the `route` anchor `/api/v1/runtime/config`; all this adds is a second\n`via` clause naming `OS_TELEMETRY_CLIENT_ERROR_REPORTING_ENABLED`. The recall win is real and\nit is `b6d3d76b5`-shaped, not `4d98d9eab`-shaped. The three sibling misses in #13306's record\nwindow remain out of scope and unfixed by this — those env vars were new to the page, so no\nanchor of any shape could have matched.\n\nAlso unchanged, deliberately: a bare all-caps word such as `EEXIT` is not admitted, because the\nshape requires a segment break. Prose does not shout in underscores; it can shout in one word.\n\n## Verification\n\n- `--self-test` 503 to **516** cases, all pass (exit 0, captured before any pipe).\n- The shipped file reproduces the measured arm on **60 of 60** runs, so the numbers above\n  describe this diff rather than a throwaway mutant.\n- **Reverse-verified**: removing the fourth shape takes `--self-test` to **exit 1, 7 cases\n  failing**, the agreement pin among them. Restore proven by observed state — working blob\n  `f1315ee83874ece9fdaba707005ff79f295ff020` equal to HEAD's, empty `git diff HEAD`, empty\n  `git status`. No rebuild is involved: this script is dependency-free and node runs the source\n  directly, so there is no `dist/` between the edit and the run.\n- Gate families derived with `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack`\n  after the final commit (`4a26def1c`): **18 GREEN**, 0 RED, 1 NOT MEASURED —\n  `check-test-completeness.mjs` exits 3 `PREREQUISITE NOT MET` because it grades a saved\n  `turbo run test` log that only CI produces, which its own failure text says to record as NOT\n  MEASURED rather than as a red. Both convention-triggered obligations for a gate-script edit\n  (`bare-root-worklist.mjs --self-test`, `check:pm-dispatch-gates`) are in that green set, as are\n  `check:docs-audit-scope`, `check-affected-docs.mjs`, `check-drift-comment.mjs` and\n  `check:nul-bytes`.\n\n`skip-changeset`: the diff is one repo-root dev script. The root manifest is `private: true` and\nno package manifest covers `scripts/`, so nothing is published. `Check Changeset` has no\npath-based exemption — it enforces on any diff unless labelled — so the label is applied rather\nthan assumed.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Pk26oZ12t5N1hwGW1m1MgC)_"
+}

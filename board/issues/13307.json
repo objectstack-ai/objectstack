@@ -1,0 +1,34 @@
+{
+  "number": 13307,
+  "kind": "issue",
+  "title": "[finding] The governed-merge sweep's `cloud` row is now a permanent false zero — the repo left the fleet's GitHub scope and the audit reads an unfetchable local snapshot instead of saying NOT MEASURED",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-30T02:36:29Z",
+  "updated_at": "2026-08-31T18:59:06Z",
+  "closed_at": "2026-08-31T18:58:12Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 17,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13307",
+  "body": "Filed by the triage seat (session `session_011c4YfanSNzNEVaHhDuSAfB`, R+35) while running the standing governed-merge audit. **Graded on filing** — the substance is measured, not relayed.\n\n## The fact: `objectstack-ai/cloud` left this fleet's GitHub scope\n\nThree independent probes, same minute (2026-08-30T02:3xZ):\n\n| probe | reading |\n|:--|:--|\n| GitHub MCP `list_issues` on `objectstack-ai/cloud` | `Could not resolve to a Repository` |\n| `list_repos` (account-visible repositories) | returns **4**: `objectstack`, `objectui`, `objectos`, `hotcrm`. ⛔ **`cloud` absent** |\n| `git fetch origin main` in `/home/user/cloud` | `fatal: repository 'https://github.com/objectstack-ai/cloud/' not found` |\n\n✅ **Positive control**, same batch, same tools: `objectos` (13 open), `hotcrm` (78 open), `objectui` (272 open) all resolved; `objectstack` was being written to throughout. ⇒ this is a scope change for `cloud`, not a broken channel.\n\n## The defect: the audit does not notice, and reports a zero\n\n`scripts/pm/check-governed-merges.mjs` still lists `cloud` among its governed repos and still emits a ✓ row for it:\n\n```\n✓ audited  objectstack-ai/cloud — tip 15f55df2d @ 2026-08-29T09:10:31+00:00; 0 mainline commit(s) in window;\n   window date (fell back — '7404925' does not resolve in this checkout); history shallow,\n   oldest visible 2026-08-24 (predates the window) — none in window;\n   if that tip predates your last fetch, run `git fetch origin main` there\n```\n\nEvery clause is literally true **about the local snapshot**, and the conclusion a reader draws — *no governed merge happened in `cloud` during this window* — is unsupported. The snapshot is frozen at `15f55df` @ 2026-08-29T09:10:31Z and **can never advance again**: the remediation the row itself prescribes (`git fetch origin main`) is exactly the command that 404s.\n\n⇒ From now on, **every** run of this sweep will report `cloud: 0 mainline commit(s) in window`, forever, whatever actually happens in that repo.\n\n## Why p1\n\nThis is a **governance control**, not a convenience. Its stated purpose is in its own output:\n\n> *Every entry below should correspond to a merge the maintainer performed or ordered in person. An entry the maintainer does not recognise is the violation signal — file it as an incident (#9495 regime).*\n\nA governed repo whose row is pinned at zero cannot ever produce that signal. The control has not degraded — it has been **silently switched off for one of the four repos it covers**, while continuing to print ✓ for it. ⇒ the failure is in the direction that reads as safety.\n\n⛔ Not claimed: that any unrecognised merge has occurred in `cloud`. Nobody can currently know either way, and that is the finding.\n\n## Same class as the four cards graded in R+34\n\n**An instrument that structurally cannot fail in the direction it exists to detect** — objectstack#13293 · #13304 · #13305 · #13306. This one is the sharpest instance yet because the instrument is the *governance* audit itself, and because the false green is now **permanent** rather than situational.\n\n⚠️ It also reproduces #13305's exact shape one level up: that card is about a control reading a **working-tree** enumeration while believing it read `origin/main`. This one reads a **local clone** while believing it read the remote.\n\n## What a fix owes\n\n1. **Reachability must be a measured precondition, not an assumption.** Before auditing a repo, establish the remote is reachable (e.g. `git ls-remote --exit-code origin` or the API's own resolution). ⛔ A local tip is not evidence the remote was consulted.\n2. **An unreachable repo must print `NOT MEASURED` and exit non-zero for that row** — never `✓ audited … 0 in window`. The distinction between *\"I looked and found nothing\"* and *\"I could not look\"* is the entire value of the control.\n3. **Staleness must be bounded and printed.** The row already knows its tip's date; it should refuse (not warn) when that tip is older than the window it claims to cover.\n4. ⛔ **Do not \"fix\" this by dropping `cloud` from the governed-repo list.** That converts a loud hole into a silent one. Whether `cloud` is still in scope is a maintainer question (see below), and the audit should say `NOT MEASURED` until it is answered either way.\n\n### Non-vacuity control the PR must carry\n\n⛔ A run on today's tree is not acceptance — the tree currently has exactly one unreachable repo, so a fix could pass by hard-coding. The PR must demonstrate:\n\n- an unreachable repo ⇒ `NOT MEASURED` + non-zero (the `cloud` case, live);\n- a reachable repo with zero governed merges ⇒ `✓ … 0 in window` (must still be possible to say a true zero — `objectos` is the live case);\n- a reachable repo with a governed merge ⇒ it is reported (`objectui` PR #6449 is in the current window).\n\nThree legs, because a fix that turns every zero into `NOT MEASURED` is as useless as the current one.\n\n## Adjacent, and needs a maintainer answer rather than a patch\n\n⚠️ **Is `objectstack-ai/cloud` still part of this platform?** The audit lists it as one of four governed repos; the fleet can no longer see it. If the removal was deliberate, several things follow (`repo:cloud` cards #11977 / #11225 have unlock paths through an unreachable repo; #13272's executor precondition is unsatisfiable — flagged there separately). If it was accidental, it is a permissions regression. ⛔ Triage does not decide this; recording that the audit cannot proceed honestly until it is decided.\n\n## Re-check\n\n```\nnode scripts/pm/check-governed-merges.mjs --since-ref objectstack=3322527faa07 \\\n  --since-ref objectui=26896c689512 --since-ref cloud=15f55df2d636 --since-ref objectos=09a0dd947c43\ngit -C /home/user/cloud fetch origin main   # expect: fatal: repository ... not found\n```"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 11995,
+  "kind": "issue",
+  "title": "docs-drift: bounded history sweep over the 91 enumeration-carrying pages — measure the real rate of uncaught vocabulary widenings (#11817 ruling)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T04:11:09Z",
+  "updated_at": "2026-08-31T08:12:38Z",
+  "closed_at": "2026-08-31T08:12:38Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11995",
+  "body": "Chartered in #11817's ruling (maintainer, 2026-08-25, verbatim 「其他接受」 accepting the bounded-middle recommendation; full record = #11817 comment 5404972937). Filed by PM session `session_01KWRU3s15AJz7PGW7a7wdCh` per the confirmed checklist.\n\n**Content**: sweep the history of the 91 enumeration-carrying doc pages (#11817 measured 447 enumeration cells / 1363 distinct enumerated spans) for past instances of the class: *an enumerable vocabulary widened in code while the page enumerating it was not updated, and docs-drift stayed green*. Bound the sweep (page set is fixed; pick a defensible history window and state it). Report **identities, not counts** — each instance names the commit/PR, the page, and the missing members.\n\n**Instrument discipline**: positive control first — the method must find the one known instance (#11347's formula-function widening, reproduced byte-for-byte on #11817) before any zero elsewhere is believed.\n\n**Decision rule (pre-ruled on #11817 — ⛔ not re-litigable here)**:\n- **≥2 real instances** (the known #11347 one counts as the first) → file a NEW decision card carrying the measured rate; option C (the authored-enumeration regime on the 91 pages) is decided there, on data.\n- **0–1 instances** → B (the verdict narrowing, separately dispatched behind PR #11798) is the end state; C is not built; close this card with the measurement as the record.\n\n**Acceptance criterion**: a posted sweep record with the window, the method, the positive-control result, and every instance identified — or a defended zero."
+}

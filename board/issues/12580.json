@@ -1,0 +1,34 @@
+{
+  "number": 12580,
+  "kind": "issue",
+  "title": "Reading needed from hotcrm: do any of the 16 inline `record_header` ActionDefs carry page-level customization an id-resolved action cannot express? (gates objectui#6252)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "repo:hotcrm"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T12:01:23Z",
+  "updated_at": "2026-09-01T00:34:25Z",
+  "closed_at": "2026-09-01T00:34:25Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12580",
+  "body": "Filed **unlabelled** by the `domain:ui` execution seat @ objectui (session `session_011SfZeFWrhGLHmfq61xbz4q`). Routing, `domain:*`, `type` and grading are triage's to produce — this seat does not apply them. Suggested routing is at the bottom.\n\n## What is needed\n\nOne measurement, in `objectstack-ai/hotcrm`, and the answer is the whole deliverable — no code.\n\n**objectui#6252** implements the objectstack#11592 ruling (maintainer, 2026-08-25, verbatim 「全部同意」 on recommendation B). That card's own Step 1 is a gate, in its words:\n\n> **Step 1 — the equivalence measurement, and it gates the rest**: compare the exemplar's 16 inline ActionDef objects (hotcrm, 4 record pages, all `locations: ['record_header', …]`) against their object-level registered actions. If any inline def carries page-level customization an id-resolved action cannot express, ⛔ stop and report back to objectstack#11592 — that evidence reopens the ruling; do not silently absorb it with an override semantic.\n\nSo the question is precisely:\n\n> For each of the 16 inline ActionDef objects across hotcrm's 4 record pages that declare `locations: ['record_header', …]` — is every one of them expressible as a reference to the object's own registered action of the same id, with no page-level customization lost?\n\nA **yes** unblocks objectui#6252 to implement. A **no**, with the specific def and the specific property that cannot survive id resolution, is **evidence that reopens the objectstack#11592 ruling** — which is a more valuable answer than a yes, and must go back to that issue rather than being worked around.\n\n## Why this seat cannot answer it\n\n`objectstack-ai/hotcrm` is not reachable from this session. Measured rather than assumed: unauthenticated REST returns **HTTP 403** for it, against a **HTTP 200** control on `objectstack-ai/objectui` in the same call, and the session's repository listing returns no match for it. This seat is therefore recording the question instead of guessing at it — a repo it cannot read is not a repo it has read and found clean.\n\n## Ready-to-run commands for whoever holds hotcrm\n\nRun these at that repo's root and paste the output back here; that is the entire ask.\n\n```\ngrep -rln \"record_header\" --include=*.ts --include=*.tsx --include=*.json .\n```\n\nThen, for each record page that matches, the two halves to compare:\n\n```\ngrep -n -A20 \"locations\" <each matching file>\n```\n\nand the object-level registered actions for the same objects, so each inline def can be lined up against the registered action carrying its id. What matters per def: whether `label`, `variant`, `icon`, `order`, `visible`, `requiredPermissions` or any handler/body differs from the registered action, or exists only inline.\n\n## Waiting state\n\nobjectui#6252 is being moved to `pm:blocked` with `Blocked-by:` pointing at this issue in the same write, so its queue label stops claiming it is dispatchable. It will return to the queue when this is answered.\n\n## Suggested routing (triage's call, not this seat's)\n\nThe hotcrm lane holds the repo. If a seam card is preferred because the target repo is unreachable from most seats, this issue is already in `objectstack` and needs only the `repo:*` routing plus a named reader."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 13994,
+  "kind": "issue",
+  "title": "rest-server: the import-job DTO serves `\"Sun Aug 30 2026 … GMT+0800 (China Standard Time)\"` for four timestamp fields on Postgres/MySQL — `String()` over a `Date`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T22:43:34Z",
+  "updated_at": "2026-09-01T05:04:04Z",
+  "closed_at": "2026-09-01T05:02:25Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13994",
+  "body": "Found by the driver-materialisation consumer census on #13973 (class (c) — genuinely wrong on one side). That sweep is not addressed by this card and does not close it.\n\n## The site\n\n`packages/rest/src/rest-server.ts:515-538`, `importJobToProgress(row)` — the mapper behind the import-job progress and summary REST responses:\n\n```ts\n...(row?.reverted_at   ? { revertedAt:  String(row.reverted_at) }   : {}),   // :520\n...(row?.started_at    ? { startedAt:   String(row.started_at) }    : {}),   // :533\n...(row?.completed_at  ? { completedAt: String(row.completed_at) }  : {}),   // :534\ncreatedAt: String(row?.created_at ?? ''),                                    // :536\n```\n\n`row` is a `sys_import_job` record read through the engine's record read door.\n\n## Why it is wrong on the production default driver\n\nThis site is unusual in the census in that it covers **both halves** of #13973's value enumeration at once:\n\n- `created_at` is a **builtin audit column** — not in `datetimeFields`, repaired by `formatOutput` only inside `if (this.isSqlite)`.\n- `started_at`, `completed_at` and `reverted_at` are declared **`Field.datetime`** (`packages/platform-objects/src/audit/sys-import-job.object.ts:85,93,94`) — `formatOutput` runs `normalizeSqliteDatetimeOutput` over `datetimeFields` **only** inside the same `if (this.isSqlite)` arm.\n\nSo on Postgres and MySQL all four arrive as JS `Date`s and `String()` renders the `Date.prototype.toString` form — **whole seconds, process timezone baked in, no `Z`**:\n\n```\nSun Aug 30 2026 18:19:25 GMT+0800 (China Standard Time)     <- what the API serves on PG/MySQL\n2026-08-30T10:19:25.947Z                                     <- what it serves on SQLite\n```\n\nMilliseconds are dropped and the value is not `Date.parse`-safe for any client doing strict ISO parsing. This is the identical mechanism that made the OCC seam a production bug (#13382), applied to a wire contract instead of a comparison.\n\nNote `JSON.stringify` would have made this correct on its own — a bare `Date` in a response body serialises via `toJSON()` to canonical ISO-Z. The explicit `String()` is what breaks it.\n\n## Why this is not a `??` fallback\n\nPer #13973's standing prohibition: which side owes the canonical spelling is the question. Two shapes:\n\n- **A — spell the repair at the mapper**, the shape this repo already uses one file over in `packages/metadata-protocol/src/protocol.ts:7710-7715`, which is class (a) precisely because it handles both:\n  ```ts\n  typeof r.occurred_at === 'string' ? r.occurred_at\n    : r.occurred_at instanceof Date ? r.occurred_at.toISOString()\n    : String(r.occurred_at ?? '')\n  ```\n- **B — normalise at the producer** (one presented shape per dialect at the read door). Fixes every sibling site at once but reverses a deliberate driver decision (`withPostgresCalendarDayAsText`) — a maintainer call, not an implementer's.\n\n## Re-run\n\n```\nrg -n 'String\\(row\\??\\.?(created_at|started_at|completed_at|reverted_at)' packages/rest/src/\n```\n\nBacklink: #13973 (census), #13382 (the OCC seam, the same shape). Neither is addressed here."
+}

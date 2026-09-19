@@ -1,0 +1,37 @@
+{
+  "number": 13408,
+  "kind": "issue",
+  "title": "availability: a datasource whose driver fails to start pins /api/v1/ready to 503 cluster-wide and is not evicted on delete — one bad tenant datasource drains every LB upstream",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T09:56:43Z",
+  "updated_at": "2026-08-31T11:54:11Z",
+  "closed_at": "2026-08-31T11:54:11Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13408",
+  "body": "On a multi-node deployment, a single datasource whose driver fails to start (here: a mongo datasource that the tenant-isolation gate refuses to boot) leaves the data-engine driver registry holding a **stuck** driver instance. `/api/v1/ready` pings all registered datasources, so it returns **503 on every replica** (`{\"code\":\"SERVICE_UNAVAILABLE\",\"message\":\"Data driver unavailable\",\"details\":{\"drivers\":[\"<name>\"]}}`) — which, behind a readiness-checked load balancer (Traefik here), **drains every upstream and takes the whole deployment offline**, even though Postgres and the app itself are healthy (`/api/v1/health` 200, direct data reads work).\n\nThe failure is not self-healing and, critically, **`DELETE` of the datasource does not clear it**:\n\n- After `DELETE /api/v1/datasources/:name`, the admin-door list is empty on every replica, but `/api/v1/ready` still names the datasource's driver and stays 503. The stuck driver instance lives in the in-memory data-engine driver registry, which the delete path does not evict.\n- Only a process restart clears it. On a shared/HA cluster that is a heavy hammer for what began as one misconfigured tenant datasource.\n\n## Reproduction\n\n1. `POST /api/v1/datasources` a datasource whose driver cannot start (e.g. a mongo datasource under a tenancy posture its driver refuses) — accepted (`201`), driver fails to start.\n2. `GET /api/v1/ready` on any replica → `503`, `details.drivers` names it. Behind Traefik/K8s readiness, all upstreams drain → outage.\n3. `DELETE /api/v1/datasources/:name` → admin list empty, but `/ready` still `503` naming the same driver. No API door evicts the engine-registry entry; restart required.\n\n## Why this matters for the readiness contract\n\n`/ready` correctly drains a replica whose data driver stops answering (that is its job — see #3756, where the opposite gap, `/ready` NOT seeing a dropped driver, was the bug). But a **registered-but-unstartable** datasource makes the probe fail *permanently and cluster-wide*, and there is no non-restart recovery because delete doesn't evict. Two questions for the fix:\n\n1. Should a single tenant/optional datasource's start failure fail the **whole-node** readiness probe, or should `/ready` distinguish the primary/default datasource (whose absence should drain) from an optional/secondary one (whose failure should be surfaced without draining the node)?\n2. `DELETE` (and a failed start) must evict the engine driver registry entry so the probe recovers without a restart — same shape as the delete-doesn't-evict-meta-registry cleanup gap noted on the datasource security card (#13405).\n\nObserved and recovered (by restart) during a full checklist run on a live 3-replica EE deployment.\n\nQA-source: #13404 · integration-system (observed during run; not a single-item clause)"
+}

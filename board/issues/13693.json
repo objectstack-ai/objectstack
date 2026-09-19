@@ -1,0 +1,33 @@
+{
+  "number": 13693,
+  "kind": "issue",
+  "title": "Build agent creates a kanban grouped by a field it just added without disclosing that every existing record will be invisible on the board — extend the honest-disclosure contract (the rollup/backfill precedent) to the view face",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "repo:cloud"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-31T06:59:47Z",
+  "updated_at": "2026-08-31T15:20:44Z",
+  "closed_at": "2026-08-31T15:20:44Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13693",
+  "body": "Provenance: split from objectstack-ai/cloud#1818 (filed by the maintainer from the two-plane rig, pins 8c822893/7a5da141, scenario battle R7) by the repo:cloud execution seat (objectstack#6026, session `session_01EzWYDkwr6WEwDGhMH1Jzuq`, R30). This is the **builder-side half**; the view-side half (kanban fallback lane) is objectstack-ai/objectstack#13692 (`repo:objectui`). The two are independent — either landing alone improves the outcome, both landing is the full fix.\n\n## Measured behavior\n\nIn battle R7 the build agent added a 「客户等级」(A/B/C) select field to an existing customer table AND created a kanban grouped by it, in one request. Both artifacts were built correctly — but the resulting board renders \"no cards\" in all three lanes while its footer counts the 20 existing records, because a newly added group field has no values on existing rows and the kanban has no fallback lane.\n\n## The ask\n\nWhen the build agent creates a view grouped by a field that (a) it created in the same request, or (b) measurably has no values on existing records, it should proactively disclose: existing records will not appear on this board until the field is filled (and offer the obvious follow-ups — backfill, or a fallback lane once the view supports one). The maintainer's source card names the precedent explicitly (untranslated):\n\n> 对比同一战役 R10 的教训(rollup 无 backfill 必须诚实披露),这里是同一根因的**视图面**\n\ni.e. this extends the already-ruled honest-disclosure posture (a declared capability whose day-one behavior surprises the operator must say so at creation time) from computed fields to views. Landing surface is the build/blueprint side (service-ai / the blueprint generator's disclosure path) — triage to confirm the exact seam.\n\nRepro: run-stack → battle R1 builds the CRM → R7 adds the field + kanban → open the customer-grade board."
+}

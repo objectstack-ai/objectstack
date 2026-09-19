@@ -1,0 +1,36 @@
+{
+  "number": 13334,
+  "kind": "issue",
+  "title": "[finding] 10 spec modules put a doc block inside their import list where no mechanical signal says whether it is a module header — 8 of them publish a schema's doc",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-30T03:51:28Z",
+  "updated_at": "2026-09-01T03:16:44Z",
+  "closed_at": "2026-09-01T02:42:31Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13334",
+  "body": "Residue recorded while landing the selection-rule fix for #13263. Filed unassigned; the reading below is complete and was done module by module, so what is left is a route choice, not a measurement.\n\n## What #13263's fix closed, and what it could not\n\n`packages/spec/scripts/lib/file-description.ts` now refuses a doc block that sits **inside** the import block when a declaration is reachable across nothing but blank lines and import / re-export lines. That case is decidable because it has a known cause: `scripts/lazify-schemas.ts` injects `import { lazySchema } from '…/shared/lazy-schema';` at the end of the file's leading run of comments, blank lines and imports, and the regex it uses for that run counts a doc block among the comments — so a block written directly above a declaration came out of the codemod with an import wedged between the two. 35 sources were repaired that way.\n\nWhat the fix deliberately leaves alone is the block that sits inside the import list with a **comment** on the far side — a section banner, or the next schema's own JSDoc. There the codemod's insertion point says nothing, because the block was not sitting against the declaration beforehand either.\n\n## The reading — 10 modules, measured on `main` after #13262 landed\n\nSame walk as the fix uses. Verdict per module is from reading the prose, not from a pattern:\n\n| module | selected block opens with | verdict |\n|:---|:---|:---|\n| `ai/agent.zod.ts:9` | `AI Model Configuration` | documents `AIModelConfigSchema` (line 27) |\n| `data/datasource.zod.ts:5` | `Driver Identifier` | documents the driver-id schema below it |\n| `data/hook.zod.ts:6` | `Hook Lifecycle Events` | documents `HookEvent` (line 106) |\n| `security/permission.zod.ts:10` | `Entity (Object) Level Permissions` | documents the object-permission family |\n| `ui/action.zod.ts:27` | `Action Parameter Schema` | documents `ActionParamSchema` (line 170) |\n| `ui/app.zod.ts:10` | `Base Navigation Item Schema` | documents `BaseNavItemSchema` (line 295) |\n| `ui/component.zod.ts:213` | `Empty Properties Schema` | documents the `EmptyProps` factory |\n| `ui/page.zod.ts:22` | `Page Region Schema` | documents `PageRegionSchema` (line 42) |\n| `shared/mapping.zod.ts:6` | `Base Field Mapping Protocol` | **genuine module header** — its own text says \"This module provides the canonical field mapping schema used across ObjectStack\" |\n| `system/cache.zod.ts:6` | `Application-Level Cache Protocol` | **genuine module header** — its own text says \"Application Cache (`system/cache.zod.ts`) - This File\" |\n\nSo 8 published reference pages, and 8 pointer rows in the published skill indexes, still open with one schema's comment.\n\n## Why no cleverer detector fixes this\n\nThe two genuine headers and the eight symbol docs are **structurally identical**: block inside the import list, a comment between the block and the next declaration. Every positional signal was measured and separates nothing —\n\n- **Line number**: `system/cache` and `shared/mapping` both start at line 6; so do four of the repaired sources and `data/hook`.\n- **Imports before the block**: 2 for both genuine headers; 2 for `data/hook`, 5 for `ai/agent`, 14 for `ui/action`.\n- **Block length**: `system/cache` is 24 lines, `ui/action` is 34.\n- **Whether the next declaration has its own JSDoc**: true for both genuine headers and for six of the eight.\n\nOnly the prose differs. A first-sentence pattern check is the approach `file-description.ts`'s own header rejects, with the measurement behind the rejection.\n\n## The two routes, both of which need a decision this card does not make\n\n1. **An explicit `@module` marker, scoped to the ambiguous position.** Select a block sitting inside the import list only when it carries `@module`. Cost is a one-line edit on the **2** genuine headers, not on the ~180 sources a corpus-wide marker requirement would touch, and it makes the whole class impossible rather than smaller. It does edit `packages/spec/src/**/*.zod.ts`, which the #13263 dispatch fenced off.\n2. **A corpus pass over the 8.** Move each injected import up into the import block, or write a real module header. This also repairs editor hover, which is broken today for every one of the eight: the doc block is attached to the import, so hovering `PageRegionSchema` shows nothing. That makes it a source defect in its own right, independent of the docs generator.\n\nThey compose — 1 is the gate, 2 is the corpus — and 宁可缺, 不要错 argues 1 should land first, since without it the eight pages keep lying whenever a source drifts back.\n\n⛔ Not a re-opening of #13263: that card's fix is landed and its own corpus limb keeps the decidable class closed."
+}

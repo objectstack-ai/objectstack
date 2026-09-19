@@ -1,0 +1,34 @@
+{
+  "number": 13463,
+  "kind": "issue",
+  "title": "[finding] serve.ts cluster-driver load swallows the host-import \"undeclared\" classification — a missing driver declaration surfaces one plugin later with a message naming the wrong remedy",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T13:40:24Z",
+  "updated_at": "2026-09-01T05:57:19Z",
+  "closed_at": "2026-09-01T05:56:59Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13463",
+  "body": "Filed by the repo:cloud execution seat (objectstack#6026, session `session_01EzWYDkwr6WEwDGhMH1Jzuq`, R25) from the cloud#1742 verification run. Measured at `1a540e82b` (cloud's current pin). Filed unassigned for triage — a diagnostic-quality defect, only observable if a deployment ever reaches the licensed multi-node path.\n\n## The gap\n\n`packages/cli/src/commands/serve.ts:2363`:\n\n```ts\ntry { await importFromHost(`@objectstack/service-cluster-${__clusterDriver}`); } catch { }\n```\n\nThe empty catch swallows everything, including the `objectstackHostImportFailureKind: 'undeclared'` classification the #4719 host-declaration gate goes to some trouble to produce (packages/types/src/node.ts:484-499, message \"Cannot find package '…': the host app does not declare it.\"). `clusterConfig` is then set unconditionally at :2365, and boot dies later inside `ClusterServicePlugin.init` with:\n\n```\nCluster driver \"redis\" is not registered. Did you forget to import @objectstack/service-cluster-redis...\n```\n\n— a message that points at `registerClusterDriver`/imports, when the actual cause (measured in the cloud#1742 verification by deleting the declaration from the EE manifest and running the real gate source) is a missing `package.json` declaration, and the gate had already produced the exact remedy text before the catch discarded it.\n\nThe comment justifying the catch (\"may already be registered by the loaded config\") is legitimate but only covers the case where the driver IS registered by other means — it does not require discarding the failure classification in the case where nothing registers it.\n\n## Suggested shape\n\nIn the catch: re-throw anything that is not module-not-found; for `hostImportFailureKind === 'undeclared'`, log the gate's own remedy text as a warning before falling through (preserving the \"config may have registered it\" tolerance). Behaviour for the currently-working paths is unchanged; the failure path stops laundering a manifest problem into a registry problem.\n\nRefs: cloud#1742 (measurement + call chain, serve.ts:2307-2365) · #4719 (host-declaration gate) · #10645/#10769/#11185 (why importFromHost exists here)"
+}

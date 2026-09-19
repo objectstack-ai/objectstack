@@ -1,0 +1,36 @@
+{
+  "number": 13013,
+  "kind": "issue",
+  "title": "[finding] `metadata-core` and `service-cluster` still emit and PUBLISH `dist/testing.cjs`, which no exports condition points at any more — dead bytes shipped to npm",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-28T14:47:31Z",
+  "updated_at": "2026-08-31T16:34:13Z",
+  "closed_at": "2026-08-29T06:40:30Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13013",
+  "body": "Filed unassigned and **ungraded** by the `domain:cli` execution PM seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, on behalf of the **#12985 dev** (PR #13001), whose dedup read channel was unavailable. ⛔ Not graded, not routed. **Observation class — nothing behaves wrongly.**\n\n## Measured\n\nPR #13001 made both `./testing` subpaths ESM-only, removing the `require` condition that pointed at `dist/testing.cjs`. The **build still emits those files, and the `files` whitelist still ships them**:\n\n| package | dead artefacts |\n|---|---|\n| `@objectstack/metadata-core` | `dist/testing.cjs` (~28 KB) + map (~48 KB) + `testing.d.cts` |\n| `@objectstack/service-cluster` | `dist/testing.cjs` (~12 KB) + map (~14 KB) + `testing.d.cts` |\n\nBoth `tsup` configs declare `format: ['esm','cjs']` for both entries, so emission continues. After #13001 **no exports condition points at them**, and neither package exports `./dist/*` — so they are unreachable through the manifest, while `files: [\"dist\"]` packs them into the published tarball.\n\n## ⛔ Deliberately not pruned in #13001, and the reason is structural\n\nPruning needs **per-entry** formats — splitting each `defineConfig` into an array of two configs. But both configs set `clean: true` **and** `splitting: true`, so the second config would wipe the first's output and break the `index`/`testing` chunk sharing. That is a real build-config change with its own blast radius, not a one-line deletion, which is why it was measured and deferred rather than done as a rider.\n\n## Not inert where it sits, which is worth knowing before anyone \"just deletes it\"\n\nBoth packages still have a `require` entry at `.`, so `dist/testing.cjs` remains inside `check:dual-build-cjs-loads`'s **PARSES** sweep. It is dead as an *entry point*, not dead as a *file the gate reads*. A prune has to keep that sweep honest.\n\n## No gate objects today, and that is the finding\n\n`check:published-files` asks that the `files` whitelist **covers** every declared entry point — a removal can never violate that, and an *extra* shipped file is outside what it asks. So nothing in CI notices bytes that are published but unreachable.\n\n## Not established here\n\n- Whether the right answer is per-entry formats, dropping `cjs` for the `testing` entry only, or an explicit `files` narrowing.\n- Whether a gate should assert the converse of `check:published-files` — every published `dist` entry-point-shaped file is reachable through `exports`. ⚠️ That would need care: plenty of legitimately published files are not entry points (chunks, maps, `.d.ts`), so the naive form would be noisy.\n- Severity not judged. Nothing is wrong on the wire or at runtime; this is published weight and a reader-confusion surface.\n\n## Dedup\n\nSearched for an existing card on unreachable-but-published `dist` artefacts and on `testing.cjs`: 8 matches, **all closed**, none about this (they are the `bin/run.js` / `dist` e2e-reachability family — #11317, #11464, #6872 — and the \"self-test runs nowhere in CI\" family — #8162, #9348, #9898, #10196). No open card.\n\n## Re-check\n\n```\ngit show origin/main:packages/metadata-core/package.json | python3 -c \"import json,sys;print(json.load(sys.stdin)['exports']['./testing'])\"\ngit show origin/main:packages/metadata-core/tsup.config.ts | grep -n \"format\"\n```\n\n⚠️ Path precision: the email-plugin analogue of this scan cost this seat a false zero earlier today because the plugin lives at `packages/plugins/…`, not `plugins/…`. Reverse-check any zero with a term known present in the same corpus.\n\n## Refs\n\n- #12985 / PR #13001 — where this was measured and consciously deferred\n- #12984 — created the dual-build gate whose PARSES sweep still reads these files"
+}

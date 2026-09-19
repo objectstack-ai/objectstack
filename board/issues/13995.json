@@ -1,0 +1,36 @@
+{
+  "number": 13995,
+  "kind": "issue",
+  "title": "metadata-protocol: the package commit timeline sorts by weekday NAME on Postgres/MySQL — `rollbackToPackageCommit` therefore plans the wrong set of reverts",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p1"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-31T22:43:53Z",
+  "updated_at": "2026-09-01T05:04:03Z",
+  "closed_at": "2026-09-01T05:02:25Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13995",
+  "body": "Found by the driver-materialisation consumer census on #13973 (class (c) — genuinely wrong on one side). That sweep is not addressed by this card and does not close it.\n\n## The two sites, one root cause\n\n`packages/metadata-protocol/src/protocol.ts`.\n\n**1. `listCommits` ordering — line 18262:**\n\n```ts\n// Newest-first; tolerate drivers that don't order by returning\n// insertion order, then sort by the ISO timestamp.\nmapped.sort((a, b) => String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? '')));\n```\n\nThe comment states the assumption in as many words: *\"sort by the ISO timestamp\"*. `createdAt` is `r.created_at` off `this.engine.find('sys_metadata_commit', …)` — a record read door.\n\n**2. `rollbackToPackageCommit` planning — lines 18843-18845:**\n\n```ts\nconst targetCreatedAt = String(target.created_at ?? '');\nconst toRevert = all.filter(\n  (c) => String(c.createdAt ?? '') > targetCreatedAt && c.operation === 'apply',\n);\n```\n\nLexicographic `>` over the same values, to decide **which commits get reverted**.\n\n## Why it is wrong on the production default driver\n\n`created_at` is a builtin audit column: not in `datetimeFields`, and `SqlDriver#formatOutput` repairs it only inside `if (this.isSqlite)`. Pinned in `packages/drivers/driver-sql/src/sql-driver-13567-audit-stamp-materialisation.test.ts` — the live dialects hand it out of the record read door as a JS `Date`, SQLite as canonical ISO-Z text.\n\nSo on Postgres/MySQL both sites compare strings of the form\n\n```\nSun Aug 30 2026 18:19:25 GMT+0800 (China Standard Time)\nMon Aug 31 2026 09:02:11 GMT+0800 (China Standard Time)\n```\n\nwhose leading token is the **weekday name**. Lexicographic order over that set is `Fri < Mon < Sat < Sun < Thu < Tue < Wed` — unrelated to chronology, and stable across the whole file, so the failure is systematic rather than intermittent.\n\nConsequences:\n\n- `listCommits` returns the package timeline in an arbitrary weekday-name order while claiming newest-first.\n- `rollbackToPackageCommit` consumes that ordering **and** re-derives the same comparison itself, so it reverts a set of `apply` commits chosen by weekday name: commits older than the target get reverted, commits newer than it get skipped. That is a destructive operation planning off a wrong predicate.\n\nOn SQLite both sides are canonical ISO-Z text, lexicographic order equals chronological order, and both sites are correct. Every test they have drives SQLite or memory.\n\n## Why this is not a `??` fallback\n\nPer #13973's standing prohibition, the question is which side owes the canonical spelling:\n\n- **A — compare instants at the consumer**, the shape #13382 landed one file over for the OCC seam (`canonicalVersionInstant` / `versionTokensAgree`). Local, and this file already has the helper.\n- **B — normalise at the producer** so the read door presents one shape per dialect. Fixes every sibling but reverses a deliberate driver decision (`withPostgresCalendarDayAsText`) — a maintainer call.\n\nA regression pin needs a `Date` on the read side. `@objectstack/metadata-protocol` has no driver dependency and must not grow one (the layering runs the other way), so the pin drives a hand-made `Date` here — the same split `sql-driver-13567-audit-stamp-materialisation.test.ts` documents for the OCC seam.\n\n## Re-run\n\n```\nrg -n 'String\\((b?\\.)?(target\\.)?created_?[Aa]t' packages/metadata-protocol/src/protocol.ts\n```\n\nBacklink: #13973 (census), #13382 (the OCC seam, the same shape, same file). Neither is addressed here."
+}

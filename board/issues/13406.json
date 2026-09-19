@@ -1,0 +1,37 @@
+{
+  "number": 13406,
+  "kind": "issue",
+  "title": "rest/meta: org-scoped metadata READ routes (/history, /diff, single-item dashboard overlay) read env-wide under isolated multi-org — the session org is not forwarded",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T09:56:03Z",
+  "updated_at": "2026-08-31T13:11:49Z",
+  "closed_at": "2026-08-31T13:11:49Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13406",
+  "body": "On a single-DB multi-org deployment (`OS_TENANCY_POSTURE=isolated`), overlay-type metadata authored **org-scoped** is under-served by several REST read doors because those routes do not forward the caller's session org — `organizationId` defaults to `null`, so the read resolves at env scope and misses the org row. Sibling doors (`/audit`, single-item `view` overlay read, `rollback`) ARE org-aware, so this is an inconsistency, not a global posture gap. **No cross-org leak** — the caller's OWN org data is under-served.\n\nConfirmed by two independent agents (original run + a dedicated rule-7 verify-pass), each authoring its own org-scoped overlays and confirming the pg rows exist before hitting the read door.\n\n## Symptoms (all reproduced ×2, active org = a real org, rows pg-verified)\n\n**1. `GET /api/v1/meta/:type/:name/history` → `{events:[]}`** while `sys_metadata_history` holds the org-scoped rows.\n- Repro: author a dashboard org-scoped, publish it twice → pg `sys_metadata_history` has 4 rows (create + publish ×2), all `organization_id=<org>`. `GET …/history` returns `{events:[]}`. Sibling `GET …/audit` returns the 4 org-scoped events. Exact asymmetry.\n- Root (confirmed in source): `rest-server.ts:5755` calls `historyMetaItem({type,name,…environmentId…})` with **no** `organizationId`; `protocol.ts:14601` does `const orgId = request.organizationId ?? null` → reads env scope (`14606`), finding nothing. The `/audit` route (`rest-server.ts:5876`) passes `organizationId: ctx?.tenantId ?? null`.\n\n**2. `GET /api/v1/meta/:type/:name/diff` cannot resolve org-scoped versions.**\n- Repro: `diff?from=1&to=2` between two org-scoped revisions (rev1 `Users` w3 vs rev2 `Users v2` w6) → `{fromVersion:1,toVersion:2,added:[],removed:[],changed:[]}`; no-params → `{fromVersion:null,toVersion:null,…}`.\n- Root: `diffMetaItem` (`protocol.ts:18484`) carries the identical `orgId = request.organizationId ?? null`; the route (`rest-server.ts:6202`) omits org.\n\n**3. Single-item `GET /api/v1/meta/dashboard/<name>` ignores an org-scoped overlay — kind asymmetry vs `view`.**\n- Repro: author an org-scoped overlay on packaged dashboard `system_overview` (widget0 title → sentinel): `PUT` 200, pg shows the org-scoped active row with the new title — but `GET /meta/dashboard/system_overview` (and the list read) serve the base title. The same shape on a packaged **view** (`GET /meta/view/<name>`) DOES serve the overlay. Same org, both rows in pg; the dashboard single-item read does not merge the org overlay, the view read does.\n\n## Fix direction\n\nThread the session org into the read path for `history`, `diff`, and the single-item overlay-merge read (dashboard and any other overlay kind that resolves like it), mirroring how `/audit`, single-item `view`, and `rollback` already resolve `ctx.tenantId`. Prior art in the same family (metadata route org-scoping, all closed): #10340, #10503, #6780.\n\nDiscovered on a live multi-node EE deployment; `getViewsByObject`'s object-scoped omission looked related at first but is a distinct, org-independent container-expansion gap — filed separately.\n\nQA-source: #13404 · studio-authoring.draft-publish-lifecycle · history,diff\nQA-source: #13404 · studio-authoring.packaged-display-class-direct-edit · dashboard-overlay"
+}

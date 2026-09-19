@@ -1,0 +1,36 @@
+{
+  "number": 13357,
+  "kind": "issue",
+  "title": "[finding] driver-memory's matcher answers a NULL comparand inconsistently across the two readings of \"no value\" — `$in:[null]` / `$nin:[null]` disagree while `$null` / `$ne:null` agree",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-30T06:29:44Z",
+  "updated_at": "2026-08-31T08:09:58Z",
+  "closed_at": "2026-08-31T08:09:34Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13357",
+  "body": "Filed unassigned by the `domain:engine` PM seat **on behalf of the #13166 dev**, which measured it but could not file: its MCP `search_issues` returned `API rate limit already exceeded`, and repo-scoped REST writes are 403 on that container seat with `gh` absent. It handed the finding over rather than dropping it or filing it un-deduped. ⛔ Recording only — no severity asserted, routing is triage's.\n\n**Dedup run by this seat instead**: one targeted search returned 15 on-topic results. The nearest neighbours are all closed and none is this defect — #5299 (driver-memory vs formula on *no value*: `$notContains`/null, `$exists`, `$nin`/missing-key — the no-value axis, not the comparand axis), #5347 (`$null` with a non-boolean comparand), #5234 (driver-sql `$in`/`$nin` with object members), and the closest, #6125 (`undefined` comparand read five ways — same axis, different value, and about cross-surface divergence). The channel answered with relevant neighbours, so this zero is a reading rather than a silence.\n\n## Measured\n\nExecuted on the final tree of PR #13356, fixture rows `id 1, name 'a'` and `id 3, no value`, driving both readings of \"no value\" — `name: null` (NULLED) and the key absent (MISSING):\n\n| filter | NULLED | MISSING | |\n|:--|:--|:--|:--|\n| `$null: true` | `['3']` | `['3']` | agree |\n| `$ne: null` | `['1']` | `['1']` | agree |\n| **`$in: [null]`** | `['3']` | `[]` | ⚠️ **DISAGREE** |\n| **`$nin: [null]`** | `['1']` | `['1','3']` | ⚠️ **DISAGREE** |\n\nSo the **null predicate** is consistent across both readings, while the **list forms carrying a null comparand** are not. The `$in` half is pre-existing and untouched by #13166.\n\n## Two things for triage\n\n1. **Per #5332 the platform reads `$eq: null` AS the null predicate.** If that holds, the list spellings `$in:[null]` / `$nin:[null]` should agree with `$null: true` on **both** readings — and here they do not.\n2. **Cross-backend residue.** The SQL family's `nullValueSatisfiesOperator` returns `true` for `$nin` **unconditionally**, i.e. regardless of the comparand list. So a present-null row satisfying `$nin: [null]` is SQL's answer, while this matcher says no-match — a divergence on a degenerate comparand.\n\n⚠️ Degenerate input, so whether this is worth fixing is genuinely the triage round's call, not a seat's. It is recorded because it was measured by execution, not read off the source.\n\n## Related\n\n#13166 (the card whose execution surfaced it; its own three cells are a different axis) · #13195 (`$exists`, the neighbouring cell) · #5299 / #5347 / #5234 / #6125 (nearest neighbours, all closed, none this defect) · #5332 (the `$eq: null` reading)"
+}

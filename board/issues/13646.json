@@ -1,0 +1,36 @@
+{
+  "number": 13646,
+  "kind": "issue",
+  "title": "`content/docs/permissions/system-context.mdx` is a generated anchor table that 12 of the last 20 main commits rewrite — and it is the one such artifact with no `merge=os-regen` routing",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-31T04:55:35Z",
+  "updated_at": "2026-08-31T10:23:09Z",
+  "closed_at": "2026-08-31T09:32:03Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13646",
+  "body": "Measured by the `domain:cli` PM seat while resolving a real conflict on PR #13625. Unlabelled for triage. ⛔ Not a defect in any one PR — a structural one.\n\n## The shape\n\n`content/docs/permissions/system-context.mdx` carries the `check-system-context-census` anchor table: a generated row per elevation read site, each citing a **file and line number**. Any PR that edits a cited file shifts those anchors, the gate goes red, and the PR runs the gate's own prescribed `node scripts/check-system-context-census.mjs --fix` to rewrite them.\n\n⇒ **Every PR that touches a cited file rewrites this table.** Measured on `origin/main`:\n\n```\ngit log --oneline origin/main -20 -- content/docs/permissions/system-context.mdx   →  12\ngit log --oneline origin/main -20                                                  →  20\n```\n\n**12 of 20.** And each rewrite is line numbers only — semantically a recomputation, textually a diff in the same rows.\n\n## Why that is a conflict magnet specifically\n\nTwo concurrent PRs each touch some cited file, each runs `--fix` against **its own** tree, and each writes correct-for-itself line numbers into the same rows. Neither is correct for the merged tree, and git has no basis to pick — so it is a text conflict every time.\n\nObserved live: PR #13625's merge against `origin/main` conflicts in **exactly one file**, this one. Its actual code (`packages/rest/src/rest-server.ts`, +182/−3) auto-merges clean.\n\n```\nCONFLICT (content): Merge conflict in content/docs/permissions/system-context.mdx\nAuto-merging packages/rest/src/rest-server.ts\n```\n\n⚠️ And the conflict is the **benign** outcome. The dangerous one is a pair whose edited rows do not overlap: git merges them with **exit 0 and no markers**, producing a table where one side's line numbers survive against the other side's tree — a table that is internally well-formed, wrong, and quite possibly green, because the gate re-derives from the tree and may simply rewrite it later.\n\n## ⭐ The remedy already exists in this repo, and this file was left out of it\n\n**#4675** — *\"spec 生成物没有 merge driver:两个 PR 各改几行,语义上是集合运算,却每次都打成文本冲突\"* — is **closed**, and its fix is the `merge=os-regen` routing in `.gitattributes`, which hands such paths to `scripts/git-merge-regen.mjs`.\n\nThat routing covers the spec artifacts and `content/docs/references/**`. It does **not** cover `content/docs/permissions/**`:\n\n```\ngrep -n 'merge=os-regen' .gitattributes   →   content/docs/references/**   (and the packages/spec/* set)\n```\n\n⇒ This is the same disease #4675 diagnosed and fixed, on a file the fix never reached. ⚠️ Worth checking as one question rather than one file: **which other generated artifacts are outside the routing?** Fixing only the file that happened to conflict today repeats the omission.\n\n## What a fix has to get right\n\n⛔ **Routing it to `merge=os-regen` may not be sufficient on its own** — that driver is built for the os-regen chain, and this table is produced by a different generator (`check-system-context-census.mjs --fix`). Whether the existing driver can regenerate it, or whether it needs its own, is the real question and is **not** answered here.\n\n⚠️ Also note `scripts/pm/os-regen-merge.sh`'s own warning, which applies to whatever is chosen: paths routed to `merge=os-regen` *\"merge with exit 0 and zero conflict markers while SILENTLY DROPPING one side's changes — only a full regeneration exposes the loss.\"* ⇒ routing without a mandatory post-merge regeneration would trade a loud conflict for a silent one, which is worse than today.\n\n## Related\n\n- **#4675** (closed) — the same disease on spec artifacts; its fix is the routing this file lacks.\n- **#8360** (open, `pm:on-hold`) — `migrations/registry.ts` still text-merges; the acknowledged residue of the same class. This card is a second member of that residue, so the two may be worth ruling together.\n- **#13490** (closed) — a different defect in the same gate's `--fix` (a false POPULATION refusal), useful context on how the regeneration behaves.\n- **PR #13625** — where this was measured; it resolves its own instance by regenerating against the merged tree, ⛔ not by hand-merging the table.\n\n## Cost of leaving it\n\nEvery pair of concurrent PRs touching cited files pays one merge-and-regenerate cycle, and a merge-queue eviction when the collision is discovered late. It also silently penalises the correct behaviour: a PR that *does* run `--fix` becomes conflict-prone, while one that skips it just goes red instead."
+}

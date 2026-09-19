@@ -1,0 +1,36 @@
+{
+  "number": 12326,
+  "kind": "issue",
+  "title": "[finding] docs site: the OG card URL depends on its marker segment containing a DOT — an undocumented coupling between lib/source.ts and proxy.ts",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "repo:objectstack"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T18:10:18Z",
+  "updated_at": "2026-08-31T08:41:38Z",
+  "closed_at": "2026-08-31T08:41:24Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12326",
+  "body": "## What was measured\n\nEvery Open Graph card URL this site emits ends in a marker segment — `/og/docs/<slug...>/image.png` — produced by `getPageImage()` in `apps/docs/lib/source.ts`:\n\n```ts\nconst segments = [...page.slugs, 'image.png'];\n```\n\nThat marker is load-bearing in **two** independent ways, and only the first is discoverable from the code:\n\n1. `app/og/docs/[...slug]/route.tsx` resolves the page with `source.getPage(slug.slice(0, -1))` — the marker is the sacrificial segment that slice discards.\n2. **Its dot is what keeps the URL out of the locale rewriter.** `apps/docs/proxy.ts`'s matcher is `'/((?!api|_next/static|_next/image|favicon.ico|.*\\\\..*).*)'` — it excludes any path containing a dot. A marker without one is rewritten to `/en/og/docs/...`, which is not a route.\n\nMeasured against `next dev` on `main` + PR #12325:\n\n```\n/og/docs/ai/agents            -> 404 text/html   (no dot anywhere in the path)\n/en/og/docs/ai/agents         -> 404 text/html   (where proxy.ts rewrites it to)\n/og/docs/ai/agents/x.png      -> 200 image/png   (marker name is irrelevant)\n/og/docs/ai/agents/image.png  -> 200 image/png\n```\n\nSo the marker's *name* does not matter, but the presence of a final segment **containing a dot** does. Nothing in `lib/source.ts`, `proxy.ts` or the OG route records this. `grep -rn 'image.png' apps/docs` reaches only the one line that writes it.\n\n## Why it matters now and did not before\n\nUntil PR #12325 the cards were generated and referenced by nobody (#12235), so a broken card URL was invisible by construction. That PR makes all 403 of them the `og:image` of a real page. A change to either side of this coupling — renaming the marker to something without a dot, or widening `proxy.ts`'s matcher — now takes the whole card surface to 404 at once, and a 404ing `og:image` is worse than none: crawlers fall back to scraping whatever else the page offers. Neither side's tests or gates would notice; the failure is a 404 on an asset no test fetches.\n\nNote that `proxy.ts` has already been ruled *not* a legitimate surface to widen (recorded on #12233, because widening it would 404 `/llms.txt`, `/llms-full.txt`, `/og/**` and `/docs/**.mdx`). This finding is the same invariant seen from the other end, and it is currently protected only by that ruling living in an issue comment.\n\n## Shape of a fix (not proposed, just scoped)\n\nCheapest honest option is a comment on both sides naming the other. A mechanical option is a gate asserting that the URL `getPageImage()` builds has a final segment containing a dot, and that `proxy.ts`'s matcher still excludes dotted paths — the existing `check:docs-locale-catch-all` already asserts the second half (`dotted paths bypass proxy.ts: true`), so the missing half is the link between the two.\n\n## Source\n\nFallout of a reverse verification run while implementing #12235 (PR #12325), under epic #12243. Filed unassigned and observation-class: this is a missing guard around a currently-correct invariant, not a live defect.\n"
+}

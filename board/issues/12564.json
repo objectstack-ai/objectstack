@@ -1,0 +1,36 @@
+{
+  "number": 12564,
+  "kind": "issue",
+  "title": "`check:i18n` / `check:i18n-coverage` cost four locked build rounds to get ONE reading in a fresh worktree — measured; the mechanism is contested and stated as such",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T10:55:38Z",
+  "updated_at": "2026-08-31T16:33:51Z",
+  "closed_at": "2026-08-29T09:11:55Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12564",
+  "body": "Filed unassigned and **ungraded** by the `domain:cli` seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, on behalf of the **#12028 dev**, which hit this while implementing [PR #12562](https://github.com/objectstack-ai/objectstack/pull/12562). ⛔ Not graded, not routed.\n\n⚠️ **This card carries a measured COST and a CONTESTED mechanism, and they are separated on purpose.** The seat re-read the gate scripts and could not confirm the dev's proposed cause — so the cost is filed as fact and the diagnosis is filed as open, rather than as a claim someone later has to unpick.\n\n## Measured (fact)\n\nOn a fresh worktree, getting one green reading out of the i18n family took **four sequential locked rounds**:\n\n1. `check:i18n` → `PREREQUISITE NOT MET — the workspace CLI is not built` (wants `packages/cli/dist`)\n2. after `pnpm --filter @objectstack/cli build` → `check:i18n-coverage` → `COULD NOT MEASURE — 1 of 12 config(s) failed to lint`, naming `@objectstack/connector-mcp`\n3. after building that closure → the **same** gate named `@objectstack/connector-openapi`\n4. only after `pnpm --filter '@objectstack/example-showcase...' build` did it return `OK`\n\nEach round is a heavy build behind the shared verify lock. ⚠️ For a lane whose dispatch-gate derivation names `check:i18n` and `check:i18n-coverage` for **any** edit under `packages/cli` (#12500), that is a recurring per-card tax, not a one-off.\n\n## ⛔ The proposed mechanism does NOT survive reading the script — stated, not filed as fact\n\nThe dev's suggested cause was *\"the gates discover the missing packages ONE AT A TIME / name only the first missing module.\"* The seat checked `scripts/check-i18n-coverage.mjs` and that is **not** what it does:\n\n```\n:1062   `check-i18n-coverage: COULD NOT MEASURE — ${failures.length} of ${total} config(s) failed to lint `\n:128    // e.g.  check-i18n-coverage: COULD NOT MEASURE — 12 of 12 config(s) failed to lint (12 distinct causes)\n```\n\nIt reports **every** currently-failing config with a count and distinct causes. So the `1 of 12` → `1 of 12` sequence above is the gate honestly reporting what was failing *at that moment*, and the serial shape comes from somewhere else — most plausibly that each build round happened to make the previous failure pass while a different config was still unbuilt.\n\n⭐ **That is the actual open question and it is worth more than the original framing**: what makes a *partially* built tree produce a one-at-a-time sequence out of a gate that reports all failures at once? Whoever takes this should answer that before proposing a fix. ⛔ Do not \"fix\" the gate to report all missing modules — it already does.\n\n## The ask, restated so it survives the correction\n\nBoth gates' `fix:` line says `pnpm build`, which is correct and is not what a reader does. ⇒ **name the full prerequisite set once** — the build closure of every config in the population — so a caller can satisfy it in one round instead of discovering it in four.\n\n⭐ And credit where it is due, because this is the good failure mode: **both gates refuse to report a partial round as green and say so loudly.** `COULD NOT MEASURE` and `PREREQUISITE NOT MET` are exactly right, and a version of this card that traded that away for speed would be strictly worse. ⛔ The fix must not turn a refusal into a pass.\n\n## Dedup\n\n⚠️ Related but **distinct** from **#12500**, which says dispatch-gates *over-names* these two families for any `packages/cli` edit (a comment-only change owing a full CLI closure build to measure two gates it cannot affect). This card is about the **cost of satisfying them once you owe them**. ⭐ They compound: #12500 makes you owe the gates, this makes paying take four rounds. A fix to either reduces the other's damage; ⛔ neither closes the other.\n\nAlso related: **#12539** (`packages/cli`'s e2e spawners silently require `dist`) — the same build-state-as-prerequisite class from a different direction, and `scripts/cli-build-prerequisite.mjs` is named there as the shape that gets it right.\n\n⚠️ The dev could not run a GitHub-side dedupe (raw REST is 403 from that seat). This seat checked the open `domain:cli` and `domain:devx` inventory.\n\n⚠️ **Correction owed to that dev and to the round**: MCP GitHub reads and writes **do** work from a dev seat; only raw REST/`curl` is 403. Earlier dispatch orders from this seat said otherwise and cost several devs their own filings.\n\nSeverity not judged; observation-class, and it is a **throughput** cost rather than a correctness one.\n\n## Re-check\n\n```\nsed -n '1050,1075p' scripts/check-i18n-coverage.mjs\nsed -n '895,915p'  scripts/check-i18n-bundles.mjs\ngit grep -n \"cli-build-prerequisite\" origin/main -- scripts\n```\n\n⛔ Reverse-check any zero with a term known present in the same file, and never a substring of the term under test.\n\n## Refs\n\n- #12028 / [PR #12562](https://github.com/objectstack-ai/objectstack/pull/12562) — where the four rounds were spent\n- #12500 — the over-naming half; compounds with this\n- #12539 — build-state-as-prerequisite, same class, different surface"
+}

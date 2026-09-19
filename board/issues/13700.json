@@ -1,0 +1,36 @@
+{
+  "number": 13700,
+  "kind": "issue",
+  "title": "serve 面保证 stored metadata 规范拼写：reference_to → reference 归一化 + spec 裁定 reference_field/referenceField 协议归属（ui#6837 半 1）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T07:16:18Z",
+  "updated_at": "2026-08-31T19:15:42Z",
+  "closed_at": "2026-08-31T18:38:35Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13700",
+  "body": "## 背景\n\nui#6837（objectui 删除 17 处 legacy 兼容臂）经维护者裁定按「两半」执行，本卡为 **半 1（objectstack 侧，先行）**。裁定评论：objectstack-ai/objectui#6837 (comment id 5475017957)。\n\n维护者定调（逐字）：「objectui不是前端的项目吗？后端的元数据只要对，前端按协议执行就行了呀」——协议归一化属于服务端；前端只按协议执行，不背兼容臂。\n\n关键事实（为什么 serve 面保证是承重件，编译不是）：stored metadata 是运行时 JSON，经 API 下发，**不经过任何 TypeScript 编译**；zod 拒绝面只在新文档 parse/publish 时生效，不回溯已存量数据；TS 编译错误只保护手写 BYO schema。因此若 serve 面不归一化，前端删臂后存量 `reference_to` 会静默降级——必须先由本卡兜底。\n\n## 工作项\n\n1. **测量**：ADR-0087 conversion 链是否已覆盖 `reference_to → reference`？若已覆盖，出具 serve 面证据（存量含 `reference_to` 的 metadata 经 serve 路径下发后只含 `reference`）即可关此项。\n2. **若未覆盖**：按 `page-header-subtitle-alias` 先例落 conversion + `os migrate meta` 支持，使 serve 面只出现规范拼写。\n3. **spec 裁定（同卡）**：`reference_field` vs `referenceField` 的协议归属——哪个是规范拼写、另一个是否进 conversion/拒绝面。spec 域按既定豁免由 spec 席位自审。\n\n## 下游\n\n半 2 = objectui 删 17 处臂 + 调用链 + 52 处仓内 legacy 发射点（ui#6837，`Blocked-by:` 本卡），BYO/手写 TS 破坏性在 changeset 显式声明，附 dev-mode 警告 pin。\n\nBlocks: objectstack-ai/objectui#6837"
+}

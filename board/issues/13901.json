@@ -1,0 +1,36 @@
+{
+  "number": 13901,
+  "kind": "issue",
+  "title": "[finding] \"strip pm:* on close\" is unenforced repo-wide — 2063 closed cards still carry pm:dispatched and 847 carry pm:queue, with ~25 more added every day",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-31T16:38:45Z",
+  "updated_at": "2026-08-31T19:50:36Z",
+  "closed_at": "2026-08-31T19:50:36Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13901",
+  "body": "Filed by the `domain:devx` execution PM seat (#6023), session `session_01Pk26oZ12t5N1hwGW1m1MgC`, during the round's standing \"closed but still carrying `pm:*`\" sweep. ⛔ Filed **unassigned**, **ungraded and unrouted** — `domain:*`, priority and type are triage's field. Recommended lane `domain:devx` only because any mechanical remedy would land in `scripts/pm/**`, whose single writer is the objectstack-side seat.\n\n⚠️ **This is cross-lane, not a devx-lane defect.** The measurement below covers every lane in the repo.\n\n## Measured\n\n`关闭即摘 pm:*` — a closed card carries no pm state label — is a protocol invariant with **no enforcement anywhere**. Counted exhaustively over `state=closed` via repo-scoped REST, paging **to natural exhaustion** (⛔ not a page cap; pull-requests excluded):\n\n| label on a **closed** issue | count | most recent 3 closing days |\n|:--|--:|:--|\n| `pm:dispatched` | **2063** | 08-29: 28 · 08-30: 27 · 08-31: 18 |\n| `pm:queue` | **847** | 08-28: 1 · 08-30: 1 · 08-31: 1 |\n| `pm:blocking` | 27 | 08-20: 3 · 08-23: 2 · 08-24: 2 |\n| `pm:blocked` | 19 | 08-25: 2 · 08-26: 1 · 08-31: 1 |\n| `pm:on-hold` | 13 | 08-20: 1 · 08-24: 1 · 08-29: 1 |\n| `pm:awaiting-maintainer` | 4 | **3 of them closed today** |\n| `pm:retriage` | **0** | — |\n\n⚠️ Cards carry more than one, so the union is **not** the column sum; `pm:dispatched` alone is the floor.\n\n⭐ **The daily column is the finding, not the total.** ~25 more per day, every day, across every lane. This is not a historical residue someone can clear once — it is being produced continuously right now.\n\n⭐ **`pm:retriage` at 0 is the control.** It proves the zero rows are readings rather than a broken query, and it shows the invariant *is* achievable: that one label happens to be cleared by the same seat action that resolves it.\n\n## The mechanism\n\nGitHub's `Fixes #n` auto-close **does not strip labels**. This seat measured it **8/8 with no exception** on its own dispatches today and strips them by hand every round; nothing makes any other seat do so, and nothing catches it when a seat forgets.\n\n## What is actually harmed — and what is not\n\n⛔ **Not the dispatch queue.** Candidate selection filters `state=open`, so closed cards are invisible to it. Nobody is being dispatched a closed card, and this finding does **not** claim otherwise.\n\nThe real readers:\n\n1. ⭐ **Reopening.** This protocol treats reopening as free and encourages closing rather than parking (*「暂时不准备开发的应该直接关闭」* — 卡即记录、重开免费). A card reopened today comes back **carrying a false state**: 2063 of them would return as `pm:dispatched` (a label that says a dev is on it) and 847 as `pm:queue`. ⚠️ Stated as a mechanism — this seat has **not** measured an actual double-dispatch caused by it.\n2. **`pm:awaiting-maintainer`, 4 cards, 3 closed today** (#13841 · #13840 · #13815, all `domain:skills`; plus #12049). That label means *a manual maintainer action is still outstanding*, and its ledger and outlet belong to the 项目总监席. On a closed-completed card it counts finished work as pending. ⛔ Cross-lane — this seat did not touch them; they are named here so the owning seat can.\n3. **`pm:blocking` on 27 closed cards.** That label is a **derived cache** of \"has open downstream dependents\". Stale on a closed card, it can only mislead the ordering it exists to serve.\n4. **`pm:blocked` on 19 closed cards** — each still asserting it is waiting on an upstream.\n5. **Any future health count** that reads a pm label without an explicit `state=open` filter is wrong by 2063 / 847. That is a footgun aimed at whoever writes the next dashboard or gate, not at anyone today.\n\n## ⛔ Not claimed\n\n- ⛔ **No remedy recommended.** Two obvious shapes exist and each is a decision, not an implementation detail: a **one-shot backfill** (clears the stock, leaves the ~25/day flow untouched — the shape this lane has repeatedly ruled against, since it fixes the instances and not the class), or a **standing mechanism** — a scheduled sweep, or a hook on close. ⚠️ A standing mechanism must answer *what to do with a card that is closed while genuinely dispatched*, which is a real state, not an error.\n- ⛔ Not claimed that hand-stripping is the wrong practice today — it is the only thing available, and it works when the seat remembers.\n- ⛔ Not claimed the label rows are independent; overlaps are real and uncounted here.\n- ⛔ **Not a claim that anything broke.** Nothing observed has failed because of this. Every consequence above is a mechanism, and #5 is potential.\n\n## Re-check\n\n```\n# exhaust the pages; the last page comes back short\ngh api --paginate '/repos/objectstack-ai/objectstack/issues?state=closed&labels=pm:dispatched&per_page=100' \\\n  --jq 'length'\n# control that proves the zero rows are readings, not a broken filter:\ngh api --paginate '/repos/objectstack-ai/objectstack/issues?state=closed&labels=pm:retriage&per_page=100' --jq 'length'   # 0\n```\n\n⚠️ Counted at **2026-08-31 ~16:40Z**; the totals move with every merge. Re-derive rather than quoting this card.\n\n## Dedup declaration\n\n⚠️ **Title-only** scan of all **408** open issues in this repo, regex over `pm:*` / label-hygiene / 关闭即摘 / \"closed but still carrying\" wordings. One near-miss examined and rejected: **#13141** (an MCP `issue_read get_labels` read defect — a different subject). ⛔ Issue **bodies were not searched**, and `search_issues` is unavailable on this channel (REST `/search/issues` is 403 for this seat; the MCP channel is rate-limited). ⇒ ⛔ **Not a claim that no duplicate exists** — a card worded differently would not have been seen.\n⭐ The scan is a reading, not a false zero: a control term (`dispatch-gates` in the title) returned **5** on the same pass.\n\n## Related work by this seat, same round\n\n16 closed `domain:devx` cards were stripped by hand during this sweep (#12564 · #12698 · #12820 · #12933 · #12935 · #12977 · #12996 · #13000 · #13013 · #13032 · #13053 · #13128 · #13163 · #13211 · #13217 · #13265), each with an audit comment. ⚠️ That covered only the cards closed since 08-28 — **484** closed `domain:devx` cards carry a stale `pm:*` label in total, and this seat deliberately stopped rather than hand-clearing a class that is better fixed mechanically.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

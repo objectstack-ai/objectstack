@@ -1,0 +1,32 @@
+{
+  "number": 13850,
+  "kind": "issue",
+  "title": "chore(ci): slow both dependabot channels from weekly to monthly",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T14:47:07Z",
+  "updated_at": "2026-08-31T15:32:32Z",
+  "closed_at": "2026-08-31T15:32:21Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13850",
+  "body": "Maintainer-directed change (direct-dispatch channel; the dispatching PM session is `session_015adLit3ZYASJiXwxKG78Wi`). Sibling of objectstack-ai/objectui#7039 — same ruling, this repo's copy.\n\n## Authorization, quoted verbatim\n\n2026-08-31, PM chat channel: first 「interval: weekly → monthly」 (ruled for objectui), then:\n\n> objectstack 也改为按月\n\n## The change\n\n`.github/dependabot.yml` — both update blocks (`package-ecosystem: \"npm\"` and `package-ecosystem: \"github-actions\"`):\n\n- `schedule.interval: \"weekly\"` → `\"monthly\"`\n- Remove the `day: \"monday\"` line in each block — `schedule.day` is only meaningful for `weekly` per the dependabot config schema; verify against the current schema docs rather than taking it from this card, and report instead of guessing if that reading is wrong.\n- Keep `time: \"02:00\"` (valid for any interval) and everything else — groups, `open-pull-requests-limit`, commit-message config — untouched.\n\n## Context\n\nCadence-only change: dependency-update PR volume drops ~4×; GitHub security-alert PRs are not driven by `schedule` and stay immediate. Any auto-merge machinery stays as is.\n\n## Acceptance\n\n- YAML parses after the edit (quote the command).\n- The repo's changeset gate consulted, not assumed (`.github/` is not released-package source; expect none owed).\n- Diff touches only the two `interval` values and the two `day` lines."
+}

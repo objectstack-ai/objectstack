@@ -1,0 +1,34 @@
+{
+  "number": 14003,
+  "kind": "pull_request",
+  "title": "docs(agents): harden the three internal worktree recipes to the canonical form",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T23:04:12Z",
+  "updated_at": "2026-09-01T00:41:56Z",
+  "closed_at": "2026-09-01T00:41:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-09-01T00:41:55Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/14003",
+  "body": "Fixes #13729\n\nThe three INTERNAL copies that PRESCRIBE a worktree recipe to an agent still taught the unhardened spelling. Each now reads as the form AGENTS.md Prime Directive 11 and CLAUDE.md already teach:\n\n    git fetch origin main && git worktree add --no-track ../REPO-TASK -b BRANCH origin/main\n\nExactly one recipe sentence per file; nothing else in these files is touched.\n\n## What changed, per copy\n\n| file | before | after |\n| --- | --- | --- |\n| `.claude/skills/checklist-author/SKILL.md` L33 | `git worktree add ../objectstack-TASK -b BRANCH main` | gains `--no-track` **and** the `git fetch origin main` + `origin/main` base |\n| `.claude/agents/os-dev.md` L32-33 | `git worktree add ../REPO-issue-N -b claude/issue-N-SLUG origin/main` | gains `--no-track` and the fetch |\n| `.claude/skills/dogfood-verification/SKILL.md` L140 | `git worktree add -b BRANCH /tmp/pr origin/main` | gains `--no-track` and the fetch |\n\nPlaceholder metavariables are spelled in caps above because this body is sanitized; the files themselves keep each copy's own angle-bracket placeholder naming verbatim (`../objectstack-TASK` stays the checklist-author spelling, `claude/issue-N-SLUG` stays the os-dev spelling, `/tmp/pr` stays the dogfood one).\n\n## Why\n\nPlain `-b` writes `branch.NAME.remote` / `branch.NAME.merge` into the `.git/config` that **every worktree of the repo SHARES** — the class already adjudicated in #13052 / objectstack-ai/objectui#6880 and already hardened in `AGENTS.md` PD#11 and `CLAUDE.md`; these copies were never swept with it. The `checklist-author` copy was additionally the only one still basing a new tree on local `main` with no fetch — the objectstack-ai/objectui#6208 class.\n\nThe published fourth copy (`skills/objectstack-pm-dispatch/SKILL.md`) is NOT in this diff: it was discharged separately in #13891, which has landed, with its `{default_branch}` interpolation preserved. Verified on today's `origin/main` before editing.\n\n## Two ratchets bind here, so the edits are reflows rather than rewraps\n\n`check:pm-skill-ratchet` constrains these files twice, and the obvious spellings break one each:\n\n- **Zero line-count headroom.** All three files sit exactly at their ceiling (os-dev.md 466/466, checklist-author 62/62, dogfood-verification 157/157). Wrapping the longer recipe onto a new line failed the gate on all three.\n- **120-byte per-line budget.** Keeping the longer recipe on its single existing line failed the other half — 139B / 133B / 134B respectively.\n\nSo each recipe is **reflowed within the lines its sentence already occupied**: the break moves, the line count does not, and every touched line lands under budget (97/81, 105/106, 92/106 bytes). Neither ratchet moves and no ceiling is raised, so no maintainer ruling is needed for either.\n\n## Verification\n\nGate union derived on the final head with `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` (no hand-built path list) at `f977b0b54` — 10 families, all run at that same head:\n\n- ✅ `check:pm-skill-ratchet` — `.claude/agents/os-dev.md is 466 lines (ceiling 466; headroom 0)`, `checklist-author/SKILL.md is 62 lines (ceiling 62; headroom 0)`, `dogfood-verification/SKILL.md is 157 lines (ceiling 157; headroom 0)`; widest-table-row pins all unchanged at 0\n- ✅ `check:agent-model-declared` · `check:agent-test-spelling` · `check:doc-authoring` · `check:nul-bytes` · `check:pm-governed-merges` · `check:pm-skill-id-lint` · `check:skill-frame-sync`\n- ✅ `pnpm --filter @objectstack/lint run check:doc-formula-expressions` — `self-test: 58 cases passed`, `22 record-scoped formula example(s) across 427 files / 1451 TS blocks judged clean` (needed `@objectstack/formula` and `@objectstack/lint` built first; its own PREREQUISITE NOT MET refusal is not a finding)\n- ⚪ `node scripts/pm/check-governed-queue-guard.mjs` — **NOT MEASURED locally, by construction**: it reads `GITHUB_EVENT_PATH` and nothing else, so outside a workflow run it exits 1 with `could not read GITHUB_EVENT_PATH`. That is its refusal path, not a finding. CI measures it.\n\n`pnpm lint` (repo-wide ESLint) is a **declared narrowing, measured on all three axes**: (1) the population comes from ESLint's own resolved config, not a guess — all three files report `File ignored because no matching configuration was supplied.`, i.e. markdown is outside the linted population entirely; (2) the count comes from `--format json` — 3 files reported, 0 errors; (3) invariance for untouched files holds because the diff contains no `eslint.config.mjs`, no tsconfig and no TypeScript at all, so no untouched file's verdict can move.\n\nNo changeset: the diff is `.claude/**` only and publishes nothing from any package, so `skip-changeset` applies.\n\n## Scope guard\n\n`.claude/agents/os-dev.md` carries adjacent text owned by other in-flight cards — the verify-lock and skip-changeset paragraphs of #12800 / #13300 / #13432. Those are deliberately untouched here; this diff is the recipe sentence only. Those three cards are not addressed by this PR and remain open.\n\nDraft on purpose: governed `.claude/**` markdown, human merge.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Msg17tAHJ3jVTYFgHydCm2)_"
+}

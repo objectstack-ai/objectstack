@@ -1,0 +1,36 @@
+{
+  "number": 13817,
+  "kind": "issue",
+  "title": "spec: `appearance.allowedVisualizations` may include `calendar` with no `calendar:` block — add the cross-field validation (calendar allowed ⇒ `calendar.startDateField` required)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-31T13:40:15Z",
+  "updated_at": "2026-09-01T03:51:43Z",
+  "closed_at": "2026-09-01T03:51:19Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13817",
+  "body": "Ruled on #13748 (2026-08-31, director batch #19, option A — fix both halves). This is the objectstack half; the objectui half (removing the invented `due_date` default) is **objectui#7029**.\n\n## The gap\n\n- `packages/spec/src/ui/view.zod.ts:945` — `allowedVisualizations` is optional;\n- `packages/spec/src/ui/view.zod.ts:1679` — the `calendar:` config block is optional;\n- there is NO cross-field check tying the two together. A view declaring `appearance.allowedVisualizations: ['grid','calendar']` with no `calendar:` block passes metadata validation.\n\nDownstream (measured on #13748, hotcrm pinned at `@objectstack/* 17.1.0`): the calendar toggle renders and is clickable, objectui invents `startDateField: 'due_date'` (app-shell `ObjectView.tsx:2220`), the renderer lands every record whose invented field is absent on \"today\" (`ObjectCalendar.tsx:445`), and the author gets a plausible-looking, fully wrong screen — all 9 leave requests piled on today's cell. The renderer's own refusal screen (`ObjectCalendar.tsx:657`) is unreachable because the synthesized config always looks complete.\n\n## Deliverable\n\nA cross-field refinement on the list-view schema: when `appearance.allowedVisualizations` contains `calendar`, require the `calendar:` block with `startDateField`. Only `startDateField` is load-bearing — title resolution has the ADR-0079 display-name fallback chain; ⛔ do not require more than the renderer actually needs.\n\n⚠️ Scope: `calendar` only — the measured defect. If `timeline` or another visualization has the same shape, that is a separate finding to measure first, not a rider here.\n\n## Pre-landing census (required — write the result into the PR)\n\nCount existing views in the reference apps (hotcrm at minimum) that declare `calendar` without the block and currently render only via objectui's invented `due_date` guess. Each one flips from \"coincidentally renders\" to a build-time red — that is the ruled loud-over-silent direction, but the PR must name the population rather than discover it in CI.\n\n## Gates\n\nClause-②: YES — path limb `packages/spec/src/**`, content limb = accept-behavior tightening (previously-valid metadata becomes invalid). Dispatch at the contract-review tier; changeset marks the tightening.\n\nRefs: #13748 (phenomenon record, closed by the ruling), objectui#7029 (runtime half), #13751 (unrelated navigation bug on the same surface, separately queued to objectui)."
+}

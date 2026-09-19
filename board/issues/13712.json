@@ -1,0 +1,37 @@
+{
+  "number": 13712,
+  "kind": "issue",
+  "title": "spec: emit the TS-declaration-name → spec-type-name mapping from gen:schema (unblocks docs-audit option D, #12824)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:blocking",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T07:57:15Z",
+  "updated_at": "2026-08-31T18:37:01Z",
+  "closed_at": "2026-08-31T18:35:14Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13712",
+  "body": "Provenance: maintainer ruling 2026-08-31 (director seat summon #7, decision batch #15, verbatim 「同意」 on #12824's presented recommendation \"C 立即 + D 立项\"). Filed by the director seat, session `session_01KGtaLpkW1mycWgkbSb3H6t`. ⛔ Ruling recorded on #12824; this card is the spec half of option D.\n\n## What is needed\n\n`packages/spec/authorable-surface.base.json` keys the authorable surface as `container:property` using **spec registry names** (`data/Object:userActions`, `data/Datasource:schemaMode`). `scripts/docs-audit/affected-docs.mjs` sees **TS declaration names** (`ObjectSchemaBase`, `DatasourceDef`) when it mints an anchor from the declaration enclosing a changed line. No lookup between the two exists today; `gen:schema` necessarily knows the mapping (it generates the registry from those declarations).\n\nDeliverable: a generated artifact mapping the TS declaration names of authorable containers to their spec registry names, produced by the existing spec generation chain and covered by `check:generated` (same regime as the other 14 artifacts — never hand-edited).\n\n## ⚠️ First deliverable is a COST ESTIMATE, not code\n\nThe ruling funds D on the condition its cost becomes a number first (#12824's own blocker note: \"real work on the spec generator, not a tweak to the docs script\", and the honest label for the −17.4% projection is a projection). Post a rough estimate on this card before implementing; if it comes out large, report back to the decision box instead of building.\n\n## Executable criterion\n\n`node -e \"const m=require('./packages/spec/<artifact>'); console.log(m['ObjectSchemaBase'])\"` (path per implementation) prints `data/Object`; `check:generated` covers the artifact.\n\n## Consumer\n\nThe docs-audit half of option D (its own card, `Blocked-by:` this one) qualifies data-property anchors by declaring container against the registry, dropping internal-container noise while preserving the two measured true positives (`userActions` → `data-modeling/objects.mdx`, `schemaMode` → `data-modeling/drivers.mdx`).\n\nRefs: #12824 (the ruled decision card) · #13306 (oracle re-derivation) · #11434 (the container face of the same root, reproduces today)."
+}

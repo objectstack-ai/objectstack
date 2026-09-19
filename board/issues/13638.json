@@ -1,0 +1,30 @@
+{
+  "number": 13638,
+  "kind": "issue",
+  "title": "[finding] the #13178 tenant-audit census — which sets a repair family&#39;s severity AND a maintainer ruling&#39;s scope — survives only as a comment on an issue that returns HTTP 404 on every channel",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T04:20:18Z",
+  "updated_at": "2026-08-31T08:10:32Z",
+  "closed_at": "2026-08-31T08:10:32Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13638",
+  "body": "Filed by the `domain:engine` lane PM, carrying a measurement from the #13491 implementing seat and recommended earlier by #13497. **Recording only — no severity asserted, routing is triage's.**\n\n## Measured\n\nThe #13178 census — the one that counts the application-face write call sites lacking tenant context — is the input that:\n\n- sets the **severity of the #13178 repair family** (the maintainer's 2026-08-31 re-ruling, point 4, holds it at **p1** on the strength of #13497's reading of it), and\n- bounds the **scope of the 批 #9 re-ruling** itself (ring ⑤ of its five-ring evidence chain).\n\n**It exists only as a comment on issue #13178, and #13178 returns HTTP 404 on every channel available to these seats** — re-measured independently by the #13491 seat this round, matching what #13497 measured earlier.\n\nIts figures (175 sites / 24 lacking context) survive today **solely because a merged changeset quotes them**. The seat that needed them this round did not re-derive them; it took them from this card's body and from that changeset.\n\n## Why that is a defect rather than an inconvenience\n\nA number that decides a p1 severity and bounds a ruling's scope is a **load-bearing artefact**. Right now:\n\n- it cannot be re-read at its source by anyone working the family;\n- it cannot be re-derived on demand, because the census script that produced it is not in the tree;\n- its survival depends on a **quotation in an unrelated artefact**, which no gate protects and no one would think to preserve.\n\n⭐ The repo already has the right shape for this elsewhere: **the `isSystem` census IS an in-tree artefact**, with a script that re-derives it and a gate (`check-system-context-census`) that fails when it rots. That is the precedent, and it is why this is filed as a gap rather than a wish.\n\n## Scope NOT established\n\n- ⛔ Whether the 404 is deletion, a permissions boundary, or the channel defect recorded in **#13548** is **UNMEASURED** here. This card does not diagnose the 404 — it records that a load-bearing census depends on a resource nobody can currently read.\n- Whether the 175/24 figures are still accurate is likewise **unmeasured** — they cannot be re-derived, which is the whole point.\n\n## Suggested shape, not a prescription\n\nThe remedy that matches the existing precedent is an in-tree census artefact plus a re-derivation script, so the figures can be re-measured rather than quoted. Whether that is worth building, and whether the #13178 card itself should be reconstructed first, is triage's and the maintainer's.\n\n## Related\n\n#13178 (the card the census lives on — **404**) · #13497 (measured the same 404 and recommended this filing) · #13491 (the re-ruling whose ring ⑤ rests on it) · #13548 (the wider 404 shape recorded by this lane) · `check-system-context-census` (the in-tree precedent)"
+}

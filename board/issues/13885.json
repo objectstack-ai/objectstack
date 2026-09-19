@@ -1,0 +1,36 @@
+{
+  "number": 13885,
+  "kind": "issue",
+  "title": "`check:type-check-debt` signals \"closure not built, nothing measured\" with exit 1, the code the repo reserves for a real finding",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-31T15:56:31Z",
+  "updated_at": "2026-08-31T22:31:23Z",
+  "closed_at": "2026-08-31T22:30:32Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13885",
+  "body": "Found while running the derived gate family for #13486 (PR linked below). Filed rather than folded in: it is a different file, a different gate, and a different defect class from that card.\n\n## Measured at `df33dd2111`\n\n`pnpm check:type-check-debt`, run in a worktree where the workspace type closure has not been built, refuses to measure and signals that refusal by **throwing** — process exit **1**:\n\n```\nError: --re-measure cannot run: 48 workspace dependenc(ies) of the ledgered packages have no built\ntype entry point on disk -- @objectstack/account, @objectstack/client, ...\nBuild the closure first, exactly as lint.yml does before this step:\n  pnpm exec turbo run build --filter='./packages/*' --filter='./packages/*/*'\n    at measureLedgers (scripts/check-type-check-coverage.mjs:3231:11)\n```\n\nThe refusal itself is right, and its reasoning is stated at length in the message. What is wrong is only the **exit-code class**.\n\n## The convention it breaks\n\nThis repo already has a documented, distinct code for \"nothing was measured\". `scripts/check-test-completeness.mjs` states it in its own failure text:\n\n> (Exit code 3, distinct from a finding's 1 — capture it BEFORE any pipe ...)\n\nand `check:dual-build-cjs-loads` answers the **identical** condition — a gate that reads built output, run against a tree with no `dist/` — with exit **3**:\n\n```\nPREREQUISITE NOT MET — this gate reads built output, and some package has no dist/.\nRun `pnpm build` first. ⛔ This is NOT a pass: nothing was measured.\n```\n\nSo three gates in one lint family meet the same \"prerequisite not satisfied\" condition and two of them answer 3 while `check:type-check-debt` answers 1.\n\n## Why the class matters here specifically\n\nExit 1 from this gate has a strong, specific meaning: a package's recorded debt went **up**. The prescribed response to that is to fix at source — the gate's own text makes raising a `TEST_DEBT` entry a maintainer-only act. A reader who takes the unmeasurable for that red is pointed straight at the ledger, which is the one place they must not go on this evidence.\n\nAnything that reads exit codes rather than prose cannot tell the two apart: a CI step, a wrapper script, or an agent doing a gate reconciliation. The prose is unambiguous, but the prose is not what an exit-code reader reads — which is the whole reason the 3-vs-1 split was introduced elsewhere.\n\n## Not a live CI failure\n\n`lint.yml` builds the closure before this step, so CI does not reach the branch. The exposure is local runs and derived-family gate sweeps, where a reader has to recognise the message to classify the result correctly. That is a real cost — it is exactly the recognition the exit-3 convention exists to make unnecessary — but it is not a red on `main`.\n\n## Suggested shape, not a decision\n\nReturn 3 on the not-built branch and keep 1 for a genuine ledger drift, the way the two sibling gates already do. Worth checking in the same change whether any caller currently keys on the raw throw. Also worth deciding, rather than assuming, whether the same treatment is owed to `check:type-check-coverage`, which shares the module."
+}

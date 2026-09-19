@@ -1,0 +1,36 @@
+{
+  "number": 13715,
+  "kind": "issue",
+  "title": "Unblock Dependabot group PR #13589: sync the `@better-auth/scim` workspace override to 1.7.2 (its exact-pin reason dissolves with the lockstep family bump) and author the published-package changeset",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "domain:devx",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T08:04:26Z",
+  "updated_at": "2026-08-31T18:43:44Z",
+  "closed_at": "2026-08-31T18:41:58Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13715",
+  "body": "Companion card for [PR #13589](https://github.com/objectstack-ai/objectstack/pull/13589) (Dependabot production-dependencies group, 21 minor/patch updates). Filed by the director seat, session `session_01KGtaLpkW1mycWgkbSb3H6t`, from a maintainer-requested merge evaluation (2026-08-31). Precedent card shape: #9297 (the #9212 group's changeset card).\n\n**Verdict recorded there: do not merge as-is — two red checks, one substantive.** Both are fixed on the Dependabot branch itself (`dependabot/npm_and_yarn/production-dependencies-6f36c788ab`), no code change anywhere else. ⛔ Never force-push or rebase a dependabot branch — additive commits only (`·@·d·ependabot r·ebase` would discard them).\n\n## Blocker 1 — `Validate Package Dependencies` red, and it is doing its job\n\nDependabot bumped `packages/plugins/plugin-auth/package.json` `dependencies.@better-auth/scim` from exact `\"1.7.1\"` to exact `\"1.7.2\"`, but `pnpm-workspace.yaml:179` still carries the override `'@better-auth/scim@<2.0.0': '1.7.1'` — and pnpm overrides win inside the workspace. ⇒ **every green suite on that PR tested scim 1.7.1 while the published manifest ships 1.7.2 to downstream installs.** `check-override-consistency.mjs` refuses exactly this tested≠shipped divergence.\n\nThe override's own documented reason for the EXACT pin (comment block ~line 97: `^1.7.1` would resolve to 1.7.2 *\"whose `better-auth`/`@better-auth/core` peers at `^1.7.2` these overrides would silence rather than satisfy\"*) **is dissolved by this very PR** — the whole better-auth family moves to 1.7.2 in lockstep, so scim 1.7.2's peers are genuinely satisfied for the first time.\n\nFix (minimal, on the PR branch):\n- `pnpm-workspace.yaml:179`: `'@better-auth/scim@<2.0.0': '1.7.1'` → `'1.7.2'`, and update the comment block's stale sentences (the `^1.7.1`→1.7.2 peer-skew rationale) to record that the family bump of #13589 satisfied the peers. The GHSA-j8v8-g9cx-5qf4 posture is unchanged — patched in >=1.7.0-beta.4, so 1.7.2 stays patched; this is a version sync, ⛔ not an override weakening.\n- Re-run `pnpm install` so the lockfile re-resolves scim to 1.7.2, then `node scripts/check-override-consistency.mjs` green.\n- ⚠️ CI then tests scim **1.7.2** for the first time (the earlier green tested 1.7.1) — treat the re-run as the real reading, and if the SCIM parity/model gates flag 1.7.2 wire drift, that is a genuine finding to report, not a flake.\n- Adopting the family float (`^1.7.2`) instead of the exact pin is the separate follow-up the comment block already names — ⛔ not this card; keep the exact-pin shape.\n\n## Blocker 2 — `Check Changeset` red (procedural, precedent #9212/#9297)\n\nAuthor the curated changeset commit on the branch, patch-bumping every published package whose manifest range moved (from the PR's file list: `@objectstack/cli`, `@objectstack/driver-mongodb`, `@objectstack/driver-sqlite-wasm` *(sql.js is a dependency there)*, `@objectstack/metadata`, `@objectstack/plugin-auth`, `@objectstack/plugin-email`, `@objectstack/plugin-hono-server`, `@objectstack/plugin-pinyin-search`, `@objectstack/service-settings` — verify against the actual diff; devDependency-only and private-app changes get no entry, per the #9212 changeset's own convention).\n\n## After both\n\nAll checks green ⇒ the PR is desirable to land: 21 updates are all minor/patch, the family moves coherently, and `@oclif/core` 4.13.4 carries an upstream security fix (powershell path). Landing goes through the normal review + queue path.\n\nRefs: PR #13589 · #9297/#9212 (precedent) · #11632 (SCIM epic, open — the parity gates are the interesting re-run) · GHSA-j8v8-g9cx-5qf4 (the override's provenance)."
+}

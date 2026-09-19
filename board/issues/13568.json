@@ -1,0 +1,37 @@
+{
+  "number": 13568,
+  "kind": "issue",
+  "title": "[finding] 删除记录后，它的审批单仍留在审批收件箱：pending 与 approved 两种都留，记录引用退化为原始 id",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "approvals",
+    "bug",
+    "domain:services",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T01:44:58Z",
+  "updated_at": "2026-09-01T04:23:10Z",
+  "closed_at": "2026-09-01T04:22:46Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13568",
+  "body": "> **来源**：宣传视频车道 #147（一句话新模块·请假管理）录制整备时发现。**未改动任何平台代码**，本单为只读观察 + 一次真实业务流程实跑。\n>\n> **本单只描述现象，不预设修正方向。** 是否算缺陷、以及该往哪个方向处理（保留审计痕迹的软引用、连带清理、有在途审批时禁止删除、仅改界面呈现……）全部留给负责人裁定。**故不带 `pm:queue`——请先分级，不要被自动流程当成待开发任务直接领走。**\n\n## 现象\n\n一个用「审批流 + 按状态共享」搭起来的请假模块：员工提交请假 → 主管在审批收件箱批准。\n\n**删除一条请假记录后，它此前产生的审批单仍留在审批收件箱里**，并且：\n\n- **pending 的会留**：记录被删时那条待批审批单仍在收件箱，仍为待批状态，仍可被点开；\n- **approved 的也会留**：已批准过的记录被删后，它的审批单同样留在列表里；\n- **记录引用退化**：行内本该显示记录标识的位置不再显示业务编号（如 `LR-00006`），退化为**原始记录 id**（观察到的那条为 `9SEmly…-J7Z`）。审批单指向的记录此时已不存在。\n\n## 是怎么撞上的\n\n不是刻意构造的，是正常操作里绕不开的一步：\n\n1. 建了一条请假记录，触发审批，收件箱出现待批项；\n2. 需要改这条记录的日期，但因该模块声明了 `lockRecord: true`，在途审批把记录锁住，改不了（`RECORD_LOCKED`）；\n3. 于是**删掉重建**——这是被锁之后唯一可走的路；\n4. 记录没了，它的审批单留在了收件箱里。\n\n也就是说：**`lockRecord` 把「改不了就删了重建」变成常规操作，而删除又会留下审批单**，两件事叠在一起，普通搭建流程里就会持续积累这类指向不存在记录的行。\n\n## 影响面\n\n不限于请假：**任何「审批 + `lockRecord`」的组合**都走同一条路。收件箱是审批人每天看的界面，留下的行会计入待批数量，点开后指向的记录已不存在。\n\n## 邻近既有单（已查，均非重复）\n\n- #7345 `finding: an approver routed a request can be unable to open the record it concerns — the inbox's record link dead-ends on \"Record not found\"` —— **症状相邻但成因不同**：那条里**记录是存在的**，只是审批人没有读权限被行集过滤掉，是可见性闸的问题；本条里记录**确实已被删除**。两者可能落到同一段呈现代码上，值得一并看，但不是同一个问题。（该单以 `not_planned` 关闭）\n- #3424 / #3456 `Approval routed to an empty position permanently locks the record` —— 讲的是审批运行卡死导致记录锁死，是**锁的成因**；本条是**记录消失后审批单的去留**。\n- #11308 `pending sys_approval_request rows still lock records invisibly` —— 讲的是 org-less 平台行的回填，成因是 #10101 的写入身份问题，与本条无关。\n- #13533 审批回写（系统身份）不触发共享规则物化 —— 同一次 #147 实拍取证中发现的另一条，不同问题。\n\n## 复现最小路径\n\n1. 建一个对象，声明 `type:'approval'` 节点 + `approvalStatusField` + `lockRecord: true`；\n2. 以普通用户提交一条记录 → 审批收件箱出现待批项；\n3. **不批准**，直接删除该记录；\n4. 打开审批收件箱 → 那条待批项仍在，记录标识处显示原始 id；\n5. 换一条**已批准**的记录重复第 3 步 → 其审批单同样留在列表里。\n\n## 取证环境\n\n2026-08-31，载体 `objectstack-ai/hotcrm`，钉 `@objectstack/* 17.1.0`。观察发生在 #147 录制整备的干跑中，收件箱当时共两行，其中一行即上述孤儿审批单。**未做进一步代码级取证**——本单停在现象层，按上面的说明留待分级。"
+}

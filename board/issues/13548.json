@@ -1,0 +1,34 @@
+{
+  "number": 13548,
+  "kind": "issue",
+  "title": "The tenant-audit census issue 13178 is unreachable (404) while three open cards cite it as their input",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T21:03:56Z",
+  "updated_at": "2026-08-31T15:06:45Z",
+  "closed_at": "2026-08-31T15:06:25Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 12,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13548",
+  "body": "## The measurement\n\nIssue **13178** — the tenant-audit write-call-site census — **is unreachable**. It returns HTTP 404 on three independent channels: unauthenticated repo-scoped REST, the rendered web page, and authenticated MCP `issue_read`.\n\nFour-channel control, all requests in the same minute, same session, same endpoint shape:\n\n| issue | result |\n|---|---|\n| **13178** | **404** |\n| 13179 | 200 |\n| 13250 | 200 |\n| 13491 | 200 |\n| 13497 | 200 |\n| 13527 (the PR that landed its repairs) | 200 |\n\nThe control fires, so the 404 is a fact about that number and not about the channel, the session, or a rate limit.\n\n**The card was real and recent.** Its repairs are in `main`:\n\n```\nf087c376ff 2026-08-30 fix(service-storage): scope the sys_file / sys_upload_session update and\n                      delete doors to the acting organization (#13178) (#13527)\ne02648ef1b 2026-08-30 fix(service-storage): scope the sys_file / sys_upload_session update and\n                      delete doors to the acting organization (#13178)\n```\n\nTwo open cards still name it as their input — #13491 (`domain:engine`, a ruling on whether `isSystem` writes are in the tenant-audit control's scope) and #13497 (the stamper-gap measurement) — and #13416 cites it as well.\n\n## What it cost\n\n#13497's brief was to classify **the 24 sites** the census identified. The census lived in a comment on #13178. With that comment gone, **the canonical list of 24 could be neither copied nor verified** — the re-location step that #13178's own ruling required (its line numbers were known to rot, so coordinates had to be re-derived rather than copied) had nothing to re-locate against.\n\n## What saved the round\n\nTwo things, both accidents of good practice rather than design:\n\n1. **The census summary survived in-tree**, because the #13178 repair's changeset quoted the two figures that mattered. From `.changeset/tenant-audit-update-delete-half-repairs.md`, now merged:\n\n   > The tenant-audit census counted 175 service write call sites against a tenancy-enabled object, 24 of them carrying no tenant context at all\n\n2. **An independent re-derivation agreed closely enough to establish the same population**, which is what let the measurement proceed at all:\n\n   | census figure | independently re-derived |\n   |---|---|\n   | 135 sites silenced by the `isSystem` guard before the posture gate | 141 |\n   | 127 of 175 statically decidable (48 runtime-parameter-name sites) | 132 literal-object engine write call sites |\n\n   Close enough to be the same family; not close enough to be the same list. The exact 24 remain unrecoverable.\n\n## Recommendation\n\n**A census that decides a repair family's severity and a ruling's scope should be an in-tree artefact, not a comment.**\n\nThe tree already has this pattern and it is enforced: the `isSystem` census is a committed page (`content/docs/permissions/system-context.mdx`) with a generator (`scripts/isystem-census.mjs`) and a gate (`scripts/check-system-context-census.mjs`, wired into the docs-anchors step). Its own commit message records the thing that makes the pattern necessary — that census numbers rot as `main` moves, and get re-derived against the merged tree rather than trusted.\n\nConcretely, one of:\n\n- **A** — re-derive the tenant-audit census as a committed artefact (a `docs/audits/` page, or a generator plus gate in the shape of the `isSystem` census), and re-point the citing cards at it. Preferred: it survives issue loss, and it makes the population re-derivable rather than quoted.\n- **B** — re-file the issue and re-point #13491 / #13497 / #13416 at the new number. Restores the citation but reproduces the fragility.\n- **C** — accept the loss; the summary in the merged changeset is enough. Cheapest, and it is what actually happened this round — but it worked by luck, because a changeset author chose to quote two numbers.\n\nThere is also a process question underneath, which is not mine to answer: whether an issue that open cards depend on can be deleted or transferred without those cards being updated, and whether anything would have noticed had the changeset not quoted the figures.\n\n⚠️ Measured on `origin/main` at `50cf2940b9`; the HTTP results are from that same session and are re-checkable at any time by repeating the table above.\n\nFound while executing #13497; the PM seat re-checked the 404 independently with its own controls before this was filed. Not graded here: no priority or domain label, unassigned, for triage.\n\n_Generated by [Claude Code](https://claude.ai/code)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

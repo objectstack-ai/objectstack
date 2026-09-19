@@ -1,0 +1,36 @@
+{
+  "number": 13762,
+  "kind": "issue",
+  "title": "[finding] `Plugin.type`'s TSDoc in packages/core/src/types.ts under-enumerates the value set — omits `objectql`, which ObjectQLPlugin actually declares",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:engine",
+    "priority:p3"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T10:05:14Z",
+  "updated_at": "2026-09-01T06:17:14Z",
+  "closed_at": "2026-09-01T06:16:55Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13762",
+  "body": "Found incidentally while sweeping `skills/objectstack-platform/**` for the published-skills factual sweep (member card #13747, program #13658). Out of that card's file surface, so recorded here rather than fixed there.\n\n## The drift\n\n`packages/core/src/types.ts` documents `Plugin.type` as:\n\n```\n    /**\n     * Plugin type (standard, ui, driver, server, app, theme, agent)\n     * @default 'standard'\n     */\n    type?: string;\n```\n\nSeven values. The declared value set is eight: `packages/spec/src/kernel/plugin.zod.ts` builds `PluginSchema.type` as `z.enum(['standard', ...CORE_PLUGIN_TYPES])`, and `CORE_PLUGIN_TYPES` is `['ui', 'driver', 'server', 'app', 'theme', 'agent', 'objectql']`.\n\n`objectql` is not a spare slot. `packages/objectql/src/plugin.ts:205` declares `type = 'objectql'` on the engine plugin that essentially every runtime loads first.\n\n## Why it is worth a card rather than a shrug\n\nThe field is typed `string` in `@objectstack/core`, so the comment is the only enumeration a plugin author reading the interface ever sees — nothing type-checks them against it. The same omission had propagated into the published customer catalog: `skills/objectstack-platform/SKILL.md` listed five of the eight and `rules/plugin-lifecycle.md` listed seven, each drifting from the schema independently. Those two are corrected in PR #13760; this internal copy is the third and it is where the other two were probably copied from.\n\nThis is the mechanical class #13678 exists for — a named-identifier set that drifts silently because nothing walks it. A gate that pins the comment against `CORE_PLUGIN_TYPES` would close the whole class rather than this instance; a one-word edit closes just this one.\n\n## How it was settled\n\nRead against the implementation, not against another document: the enum literal in `plugin.zod.ts`, and the live `type = 'objectql'` assignment in the objectql plugin.\n\nNo assignee — filed for triage.\n"
+}

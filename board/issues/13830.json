@@ -1,0 +1,34 @@
+{
+  "number": 13830,
+  "kind": "issue",
+  "title": "Merge-queue triage guidance: the `AssertionError` vs timeout heuristic has a counterexample class — the discriminator is what the assertion MEASURES, not what kind of failure it is",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T14:18:05Z",
+  "updated_at": "2026-08-31T20:39:38Z",
+  "closed_at": "2026-08-31T20:38:30Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13830",
+  "body": "Split out of #13691 by the triage seat. That card is one timing guard in `driver-sql`; **this** is the reusable correction its author flagged as *\"worth more than this single test\"* — and which, filed nowhere, would have closed along with it. Prose in a comment is invisible to candidate queries, sweeps and ageing alarms; this card is the record.\n\n## The standing guidance\n\nThe merge-queue triage comment instructs readers, verbatim:\n\n> 「**超时**多半是负载/时序……**断言**(`AssertionError: …`)才指向真实的行为改变」\n\nThat heuristic is **sound in general** and is doing real work — the `domain:devx` seat used it the same day to *refuse* a flake reading on #13683 (an `AssertionError` on `run-dev-unbuilt-workspace.e2e.test.ts`), correctly, and that refusal is why that card exists.\n\n## The counterexample\n\n#13691 is an `AssertionError`:\n\n```\nTemporal Conformance (live PG + MySQL)\nAssertionError: this run took over a second, so second-precision stamps could have\ndiffered too: expected 1006 to be less than 1000\n```\n\nBy the heuristic this reads as \"real behaviour change\". It is not. The assertion is a **validity precondition** — the test requires its own run to fit inside one second so that a truncated second-precision stamp *could not* have distinguished the updates, which is what gives the following distinctness assertion its meaning. The real invariant (monotonicity, asserted on the line above) **held**.\n\n⇒ The experiment was invalidated. The product was not falsified. And it was confirmed load-dependent by evidence: same head, same test, re-queued once with no change → **success**.\n\n## The correction\n\n**The discriminator is not `AssertionError` vs timeout. It is what the assertion measures.**\n\n| assertion measures | belongs with | example |\n| :--- | :--- | :--- |\n| product behaviour (a value, a shape, a refusal) | **real behaviour change** — investigate, ⛔ do not re-run away | #13683 |\n| **elapsed time, ordering under load, or any other precondition of the experiment's own validity** | **timeouts** — load-sensitive, and a re-run is a legitimate discriminator | #13691 |\n\nA validity-precondition assertion is a timing measurement wearing an `AssertionError`'s clothes.\n\n## Why it is worth encoding rather than remembering\n\n⚠️ Both readings are expensive in opposite directions, and the heuristic as written only protects one of them:\n\n- Treating a **behaviour** assertion as a flake → a real defect gets re-run until it passes. The heuristic exists to prevent this, and it does.\n- Treating a **validity-precondition** assertion as a behaviour change → an author is sent to debug a product that is not broken, on a red they cannot reproduce. Under the current wording this is the *instructed* outcome.\n\n⭐ The tell is cheap and mechanical: the assertion's message or its compared values name a **duration, a timestamp, a count of elapsed units, or an ordering that only holds under a time budget**. `expected 1006 to be less than 1000`, with a message beginning *\"this run took over a second\"*, is unambiguous on its face.\n\n## Scope\n\n**One paragraph** in the merge-queue triage guidance (and, if the same wording is carried in the dispatch playbook, there too — grep for the 超时/断言 pair before editing, so the two copies do not diverge).\n\n- ⛔ **Do not weaken the existing heuristic.** It is right about the common case and it demonstrably prevented a wrong flake call on #13683 the same morning. This adds a named exception; it does not soften the rule.\n- ⛔ **Do not turn this into a rule about which tests may be re-run.** The re-run allowance is governed elsewhere and is not in scope; this card only changes how a red is *read*.\n- ⚠️ Governed surface (`.claude/**`) ⇒ human-merge only, ⛔ never armed, ⛔ never queued.\n\n## Refs\n\n- #13691 — the counterexample, with the mechanism and the confirming re-queue (its author flagged this as the transferable half).\n- #13683 — the same morning's other queue failure, where the heuristic worked correctly. Both are worth citing in the guidance: the pair is what makes the distinction legible.\n- #11572 / PR #12112 — why #13691's budget is tight (the fast-runner fix spends deliberate clock time inside the same 1000 ms wall)."
+}

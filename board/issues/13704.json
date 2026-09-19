@@ -1,0 +1,32 @@
+{
+  "number": 13704,
+  "kind": "issue",
+  "title": "Wizard view v1 — declaration-and-refusal tightening of FormViewSchema type:'wizard' (Card S, ruled shape of #13622)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T07:28:50Z",
+  "updated_at": "2026-08-31T14:01:29Z",
+  "closed_at": "2026-08-31T13:27:05Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13704",
+  "body": "Card S of the #13342 chain, filed by the domain:spec seat (`session_01PBjwYLS6BciTQW3c9xQiD2`) per the maintainer ruling of 2026-08-31 on #13622 (director batch #12, verbatim 「同意」 — shape approved per recommendations, all five trade-offs settled). The full design of record is the proposal comment on #13622 (D1–D8) plus that ruling; this card implements it and nothing else.\n\n## Ruled shape (binding — quote of record on #13622)\n\n- **D1**: deepen the form family's existing `type: 'wizard'` — no new viewKind, ZERO new keys.\n- **D2 + T5**: sections ARE the steps; refuse the wizard-inert step keys (`visibleWhen` / `visibleOn` / `collapsible` / `collapsed`) at parse via the EXISTING `FormViewSchema` superRefine (the pane-refusal precedent, covering the groups bucket and the overlay doors) — mirroring objectui#6237's ruled type-split at the spec door. The parse refusal UPGRADES #6237's renderer fact; objectui#6237 remains the future-contract tracker.\n- **D3 + T1**: a `steps:` spelling gets a guidance-refusal WITH prescription (#5099 shape) — ⛔ never accepted as an alias.\n- **D7**: `type: 'wizard'` refuses absent/empty `sections` (today it silently falls back to simple rendering).\n- **T2**: refusal breadth NARROW — exactly the #6237-family step keys + the empty-sections refusal; ⛔ no per-type presentation-key matrix (F1 absorbed as not-done by this ruling).\n- **D4/D5/D6/D8** are declaration/docs postures with no new authorable keys: the gate is the DEFAULT semantics of `type:'wizard'` (`allowSkip` stays the only knob — \"navigation freedom, not validation exemption\"; gate is UI admission, never authorization); progress is derived state (`showStepIndicator` stays the only authorable); per-step validation binds ONLY existing field-level vocabulary; array order IS step order (no order key). Record these in the schema TSDoc where the tightenings land.\n- **T3 deferred**: `buttons.next/previous` NOT in v1 (F4 rides with it, deferred).\n- **T4**: the semver grade of the accept-set tightening is the review chain's call — argue it in the changeset, name the nearest tightening precedent.\n- ⛔ No teaching material (the #13337/#13086 fence stands until Card R also lands).\n\n## Clause-② / parking\n\nRULED yes (accept-set tightening on the published FormViewSchema) ⇒ fable dispatch; PR parks DRAFT + `needs:contract-review` on both carriers; review chain/maintainer owns enqueue.\n\n## Sequencing\n\nCard R (objectui alignment + pins) is filed `Blocked-by:` this card and dispatches only after this lands — never co-batched. Parent #13342 stays the coordination node.\n\nRefs: #13622 (proposal + ruling of record) · #13342 (parent) · objectui#6237 · #13337 / #13086 (teaching fence)."
+}

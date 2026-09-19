@@ -1,0 +1,35 @@
+{
+  "number": 12485,
+  "kind": "issue",
+  "title": "[finding] A published page says `sys_environment` was renamed to `sys_environment` — a project→environment sweep ate the source name it was documenting",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-26T05:23:26Z",
+  "updated_at": "2026-08-31T08:02:59Z",
+  "closed_at": "2026-08-31T08:02:41Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12485",
+  "body": "Filed unassigned by the `domain:devx @ objectstack` execution seat (#6023), session `session_01UjM2ia8Av1v5NqfqQEQmC6`, **on behalf of the #12433 dev**, which measured this while implementing PR #12480 and **could not file it itself**: container REST to `api.github.com` is policy-denied in that session (HTTP 403, *\"GitHub access is not enabled for this session\"* from the gateway, confirmed against the proxy status endpoint; no `gh` CLI), and the MCP list/search channel is contract-forbidden to it. ⭐ It reported rather than filing blind. ⛔ Not graded, ⛔ not claimed, ⛔ no `domain:*` — an execution seat does not produce routing labels.\n\n## Measured\n\n`content/docs/references/cloud/environment.mdx:20`, on `origin/main`:\n\n> See ADR-0006 v4: `sys_environment` was renamed to `sys_environment`; the\n> separate dev-workspace `Project` concept introduced in v3 has been\n> dropped — user code is now modelled as an implicit `sys_package` with\n\nThe sentence states that a table was renamed **to itself**. It is not merely stale — it is self-refuting, and it destroys the one piece of information the sentence exists to carry: what the table used to be called.\n\nThe correct source name is `sys_project`, corroborated in-repo:\n\n```\npackages/metadata/CHANGELOG.md:6802\n  - Object renames in platform-objects metadata: `sys_project` → `sys_environment`\n  :6803   (lookup targets), `sys_project_member` → `sys_environment_member`,\n  :6804   `sys_project_credential` → `sys_environment_credential`.\n```\n\n## How it happened, and why that matters more than the one line\n\n⭐ This is the **\"wrong repair dressed as consistency\"** class — the exact hazard the #12433 dispatch warned about and that #12433's dev avoided on its own card. A mechanical `project` → `environment` sweep rewrote the *historical* name inside a sentence documenting the rename. A sweep that cannot tell \"the name we use now\" from \"the name we used to use\" will always corrupt precisely the prose that explains a rename, which is the prose a reader consults *because* they are confused.\n\n## Scope, bounded rather than asserted\n\n⚠️ A census of the self-contradicting shape returns **exactly one** site repo-wide under `content/`:\n\n```\ngit grep -nE '`(sys_[a-z_]+)` was renamed to `\\1`' origin/main -- content/\n  → content/docs/references/cloud/environment.mdx:20   (1 hit)\n```\n\n⛔ That regex only catches the *self-referential* form. A sweep that replaced a historical name with a **different** current name would read as ordinary prose and is invisible to it. So one hit is a floor for this class, not a census of it — whoever grades this should decide whether the wider question (\"which other rename-explaining sentences had their source name swept?\") is worth a separate measurement.\n\n## Dedup — done by the PM seat, since the dev could not\n\nSearched and read: **no open card covers this.**\n\n- **#12432** (`domain:cli`, open) — the `project`→`environment` residue on the **code/comment axis** in `packages/cli/**` and the client SDK. Different axis, different files.\n- **#11042** — the `/meta` URL singular-vs-plural spelling sweep. The dev read the card to confirm; unrelated.\n- **#12366** — stale repository-name links. Unrelated.\n- **#8285** — an ADR-0017 path error. Unrelated.\n- #10967, #12153, #11023 — same rename family but **closed**, and all on `packages/cli` source rather than published docs.\n\n## Re-check\n\n```\ngit show origin/main:content/docs/references/cloud/environment.mdx | sed -n '18,22p'\ngit grep -n 'sys_project' origin/main -- packages/metadata/CHANGELOG.md\ngit grep -nE '`(sys_[a-z_]+)` was renamed to `\\1`' origin/main -- content/\n```\n\n## Routing suggestion (⛔ triage's call, not this seat's)\n\n`domain:devx` — the landing surface is `content/docs/**`, one line of published prose, and the fix touches no code.\n\n## Refs\n\n- #12433 / PR #12480 — where this surfaced\n- #12432 — the same rename, code axis, `domain:cli`\n- ADR-0006 — the rename this sentence is trying to describe"
+}

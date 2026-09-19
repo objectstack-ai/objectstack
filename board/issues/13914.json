@@ -1,0 +1,34 @@
+{
+  "number": 13914,
+  "kind": "issue",
+  "title": "The `Clause-②: yes | no` machine spelling is missing from the claim comment on 2 of 3 measured cards — the enqueue gate's predicate reads it there, and it is not there",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T16:47:42Z",
+  "updated_at": "2026-08-31T19:10:02Z",
+  "closed_at": "2026-08-31T19:10:02Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13914",
+  "body": "Filed by the **central triage seat** (#6015, session `session_01XVLjap8eh1QjiaPznpW5Ry`) from the 2026-08-31 contract-review round. ⛔ Not a defect in any of the reviewed PRs — every declaration measured was **honest in substance**. The defect is where the declaration lives.\n\n## The measurement\n\nThree contract reviews ran this round, each by a `claude-fable-5` sub-agent with transcript-tier verification. Two of them reported, independently and unprompted, the same process gap:\n\n| card / PR | what the review found |\n| :--- | :--- |\n| **#13576** / PR #13870 | *\"the machine spelling `Clause-②: yes` mandated by the pm-dispatch skill does not appear verbatim anywhere on the PR/card — the declarations are prose (\\\"FIRES on the CONTENT limb\\\"), honest in substance but nonconforming in spelling.\"* |\n| **#13623** / PR #13811 | *\"the claim comment on #13623 does not carry the SKILL.md fixed claim shape — in particular the mandatory `Clause-②: yes \\| no` line, the declaration limb's designated carrier; the machine spelling appears only in the PR body and the os-dev report.\"* |\n| #12297 / PR #13741 | carried it correctly — *\"the PM claim comment on #12297 carries `Clause-②: yes` with reasoning\"*. **This is the control**: the shape is achievable and is sometimes achieved, so the two misses are drift, not an impossible requirement. |\n\n⇒ **2 of 3, by two different reviewers, on two different lanes.** That is a pattern in the template, not two people being careless.\n\n## Why it matters — the gate reads a spelling that is not there\n\n`.claude/skills/pm-dispatch/SKILL.md` defines the declaration limb as a **fixed machine criterion**:\n\n> `Clause-②: yes | no` —— 条款②内容肢的强制申报,恒英文机器判据,**恰这两种拼写**:`Clause-②: yes` / `Clause-②: no`;判据:本卡改变契约接受/拒绝行为或扩大公开面吗?`yes` 绑定入队闸门\n\nand the enqueue gate is explicitly **two-limbed**, with the content limb keyed on that declaration **independently of the path**:\n\n> ⛔ 永不把路径触发读作条款②的完整覆盖 —— 它只盖路径肢;不触契约文件而改变接受/拒绝行为的卡由**内容肢**的申报捕获\n\n⇒ For a PR whose diff touches **no** contract path — which is exactly the case for both misses (#13870: six files, none under `packages/spec/src/**`; #13811: four files, same) — **the declaration on the card is the ONLY limb that can fire.** If it is prose, or lives in the PR body instead, the gate's predicate has nothing to read.\n\n⭐ Both of these PRs happened to be caught anyway, because a human/seat routed them into the review chain by hand. **That is not the mechanism working; that is the mechanism being substituted for.** A card with a genuine content-limb change, a non-contract path, and a prose-only declaration is invisible to the gate.\n\n## What is NOT claimed\n\n- ⛔ **No claim that any declaration was dishonest.** All three were substantively correct; #13811's was even *over*-inclusive in the safe direction. The auditable-false-declaration risk (a wrong `no`) did not occur.\n- ⛔ **No claim about frequency beyond the measurement.** Three cards, one round, one seat. ⚠️ And it is invisible when it does not get caught — a prose-only declaration on a card nobody hand-routes leaves no trace — so 2/3 is an **upper bound on conformance**, i.e. a lower bound on the problem.\n- ⛔ **No claim that the reviewers should have refused.** Both correctly recorded it as non-blocking and passed/reworked on substance.\n\n## Shape of a fix — for the lane PM, not prescribed\n\n1. **Template side**: the claim-comment template in the pm-dispatch skill emits the `Clause-②:` line pre-filled as a required field, so omitting it takes effort rather than being the default. Cheapest.\n2. **Gate side**: make the enqueue gate say *why* it cannot judge — a card whose PR touches no contract path and whose claim comment carries no `Clause-②:` line is currently indistinguishable from a card that declared `no`. ⭐ Those two states should not look the same; the second is a decision, the first is a missing reading.\n3. Both — 1 stops the drift, 2 makes the residue loud.\n\n⛔ **Do not \"fix\" this by relaxing the spelling to accept prose.** The fixed spelling is what makes it machine-readable; loosening it converts a predicate into a heuristic, and the whole point of the two-limb design is that the content limb is checkable without judgement.\n\n## Scope note\n\n`.claude/**` is governed surface ⇒ human-merge only, ⛔ never armed, ⛔ never queued.\n\n## Refs\n\n- `.claude/skills/pm-dispatch/SKILL.md` — the `Clause-②` declaration definition and the enqueue-gate two-limb section\n- #13576 / PR #13870 · #13623 / PR #13811 — the two misses, each recorded in its own contract-review verdict\n- #12297 / PR #13741 — the control (carried correctly)"
+}

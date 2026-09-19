@@ -1,0 +1,35 @@
+{
+  "number": 13578,
+  "kind": "issue",
+  "title": "datasource DELETE does not evict the stuck driver from the data-engine driver registry — /ready keeps naming a datasource that no longer exists, recoverable only by process restart",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "priority:p1"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-31T02:18:38Z",
+  "updated_at": "2026-09-01T03:00:38Z",
+  "closed_at": "2026-09-01T02:43:40Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13578",
+  "body": "Split out of #13408 by the `domain:cli` PM seat (#6024) at dispatch time, unlabelled for triage. Filed separately **because it is decision-independent and #13408 is not**, see below.\n\n## The defect\n\nOn a multi-node deployment, a datasource whose driver fails to start leaves a **stuck driver instance** in the in-memory data-engine driver registry. Deleting the datasource does not clear it:\n\n- `DELETE /api/v1/datasources/:name` → the admin-door list is empty on every replica…\n- …but `GET /api/v1/ready` **still names that datasource's driver** and still answers 503.\n- No API door evicts the engine-registry entry. **Only a process restart clears it.**\n\nSo an administrator who reacts to a bad datasource with the single most natural action — delete it — gets no recovery, and on a shared/HA cluster the remaining remedy is a restart of every replica.\n\n## Why this is filed apart from #13408, and not held behind it\n\n#13408 bundles two halves. Its **other** half — *should one unhealthy driver drain whole-node readiness?* — turned out to be **intentional, documented behaviour**, so it is a product decision and #13408 has been moved to the decision box (analysis on that card).\n\nThis half is not that. It is a defect under **either** answer to the readiness question:\n\n- If a bad driver **should** drain the node, then a *deleted* datasource must stop draining it — otherwise the drain is unrecoverable by design.\n- If it **should not**, this is still a registry that leaks entries no door can reach.\n\n⇒ Holding it behind the decision would park a live defect inside a decision it does not depend on. Recording that reasoning here so the split is auditable rather than looking like scope drift.\n\n## What the fix needs to answer\n\nThe repair is not only the `DELETE` path — that is the one path that happened to be observed:\n\n- **Enumerate every path that can leave an orphan driver instance**, by walking the registry's lifecycle rather than by example: failed-start rollback, tenant deletion, datasource rename/reconfigure, environment teardown. ⛔ An answer of the form \"fixed `DELETE`\" leaves the others.\n- Decide where eviction belongs — the delete path calling the registry, or the registry owning its own liveness — and say why.\n- ⚠️ **Cluster propagation is part of the shape, not a detail.** #13405 records the sibling asymmetry on a *different* registry: create broadcasts cluster-wide, delete does not mirror. If eviction is local-only, one replica recovers and the rest do not, which is the same bug with a smaller blast radius.\n\n## Landing surface\n\nThe data-engine driver registry plus the datasource delete path — **not** `packages/runtime/src/http-dispatcher.ts`, which only *reports* the registry's contents at `/ready`. #13408's triage note flagged this half as needing engine/services alignment; routing is triage's call, which is why this card is filed unlabelled.\n\n## Refs\n\n- **#13408** — the parent observation and the readiness-semantics decision (both halves were reported together there).\n- **#13405** — the same delete-doesn't-evict shape on the `/api/v1/meta/datasource` metadata registry, with the create-broadcasts/delete-doesn't asymmetry stated. Distinct sink, same disease; worth reading before choosing where eviction lives. ⚠️ That card is `domain:spec` and in flight — ⛔ do not fold this into it.\n- **#3756** — the closed card that established `/ready`'s driver-health check in the first place.\n\nObserved on a live 3-replica EE deployment during the #13404 checklist run; recovered by restart."
+}

@@ -1,0 +1,37 @@
+{
+  "number": 13902,
+  "kind": "issue",
+  "title": "driver-sql: 37 more live-DDL it() blocks across 9 files inherit vitest's 5000ms default (same shape as #13688)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p2",
+    "tests"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T16:40:12Z",
+  "updated_at": "2026-09-01T06:17:02Z",
+  "closed_at": "2026-09-01T06:16:38Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13902",
+  "body": "Filed while implementing #13688 (its A2.2 instruction: sweep the package for other\nlive-DDL tests still on vitest's inherited 5000ms default, widen the fix only within\nthe one target file, file a finding for the rest). Unassigned: recording only.\n\n### What #13688 fixed\n\nTwo `it(...)` blocks in `sql-driver-13056-orphan-shadow-column-cleanup.test.ts` drove\n2-3 full `new SqlDriver(...)` -> `initObjects(...)` -> `disconnect()` cycles against\nlive MySQL with no explicit timeout, so they inherited vitest's 5000ms default. That\nbudget was never chosen — four sibling files in the same package already carry\nexplicit per-test budgets (`60_000` / `120_000` / `40_000`). The timeout (not an\nassertion failure, no MySQL error in the logs) reddened unrelated PRs, e.g. #13685\n(a `plugin-auth`-only diff) and ejected #13687/#13761 from the merge queue (#13767).\n\n### The sweep\n\nA script walked every `it(...)` nested inside a `declareDialectCell(...)` callback\nin `packages/drivers/driver-sql/src/*.test.ts` and checked whether the third argument\nis an explicit numeric timeout. Same defect shape, still on the default, in **9 more\nfiles, 37 more `it(...)` blocks**:\n\n| File | Cells | `it()` blocks w/o budget |\n|---|---|---|\n| `sql-driver-11627-hash-shadow-key.test.ts` | MySQL, PG | 9 |\n| `sql-driver-11565-row-byte-budget.test.ts` | MySQL | 6 |\n| `sql-driver-keyed-text-mysql.test.ts` | MySQL | 5 |\n| `sql-driver-12998-shadow-null-safe-key.test.ts` | MySQL | 4 |\n| `sql-driver-13015-shadow-carried-index-drift.test.ts` | MySQL | 4 |\n| `sql-driver-11794-richtext-text-family.test.ts` | MySQL, PG | 3 |\n| `sql-driver-string-maxlength-varchar.test.ts` | MySQL, PG | 3 |\n| `sql-driver-backend-fault-envelope.test.ts` | PG | 2 |\n| `sql-driver-11389-date-tz-skew.test.ts` | MySQL, PG | 1 |\n\nMost of these (all but `sql-driver-backend-fault-envelope.test.ts`) follow the exact\n`#13688` shape: each `it(...)` itself constructs a fresh `new SqlDriver(...)`, calls\n`initObjects(...)` (schema-sync DDL), and reads `information_schema` back — one or\nmore full connect cycles per test, inline in the `it()` body. Spot-checked\n`sql-driver-11627-hash-shadow-key.test.ts:135` as representative; the pattern repeats\nacross the other 7.\n\n`sql-driver-backend-fault-envelope.test.ts`'s two `it()` blocks are lower-risk: they\nreuse a single driver connected once in a `beforeAll` and each issue 1-2 queries\nagainst an already-open connection, not a fresh connect/DDL/disconnect cycle. Listed\nfor completeness since they are still on the inherited default, but the cost profile\nis not the same as the other 8 files.\n\n### What this is and is not\n\nThis is a **structural** sweep (does an explicit budget exist), not a confirmed list\nof CI failures — I have not run these against live MySQL/PG here (no live containers\nin this environment; see #13688's own A2.1 for the same constraint). The evidence\nthat the *shape* is a real defect, not merely a theoretical one, is #13688 itself:\ntimeout-not-assertion, no DB error, and the repo's own convention (4 sibling files\nbudgeted) treating \"no timeout\" as an oversight rather than a choice.\n\n### Recommendation\n\nPer #13688's dispatch order (STOP condition 3): \"A2.2 finds the same shape across\nmany files in the package -> report before sweeping; a package-wide re-budget is a\ndifferent, larger decision\" -- so #13688 fixed only its own two tests and this issue\nrecords the rest for a deliberate decision, not a silent drive-by. The repo's existing\nconvention is a **per-test** budget (never a package-wide `testTimeout`, which would\nsilently re-budget the 150+ tests that legitimately want the fast default) -- same\nshape as #13688's fix, applied file by file.\n\n### Related\n\n- #13767 -- the queue-flake anchor for `sql-driver-13056-orphan-shadow-column-cleanup.test.ts`\n  specifically; #13688 addresses its root cause.\n- #13830 -- merge-queue triage guidance on the timeout-vs-assertion heuristic this\n  whole class turns on.\n"
+}

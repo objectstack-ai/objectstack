@@ -1,0 +1,37 @@
+{
+  "number": 13831,
+  "kind": "issue",
+  "title": "[finding] `CEL_STDLIB_FUNCTIONS` advertises 35 names but the CEL environment registers 72 — any consumer keying on the exported constant is blind to 37 real functions",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:dispatched",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-31T14:18:31Z",
+  "updated_at": "2026-08-31T18:18:25Z",
+  "closed_at": "2026-08-31T18:18:25Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13831",
+  "body": "Measured during the #13594 decisive census (issue comment 5479634264 there): the exported constant `CEL_STDLIB_FUNCTIONS` (`packages/formula/src/validate.ts:545`) lists **35** function names, while the cel-js `Environment` built in `packages/formula` registers **72** distinct names. The 37 registered-but-unadvertised names include `type`, `map`, `filter`, `exists`, `split`, `substring`, `getFullYear`, `base64`, `json`, `orValue` — all resolve and evaluate today.\n\n## Why it matters — the hazard was nearly realized the same afternoon\n\nThe #13594 ruling (branch one) extends the lint gate to reject unknown CEL functions at ERROR level. An implementer keying that gate on this constant — the obvious-looking move, since the constant's name says \"the stdlib\" — would reject all 37 real functions as unknown. The ruling therefore pins the oracle to the engine's own `check()` verdict (execution comment 5479679994 on #13594), but the trap stays armed for every OTHER consumer of the export: docs generators, autocomplete surfaces, any future validator.\n\n## The question for grading\n\nIs the constant meant to be:\n\n1. **the complete registry** — then it is stale by 37 entries and should be derived from the registration site (or `Environment.getDefinitions()`) rather than hand-maintained; or\n2. **a deliberately advertised subset** — then its name and docblock must say so, so no consumer treats it as complete.\n\nEither way the fix owes a drift pin: the constant is a subset of the registered set (route 2) or equals it (route 1), asserted against the real `Environment`, so the two can never silently diverge again.\n\nRefs: #13594 (census + ruling), `packages/formula/src/stdlib.ts` (27 `registerFunction` sites, the registration ground truth).\n\n⛔ Filed unassigned — recording only, for the finding box to grade."
+}

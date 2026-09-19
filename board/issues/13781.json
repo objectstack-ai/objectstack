@@ -1,0 +1,36 @@
+{
+  "number": 13781,
+  "kind": "issue",
+  "title": "[finding] `maskSelfTests` misses fixture path literals in self-test HELPER functions, so `release-rehearsal-clone` declares `.changeset/one.md` / `two.md` and the residue calls them a layout move",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-31T11:40:28Z",
+  "updated_at": "2026-08-31T18:39:18Z",
+  "closed_at": "2026-08-31T18:34:44Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13781",
+  "body": "Found by the #13448 dev seat (PR for `hintCovers` / `unreachableReason`) while censusing every dead hint in the fleet. ⛔ Unassigned; no priority or type label — triage's field.\n\n## The defect\n\n`maskSelfTests` does not reach path literals written in a **helper function** that only the self-test calls, even when that helper sits below the file's own `/* self-test */ banner`. Measured on `scripts/pm/release-rehearsal-clone.mjs` at `4301f7846`:\n\n```\nnode -e \"import('./scripts/pm/dispatch-gates.mjs').then(async m => {\n  const src = require('node:fs').readFileSync('scripts/pm/release-rehearsal-clone.mjs','utf8');\n  console.log(m.extractWatchHints(m.maskSelfTests(m.maskComments(src)), 'scripts/pm/release-rehearsal-clone.mjs'));\n})\"\n```\n\n```\n[ 'scripts/pm/release-rehearsal-clone.mjs', '.changeset/*.md', '.changeset',\n  '.changeset/config.json', '.changeset/README.md',\n  '.changeset/one.md',            <-- fixture\n  '.changeset/two.md' ]           <-- fixture\n```\n\n`.changeset/one.md` and `.changeset/two.md` are written by the self-test's temporary-repo builder (`writeFile(repo, '.changeset/one.md', ...)`, around lines 494-505). They are not paths the gate reads in this repo and never were.\n\n## Why it is worth a card and not a shrug\n\nThey land in the residue as DEAD literals, and the reason printed for them is:\n\n```\n'.changeset/one.md' — the tree stops at .changeset; the layout moved under it\n'.changeset/two.md' — the tree stops at .changeset; the layout moved under it\n```\n\nThat is the **same false-cause register** #13448 was filed for — a well-formed sentence naming a directory rename that never happened — arriving one layer up, at EXTRACTION rather than at the covering predicate. A reader triaging those two rows goes looking for a move of a fixture that only ever existed inside a temp dir.\n\n⚠️ #13448's repair does not touch this: those two are ordinary literals, judged by the collapse, and the collapse is the right form for them. From the tree alone \"never existed\" and \"moved\" are indistinguishable for a literal under a surviving prefix, which is exactly why the *extraction* is the place to stop it.\n\n## Relationship to #8478 — a residual, not a duplicate\n\n**#8478** (closed) is this class: \"dispatch-gates watch hints are read from self-test fixtures and comments, so gates are printed as MATCHED for paths they never read\". `maskComments` + `maskSelfTests` closed the two boundaries it named. This is a **third** boundary the masking does not cover: a fixture literal in a plain helper function that only the self-test calls. Re-opening #8478 or filing under it is fine if triage prefers.\n\n## Not folded into #13448's PR\n\nThe four-condition in-place exemption fails on the second: the correct fix is not mechanically pinned by existing evidence. At least three shapes are available and each has its own blast radius, so it is a decision:\n\n- widen `maskSelfTests` to mask everything below the self-test banner — fleet-wide extraction change, needs its own before/after hint census;\n- teach it to follow the call graph from the self-test entry — more precise, much larger;\n- move the fixtures inside the self-test body, or spell them so the extractor drops them — cheapest, but only fixes this one gate and leaves the mechanism.\n\n## Dedup declaration\n\n`search_issues` (MCP), one targeted query, semantic. ⚠️ The channel is **proven live for this session**: the same query returned #13448 itself, a known-must-hit control, so the result is a reading and not a false zero. REST `GET /search/issues` is **403** for this seat, so it could not be used as the second channel. Nearest neighbours examined: **#8478** (closed, this class, different boundary — discussed above), **#12299** / **#12371** / **#12470** (module-relative literal depth — a different extraction defect), **#13448** (the covering predicate, this card's parent run). ⚠️ One semantic query only; a duplicate worded very differently would not have been seen.\n\n## Refs\n\n- `scripts/pm/dispatch-gates.mjs` — `maskSelfTests`, `extractWatchHints`, `unreachableReason`\n- `scripts/pm/release-rehearsal-clone.mjs` lines ~494-505 — the live specimen\n- #8478 — the closed card of this class\n- #13448 — surfaced during its census; ⛔ not fixed there and ⛔ not blocked by it\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

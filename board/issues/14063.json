@@ -1,0 +1,32 @@
+{
+  "number": 14063,
+  "kind": "issue",
+  "title": "给 governed-surface-guard 的 merge_group job 装依赖,启用生成物豁免重算 —— 纯再生成的 skills 指针行不再需要维护者批准",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T02:05:28Z",
+  "updated_at": "2026-09-01T03:14:14Z",
+  "closed_at": "2026-09-01T03:14:00Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14063",
+  "body": "## 裁决(2026-09-01,维护者,逐字)\n\n> 纯生成的指针行(spec 源变更后再生成的 references/_index.md) 不需要我审核吧\n\n语境:#13794(spec 源变更 + 4 个再生成的 `skills/*/references/_index.md`)在 merge_group 腿被 Governed Surface Queue Guard 拒绝,维护者被迫钉头批准一轮纯生成 diff。总监席提案「给 guard job 装依赖启用生成物豁免重算」,维护者以上句确认。\n\n## 依据(脚本头注已归档的 trade,`scripts/pm/check-governed-queue-guard.mjs`)\n\n> ⚠️ One measured limit […]: the #11705 rows (generator-owned files inside `skills/**`) recompute by running the generator's own `--check`, and THIS JOB INSTALLS NO DEPENDENCIES. Here they therefore fail closed — a spec PR carrying its regenerated `references/_index.md` is still governed at merge-group time and needs the approving review, even though the seat-side `--test` lifts it in a dev container. Giving this job a dependency install would close that, at a cost on every queue build, and no ruling covers that trade — it is filed, not taken.\n\n本卡即把该 trade 从 filed 变为 taken;裁决已覆盖。\n\n## 要求\n\n1. `.github/workflows/governed-surface-guard.yml` 的 merge_group job 增加依赖安装(以及 `recomputeProvenanceFor` 跑生成器 `--check` 所需的最小构建),使 `applyGeneratedExceptions` 在队列构建里可实际重算 —— 座席侧 `--test` 与 queue 腿对同一 diff 恒同答(#11705 ⛔ 不写第二机制,继续从 `check-governed-merges.mjs` 导入,不复制)。\n2. **fail-closed 语义一根不松**:重算任何错误路径照旧拒绝(EXIT 语义与现状一致);豁免只对生成器认账的 byte-exact 再生成生效,手写 `skills/**` / `.claude/**` / ADR / `AGENTS.md` 改动照旧需要 `GOVERNED_APPROVERS` 钉头批准。\n3. 自测更新:`--self-test` 对 workflow 名/结构的既有断言保持绿;为「装了依赖后豁免生效」「重算失败仍 fail closed」补 pin。\n4. 报告队列构建的实测耗时增量(pnpm install + 构建),写进 PR 正文。\n5. `pull_request` 早警腿行为不变(照旧 exit 0)。\n\n## 验收\n\n- #13794 形态的 diff(spec 源 + 纯再生成指针行)在 merge_group 腿零批准放行;\n- 含任一手写受管文件的 diff 照旧被拒;\n- 守卫自测绿;workflow 名 `Governed Surface Queue Guard` 不动(required context 钉的就是它)。"
+}

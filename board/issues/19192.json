@@ -1,0 +1,35 @@
+{
+  "number": 19192,
+  "kind": "pull_request",
+  "title": "fix(service-messaging): sms-channel declares isAvailable() so fan-out can suppress it on an absent transport",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-19T09:51:24Z",
+  "updated_at": "2026-09-19T10:49:21Z",
+  "closed_at": "2026-09-19T10:49:19Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-09-19T10:49:19Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/19192",
+  "body": "Fixes #18567\n\nClause-②: no — adding this member pulls `sms-channel` back to the symmetry `MessagingChannel` already declares (拉回已声明契约). The accept set is not widened and no published type moves: `createSmsChannel` still returns `MessagingChannel`, and `isAvailable` is an OPTIONAL member of that already-published interface.\n\n## What changed\n\n`sms-channel` declared no `isAvailable()`, and `email-channel` was the only implementation of that optional member in the repository. Fan-out's `resolveChannelAvailability` treats a channel without the member as AVAILABLE — the deliberate default that keeps every third-party channel working — so one condition, \"there is no transport\", was answered two ways depending on which channel was asked: `email` was suppressed before any `sys_notification_delivery` row was written, while `sms` got a row per recipient that the pipeline could only dead-letter.\n\nThe member now mirrors `email-channel.ts`, reading the reason **off the `TRANSPORT_NOT_CONFIGURED` constant** `send()` already refuses with rather than retyping the literal, so the refusal on the delivery row, the suppression record on `sys_notification.suppressed_channels` and the availability answer all name one condition.\n\n- ⛔ **No new error code and no new reason token.** The vocabulary stays the closed `CHANNEL_UNAVAILABLE_REASONS` set in `channel.ts`, held there by the constant's type annotation.\n- ⛔ **PR #18562's fix is not weakened.** `send()`'s refusal is byte-identical; it now answers the residue a pre-write suppression cannot cover — a transport present at emit and gone by dispatch, where the delivery row already exists.\n- **Immaterial under `MessagingServicePlugin`**, where `lazyChannelMount` refuses first and the channel is never registered — a composition fact, ⛔ not a suppression.\n\n## Which existing tests changed shape, and why each change is intended\n\nTwo, both in `sms-channel.test.ts`, and neither is a repair to make a suite pass:\n\n1. **The stale concession at line 98 is now false and was rewritten.** It read \"This channel declares no `isAvailable()`, so fan-out cannot suppress it\" — the test corpus documented the gap rather than covering it. The test under it now reads the token off `isAvailable()` instead of retyping the literal, exactly as `email-channel.test.ts` does for the same pair of members, so a future rename cannot leave the two disagreeing while both stay green.\n2. **The END TO END test's resolver is now present at emit and gone by dispatch** (`getSms: n++ === 0 ? transport : undefined`). This is forced by the change and is the shape `email-channel.test.ts` already uses for the identical reason: with the member declared, a resolver absent THROUGHOUT is suppressed at fan-out and writes no row at all, which would leave that test asserting `dead` over an empty table. The row it still pins — `dead`, `attempts: 1`, error containing `transport_not_configured` — is unchanged, and the suppression case it no longer covers is pinned separately and directly by the new `DRIVEN` test.\n\n## Coverage added\n\nA new `availability at fan-out (#18567)` block: the channel answers unavailable with the declared reason; THE CONTROL that it answers available once a transport is registered; that the answer is never memoized (the `sms` settings namespace is `scope: 'global'` and its transport is hot-swapped by the change bus); that the probe performs no data access; and the behaviour change **driven** end to end through a real `MessagingService` — no delivery rows, and `{ channel: 'sms', reason: 'transport_not_configured' }` recorded on the `sys_notification` insert and returned as `EmitResult.suppressed` — paired with the other-side control that the same emit with a transport still enqueues one row per recipient.\n\n## Verification\n\n**Ablation** (proving the new coverage is not vacuously true), run through `scripts/ablation-replace.mjs`, so the mutation is verified against the disk and not against an exit code. Mutation: the availability answer neutered to `return { available: true };` — the \"no `isAvailable` ⇒ available\" behaviour this PR removes.\n\n- mutation landed on disk: anchor `1 -> 0`, blob `be10dc96181e -> 859b9e58e199`\n- reached the built artifact: `ablation-dist-preflight @objectstack/service-messaging 'reason: TRANSPORT_NOT_CONFIGURED' --absent` after a rebuild — exit 0\n- **direction: turned red.** `5 failed | 20 passed (25)` — the refusal test, the END TO END test, and three of the new ones\n- restore leg: source blob back to `be10dc96181e` == HEAD, `git diff HEAD` empty, whole-tree `git status --porcelain` empty, `dist/` REBUILT and re-checked marker-PRESENT (2 built files), suite green again\n\n**Gates** — 61 derived for this diff by `scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` at `305119697`, exit codes captured before any pipe and reconciled with `--ran`: **58 exit 0, 3 NOT MEASURED, 0 unrun.** The three are `check:dual-build-cjs-loads`, `check:i18n` and `check:type-check-debt`, each exit **3** = PREREQUISITE NOT MET: all three read built output across the whole workspace and demand a full `pnpm build`, which is CI's run and ⛔ not a finding.\n\n**Suites** (`packages/services/service-messaging`, at `305119697`): `pnpm test` 44 files / 479 tests passed; `pnpm typecheck` exit 0; the dependency-closure build (`--filter '@objectstack/service-messaging^...'`) exit 0.\n\n**Lint: the whole repo, not a narrowing.** `eslint . --no-inline-config --format json` ran to completion at `305119697` — **6897 files, 0 errors, 0 warnings, exit 0**.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01AhQASwqJr2Z7XfGWUdvnbF)_"
+}

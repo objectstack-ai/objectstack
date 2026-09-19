@@ -1,0 +1,36 @@
+{
+  "number": 13714,
+  "kind": "issue",
+  "title": "analytics: cube query with a time-dimension granularity (month) on a date dimension crashes 500 DATABASE_ERROR",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T07:59:04Z",
+  "updated_at": "2026-09-01T06:39:49Z",
+  "closed_at": "2026-09-01T06:31:31Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13714",
+  "body": "A cube query that adds a **`timeDimensions` granularity** on a date dimension returns `500 DATABASE_ERROR`, while the same cube's plain measure/dimension queries succeed. Found while browser-testing the dashboards/analytics area against the showcase dev app (console pin `190fbd01`, framework `502ff8b5`); reproduced ×2.\n\n## Reproduction\n\n```\nPOST /api/v1/analytics/query\n{\n  \"cube\": \"showcase_delivery\",\n  \"measures\": [\"showcase_delivery.count\"],\n  \"timeDimensions\": [{ \"dimension\": \"showcase_delivery.due_date\", \"granularity\": \"month\" }]\n}\n→ 500 DATABASE_ERROR\n```\n\nControls that succeed (same cube, same session):\n- `measures:[\"showcase_delivery.count\"]` + `dimensions:[\"showcase_delivery.status\"]` → 200, buckets reconcile with `/data`.\n- `measures:[\"showcase_delivery.total_estimate_hours\"]` by status → 200.\n- Malformed bodies are correctly rejected at entry with a `400` + migration hint (so the entry validator is fine; the failure is downstream, at SQL generation/execution for the month bucket).\n\n## Impact\n\nAny dashboard widget or report that buckets a measure by month/week/day over a date dimension (a common chart shape — \"count by month\") fails at runtime with a 500. On the checklist this surfaced as `dashboards.drill-through-range` and `dashboards.empty-null-bucket-boundaries` not being able to isolate the **month-bucket** path in the UI (the underlying query 500s), even though status/priority bucketing renders correctly.\n\n## Notes\n\n- The date-bucket *parity* unit pins (#3773 date-bucket-parity, #3839 empty-group-parity) are green — they exercise the bucketing logic at a layer that does not hit the real SQL driver the way the live `/analytics/query` path does, which is why this only shows against a running deployment.\n- Likely a date-truncation SQL emission issue for the granularity clause on the better-sqlite3 driver (showcase dev app); worth checking whether the Postgres driver path differs.\n\n(Dedup note: the GitHub search API was rate-limited at filing time, so a pre-file duplicate scan could not complete — please close as duplicate if an existing card already covers analytics time-dimension bucketing.)\n\nQA-source: #13404 · dashboards.drill-through-range, dashboards.empty-null-bucket-boundaries (UI supplement) · analytics timeDimension"
+}

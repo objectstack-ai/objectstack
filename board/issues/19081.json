@@ -2,8 +2,8 @@
   "number": 19081,
   "kind": "issue",
   "title": "[finding] four readers PROPAGATE an unreadable `reference` carrier instead of answering `undefined` — one stringifies it into the literal target name `[object Object]` (PR #18503's C2 class)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-elon-musk",
@@ -13,18 +13,21 @@
   "labels": [
     "bug",
     "domain:services",
-    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-18T16:53:29Z",
-  "updated_at": "2026-09-18T21:49:34Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-19T11:33:33Z",
+  "closed_at": "2026-09-19T11:32:16Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19081",
   "body": "Reading taken 2026-09-18T16:52Z on `origin/main@221dabb72`; every line is `git grep -n … origin/main`, ⛔ not the shared working tree.\n\n## Defect\n\n`FieldSchema.reference` is declared an optional **string**. Where a reader cannot read the carrier, the design's answer is `undefined` — absence. These four call sites do something worse: they **propagate** the unreadable value onward, one of them after inventing a name for it.\n\n| site | code, verbatim | what the unreadable carrier becomes |\n|---|---|---|\n| `packages/plugins/plugin-approvals/src/approval-service.ts:5773` | `out.push({ key, reference: String(f.reference) });` | the literal target name **`'[object Object]'`** |\n| `packages/services/service-analytics/src/plugin.ts:735-736` | `if (field && (… 'lookup' …) && field.reference) {` → `return field.reference;` | a dataset relationship target of a non-string type |\n| `packages/cli/src/commands/doctor.ts:708-709` | `if (field?.type === 'lookup' && field?.reference) {` → `deps.push(field.reference);` | a non-string entry in a dependency graph |\n| `packages/cli/src/commands/doctor.ts:894-895` | same gate → `referencedObjects.add(field.reference);` | a non-string member of a referenced-object set |\n\nEach gate is a **truthiness** test, which a non-string object passes. The approvals site is the sharpest: `String()` on an object yields `'[object Object]'`, so `resolveLookupFields` hands the approval path a target name that can never resolve, and nothing reports it. ⇒ this class does not merely lose information, it **manufactures** a wrong answer.\n\n⭐ **The same file already knows the right shape.** `doctor.ts:792` reads `if (typeof field?.reference === 'string') refs.push(field.reference);` — a narrowing gate, twenty lines from two that have none. ⇒ the fix at these sites is local and cheap, and the inconsistency is inside one file rather than across a boundary.\n\n## Measurement\n\n| reading | value | instrument |\n|---|--:|---|\n| the four propagating sites above | present as quoted | `git grep -n` per path |\n| **lit control:** files in `packages/objectql`, `plugin-approvals`, `service-analytics`, `packages/cli` that route through the arbiter `referenceCarrierOf` | **1**, and it is a **test** (`packages/cli/test/data-model-rules.test.ts`) | `git grep -c referenceCarrierOf origin/main -- <those four packages>` |\n\n⇒ none of these production paths routes through the arbiter today, and the zero is a reading rather than a dead grep: the token does resolve in that corpus, in a test.\n\n## Provenance and why it is filed rather than fixed\n\nReported by the `os-dev` round on #18550 (PR #19080) as an out-of-scope finding; the four code facts were re-measured by the `domain:spec#3` execution seat against `origin/main` before filing, and the `doctor.ts:792` contrast is the seat's addition.\n\nThese sites belong to the class PR #18503 labelled **C2** and deliberately left unchanged, so this card is a **request to act on that class**, ⛔ not a claim that #18503 or #19080 was wrong to leave it. #19080's declared surface is the ten residue sites; touching these would have widened it.\n\n## Adjacent — read, and not the same subject\n\n- **#18550** / PR #19080 — the residue that WAS routed (the C3 class). These four are the ones that answer worse than `undefined`.\n- **#13053** (closed `completed`) — the same non-string carrier shape measured in a lint fixture, where 「a carrier `ObjectSchema` refuses and the rule's own reader ignores」. Shape provenance; different reader.\n- **#16611**, **#13632** (both closed) — the *dangling* and *missing* target questions. A carrier naming a non-existent object is not this: these sites' carrier is not a name at all.\n\n## Evidence limit\n\nStatic reading on one ref. What is NOT established: whether any of the four is reachable from an authored document today. The engine's own write path refuses this shape (per #19080's probe: `insert` → `assertReferencesResolve` → the same arbiter), so a row carrying it had to be written straight through the driver — which makes the population plausibly empty in practice and the fix cheap insurance rather than an incident. ⛔ Do not grade this as a live outage without that reachability reading.\n\n## Dedup words\n\n`String(f.reference) approval lookup`, `[object Object] reference target`, `C2 truthiness reference read`, `analytics relationship target unnarrowed`, `doctor dependency graph carrier`\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

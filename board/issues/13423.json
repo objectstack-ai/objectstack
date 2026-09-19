@@ -1,0 +1,34 @@
+{
+  "number": 13423,
+  "kind": "issue",
+  "title": "[finding] The governed-merge sweep audits a checkout whose origin does not parse to a GitHub slug — the wrong-origin refusal beside it has a hole, and reachability raises the bar without closing it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T11:25:47Z",
+  "updated_at": "2026-08-31T18:59:08Z",
+  "closed_at": "2026-08-31T18:58:13Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13423",
+  "body": "Measured by the #13307 dev seat (PR #13421) while building the remote-reachability leg. **Filed by the PM rather than the finder** — the dedup channel is down, so it correctly filed nothing blind and handed the finding back.\n\n⛔ No `domain:*`, no priority, no type label — triage's field.\n\n## The defect\n\n`scripts/pm/check-governed-merges.mjs`, in `resolveRepoCheckouts`. The wrong-origin refusal is written as:\n\n```\nif (seen.slug && seen.slug !== repo.slug)\n```\n\n⇒ The guard only fires when a slug **was parsed and differs**. When `slugFromRemote` returns `null` — any remote spelling it cannot parse into an `owner/name` GitHub slug — `seen.slug` is falsy, the condition is false, and the checkout **falls through to `status: 'audited'`**.\n\n⭐ So the repo is audited **under the governed name** with no evidence it is that repo. The refusal sitting immediately beside it exists precisely to stop that, and this is the hole in it.\n\n## Same class as #13307, which is why it is worth a card\n\n#13307 is *\"a local tip is not evidence the remote was consulted.\"* This one is *\"a local checkout is not evidence it is the repo you think.\"* Both are **an instrument that cannot fail in the direction it exists to detect**, and both fail in the direction that reads as safety — a tick, an audited row, and a zero.\n\n## ⚠️ The reachability leg raises the bar without closing this\n\nPR #13421 makes every audited repo prove its remote is reachable and its tip matches. That is a real narrowing — but **a local or mirror remote is reachable**. A checkout whose origin is, say, a filesystem path or a non-GitHub host now passes the new probe *and* still slips the slug check, so it is still audited under the governed name.\n\n⇒ The two guards compose to something stronger than either, and still not to a closed door.\n\n## ⛔ Why it was NOT fixed in PR #13421\n\nDeliberately, and the reasoning is worth keeping: the bounded-in-place exemption fails its **second** condition. What an unparseable remote *should* do is a **judgment**, not a mechanical form pinned by existing evidence — a legitimate mirror URL and a bogus one are both unparseable, and the sweep has no basis in the tree for telling them apart. Fixing it in place would have meant inventing that policy inside a card scoped to reachability.\n\n## Repro\n\nPoint `--repo-root` at any checkout whose `origin` is not a `github.com` URL, and observe the row audit under the governed slug.\n\n## Dedup declaration\n\n⚠️ **`search_issues` returns FALSE ZEROS on this fleet** (recorded on #13312), so a zero from it is not a reading. Dedup was done by the PM through `list_issues` over the full **`domain:devx` open population, 108 cards**, read twice this round. #13307 is the only open card on this file and is a **different** defect (remote reachability, not slug parsing).\n\n⚠️ **That listing covers one lane only.** A duplicate filed under another `domain:*`, or with no domain label, would not have been seen. Cross-lane and cross-repo dedup is triage's field.\n\n## Refs\n\n- **#13307** / PR **#13421** — the reachability leg, same defect class, adjacent code\n- `scripts/pm/check-governed-merges.mjs` — `resolveRepoCheckouts`, `slugFromRemote`"
+}

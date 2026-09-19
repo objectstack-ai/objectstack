@@ -1,0 +1,33 @@
+{
+  "number": 13365,
+  "kind": "issue",
+  "title": "hostImporter CJS/ESM 双构建实例错位:OS_CLUSTER_DRIVER=redis 注册进 CJS registry、Runtime 查 ESM registry → 拒启,且 serve 静默吞错",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T06:55:34Z",
+  "updated_at": "2026-08-31T13:10:54Z",
+  "closed_at": "2026-08-31T13:10:53Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13365",
+  "body": "## 现象\n\n宿主 app 声明了 `@objectstack/service-cluster` / `@objectstack/service-cluster-redis`(#4719 契约满足)、设 `OS_CLUSTER_DRIVER=redis` 走 `os serve`,boot 拒启:\n\n```\n✗ Cluster driver \"redis\" is not registered. Did you forget to import @objectstack/service-cluster-redis or call registerClusterDriver()? See content/docs/kernel/cluster.mdx §6.\n```\n\n而手动在同一宿主目录 `import('@objectstack/service-cluster-redis')` 完全正常(导出齐全)。**serve 侧没有任何线索**:装载失败被空 `catch` 吞掉。\n\n- 实测环境:平台 **17.2.0**(objectos-ee:4.1.1 镜像,builtAt 2026-08-24),宿主 app 为 os-tianshun-ehr 的 EE 薄扩展镜像(经 file: 声明 + 符号链接指向镜像内 workspace 包)。\n- 复现与临时绕法收录在 steedos-labs/os-project-titanwind-ehr 的 `deploy-ee/README.md` 与 `deploy-ee/cluster-preload.mjs`(PR steedos-labs/os-project-titanwind-ehr#1880)。\n\n## 根因链(逐环节核实过)\n\n1. `serve`(`packages/cli/src/commands/serve.ts`,`OS_CLUSTER_DRIVER` 分支)经 **importFromHost**(#4719 宿主解析器)装载 `@objectstack/service-cluster-${driver}`。\n2. `createHostImporter`(`packages/types/src/node.ts`)对**已声明**的包走 `hostRequire.resolve(pkg)` —— **CJS 解析**,命中 exports 的 `\"require\"` 条件:\n\n   ```\n   hr.resolve('@objectstack/service-cluster-redis')\n   → …/service-cluster-redis/dist/index.cjs        ← CJS 构建\n   hr.resolve('@objectstack/service-cluster')\n   → …/service-cluster/dist/index.cjs\n   ```\n3. 于是 `registerClusterDriver('redis', …)`(`service-cluster-redis/src/index.ts` 末尾的模块副作用)注册进的是 **service-cluster CJS 构建实例**的 `driverRegistry` —— 这是个**模块级 `const Map`**(`packages/services/service-cluster/src/cluster.ts`),不挂 globalThis。\n4. `Runtime` 的 `defineCluster` 从 ESM 上下文 bare import `@objectstack/service-cluster` → **ESM 构建实例**(`dist/index.js`)→ 另一张空 Map → 抛 \"not registered\"。\n5. 加重:serve 对该 import 是空 `catch { /* may already be registered by the loaded config */ }` —— 真实失败模式(装载成功但注册进错实例/或解析失败)完全静默,操作者只能看到第 4 步的结果性报错,与真实原因相隔两层。\n\n**一句话:同一个包的 CJS 与 ESM 双构建各持一份 registry,注册与查找不在同一张 Map 上。**\n\n## 最小复现\n\n任意宿主 app(package.json 声明上述两包并可解析),`OS_CLUSTER_DRIVER=redis OS_REDIS_URL=redis://… os serve` → 拒启如上。\n\n## 项目侧临时绕法(可作修复验证参照)\n\n入口改 `node --import cluster-preload.mjs`,预载脚本在宿主目录以**纯 ESM** `await import('@objectstack/service-cluster-redis')` 一次 —— Node 默认 realpath 到与 Runtime 相同的 ESM 实例,注册即生效。实测 3 副本集群恢复正常(redis fence 锁选主、跨副本协调均工作)。\n\n## 建议修复方向(任一即可,前两者可叠加)\n\n1. `driverRegistry`(以及同类模块级单例,如 multi-node gate 的注册表)挂 **globalThis 兜底**,双构建实例共享一张表;\n2. `createHostImporter` 对已声明包在 ESM 上下文**优先 `import` 条件**解析(或 resolve 后按 import 条件重定向),避免 CJS/ESM 双实例;\n3. serve 的集群驱动装载**不再静默吞错**:至少把失败原因降级为 WARN 打出来 —— \"may already be registered by the loaded config\" 这个假设应该验证(查 registry)而不是假定。\n\n## 波及面\n\n不止 cluster:凡经 hostImporter 装载、靠**模块副作用注册进模块级单例**的包,双构建下都可能注册错位。已另立 cloud 侧 issue 追多节点授权门(registerMultiNodeGate)的同型错位与接线缺口(编号见评论/引用)。\n"
+}

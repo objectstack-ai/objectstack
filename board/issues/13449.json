@@ -1,0 +1,36 @@
+{
+  "number": 13449,
+  "kind": "issue",
+  "title": "[finding] `check:doc-anchors` declares a fabricated watch hint `scripts/scripts/check-doc-anchors.mjs` — a remedy string meant to run from the repo root is resolved module-relative, doubling the prefix",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-30T12:32:22Z",
+  "updated_at": "2026-08-31T11:54:24Z",
+  "closed_at": "2026-08-31T11:54:11Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13449",
+  "body": "Measured by the #13312 dev seat (PR #13447) while censusing dead watch-hint literals across all families. **Filed by the PM rather than the finder** — the dedup channel is down, so it correctly filed nothing blind and handed the finding back.\n\n⛔ No `domain:*`, no priority, no type label — triage's field.\n\n## The defect\n\n`check:doc-anchors` carries a watch hint naming a path that has never existed:\n\n```\nscripts/scripts/check-doc-anchors.mjs\n```\n\n⭐ **The doubled `scripts/` is not a typo in a hint — it is a real string being read in the wrong frame.** Line 459 of `scripts/check-doc-anchors.mjs` spells `./scripts/check-doc-anchors.mjs` inside a **remedy message**, i.e. a command intended to be run from the **repo root**. The hint extractor resolves quoted path-shaped literals **module-relative**, so the gate's own directory is prepended and the prefix doubles.\n\n⇒ Neither half is wrong on its own: the remedy string is correct for its reader, and the extractor is correct for a declaration. The fabrication comes from one being read as the other.\n\n## Why it is worth a card\n\nThis is the same class as its parent finding #13312 — a dispatch brief shown a lead that cannot ever match anything — but with a **different cause**, and the difference is what makes it separately fixable. #13312's fabrications are self-test **fixture constants**; this one is **prose meant for a human**, in a file that is otherwise correct.\n\n⚠️ And #13312's own measurement is the reason this cannot be fixed by tightening the extractor: the sanctioned declaration idiom is structurally indistinguishable from an incidental module-scope constant (measured there at **8.6 real populations deleted per fabrication removed**). ⇒ The honest fix is **local to this gate** — spell the remedy so it cannot be read as a declaration — not a change to how literals are scraped.\n\n## Current state\n\nPR #13447 now **annotates** this hint as dead, so it is visible rather than silent. ⛔ That is the display half only; the fabricated literal is still declared, and the spelling fix belongs in `scripts/check-doc-anchors.mjs`, which was outside that card's file surface.\n\n## Reproduction\n\n```\nnode scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --residue\ngit ls-files 'scripts/scripts/*'            # 0\n```\n\nThen read `scripts/check-doc-anchors.mjs` around line 459 for the source string.\n\n## Dedup declaration\n\n⚠️ **`search_issues` returns FALSE ZEROS on this fleet** (recorded on #13312), so a zero from it is not a reading. Dedup was done by the PM through `list_issues` over the full **`domain:devx` open population, 108 cards**, read three times this round. Nearest neighbours examined and rejected as distinct: **#13312** (same symptom class, different cause — fixture constants, and it is this card's parent), **#13448** (the `hintCovers` basename-glob defect filed alongside this one — a coverage predicate failure, not a fabricated literal), **#12797** (a wrong reason on a bare hint), **#13333** (a family the derivation does not reach).\n\n⚠️ That listing covers one lane only. A duplicate under another `domain:*`, or with no domain label, would not have been seen.\n\n## Refs\n\n- **#13312** / PR **#13447** — the census that surfaced this, and the annotator that makes it visible\n- **#13448** — the sibling residue defect filed from the same census\n- `scripts/check-doc-anchors.mjs` line 459 — the remedy string"
+}

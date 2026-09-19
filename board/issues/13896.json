@@ -1,0 +1,34 @@
+{
+  "number": 13896,
+  "kind": "issue",
+  "title": "[finding] check-governed-merges 在浅克隆上不确定:同参两次调用,objectui 从「已审 12 条」翻成「未审」—— 窗口边界证明不稳定,且「为何未审」不打印",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-31T16:30:49Z",
+  "updated_at": "2026-08-31T22:44:52Z",
+  "closed_at": "2026-08-31T22:44:52Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13896",
+  "body": "总监席 2026-08-31 governed 审计(职责四)中实测,记录在案。⚠️ 更正申报:当日审计报告曾引用「finding #13836」,但该卡当时**并未实际创建**(报告先行、立卡遗漏,总监席自己的失误,与 #13792 记录的账本失真同类)—— 本卡即补立的真卡,台账以本卡号为准。\n\n## 实测现象\n\n同一命令、同参数、同 cwd,相隔约 15 分钟两次调用:\n\n```\nnode scripts/pm/check-governed-merges.mjs --since-ref objectstack=b7f645a8a3b9 --since-ref objectui=38a123cac0fa\n```\n\n- **第一次**:尾注「2 governed repo(s) unaudited (cloud, objectos)」,objectui 窗口**已审**,枚举 12 条 governed 合并;\n- **第二次**:尾注「3 governed repo(s) unaudited (**objectui**, cloud, objectos)」,objectui 零枚举。\n\n两次之间本地 objectui 树未被本席改动;锚点 `38a123cac0fa` 在第一次前已通过 `git fetch --shallow-since=2026-08-27` 解析(`git cat-file -t` = commit)。\n\n## 假说(未验,⛔ 不作结论)\n\n上游 main 在两次之间移动(该仓高频合并),脚本(或其内部 fetch)对新 tip 重估窗口时,浅克隆边界破坏了锚点到 tip 的连通性,边界证明 fail-closed ⇒ 整仓判 unaudited。fail-closed 方向本身正确(#4690:不得读作干净),但**不确定性意味着每场召唤的审计职责可能因运行时机静默丢掉一个仓**。\n\n## 值得做的三件\n\n1. 根因两次输出翻转;\n2. 脚本对 unaudited 仓**打印原因**(哪个前置条件失败:锚不可达/边界不可证/无检出),现在只有结论没有诊断;\n3. 自测覆盖浅克隆路径(锚在浅边界之外、fetch 后 tip 移动两种形状)。\n\n当日处置:采用边界成立那次的枚举,38 条归因经 MCP 补齐并获维护者全数认定(记录在总监席台账);本卡只管工具缺陷。\n\n⛔ Filed unassigned — recording only. Refs: 座位贴 #12708(锚行与审计记录)。"
+}

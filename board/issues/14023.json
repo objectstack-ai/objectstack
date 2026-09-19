@@ -1,0 +1,36 @@
+{
+  "number": 14023,
+  "kind": "issue",
+  "title": "Every migration in `packages/metadata/src/migrations/` requires `driver.raw(...)`, a method no driver in this repo defines — the drivers expose `execute()`, so the documented cut-over call is a no-op that reports `error`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p1"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T00:06:42Z",
+  "updated_at": "2026-09-01T05:04:06Z",
+  "closed_at": "2026-09-01T05:03:40Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14023",
+  "body": "Found while implementing the timestamp-canonicalisation fix in `migrate-sys-notification-to-event.ts` (#13998). Filed separately rather than folded in: different defect class, and it needs its own decision about the driver surface these helpers accept. That card is not addressed by this one.\n\n## The mismatch\n\n`migrateSysNotificationToEvent` guards, then drives, on `driver.raw`:\n\n```ts\nif (typeof driver?.raw !== 'function') {\n    return { status: 'error', migrated: 0,\n        error: 'migrateSysNotificationToEvent: driver must expose a .raw(sql, bindings?) method.' };\n}\n```\n\nNo data driver in this repo defines a `raw` method. Measured, with a firing positive control on the same expression:\n\n```\n$ grep -rnE '^\\s*(public |protected |private )?(async )?raw\\s*\\(' packages/*/src packages/*/*/src --include=*.ts | grep -v '\\.test\\.ts'\npackages/verify/src/harness.ts:84:  raw(path: string, init?: RequestInit): Promise<Response>;     # an HTTP harness, not a data driver\n\n$ grep -rnE '^\\s*(public |protected |private )?(async )?execute\\s*\\(' packages/drivers/*/src/*.ts | grep -v '\\.test\\.ts'\npackages/drivers/driver-memory/src/memory-driver.ts:547\npackages/drivers/driver-mongodb/src/mongodb-driver.ts:241\npackages/drivers/driver-sql/src/sql-driver.ts:7956\npackages/drivers/driver-turso/src/remote-transport.ts:1180\n```\n\n`SqlDriver implements IDataDriver` (`sql-driver.ts:4081`) and the contract itself declares `execute?(command, options)` (`packages/spec/src/contracts/data-engine.ts:293`) — there is no `raw` on it.\n\n## Why it matters\n\n`docs/handoff/adr-0030-notification-convergence.md` gives operators this cut-over step, verbatim:\n\n> 2. Run `migrateSysNotificationToEvent({ driver, data })` to carry existing notifications into `sys_inbox_message` + receipts.\n\nAn operator who passes their platform driver — the only `driver` that sentence can mean — gets `{ status: 'error', migrated: 0 }` back and nothing happens. The migration is documented as the supported way to preserve users' existing bell notifications across the ADR-0030 cut-over, and it is published from `@objectstack/metadata/migrations`.\n\nThe failure is quiet in the shape that matters: `status: 'error'` is a returned value, not a throw, and the message names a driver method rather than saying the migration did not run.\n\n## Scope: the whole directory, not one file\n\nAll four members take `driver.raw` and none accepts `execute`:\n\n- `migrate-sys-notification-to-event.ts` — guard at :74, calls at :157, :174, :191, :203\n- `migrate-env-id-to-project-id.ts` — :90, :98 (doc at :39 states the requirement)\n- `migrate-project-id-to-environment-id.ts` — :170, :176 (doc at :110)\n- `drop-projection-tables.ts` — doc at :39 states the same requirement\n\n## The repo already has the correct shape, one package over\n\n`packages/metadata-protocol/src/migrations/` resolves both surfaces rather than assuming one:\n\n```ts\n// partial-index-probe.ts:94\nif (typeof driver.raw === 'function') return (sql: string) => driver.raw(sql);\nreturn (sql: string) => driver.execute(sql);\n\n// seed-tenancy-backfill.ts:347\nif (typeof driver.execute === 'function') {\n  return { exec: (sql, params) => driver.execute(sql, params ?? []), client, ledger };\n}\nreturn { exec: (sql) => driver.raw(sql), client, ledger };\n```\n\nAdopting that resolver in the `packages/metadata` family is the obvious repair, but it is a decision about which surface these published helpers promise, so it is worth making deliberately rather than as a rider.\n\n## Why the tests do not catch it\n\nEvery case in `migrate-sys-notification-to-event.test.ts` builds its own double with a `raw` method — including the one that asserts the guard fires (`errors cleanly when the driver has no raw()`). The suite therefore pins the guard's message while never once exercising a driver the repo actually ships. The same is true of the sibling migrations' suites.\n\nA repair should pin the real surface: drive at least one case through a driver type this repo defines, rather than through a double shaped to the helper's own assumption.\n\n## Re-run\n\n```\ngrep -rn 'driver\\.raw' packages/metadata/src/migrations/\ngrep -rnE '^\\s*(public |protected |private )?(async )?raw\\s*\\(' packages/*/src packages/*/*/src --include=*.ts | grep -v '\\.test\\.ts'\n```\n\nBacklink: #13998 (the timestamp defect in the same file, where this was found). #13998 is not addressed here and stays open on its own terms.\n\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

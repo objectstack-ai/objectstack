@@ -1,0 +1,34 @@
+{
+  "number": 13985,
+  "kind": "pull_request",
+  "title": "test(dogfood): declare OS_REGISTRY_LOG=warn in the suite's own vitest harness",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T22:13:52Z",
+  "updated_at": "2026-08-31T22:51:59Z",
+  "closed_at": "2026-08-31T22:51:57Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": "2026-08-31T22:51:57Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/13985",
+  "body": "Part of #13517 — this lands the concentrated 67% share only. The card measures a\nrepo-wide volume; this PR quiets one suite through that suite's own harness, and\nthe remainder is re-measured below so it can be judged separately. The card stays\nopen on purpose.\n\n## What this changes\n\nOne file, `packages/qa/dogfood/vitest.config.ts`: both inline projects now declare\n\n```ts\nenv: { OS_REGISTRY_LOG: 'warn' },\n```\n\n`OS_REGISTRY_LOG` is `@objectstack/objectql`'s own published seam for registry\nverbosity (`SchemaRegistryOptions.logLevel` / `REGISTRY_LOG_LEVELS`,\n`packages/objectql/src/registry.ts`). At `warn`, the registry's private `log()`\nreturns before writing, so the per-item `[Registry] Registered …` lines stop.\nSet **per project** for the same measured reason the neighbouring\n`disableConsoleIntercept` is: inline projects do not inherit root-level test options.\n\nWhat it deliberately does **not** do:\n\n- it does not move the engine's shipped default (still `'info'`, unchanged for\n  every production reader);\n- it does not make library code sniff `process.env.VITEST` — a library that\n  behaves differently under a test runner makes every log reading in tests a\n  reading of something other than production;\n- it does not re-arm console interception.\n\nThe request lives in the harness, declaratively, where the test author can see it.\n\n## Measurement — `packages/qa/dogfood`, one full run each, base `eb649cb8bc`, head `d7cf9c96c9`\n\n`pnpm --filter @objectstack/dogfood exec vitest run --maxWorkers=3 --reporter=dot`,\ncombined stdout+stderr captured to a file and counted.\n\n| | before | after | delta |\n|---|---:|---:|---:|\n| lines on the run's stdout | 66,976 | 27,242 | −39,734 (−59.3%) |\n| `[Registry] …` lines | 39,738 | 1 | −39,737 |\n| engine structured-logger lines | 25,118 | 25,148 | +30 |\n| console-carried lines (stdout minus the structured logger) | 41,858 | 2,094 | −39,764 (−95.0%) |\n\nTest outcome is identical on both sides: `Test Files 128 passed | 1 skipped (129)`,\n`Tests 998 passed | 3 skipped (1001)`.\n\nThe 41,858 console-carried figure reproduces the card's 41,115 for this suite to\nwithin 1.8%, which is what makes the two measurements comparable: the card counted\n**intercepted console lines**, and the engine's structured logger writes to\n`process.stdout` directly and was never on that path.\n\nDiagnostics are preserved, which is the point of choosing `warn` rather than\nsilencing the sink: the ADR-0005 `[Registry] Collision` warning goes through a bare\n`console.warn` that the level never gates, and it is present in both runs\n(1 occurrence before, 1 after). The single surviving anchored `[Registry]` line\nafter the change is the `Package not found for uninstall` warning.\n\n## Mechanism proof (reverse verification, on a committed tree)\n\nSame single file, `test/action-params-contract.dogfood.test.ts`:\n\n- knob present: **0** anchored `[Registry]` lines, 1 file / 5 tests passed\n- knob absent (that config restored from the merge base, mutation confirmed on\n  disk — `OS_REGISTRY_LOG` occurrences 5 to 0 — then restored from `HEAD`,\n  restore proven by an empty `git diff HEAD` and a blob hash equal to the HEAD\n  blob `c3873b15bfe3b14d041098eb8dad6cfedc9eb87e`): **416** lines\n\n## Gates run locally at `d7cf9c96c9`\n\n`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` derived 23\nfamilies; all 23 were run. 21 green. Two returned exit code 3 = PREREQUISITE NOT\nMET = **not measured**, never a pass:\n\n- `check-test-completeness` — its own text: \"There is no local log to hand it, so\n  the local reading for this gate is NOT MEASURED. It is not a red, and there is\n  nothing here to fix.\" It reads a saved `turbo run test` log; CI has one.\n- `check:dual-build-cjs-loads` — \"PREREQUISITE NOT MET — this gate reads built\n  output, and some package has no dist/.\" Re-run after\n  `turbo run build --filter='./packages/*' --filter='./packages/*/*'`: **exit 0**.\n\nAlso run: `check:nul-bytes` OK (7,662 files, no raw control bytes) ·\n`check-console-intercept-disarm` OK (\"72 vitest-running package(s), every one\ndisarms console interception at the package root\") ·\n`pnpm --filter @objectstack/dogfood run typecheck` exit 0.\n\n⚠️ That typecheck green does **not** cover this diff. `tsc --noEmit --listFiles`\nfor this package reports **0** hits for `packages/qa/dogfood/vitest.config.ts` — the\nedited file is outside the package's tsc program. What does exercise it is vitest\nitself: both full runs above loaded this config and accepted the `env` option.\n\nESLint was run **narrowed to the edited file**, with the three readings that make a\nnarrowing a measurement rather than a skip: ① the population comes from ESLint's own\nconfig resolution — 5,594 of 7,669 tracked files are not ignored; ② the narrowed run\nlinted **1** file (count read from `--format json` output), 0 errors, 0 warnings;\n③ the config cannot move a verdict on an untouched file, per `eslint.config.mjs`'s\nown statement that \"this repo runs one `eslint.config.mjs`, which never enables\ntype-aware linting (no `parserOptions.project`, no typed `@typescript-eslint`\nrules) for ANY file\". The repo-wide sweep is CI's run.\n\n## No changeset\n\n`packages/qa/dogfood` is `private: true` and nothing here publishes — a test-harness\nconfiguration change only. Labelled `skip-changeset`.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01F3jdziLbAPGeceVNmSox5L)_"
+}

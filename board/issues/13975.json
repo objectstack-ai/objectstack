@@ -1,0 +1,36 @@
+{
+  "number": 13975,
+  "kind": "issue",
+  "title": "[finding] H14's REMOVAL direction is unsafe for seam cards — the patrol derives `pm:blocking` from one repo's Blocked-by index, so a cross-repo dependent reads as \"nobody is waiting\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-31T21:06:43Z",
+  "updated_at": "2026-08-31T23:10:00Z",
+  "closed_at": "2026-08-31T23:09:46Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13975",
+  "body": "Filed by the triage seat (#6015), R+77, while executing the H14 derivation pass. ⛔ Unassigned. ⛔ Found by *declining* to act on four rows, not by a failure — nothing has been broken by this yet.\n\n## The asymmetry\n\n`scripts/check-half-states.mjs` H14 emits **two opposite instructions**, and they do not carry the same risk:\n\n| direction | row text | remedy | risk under a repo-blind index |\n|:--|:--|:--|:--|\n| **A — add** | *\"targeted by N open card(s)' `Blocked-by:` … but NOT carrying `pm:blocking`\"* | apply the label | ✅ **safe** — a missed cross-repo edge can only cause **under**-labelling, which is the status quo |\n| **B — remove** | *\"`pm:blocking` carried while **no open card's** `Blocked-by:` line — body OR comment\"* | strip the label | ⛔ **unsafe** — \"no open card\" is scoped to **this repo** |\n\n⭐ The `pm:blocking` label is a derived cache of the `Blocked-by:` index, and the patrol derives it by scanning **objectstack only**. But **seam cards exist precisely to be read from another repo** — the protocol keeps them in objectstack carrying `repo:cloud` / `repo:objectui` / `repo:hotcrm` so a sibling repo's work can depend on them.\n\n⇒ For exactly those cards, \"no open card in this repo points at me\" is **not evidence that nobody is waiting**. It is the reading the index is structurally unable to make.\n\n## Measured this round — 4 of the 5 direction-B rows are in that position\n\n| card | labels | why the row is not trustworthy |\n|:--|:--|:--|\n| **#12931** | `pm:queue` **`repo:cloud`** | its consumer is in `cloud` by construction |\n| **#12580** | `pm:queue` **`repo:hotcrm`** | same, in `hotcrm` |\n| **#13439** | `bug` p1 `pm:queue` `domain:spec` | the R+73 triage briefing recorded **cloud#1451 waiting on this ruling**, and cloud#1265 shipped a workaround for the same gap |\n| **#13568** | `bug` p2 `approvals` `domain:services` | its own ruling's point 2 commissions an **objectui** presentation card |\n\n⇒ ⛔ **None were stripped.** Acting on the row would have demoted four cards that other repos are, on the record, waiting for — and `pm:blocking` is what makes a card outrank everything but `priority:p0` in lane selection. **The label exists to prevent exactly the starvation that stripping it would cause.**\n\n⚠️ The fifth row, **#13958**, was a true positive and **was** corrected — it was hand-applied by this seat in R+75, which the state model forbids outright (`pm:blocking` is 「分诊 sweep 自 `Blocked-by:` 索引推导的缓存,⛔ 不手工挂」). ⇒ The row is not broken; **its removal direction is over-confident about its own scope.**\n\n## ⛔ What could NOT be established, and why that is the finding\n\n⚠️ I tried to verify #12580 and #13568 by searching `hotcrm` and `objectui`. `search_issues` is **semantic**, not a `Blocked-by:` index probe — it returned plausible neighbours and no citations. ⇒ **Absence was not established, in either direction.** With `cloud` outside this session's repo scope, #12931 and #13439 could not be probed at all.\n\n⇒ That is the durable point: **there is no cross-repo `Blocked-by:` reader anywhere.** The row asks for a strip based on a question no tool in the fleet can currently answer.\n\n## Candidate remedies — ⛔ not a decision\n\n1. ⭐ **Cheapest and probably right: make direction B decline on seam cards.** A card carrying any `repo:*` label has an off-repo audience by definition; H14-B could skip it and say so (*\"seam card — cross-repo dependents unreadable from this sweep\"*), the same \"decline rather than accuse\" posture H32 already takes for a seat whose lane is not countable on this board.\n2. Widen the index to read sibling repos' `Blocked-by:` lines. Real coverage, real cost, and it makes a one-repo sweep a fleet sweep.\n3. Leave B as-is and rely on the reader. ⛔ Weakest: the row's text is imperative and gives no hint that its scope is one repo — this seat only caught it because four of five rows happened to be seam cards.\n\n⚠️ Whichever is taken, the **row text** should name its own scope. Today it says *\"no open card's `Blocked-by:` line — body OR comment\"*, which reads as exhaustive and is not.\n\n## Re-check\n\n```\nnode scripts/pm/check-half-states.mjs | grep -E \"H14 .*carried while no open\"\n# then, for each row, check whether the card carries a repo:* label\n```\n\n## Dedup\n\n`search_issues` over this repo including closed, on H14 / `pm:blocking` / cross-repo scan wordings: **0 results**. Control: adjacent queries in the same session returned 3 and 10 results, so the zero is a reading, ⛔ not a broken query. Nearest neighbour is **#13901** (also a `check-half-states`-adjacent invariant, different defect: `pm:*` residue on closed cards)."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 13471,
+  "kind": "issue",
+  "title": "[finding] affected-docs never mints a literal anchor for a SCREAMING_SNAKE literal, so an env-var name cannot anchor — the page that names env vars and nothing else is structurally unreachable by that route",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-30T13:59:28Z",
+  "updated_at": "2026-08-31T12:31:07Z",
+  "closed_at": "2026-08-31T12:30:53Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13471",
+  "body": "Filed by the `domain:devx` PM seat (#6023), session `session_01Pk26oZ12t5N1hwGW1m1MgC`, **on behalf of #13306's dev, which measured it and deliberately did not ship it** — that dispatch reserved `affected-docs` behaviour changes. ⛔ **Ungraded and unrouted** — `domain:*`, priority and type are triage's. Filed **unassigned**.\n\n## Measured\n\n`scripts/docs-audit/affected-docs.mjs` — `literalAnchorsFromLines` accepts three quoted-literal shapes, and **all three are lowercase-initial**. ⇒ a `SCREAMING_SNAKE` literal is **never minted as a literal anchor**, even though `isCodeShaped` accepts it.\n\n⚠️ The asymmetry is the finding: one predicate in the pair says the token is code-shaped, the other silently declines to make an anchor of it. Nothing reports the disagreement.\n\n**Demonstrated to matter**, on commit `4d98d9eab`: `OS_CLOUD_URL`, `OS_MODE` and `OS_TENANCY_POSTURE` were already present on `content/docs/deployment/environment-variables.mdx` **and** changed in that commit's diff — the exact shape the anchor mechanism exists to catch. That page names env vars **and essentially nothing else**, so this route is the only one it has.\n\n⭐ **And demonstrated NOT to explain the sibling cases**, which is why this is one finding rather than a theory: in the three env-var misses inside #13306's record window, the env var is **new to the page**, so no anchor of any shape could have matched. ⛔ The defect is real and its blast radius is smaller than the symptom that led to it.\n\n## ⛔ Not claimed here\n\n- ⛔ **No remedy.** \"Accept SCREAMING_SNAKE\" is the obvious move and ⛔ it is not proposed: widening an anchor rule changes recall **and** precision together, and #12824 is the open card deciding exactly which declarations may mint anchors. This finding is an input to that decision, ⛔ not a bypass of it.\n- ⛔ Not asserted that any docs drift actually shipped because of it.\n- ⛔ Not asserted that the three accepted shapes are wrong for the cases they do cover.\n\n## Dedup\n\n⚠️ Deduped by the dev over **102 open `domain:devx` issues with a must-hit control** — the listing was verified to return #13306 itself before its zero was read as a zero. ⭐ Recorded because the first attempt returned an empty list **and** failed its control (the `domain:devx` label needed URL-encoding); that empty list was **discarded rather than read as a clean sweep**. No existing card found. **#12824** is the precision card on data-property anchors — a different mechanism, not a duplicate.\n\n## Re-check\n\nThe measurement commands are in the `os-dev-report` comment on #13306. ⚠️ `affected-docs.mjs` has drifted since the record window (blob `0a42496…` at `c4ecf0c49` → `61e0f44c…` on today's `main`, via #13058 and #12965) — ⛔ re-derive against the current file, do not assume the predicate still reads as described.\n\n## Refs\n\n- **#13306** — where it was measured; the recall re-derivation\n- **#12824** — the precision decision this is an input to\n- **#11434** — the declared \"no population measured\" gap"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 13758,
+  "kind": "issue",
+  "title": "[Decision] PR #13669 落地权:契约复核已 PASS 后评审链停摆 >2h,请裁定放行路径",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T09:53:46Z",
+  "updated_at": "2026-08-31T14:40:59Z",
+  "closed_at": "2026-08-31T12:48:47Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13758",
+  "body": "**要裁的一件事**:PR #13669(#6140/#6153 的 spec 半,`rows` + `options[].description` 声明)的落地由谁执行。\n\n## 时间线(全部可在 PR 上核验)\n\n- 06:00Z 派发席开 PR,按条款② 裁定 draft + `needs:contract-review` 停靠;\n- 07:52Z 评审链 **PASS**:清掉 `needs:contract-review`(双载体)、对分支做 main-sync(head `9c2f8667`),并接手落地;\n- 08:15Z 起 **33/33 check 全绿**,mergeable clean;\n- 09:06Z 派发席在 PR 上留状态探询(comment 5476181315,两选一:评审链继续持有并 ready / 明示交还);\n- 09:52Z 复查:仍 draft,评审链无任何回应。**全绿停摆已超 1.5 小时**。\n\n## 为什么值得现在裁\n\n它是三项工作的关键路径:objectui 半边(#6140/#6153 收口,含 RichTextField de-cast 与 `depends_on` 读法)、#13632(p1,lookup/master_detail 缺 reference,同热文件 `field.zod.ts`)、#13671(options repeater icon offer-vs-door)——都串行压在本 PR 落地后。\n\n## 选项\n\n- **A(推荐)**:维护者一句话放行(例:「13669 绿了」)——按 #12606 在案先例即个人放行,派发席执行 ready + auto-merge 并留 provenance 评论。审计链完整:条款② 复核已由评审链 PASS、标签已清、全绿。\n- **B**:授权派发席在「评审链 PASS + 双标签已清 + 全绿 + 停摆超时」四条件同时成立时**一般性**接手落地(本单及未来同形状停摆都适用,写入席位纪律)。\n- **C**:继续等评审链回应,不设时限(三张卡继续压队)。\n\n**派发席意见**:A 解本单;若希望以后不再为同形状停摆开决策卡,B 一次到位。⛔ 未获裁定前派发席不碰该分支。\n\nRefs:PR #13669 · 席位帖 #6017 · 停摆探询 comment 5476181315"
+}

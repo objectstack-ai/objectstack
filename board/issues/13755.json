@@ -1,0 +1,36 @@
+{
+  "number": 13755,
+  "kind": "pull_request",
+  "title": "fix(spec): redact mongo CSFLE kmsProviders key material on datasource reads",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "protocol:data",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T09:49:53Z",
+  "updated_at": "2026-08-31T11:06:17Z",
+  "closed_at": "2026-08-31T11:06:15Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": "2026-08-31T11:06:15Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/13755",
+  "body": "Fixes #13602\n\n## What\n\n`redactDatasourceConfig('mongodb', ...)` served mongo CSFLE KMS key material inside the `options` passthrough back in cleartext with no `redactedKeys` entry. Five client-measured positions join `passthroughSecretPaths` in `packages/spec/src/data/datasource-credential-redaction.ts`, with the measurement quoted in the table docblock:\n\n- `options.autoEncryption.kmsProviders.aws.secretAccessKey`\n- `options.autoEncryption.kmsProviders.aws.sessionToken`\n- `options.autoEncryption.kmsProviders.azure.clientSecret`\n- `options.autoEncryption.kmsProviders.gcp.privateKey`\n- `options.autoEncryption.kmsProviders.local.key`\n\nTable rows only. The #13405 mirrored-spelling derivation is untouched and no new credential name spellings were invented — these are the client-measured residue the table exists for.\n\n## Premise measurement (#9040 discipline — measured, never inferred from documentation)\n\nInstrumented `new MongoClient(url, { ..., ...options })` — the exact spread `@objectstack/driver-mongodb` performs — against `mongodb@7.5.0`, with the autoEncryption record, the kmsProviders record and every family object wrapped in read-logging Proxies. Both states of the optional `mongodb-client-encryption` dependency were measured, and the answers differ:\n\n- **With `mongodb-client-encryption` installed** (7.2.1, inside the pin's `^7.2.0` optional-peer range): construction reads every one of the five leaves — the kmsProviders record is BSON-serialized into the native MongoCrypt. Observed reads: `aws.secretAccessKey`, `aws.sessionToken`, `azure.clientSecret`, `gcp.privateKey`, `local.key`, plus the identity halves `aws.accessKeyId`, `azure.tenantId`, `azure.clientId`, `gcp.email`. `connect()` then proceeds into live CSFLE machinery (mongocryptd spawn attempt).\n- **Without it** (the repo's own install state — the dependency is absent from the lockfile): the same construction throws `MongoMissingDependencyError` before reading any of the positions. The stored copy performs no function but sits cleartext at rest — the AWS_SESSION_TOKEN posture already on the table: a loud client failure does not make serving the secret back acceptable.\n\nBoundary kept deliberately narrow: the identity halves the client also reads (`aws.accessKeyId`, `azure.tenantId`, `azure.clientId`, `gcp.email`) are not credential material (the #8876 asymmetry) and stay served; unmeasured neighbours (`kmip.endpoint`, `keyVaultNamespace`, `schemaMap`, `bypassAutoEncryption`) mirror no credential spelling, are not on the table, and are pinned untouched by a negative-control test.\n\n## Round-trip answer (the card's third question)\n\n- **An untouched Save keeps a working CSFLE config byte-identical.** `restoreRedactedConfig` mirrors the redactor structurally — it computes the served projection from the stored row and grafts every stored leaf back where the patch still matches — so the new rows are covered by construction, with nothing to forget. Pinned end-to-end at the admin service door: read serves the config with the five leaves withheld and named in `redactedConfigKeys`; an untouched update writes the stored config back deep-equal to the original.\n- **The served projection handed straight to the client (restore bypassed) fails loudly, not silently.** Measured with the dependency installed: construction throws `TypeError: Failed to parse KMS provider aws: expected UTF-8 secretAccessKey` (azure and gcp equivalents measured identically); `local` served as an empty object constructs, but encryption stays armed — the client proceeds into the mongocryptd path, and no silently-unencrypted operation was observed. Redaction therefore creates no silent-downgrade path, and no new write-back semantics were needed.\n\n## Clause ②: no\n\nTable entries plus tests only. No accept/reject behaviour changes: the write door refuses and accepts exactly what it did before (these positions were and remain writable — the binder's one secret slot is the login password, the proxyPassword posture), and no public export was added, removed or re-typed.\n\n## Verification (all runs at HEAD 3520ba2d, after the final commit)\n\n- `pnpm --filter @objectstack/spec exec vitest run src/data/datasource-credential-redaction.test.ts src/kernel/metadata-type-redaction.test.ts` — Test Files 2 passed, Tests 47 passed.\n- `pnpm --filter @objectstack/service-datasource exec vitest run src/__tests__/datasource-config-redaction.test.ts` — Tests 36 passed (includes the new CSFLE round-trip pin).\n- Reverse verification, fix committed first: the redaction module was reverted to the branch base (mutation proven on disk — autoEncryption occurrence count 6 to 0), the new CSFLE pin went red exactly (1 failed, 36 passed; the negative control stayed green), then restored from HEAD with byte-identity proven (git diff HEAD empty; worktree blob hash equals the HEAD blob). The suite resolves relative src imports, so no dist build participates in either leg.\n- `pnpm --filter @objectstack/spec typecheck` and `pnpm --filter @objectstack/service-datasource typecheck` — green; both edited test files confirmed inside their tsc programs via a listFiles probe (1 hit each).\n- `scripts/pm/dispatch-gates.mjs` (no paths — changeset derived from merge-base; answer asserted for objectstack-ai/objectstack at commit 3520ba2d) derived 46 families for this diff, path-matched plus convention-triggered test-file families. 44 PASS — including `check:type-check-debt` re-measure (\"29 ledger entries re-measured, none above its recorded number\"), `check:authorable-surface`, `check:docs`, `check:engine-double-contract`, `check:where-matcher`, `check:cross-package-test-inputs`. 2 declared PREREQUISITE NOT MET by their own exit-3 text (NOT MEASURED, not red): `check-test-completeness` (grades a saved CI turbo test log that does not exist locally) and `check-half-states` (needs repo-scoped REST reads; this session's gate answers 403 — CI-owned).\n- Changeset: `.changeset/csfle-kms-providers-redacted.md`, `@objectstack/spec` patch.\n\nMeasurement scripts and full logs are excerpted in the report comment on #13602. Session: https://claude.ai/code/session_01PBjwYLS6BciTQW3c9xQiD2\n\n_Generated by [Claude Code](https://claude.ai/code/session_01PBjwYLS6BciTQW3c9xQiD2)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01PBjwYLS6BciTQW3c9xQiD2)_"
+}

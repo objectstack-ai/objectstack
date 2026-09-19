@@ -1,0 +1,37 @@
+{
+  "number": 14011,
+  "kind": "issue",
+  "title": "Stale contract prose: `AutomationContext.flowName` says a `runAs:'system'` run \"resolves no user\", but #5494 made elevation carry the operator through",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T23:31:11Z",
+  "updated_at": "2026-09-01T02:20:34Z",
+  "closed_at": "2026-09-01T02:20:34Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14011",
+  "body": "Observation, filed from a downstream app (`steedos-labs/hotcrm-heimao`). Not a runtime defect — the shipped behaviour is right and the prose describing it is not.\n\n## The text\n\n`packages/spec` → `dist/contracts/index.d.ts:3033`, documenting `AutomationContext.flowName`:\n\n> a `runAs:'system'` run resolves no user, so `resolveRunDataContext` labels its data operations `svc:flow:FLOWNAME` on `ExecutionContext.actor` … instead of leaving the audit row unattributed\n\n## What ships\n\n`@objectstack/service-automation`'s `resolveRunDataContext` does the opposite, and says so on purpose (#5494):\n\n> elevation is not anonymity … carry them through: `isSystem` alone decides authorization, while the user drives the platform's attribution stamps\n\nMeasured on 17.1.0: a write with `{ ...callerCtx, isSystem: true }` leaves `updated_by` = the caller, byte-identical to the plain user-context write. Corroborated in two more places — `sys_stamp_audit_update` gates on `session?.userId` with no `isSystem` test, and `plugin-audit`'s `writeAudit` reads `sess.userId ?? provenance.attributedUserId` with no `isSystem` gate.\n\nThe `svc:flow:` labelling the prose describes is real, but it is the **user-less** case — a schedule trigger, where there genuinely is no operator. The sentence generalises it to all `runAs:'system'` runs.\n\n## Why it is worth a card rather than a shrug\n\nThe prose reads as **\"system elevation costs you the operator in the audit trail.\"**\n\nThat belief is load-bearing in the wrong direction. In the downstream app it was written into an adjudication as the explicit stop-condition for a security design — *\"if elevation erases the operator, stop and report a fork, because §九·58 requires 谁修改了什么…都要有日志可查\"*. Had the investigating agent read the contract prose and trusted it, the correct design would have been abandoned on a false premise, and the card would have stopped one measurement short of the truth.\n\nIt did not, because it measured instead of reading. But the next reader may not, and a doc that talks someone out of the right answer is worth more than a cosmetic fix.\n\nContext: #14010, the card this surfaced from.\n\n## Suggested wording\n\nSay what is true of both cases — elevation decides *authorization* and leaves *attribution* alone; the `svc:flow:` actor label is what a genuinely user-less run (a schedule) falls back to."
+}
