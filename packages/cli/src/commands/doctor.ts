@@ -7,6 +7,7 @@ import dotenvFlow from 'dotenv-flow';
 import fs from 'fs';
 import path from 'path';
 import { normalizeStackInput } from '@objectstack/spec';
+import { referenceCarrierOf } from '@objectstack/spec/data';
 import { printHeader, printSuccess, printWarning, printError, printStep, printInfo } from '../utils/format.js';
 import { loadConfig, configExists } from '../utils/config.js';
 import { checkProtocolVersionGap } from '../utils/protocol-version-gap.js';
@@ -707,10 +708,28 @@ function detectCircularDependencies(objects: any[]): string[] {
   for (const obj of objects) {
     const deps: string[] = [];
     if (obj.fields && typeof obj.fields === 'object') {
-      for (const field of Object.values(obj.fields) as any[]) {
-        if (field?.type === 'lookup' && field?.reference) {
-          deps.push(field.reference);
+      for (const [key, field] of Object.entries(obj.fields) as Array<[string, any]>) {
+        if (field?.type !== 'lookup') continue;
+        // The carrier is read through the ONE arbiter, the same narrowing
+        // `collectViewObjectRefs` below already performs — a truthiness gate
+        // admitted an object- or array-valued `reference` as a NODE of the
+        // dependency graph, where it can never match an object name and prints
+        // as `[object Object]` in a cycle message. Absence is the contract's
+        // answer; unreadability is reported, because this check's success line
+        // ("No circular references detected") asserts something positive that a
+        // silently missing edge cannot support. The throw is caught so `doctor`
+        // keeps reporting on exactly the broken metadata it exists to inspect.
+        let reference: string | undefined;
+        try {
+          reference = referenceCarrierOf(field, 'doctor.detectCircularDependencies');
+        } catch (err: any) {
+          issues.push(
+            `Object "${obj.name}" field "${key}": lookup target is unreadable, so this edge is absent `
+            + `from the dependency graph — ${err?.message ?? err}`,
+          );
+          continue;
         }
+        if (reference) deps.push(reference);
       }
     }
     graph.set(obj.name, deps);
@@ -890,13 +909,31 @@ export function findUnusedObjects(config: any): string[] {
   }
 
   // Lookup fields reference other objects
+  //
+  // The carrier is read through the ONE arbiter rather than a truthiness gate:
+  // an unreadable `reference` used to enter `referencedObjects` as a non-string
+  // member, where it marks nothing as referenced and so lets this function
+  // report the object it actually points at as unused. Unreadability is
+  // REPORTED rather than skipped, because "defined but not referenced" is a
+  // positive claim about the config and an edge nobody could read cannot
+  // support it. The throw is caught so `doctor` keeps reporting.
+  const unreadableCarriers: string[] = [];
   if (Array.isArray(config.objects)) {
     for (const obj of config.objects) {
       if (obj.fields && typeof obj.fields === 'object') {
-        for (const field of Object.values(obj.fields) as any[]) {
-          if (field?.type === 'lookup' && field?.reference) {
-            referencedObjects.add(field.reference);
+        for (const [key, field] of Object.entries(obj.fields) as Array<[string, any]>) {
+          if (field?.type !== 'lookup') continue;
+          let reference: string | undefined;
+          try {
+            reference = referenceCarrierOf(field, 'doctor.findUnusedObjects');
+          } catch (err: any) {
+            unreadableCarriers.push(
+              `Object "${obj.name}" field "${key}": lookup target is unreadable, so it marks no object `
+              + `as referenced — ${err?.message ?? err}`,
+            );
+            continue;
           }
+          if (reference) referencedObjects.add(reference);
         }
       }
     }
@@ -908,7 +945,7 @@ export function findUnusedObjects(config: any): string[] {
       unused.push(`Object "${name}" is defined but not referenced by any view, flow, app, or lookup field`);
     }
   }
-  return unused;
+  return [...unreadableCarriers, ...unused];
 }
 
 // ─── ADR-0120 D5e — `isolated`-posture unique-scope advisory ────────
