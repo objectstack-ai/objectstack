@@ -663,10 +663,10 @@ function rowExcerpt(row) {
  */
 export const PAGE_ROW_REFERENCES = [
   {
-    context: 'at once — this is the single largest behaviour on the page',
-    unheld:
-      'a RANGE whose endpoints the sentence never names -- it says only that row 1 costs you "all of" ' +
-      'them at once. Nothing in it picks a first or a last row, and the two are not a section extent.',
+    context: 'down to and including the write-bypass row',
+    seam: 'Write bypass = `true`, effective write scope = `org`',
+    why: 'the sentence no longer states a range whose endpoints it never named -- it names the LAST ' +
+      'behaviour the short-circuit swallows, the write-bypass row, and exactly one row is that seam',
   },
   {
     context: 'the step 3.5 anchor guard is inside the block',
@@ -720,9 +720,9 @@ export const PAGE_ROW_REFERENCES = [
   },
   {
     context: 'is skipping',
-    unheld:
-      'the bullet\'s only subject is the linked doc title "Sharing Rules", and several rows are about ' +
-      'sharing rules. No key in the sentence picks one of them, so this one is declared, not guessed.',
+    seam: 'on the record-`afterDelete` hook',
+    why: 'the bullet no longer rests on the linked doc title -- it names the hook the skip is on, and ' +
+      'exactly one sharing row is the record-`afterDelete` revocation skip',
   },
 ];
 
@@ -2713,8 +2713,8 @@ function selfTest() {
       realResult.problems.join(' | ')
     );
     t(
-      'and the real run really resolved them (10 page references + 8 `why:` mentions, 2 declared unheld)',
-      realResult.held.page === 10 && realResult.held.why === 8 && realResult.held.unheld === 2,
+      'and the real run really resolved them (12 page references + 8 `why:` mentions, 0 declared unheld)',
+      realResult.held.page === 12 && realResult.held.why === 8 && realResult.held.unheld === 0,
       JSON.stringify(realResult.held)
     );
 
