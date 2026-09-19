@@ -47,6 +47,7 @@ export const en: TranslationData = {
           },
         },
         due_date: { label: 'Due Date' },
+        days_overdue: { label: 'Days Overdue' },
         reminder_date: { label: 'Reminder Date/Time' },
         completed_date: { label: 'Completed Date' },
         owner: { label: 'Assigned To' },

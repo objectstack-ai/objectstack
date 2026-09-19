@@ -1,4 +1,4 @@
-import { P } from '@objectstack/spec';
+import { cel, P } from '@objectstack/spec';
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
@@ -155,6 +155,34 @@ export const Task = ObjectSchema.create({
     //   is_overdue   == true   ->  due_date less_than '{today}' AND status not_equals 'completed'
     // Consistent by construction, with no second writer that can drift — which is
     // the pattern a reference app should be teaching.
+
+    // [#18584] `days_overdue` IS a formula, and the paragraph above is the
+    // reason that is not a contradiction. What killed `is_completed` /
+    // `is_overdue` as formulas was one specific consumer — a FILTER naming a
+    // virtual field matches nothing, because no driver materialises a column
+    // for it. This field has no filter reading it, by construction: its one
+    // consumer is the `overdue_escalation` flow's `notify` message, which
+    // READS the value off a record the `get_record` step already fetched.
+    // `ObjectQL.find` evaluates every formula field on the schema when the
+    // caller asks for no explicit projection (`planFormulaProjection(schema,
+    // undefined)`), and `flows/task.flow.ts` declares no `fields`, so the
+    // rows handed to the `loop` iterator carry this value computed.
+    // ⛔ Do NOT add a view/report/flow FILTER on this field — use the stored
+    // `due_date` column, exactly as the paragraph above prescribes.
+    //
+    // Semantics, per the ruling on #18584: whole days between `due_date` and
+    // now, `0` when the task is not overdue and `0` when `due_date` is empty.
+    // ⛔ No working-day calendar and ⛔ no timezone option — an example
+    // demonstrates the capability, it is not a scheduling product.
+    // `today()` is the platform's calendar-day function (UTC by default) and
+    // `daysBetween(a, b)` its whole-day span, so the pair is the registered
+    // stdlib spelling of "UTC whole days" — no hand-rolled millisecond math.
+    days_overdue: Field.formula({
+      label: 'Days Overdue',
+      description: 'Whole days past the due date; 0 when not overdue or no due date.',
+      returnType: 'number',
+      expression: cel`record.due_date == null || daysBetween(record.due_date, today()) < 0 ? 0 : daysBetween(record.due_date, today())`,
+    }),
 
     // Progress
     progress_percent: Field.percent({
