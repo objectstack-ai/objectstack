@@ -373,11 +373,22 @@ export const objectForm = defineForm({
         // a row; neither half is measured for this node, and a repeater that
         // resolves neither renders an empty row whose values never land — the
         // offer-vs-door defect the reconciliation gate beside this file
-        // exists to catch. `json` is a passthrough widget in the
-        // metadata-admin renderer, so it derives nothing, and the Zod parse
-        // still refuses a malformed rule loudly at publish. Same treatment as
-        // the sibling structured-array rows `permission.rowLevelSecurity` and
-        // `email_template.variables`.
+        // exists to catch. The Zod parse still refuses a malformed rule loudly
+        // at publish. Same treatment as the sibling structured-array rows
+        // `permission.rowLevelSecurity` and `email_template.variables`.
+        //
+        // ⚠ Precisely: `json` is in the metadata-admin renderer's passthrough
+        // set, but that set is consulted AFTER the structural fallbacks, ⛔ not
+        // instead of them — `resolveFieldFace` tries the widget registry, then
+        // an object form, then an array-of-objects, and only then the
+        // passthrough check. So this row reaches the raw-JSON editor today
+        // because the unresolved double-hop pointer derives nothing, ⛔ not
+        // because the hint suppresses derivation. Once the pin moves past
+        // objectui's pointer resolution the same hint on this node derives an
+        // `object-rows` repeater over the FIRST `oneOf` branch (`script`) —
+        // that is the renderer's precedence, not this repo's contract, and
+        // whoever bumps the pin owns re-measuring this row and its two
+        // shape-siblings named above.
         //
         // Upgrading this to a structured control is a form-face addition — the
         // same boundary the reconciliation ledger draws for the

@@ -115,16 +115,27 @@ export const fieldForm = defineForm({
         // object keyed by field, with `$and`/`$or`/`$not`. Routing it to the
         // array widget would write metadata the runtime refuses, which is the
         // authoring trap this row exists to close, re-created one layer up.
-        // `filter-condition` is the widget whose storage contract IS that
-        // object shape, and this file already uses it one section down for
-        // `summaryOperations.filter`, the sibling FilterConditionSchema key.
+        // `filter-condition` names the FilterCondition wire, and this file
+        // already uses it one section down for `summaryOperations.filter`, the
+        // sibling FilterConditionSchema key.
         //
-        // An explicit widget is the only face that can work here: the served
-        // node is `{ $ref: '#/$defs/…' }` onto the recursive FilterCondition,
-        // whose derivation is `allOf: [open record, { $and/$or/$not }]` with
-        // NO top-level `type`, so the generic renderer has nothing to derive a
-        // control from (objectui#9912 measured the same for 12 of the 14
-        // served pointer rows).
+        // ⚠ What the hint renders as TODAY, measured at the pinned
+        // `.objectui-sha`, is the announced raw-JSON editor carrying the hint —
+        // ⛔ NOT a criteria builder. The renderer that consumes this registry is
+        // the metadata-admin `SchemaForm`, whose own `WIDGETS` map registers no
+        // `filter-condition` (the `FilterConditionField` of that name lives in
+        // `@object-ui/fields`, on the ComponentRegistry path `ObjectForm` uses,
+        // not this one), and its `resolveFieldFace` falls past the registry,
+        // past both structural fallbacks — the served node is
+        // `{ $ref: '#/$defs/…' }` onto the recursive FilterCondition, an
+        // `allOf: [open record, { $and/$or/$not }]` with NO top-level `type`,
+        // so neither an object form nor an array-of-objects can be derived
+        // (objectui#9912 measured the same for 12 of the 14 served pointer
+        // rows) — and lands on `{ kind: 'raw-json', hint }`. That is the same
+        // face `summaryOperations.filter` gets, it hands `JSON.parse` output
+        // through verbatim, and the save door judges it, so the wire is exact
+        // either way. The hint is the forward-looking half: it is what a
+        // renderer resolves when it can, and it is ⛔ never `filter-builder`.
         //
         // `visibleWhen` mirrors the key's own contract text — "it is
         // meaningful on a child's `master_detail`/`lookup` field" — and the
