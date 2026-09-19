@@ -55,6 +55,10 @@ node scripts/checklist-select.mjs <selector> --json
 `blocked` 时才传 `--include-blocked`。**把解析器报出的 `revision` 钉进运行记录**:
 判定只对它运行时所对的那个 revision 有效。
 
+**`planned` 项任何选择器都不返回,也没有开关让它返回**:能力不存在,无 steps 可驱动、
+无 oracle 可查,解析器单独列出命中项。运行记录逐项记 `planned`,⛔ 永不 pass / fail /
+blocked / not-run,⛔ 不进标题计数;与 blocked 的分界是 fixture 债 vs 平台债。
+
 ## 1. 规划这一轮 —— 只构建需要的,钉住的先跑
 
 读命中项的 `surface`:

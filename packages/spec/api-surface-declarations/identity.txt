@@ -256,7 +256,7 @@ declare const InvitationSchema: z.ZodObject<{
     expiresAt: z.ZodString;
     inviterId: z.ZodString;
     createdAt: z.ZodString;
-    updatedAt: z.ZodString;
+    updatedAt: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>;
 
 // ── InvitationStatus (const) ──
@@ -293,7 +293,7 @@ declare const MemberSchema: z.ZodObject<{
     userId: z.ZodString;
     role: z.ZodString;
     createdAt: z.ZodString;
-    updatedAt: z.ZodString;
+    updatedAt: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>;
 
 // ── ORGANIZATION_ADMIN (const) ──
@@ -316,7 +316,7 @@ declare const OrganizationSchema: z.ZodObject<{
     logo: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
     createdAt: z.ZodString;
-    updatedAt: z.ZodString;
+    updatedAt: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>;
 
 // ── Position (type) ──
