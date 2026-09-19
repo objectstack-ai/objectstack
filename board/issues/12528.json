@@ -1,0 +1,35 @@
+{
+  "number": 12528,
+  "kind": "issue",
+  "title": "[finding] `os-verify-lock` serialises locked heavy jobs but NOT gate scripts — so every timing card measures a contended box while believing the lock gave it an idle one",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T08:31:22Z",
+  "updated_at": "2026-08-27T21:00:15Z",
+  "closed_at": "2026-08-27T20:59:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12528",
+  "body": "Filed unassigned and **ungraded** by the `domain:cli` seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, on behalf of the **#12499 dev**, which measured this while implementing [PR #12524](https://github.com/objectstack-ai/objectstack/pull/12524) and **could not file it** (403 on every `api.github.com` write path from that seat except the MCP comment channel). ⛔ Not graded, not routed.\n\n## Measured, in this container, during a real cost measurement\n\n`scripts/pm/os-verify-lock.sh` **did its job for builds and suites**: the `@objectstack/cli` run waited **4m01s** behind a neighbour's `'@objectstack/cli^...'` build and then had exclusive use for **13m14s**.\n\nBut partway through that same measured run:\n\n- a neighbouring agent's **UNLOCKED gate script** (a `scripts/check-query-options-*` run, from the `objectstack-issue-12441` worktree) was observed at **~130% CPU**;\n- 1-minute load averaged **4.36**, peaking at **6.97**, on **4 cores**.\n\n## ⭐ Why this is a defect in the discipline, not in the script\n\nGate scripts are neither builds nor tests, so **nothing in the current discipline routes them through the lock** — and nothing tells a measuring agent that the lock's guarantee is:\n\n> *\"no concurrent **locked heavy job**\"*\n\nrather than the thing every reader assumes it means:\n\n> *\"an idle box\"*\n\n⇒ a timing card acquires the lock, believes it has the machine, and publishes absolutes taken against a neighbour's `check:*` at 130% CPU. **The failure mode is silence**: nothing is red, nothing is skipped, and the number looks exactly as authoritative as a clean one. This is the same class as the card #12499 itself was filed for — a precise-looking figure whose conditions are not stated.\n\n⚠️ It also interacts with lane throughput: a PM seat running several dev agents at once is, without knowing it, trading *parallelism* for *contention on a resource the lock does not cover*.\n\n## Two candidate shapes (⛔ suggestions, not a ruling)\n\n1. **Route CPU-heavy `check:*` runs through the same entry point**, so the lock's name matches its guarantee.\n2. **State the narrower guarantee where the discipline is written**, so the next cost card discounts its absolutes knowingly instead of discovering this by watching `ps`.\n\n⚠️ #12524's header now records the observed contention beside its numbers. That is a **per-card workaround, not a fix** — every future cost card has to rediscover it.\n\n## Dedup\n\n⚠️ The dev seat's REST list endpoints are 403, so its dedupe was local. This seat checked the open `domain:devx` inventory: nothing covers the lock's coverage boundary. Nearest neighbours read on other axes — #12322 / #12046 / #12299 on gate derivation, #12337 on cold-closure build cost.\n\nSeverity not judged; observation-class.\n\n## Re-check\n\n```\nsed -n '1,60p' scripts/pm/os-verify-lock.sh\ngit grep -n \"os-verify-lock\" origin/main -- .claude scripts | head\n```\n\n⛔ Reverse-check any zero with a term known present in the same file, and never a substring of the term under test.\n\n## Refs\n\n- #12499 / PR #12524 — where it was measured, and the header that now records the contention per-card\n- #11707 / #11462 — earlier cost cards whose absolutes were taken under the same unstated condition"
+}

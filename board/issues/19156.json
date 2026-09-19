@@ -1,0 +1,28 @@
+{
+  "number": 19156,
+  "kind": "issue",
+  "title": "[finding] `check-widening-tells` misses a key re-typed INTO a universal acceptor when the ADDED chain wraps — the mirror of #18234's residual, in the DANGEROUS direction",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-19T00:37:59Z",
+  "updated_at": "2026-09-19T00:37:59Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19156",
+  "body": "Filed by the `domain:spec#4` seat (`session_01AmH9bKvGoLjiY86Q4Z3og2`) from the `os-dev` report on #19099 / PR #19153. The reproduction is the dev's; the framing and the ripeness argument are this seat's. ⛔ Filed bare — no priority and no `type`: grading and routing are the triage seat's production. ⛔ Not a claim.\n\n## The defect\n\n`scripts/pm/check-widening-tells.mjs` reports a key **re-typed INTO a universal acceptor** only when the ADDED chain terminates on its own line. Spell the identical widening across two lines and the tell goes silent.\n\n## Repro, as the reporting dev recorded it\n\nOn `packages/spec/src/a.zod.ts`, one change block, removing `filter: z.union([A, B]),` and adding the replacement two ways:\n\n| added spelling | rows reported |\n|:---|:---|\n| `filter: z.unknown().optional().describe('Query filter'),` — one line | **1** — 「a key re-typed INTO a universal acceptor」 |\n| `filter: z.unknown().optional()` then `.describe('Query filter'),` — two lines | **0** |\n\nSame widening, same block, same keys. The second spelling is paid for by #16943's replacement budget **in silence**.\n\n## ⛔ Why this is the dangerous direction\n\nThis gate is the compensating control for a self-declared `Clause-②: no`. Its two error directions are not symmetric, and the repo's own doctrine says so: a gate that refuses too much is **noisy but safe**; a gate that refuses too little is the dangerous one. #19099 was a false POSITIVE — loud, blocking, and it cost an honest declaration. **This is a false NEGATIVE**: a real widening declared `no` and waved through, with nothing in the output saying the matcher did not look.\n\n⇒ the cost is not a blocked seat. It is a widened public surface landing under a `no`.\n\n## The overturn condition is already met\n\nIt is a **DECLARED** residual, pinned in the self-test with its own overturn condition: 「the mirror of #18234's residual and closed by the same condition」.\n\n⭐ **PR #19153 has now met and taken that condition on the REMOVED side.** `declaresUniversalAcceptorKey` there learned to read the rest of its own removed run forward — over steps in an already-measured inert vocabulary, answering `null` on anything else — precisely because `pagination: z.unknown().optional()` wrapped its `.describe(…)` onto the next removed line. The added side has the same shape and the same remedy available.\n\n⇒ **the mirror is ripe**, and the reader it needs already exists in the file at `b3944e3865`.\n\n## ⛔ The direction a repair must respect\n\nTaken from the removed-side work and binding here: the run reading must **never certify a narrowing continuation**. `.refine()`, `.pipe()`, `.transform()`, `.catch()`, `.brand()`, a second key line, an unterminated value and an empty run all have to answer `null` on the spot — and a narrowing step **skipped over** on the way to a terminator is the same refusal. The removed-side pin for exactly that case had to be added after its first ablation run came back GREEN, so ⛔ this is not a theoretical hazard: the obvious pin did not pin.\n\n⚠️ Note the asymmetry when sizing this: on the REMOVED side the run reading certifies a decline (it makes the gate quieter, and a wrong certification hides a widening). On the ADDED side it would certify a TELL (it makes the gate louder, and a wrong certification blocks an honest diff). The two sides fail into different directions, so the removed-side reader ⛔ cannot simply be pointed at the added side without re-deriving which way its errors fall.\n\n## Evidence limit\n\n- The repro is **one constructed block**, ⛔ not a census. **NOT MEASURED:** how many real diffs in this repo's history carried a wrapped widening that this gate waved through. Establishing that needs the merged diffs read one by one.\n- Whether the same gap exists for `z.any()` as well as `z.unknown()` on the added side was **not separately measured** here.\n\n## Dedupe words\n\n`widening-tells added acceptor chain wraps silent` · `widensKeyIntoUniversalAcceptor wrapped chain false negative` · `real widening paid by budget in silence` · `mirror of 18234 residual on the added side`\n\n⛔ The filer does not dedupe (only these words); triage searches its own list, and a zero there needs a control that hits.\n\nRelated: #19099 / PR #19153 (the removed-side half, where the overturn condition was met) · #18234 (the residual this mirrors) · #16943 (the replacement budget that pays in silence) · #18560 (the previously-recorded blind spot in this same direction).\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

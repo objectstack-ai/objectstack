@@ -1,0 +1,35 @@
+{
+  "number": 12790,
+  "kind": "pull_request",
+  "title": "fix(objectql): single-quote the shadowed package id in the [Registry] Collision warning",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-27T19:49:58Z",
+  "updated_at": "2026-08-27T20:27:49Z",
+  "closed_at": "2026-08-27T20:27:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-27T20:27:48Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12790",
+  "body": "Fixes #12609\n\n## What changed\n\n`SchemaRegistry.registerItem`'s cold-boot-order `[Registry] Collision` warning (`packages/objectql/src/registry.ts`) double-quoted the shadowed package id:\n\n```\n`[Registry] Collision: ${type}/${baseName} is shipped by package ` +\n`\"${shadowed._packageId}\" and a runtime-authored row with the same name has ` +\n...\n```\n\nagainst this package's own convention — measured over non-test `.ts` under `packages/objectql/src`, quoted identifiers in operator prose are single-quoted **174** times against **37** double-quoted (this line was one of the 37; the double-quote count matches the card's originally-reported 37 exactly, the single-quote count differs by 4 from the reported 170 — a different regex over the same tree, not a different tree; instrument and full counts below). #12563 already settled the same ADR-0005 shadowing fact with single quotes on the automation side (`package 'crm'`), so an operator whose boot hits both packages' collision warnings previously read one story in two spellings; this line now matches:\n\n```diff\n-`\"${shadowed._packageId}\" and a runtime-authored row with the same name has ` +\n+`'${shadowed._packageId}' and a runtime-authored row with the same name has ` +\n```\n\nByte-identical otherwise — only the quote character moved.\n\n## Scope\n\nThe one message named by #12609, nothing else. A sibling `[Registry] Collision` warning a few lines above (`ships from package`, the late-registration-order guard) also double-quotes its package id and is the same defect class, but is a different message describing a different event — filed separately as #12789 rather than swept in here.\n\n## Premise check (done before writing anything)\n\n- Confirmed the double-quoted spelling was still present on `origin/main` by reading the ref directly (`git show origin/main:packages/objectql/src/registry.ts`), not a working tree — present at `21196cf6` (this branch's base; #12623 held `registry.ts` and had already landed).\n- Re-derived the minority count with a published instrument (not recalled from the card): `grep -roP \"'\\$\\{[^}]*\\}'\"` / `\"\\$\\{[^}]*\\}\"` over non-test `.ts` under `packages/objectql/src` → **174 single / 37 double**. Double matches the card's 37 exactly; single differs by 4 (174 vs 170) — informative as \"still a minority, still ~17.5%\", not alarming.\n\n## Existing pin\n\nSearched first: `grep -rn \"is shipped by package\"` (only the source line itself) and `grep -rln \"Registry] Collision\"` under `packages/objectql/src/*.test.ts`, plus a search for `\"runtime-authored row\"` in test files. **No existing pin held this message's quote character** — `registry-collision-order.test.ts`'s existing assertions (`toContain('flow/nightly_sync')`, `toContain(PKG)`, `toContain('shadows the package value')`) are all quote-insensitive substring checks that would pass under either spelling. One is added, matching #12563's \"would notice a disagreement\" shape (assert the corrected spelling present **and** the pre-fix spelling absent, so it's red in both directions):\n\n```ts\nexpect(lines[0]).toContain(`package '${PKG}'`);\nexpect(lines[0]).not.toContain(`package \"${PKG}\"`);\n```\n\n## Ablation\n\nPredicted in a commit before mutating (`predict(ablation #12609): …`, `7d3efa7a2`), then: reverted the quote (anchored `perl`/`python3` replace on the unique `and a runtime-authored row` line, confirmed via anchored `grep` in both directions before *and* after the edit) → ran `registry-collision-order.test.ts` → exactly the new `[#12609]` pin went **red** (both its assertions), the other 11 tests — including the positive control (`COMMON COLD-BOOT ORDER …` asserting `toContain('shadows the package value')`, which cannot see the quote character) — stayed **green** → restored via `git checkout HEAD -- packages/objectql/src/registry.ts` (HEAD already carried the real fix) → `git hash-object` on the restored file matched the HEAD blob exactly, `git diff HEAD` empty, double-quote marker absent by grep. Re-ran the full file after restore: 12/12 green. Whole window wrapped in `trap ... EXIT INT TERM` against an absolute `REPO_ROOT`.\n\n## Clause ②\n\nVerified, not assumed: searched the repo (non-test `.ts`/`.tsx`/`.js`, plus `content/`/`docs/`) for anything parsing this message's text. Two hits, both prose references to the warning by name (`flow-precedence.ts`'s doc comment, `flow-name-shadowing.test.ts`'s doc comment, `docs/adr/0005-metadata-customization-overlay.md`) — none matches or parses the quote character. The only consumer is the new substring-based test pin added here. `patch`, argued in the changeset.\n\n## Tests\n\n- `pnpm --filter '@objectstack/objectql^...' build` — dependency closure, green.\n- `pnpm --filter @objectstack/objectql exec vitest run --maxWorkers=2 src/registry-collision-order.test.ts` — 12/12 passed (pre- and post-ablation).\n- `pnpm --filter @objectstack/objectql test` — 245 files / 4244 tests passed.\n- `pnpm --filter @objectstack/objectql typecheck` — clean.\n- Gates derived via `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` (re-run after the final commit, `7d3efa7a2`): `check:engine-double-contract`, `check:where-matcher`, `check:objectql-double-limit`, `check:query-options-erasure`, `check:durability-log-level`, `check:cross-package-test-inputs`, `check:test-source-alias`, `check:type-source-resolution` all green with their own printed verdict lines; no new baseline/ledger entries required by any of them.\n\n## Out-of-scope findings\n\n- Filed #12789: the sibling `[Registry] Collision` warning (`ships from package`, late-registration-order guard, same file) also double-quotes its package id — same defect class, different message, deliberately not swept into this PR.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01LZbWd2jNV1FErXTPSS4Dry)_"
+}

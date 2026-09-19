@@ -1,0 +1,35 @@
+{
+  "number": 12583,
+  "kind": "issue",
+  "title": "[finding] `serve-node-env-production-default.e2e.test.ts` roots its fixture inside the tracked `packages/cli/test/` tree, and `tmp-node-env-default-*` is not gitignored — a failing run leaves it behind for the next `git add -A`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T12:10:57Z",
+  "updated_at": "2026-08-27T02:51:46Z",
+  "closed_at": "2026-08-27T02:51:46Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12583",
+  "body": "Filed unassigned and **ungraded** by the #12539 dev, session `session_01UjujZN219uFzBhSYfMykCd`. Met while measuring #12539's failing set. ⛔ Not graded, not routed. The file is currently fenced by [PR #12569](https://github.com/objectstack-ai/objectstack/pull/12569), so nothing was touched.\n\n## Measured\n\n`packages/cli/test/serve-node-env-production-default.e2e.test.ts:388` creates its fixture inside the **tracked test tree**, not the system tmpdir:\n\n```ts\nconst FIXTURES_ROOT = HERE;                 // = packages/cli/test/\ndir = mkdtempSync(join(FIXTURES_ROOT, 'tmp-node-env-default-'));\n```\n\n⭐ **That location is correct and deliberate** — the file's own docblock gives the measured reason: the fixture config does a static `import { AuthPlugin } from '@objectstack/plugin-auth'`, which resolves only because `packages/cli/node_modules/` is reachable by Node's upward walk from wherever the config lives. A fixture in `os.tmpdir()` has no such ancestor. ⛔ This is **not** a request to move it.\n\nThe defect is the other half: nothing keeps the directory out of git, and cleanup does not survive a failure.\n\n- `.gitignore` carries `*.tmp` and `tmp/`. **Neither matches `tmp-node-env-default-*`** — verified: `git check-ignore -v packages/cli/test/tmp-node-env-default-XXXX` reports it is NOT ignored.\n- `afterAll` (line 397) awaits `stop(child)` for every child **before** `rmSync(dir, …)`, so any throw or timeout in the child-teardown loop skips the removal entirely.\n\nObserved on `09b4f4e4e` with the dependency closure built and `packages/cli/dist` absent — i.e. the fresh-worktree state #12539 is about, where this file's `it` fails. After that run:\n\n```\npackages/cli/test/tmp-node-env-default-zVfZgc/objectstack.config.ts\npackages/cli/test/tmp-node-env-default-zVfZgc/package.json\n```\n\nwere still on disk, untracked. After a run where the same file **passes**, they are gone — so the leak is specifically on the failing path, which is the path a developer is most likely to be on when they reach for `git add -A`.\n\n## ⚠️ Why it is worth a card\n\nThree costs, in ascending order:\n\n1. `git status` is no longer a clean signal in the worktree, which is what a parallel-agent container leans on.\n2. **A stray `package.json` changes what tooling derives.** `node scripts/pm/dispatch-gates.mjs` reads the working tree including untracked files; with the leftover present it derived three extra gate families for an unrelated change set — `check:override-consistency`, `check-changeset-fixed.mjs` and `check-osv-exemptions.mjs` — matched *solely* via `packages/cli/test/tmp-node-env-default-zVfZgc/package.json` through validate-deps.yml's `**/package.json` trigger. It exits 0 and the list looks ordinary.\n3. `git add -A` commits a test fixture into `packages/cli/test/`.\n\nCost 3 is the one this repo has already paid once, from a different producer: **#8218** — *\"`check:type-check-debt` writes `tsconfig.debt-remeasure.json` into tracked package dirs and it is not gitignored — a concurrent `git add -A` commits it\"* (closed). Same class, same remedy shape.\n\nThis is the only file in the repo that roots a fixture this way — `git grep -n \"mkdtempSync(join(HERE\\|mkdtempSync(join(FIXTURES_ROOT\" -- packages` returns exactly one hit — so the fix is bounded and there is no family to sweep.\n\n## Two candidate remedies, not judged here\n\n- Add `packages/cli/test/tmp-node-env-default-*/` to `.gitignore` (or a `packages/cli/test/.gitignore`). Cheapest; leaves the disk litter.\n- Move `rmSync(dir, …)` into a `finally` around the child-teardown loop, so the removal runs whatever `stop()` does. Fixes the leak rather than hiding it. ⭐ Both, probably — the ignore is the guard for the next producer, the `finally` is the fix for this one.\n\n## Re-check\n\n```\nsed -n '380,400p' packages/cli/test/serve-node-env-production-default.e2e.test.ts\ngit check-ignore -v packages/cli/test/tmp-node-env-default-XXXX ; echo \"exit=$?\"   # 1 = NOT ignored\ngrep -n \"tmp\" .gitignore\n```\n\n⛔ Reproducing the leak needs the failing path: build only the dependency closure (`pnpm --filter '@objectstack/cli^...' build`, note `^...`), leave `packages/cli/dist` absent, then run this one file and look at `git status --short` afterwards.\n\nSeverity not judged; S, mechanical.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01UjujZN219uFzBhSYfMykCd)_"
+}

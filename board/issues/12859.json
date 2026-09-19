@@ -1,0 +1,35 @@
+{
+  "number": 12859,
+  "kind": "issue",
+  "title": "Queue-flake anchor: src/plugin-artifact-forward-conversion.test.ts",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:engine",
+    "tests"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-28T04:26:04Z",
+  "updated_at": "2026-08-28T09:38:07Z",
+  "closed_at": "2026-08-28T09:36:36Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12859",
+  "body": "`src/plugin-artifact-forward-conversion.test.ts` has ejected **3 distinct pull requests** from the merge queue\nwithin a rolling 24 hours. This issue is the single place for that conversation;\nit is refreshed by the merge-queue-triage workflow on every further ejection.\n\n| PR | queue build |\n|---|---|\n| #12843 | [33140380738](https://github.com/objectstack-ai/objectstack/actions/runs/33140380738) |\n| #12851 | [33141029941](https://github.com/objectstack-ai/objectstack/actions/runs/33141029941) |\n| #12855 | [33141213420](https://github.com/objectstack-ai/objectstack/actions/runs/33141213420) |\n\n**This issue is a NAME, not a diagnosis.** The workflow that files it reads the\nfailing test file path out of the job logs and counts distinct PRs; it does not\nknow whether this is a flake, a load/timing cliff, a semantic conflict between\nqueued PRs, or a real regression, and it does not act on any of those. No test is\nskipped, quarantined or re-queued by it, and no PR is labelled by it — weakening\na gate stays a human act.\n\nWhat to do with it: read one victim PR's triage comment for the failure REASON\nline beside the FAIL line (a timeout and an assertion are the same FAIL line and\nopposite diagnoses), decide the cause, and close this issue with the fix or with\nthe reason it is not one.\n\nLast refreshed by queue build [33141213420](https://github.com/objectstack-ai/objectstack/actions/runs/33141213420) (PR #12855).\n\n---\n_Filed by the merge-queue-triage workflow (#4859, aggregation #10128)._\n\n<!-- queue-signature-anchor:src/plugin-artifact-forward-conversion.test.ts -->"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 12656,
+  "kind": "issue",
+  "title": "[finding] `Claim pointer:` is matched by NEITHER claim marker, and `latestClaimComment`'s header cites one as a claim the marker reads",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-27T03:42:48Z",
+  "updated_at": "2026-08-27T06:22:10Z",
+  "closed_at": "2026-08-27T06:11:59Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12656",
+  "body": "Filed unassigned by the os-dev seat working #12629 (`session_01MnijPVVDakqK2J335JoJtq`, branch `claude/issue-12629-family-member-patrol-row`). Out of that card's scope — different defect class, and the file's own ruling forbids the obvious repair — so it is recorded rather than fixed. Grading is the lane's.\n\n## The measurement\n\n`scripts/pm/check-half-states.mjs` has two claim markers and this live comment shape matches neither. Run against the shipped constants, with a positive control:\n\n```\nCLAIM_COMMENT_MARKER  : false\nCLAIM_NEAR_MISS_MARKER: false\nnearMissClaimSeparators: []\ngoverningClaim         : null\nlatestClaimComment     : null\ncontrol (canonical `Claim: PM loop round R6`): true\n```\n\nThe subject string is `Claim pointer: folded into the 11678 family dispatch` — quoted in that file as a REAL line from its own claim census.\n\nWhy each misses: `CLAIM_COMMENT_MARKER` is anchored `Claim(?:ed)?` then optional whitespace then a colon, and the word here is followed by ` pointer`. `CLAIM_NEAR_MISS_MARKER` requires the character after the word to be one of the four declared non-canonical separators (em dash, en dash, hyphen-minus, fullwidth colon); a lowercase letter is none of them. So the comment is invisible to H2, H20, H27, H33 and H34 alike.\n\n## The part that is a straight factual error, not a coverage judgement\n\n`latestClaimComment`'s docblock argues that it must NOT narrow to branch-naming claims, and offers two census specimens as claims the marker reads but that name no branch:\n\n> the measured claim census carries 「Claim: PM loop round R6」 and 「Claim pointer: folded into the 11678 family dispatch」 — well-formed claims naming no branch of their own\n\nThe second one is not in that population at all. The paragraph's conclusion survives on the first specimen, so the code is right; the example is wrong, and it is the kind of wrong that propagates — a later author reading it will believe `Claim pointer:` is a shape the marker handles.\n\n## Why this is not simply \"widen the marker\"\n\nThe maintainer's 2026-08-11 ruling makes the literal `Claim:` the single machine criterion, and `CLAIM_COMMENT_MARKER`'s own note states the repair direction: the fleet converges on the documented spelling, and the predicate is ⛔ never relaxed. So `Claim pointer:` is a MALFORMED claim, not a dialect.\n\nWhat follows from that is the actual gap: H34 exists precisely to make a malformed claim visible and point the seat at the canonical spelling — \"visibility without redefining the vocabulary\", in its own words — and it does not see this one either. A seat writing `Claim pointer:` gets no signal from anywhere, exactly as it did before H34 landed for the dash spellings.\n\n## Disposition (candidate, for the lane to grade)\n\nTwo pieces, separable:\n\n1. **Correct the docblock example.** Mechanical, and it removes a statement the code contradicts.\n2. **Decide whether H34's near-miss shape should cover a WORD in the separator position**, not only a punctuation character. It is a real widening of the near-miss detector (never of the claim marker), and it needs its own noise measurement: `Claim` followed by a word is a much commoner prose opening than `Claim` followed by a dash, so the `looksLikeClaimContent` conservative half would be carrying more weight than it was measured for. ⛔ Not something to bolt on without that measurement — H34's header is explicit that its strictness was paid for once already.\n\nPopulation size is unmeasured here; this seat found the shape quoted in the source, not by sweeping the board. A census of live `Claim <word>:` openings is the first thing a fix would need."
+}

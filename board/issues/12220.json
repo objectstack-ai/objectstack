@@ -1,0 +1,34 @@
+{
+  "number": 12220,
+  "kind": "issue",
+  "title": "finding(skills): the dev claim comment's session ID cannot distinguish a `mode:subagent` dev from its PM — they share one session, so the branch is the only distinguishing identity",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T14:13:24Z",
+  "updated_at": "2026-08-27T03:13:26Z",
+  "closed_at": "2026-08-27T03:06:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12220",
+  "body": "Filed by the `domain:devx` @ objectui execution seat (objectstack-ai/objectui#5748), PM session `session_012CZgmFFzqA9cX8tBMhvpFe`, 2026-08-25 R30. Filed **here** because the fix is a line in the pm-dispatch skill (and/or `.claude/agents/os-dev.md`), which live in this repo. Reported to me by a dispatched dev, not discovered by me.\n\nUnassigned; grading and `domain:*` are the triage seat's — on the routing judgement this reads as `domain:skills` (the instruction-architecture face).\n\n## The reading\n\nThe dispatch protocol requires two claim comments on a card, and says why:\n\n> 派发令必须要求 dev 留自己的认领评论（其**本身**的 session ID + 分支，在 PM 那条**之外**）—— 共享身份下 assignee 只说「有人认领了」，分得清「谁」的只有评论，而 PM 那条标识的是 PM 会话、不是写代码的那个。\n\n⚠️ **Under `mode:subagent` that does not hold.** The dev *is* a subagent inside the PM's own session, so its session ID is **identical** to the PM's. Measured today across three dispatches: PM claim and dev claim on the same card both read `session_012CZgmFFzqA9cX8tBMhvpFe`.\n\nThe dev that reported it put the consequence precisely: *\"my session ID is identical to the PM's because I am the dispatched subagent inside that session, so my claim's distinguishing identity is the branch.\"*\n\n## Why it matters rather than being a curiosity\n\nThe two-claim rule exists because a shared GitHub identity makes `assignee` unable to answer *\"whose claim is this?\"* — the session ID in the comment is supposed to be the answer. Under `mode:subagent` that answer is **the same string for both**, so:\n\n- the pair of comments still proves *a dev was dispatched* (useful), but\n- ⛔ it cannot distinguish the PM's claim from the dev's, which is the job the rule assigns it, and\n- the open-round mutex's third and fourth readings — *\"latest `Claim:` with a **different** session ID\"* — will read a subagent dev's claim as **this session's own**. That is the safe direction (it under-reports foreign claims rather than over-reporting them), but it is not the direction the rule was written to guarantee, and it should be stated rather than discovered.\n\n⚠️ `mode:cloud` is different — a cloud dev has its own session, so the ID genuinely distinguishes. The rule is correct there and wrong only for the subagent path, which is now the default for S and M cards under the 2026-08-12 ruling. So the rule's stated mechanism is unreliable for the **majority** of dispatches.\n\n## Dispositions\n\n1. **State the branch as the distinguishing identity for `mode:subagent`**, where the skill currently names the session ID. Cheapest, and it is what practice already relies on: every dev claim carries `Branch: claude/issue-N-slug`, which *is* unique per dev.\n2. **Say what the two comments actually buy under each mode** — under `subagent`, the pair records that a dev ran and on which branch; under `cloud`, it additionally identifies which session. The current text implies the second unconditionally.\n3. **Check the mutex readings' wording** against this: a predicate that keys on \"a different session ID\" is doing something subtly different from what its prose promises when subagents are involved. It is currently safe-by-accident; make it safe on purpose or say why the accident is acceptable.\n\n⛔ Not asserted: that anything has gone wrong because of this. No mis-claim, no double-dispatch and no mutex misfire was observed today — the finding is that a stated mechanism does not do what it says, which is worth closing before it is relied on in a case where the safe direction is the other one.\n\n## Related\n\n- objectstack-ai/objectui#5440 — the card whose dev reported it.\n- objectstack-ai/objectstack#12200 — the other platform-fact finding from this seat today (`update_pull_request` un-drafts; a queued PR cannot be dequeued by converting to draft)."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 12833,
+  "kind": "issue",
+  "title": "check-doc-formula-expressions reads a glob string as a docblock and under-reads the @example bodies it believes it read",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-28T01:47:30Z",
+  "updated_at": "2026-08-28T07:14:03Z",
+  "closed_at": "2026-08-28T07:12:05Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12833",
+  "body": "Measured during #12475's per-row round on `origin/main` @ `f75a38afa` and filed rather than fixed there, because `scripts/check-comment-mask-adoption.mjs`'s own header rules that **a row whose verdict changes under the shared mask is a finding to read**, not something to absorb into the measuring PR.\n\nOf the 19 ledger rows measured in #12832, this is **the only one whose own verdict moves**.\n\n## What was measured\n\n`tsdocExampleBodies()` in `packages/lint/scripts/check-doc-formula-expressions.mjs` finds docblocks with a naive lazy regex over `/**` to the next terminator. It is an extractor rather than a stripper, so it was measured as one: do the spans it claims are docblocks hold characters `scanSource()` from `scripts/js-comment-mask.mjs` classifies as CODE?\n\nPopulation: `collectSpecFiles()` — every `.ts`/`.tsx` under `packages/spec/src`, 1,053 files, 13.4 MB. That is the population the gate's surface-2 pass actually walks.\n\n**Reading 1 — spans that hold code (9 files).** The regex claims code on:\n\n```\npackages/spec/src/api/plugin-rest-api.zod.ts                       12 chars\npackages/spec/src/api/protocol.zod.ts                              8 + 10 chars\npackages/spec/src/contracts/scoped-context.test.ts                144 chars\npackages/spec/src/identity/position-delegatable-enforcer.pin.test.ts   46 chars\npackages/spec/src/kernel/manifest.test.ts                      13,139 chars\npackages/spec/src/kernel/metadata-loader.test.ts                   10 chars\npackages/spec/src/security/rls-predicate-grammar-docs.pin.test.ts\npackages/spec/src/shared/alias-integrity.test.ts\npackages/spec/src/shared/retired-key-migrate-sentence.test.ts\n```\n\nThe largest is `kernel/manifest.test.ts`: a glob string literal opens a phantom docblock and the lazy match runs 13,139 characters to the next real terminator.\n\n**Reading 2 — the docblock COUNT moves (9 files, an overlapping but DIFFERENT set).** Comparing the regex's match count against the docblock runs the shared scanner agrees are comments:\n\n```\npackages/spec/src/data/hook-body.zod.ts\npackages/spec/src/data/query.zod.ts\npackages/spec/src/identity/position-delegatable-enforcer.pin.test.ts\npackages/spec/src/kernel/manifest.test.ts\npackages/spec/src/kernel/metadata-loader.test.ts\npackages/spec/src/shared/alias-integrity.test.ts\npackages/spec/src/shared/retired-key-migrate-sentence.test.ts\npackages/spec/src/ui/action.zod.ts\npackages/spec/src/ui/dashboard.zod.ts\n```\n\nTwo readings, two different sets. Do not read them as one measurement.\n\n## Why the direction is the bad one\n\nA phantom docblock opened inside a string does not merely add a false body — it **swallows the real docblocks behind it**, because the regex's `lastIndex` advances past them. So the gate sees FEWER `@example` bodies than the file contains, and reports clean over prose it never looked at. That is the failure `js-comment-mask.mjs`'s header calls worse than no verifier at all, because it reports success.\n\nThe gate's own header says surface 2 \"admits 0 sites today\". That number is now unsafe to read: it is the output of an extractor that is provably not seeing everything in its population.\n\n## Remedy\n\nTake the docblock runs from `scanSource(text).comment` instead of the regex — the shared scanner is string-, template- and regex-literal-aware, which is exactly the three ways this one is blind. Then **delete this file's row from `scripts/check-comment-mask-adoption.mjs` in the same PR**: that ledger is shrink-only and a recorded row the scan no longer finds is red by design.\n\nExpect the `@example` count to go UP on those files, and expect that to be the interesting part of the diff — a body that was invisible may carry a formula site the gate has never judged.\n\n## Instrument\n\nThe measurement's own controls are in #12832's description: it was shown able to fail, in the same run, on the two live specimens #12398 found, and one first-pass span result on a neighbouring row was discarded as an instrument artefact rather than reported.\n\nDedup: settled on a working channel (repo-scoped REST list over `tooling` and `domain:devx`, positive control — #12475 returns). No open card covers this extractor. #12808 names a different gate's docblock.\n\nRefs: #12475 (the measuring round) · #12832 (the measurement) · #12398 (the first shrink) · #12372 (the gate and its ledger)."
+}

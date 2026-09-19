@@ -1,0 +1,32 @@
+{
+  "number": 12667,
+  "kind": "issue",
+  "title": "Surface licensed max_nodes oversell to operators — visibility without the slot-claim mechanism (ruled C on #8501)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-27T05:31:11Z",
+  "updated_at": "2026-08-27T15:16:41Z",
+  "closed_at": "2026-08-27T15:06:37Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12667",
+  "body": "Provenance: maintainer ruling 2026-08-27 (PM chat, decision-inbox batch 4, adjudication session `session_01DKWDdUJ2XNRESVVWUvcpnh`), verbatim: 「其他接受」 — adopting Option C on #8501: make a licensed `max_nodes` oversell VISIBLE to operators; the atomic slot-claim enforcement mechanism is deliberately NOT built now (deferred until real commercial pull — see the reopen triggers recorded on #8501).\n\n## Scope\n\nMake an over-cap boot visible beyond the existing `os serve` log line: an operator-facing surface (console and/or telemetry) showing declared replicas vs the licensed cap, fed by the `MultiNodeGate` verdict vocabulary (`admitted` / `refused` / `capped`) that #8367 / PR #8503 landed. Visibility only:\n\n- ⛔ No enforcement, no membership view, no slot claim, no refusal behaviour — all explicitly out (ruled out on #8501; sub-decisions like TTL semantics and refusal posture stay unmade until that card's reopen triggers fire).\n- The gate verdict is advisory and stays advisory; this card makes the advisory reading reach a human.\n\n## First actions for the implementing dev (premise-first)\n\n1. Re-measure the three facts on today's tree before designing — the seam changed at #8503: gate consulted once per process at boot (`packages/cli/src/commands/serve.ts`), no cluster membership view (`generateNodeId` random per process), `OS_CLUSTER_REPLICAS` is an operator-declared count identical in every replica (`split-brain-guard.ts`).\n2. Establish where the reading can actually land: if the display half lands in objectui (console surface), stop and report for cross-repo splitting per contract-first — do not absorb a cross-repo feature into one PR.\n\nNamed reader: the `domain:services` seat (gate and cluster primitives live in `packages/services/service-cluster`); routing note for triage. Refs: #8501 (ruling + full four-facet record), #8367 / PR #8503 (the seam), #8504 (the serve-time loud warning, landed), objectstack-ai/cloud#1275 (the 2026-08-13 overflow-semantics ruling — unchanged)."
+}

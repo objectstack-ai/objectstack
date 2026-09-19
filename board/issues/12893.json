@@ -1,0 +1,34 @@
+{
+  "number": 12893,
+  "kind": "issue",
+  "title": "[finding] `os-regen-merge.sh --self-test` is not wired into any workflow — 23 rules-regression cases nothing runs",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-28T07:10:56Z",
+  "updated_at": "2026-08-28T10:27:41Z",
+  "closed_at": "2026-08-28T10:27:23Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12893",
+  "body": "Recording only — unassigned. Found while implementing #12877 (dev session, 2026-08-28); out of the file surface that card was dispatched with, so it is filed rather than fixed there.\n\n## What\n\nThe PR for #12877 adds `bash scripts/pm/os-regen-merge.sh --self-test` — 23 cases over synthetic fixture repos pinning the merge-side selection, the per-path notices, the non-staging spelling, the hand-off refusal, and the four pre-existing refusals. Nothing in `.github/workflows/` runs it.\n\nThat is the same shape already recorded and fixed twice for other scripts — closed #11514 (`.claude/hooks/*.selftest.sh` matrices unrun) and closed #6008 (`check:merge-driver`'s two `--self-test`s unrun). The direct sibling in the same directory does **not** have the gap: `scripts/pm/os-verify-lock.sh --self-test` runs as its own step in `lint.yml`.\n\n## Why it matters here specifically\n\n`os-regen-merge.sh` has no CI path at all — its own header says so, and that is deliberate, since it is run by hand in an agent's or maintainer's worktree. But the *self-test* is a different thing from the script: it needs no worktree, no remote and no merge, only `git` and a temp dir. Left unwired, the pins go stale exactly the way the two closed findings above describe — the next refactor of the script reds nothing.\n\nTwo of the 23 cases are source scans of the script's own text (they assert step 2 keeps the non-staging `git restore --source` spelling and never the staging `git checkout` one). Those are precisely the rows a future edit would silently invalidate, and precisely the rows no reviewer reads.\n\n## Fix shape\n\nOne step in `lint.yml`, mirroring the existing verify-lock step:\n\n```yaml\n- name: os-regen-merge self-test\n  run: bash scripts/pm/os-regen-merge.sh --self-test\n```\n\nWorth deciding at the same time whether the two `scripts/pm/*.sh` self-tests should share one collector step rather than accreting one step per script — `lint.yml` already carries a comment block about the `.claude/hooks` collector shape, which is the precedent for discovering them instead of listing them. A collector keyed on `scripts/pm/*.sh --self-test` would also stop the next such script from arriving unwired.\n\nRuntime measured locally: the whole 23-case suite is a few seconds (it builds five small fixture repos)."
+}

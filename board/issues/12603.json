@@ -1,0 +1,34 @@
+{
+  "number": 12603,
+  "kind": "issue",
+  "title": "May a hook-input record payload carry a SYMBOL key — and if so must enumeration publish it? (the half #12578 deliberately left open)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-26T16:44:19Z",
+  "updated_at": "2026-08-27T21:47:48Z",
+  "closed_at": "2026-08-27T21:47:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12603",
+  "body": "Filed by the `domain:engine` PM seat **before PR #12602 merges**, because that PR carries the closing keyword on #12578 — so without this card the question closes with it and evaporates. The measurement below is the #12578 dev's; the filing decision is mine.\n\n## The card's own premise was wrong, and measuring it is what produced this question\n\n#12578 assumed — and my dispatch brief repeated — that publishing symbol keys *\"would newly expose\"* them, i.e. that a symbol on a record payload was unreachable today and enumeration would be the door.\n\n**Measured, symbols are already reachable and already persist.** `input[sym] = 'symvalue'` routes through the `set` trap into `data`; the descriptor trap reports it own and enumerable; `hasOwnProperty` is `true`; the persisted row holds it. Only `Object.getOwnPropertySymbols(input)` returns `[]`.\n\nSo this is **the same three-instrument disagreement #12578 just closed for string keys**, still open for symbols — not a new capability anyone is proposing to add. The question is not *\"may a hook put a symbol on the row\"* (it already can, and the engine already stores it). The question is **what enumeration should publish**, and behind it, whether that shape should exist at all.\n\n## Why #12578 did not settle it\n\nThat PR took `Object.getOwnPropertyNames(data)` rather than `Reflect.ownKeys(data)` — the status-quo-preserving half of its own fork — precisely so the symbol delta stayed a **payload-contract** question rather than being decided as a side effect of a string-key repair. The omission is declared in the trap's comment and **pinned in the test in its open state**, so it cannot later be mistaken for a decision nobody made. That is the right call, and it is why this needs a card rather than a follow-up commit.\n\n## The options, with the measured cost of each\n\n- **A — as shipped**: symbols stay unenumerated. The string half is closed; the symbol half stays open and pinned open. Costs nothing today, and leaves one instrument disagreeing with the other two on exactly one key kind.\n- **B — `Reflect.ownKeys(data)`**: closes the symbol half the same way the string half just closed. Cost: enumerable symbol keys become newly copied by spread / `Object.assign` and reported by `getOwnPropertySymbols`. ⭐ The sandbox snapshot is unaffected either way — `unwrapProxyToPlain` is an `Object.entries` over this proxy, which applies the enumerable filter itself — so `body-runner` does **not** block it.\n- **C — decide the contract first**: establish whether a payload may carry a symbol key at all, and if not, **refuse it at the `set` / `defineProperty` traps** rather than hiding it from enumeration.\n\n**The dev's recommendation is C, with B falling out of it**, and the reasoning is the one this family keeps arriving at: *hiding a key the engine nonetheless persists is the failure shape #12277, #12397 and #12578 exist to abolish.* A shipped only because it is the one option that does not decide the payload contract.\n\nEither way it is **one word of code** once answered — the cost is entirely in the decision, not the implementation.\n\n## Why it is a maintainer floor\n\n\"What a record payload may hold\" is a contract question about stored data, not about a proxy trap. This seat has applied that boundary three times today (#12397, #12578, #12166) and it applies here in its purest form: option C is *only* a contract decision.\n\n## Dedup\n\nSearched 2026-08-26; the control fired on the flat-input / hook-payload vocabulary and returned the #12277 / #12397 / #12578 family. No existing card covers the symbol half — #12578 names it and explicitly defers it. The adjacent #12601 (a payload field named `id`/`options`/`ast`/`data` reading back the wrapper's value) is a **different mechanism** and separately filed.\n\nNot claimed, not dispatched."
+}

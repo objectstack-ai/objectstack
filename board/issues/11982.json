@@ -1,0 +1,34 @@
+{
+  "number": 11982,
+  "kind": "issue",
+  "title": "`PluginConfigValidator` can never run: `PluginLoader` calls its own `validatePluginConfig(metadata)` with no config, and a plugin factory closes over its config so the kernel never receives it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T03:45:24Z",
+  "updated_at": "2026-08-28T10:06:49Z",
+  "closed_at": "2026-08-28T07:26:38Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11982",
+  "body": "Found while implementing #11637 (the REST server config seam). Filed, not fixed — #11637's declared surface is `packages/rest/src/rest-server.ts`, and this is a `packages/core` mechanism with its own gate family.\n\n#11637 offered \"declare `configSchema` on the REST plugin and let the kernel's `plugin-config-validator` do it\" as one of its two candidate fixes. Measuring that candidate is what turned this up: **the mechanism cannot run at all**, for any plugin, so the candidate was structurally unavailable and #11637 landed the seam-side parse instead.\n\n## What was measured\n\nOn `origin/main` @ `7899f5745`.\n\n**1. The one call site passes no config.** `packages/core/src/plugin-loader.ts:157-159`:\n\n```ts\nif (metadata.configSchema) {\n    this.validatePluginConfig(metadata);   // <- no second argument\n}\n```\n\nand `:406-419`:\n\n```ts\nprivate validatePluginConfig(plugin: PluginMetadata, config?: any): void {\n    if (!plugin.configSchema) return;\n    if (config === undefined) {\n         // In loadPlugin, we often don't have the config yet.\n         // We skip validation here or valid against empty object if schema allows?\n         // For now, let's keep the logging behavior but note it's delegating\n         this.logger.debug(`Plugin ${plugin.name} has configuration schema (config validation postponed)`);\n         return;\n    }\n    this.configValidator.validatePluginConfig(plugin, config);\n}\n```\n\n`config` is always `undefined` here, so the early return always fires. \"Postponed\" to nothing: `git grep validatePluginConfig` finds no other caller outside `PluginConfigValidator`'s own unit test.\n\n**2. There is nothing for it to postpone *to*.** `kernel.use(plugin)` (`packages/core/src/kernel.ts:198`) hands `pluginLoader.loadPlugin(plugin)` the `Plugin` object only. A plugin factory captures its config in a closure — `createRestApiPlugin(config)` is the model — so no config value ever crosses into the kernel, and `PluginMetadata` carries no field for one. Even a correct `validatePluginConfig(metadata, config)` call would have nothing to pass.\n\n**3. No kernel plugin in the repo declares `configSchema`.** `git grep -n \"configSchema:\" packages -- ':!**/dist/**' ':!**/CHANGELOG.md'` returns 20 hits and **none** is a kernel `Plugin`: they are automation node-executor JSON schemas (`service-automation/src/builtin/*`), the datasource driver catalog, `plugin-approvals`' approval-node descriptor, and spec/test declarations. So `PluginConfigValidator` — ~200 lines with its own unit test, its own `formatZodErrors`, `validatePartialConfig` and `getDefaultConfig` — has zero live consumers.\n\n## Why it matters\n\n`PluginMetadata.configSchema` reads, at every author's call site, as the declared way to validate a plugin's configuration. It is documented as such (`packages/core/ADVANCED_FEATURES.md:304`, ADR-0025's \"Config\" section: *\"`PluginConfigValidator` validates plugin config against the plugin's schema\"*). A plugin author who declares one gets a `debug` line and no validation — the declared-not-enforced shape, one layer up from the one #11637 closes.\n\n## Not prejudged\n\nThree shapes, and the choice is a real call:\n\n- **Wire the config through.** Give `Plugin`/`PluginMetadata` a config field the factory populates, and pass it at `loadPlugin`. Makes the mechanism real for every plugin, and is the only shape that would let a plugin's schema cover its whole config rather than the slice a seam happens to reach.\n- **Retire it.** Delete `PluginConfigValidator` and the `configSchema` field under ADR-0049 enforce-or-remove, with a tombstone, and let each plugin parse its own config at its own seam (which is what #11637 does). A capability with zero consumers earning its keep on the strength of a docstring is the startup-scope case for removal.\n- **Fix the call and leave the surface.** Pass `config` where one exists, keeping the field for the declarative/manifest loading path ADR-0025 describes.\n\nWorth measuring before choosing: whether ADR-0025's manifest-driven load path (`\"configuration\"` in the plugin manifest) has a live call site that *would* have a config in hand, since that is the one caller for which the mechanism was designed.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_019siH5jDmk5hrayvfyojUqR)_\n"
+}

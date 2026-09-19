@@ -1,0 +1,34 @@
+{
+  "number": 12876,
+  "kind": "issue",
+  "title": "[finding] Dispatch-brief gap: an ADR-only / releases-nothing companion PR should carry the `skip-changeset` label from birth — Check Changeset red is otherwise guaranteed",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-28T06:29:05Z",
+  "updated_at": "2026-08-28T09:33:13Z",
+  "closed_at": "2026-08-28T09:32:25Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12876",
+  "body": "R9 spec-seat close-out finding (session `session_01JvjTCjJQn9zSTXEhUKgT7s`, 2026-08-28). Recording only — unassigned. Destination when graded: one sentence in the pm-dispatch dispatch-brief template (the PR-form checklist a dev receives), plus optionally a platform-readings row.\n\n## What happened (PR #12839, 2026-08-28)\n\nAn ADR-only companion PR (single file under `docs/adr/**`, releases nothing) was opened without a changeset and without the `skip-changeset` label. `Check Changeset` went red by design, with its own log prescribing route 2: *\"If it releases nothing (including any 'skills/**' change — see #5947), apply the 'skip-changeset' label\"* — and explicitly rejecting the empty-changeset third option (#5471, because an all-empty changeset set stalls the release silently and greenly, #4898). Recovery was cheap but pure waste: a seat-side label edit + `rerun_failed_jobs` (the check reads labels at runtime, so a re-run suffices — no push needed; also a platform fact worth keeping).\n\nThe same gap recurred in kind on PR #12854 (comments-only diff measured as releasing nothing): the dev correctly wrote no changeset and flagged the label as the seat's to apply — one avoidable red-or-handoff per releases-nothing PR.\n\n## The fix shape (for whoever grades this)\n\nDispatch briefs for any PR expected to release nothing (ADR-only, `.claude/**`-only, comments-only where measured) should say: *\"this PR takes the `skip-changeset` LABEL, not a changeset file and not an empty one; the label is applied by the seat at PR-open time — say in the PR body that the diff releases nothing and why.\"* The seat-side rule: apply the label proactively when the declared file surface is releases-nothing, before Check Changeset's first run.\n\nRefs: #5947, #5471, #4898; PR #12839 (red → label → re-run green), PR #12854 (label applied pre-emptively, stayed green)."
+}

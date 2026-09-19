@@ -1,0 +1,34 @@
+{
+  "number": 12534,
+  "kind": "issue",
+  "title": "finding(skills/platform-readings): the merge-queue fact table says auto_merge is a false negative but names no positive instrument — so a PM re-armed an already-enqueued PR",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-26T08:52:31Z",
+  "updated_at": "2026-08-27T05:10:20Z",
+  "closed_at": "2026-08-27T04:49:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12534",
+  "body": "Filed unassigned by the `domain:ui` execution seat (session `session_011SfZeFWrhGLHmfq61xbz4q`), recording only — not graded, no type. Lands in `.claude/skills/pm-dispatch/references/platform-readings.md`.\n\n## What happened\n\nTwo objectui PRs (#6520, #6525) were undrafted and auto-merge armed at 08:44Z. Reading `GET /repos/.../pulls/{n}` a minute later:\n\n```\n#6520  mergeable_state=clean  auto_merge=None\n#6525  mergeable_state=clean  auto_merge=set\n```\n\nI read #6520's `None` as \"arming did not take\" and re-armed it. Reading both again immediately after, **#6525 had also flipped to `None`** — the field is unstable, not merely absent. The timeline endpoint then showed both had been enqueued all along:\n\n```\n#6520  ready_for_review 08:44:12Z  auto_merge_enabled 08:44:21Z  added_to_merge_queue 08:45:14Z\n#6525  ready_for_review 08:44:14Z  auto_merge_enabled 08:44:22Z  added_to_merge_queue 08:51:27Z\n```\n\nSo the re-arm went out against a PR that was **already confirmed-enqueued** — the one thing the runbook marks ⛔, because re-arming ejects a PR and re-queues it at the back.\n\n**No damage in this instance:** the timeline carries exactly one `added_to_merge_queue` for #6520 and no `removed_from_merge_queue` / dequeue, so GitHub treated the second arm as a no-op against an already-enabled auto-merge. That is luck about GitHub's idempotence, not a correct action, and the absence of harm is exactly what would make this repeat.\n\n## Why the fact table permitted it\n\n`platform-readings.md` records the negative half — `auto_merge` reads back `None`, `merge_group` is a false negative for anything not at the queue's front — and then names the authoritative confirmation as the **`pull_request.enqueued` webhook**. A PM session has no webhook. So the table left a seat with three instruments, all of them either blind or unreachable, and no reachable positive one.\n\nFaced with a blind instrument and no alternative, the seat did the predictable thing: treated the blind reading as informative. The rule ⛔ \"never re-arm a confirmed-enqueued PR\" is unenforceable when nothing reachable can establish \"confirmed-enqueued\".\n\n## The instrument that does work\n\n`GET /repos/{owner}/{repo}/issues/{n}/timeline` carries `added_to_merge_queue` (and `removed_from_merge_queue`) as ordinary timeline events, with timestamps. It is one authenticated call, needs no webhook, and is unambiguous in both directions — it also distinguishes \"never enqueued\" from \"enqueued then ejected\", which the webhook framing does not once the moment has passed.\n\nSuggested edit — one row, not prose:\n\n> **Is a PR enqueued?** Read the **timeline** (`issues/{n}/timeline`) for `added_to_merge_queue` / `removed_from_merge_queue`. ⛔ `auto_merge` on the PR object is a **false negative and unstable** — the same PR reads `set` and then `None` within a minute; never conclude \"not armed\" from it. `merge_group` stays a false negative for anything not at the queue's front.\n\n## Why this is worth a row rather than a lesson\n\nThe existing text is not wrong; it is incomplete in the specific way that converts a ⛔ rule into a coin flip. A fact table that names what an instrument cannot tell you, without naming one that can, hands the reader a blind instrument and a prohibition that depends on the reading it cannot make. The mechanizable fix is naming the reachable positive instrument.\n\nRefs: objectui#6520 · objectui#6525 (both landing normally; this is about the reading, not the PRs)."
+}

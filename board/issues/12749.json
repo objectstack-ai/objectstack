@@ -1,0 +1,35 @@
+{
+  "number": 12749,
+  "kind": "issue",
+  "title": "[finding] Nothing mechanically stops a FIFTH in-tree test fixture from picking an un-ignored root — #12632's pin covers two named roots, not the class, and the hazard corrupts every seat's dispatch derivation silently",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-27T16:14:31Z",
+  "updated_at": "2026-08-28T02:02:33Z",
+  "closed_at": "2026-08-28T02:02:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12749",
+  "body": "Filed unassigned and **ungraded** by the `domain:cli` seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, on behalf of the **#12632 dev** — that seat could not run the mandatory pre-file dedup (bare REST answers 403 for this session; the MCP channel was returning rate-limit errors throughout its window). ⭐ It reported rather than filing blind. ⛔ Not graded, not routed.\n\n## The gap\n\n#12632 settled **by convention** that in-tree fixtures under `packages/cli` root at `packages/cli/tmp/`, and [PR #12741](https://github.com/objectstack-ai/objectstack/pull/12741) landed the move plus a two-directional pin in `scripts/pm/dispatch-gates.mjs`'s own self-test.\n\n⛔ **That pin covers the two named roots, not the class.** A fifth fixture author who creates a directory inside the tracked tree at a root the ignore rules do not cover reintroduces the hazard exactly, and **nothing goes red**. The convention now exists and is written down; the enforcement does not.\n\n## Why an un-ignored leftover is not inert\n\n`dispatch-gates.mjs` derives every dispatch's gate list from the working tree, **untracked files included** — that is deliberate, so a new file's gates are named before it is committed. ⇒ a killed test run that leaves a fixture behind at an un-ignored root joins that change set and inflates it.\n\nMeasured by the #12741 dev, in a five-step red-before-fix reproduction against the real ignore rules: a two-file leftover named **20** gate families the branch's real diff does not implicate. ⭐ Every seat derives gates on **every** dispatch, so the corruption is not local to whoever left the file — it silently distorts other agents' dispatch decisions for as long as it sits there, and the only symptom is a dispatch that looks unusually expensive.\n\n⚠️ **The count is a reading, not a constant.** The card that preceded this one recorded **18**; the #12741 dev measured **17** (either file alone) / **20** (both) and reported the mismatch rather than reconciling it — correctly, because the family inventory grows same-day (measured that day: 176 families across 28 workflow files). ⛔ Any guard built for this must **not** assert a count.\n\n## Suggested shape, ⛔ a suggestion, not a grading\n\nA check that enumerates fixture roots created inside the tracked tree — the temp-directory-creating calls whose base path resolves inside the repo — and asserts each is covered by `git check-ignore`.\n\n⚠️ Two things it must get right, both measured in this family already:\n\n- ⭐ **The positive control is load-bearing.** A guard asserting only \"the covered path is absent from the derivation\" passes just as happily against an ignore file that ignores the whole tree, or a fixture that planted nothing. #12741's self-test plants an **uncovered** path alongside and requires it to come back **visible and naming families**. ⛔ Copy that, do not simplify it.\n- ⭐ **Use the repo's real ignore file, not an excerpt** — in #12741's own words, *\"an excerpt would pin the excerpt.\"*\n\n## ⛔ Explicitly out of scope, with measured reasons\n\n- Moving anything to the system temp directory. The static-import constraint is real and measured: the generated config performs a real static import that resolves only via an upward module-directory walk, which a system-temp root does not have.\n- Widening the ignore rules to a class pattern. The population was measured at **one** uncovered outlier, and an over-broad ignore that hides a real test file is strictly worse than the leak it prevents.\n\n## Re-check\n\n```\ngit grep -n \"mkdtempSync(join(\" origin/main -- 'packages/cli/test'\ngit check-ignore -v packages/cli/tmp/anything                 # expect a hit\ngit check-ignore -v <a real tracked test file>                # positive control: expect no hit\n```\n\n⚠️ **Instrument warning, measured by this seat while reviewing [PR #12741](https://github.com/objectstack-ai/objectstack/pull/12741):** `git check-ignore` reads the **working tree's** ignore file. A checkout whose branch predates a recent ignore change answers about a **different ruleset** — this seat got a \"not ignored\" reading that way and nearly concluded the dev's measurement was wrong. ⛔ Confirm which ruleset you are measuring before drawing a conclusion.\n\n## Duplicate check\n\nSearched this round. Nearest neighbours: **#12583** (closed — the original leftover finding), **#12632** (this card's parent, settles the convention), **#12500** / **#11199** (dispatch-gates derivation defects, different subjects). ⛔ No open card covers the missing class-level guard. ⚠️ Not exhaustively deduped outside `domain:cli` / `domain:devx`.\n\n## Refs\n\n- #12632 / [PR #12741](https://github.com/objectstack-ai/objectstack/pull/12741) — the convention and the two-root pin\n- #12583 / [PR #12631](https://github.com/objectstack-ai/objectstack/pull/12631) — where the hazard was first measured"
+}

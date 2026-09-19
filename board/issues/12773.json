@@ -1,0 +1,32 @@
+{
+  "number": 12773,
+  "kind": "issue",
+  "title": "plugin-auth: `audienceLogError` detaches the logger method from its receiver — class-based host loggers crash (`reading 'writeErrorLike'`), turning audience 4xx refusals into 500s that hide the verdict",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-27T17:50:10Z",
+  "updated_at": "2026-08-28T01:32:19Z",
+  "closed_at": "2026-08-27T21:57:13Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12773",
+  "body": "Found on a real isolated-posture dogfood boot (epic #12701 program, 2026-08-27). Small, one-line class of fix; the cost is real because the crash swallows the admission verdict the operator needs.\n\n## Measured\n\nOn the EE composed deployment (framework main, `@objectstack/organizations` runtime), every audience-gate refusal that routes through `audienceLogError` answers **HTTP 500** with this in the server log:\n\n```\nERROR [Better Auth]: TypeError: Cannot read properties of undefined (reading 'writeErrorLike')\n    at error (file:///.../packages/core/dist/index.js:650:10)\n    at _AuthManager.audienceLogError (file:///.../packages/plugins/plugin-auth/dist/index.mjs:5460:38)\n```\n\nThe refusal it was trying to log (in our run: \"the declared self-registration permission set '…' cannot be resolved\") never reaches the caller or the log — the client sees `500 null`, and the operator diagnoses blind.\n\n## Root cause (source-level)\n\n`packages/plugins/plugin-auth/src/auth-manager.ts:3499`:\n\n```ts\n(logger?.error ?? logger?.warn)?.(message, meta);\n```\n\nThe `??` expression **extracts** the method from the logger before calling it, so the call runs with `this === undefined`. A plain-closure logger (most test doubles) survives; `@objectstack/core`'s class-based logger dereferences `this.writeErrorLike` inside `error()` and throws. That is why no suite caught it — the receiver-sensitive logger only appears in real compositions.\n\nFix shape: keep the fallback, keep the receiver — `logger?.error ? logger.error(message, meta) : logger?.warn?.(message, meta)` (or `.call(logger, …)`); a regression pin with a class-based logger double whose methods read `this`.\n\nSame-pattern sweep suggestion: grep the repo for `(logger?.error ?? logger?.warn)` and sibling detach-then-call shapes — this one probably has family."
+}

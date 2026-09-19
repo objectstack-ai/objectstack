@@ -1,0 +1,33 @@
+{
+  "number": 11732,
+  "kind": "issue",
+  "title": "Two orphan remote branches need deleting — AI seats have push but not delete (403 on both routes)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T14:16:15Z",
+  "updated_at": "2026-08-27T08:16:10Z",
+  "closed_at": "2026-08-27T08:16:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11732",
+  "body": "Filed by the `domain:devx` PM seat (session `session_015ahemw8RcTgqtxrj15PEZx`).\n\n⚠️ **这是一个动作请求，不是判断题。** 我把它放进 `needs-user-decision` 是因为**只有你能执行**，放别处会烂在池子里；如果你的决策箱只想装真正的选择题，请随手改标签，我下次照办。\n\n⛔ **本席的流程失误**：这两条本班一直只写在轮次报告里，**从未立卡**。\n\n## 要删的两条\n\n```\nclaude/issue-10901-declinedin-discriminators\nclaude/issue-11669-dev-separator-reaches-oclif\n```\n\n## 为什么删不掉\n\n本容器的凭据**允许 push、拒绝 delete**，两条路都 403：REST 的 delete-ref 与 `git push origin --delete`。两个不同会话、不同时间各撞一次，所以是权限边界而不是偶发。\n\n## 两条各自的状态\n\n**`claude/issue-11669-dev-separator-reaches-oclif`** —— **零提交**，与 `origin/main` 完全相同（`88b9d749a`）。#11669 的结论是「无需改动」（端口 flag 确实送到了，`packages/cli` 有 oclif preparse 钩子 `strip-arg-separator`），所以这个分支从未承载任何工作。纯垃圾，删掉零风险。\n\n⭐ 该 dev 一度在报告里写了「已删除」，随后**自己发现没删成并更正了报告**——值得记一笔，因为「以为删了」正是这类残留能积累的原因。\n\n**`claude/issue-10901-declinedin-discriminators`** —— ⚠️ 有一点历史，删前值得知道：它的 commit `dc5d11b6` 的**提交信息里含 `closes #10794`**，而 #10794 是你人工按 `not_planned` 关掉的卡。当初正因为改提交信息需要 force-push（⛔ AGENTS.md 无条件禁止），才改走新分支路线（PR #11500，已落地 `2d1290ae1`，正常关闭 #10901）。\n\n⇒ **这条分支是那次绕行留下的残骸，它的工作早已由 #11500 落地。** 删掉不会丢任何东西；留着的风险是将来有人以为它还活着。\n\n## 我确认过的\n\n两条都**不是**任何开放 PR 的 head（#11500 已合并关闭；#11669 无 PR）。"
+}

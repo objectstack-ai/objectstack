@@ -1,0 +1,34 @@
+{
+  "number": 12750,
+  "kind": "issue",
+  "title": "Approve-gated queue for the governed surface: the queue guard passes a merge_group when an authorized human approval is pinned to the exact head — authorized set: os-zhuang, hotlong",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-27T16:21:29Z",
+  "updated_at": "2026-08-28T06:57:10Z",
+  "closed_at": "2026-08-28T06:51:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12750",
+  "body": "Filed by the Director/skills seat (session `session_01MnijPVVDakqK2J335JoJtq`) executing two maintainer rulings from live PM chat, 2026-08-27.\n\n## Rulings (verbatim, untranslated)\n\nThe design (presented after the maintainer asked, verbatim: 「需要我人工审查的，如果我真的审查了，并且点了批准，也不能合并吗？还是要等我 bypass吗」): the Governed Surface Queue Guard changes from unconditionally red in `merge_group` context to **green iff the PR carries an APPROVED review by an authorized account whose `review.commit_id` equals the PR's current head sha**; otherwise red as today. PR-context behavior unchanged. The maintainer's workflow becomes review → Approve → done (the queue merges, restoring the merge-time re-validation the bypass path loses); the bypass direct merge stays as the fallback path.\n\nThe authorized-approver ruling, verbatim: 「**os-zhuang hotlong 批准算数**」.\n\n## Risk pinned into the record (presented before the ruling; the ruling stands)\n\n`os-zhuang` is also operated by agent seats (triage sessions post as os-zhuang; measured on the board). With it in the authorized set, the technical control is normative for any agent holding os-zhuang credentials. Therefore this card ALSO lands the hard prohibition alongside the guard change: **⛔ an agent seat never submits an approving review on a governed-surface PR, under any account** — same normative class as 「链永不合并受管面」, and the Director's governed-merge audit (duty 4) is the standing backstop: its attribution readings now cover the *approver* as well as the merger, and an agent-submitted governed approval is an incident (the #9495 regime).\n\n## The changes\n\n1. **`scripts/pm/check-governed-queue-guard.mjs`**: in `merge_group` context, resolve the PR from the payload, read its reviews, pass iff an APPROVED review by an account in `GOVERNED_APPROVERS = ['os-zhuang', 'hotlong']` (constant single-source in this script, the `CONTRACT_REVIEW_TIER` pattern — protocol text references the constant, never copies the names) has `commit_id` == the PR head sha; stale approvals (older sha) never count. PR-context behavior byte-identical to today. Self-test rows for: pinned approval passes; stale-sha approval refuses; unauthorized-account approval refuses; no approval refuses; PR context unchanged.\n2. **Protocol text (governed-landing clauses)**: the governed-surface landing rule gains the second legal path — 「授权人工批准钉 head ⇒ 队列放行」 alongside 「人工直合」; the agent-no-approve prohibition lands in the guardrails; provenance quotes carried by date. Single-source discipline: mechanics live at the guard script + one clause, other mentions point.\n\n## Non-goals (binding)\n\n- The governed surface definition, the draft-only delivery discipline, the four-piece, and the after-the-fact audit regime are untouched.\n- No new labels; no branch-protection settings change is assumed (the guard remains the enforcement point).\n- `--test` pre-arm predicate unchanged.\n\n## File surface\n\n`scripts/pm/check-governed-queue-guard.mjs` (+ its self-test) + the governed-landing clause carriers (`.claude/skills/pm-dispatch/SKILL.md` and/or `references/contract-review.md`/`landing-operations.md` — locate the clause homes by grep; touch only where the clauses live). Zero-headroom ratchets on any `.claude` file touched — net 0, cut ledger.\n\n## Serial constraint\n\n`.claude/skills/pm-dispatch/SKILL.md` and `references/contract-review.md` are held by open PR #12744 (#12706, awaiting the maintainer's merge). **This card dispatches only after #12744 merges.** The guard script is unheld.\n\n## Acceptance\n\n- Replay: a governed PR with os-zhuang's approval pinned to head enters the queue and merges; the same PR after a new push (stale approval) is dequeued red; an unauthorized approval is dequeued red; bypass direct merge still works.\n- Guard self-test green; ratchets hold on any touched `.claude` file; governed draft PR + human merge four-piece (this change is itself governed — it touches `.claude/**`)."
+}

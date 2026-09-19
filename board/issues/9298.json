@@ -1,0 +1,33 @@
+{
+  "number": 9298,
+  "kind": "issue",
+  "title": "QA wave R0: provision the shared QA tree and take the machine-lane baseline at e4e5c6e3",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-17T12:08:59Z",
+  "updated_at": "2026-08-27T16:57:06Z",
+  "closed_at": "2026-08-27T16:57:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9298",
+  "body": "Part of #9296. Round 0 of the full platform-checklist regression — everything the later rounds stand on. **This card produces no PR and no `qa-run` issue**; it produces one comment on itself carrying the readings, and a structured report to the PM.\n\n## What this round owns\n\n1. **One QA tree for the whole wave.** `git worktree add ../objectstack-qa-wave <sha>` at `e4e5c6e3c608b1b807c83a0d5b734f213eb1a1dd`, then `pnpm install` **there**. Re-`fetch` first and record the sha you actually get — if `main` moved, the wave re-pins to yours and you say so.\n   - ⛔ **Do not create a second worktree or a second `pnpm install` anywhere.** The container has a fixed disk allowance (~30 GB free at dispatch); rounds R1/R2/R3 all reuse this one tree. Isolation between runs is per-item **port + file DB**, not per-item tree.\n2. **Console build — start it first, it is the long pole.** `pnpm objectui:build` builds `@object-ui/console` at the *pinned* `.objectui-sha` (`665661ab…`) into `packages/console/dist`. Cold monorepo: budget 10–30 min; run it in the background while the gates below run. ⛔ Never `pnpm objectui:refresh` — that re-bumps the pin to the local `../objectui` HEAD (currently `195b9e4a`, ≠ the pin) and every later browser verdict would describe a commit this repo does not pin.\n   - `packages/console/dist` does not exist right now, so `/_console/` 404s until this finishes. That is a **prerequisite, not a defect**.\n   - Finish with `pnpm check:console-sha` and report its output.\n3. **Repo machine gates, with timings** (the timings are a deliverable — they budget R1–R3):\n   - `pnpm check:platform-checklist` (expected green: 15 areas / 182 items / 28 kinds mapped / 2 waived)\n   - `pnpm typecheck`\n   - `pnpm test`\n   - `objectstack verify` against the showcase app, and the `packages/qa/dogfood` golden suite\n4. **Smoke the boot path** the later rounds depend on: `pnpm -C examples/app-showcase exec objectstack dev --ui --seed-admin -p <free non-default port> -d file:/tmp/qa-wave/r0.db`, poll `/api/v1/health` → 200, confirm `/_console/` serves after the build. Record the port/DB convention the next rounds should follow.\n\n## Reporting\n\nComment on this issue (English) with: the sha actually tested, `.objectui-sha`, per-gate command → exit status → wall-clock, the console-sha comparison, and the boot smoke result. Then return the PM report JSON.\n\n**A red gate on `main` is a finding, not your task.** Do not fix it: reproduce it twice, check whether it also fails on the merge-base, and file it as its own issue with the failing command and output. Say so in the report.\n\n## Non-negotiable for this card\n\n- No PR from this card. Nothing you produce lands in the repo tree.\n- Report faithfully: a gate you did not get to is \"not run\", never \"passed\". If `pnpm test` cannot finish in a sane budget, report how far it got, which packages are covered, and stop — a partial run reported honestly is a good outcome; an implied full green is not.\n"
+}

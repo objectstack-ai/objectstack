@@ -1,0 +1,32 @@
+{
+  "number": 11969,
+  "kind": "issue",
+  "title": "Convert the accepted cross-request caching design (#11633) into an ADR — governed surface: draft PR, human merge",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T03:30:41Z",
+  "updated_at": "2026-08-27T09:35:37Z",
+  "closed_at": "2026-08-27T08:22:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11969",
+  "body": "Follow-up ruled in #11633's acceptance (§9 of the design, proposal accepted). Provenance: design document = #11633 comment 5394942824; maintainer acceptance = #11633 comment 5404681591 (2026-08-25, verbatim 「接受你的建议，继续」). Filed by PM session `session_01KWRU3s15AJz7PGW7a7wdCh`.\n\nBlocked-by: #10348\n\n(The design named two unlanded premises: #10348-C and the #11663 ruling. The #11663 condition is **met** — ruled 2026-08-25, #11663 comment 5404675670. #10348-C remains the only gate.)\n\n**Content**: convert the accepted design comment into an ADR recording the durable rule — *no authorization answer is cached without a declared invalidation contract and a TTL bound* — plus the staleness posture (leg B off by default, TTL=0, supported low-seconds range), the fork rulings (coarse invalidation; TTL + `authz.invalidated` with TTL as the contract; session-of-record stays uncached per #4785), and the expiry-boundary rule (`min(ttl, nextBoundary)` — validity windows see no write at their boundary).\n\n**Governed surface discipline**: `docs/adr/**` — draft PR only, request review from the maintainer; ⛔ never flipped ready, never queued, never auto-merged by a seat; human merge is the review record.\n\n**Acceptance criterion**: a draft PR exists converting comment 5394942824 into `docs/adr/**`, its body linking both rulings (#11633 comment 5404681591, #11663 comment 5404675670), left for the maintainer."
+}

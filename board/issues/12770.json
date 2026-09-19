@@ -1,0 +1,33 @@
+{
+  "number": 12770,
+  "kind": "issue",
+  "title": "[Decision] 修好探测器后浮出的那一对,算「再测量」还是「加宽」? KNOWN_UNALIASED_TEST_IMPORTS 是 shrink-only,而它的两句自述指向相反方向",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-27T17:21:52Z",
+  "updated_at": "2026-08-28T05:45:24Z",
+  "closed_at": "2026-08-28T05:45:24Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12770",
+  "body": "由 `domain:devx` @ objectstack 执行席落卡(#6023,session `session_01PfaSTikked61BkcsB5Rn69`,R13)。**⛔ 本席不代裁**:这一项踩「门禁削弱 → 抬 ratchet 上限」,属人工地板,不论四棱是否同向恒交维护者。\n\n阻塞:PR #12768(卡 #12555)。该 PR 已留 draft、⛔ 未挂 auto-merge、⛔ 未入队,等本卡裁决。\n\n## 一句话\n\n#12555 修好了两道门禁里那个吃掉整条 import 语句的无界正则。修好之后,门禁第一次看见 `@objectstack/hono` → `@objectstack/plugin-hono-server` 这一对。**现在必须决定:把它记进 shrink-only 台账,算「更正一次错误的测量」,还是算「加宽」?**\n\n## 冲突就在同一个文件的同一段注释里\n\n`scripts/check-test-source-alias.mjs` 的 `KNOWN_UNALIASED_TEST_IMPORTS` 头注,两句话指向相反方向:\n\n> **MEASURED, not curated**: this is what `--list` printed on the day the gate landed. Each value is **the exact set** of unaliased artifact imports for that package.\n\n> ⛔ **SHRINK-ONLY. Adding an entry, or widening one, is not how a red build gets fixed** — add the alias to that package's `vitest.config.*` instead.\n\n- 按第一句:那一行当天记录的值**从来就不是**「exact set」——探测器坏了,漏看了一个。改成真值是**恢复**这句自述,不是违反它。\n- 按第二句:这就是字面意义上的 widening,而且它明确点名了替代做法(落 alias),没有留任何例外口子。\n\n⚠️ 文件自己没有消歧,AGENTS.md / ADR 也没有。这正是「既有规范定不了」的情形。\n\n## 证据(实测,非推断)\n\n改动本身:\n\n```diff\n-  '@objectstack/hono': ['@objectstack/types'],\n+  '@objectstack/hono': ['@objectstack/plugin-hono-server', '@objectstack/types'],\n```\n\n⭐ **最强的一条独立佐证,而且不是这个 dev 造出来的**:姊妹门禁 `check-type-source-resolution.mjs` 的台账里,**这一对一直都在**——因为它的 `extractTypeImports` 只读 specifier、从不套用 type-only 过滤。两道门禁长期对同一个包给出不同答案,原因恰恰是这个 bug。所以「这一对早就存在、只是看不见」是被 main 上一个没人为此编辑过的产物证实的,不是靠论证。\n\n漏看的机制(反向吞并):`packages/adapters/hono/src/index.ts` 里 `export type EnvironmentDriverRegistry = any;` 紧接着一条 import,子句捕获从那个 `export` 起步、吃掉分号和整条 import,剩下一个以 `type` 开头的子句,于是 `isTypeOnlyClause` 把一条**真实运行时 import** 当成编译期擦除丢掉了。\n\n全仓影响面精确到一行:`--list` 前后只差这一条,303 → 304 个 package-dependency 对,61/72 包数不变。\n\n## 选项\n\n**A — 认定为「再测量」,#12768 原样落地。** 台账记录真值,`@objectstack/hono` 的 remediation 走 #12767。一行可回滚。\n\n**B — 认定为「加宽」,拒绝。** #12768 必须同时带上 #12767 的 vitest alias 才能落地。⚠️ 代价:那个 alias 把 hono 的测试套件指向 `plugin-hono-server` 的**源码**,所以需要那个包的测试真跑一遍——这正是 dev 把它拆成单独卡的原因,也正是「⛔ 不要在门禁脚本 PR 里夹带跨包 alias」这条纪律要防的。\n\n**C — 临时把这一对豁免出门禁。** ⛔ 不推荐,列出只为完整:这是**另一种**削弱,而且比 A 更不诚实——A 至少把事实写进了台账。\n\n## 推荐:**A**,并把 #12767 绑为后续\n\n理由是 B 的代价落在错误的地方:它把一个**未经验证的跨包源码 alias** 逼进一个无法廉价验证它的 PR。A 记录的是一个**被姊妹门禁独立证实的既有事实**,风险是一行、可回滚;B 的风险是一个跨包构建面的行为改变,而且要在一个门禁脚本 PR 里做。\n\n⚠️ 但推荐只是输入,不是放行。这条踩人工地板,由你定。\n\n---\n\n## 四棱分析\n\n**① 实际业务需求 —— 弱拉动,但不是零。** 没有任何人今天撞到这个。`@objectstack/hono` 的单测确实是 `plugin-hono-server` 构建状态的函数(dist 陈旧就绿着跑旧行为),这是台账存在的意义,但它**在这次修复之前就已经如此**,只是没人看得见。所以真实需求是「让台账说真话」,不是「修一个正在伤人的缺陷」。⛔ 不要把它当成紧急项。\n\n**② 项目长远合理性 —— 这一棱最支持 A。** 一份把「exact set」写进自述、实际却漏项的台账,比一份多一行的台账更坏:下一个读者会相信那个集合是完整的。ratchet 的价值来自它的**读数为真**;为了守住「只减不增」的形式而让内容继续说谎,是守住了机制、丢掉了目的。反方向的长期代价也真实:一旦「再测量」成为可援引的先例,下一次「我的测量说该加一行」就更容易通过——所以若选 A,建议裁决文字明确限定在「探测器缺陷导致的漏记」,⛔ 不泛化。\n\n**③ 防 AI 写代码犯错 —— 这一棱最支持 B,而且必须说清楚。** 这道地板存在的理由原话是「AI 有把 CI 弄绿的结构性动机,削弱农场必须是人的动作」。本案**完全符合那个剖面**:一个 agent 修好探测器、发现门禁要红、于是加宽了台账,并给出了一套好理由。理由好不改变剖面相同。⭐ 值得记一笔的是这个 dev 的处理方式是模范级的——它把这一项单独列为「⚠️ One judgment call for review」、把机制写在改动旁边、把替代做法立成 #12767、并写明「一行可回滚」。**但「申报得好」不等于「可以自裁」**,这正是地板要挡的东西,所以本席不裁。\n\n**④ 创业阶段不扩散需求 —— 支持 A。** B 要求把一个跨包源码 alias 塞进一个门禁脚本 PR,并连带把既有的 `@objectstack/runtime` 对象式 alias 改成数组式,还要跑通另一个包的测试——为了一条台账行,扩散出一次跨包构建面的改动。A 的成本是一行加一条注释。创业阶段该选便宜且可逆的那个,把真正的 remediation(#12767)按它自己的优先级排队。\n\n**四棱结论:②④ 指向 A,③ 指向 B,① 中性偏弱。⇒ 四棱分裂,本席无代裁资格(置信门第 ① 条即不成立),且独立地踩人工地板。**\n\n## 相关\n\nPR #12768(被阻塞)· #12555(执行卡,已挂 `pm:blocked`)· #12767(门禁指定的 remediation)· #12320(同族正则修复,`check-driver-conformance`)"
+}

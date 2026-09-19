@@ -1,0 +1,34 @@
+{
+  "number": 12642,
+  "kind": "issue",
+  "title": "[finding] The generated-leaf provenance companion is now RECORDED in 9 of 9 bundle sets and READ at serving time in 1 — `withSourceFallback` was never wired outside platform-objects",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-27T02:43:53Z",
+  "updated_at": "2026-08-27T15:32:51Z",
+  "closed_at": "2026-08-27T15:32:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12642",
+  "body": "**Origin**: measured while implementing #12559 (the `--source-hashes` rollout). Filed unassigned and recording-only — this is a boundary the rollout leaves behind, not a defect in it, and the hazard is again what a *reader* concludes.\n\n## The measurement\n\nPR #12557 (#11671, maintainer ruling #12069 Option A) landed the provenance companion as **two** halves, and its own body says so:\n\n> `withSourceFallback` takes that table as a fourth argument and now judges `objects` / `metadataForms` alongside the hand-authored sections, so a leaf whose source moved underneath it serves the **current source string** instead of a superseded draft.\n>\n> It does not only record. `withSourceFallback` reads the records at serving time and substitutes the current source, and `findStaleFills` reports them.\n\n#12559 rolled out the **recording** half to the eight uncovered sets. The **reading** half did not move, and nothing in either PR's file surface would tell a reader that. Measured on the tree at the head of `claude/issue-12559-i18n-source-hash-rollout`:\n\n```\ngrep -rn \"withSourceFallback\" --include=*.ts packages/ | grep -v node_modules | grep -v '\\.test\\.'\n```\n\nEvery call site is in `@objectstack/platform-objects` — `src/apps/translations/setup.translation.ts` and `src/metadata-translations/index.ts`. The other eight sets' `src/translations/index.ts` assemble their `TranslationBundle` from the raw generated modules and never consult the companion sitting next to them:\n\n```ts\nexport const AuditTranslations: TranslationBundle = {\n  en: { objects: enObjects, messages: enMessages },\n  'zh-CN': { objects: zhCNObjects, messages: zhCNMessages },\n  ...\n};\n```\n\nSo after #12559: **provenance recorded 9 of 9, provenance served 1 of 9.**\n\n## Why it is worth writing down\n\nIt is the same inference hazard #12559 was filed about, one layer down. After that PR the repo has `--source-hashes` documented in all nine extract configs, 24 committed companions, a changeset announcing the rollout, and `check:i18n` reporting 7 bundles per set where it reported 4. The natural reading of all of that is *\"a stale generated leaf now serves the current source everywhere\"*. For eight of nine sets it records the drift and still serves the superseded draft.\n\nThe gap is not hypothetical, and it was measured on a newly covered set during that PR's ablation. Revising the source label behind `objects.sys_share_link.fields.token.label` in `plugin-sharing` (a leaf recorded in **es-ES only**) and regenerating from one extract run:\n\n| observation | result |\n|---|---|\n| `findStaleFills` on the companion | **es-ES 1 stale**, zh-CN 0, ja-JP 0 — the record identifies it exactly |\n| `check:i18n` | `OK (9 package(s) — all bundles in sync…)` |\n| `check:i18n-stale-fill` | `OK (10 bundle set(s) — no new stale fills, 0 baselined)` — blind by construction, one locale, no second witness |\n| what es-ES serves | the superseded English draft |\n\nOn `platform-objects` that same leaf would have been substituted at serving time. In `plugin-sharing` the evidence exists on disk and nothing reads it.\n\n## What resolving it would look like — not chosen here\n\n- **Wire the eight** — each `src/translations/index.ts` passes its three companions through `withSourceFallback`, the shape `platform-objects` takes. Cheap for seven of the eight, which already depend on `@objectstack/platform-objects`. `@objectstack/plugin-webhooks` does **not** (`@objectstack/core`, `@objectstack/service-messaging`, `@objectstack/spec`), so this route adds a dependency edge there or moves `withSourceFallback` somewhere both can reach — which is the part that makes this a decision rather than a mechanical follow-up.\n- **Move the seam** — have the i18n loader apply provenance centrally, so a bundle set opts in by committing a companion rather than by wiring a call. One place instead of nine, and no new package edges.\n- **Leave recording-only and say so** — the records are still worth having (they are kept fresh by `check:i18n` and carry forward across source revisions), and a future consumer inherits nine sets of history rather than one. But then the boundary needs to be written where a reader looks, exactly as #12559 argued.\n\nChoosing among these is a per-package architecture call, so it is triage's rather than a seat's. Filed unassigned; not claimed.\n\n## Dedup\n\nSearched 2026-08-27 across open issues for this vocabulary (`withSourceFallback`, `source-hashes`, `provenance companion`); the positive control fired — the query returns #12559 itself. No existing card covers the serving-side half: #11671 is the mechanism, #12069 its ruling, #12559 the recording rollout, and none of them names the eight sets' `index.ts`.\n"
+}

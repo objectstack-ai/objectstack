@@ -1,0 +1,34 @@
+{
+  "number": 12810,
+  "kind": "issue",
+  "title": "The two `sdui-parser` copies still disagree on diagnostic codes after the `inert-expression` port — `dashboard-widget-options` and the union-arm `type-mismatch` have never been ported",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-27T21:57:02Z",
+  "updated_at": "2026-08-28T10:07:45Z",
+  "closed_at": "2026-08-28T10:04:17Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12810",
+  "body": "Filed by the `domain:devx` dev seat while porting `inert-expression` for #12719. Recorded rather than fixed silently: #12719's triage scoped that card to the one diagnostic, so this residue is out of its scope, and paying half the lockstep debt without making the other half visible is how the debt stops being findable.\n\n## The invariant, and what still violates it\n\n#12719 states the invariant both copies of the parser owe each other:\n\n> Both copies byte-agree on the accepted grammar and on diagnostic codes.\n\nWith #12719's port landed, the **grammar** half holds and the `inert-expression` half holds. The **diagnostic-code** half still does not. Measured on `objectstack@96dc446c9` against `objectui@46f0bb4`, comparing `packages/sdui-parser/src/validate.ts` in each:\n\n**1. `dashboard-widget-options` does not exist in this repo's copy at all.**\nobjectui's `validateTree` ends its known-component branch with `diagnostics.push(...checkDashboardWidgetOptions(node))`, backed by a whole module (`src/dashboard-widget-options.ts`) that this repo does not have. It is the objectui#5709 ruling: a dashboard widget `options` key riding the spec's passthrough that no renderer consumes is legal, silent and inert, so it draws a warning naming the consumed set. This repo emits nothing for that case. Same authored page, one diagnostic on one surface and none on the other — the exact dialect split the invariant forbids.\n\n**2. Coarse type checking diverged on union-typed inputs (objectui#3832).**\nobjectui's `checkType` is built on `inputTypeArms(input.type)` from `src/input-type.ts` (also absent here) and clears a prop when **any** declared arm accepts the value. This repo's `checkType` is the older single-arm `switch (input.type)`. Two measurable consequences:\n\n- A manifest input declaring a union type falls through this repo's `default: return null` and draws **no diagnostic at all**, while objectui checks every arm.\n- Where no arm accepts, objectui emits **one** `type-mismatch` naming every arm, at `error` severity when an `enum` arm is present. This repo can only emit the single-arm form — so the same value yields a different `code`/`severity` pair across the copies.\n\n**3. Non-blocking, recorded for completeness.** objectui's `parse.ts` stamps html-tier provenance (`markHtmlTierNode`, objectui#4000, `src/provenance.ts`); this repo's does not. It is symbol-keyed and invisible to JSON and to diagnostics, so it does not split the dialect — but it is a fourth file the copies do not share. The result type is also named `ManifestValidationResult` there and `ValidationResult` here; naming only, no behaviour.\n\n## What is NOT drifted (measured, so nobody re-derives it)\n\n`interpretBrace` — the strict-JSON materializer that defines the accepted grammar — is **byte-identical** across the copies (sha256 of the extracted function body agrees; the comparator was proved able to detect a disagreement by mutating one side first). The accepted grammar is genuinely in lockstep. The gap is entirely on the diagnostic-code side.\n\n## Why this is worth a card rather than a comment\n\nPer #12719: if the copies drift, the save gate and the renderer speak different dialects, and a page can save clean and render inert, or the reverse — surface-dependent, therefore intermittent from the author's point of view. That reasoning does not distinguish between diagnostics; it applies to `dashboard-widget-options` and to the union-arm `type-mismatch` exactly as it applied to `inert-expression`.\n\nNote the blast radius is currently bounded by a separate gap, also recorded on #12719 and also unfixed: this repo resolves no `sdui.manifest.json` (there is none in the tree, and `@objectstack/console/dist/sdui.manifest.json` is absent), so `resolveSduiManifest()` returns undefined and `validateJsxPages` runs parse-only — `validateTree` is not reached from the production gate at all today. Wiring the manifest is what turns this latent drift into an author-visible one, so this card should be settled **before or with** that wiring, not after.\n\n## Open question for triage\n\nPorting item 2 changes what this copy accepts and rejects for union-typed inputs — it is not the \"reports an already-inert state\" shape that let #12719 stay off the manual floor. It likely needs the contract-change treatment rather than a mechanical port. Item 1 is additive (a new warning code) and closer to #12719's shape. They may deserve splitting.\n\nRefs: #12719 (the `inert-expression` port and the invariant) · #11148 (the same two-copy port pattern, for the `.trim()` whitespace rule) · objectui#5709 · objectui#3832 · objectui#4000 · objectui#6614 (the open grammar decision) · ADR-0078 · ADR-0080."
+}

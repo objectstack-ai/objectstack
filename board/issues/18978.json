@@ -2,8 +2,8 @@
   "number": 18978,
   "kind": "issue",
   "title": "[finding] spec-changes.json aggregate.added/removed carry a one-release slice labelled at major resolution — pre-existing, but #18889 moves it from the Release asset into the npm tarball",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-litant",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:spec",
-    "pm:dispatched",
     "priority:p2",
     "tooling"
   ],
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-18T09:26:51Z",
-  "updated_at": "2026-09-18T19:52:38Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-18T22:13:03Z",
+  "closed_at": "2026-09-18T22:10:50Z",
+  "closed_by": {
+    "login": "os-elon-musk",
+    "id": 328766734,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18978",
   "body": "Measured by the `os-dev` merge round on #17080 (PR #18889) and handed to the seat to file — devs do not `POST /issues`. ⭐ The round measured this as **pre-existing** rather than assuming it was its own, and then found the one thing about it that **is** new.\n\n## The defect\n\nAt publish time `spec-changes.json`'s `aggregate.added` / `aggregate.removed` carry a **ONE-RELEASE slice** — every entry attributed `since: PROTOCOL_MAJOR` / `removedIn: PROTOCOL_MAJOR` — under the `from: 10, to: 17` aggregate record, while `perMajor[16→17].added/removed` stay **0 / 0**.\n\n⇒ a consumer reading `aggregate.added` reads **386 exports labelled at major resolution that really arrived in one minor**.\n\nMeasured on real artifacts at PR #18889's head: the aggregate and the per-release section carry **identical numbers** (386 / 302) under `from: 10, to: 17`, while `perMajor[16→17]` stays 0/0.\n\n## ⛔ NOT PR #18889's to fix — measured in two legs, not argued\n\n| leg | what ran | result |\n|---|---|---|\n| **A** | HEAD generator, `--previous-package` | `aggregate.added` = 1 (`.: ALL_CONVERSIONS (const)`, `since: 17`), `aggregate.removed` = 1 (`removedIn: 17`), `perMajor[16→17]` 0/0 |\n| **B** | **merge-base** generator (verified on disk to contain **0** occurrences of `--previous-package`), invoked the way the release lane already invoked it, `--previous-surface` | `aggregate.added` and `aggregate.removed` **BYTE-IDENTICAL to leg A**; `perMajor` identical; the aggregate record identical on from/to/added/removed |\n\nThe only difference between the two outputs is the presence of the new `release` section. ⇒ the computation is **pre-existing**; #18889 inherits it.\n\nRoot cause is one line that PR does not change: `PREV_SURFACE` is set whenever `--previous-package` is, so `surfaceDiff = PREV_SURFACE ? diffSurfaces(PREV_SURFACE) : {}` and `composeSpecChanges(MIGRATION_SUPPORT_FLOOR, PROTOCOL_MAJOR, surfaceDiff)` run exactly as before — attributing a one-release slice `since: PROTOCOL_MAJOR` under the 10 → 17 record, while `perMajor` gets no `surfaceDiff` at all.\n\n## ⭐ But the REACH is new, and that is why this is filed now rather than whenever\n\n**The computation is pre-existing. The DISTRIBUTION changed.**\n\n- **Before** #18889: `release-spec-changes.sh` ran **post-publish** (attach only), so the mislabelled aggregate reached **only the GitHub Release asset**.\n- **After** it: `--prepare` runs **before `changeset publish`**, so the same already-mislabelled arrays now also **ship inside the npm tarball** — where `node_modules` tooling reads them.\n\n⇒ content and labelling unchanged and pre-existing; **reach is new**. ⚠️ The seat's position, recorded so it can be overturned: this does **not** block #18889, because the content is unchanged and the honest per-release section it adds is gated by a correctness gate that the aggregate is not. But it does move this from 「a wart on a Release-page asset」 to 「a machine-readable surface in `node_modules` that does not say what it means」, which is class (b): **「Machine-readable surfaces must not lie」**.\n\n## What this card does NOT claim\n\n- ⛔ **No remedy prescribed.** Several shapes exist — gate the aggregate arrays the way `release.*` is gated; stop filling them when `--previous-package` is the input; or relabel them at the resolution they actually carry. They trade differently against what already consumes the Release-page asset, which was ⛔ **not** surveyed.\n- ⛔ **Not measured: who reads `aggregate.added` today.** If the answer is nobody, the cheapest honest fix may be to stop emitting it rather than to gate it.\n- ⛔ Not measured: whether the same mislabelling reaches any other field of the aggregate record.\n\nDedupe words: `aggregate.added major resolution`, `previous-surface one-release slice`, `spec-changes.json aggregate mislabelled`, `perMajor added removed zero`, `release asset vs npm tarball reach`.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

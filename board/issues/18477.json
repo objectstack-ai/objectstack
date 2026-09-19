@@ -2,8 +2,8 @@
   "number": 18477,
   "kind": "issue",
   "title": "docs(adr): declared journeys as the priority anchor — the maintainer's ≤10 end-to-end paths, each with its runner, become the first triage question (maintainer 「立」)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "hotlong",
@@ -11,20 +11,21 @@
     "type": "User"
   },
   "labels": [
-    "domain:skills",
-    "pm:dispatched"
+    "domain:skills"
   ],
-  "assignees": [
-    "hotlong"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-16T14:52:34Z",
-  "updated_at": "2026-09-17T07:56:43Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-18T22:09:41Z",
+  "closed_at": "2026-09-18T22:09:41Z",
+  "closed_by": {
+    "login": "os-elon-musk",
+    "id": 328766734,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 9,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18477",
   "body": "Filed and dispatched by the director seat (summon #24, `session_01Wj1HUjzyeiBQ8atRf1ZhaL`) under the maintainer's ruling on the direct channel, 2026-09-16 ~14:5xZ: after 「我觉得一个创业项目核心应该放在怎么解决实际业务需求上,你再帮我综合评估我们最近的开发还有哪些跑偏了」, 「我们是一个开发平台,也是创业项目,用的人少,你也不会知道『谁今天撞上』」 and 「路的清单 是否建议重新讨论,专门立文档」 — reply to the ADR proposal, verbatim: 「立」. ⛔ No `domain:*` set by the filer; `docs/adr/**` is the governed face (`domain:skills`); the director dispatches directly.\n\nDedup terms: `declared journeys` · `journey-anchored priority` · `路的清单` · `黄金旅程 ADR` · `priority anchor`\n\n## Why (director's readings, 2026-09-16)\n\nFour repos, 1,166 merges since 09-02 (shallow floor): fix 36% · **process/gates 30%** · docs 16% · **feature 8%** · tests 6%. Of objectstack's 86 `feat` merges in 30 days, most are contract declarations, tombstones, refusals and gates; user-facing capability landed in the dozens, not hundreds. Meanwhile cloud's six P0s (three credential leaks, production signup broken 22 d, control plane unlaunchable 26 d, a 15 h outage) sit in waiting states, and hotcrm's one customer requirement line (REQ-0006) was blocked by a code-size ratchet. Queue: spec 88 · devx 57 vs engine 9 · services 1 · cli 3. The protocol's first triage question is 「违背了哪条契约」; with few users no pull reading exists, so the maintainer's own declared end-to-end paths are the anchor instead.\n\n## Deliverable — ONE ADR, draft, the maintainer edits by deletion\n\n`docs/adr/0136-declared-journeys-as-priority-anchor.md` (take the next free number on the tree at claim time), in the repo's ADR shape (`Status: Proposed`, context / decision / consequences), **short**:\n\n### The journey table — ≤10 rows, drafted from existing sources, ⛔ nothing invented\n\nOne row per declared end-to-end path, five columns: **who walks it** (tenant admin / app author / AI app builder / platform operator) · **entry → what the user sees when it is done** · **runner** (the mechanical proof: a `docs/qa/platform-checklist/` item id, a step of cloud `scripts/dev-local/MAGIC-FLOW-TEST-RUNBOOK.md` §7 「Test checkpoints」, a dogfood script, or `none yet`) · **last reading** (🟢/🔴 + date + the card if red) · **source** (ADR-0111 row, REQ number, epic card).\n\nSources to draft from, all on `origin/main`: cloud `docs/adr/0111-hotcrm-hosted-saas-mvp-services-model.md` acceptance rows 1.1–5.x; cloud `scripts/dev-local/MAGIC-FLOW-TEST-RUNBOOK.md` §7 (the golden-journey checkpoints); cloud#1521 (control plane launchable) and cloud#1653 (new-user workspace); hotcrm `docs/requirements/0001–0006` (the REQ line, one row for 「a customer requirement lands end-to-end in HotCRM」); objectstack `docs/qa/platform-checklist/` (areas + `coverage.json`) for the platform-side paths (author an app, install a package, AI builds an app from a prompt). Merge duplicates; if the honest count exceeds 10, keep the 10 with a runner and list the rest under 「未入选」 with one line each so the maintainer can swap.\n\n### The decision section — three rulings, stated as rules the PM protocol will cite\n\n1. **Journey-anchored priority.** Every triaged card names the journey it sits on (`Journey:` line). A journey broken or blocked ⇒ P0/P1. A journey that runs but produces a wrong result on a path it exercises (incl. an AI-authored app silently swallowed by the platform) ⇒ P2. On no declared journey ⇒ p3 or `not_planned` by default — a declared-but-unenforced key is retired in batches per release, ⛔ not one card per key. **Security and data integrity never wait for a journey: always the top band.**\n2. **Cross-lane priority.** While any product repo (cloud / hotcrm / objectui user-facing) has an unclaimed P0/P1 on a journey, no lane dispatches a p2/p3 contract-hygiene or tooling card. One sentence; the PM protocol's 取卡全序 cites it.\n3. **The queue is fed by running the journeys.** The runners are executed on a schedule (the existing `checklist-test` / `dogfood-verification` skills); a red journey files a card with its `Journey:` line. Contract sweeps and findings become background, graded against the journey list.\n\nThe ADR states in one line that it **supersedes `docs/adr/PRIORITIZATION.md`** (a 2026-06 ADR-status review, self-marked STALE) as the priority anchor; that file gains a one-line pointer, ⛔ not rewritten.\n\n### Consequences section\n\n- The list is the maintainer's appetite: the maintainer edits it by deletion and swap; a seat proposes a new row only with a runner attached. Ten is the cap.\n- The `SKILL.md` triage lines that implement rulings 1–3 are a separate skills-lane card filed after this ADR is accepted (⛔ not in this PR; the ADR is the law, the skill edit is the enforcement).\n\n## Acceptance\n\n- ≤10 rows, every row with a real source citation and either a runner path/id that exists on the tree or `none yet`; the dev's report lists the four source documents' row counts and how the table was reduced.\n- ADR file in the repo's shape; `docs/adr/PRIORITIZATION.md` +1 line pointer; nothing else touched.\n- Governed (`docs/adr/**`): draft PR, `## 维护者速读(草稿)`, four-piece by the director, the maintainer's approval lands it. The maintainer is expected to DELETE rows in review — the PR body says so.\n\nRefs objectstack#18472 (gate census) · #18473 (asymmetry flip) · cloud#1521 · cloud#1653 · hotcrm docs/requirements/README.md\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

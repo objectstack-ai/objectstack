@@ -1,0 +1,35 @@
+{
+  "number": 12454,
+  "kind": "issue",
+  "title": "Three sites still cite ADR-0112's \"the producer names the condition\" unqualified after PR #12453 — one of them fenced, and the phrase census needs a wrap-tolerant grep",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T03:40:40Z",
+  "updated_at": "2026-08-27T11:39:50Z",
+  "closed_at": "2026-08-27T11:39:50Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12454",
+  "body": "Filed unassigned and **unlabelled** by the `domain:cli` seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, on behalf of the **#11735 dev**, which measured this while implementing PR #12453 and **could not file it itself** (403 on `api.github.com`, no `gh`, and the contract forbids MCP for the dedup read — so filing from that seat would have been filing blind). ⛔ Not graded, not routed.\n\n## The residue\n\n#11735 / PR #12453 qualified **nine** citation sites to the code axis. The real population is larger, and three sites still carry the unqualified attribution:\n\n| site | state | why it was left |\n|---|---|---|\n| `packages/rest/src/rest-server.ts:9646` | unqualified | ⛔ **FENCED** by PR #12421 (#11926) at the time |\n| `packages/rest/src/rest-sandbox-declared-status.test.ts:130` | unqualified | outside #11735's declared file surface |\n| `packages/rest/src/rest.test.ts:2422` | unqualified | outside #11735's declared file surface |\n\n⛔ The #11735 dev did **not** widen its surface to reach them — the claim declared it closed with *\"stop on breach and explain\"*, and the explanation is this card. That was the right call and this is the other half of it.\n\n## The fix is mechanical, because the correct form is already pinned\n\n`packages/rest/src/rest-hook-refusal-message-parity.test.ts:630` (landed 2026-08-25 in #12280) carries the canonical qualification:\n\n> *\"ADR-0112's 'the producer names the condition' is a rule about the `code`, not the status … The phrase this reading is built on is not in the ADR at all — it is `error-response.ts`'s own prose.\"*\n\nPR #12453's `error-response.ts` docblock now states the axis once in full, and the other sites echo it. These three want the same treatment.\n\n⚠️ **Check the claim-holder before dispatching.** `rest-server.ts` was fenced by an in-flight PR when this was measured, and `rest.test.ts` is the hottest shared test file in `packages/rest`. Both may still be held.\n\n## ⭐ The census method, banked so this is not re-measured wrong\n\nThe original card censused with a **contiguous-phrase** grep over `*.ts` and found nine. That method **cannot see a citation that wraps across a comment line boundary** — and two of the three sites above wrap. Measured on `origin/main` @ `8515954fb`:\n\n- the card's own re-check command → **11**\n- the wrap-tolerant form → **13**\n\n```sh\n# ⛔ under-counts — misses wrapped comment text\ngit grep -n \"the PRODUCER names the condition\" -- '*.ts'\n\n# ✅ use this\ngit grep -n -iE \"producer names|names the condition\" -- '*.ts'\n```\n\n**Generalisable**: a phrase census over *comments* must assume the phrase is wrapped, because comments are the one place text is hard-wrapped by convention. ⛔ Reverse-check any zero with a term known present, and never a substring of the term under test.\n\n## ⛔ Explicitly NOT in scope\n\nAmending **ADR-0112** itself. That remains a governed `docs/adr/**` maintainer-merge path, ruled out of scope on #11735 and still out of scope here. The qualification holds under either outcome of that open question, which is why it forecloses nothing.\n\nAlso measured and correctly left alone by #11735's dev, ⛔ do not sweep: the widespread *\"ADR-0112 envelope (`code` + `status`)\"* idiom (50+ sites) is a **different** usage — it names the wire envelope as an assertion contract, not a principle about who names what — and is the form the repo's own agent contract prescribes for rejection tests.\n\n## Duplicate check\n\nSearched the open `domain:cli` inventory and by keyword this round. #11735 is the parent and is being closed by PR #12453; no open card covers the residue. ⚠️ Not exhaustively deduped against `domain:devx`.\n\n## Refs\n\n- #11735 / PR #12453 — the nine sites, and the axis statement the fix should echo\n- #11032 — same defect class (a load-bearing citation accurate about behaviour, inaccurate about the document)\n- #11684 / PR #11731 — where the unqualified form nearly settled a contract question the wrong way"
+}

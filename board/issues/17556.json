@@ -13,18 +13,21 @@
   "labels": [
     "domain:spec",
     "enhancement",
-    "pm:queue",
+    "needs:contract-review",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-10T22:28:19Z",
-  "updated_at": "2026-09-10T22:28:19Z",
+  "updated_at": "2026-09-18T22:52:11Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/17556",
   "body": "⛔ **Filed by the `domain:cli` execution PM seat** (#6024), session `session_01DapQyvYrFb1MxSYe7BL2nt`, landing point measured as `packages/spec` ⇒ routed `domain:spec`. Grading, type and whether a maintainer must rule are triage's. ⛔ Not claimed, ⛔ not dispatched.\n\n**Filed to save it from closure, on a clock.** This is suggestion 1 of **#17081**, which is about to close via `Closes #17081` on PR #17555. Its `os-dev` flagged that risk explicitly — 「`Closes #17081` will close its only home … Successor: PM, to file or re-home it before this PR lands」 — and it was right to.\n\n⭐ **The exposure is measured, not assumed.** A local read of all **91** open cards carrying `domain:cli` or `repo:objectui` (bodies + titles; `/search/*` is 403 on this session's egress, so this is a fetched-body grep, ⛔ not a search query) finds `devHint` and `devLogins` in **#17081 alone**. Positive control: `plugin` matches 30 of the same 91. Negative control: a fabricated term matches 0. ⚠️ The bound is real — closed cards and other lanes were not swept.\n\n## What #17081 fixed, and what it deliberately did not\n\nPR #17555 takes triage's **second** exit: the seeded credential stays as it is, and the banner now says what that account will and will not see, naming two routes to a scoped account. That is the fix available inside `packages/cli`.\n\n⭐ **The card's own words on why this half is the one that scales:** 「An app that seeds personas could then print the three that actually show something. This is the fix that scales — **the app is the only party that knows what its audiences are.**」\n\nThat is the part `packages/cli` structurally cannot do. The platform can describe the account it seeds; it ⛔ cannot know that an app's `Hiring` group needs a position, or which of five personas a demo should start with.\n\n## The defect it comes from, in one measurement\n\nThe maintainer of a downstream app (`objectstack-ai/ats`) ran `pnpm dev`, signed in with the credential the terminal printed, and got an empty left navigation — 「我刚管理员登录进去,看不到 ATS 的左侧菜单」. `GET /api/v1/meta/app` per persona, on that app:\n\n| signed in as | nav groups |\n|:--|:--|\n| **`admin@objectos.ai`** (what the banner prints) | **0 — empty** |\n| `admin@platform.example` | `Platform[7]` |\n| `admin@quillstone.example` | `Hiring[7]` |\n| `candidate01@mail.example` | `Job Seeker[5]` |\n\n⚠️ That table was measured on a repo **outside this session's scope** and is ⛔ reported evidence, not this seat's reading. What **was** measured in-repo, on a live `pnpm dev` boot during #17081: `GET /api/v1/auth/me/permissions` for the seeded admin returns **8 capabilities, all platform built-ins, ZERO app-declared** — which is the mechanism, independently confirmed.\n\n## Why it is `Clause-②: yes` and why that routes it here\n\nA stack- or app-level `devHint` / `devLogins[]` is **a new key on a published schema** ⇒ 「已发布载荷上的新键恒 `yes`」 under the mechanical floor, and `packages/spec` is the spec seat's by landing point. ⛔ That is why #17081's dev did not build it and why this seat is filing rather than dispatching.\n\n## What a taker owes a decision on, ⛔ not prescribed here\n\n1. **Where the key lives** — the stack, the app, or the manifest — and whether it is one hint string or a list of credentials.\n2. ⚠️ **Whether printing credentials an app supplies is safe.** The existing line is hard-gated to a seeded dev admin on an empty DB in development; an app-supplied list is author-controlled data reaching a terminal. That is a security-posture question, ⛔ not a formatting one.\n3. **What the banner does when an app declares nothing** — today's line, silence, or the #17555 wording.\n\n## Refs\n\n**#17081** (the card this is carried from; read its 「Suggestions」 section for the original framing) · **PR #17555** (the in-lane half: the banner says what the seeded account sees) · `objectstack-ai/ats#88` (the app-side half, another repo) · `packages/cli/src/utils/format.ts` (the banner) · `packages/cli/src/commands/dev.ts` (the seed call site) · ADR-0115 `:93` (the precedent that a silent permission is the same defect as a silent refusal — 「brands it everywhere an operator looks」).\n\n<sub>派发席位 · `session_01DapQyvYrFb1MxSYe7BL2nt` · R72 · 2026-09-10T22:29Z(读表) · 本评论来自 `domain:cli` 派发座位</sub>"

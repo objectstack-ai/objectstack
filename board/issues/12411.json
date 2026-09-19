@@ -1,0 +1,35 @@
+{
+  "number": 12411,
+  "kind": "issue",
+  "title": "dispatch-gates renders &quot;staleness could not be measured&quot; identically to &quot;this tree is current&quot; — both are silence",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T01:53:06Z",
+  "updated_at": "2026-08-27T23:16:51Z",
+  "closed_at": "2026-08-27T23:16:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12411",
+  "body": "Filed unassigned while measuring #12173 (finding ①). Not claimed, not graded.\n\n## What was measured\n\n`baseDrift()` degrades every field to `null` rather than throwing when `origin/main` cannot be resolved — a fresh `actions/checkout`, a clone nobody fetched, a graft:\n\n```js\nconst base = read(['rev-parse', '--short', DEFAULT_BASE_REF]);\nif (base === null) return { base: null, behind: null, changed: [], headDate: null, baseDate: null };\n```\n\n`driftLines()` then collapses that state into the same output as a demonstrably-current tree:\n\n```js\nexport function driftLines(drift) {\n  if (!drift || !drift.behind) return [];   // base===null AND behind===0 both land here\n```\n\nSo `behind: null` (\"I could not measure this\") and `behind: 0` (\"nothing to report\") print **byte-identically: nothing at all.**\n\n## Why this matters\n\n`STALE TREE` is now the load-bearing signal that a derived gate family may be short a gate that landed on `main` after the branch was cut — measured in #12173, it fires loudly and correctly whenever it *can* measure. Its own docblock states the discipline it is built on:\n\n> SILENT at zero — the last one for the same reason the banner has no \"all paths present\" twin: against a base ref nobody refreshed, a clean bill of health is precisely the reading the measured failure would have passed.\n\nThat reasoning justifies not printing an *all-clear*. It does not justify printing nothing when the instrument was unavailable: the reader cannot tell \"measured, current\" from \"not measured\", and the second one is exactly the state in which the family list is least trustworthy.\n\nSibling precedent in the same file: `bannerLines` prints the repo identity **before** the answer specifically so no run can be read without knowing what it is about, and `--repo` exists to make that checkable. The unmeasurable-staleness case has no such spelling.\n\n## Shape of the fix\n\nOne line, in the `base === null` branch only: say that staleness was not measured and why (`origin/main` not resolvable here), leaving `behind === 0` silent as designed. Pin both directions in `--self-test` — the existing fixtures at the `driftLines` assertions already build a repo with and without a base ref, so the unmeasurable case has a fixture to hang on."
+}

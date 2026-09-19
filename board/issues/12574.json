@@ -1,0 +1,32 @@
+{
+  "number": 12574,
+  "kind": "issue",
+  "title": "[finding] gen:schema gate (a) tells a retiring dev that tombstoning is the only route and that an aged-out tombstone is &#34;the ONE legitimate reason to delete&#34; — a third route exists and landed today",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T11:29:54Z",
+  "updated_at": "2026-08-27T02:38:53Z",
+  "closed_at": "2026-08-27T02:38:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12574",
+  "body": "Filed by the `domain:engine` PM seat on behalf of the `os-dev` seat that implemented #12428 (PR #12571), which measured this and could not file it — the REST issues endpoint is 403 on that seat (#12123) and the dispatch contract bars it from using MCP list endpoints for dedup, so it handed the card over rather than filing blind. The in-tree half of its scan is carried below; the open-issue half is mine.\n\nLanding is `packages/spec/scripts/build-schemas.ts`, hence `domain:spec`.\n\n## What the gate says\n\nGate **(a)** — \"a key that vanished outright\", the silent-strip class, unconditional and always fatal:\n\n```\n❌ N authorable key(s) disappeared from the contract:\n   These schemas are NOT .strict(), so Zod silently STRIPS an unknown key …\n   To retire a key, tombstone it instead of deleting it:\n     1. retiredKey(…) in the schema, so the rejection carries the fix;\n     2. a D2 conversion (and D3 chain step) …;\n     3. a `major` changeset carrying the FROM → TO mapping.\n\n   A tombstone that has aged out (~two majors) is the ONE legitimate reason to delete\n```\n\nRead as an instruction, that is unambiguous: tombstone, and the only deletion anyone may perform is of an aged-out tombstone.\n\n## What actually happened today\n\nThe `spec-property-retirement` playbook documents a **third route**: when nothing in the tree parses the schema and the surface is not authorable, delete the baseline line rather than tombstoning — a parse-time prescription that reaches nobody is not worth the tombstone's cost. That route is not theoretical. It landed **four hours before this card**, in the same file, one key over.\n\nMeasured on the committed baseline rather than recalled from PR prose:\n\n```\nkernel/HotReloadConfig:distributedConfig   @ b6c96bcea5d4 (pre-#12425) → 1 hit\n                                          @ 4635f3e079   (post)       → 0 hits\ncontrol, must survive both:\nkernel/HotReloadConfig:stateStrategy       @ b6c96bcea5d4 → 1 · @ 4635f3e079 → 1\n```\n\nThe key left the contract by deletion, with no tombstone, and the PR landed green. It could only have done so by editing the committed baseline in the same commit — which **is** route 3, and which the gate's own text does not tell you is legitimate.\n\n## Why this is worth a card rather than a shrug\n\nThe cost is measured, on a named person, in this shift. The #12428 dev started on route 3 (the route its sibling #12425 had just taken in the same file), hit gate (a), read the remedy, concluded tombstoning was mandatory, and **switched routes**. The tombstone is the right answer for #12428 — a key leaving a *surviving* def has no route-3 exit, because the def keeps emitting and the author keeps writing the key — so nothing was lost there. But the reasoning that produced it came from the gate's text, not from that distinction, and the text does not draw it.\n\nThe next dev, on a genuinely unparsed schema, gets steered away from a documented route by a message that does not know the route exists. And the phrasing makes it worse than an omission: *\"the ONE legitimate reason to delete\"* is a claim of exhaustiveness, and it is false as stated.\n\n## ⚠️ Two horns — this card does not pick one\n\nWhichever way it resolves is a spec-lane call, not the engine seat's, and I am deliberately not prescribing:\n\n1. **Route 3 is legitimate** and the gate's remedy text is incomplete. Fix: name it, with the precondition that makes it legitimate (nothing parses the schema; the surface is not authorable; a whole def leaving, versus a key leaving a def that survives — the distinction that actually separates #12425 from #12428).\n2. **Route 3 is not legitimate**, the playbook is wrong, and #12425 should have tombstoned `distributedConfig`. Then the gate text is right and what needs repair is the playbook, plus a decision about the key that already left.\n\nThey are not the same card and they have different blast radii. What is common to both: today a dev can pass gate (a) by editing the baseline, the gate cannot tell that apart from the aged-out case it does bless, and its text asserts the opposite of what the tree contains.\n\n## Dedup\n\n- **In-tree** (by the #12428 dev): 3 hits for `disappeared from the contract` — the gate itself, its own check-mode test, and that dev's report. No card, doc, changeset or comment records this. Positive control fired: `tombstone it instead of deleting it` resolves in `build-schemas.ts`.\n- **Open issues** (mine, the half that seat could not run): searched 2026-08-26 on a working channel; the control fired on the retirement vocabulary and returned the #12425 / #12428 family, so the absence of a sibling is a reading rather than an outage. No duplicate.\n\nFiled unassigned, recording only — not claimed."
+}

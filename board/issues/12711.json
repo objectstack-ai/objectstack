@@ -1,0 +1,36 @@
+{
+  "number": 12711,
+  "kind": "issue",
+  "title": "docs deploy: production builds are OOM-failing now — the peak is the Turbopack compile phase, not the prerender; `turbopackSourceMaps` is a free knob #12683's option set missed",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p1",
+    "repo:objectstack"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-27T12:57:57Z",
+  "updated_at": "2026-08-28T05:25:02Z",
+  "closed_at": "2026-08-28T05:25:02Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12711",
+  "body": "Production docs deploys are failing **right now** — five consecutive production builds OOM-killed. This is the live-outage counterpart to #12683's standing-risk card, and it corrects the attribution in **both** #12683 and #12698.\n\n## Measured (Vercel API + build logs, 2026-08-27)\n\nVercel's own API on the failed deployment:\n\n```\nerrorCode    = \"out_of_memory\"\nbuildMachine = { purchaseType: \"standard\", cores: 4, memory: 8192 }\n```\n\n## The peak is the Turbopack COMPILE phase, not the prerender\n\nBoth failures die between `Creating an optimized production build ...` and `Compiled successfully` — with **zero output in between**:\n\n```\n11:31:03.206  Creating an optimized production build ...\n11:42:26.615  ERROR ... exited (137)          <- 11m23s of silence\n```\n\n```\n11:43:01.851  Creating an optimized production build ...\n11:45:03.086  ERROR ... exited (137)          <- 2m of silence\n```\n\n**The build never reaches `Collecting page data` / `Generating static pages`.** So #12683's attribution — \"the docs site prerenders 400+ MDX pages\", offered as the reason one process holds 7.6 GB — cannot be the mechanism: that phase does not execute. Same for the 403 build-time OG PNGs (`app/og/docs/[...slug]/route.tsx`) and the 403 markdown routes (`app/llms.mdx/docs/[[...slug]]/route.ts`) — both are `generateStaticParams` work in a phase the build dies before.\n\nTwo of #12683's negative findings **are** confirmed by measurement below: `--max-old-space-size` and `experimental.cpus` do not bound this peak. `experimental.cpus` additionally cannot matter here for a structural reason — its static-generation workers have not spawned yet when the kill lands.\n\n## Experiment matrix (local cold builds, 403 MDX, peak single-process RSS)\n\n| config | peak | compile | verdict |\n|---|---|---|---|\n| baseline | 5191 MB | 22.6s | — |\n| `experimental.turbopackSourceMaps: false` | **4757 MB** | 19.5s | ✅ **-434 MB (-8.4%), no downside** |\n| `turbopackScopeHoisting: false` | 4806 MB | 19.1s | ❌ no effect |\n| `NODE_OPTIONS=--max-old-space-size=2048` | 4734 MB | 18.0s | ❌ no effect (peak is Rust-side, confirming #12683) |\n| `turbopackFileSystemCacheForBuild: true` | 4779 MB | 22.2s | ❌ no effect |\n| + `turbopackMinify: false` | 3785 MB | 16.2s | ⚠️ -972 MB more, **but rejected** |\n| `includeProcessedMarkdown: false` | — | — | ❌ build fails (`getLLMText` / `/llms.txt` depend on it) |\n\n**Why `turbopackMinify: false` is rejected:** client JS goes 5.8 MB -> 16 MB (+176%) — that is real user download weight. Restricting it to the server side (where the memory actually goes: 589 MB of server chunks vs 5.8 MB client) is not available: `experimental.serverMinification` is consumed only by `dist/build/webpack-config.js` and is never read on the Turbopack path.\n\n## Why sourcemaps are free here\n\nThe build emits **260 sourcemap files totalling 348 MB** into `.next/server`. Production serverless functions have no use for them. Next's documented build-time default for `turbopackSourceMaps` follows `productionBrowserSourceMaps` (false), but the server-side maps are emitted regardless — setting the flag explicitly is what suppresses them.\n\nSide benefits beyond the memory: 348 MB smaller build output, and compile time drops 22.6s -> 19.5s locally.\n\n## Proposed change\n\n```js\n// apps/docs/next.config.mjs\nexperimental: {\n  cpus: 2,\n  turbopackSourceMaps: false,\n}\n```\n\n**Honest limitation:** local measurement is macOS/arm64; Vercel is Linux/x86_64, and the absolute figures differ substantially (local 4.7 GB vs the 7.6 GB #12683 measured). The *ratio* is the transferable part, and even it is not a guarantee. Scaling -8.4% onto 7592 MB gives ~6950 MB against an 8192 MB container — roughly 15% headroom. That is thin. It is worth trying first because the cost of being wrong is one build cycle, and #12683's option A (bigger build machine) stays available and unaffected.\n\nAlso worth noting: Vercel takes **11 minutes** to compile what takes 20s locally. A 4-vs-10 core gap does not explain 30x; the rest is thrashing near the container ceiling. Lowering the peak should cut build time substantially as a side effect.\n\n## Correction to #12698\n\n#12698's action 2 (\"fix the Ignored Build Step — it skips dependency-only changes\") rests on a misreading. The project's actual rule is:\n\n```\nif [ \"$VERCEL_ENV\" == \"production\" ]; then exit 1; else exit 0; fi\n```\n\n`exit 1` = build, `exit 0` = skip. So **production always builds and Preview always skips** — it is not a path-scoped rule. The `Canceled by Ignored Build Step` that #12698 read off PR #12684's head was that PR's *Preview* deployment being skipped, which is the intended behaviour. Pushes to `main` do trigger production builds; they have simply been OOM-failing. No dashboard change is needed for the ignore step.\n\n## Re-check\n\n```\ncurl -s https://objectstack.ai/ | grep -o 'data-dpl-id=\"[^\"]*\"'\n```\n\nRefs: #12683 (standing-risk card — this adds an option E its set did not contain) · #12698 (ignore-step correction) · #12677 · #12333 · epic #12243.\n"
+}

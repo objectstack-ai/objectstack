@@ -1,0 +1,34 @@
+{
+  "number": 12038,
+  "kind": "issue",
+  "title": "17 client-SDK methods have no published response contract to bind to: the whole `meta.*` history/diagnostics family (9) plus 8 `packages.*` routes whose handlers call `(protocol as any).<method>`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T06:06:29Z",
+  "updated_at": "2026-08-28T06:27:47Z",
+  "closed_at": "2026-08-28T05:57:39Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 12,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12038",
+  "body": "Measured at `c804f0ca5` while implementing #11925. These are that card's Class C — a **missing contract**,\nnot a missing annotation — and they keep `Promise< any >` with a docblock, per the rule #8140 settled and\n#11924 recorded. `packages/spec` is `domain:spec`'s single-owner surface and read-only from the `domain:cli`\nseat, so this is filed rather than authored.\n\n## How \"no contract\" was established, not assumed\n\nTwo independent instruments, both negative:\n\n**1. The route ledgers' own `responseSchema` field** — the repo's declaration of whether a route has a named\nresponse type (`packages/client/src/route-ledger-response-schema.test.ts` resolves each name against the live\n`@objectstack/spec/api` namespace). Every one of the 17 reports `responseSchema=None`:\n\n```\nmeta.getPublished     [runtime] GET /meta/:type/:name/published        responseSchema=None\nmeta.listDrafts       [runtime] GET /meta/_drafts                      responseSchema=None\nmeta.getDiagnostics   [rest   ] GET /api/v1/meta/diagnostics           responseSchema=None\nmeta.getReferences    [rest   ] GET /api/v1/meta/:type/:name/references responseSchema=None\nmeta.getBookTree      [rest   ] GET /api/v1/meta/book/:name/tree       responseSchema=None\nmeta.getAudit         [rest   ] GET /api/v1/meta/:type/:name/audit     responseSchema=None\nmeta.rollbackItem     [rest   ] POST /api/v1/meta/:type/:name/rollback responseSchema=None\nmeta.diffItem         [rest   ] GET /api/v1/meta/:type/:name/diff      responseSchema=None\nmeta.migrateStored    NO LEDGER ROW\npackages.publish|discardDrafts|listCommits|revertCommit|rollback|export|adoptOrphans|duplicate\n                      [runtime] …                                      responseSchema=None\n```\n\nThis is #3877's hole exactly as it recorded it — ~190 of 237 ledgered routes declare nothing — so a `None`\nhere is the expected reading, not an anomaly.\n\n**2. The producers themselves are untyped.** The eight `packages.*` handlers reach the protocol service\nthrough an `any` cast, so there is no declared type anywhere on the path to lift:\n\n```\ndomains/packages.ts:660  (protocol as any).publishPackageDrafts   → success(result)\ndomains/packages.ts:690  (protocol as any).discardPackageDrafts   → success(result)\ndomains/packages.ts:712  (protocol as any).listCommits            → success({ commits })\ndomains/packages.ts:735  (protocol as any).revertCommit           → success(result)\ndomains/packages.ts:757  (protocol as any).rollbackToPackageCommit → success(result)\ndomains/packages.ts:808  (protocol as any).reassignOrphanedMetadata → success(result)\ndomains/packages.ts:838  (protocol as any).duplicatePackage       → success(result)\ndomains/packages.ts:790  assemblePackageManifest(): Promise<Record<string, any> | null> → success(manifest)\n```\n\nFor `meta.*`, the one named type that exists — `StoredMigrationReport`, which `meta.migrateStored`'s own\ndocblock points at — lives in **`@objectstack/metadata-protocol`**, not `@objectstack/spec`. The client\ndepends on `@objectstack/core` and `@objectstack/spec` only, so reaching it would be an architecture change,\nnot an annotation.\n\n## ⭐ One verified near-miss, recorded so the next sweep does not step in it\n\n`PackageRollbackResponse` (`spec/api/package-api.zod.ts:331`) sits one import away from\n`client.packages.rollback` and is the **wrong type for it**. It declares\n`{ success, restoredVersion?, message? }` — a *version* rollback, matching that file's header\n(`POST /api/v1/packages/:packageId/rollback  — Rollback a package`). The client's `rollback(id, commitId,\nopts)` posts `{ commitId }` and the dispatcher routes it to `rollbackToPackageCommit` — the **ADR-0067 commit**\nrollback, a different operation with a different result. Binding it would compile and be false.\n\n#11925 left a compile-time guard against exactly that substitution, in\n`packages/client/src/return-type-precision.test.ts`, in the same shape as #8140's `SearchResult` guard.\n\n## What closing this needs\n\nFor each of the 17: a response schema in `@objectstack/spec/api` (or `spec/meta`), the ledger row's\n`responseSchema` filled in so the resolver holds it, and only then the SDK annotation. That ordering is the\npoint — #7294 is the worked precedent, quoted in `meta.publishItem`'s docblock: *\"this method resolved to\n`any` before that, because the publish door had no declaration at all for a return type to point at.\"*\n\nRelated: #11925, #11924, #8140, #3877.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_019siH5jDmk5hrayvfyojUqR)_\n"
+}

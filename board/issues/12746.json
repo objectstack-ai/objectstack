@@ -1,0 +1,34 @@
+{
+  "number": 12746,
+  "kind": "pull_request",
+  "title": "build(docs): stop rebuilding the docs site on every push to main",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-27T16:03:21Z",
+  "updated_at": "2026-08-27T16:42:32Z",
+  "closed_at": "2026-08-27T16:42:30Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-27T16:42:30Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12746",
+  "body": "Every push to `main` rebuilds the documentation site, and almost none of them change what it renders.\n\n## Measured (7 days, whole team)\n\n| project | production builds | build-minutes | avg |\n|---|---|---|---|\n| **objectstack (docs)** | **228** | **2835 (98.6%)** | **12.4 min** |\n| objectui | 123 | 36 | 0.3 min |\n| hotcrm | 42 | 5 | 0.1 min |\n\nThe team runs `concurrentBuilds: 1`, so an 18-second `objectui` build queues behind a 12–46 minute docs build. The queue reached **92 deployments, the oldest 34 hours old**. At 4 vCPU those docs builds cost roughly **$171/month** against a $20 included allowance — and 168 of the 228 were failures, so most of it bought nothing.\n\n## The change\n\n`apps/docs/vercel.json` gains an `ignoreCommand`. Per Vercel's docs this *overrides* the dashboard's Ignored Build Step, which moves the rule into version control where it can be reviewed and reverted. `scripts/vercel-ignore-docs.sh`:\n\n1. non-production → **skip** (identical to the rule it replaces — its preview half was already right)\n2. `content/**` or `apps/docs/**` changed since the last successful deploy → **build**\n3. otherwise → ask turbo whether the docs dependency graph is affected (catches `@objectstack/spec`)\n4. anything indeterminate → **build**\n\n## ⚠️ Why step 2 exists (the part that would silently break docs)\n\n`turbo --filter=<pkg>...[range]` computes affected packages **by package directory**. This repo's MDX lives at the repo root in `content/`, outside the `apps/docs` boundary. `turbo.json` *does* list `\"$TURBO_ROOT$/content/**\"` under `@objectstack/docs#build`'s `inputs` — but `inputs` only feeds the **cache hash**; it does not widen the affected-package calculation.\n\nVerified against real commits on `main`:\n\n| commit | changes | dependency-graph verdict alone |\n|---|---|---|\n| `72f91652` | `.claude/**` only | SKIP ✅ |\n| `366f8957` | `packages/spec/**` | BUILD ✅ |\n| **`1265f12b`** | **`content/docs/api/client-sdk.mdx` only** | **SKIP ❌ — doc update never ships** |\n\nSo the dependency-graph check cannot be used on its own here, which is the one thing #12698's suggested command would have done.\n\n## Failure direction is deliberate\n\nA wrong \"build\" costs a few build-minutes. A wrong \"skip\" leaves the site quietly stale with **no error anywhere** — the exact shape of the two-day outage in #12333. So a missing `VERCEL_GIT_PREVIOUS_SHA`, a shallow clone that cannot reach it, an unparseable turbo verdict, and any non-0/1 exit from turbo all **build**.\n\n## Not `npx turbo-ignore`\n\n#12698 suggested it. It is deprecated upstream (`\"turbo-ignore\" is deprecated. Use \"turbo query affected\" instead`) and it derives its own comparison range, falling back to `[HEAD^]` when it cannot read Vercel's git environment — silently answering a different question than the one asked. This names the range explicitly instead.\n\n## Tests\n\n`scripts/vercel-ignore-docs.selftest.sh` pins all six cases against real commits from this repo's history:\n\n```\n  ok    preview deployments skip         -> skip\n  ok    no baseline builds               -> build\n  ok    unreachable baseline builds      -> build\n  ok    content-only                     -> build\n  ok    spec-dependency                  -> build\n  ok    claude-only                      -> skip\n```\n\n## Context\n\nIndependent of, and complementary to, the memory work: the build machine was moved to Enhanced (16 GB) after #12711 showed 403 pages need ~7.6 GB on an 8 GB machine. That took a docs build from **46–50 min failing** to **3.7 min succeeding** ($0.64 → $0.105 each). This PR reduces how *often* that runs at all — and every avoided build is one less chance to meet the ceiling as the docs keep growing (measured at ~9.7 MB of build memory per page).\n\nRefs #12743, #12711, #12698\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

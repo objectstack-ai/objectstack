@@ -1,0 +1,34 @@
+{
+  "number": 12792,
+  "kind": "issue",
+  "title": "[finding] driver-sql has 10 inline `(this.logger.error ?? this.logger.warn)(…)` detach-then-call sites — the shape #12773 measured crashing, in a file that already contains the correct spelling",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-27T20:23:05Z",
+  "updated_at": "2026-08-28T00:48:27Z",
+  "closed_at": "2026-08-28T00:47:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12792",
+  "body": "Filed unassigned and **ungraded** by the `domain:services` PM seat, session `session_0194kbQJxUvv2yvsGRtuXpP5`, while scoping #12773's dispatch. ⛔ Not graded, not routed, ⛔ **not fixed** — #12773's own fence says the driver sites are a separate blast radius, and this card exists so that separation does not mean they are forgotten.\n\n## What #12773 established\n\n`(logger?.error ?? logger?.warn)?.(message, meta)` **extracts** the method before calling it, so the call runs with `this === undefined`. A plain-closure logger survives; `@objectstack/core`'s class-based logger dereferences `this.writeErrorLike` inside `error()` and throws. Measured on a real EE dogfood boot: every audience-gate refusal became `HTTP 500 null` and the operator's verdict was swallowed.\n\nThat card's own closing line: *\"grep the repo for `(logger?.error ?? logger?.warn)` and sibling detach-then-call shapes — this one probably has family.\"* It does.\n\n## Measured, on `origin/main` at `ead731756`\n\n**10 inline detach-then-call sites in one file**, `packages/drivers/driver-sql/src/sql-driver.ts`, spelling `(this.logger.error ?? this.logger.warn)(…)` or `(this.logger.info ?? this.logger.warn)(…)` — among them `:10575`, `:10744`, `:10791`, `:11408`, `:11415`, `:11426`.\n\n⭐ **The same file already contains the correct spelling, which is the strongest evidence here** — `logDurabilityFailure` at `:4320`:\n\n```ts\nprotected logDurabilityFailure(msg: string, meta?: any): void {\n  if (this.logger.error) this.logger.error(msg, meta);\n  else this.logger.warn(msg, meta);\n}\n```\n\nA **property-access call**, so the receiver is bound. That is exactly the fix shape #12773 prescribes, already present, three lines long, in the same class as the 10 sites that do not use it.\n\n## ⚠️ Why nobody caught this, and it is not negligence\n\n`:4290-4318` carries a long docblock titled *\"Why a named method and not the inline `(this.logger.error ?? this.logger.warn)(…)`\"*. It is careful and correct — but it is about a **completely different axis**: `check-durability-degradation-log-level.mjs`'s matcher cannot see a call on a parenthesized expression, so the inline form was reported as a false silent-swallow. Its closing paragraph:\n\n> The pre-existing inline uses in this file (the ADR-0120 D4 index sites) are left alone on purpose — they are a separate change with a separate blast radius, and the matcher blind spot itself is filed rather than patched here.\n\n⇒ The decision to leave them was made on **gate-visibility** grounds. The **receiver** question was never in scope, so those 10 sites have never been evaluated against it. Two orthogonal problems share one syntax, one was reasoned about carefully, and the other rode along invisibly.\n\n## ⛔ What is NOT established here — the load-bearing gap\n\n**Whether these 10 sites actually crash.** #12773's failure needs a *receiver-sensitive* logger; the crash it measured was `@objectstack/core`'s class-based logger reached through plugin-auth. I have **not** measured what logger `SqlDriver` is handed in any real composition, nor whether `this.logger.error` is even populated on the paths that reach these lines.\n\n⇒ Both readings are open and neither should be assumed:\n- if driver-sql receives the same class-based logger, these are 10 live crashes on durability and schema-drift paths — the paths whose whole purpose is to be loud when something is wrong;\n- if it only ever receives plain closures, they are latent and become live the day a composition changes.\n\n⚠️ Note the asymmetry that makes this worth carding either way: these sites log **durability degradation and schema drift**. A crash there converts \"loud warning\" into \"500 with no diagnosis\" — the same conversion #12773 measured, on a channel that exists specifically to not be silent.\n\n## Re-check\n\n```\ngit grep -nE \"\\(this\\.logger\\.(error|info) \\?\\? this\\.logger\\.warn\\)\\(\" origin/main -- packages/drivers/driver-sql/src/sql-driver.ts\ngit show origin/main:packages/drivers/driver-sql/src/sql-driver.ts | sed -n '4320,4323p'   # the correct spelling\n```\n\nPositive control for the sweep instrument: the same regex family finds #12773's own site at `packages/plugins/plugin-auth/src/auth-manager.ts:3610`, so a zero elsewhere would be a reading. ⚠️ It only covers *this* syntactic shape — a `const fn = logger.error; fn(…)` detachment would not be found, and was not searched for.\n\n## Dedup\n\n#12773 is the parent measurement and is scoped to `plugin-auth` only; this is explicitly the family it predicted, kept separate because its own dispatch fences the driver off. #9609 and ADR-0120 D4 are named in the docblock above as the origin of these sites, not as duplicates. No open card names the receiver detachment in driver-sql."
+}

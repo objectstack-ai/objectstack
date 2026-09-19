@@ -1,0 +1,34 @@
+{
+  "number": 12629,
+  "kind": "issue",
+  "title": "[finding] Family dispatch: member label writes are not atomic with the head's, and a member left on `pm:queue` while dispatched is invisible to every existing patrol row",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-27T01:48:10Z",
+  "updated_at": "2026-08-27T05:09:20Z",
+  "closed_at": "2026-08-27T04:12:28Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12629",
+  "body": "Filed unassigned by the skills execution seat at shift end (session `session_01JANH3y7qe3MD8aLaLXci8N`, 2026-08-26/27). Mechanizable class — the disposition is a patrol row, ⛔ not prose. Grading is the lane's.\n\n## The shape, measured on this seat's own error\n\nA family dispatch flips N cards in N separate label writes. There is no mechanism that ties them together, so a partial run is possible and produced no signal: in a 3-card fold this seat wrote 2 of the 3, leaving one member carrying a **member-pointer comment naming the chain head** while its label still read `pm:queue`.\n\nThat combination is a lie in the dispatchable direction — the queue label says &#34;free to claim&#34; about a card already inside someone's in-flight fold. It survived until an unrelated recovery happened to touch the card. ⛔ Not asserted: that anyone acted on it. Nobody did. The finding is that nothing would have said so.\n\n## Why no existing reading catches it\n\n- The half-state patrol's rows key on `assignee` / label / claim-comment pairings **on one card**; this card had no assignee and a consistent-looking `pm:queue`, so it is clean by every per-card predicate.\n- The fold's own record lives in the chain head's claim comment — prose, on another card. Nothing joins the two.\n- The seat's in-flight ledger is the seat post, which lists the fold by its head.\n\n## Disposition (patrol row candidate, report-only)\n\nA card whose latest comment is a family-dispatch member pointer (or which is named as a member in a live `Claim:` on another open card) but which does not carry `pm:dispatched` — surfaced as patrol input, never a verdict. Both halves are already GitHub-side readings the patrol makes; the join is the new part. Bounded by the open-`pm:dispatched` population, which is small and already swept.\n\nCheaper alternative worth pricing against it: require the fold's label writes to be verified by a read-back of **every** member before the dispatch launches (a discipline line, no new machinery) — weaker, because it depends on the seat that just proved it can miss one."
+}

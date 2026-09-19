@@ -1,0 +1,35 @@
+{
+  "number": 12579,
+  "kind": "issue",
+  "title": "The two ⛔ notes forbidding a single-sourced `ORGANIZATIONS_RUNTIME_PKG` name a constraint that no longer exists — decide whether to consume the resolver hop or restate why not",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T11:52:58Z",
+  "updated_at": "2026-08-27T17:47:26Z",
+  "closed_at": "2026-08-27T17:47:25Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12579",
+  "body": "Filed by the #12533 dev (session `session_01UjujZN219uFzBhSYfMykCd`), branch `claude/issue-12533-resolver-import-alias-hop`, as the **named consumer follow-up** that card's claim comment split out. ⛔ Unassigned and unlabelled on purpose — this needs triage, and the substantive half needs a maintainer call.\n\n## What changed under these notes\n\n`packages/cli/src/commands/serve-cluster-host-resolution.test.ts`'s `resolveIdentifier()` gained an import-alias hop (#12533): it now follows an import alias to a string literal in a sibling module of the same package, so a package spelling can be declared once in `packages/cli/src/utils/` and still be seen by the host-anchoring sweep.\n\nThat hop is the capability. It has **no live site** — deliberately, because a capability and the reversal it licenses do not land together.\n\n## The notes, and why they are now half-true\n\nTwo sites carry a written ⛔ against closing this duplication. Measured on `origin/main` @ `9bed0b0fe`:\n\n- `packages/cli/src/utils/tenancy-posture-hints.ts:89` — *\"⛔ Do NOT close the gap by importing `Serve.ORGANIZATIONS_RUNTIME_PKG` here\"*\n- `packages/cli/src/commands/serve-organizations-message-spelling.test.ts:52` — *\"`Serve.ORGANIZATIONS_RUNTIME_PKG` **deliberately stays a string LITERAL** in `serve.ts`\"*, with the stated reason: *\"`serve-cluster-host-resolution.test.ts` resolves the organizations `import()` through that static and needs the literal in that file, or the load drops out of the host-anchoring sweep silently\"*\n\nThe spelling test's reason is the one that moved. **The load no longer drops out** — `static readonly ORGANIZATIONS_RUNTIME_PKG = SHARED_ALIAS;` now resolves through the hop, and that shape is pinned by a synthetic case in the sweep. The `tenancy-posture-hints.ts:89` note points the other direction (don't import *from* `serve.ts` *into* the shared module) and its own reasoning should be re-read on its own terms rather than assumed to fall with the other.\n\n⚠️ So this card is **not** \"finish the job\". It is: a documented decision now rests partly on a constraint that has been removed, and the decision must either be **taken again** or its note **rewritten to state the reason that still holds**. Leaving a ⛔ whose stated reason is stale is how the next author reads it as arbitrary and steps over it.\n\n## What a change here would have to move together\n\n- `packages/cli/src/commands/serve.ts:548` — the literal that would become the alias\n- `packages/cli/src/utils/tenancy-posture-hints.ts:105` — `export const ORGANIZATIONS_RUNTIME_PKG = '@objectstack/organizations'`, already the single source candidate, already imported into `serve.ts` for a different export (`serve.ts:56`)\n- `serve-organizations-message-spelling.test.ts` **site 8** — it pins the two declarations EQUAL. ⚠️ Once they are one declaration the pin has no subject; today it does, which is why #12533 explicitly left it alone.\n- both ⛔ notes above, rewritten in the same diff\n\n⛔ Not a drive-by. The duplication was shipped **on purpose** by PR #12532 with the reasoning at both ends, so reversing it is a maintainer-facing decision, not a refactor.\n\n## Why it is worth deciding rather than dropping\n\nLeft as is, the sweep carries a resolver branch nothing reaches. #12533's PR states that in its body and the suite's own docblock says it in the file, but the durable answer is either a consumer or an explicit \"the duplication stays, here is the reason that survives the hop\".\n\n## Re-check\n\n```\ngit grep -n \"ORGANIZATIONS_RUNTIME_PKG\" origin/main -- packages/cli/src\ngit grep -n \"resolveImportedLiteral\" origin/main -- packages/cli/src/commands/serve-cluster-host-resolution.test.ts\n```\n\n⛔ Reverse-check any zero against a term known present in the same file, never a substring of the term under test.\n\n## Refs\n\n- #12533 — the resolver hop; its claim comment is where this consumer half was split out\n- #12492 / PR #12532 — where the duplication was shipped deliberately, and where the refactor was attempted and measured to empty the sweep\n- #11614 / PR #12149 — the earlier hop, and the loss that motivated it\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01UjujZN219uFzBhSYfMykCd)_"
+}

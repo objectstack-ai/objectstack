@@ -1,0 +1,34 @@
+{
+  "number": 12678,
+  "kind": "issue",
+  "title": "Shift-close = immediate seat release + linger mode: fix the round-open mutex's two false positives and codify the outgoing PM driving named tails to merge",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-27T08:09:51Z",
+  "updated_at": "2026-08-27T12:48:17Z",
+  "closed_at": "2026-08-27T10:18:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12678",
+  "body": "Filed by the skills seat (`session_01MnijPVVDakqK2J335JoJtq`) executing a maintainer ruling issued in live PM chat, 2026-08-27 ~06:4xZ.\n\n## Ruling (verbatim, untranslated)\n\nThe maintainer's proposal-question:\n\n> 「是否建议项目经理下班的日常流程应该是立刻进行交接，并继续处理完手上的任务到合并，这样可以方便下一任项目经理尽快接手。」\n\nThe seat answered with a three-part design (below); the maintainer's execution ruling on that exact three-part shape, verbatim: 「**落协议**」. The three parts are therefore the ruled scope — not a menu.\n\n## Evidence — the observed failure this fixes\n\n2026-08-27 04:19Z: the maintainer summoned a fresh engine-lane PM. It ran the four mutual-exclusion readings and self-recused, offering the maintainer only \"wait ~40–50 minutes\" or \"explicitly override\". Two false positives compounded:\n\n1. Reading ① found the predecessor's **shift-close briefing** posted 4 minutes earlier and treated its recency as occupation. A close-out briefing is the predecessor's explicit declaration that it will write no more — it should read as a **release marker**, not as a lock. (Compounding half-state: the briefing was posted but the seat post title still said 🟢 — the close sequence has no defined final stroke.)\n2. Reading ③ found fresh non-self claims on two lane cards and read them as seat occupation — but those strokes were the **skills seat's contract-review chain** landing a cross-lane takeover patch, not an engine seat at work. Claims carry session ID and seat identity; cross-seat chain strokes are distinguishable and should not count.\n\nNet effect: the maintainer's explicit summon was bounced by a passive timer, exactly the outcome the seat-availability design should prevent.\n\n## The three ruled changes\n\n**① Close-out briefing = seat release.** The four-readings rule changes so that a shift-close briefing, when it is the latest event, releases the seat immediately — the recency window applies only to **un-closed** activity (a live or silently-dead predecessor). Close-sequence ordering is defined: seat-post body/title refresh first, briefing comment as the **final stroke**; the successor's release condition is the briefing's presence (a lagging title is a repairable half-state the successor fixes on seating, not a blocker).\n\n**② Linger mode (离任留守).** The outgoing PM may keep driving its in-hand items to merge after close. Its post-close write surface is exactly the items **named in the briefing** (accepted PRs awaiting queue, review-chain carriers mid-landing) — no queue reads, no new dispatches, no un-named cards. The successor seats immediately and treats the named set as fenced (same declarative-collision shape as the hot-file serial queue). Residual timers of the outgoing session may only touch fenced items. When the last tail merges, the outgoing PM posts one tail-clear note on the seat post. Title vocabulary is NOT extended: a closed seat shows `⏳ vacant`; the linger register (who lingers, which tails) is one line in the 说明 section. This flips the default from \"hot-handoff custody to the successor\" to \"custody retained by the reviewer who accepted the work\" — the natural extension of the 2026-08-25 清标即落地 ruling (the one who reviewed lands it).\n\n**③ Reading-③ cross-seat filter + explicit-summon override.** Reading ③ counts only claims claiming **this seat's lane dispatch** — strokes by the review chain / Director seat on lane cards are cross-seat and do not occupy the seat. And a maintainer's explicit summon is the arbiter: with a close-out briefing present, the summoned session seats directly (repairing any title half-state on the way in); with **no** briefing (predecessor possibly dead mid-round), the conservative path stays — ask the maintainer to confirm termination, their confirmation seats.\n\n## Non-goals (binding)\n\n- 宁少跑 stays the rule for the un-closed case; nothing here weakens the mutex where no close-out exists.\n- No new seat-post title state word; no new labels; no change to the claim marker or any patrol predicate (`check-half-states.mjs` untouched by this card).\n- The dead-claim reclaim path and the takeover-liveness rules (>24h no output etc.) are untouched.\n\n## File surface\n\n`.claude/skills/pm-dispatch/SKILL.md` (four-readings mutex clause + 收班 line) + `references/seat-post-protocol.md` (close sequence, linger-mode rules, title/说明 register) + `references/dispatch-runbook.md` only if the four-readings detail rows live there (bounded to the clauses this card names). All files sit at zero-headroom ratchets — every add is paid by same-file cuts with a cut ledger naming surviving homes.\n\n## Acceptance\n\n- The engine-case transcript replayed against the new text yields: seat immediately (briefing present), title repaired, fenced set = the briefing's named tails, no wait and no question bounced to the maintainer.\n- A predecessor with NO briefing still triggers the conservative path verbatim.\n- Ratchets hold (SKILL.md 1005/1005 etc.); `check:pm-skill-ratchet`, id-lint, frame-sync/freshness green; governed PR stays draft for human merge."
+}

@@ -1,0 +1,30 @@
+{
+  "number": 12426,
+  "kind": "issue",
+  "title": "[unconfirmed] `packages/rest` excludes every test file from its only tsc program — 147 test files may be type-checked by nothing, yet `check:type-check-coverage` is green",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-26T02:17:25Z",
+  "updated_at": "2026-08-27T06:26:36Z",
+  "closed_at": "2026-08-27T06:26:36Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12426",
+  "body": "Filed unassigned and **unlabelled** by the `domain:cli` seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, on behalf of the #11926 dev, which measured this while implementing PR #12421 and **deliberately declined to file it**. ⛔ Not graded, not routed — that is triage's.\n\n⚠️ **This card is an UNCONFIRMED READING, and the title says so on purpose.** It is filed because the reading would otherwise have survived only inside a dev report comment, which no candidate query, sweep or ageing alarm can see. It is filed with its own refutation attached rather than as a defect claim.\n\n## What was measured\n\nWhile verifying that the `@ts-expect-error` pin added to `packages/client/src/client.test.ts` was not a phantom, the dev checked the same property on the REST side and found the opposite shape:\n\n- `packages/rest/tsconfig.json` excludes `**/*.test.ts`.\n- `tsc --listFiles` for that project returns **0** hits for `rest.test.ts`.\n- There is no sibling test tsconfig for the package.\n- There is no `TEST_DEBT` / `test-typecheck-debt.json` entry recording the gap.\n\nTaken at face value that says `packages/rest`'s **147 test files** are compiled by no tsc program, so a type error in any of them — including a rotted `@ts-expect-error` — would not be caught.\n\nThis is *not* hypothetical for the PR that surfaced it: the dev reported `pnpm --filter @objectstack/rest typecheck` as green **and scoped that green honestly**, stating it says nothing about the edited REST test file. That PR was fine because its REST pins are runtime assertions and only its client pin is type-level. The concern is the general case.\n\n## ⛔ Why this may well be wrong\n\nStated first-class, because the reasons to doubt it are strong:\n\n1. **`check:type-check-coverage` is green.** That gate exists to catch exactly this, so either it does not consider this shape a gap, or the reading above is incomplete.\n2. **The gate's author reasoned explicitly about `packages/rest`.** A deliberate, documented exclusion is a very different thing from an oversight, and the dev found evidence of the former without being able to settle it.\n\n⇒ The likeliest outcome is that this is **working as designed** and the card closes `not planned` with the rationale recorded — which is still worth the filing, because the next person to read `packages/rest/tsconfig.json` will have the same question.\n\n## What would settle it, in one reading\n\n⛔ Not left as \"someone should check\":\n\n```sh\nnode scripts/check-type-check-coverage.mjs           # read its verdict line and its own stated scope\nsed -n '1,40p' packages/rest/tsconfig.json           # the exclude\nls packages/rest/tsconfig*.json                      # is there a test project at all\ngit log -S 'packages/rest' -- scripts/check-type-check-coverage.mjs   # the author's reasoning\n```\n\nThe question is single: **does `check:type-check-coverage` intend `packages/rest`'s test layer to be uncovered, and if so where is that intent recorded?** If it is intended and recorded, close this. If it is intended and *not* recorded, the fix is the record, not the tsconfig. If it is unintended, this is a real gate gap and a `domain:devx` card.\n\n## Routing note for triage\n\nThe landing surface is `scripts/check-type-check-coverage.mjs` and/or `packages/rest/tsconfig*.json` — a gate/tooling surface, so `domain:devx` on the face of it rather than `domain:cli`. ⛔ Filed unlabelled either way; the seat that measured it does not own that call.\n\n## Refs\n\n- #11926 / PR #12421 — where this surfaced; that PR's own REST typecheck green is scoped honestly in its body for this reason."
+}

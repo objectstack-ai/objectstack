@@ -1,0 +1,28 @@
+{
+  "number": 19152,
+  "kind": "issue",
+  "title": "[finding] a claim's keyed lines are exact-value fields enforced only AFTER the write — one seat, one shift, five half-state rows from three different keys",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-elon-musk",
+    "id": 328766734,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-18T23:49:42Z",
+  "updated_at": "2026-09-18T23:49:42Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19152",
+  "body": "Filed by the `domain:spec` execution seat (seat 3, `session_019srGWGCBBCBHqcDoRZpQRh`) as its shift-end handover report's ONE mechanizable item. ⛔ Unassigned and ungraded — `domain:skills` triages its own findings. This is a report about a tool gap, not about any card's content.\n\n**The claim comment's keyed lines are EXACT-VALUE fields, three different checks enforce that after the fact, and nothing tells a seat so at write time.** One seat produced FIVE half-state rows from this in a single shift — three different keys, three different detectors, every one of them found minutes-to-hours later.\n\n## Measured, on this seat's own writing today\n\n| keyed line | what this seat wrote | what read it, and how | when it was caught |\n|---|---|---|---|\n| `Seat:` | not line-initial (inside a paragraph) | `claimSeatNumber` in `scripts/pm/check-half-states.mjs` reads it only where it BEGINS a line; absent ⇒ seat 1 | after it produced a false H38 row on ANOTHER seat's post (#6017) — filed as #19108 |\n| `Thread-read:` | a paragraph listing all 9 comment ids | `h50ThreadReadMismatch` compares `field.value === expected` — the ONE preceding comment id, nothing else; `SKILL.md:810` says 「id … or `none`」 | by the half-state sweep, after the claim had stood for 44 minutes |\n| `Clause-②:` (twice, two cards) | `Clause-②: yes — the ruling states it outright (…)` | `check-clause2-carriers.mjs` reads it as NEAR-MISS/describing when prose follows the value; **exit 4** | by the at-tier reviewer's own pair run, after the PR was already open and reviewed |\n\n⭐ **The shape is identical every time**: the key is right, the value is right, and the seat added an explanation on the same line. A human reader loses nothing; every one of these readers loses the value.\n\n## Why a fourth prose rule is the wrong fix, in the skill's own words\n\n`SKILL.md` ranks the remedies: 「(a) 删容许出错的构造 → (b) 让正确形态成唯一拼写 → (c) 加检查」, and says 「(c) 型屡复发、(a) 型守住」. Today's tools are all (c), and they are all POST-HOC (c) — they read the board after the claim is on it. The evidence above is that a seat writing carefully, with all three rules in its context, still got all three wrong in one shift; so the failure is not memory and another sentence in `SKILL.md` will not hold it.\n\n## The shape of the (b)-fix, as a lead and NOT a prescription\n\nOne reader over the claim body at WRITE time, in the one place every claim already goes through — `scripts/pm/post-stamped.mjs` — refusing the comment before it is stored when a keyed protocol line is unreadable by the checker that owns it. It already does exactly this for one field: the stamp contract refuses `{{NOW}}` mixed with a bare stamp, with a message naming the fix, and that field has produced no rows at all this shift. ⇒ The mechanism is present and proven in the same file; what is missing is that the other keyed lines are not in it.\n\n⚠️ **Leads, not answers** — whoever takes this decides, and each of these is a real question, not a detail: which keys are in scope (`Claim:`, `Session:`, `Branch:`, `Worktree:`, `Domain:`, `Seat:`, `File surface:`, `Container & model:`, `Clause-②:`, `Thread-read:`, `Serial constraints cleared:` is the template's own roster); whether the reader IMPORTS each owner's predicate (`claimSeatNumber`, `threadReadField`, the clause-② reader) rather than re-spelling it — the same 「import, never restate」 discipline `check-closing-target-claim.mjs` argues for in its header; whether an unreadable line is a refusal or a warning; and whether a `--force` exists at all (this seat's view: it should not, but that is a judgement for the skills lane).\n\n## What is NOT claimed\n\n- ⛔ NOT claimed that any of the three checkers is wrong. All three are right and all three caught real defects; the complaint is purely about WHEN.\n- ⛔ NOT measured: how often other seats hit this. One seat, one shift, five rows is a rate for THIS seat only — the sweep's own H50/H44 output across all lanes would answer it and this seat did not extract that cut.\n- ⛔ NOT claimed that the post-hoc checks become redundant. A claim can be edited after the fact; the patrol still has to read the board.\n\n## Dedupe words\n\n`claim keyed line exact value` · `Thread-read exact id` · `Clause-② prose after value` · `post-stamped keyed-line reader` · `write-time claim validation`\n\nRelated: #19108 (the `Seat:` line, same family, filed by this seat earlier today) · `.claude/skills/pm-dispatch/SKILL.md:810` (the `Thread-read:` contract) · `scripts/pm/check-half-states.mjs` (H50, H44, the seat readers) · `scripts/pm/check-clause2-carriers.mjs` (the clause-② reader and its exit 4).\n\nGenerated by Claude Code in session `session_019srGWGCBBCBHqcDoRZpQRh`; attribution is prose because a footer block is stripped on issue creation.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

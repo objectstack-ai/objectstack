@@ -1,0 +1,35 @@
+{
+  "number": 11968,
+  "kind": "issue",
+  "title": "authz caching substrate: engine-seam write epoch (generalise plugin-security's `writeEpoch`) + `authz.invalidated` channel + boot-time posture statement",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T03:30:34Z",
+  "updated_at": "2026-08-27T08:11:53Z",
+  "closed_at": "2026-08-27T08:11:53Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11968",
+  "body": "Substrate step (§10.3) of the accepted #11633 cross-request caching design. Provenance: design document = #11633 comment 5394942824 (§2, §3, §10.3); maintainer acceptance = #11633 comment 5404681591 (2026-08-25, verbatim 「接受你的建议，继续」, Fork 2 → B). Filed by PM session `session_01KWRU3s15AJz7PGW7a7wdCh`.\n\n**Content**: extract the engine-seam write epoch (generalising `plugin-security`'s `writeEpoch`) + add the `authz.invalidated` channel on the existing at-most-once `IPubSub` + the boot-time posture statement. Done once, **before** leg B, so leg B does not carry it.\n\n**Hard requirements from the ruling**:\n- The **TTL is the correctness contract**; the bus only narrows the typical staleness window. The code **at the channel** must say a missed message is expected — nobody may read the channel as the correctness mechanism (`cluster.mdx` §4.2: no shipped driver provides at-least-once).\n- The boot-time posture statement is **non-optional**: a loud line whenever a grants cache is enabled with no bus bridge (a silently-absent bridge is #4785's failure shape).\n\n**Acceptance criterion**: with the substrate landed and no cache consumers yet, runtime behaviour is unchanged; the posture line appears exactly when a cache flag is on without a bus, and not otherwise.\n\nDownstream: leg B (grants cache) declares `Blocked-by:` on this card. Premise-first: design measured at `992161b728`; re-verify seams on current `origin/main`."
+}

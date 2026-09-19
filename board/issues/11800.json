@@ -1,0 +1,35 @@
+{
+  "number": 11800,
+  "kind": "issue",
+  "title": "`guard-main-checkout.sh` (the Edit/Write half of the worktree-first pair) ships no self-test matrix — its Bash sibling has 121 cases",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T16:57:05Z",
+  "updated_at": "2026-08-27T16:57:08Z",
+  "closed_at": "2026-08-27T16:57:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11800",
+  "body": "Found while wiring #11514 (PR #11799), which runs every `.claude/hooks/*.selftest.sh` in CI. Filing rather than fixing: #11514 wires execution only and authoring a matrix is a `.claude/**` change.\n\n## Measured\n\n`.claude/hooks/` holds **three hooks and two self-tests**:\n\n```\n.claude/hooks/guard-main-checkout-bash.selftest.sh   121 cases\n.claude/hooks/guard-main-checkout-bash.sh\n.claude/hooks/guard-main-checkout.sh                 <-- no matrix\n.claude/hooks/guard-shared-stash.selftest.sh          32 cases\n.claude/hooks/guard-shared-stash.sh\n```\n\n`guard-main-checkout.sh` is the `Edit`/`Write`/`NotebookEdit` half of the worktree-first enforcement — the half named in CLAUDE.md and AGENTS.md as the primary guard. It has no self-test at all. Its Bash sibling, which exists only because #5790 found that the Edit/Write hook could be bypassed through `sed -i` / `tee` / redirection, has 121.\n\n## Why it matters now specifically\n\nOnce #11799 lands, CI runs every matrix in that directory, so a regression in `guard-shared-stash.sh` or `guard-main-checkout-bash.sh` goes red. `guard-main-checkout.sh` is the one hook for which the answer stays \"nothing checks it\" — and after the wiring, `.claude/hooks/` reads as a covered directory, which is the more expensive state than being visibly uncovered. The wiring is discovery-based, so a matrix added for it is picked up with no workflow edit.\n\nThe failure direction is the quiet one: this hook fails **open** by design for anything it cannot parse, so a regression that makes it fail open more often produces no error anywhere — edits into the shared primary checkout simply start being allowed, and the symptom is another agent's tree being clobbered, attributed to something else.\n\n## Shape of the work\n\nPort the case matrix the way `guard-main-checkout-bash.selftest.sh` was ported from objectui: hermetic fixture (its own `git init` + linked worktree + a non-repo dir under `$TMPDIR`), feed the hook the `PreToolUse` payload shape for `Edit`/`Write`/`NotebookEdit`, assert block/allow per case, exit 0 = all hold. The block/allow verdicts to pin are the ones its header already states, plus the `OS_ALLOW_MAIN_EDITS=1` exception and the sibling-repo path cases (`objectui`, `cloud`), which are the ones prose alone has been carrying.\n\n## Prior art in the same directory\n\n- `guard-main-checkout-bash.selftest.sh` — the matrix to mirror\n- #11131 / #10570 / #10720 — three real defects the Bash guard's matrix and reviewers caught; the Edit/Write hook has had no comparable pressure\n- #11738 — an open fail-open in `guard-shared-stash.sh`, i.e. hooks in this directory do carry live defects"
+}

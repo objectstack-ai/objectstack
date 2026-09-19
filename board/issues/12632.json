@@ -1,0 +1,35 @@
+{
+  "number": 12632,
+  "kind": "issue",
+  "title": "Four in-tree test fixtures, two different roots: three use `packages/cli/tmp/` (already ignored), one needs a bespoke ignore rule — decide which is the convention",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-27T02:11:21Z",
+  "updated_at": "2026-08-27T16:59:08Z",
+  "closed_at": "2026-08-27T16:59:08Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12632",
+  "body": "Filed unassigned and **ungraded** by the `domain:cli` seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, out of the #12583 dev's second open question. ⛔ Not graded, not routed. ⚠️ **Nothing here is broken** — this is a convention question the tree currently answers two ways.\n\n## Measured\n\n`mkdtempSync` appears on **359** lines repo-wide. Exactly **four** create a directory **inside the tracked tree**, all under `packages/cli/`:\n\n| file | root | ignored by |\n| :--- | :--- | :--- |\n| `test/init-scaffold-authoring-rules.test.ts:63` | `packages/cli/tmp/` | `.gitignore:53` `tmp/` |\n| `test/init-template-comments-self-contained.test.ts:92` | `packages/cli/tmp/` | `.gitignore:53` `tmp/` |\n| `test/serve-no-artifact.e2e.test.ts:148` | `packages/cli/tmp/` | `.gitignore:53` `tmp/` |\n| `test/serve-node-env-production-default.e2e.test.ts:436` | **`packages/cli/test/`** | ⚠️ [PR #12631](https://github.com/objectstack-ai/objectstack/pull/12631)'s bespoke `packages/cli/test/tmp-node-env-default-*/` |\n\n⇒ **three of four already share a root that costs zero ignore surface; the fourth needed a rule of its own.**\n\n## ⭐ Why the outlier is not simply wrong\n\nIts root is **deliberate and documented** (`:217–222`): the generated config does a real, static `import`, which resolves only because the directory has a `node_modules` ancestor — *\"a fixture rooted in `os.tmpdir()` has no such ancestor and the import fails.\"*\n\n⚠️ **But that reason does not distinguish the two in-tree roots.** `packages/cli/tmp/` has exactly the same `node_modules` ancestor that `packages/cli/test/` has. ⇒ the documented constraint rules out `os.tmpdir()`; it does **not** rule out the root its three siblings already use.\n\n## What is actually being asked\n\n⭐ **A fifth fixture author has to choose, and the tree answers two ways.** Either:\n\n- **A** — `packages/cli/tmp/` is the convention. Move the outlier there, delete [PR #12631](https://github.com/objectstack-ai/objectstack/pull/12631)'s bespoke entry, and say so in the docblock so the next author does not re-derive the choice. ⚠️ This moves a fixture whose placement is deliberately documented, so the docblock must be updated in the same diff — ⛔ a moved root under an unchanged \"why this root\" comment is worse than either state.\n- **B** — the in-`test/` root is the convention and the three siblings are the drift. ⚠️ Then `tmp/` covering them is an accident rather than a decision, and that should be written down too.\n- **C** — both are fine; record that in one place so it stops looking like an inconsistency.\n\n⛔ **Do not pick by tidiness.** The question is whether the static-import constraint has any bearing on the choice between the two in-tree roots. ⭐ Measured above: **it does not** — which makes this a naming/consistency call, not a technical one.\n\n## ⛔ Explicitly not in scope\n\n- Moving anything to `os.tmpdir()`. The docblock's reason is real and measured; ⛔ that direction is closed.\n- Widening `.gitignore` to a class pattern. [PR #12631](https://github.com/objectstack-ai/objectstack/pull/12631) measured that the population is **one** uncovered outlier, so a class pattern would be ignore surface bought for nothing — and an over-broad ignore that hides a real test file is strictly worse than the leak it prevents.\n\n## ⚠️ Whichever way it goes, keep the property [PR #12631](https://github.com/objectstack-ai/objectstack/pull/12631) proved\n\nA leftover in the tracked tree does not merely risk a `git add -A`. Measured on that PR: with the leftover present and **no** ignore rule, `scripts/pm/dispatch-gates.mjs` gains **18 spurious families**. ⭐ Every seat derives gates on every dispatch, so a stray fixture silently corrupts other people's dispatch decisions for as long as it sits there. ⛔ Any resolution must leave that closed.\n\nSeverity not judged; convention-class, no live defect.\n\n## Re-check\n\n```\ngit grep -n \"mkdtempSync(join(\" -- 'packages/cli/test'\ngit check-ignore -v packages/cli/tmp/anything\nsed -n '215,226p' packages/cli/test/serve-node-env-production-default.e2e.test.ts\n```\n\n⛔ Reverse-check any zero against a term known present in the same population.\n\n## Refs\n\n- #12583 / [PR #12631](https://github.com/objectstack-ai/objectstack/pull/12631) — where the census and the 18-families cost were measured\n- #12539 / [PR #12617](https://github.com/objectstack-ai/objectstack/pull/12617) — the built-CLI prerequisite that now runs before the fixture is created, narrowing the original reproduction"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 12472,
+  "kind": "issue",
+  "title": "check-cli-command-ids' \"declaration is spelled as a LITERAL\" self-test assertion cannot fail — the needle appears in the assertion's own source text",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-26T04:49:02Z",
+  "updated_at": "2026-08-27T17:41:12Z",
+  "closed_at": "2026-08-27T17:40:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12472",
+  "body": "Measured while landing the `ROOT_DIR_WATCH_HINTS` declarations for #12369. **Filed unassigned; not touched there** — that card's declared file surface is `scripts/pm/bare-root-worklist.mjs` plus the two gate scripts named in its ruling, and this is a third gate with a different defect class.\n\n## The shape\n\n`scripts/check-cli-command-ids.mjs:540` pins that the declaration is written as a source literal rather than computed:\n\n```js\nt('the declaration is spelled as a LITERAL in this source, not computed',\n  readFileSync(fileURLToPath(import.meta.url), 'utf8').includes(\"'scripts/**'\"),\n  'the hint extractor reads source text; a computed `${r}/**` builds no hint at all');\n```\n\nThe needle `'scripts/**'` is itself spelled as a literal **inside the assertion**, so `readFileSync(own source).includes(...)` finds it in the check rather than in the declaration. The assertion is satisfied by its own text.\n\n## Measured\n\n`'scripts/**'` occurs **3** times in that file: the declaration at `:176`, this assertion at `:540`, and `ROOT_DIR_WATCH_HINTS.includes('scripts/**')` at `:544`. Rewriting only the declaration into the computed form the assertion exists to reject —\n\n```js\nconst ROOT_DIR_WATCH_HINTS = [`${WALK_ROOT}/**`];\n```\n\n— leaves the literal still present in the file, so the `includes` check stays **green**. That is the exact failure it names: a computed spelling builds no watch hint at all, `dispatch-gates` recovers nothing from the gate, and the gate goes back to being unnameable by every dispatch brief — silently, with `--self-test` green.\n\nNote `:544` does not cover the gap: it asserts the array's runtime *value*, which the computed form still satisfies. The literal-vs-computed distinction is precisely what nothing checks.\n\n## Cleared, for contrast\n\n`scripts/check-parse-guard.mjs` carries the same idiom and is **not** affected — `'scripts/**'` occurs once there (the declaration only), so it has no source-text `includes` pin of this shape to be phantom.\n\n## Repro\n\n```bash\npython3 - <<'PY'\nf='scripts/check-cli-command-ids.mjs'\ns=open(f).read()\nprint('occurrences:', s.count(\"'scripts/**'\"))\nm=s.replace(\"const ROOT_DIR_WATCH_HINTS = ['scripts/**'];\",\n            \"const ROOT_DIR_WATCH_HINTS = [`${WALK_ROOT}/**`];\")\nprint('literal still found after computing the declaration away:', \"'scripts/**'\" in m)\nPY\n```\n\n## The remedy that was measured to work\n\nAssemble the needle instead of spelling it, so the searched byte sequence exists nowhere but the declaration. Landed in `scripts/check-objectql-double-limit.mjs` on the #12369 branch and ablated in both directions — the naive spelling survived deleting the whole declaration line; the assembled one reds on the computed form:\n\n```js\nconst declNeedle = `'${SCAN_ROOT}/` + '*'.repeat(2) + `/*${DECLARED_TAIL}'`;\nexpect('…', readFileSync(fileURLToPath(import.meta.url), 'utf8').includes(declNeedle));\n```\n\nWhether `check-cli-command-ids` wants that shape or a different one is a judgement for whoever picks this up; what is measured here is only that the assertion as written cannot fail.\n\nMeasured on `objectstack-ai/objectstack` at `68c5dbaab2`.\n"
+}

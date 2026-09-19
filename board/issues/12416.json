@@ -1,0 +1,32 @@
+{
+  "number": 12416,
+  "kind": "issue",
+  "title": "spec: decide whether the entry-nameability invariant covers plain export REFERENCES, not just factory calls (27 pairs measured)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-26T02:06:41Z",
+  "updated_at": "2026-08-27T06:11:00Z",
+  "closed_at": "2026-08-27T06:11:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12416",
+  "body": "Observation filed while implementing #11986's gate. Filed unassigned, `finding` — this is a scope question for triage, not a defect report with an agreed fix.\n\n#11986's gate probes the **call** surface: for each public entry it compiles `export const c = E.<fn>(…)` for every callable export and asserts the declaration emitter can name everything the result mentions. That is the shape all three decided instances took (#10868 → #11350 → #11709).\n\nA second probe shape exists and was measured before the call shape was chosen: the plain **reference**, `export const r = E.<name>;` for every value export — which is what a consumer writes as `export const mySchema = SomeSpecSchema;` or when re-exporting a spec value. Measured on `cdbd9204b65ae4ebec63f90f61669fb498efaa55`, it finds **27 (entry, type) pairs across 11 of the 17 entries**:\n\n| entry | unnameable type(s) |\n|:--|:--|\n| `@objectstack/spec` | `NavigationItem`, `ObjectStackRawIssue` |\n| `@objectstack/spec/data` | `DerivationRule`, `FormField`, `IScopedContext` |\n| `@objectstack/spec/system` | `BaseValidationRuleShape`, `FilterCondition`, `FormField`, `FormFieldInput` |\n| `@objectstack/spec/kernel` | `NavigationItem`, `NavigationItemInput` |\n| `@objectstack/spec/ai` | `FilterCondition`, `FormField`, `StateNodeConfig` |\n| `@objectstack/spec/automation` | `FormField` |\n| `@objectstack/spec/api` | `BaseValidationRuleShape`, `FilterCondition`, `FormField`, `FormFieldInput`, `NavigationItem`, `NavigationItemInput`, `QueryAST`, `QueryInput` |\n| `@objectstack/spec/ui` | `FilterCondition` |\n| `@objectstack/spec/security` | `FormField` |\n| `@objectstack/spec/identity` | `FormField` |\n| `@objectstack/spec/shared` | `StrictObjectOptions` |\n\n**The question for triage: is this in scope for the invariant?** Reading the ruling literally (「a type that appears structurally in an entry's public declarations must be nameable from that same entry」) it is — these types do appear structurally, and a consumer that re-exports the value hits the same TS2883. Against that: **no consumer has reported one**, whereas the call class produced nine reported build failures and three maintainer decisions. Closing all 27 is 27 re-export lines across 11 barrels plus an `api-surface/` regeneration, and it widens the public type surface of six entries that have no pull for it.\n\n**Two further measurements that bear on the decision**, both from the same run:\n\n1. Five entries (`.`, `/system`, `/api`, `/ui`, `/cloud`) produce **TS7056** under the reference shape — \"the inferred type of this node exceeds the maximum length the compiler will serialize\". Those probes are NOT MEASURED in either direction: the printer gives up before name resolution. So a reference-shape gate could not be made total the way the call-shape gate is; part of its surface is structurally unmeasurable with this instrument.\n2. Cost: the reference shape measured ~105s across all entries versus ~42s for the call shape (~31–47s in the shipped gate).\n\n**Deliberately not decided in #11986's PR.** Adding these 27 to that gate's ledger would have traded its one strong property — a ledger with a one-line repair for every row it carries — for a 27-row accommodation surface with no shrink plan, which is the debt-laundering shape the ledger exists to refuse. The gate's docblock says so explicitly, so a later author does not \"extend\" it by reflex.\n\nIf triage decides the class is in scope, the natural shape is a second gate (or a second probe mode) with its own ledger, not a widening of this one.\n\nRelated: #11986 (the call-shape gate), #12414 (the seven live call-shape leaks), #11709, #11350."
+}

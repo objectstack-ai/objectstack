@@ -1,0 +1,34 @@
+{
+  "number": 12679,
+  "kind": "issue",
+  "title": "Should the authz posture statement live outside `service-cluster`? `Runtime` now registers `AuthzClusterBridgePlugin` under `cluster: false`, so that flag no longer means \"this package contributes nothing\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-27T08:15:15Z",
+  "updated_at": "2026-08-27T22:49:50Z",
+  "closed_at": "2026-08-27T22:49:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12679",
+  "body": "Filed by the `domain:engine` seat (session `session_01LZbWd2jNV1FErXTPSS4Dry`) while accepting **PR #12652** for **#11968**. ⛔ Filed as a card rather than raised as a blocker: the PR is green, contract-reviewed and implements a ruled design, and a prose note in a PR body is nobody's inbox.\n\n⚠️ **The PR was accepted and is landing.** This card exists so the shape question reaches the maintainer **without** holding a ruled change. If the answer is \"move it\", that is a follow-up PR, not a revert.\n\n## The one-line question\n\n`Runtime` now registers `AuthzClusterBridgePlugin` **unconditionally — including when `cluster: false`**. That changed an existing pin from *\"`kernel.use` is not called at all\"* to *\"exactly one plugin, the authz posture bridge\"*.\n\nSo `cluster: false` no longer means **\"this package contributes nothing.\"** Is that the shape you want, or should the boot-time posture statement live outside the `service-cluster` package?\n\n## Why it was built that way (⛔ this is not a defect report)\n\nBoth the dev and the contract reviewer cleared it, and the reasoning is sound: a **missing bus is the loudest case the posture check has**. Skipping registration under `cluster: false` would put the statement's absence exactly where the missing bus is — i.e. the platform would go quiet precisely in the configuration most worth announcing. The plugin is **inert on the shipped default**.\n\nThe dev classified it `openQuestions: []`, *\"a shape change rather than a bug\"*, and stated it rather than deciding it. That was the right call and this card is the consequence.\n\n## 四棱卡面块(决策待裁)\n\n**背景一句话**:授权缓存的开机「姿态声明」现在由 `service-cluster` 包的 `AuthzClusterBridgePlugin` 承载,而 `Runtime` 对它**无条件注册** —— 包括 `cluster: false` 时。代价是 `cluster: false` 这个开关原本的含义(「这个包什么都不装」)被改写了;收益是「没有总线」这一最该出声的配置不会静默。\n\n**选项 A —— 维持现状**:姿态声明继续住在 `service-cluster`,`Runtime` 无条件注册。\n**选项 B —— 搬家**:把姿态声明移到 `core`(或 kernel 自身),`service-cluster` 恢复「`cluster: false` 即零注册」的旧语义。\n\n- **实际业务需求**:目前**没有实测拉力指向任一侧** —— 没有用户报过 `cluster: false` 下多一个 inert 插件造成的问题,也没人报过姿态声明缺失。这一轴是空的,我据实说明而不是编一个。真正会踩到的是**读启动日志或断言插件数量的人**:仓内已有一条 pin 因此改写,说明「`cluster: false` ⇒ 零插件」这个假设是**有人真的在依赖**的形状。\n- **项目长远合理性**:B 更干净 —— 「集群功能开关」和「平台是否声明自己的授权缓存姿态」本来就是两件事,把后者绑在前者的包里,是让一个部署开关顺带决定一个可观测性行为。A 的代价会随时间累积:下一个「必须无条件发生」的东西也会想住进这个包,`cluster: false` 的含义继续稀释。\n- **防 AI 写代码犯错**:**这一轴最尖锐,且指向 B**。`cluster: false` 现在是一个**名字与行为不符**的开关 —— 一个读代码的人(或生成代码的模型)看到 `cluster: false`,合理推断「service-cluster 不参与」,而事实是它注册了一个插件。这正是本仓反复付账的 declared≠actual 形状。A 若保留,那条「`cluster: false` 仍会注册 authz 姿态桥」的注释必须是**强制且显眼**的,否则它会被下一个重构悄悄删掉。\n- **创业阶段不扩散需求**:**A 明显更省** —— 已经实现、已过契约复审、已绿。B 是一次纯搬迁 PR:跨 `core` / `service-cluster` 移动一个插件与其 pin,零新增能力,收益是语义整洁而不是功能。创业阶段不该为「更漂亮」付一次跨包重构,除非上面那条 AI 易错轴被判定为真实成本。\n\n**推荐:A(维持现状)+ 一条强制注释**,把「`cluster: false` 仍注册 authz 姿态桥」写在 `Runtime` 注册处与 `cluster` 配置项的文档上,并让那条改写过的 pin 显式断言这件事(而不是断言一个数字)。理由:四轴里只有「防 AI 犯错」一轴真正推 B,而那一轴的伤害可以用**一条读得到的声明**消掉,不必付跨包搬迁的价钱;「实际业务需求」一轴是空的,不足以支撑重构。\n\n⚠️ **本分析看不见什么**:① 我**没有测量**仓内还有多少地方假设「`cluster: false` ⇒ 零插件」—— 已知一条 pin 因此改写,是否还有第二条、第三条,决定了 A 的注释是否够用;② 分发/部署层若近期要把 `cluster` 变成面向客户的公开配置项,那 A 的语义债就会变成对外契约债,那时 B 会明显更值 —— 这是路线图问题,只有你能答。\n\n**低摩擦裁决格式**:回一个字母即可;「A,但 X」我按 A 落地并把 X 记进卡里。\n\n## ⚠️ Dedup channel DECLARED — this card may be a duplicate\n\n⛔ I could **not** verify this is not already filed. `search_issues` returned `total_count: 0` for this topic, but the **positive control I ran immediately afterwards failed with `API rate limit already exceeded`** — so the zero is **not a reading**, it is a possibly-degraded channel. This lane has a recorded instance of exactly that failure (`search_issues` answering `0` on a known-hit control while REST answered 403).\n\n⇒ Treat the zero as unverified. If a duplicate surfaces, close this one as the later card.\n\n## Provenance\n\n- **PR #12652** — the implementation (accepted by this seat, comment `5436232239`).\n- **#11968** — the substrate card.\n- **#11633** — the maintainer-accepted design (2026-08-25, 「接受你的建议，继续」, §10.3) whose logic requires the unconditional registration.\n- Contract review PASS: comment `5434287219` on #11968, run at contract-review tier."
+}

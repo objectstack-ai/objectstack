@@ -1,0 +1,35 @@
+{
+  "number": 12559,
+  "kind": "issue",
+  "title": "[finding] Generated-leaf staleness detection covers 1 of 9 i18n bundle sets — the other 8 stay legacy-trusted, and nothing says so at the point a reader would look",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T10:40:13Z",
+  "updated_at": "2026-08-27T03:47:34Z",
+  "closed_at": "2026-08-27T03:47:34Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12559",
+  "body": "**Origin**: recorded by the `domain:engine` PM seat while reviewing PR #12557 (#11671, maintainer ruling #12069 Option A). The implementing dev raised it as a scope boundary rather than a defect and deliberately did **not** file it. Filing it anyway, unassigned and recording-only, because the hazard is what a *reader* concludes, not what the PR did wrong.\n\n## The measurement\n\nPR #12557 gives generated translation leaves a provenance companion, so a leaf whose source string moved underneath it can be told from a real translation and serves the current source instead of a superseded draft. It works — leg D in that PR shows the already-shipped `check:i18n-stale-fill` returning exit 0 and *\"0 stale-fill leaves\"* on the same tree where the new mechanism correctly reports one.\n\nBut `--source-hashes` is **off by default**, and a bundle set opts in by documenting the flag in its extract config. Exactly one does:\n\n| covered | uncovered — entirely legacy-trusted |\n|---|---|\n| `@objectstack/platform-objects` | `plugin-approvals`, `plugin-audit`, `plugin-security`, `plugin-sharing`, `plugin-webhooks`, `service-messaging`, `service-realtime`, `service-storage` |\n\nThat is **1 of 9**. The uncovered eight keep exactly today's behaviour: no companion, so every leaf is legacy-trusted, never reported and never wrong about. Nothing regresses — but nothing is detected there either.\n\n## Why it is worth writing down\n\nThis is not a defect in #12557; the ruling named a `platform-objects` module and the PR stayed inside it. The hazard is the inference a later reader draws. After this lands, the repo has a working stale-fill detector, a changeset announcing it, and a gate that reports green — and the natural reading of all three is *\"generated translation staleness is now caught\"*. For eight of nine bundle sets it is not, and the thing that makes it not caught is a single absent flag in an extract config, which is invisible from any of those three surfaces.\n\nThe pre-existing `check:i18n-stale-fill` does not close the gap either. It infers provenance from two locales holding byte-identical text, so a leaf stranded in exactly one locale has no second witness and is invisible to it by construction. Measured on the covered set, that population is real rather than hypothetical: **18 generated leaves are recorded in exactly one locale today** (zh-CN 2, ja-JP 3, es-ES 13) — counted directly from the three committed companions, not quoted from the PR. There is no reason to expect the other eight sets to be structurally different; there is simply no instrument pointed at them.\n\n## What resolving it would look like — not chosen here\n\nCheap, and that is part of the argument: enabling a set is a one-line extract-config change plus a generated companion, the same shape `platform-objects` just took.\n\n1. **Roll it out** — opt every bundle set in, one PR or one per set. Each lands a companion whose day-one staleness is 0 by construction (records are written only where a leaf is currently a byte copy of the *current* source), so the rollout is behaviour-neutral on the day it lands and only ever reports drift that accrues afterwards.\n2. **Roll out selectively** — cover the sets whose strings actually churn, and say in the extract config of each uncovered set that it is legacy-trusted by choice. The declaration is the load-bearing half either way.\n3. **Leave it at one set** — defensible, but then the flag's own description is the only place the boundary is written, and that is not where a reader looks.\n\nThis is a per-package rollout decision, which makes it triage's call rather than a seat's. Filed unassigned; not claimed.\n\n## Dedup\n\nSearched 2026-08-26 from a seat with a working list channel. The positive control fired (the query resolves this vocabulary and returns the #11671 family), so the absence of a sibling card is a reading rather than a channel outage. No existing card covers the per-set coverage boundary — #11671 is the mechanism, #12069 is its ruling, and neither names the other eight sets."
+}

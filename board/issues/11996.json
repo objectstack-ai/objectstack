@@ -1,0 +1,35 @@
+{
+  "number": 11996,
+  "kind": "issue",
+  "title": "check-governed-merges: measure whether a governed-surface PR landing via a merge-queue batch is visible to the audit (#11831 ruling)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "tooling"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T04:11:19Z",
+  "updated_at": "2026-08-27T02:19:52Z",
+  "closed_at": "2026-08-27T02:19:52Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11996",
+  "body": "Chartered in #11831's ruling (maintainer, 2026-08-25, verbatim 「10150 是我合并的，其他接受」; full record = #11831 comment 5404974747). Filed by PM session `session_01KWRU3s15AJz7PGW7a7wdCh` per the confirmed checklist. The #10150 instance itself was confirmed a maintainer hand-merge (no violation) — this card is the **structural** question that outlives it.\n\n**Content**: establish by measurement whether `scripts/pm/check-governed-merges.mjs` (129 assertions green today) would flag a governed-surface PR (`docs/adr/**`, `.claude/**`, `skills/**`, `AGENTS.md`, `CLAUDE.md`) that reached `main` **through a merge-queue batch**. Construct or replay the queue-batch signature (batch merge-commit shape, parent/child pairing, `merged_at` collapse, `merged_by` semantics) against the gate — measure, ⛔ do not reason from the gate's source alone.\n\n**Disposition rule**:\n- Gate **sees** it → post the discriminating evidence on this card and close; the post-hoc-audit model (2026-08-18 ruling) is confirmed to cover the queue route.\n- Gate is **blind** → add the recognition so a governed-surface queue landing appears in the audit list. That is audit **tightening** (a Bug fix); ⛔ never weaken or bypass anything to get there. The fix rides this card.\n\n**Lane note for triage**: per the lane table, a gate whose SUBJECT is the governed surface itself (`check-governed-merges` is named there) anchors to `domain:skills` — triage confirms the lane.\n\n**Acceptance criterion**: a written verdict either way, backed by the constructed-signature run; recognition added iff blind, with a pin so the signature stays covered."
+}

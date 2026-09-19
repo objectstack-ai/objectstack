@@ -1,0 +1,33 @@
+{
+  "number": 12734,
+  "kind": "issue",
+  "title": "ADR-0127 records two measurably-wrong facts about the session-cache doors: a boot refusal that does not exist, and a `cookieCache` cost overstated as identical to its sibling's",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:services"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-27T15:03:12Z",
+  "updated_at": "2026-08-28T08:09:14Z",
+  "closed_at": "2026-08-28T08:03:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12734",
+  "body": "Filed unassigned by the os-dev working #12547 (branch `claude/issue-12547-cookiecache-disclosure`). ⛔ No `domain:*`, no `pm:queue` — routing and grading are triage's. Not fixed in that PR: amending an accepted ADR's Decision and Consequences sections is a judgment call outside a disclosure card's declared file surface.\n\n## The two statements\n\nBoth on `origin/main` in `docs/adr/0127-authorization-cache-invalidation-contract-and-ttl-bound.md`:\n\n**1. Consequences, the \"one disclosed gap\" paragraph:**\n\n> The `secondaryStorage` door into D7's rejected architecture is **boot-refused and pinned**; the `cookieCache` door reaches the same architecture and is **unguarded**.\n\n⚠️ **There is no ObjectStack-authored boot refusal on the `secondaryStorage` door.** This is the same false premise that mis-graded #12547 and cost that card a full retriage round — it is now recorded in an accepted ADR, where the next reader will pick it up as settled fact. Measured (and verified first-hand by the triage seat on 2026-08-27):\n\n```\ngit grep -n \"secondaryStorage\" origin/main -- packages/plugins/plugin-auth/src | grep -iE \"throw|refus|reject|assert\"\n```\n\nyields exactly one hit, and it is a **test title** — `session-of-record.test.ts` *\"the DEFAULT composition refuses to boot with a secondaryStorage rather than degrading quietly\"*. That test's own comment attributes the refusal to **better-auth 1.7's** hard-refuse of `secondaryStorage` without `storeSessionInDatabase`, conditional on the OIDC provider being enabled. Meanwhile `auth-manager.ts` passes a host-supplied `secondaryStorage` straight through, and `cacheSecondaryStorage()` is deliberately exported, under an export comment that states the posture: *\"exported rather than auto-wired … so a host opts into that trade explicitly or not at all.\"*\n\n⇒ The ruled posture (maintainer, 2026-08-27, on #12547) is **opt-in with disclosed cost on both doors, no ObjectStack-authored boot refusal on either**. The ADR records the opposite.\n\n**2. D7, last sentence:**\n\n> `cookieCache` is a different key reaching the same architecture, **with the same result**.\n\nThe direction is right; **\"the same result\" is measurably too strong**. Measured against the installed better-auth `1.7.1` while implementing #12547 — three differences, each named with the file it was read from:\n\n| | `secondaryStorage` | `cookieCache` |\n|---|---|---|\n| session of record | moves into the cache — `createSession` skips the `sys_session` row | **stays in `sys_session`** — read-side only, so admin session lists, the concurrent-cap count and D4's audit trail stay correct |\n| staleness window | unbounded — the cache *is* the record | **bounded, per-client**: `cookieCache.maxAge`, default 300s (`dist/cookies/index.mjs:50`, `:99`) |\n| stateless refresh extending the window | n/a | **force-disabled** whenever a `database` is configured, which ObjectStack always does (`dist/context/create-context.mjs:149-165`) |\n| sensitive operations | still cache-backed | **already bypass it** — `getAuthoritativeSessionFromCtx` / `sensitiveSessionMiddleware` re-read with `disableCookieCache: true` when stateful (`dist/api/routes/session.mjs:270-280`) |\n\nConfirmed empirically, not only by reading: an ablation in #12547's PR plumbs `cookieCache` through and the new pin goes red with a revoked session still authenticating — so the failure *direction* is real, and it is the *magnitude* that the ADR overstates.\n\n## Why this is worth a card rather than a shrug\n\n⭐ **An overstated disclosure is its own defect, in the direction that costs the most.** #12547's brief put it exactly right: a cost note that overstates the danger *\"teaches operators to discount the sibling door's warning too.\"* The `secondaryStorage` warning is the one that must land — it is the unbounded one — and pairing it with a claim a careful reader can falsify in ten minutes is how a real warning gets read as boilerplate.\n\nAnd statement 1 has already demonstrated its cost once: it is precisely the belief that produced the wrong grading on #12547.\n\n## Options, so grading is cheap\n\n| | shape | note |\n|---|---|---|\n| **A** | amend both sentences in place, citing the measurement | smallest change; the ADR's *decisions* (D7's ruling) are untouched and correct — only two factual claims about the current implementation are wrong |\n| **B** | amend statement 1 only | statement 2's direction is right and D7's ruling does not depend on the magnitude; defensible if the seat prefers minimum edit to an accepted record |\n| **C** | leave it, on the record | ⛔ the reading that already cost one card a retriage round |\n\n⛔ No recommendation from this seat beyond noting that neither statement's correction changes any ADR **decision** — D7 stands either way, and #12547's PR does not depend on this being fixed.\n\nRe-check commands:\n\n```\ngit grep -n \"secondaryStorage\" origin/main -- packages/plugins/plugin-auth/src | grep -iE \"throw|refus|reject|assert\"\ngit grep -n \"boot-refused and pinned\" origin/main -- docs/adr\ngit grep -n \"with the same result\" origin/main -- docs/adr\n```\n\n⛔ Reverse-check any zero with a term known present in the same file.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_0194kbQJxUvv2yvsGRtuXpP5)_"
+}

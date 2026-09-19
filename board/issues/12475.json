@@ -1,0 +1,35 @@
+{
+  "number": 12475,
+  "kind": "issue",
+  "title": "The 19 remaining `check:comment-mask-adoption` rows are recorded by SHAPE, not by measured behaviour — two of the first three converted were deleting real code",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T05:03:20Z",
+  "updated_at": "2026-08-28T02:14:18Z",
+  "closed_at": "2026-08-28T02:12:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12475",
+  "body": "Filed unassigned from #12398's implementation round — an observation, not a claim on anyone's\ntime, and deliberately **not** fixed there (that card converted exactly the three guards its\nscope named).\n\n## What was measured\n\n#12398 converted three route-ledger conformance guards off their private comment strippers\nonto `scripts/js-comment-mask.mjs` and deleted their rows from\n`scripts/check-comment-mask-adoption.mjs` (23 rows → 20). The conversion was checked by\ndiffing private-vs-shared output byte for byte over each package's scanned population, and\n**two of the three were silently deleting real code**:\n\n| file | what the private scanner did |\n|---|---|\n| `packages/metadata/src/plugin.ts` | read the `//` inside the regex literal `/^https?:\\/\\//i` as a line-comment opener, deleting **40 bytes** of live code to end of line |\n| `packages/cloud-connection/src/marketplace-proxy-plugin.ts` | same, on `/\\/packages\\/[^/]+\\/versions\\//` — **38 bytes**, and this file is a declared **MOUNT SOURCE**, i.e. source that guard's census reads |\n\nThat is the naive-`//` family `js-comment-mask.mjs`'s header measures, found live rather than\nargued from the shape.\n\n## Why it is worth a card rather than a shrug\n\nThe adoption ledger's `why` notes describe each row's **implementation shape** —\n\"hand-rolled scanner, preserves block-comment newlines\", \"the full naive two-regex pair\" — not\nwhat that implementation does to the source it actually reads. Those are different facts, and\nthe first does not imply the second: three rows carried near-identical `why` text and the\nbehaviour underneath split two ways.\n\nSo for the 19 rows still recorded, nobody has the measurement. Each of them feeds a gate, and\nthe direction that matters is the quiet one: a stripper that swallows live code makes its gate\nreport clean over text it never looked at — the failure `js-comment-mask.mjs`'s header calls\nworse than no verifier at all, because it reports success.\n\n## Cheap to settle, per row\n\nFor a recorded file, run its private stripper and `stripComments` from\n`scripts/js-comment-mask.mjs` over the population that file actually scans, and diff the two\noutputs. A non-empty diff is either a conversion to make or a `why` note to correct; an empty\ndiff is a row whose `why` can then say so on evidence.\n\n⛔ Not a sweep, and not a licence to convert in bulk: the adoption gate's own header is explicit\nthat converting is per-row, is a MEASUREMENT rather than a sweep, and that a row whose verdict\nchanges under the shared mask is a finding to read.\n\n## Dedup status — NOT established, and why\n\n⚠️ The REST list endpoints return `403 GitHub access is not enabled for this session` from the\ndev seat this was filed from, and the dispatch contract forbids the MCP `list_issues` /\n`search_issues` fallback. Local grep over the tree cannot see issue bodies. So \"no covering\ncard\" is **unverified** here rather than checked and confirmed — recording that plainly so the\ntriage round can settle it rather than reading this as a completed dedup. The same outage is\nrecorded on #12398 from two other seats.\n\nRefs: #12398 (where it was measured) · #12372 (the adoption gate and its ledger)"
+}

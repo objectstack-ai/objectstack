@@ -1,0 +1,34 @@
+{
+  "number": 12299,
+  "kind": "issue",
+  "title": "`extractWatchHints` strips a module-relative literal's own depth, so `unreachableReason` prints false \"never was a repo path\" rows for files the gates really read — residue-side repair, shape pending the #12371 ruling",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T17:05:33Z",
+  "updated_at": "2026-08-27T19:50:58Z",
+  "closed_at": "2026-08-27T19:49:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 13,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12299",
+  "body": "Split out of #12246 so it is not closed with it. #12246 filed three defects; its\nre-dispatch fixed defects 1 and 2 (a glob in a non-final segment collapsed to a dead double\nslash, and the \"THE LAYOUT MOVED\" misclassification that followed from it) and put this\nthird one explicitly out of surface. Filed unassigned, not graded.\n\n## The defect\n\n`extractWatchHints` was written against `.mjs` gates, whose relative imports carry a leading\n`./`. The `packages/spec` TypeScript gates use `paths`-mapped bare specifiers that look pathy,\nand the extractor admits any quoted span carrying a slash:\n\n```\nlib/dist-freshness · lib/generated-output · lib/schema-name · src/kernel/protocol-version\ndata/field.zod.ts · ui/view.zod.ts · @objectstack/spec · typescript/bin/tsc\n```\n\nNone of these was ever a repo path.\n\n## Measured, and re-measured on `daae7aa396`\n\nFleet-wide over 170 families x 754 distinct hints x 6816 tracked files: **640 inert\n(check, hint) pairs**, of which only 21 contain a glob at all. The specifiers carry no glob\nwhatsoever — this is a different function and a different mechanism from the glob collapse\n#12246 fixed, which is why the two were separated there rather than folded together.\n\nThe inert hints fabricate **no** MATCHED pair — a hint covering zero files cannot put a gate\nin any card's matched column. That was measured for #12107 and is why it landed. The cost is\nconfined to the residue, and it is real there: these specifiers are what `unreachableReason`\nprints, so a family's genuine reason is displaced by literals that were never repo paths.\n\nAfter #12246's fix the unreachable listing is 11 families, **all** of them \"BY CONSTRUCTION\",\nand 10 of the 11 print reasons drawn entirely from this class, e.g.\n\n```\n- pnpm --filter @objectstack/spec run check:spec-changes   [lint.yml]   dead:\n    'src/kernel/protocol-version' — no tracked path under its first segment; never was a repo path\n  · 'src/migrations/registry' — … · 'src/migrations/spec-changes' — … · …\n```\n\nThe verdicts are correct; the reasons are noise.\n\n## The warning that should become a pinned test whichever way this goes\n\n⚠️ Inert **today** is not inert by construction. `data/field.zod.ts` and\n`src/kernel/protocol-version` are one top-level `data/` or `src/` directory away from covering\nreal files, and at that point they would fabricate in the **matched** column rather than in the\nresidue — which is the expensive direction `hintCovers`' docblock prices, not the cheap one.\n\n## Not asserted\n\nNo claim about the remedy. The hint set is fleet-wide, so any change here is priced the way\n`firstPartyImportTargets`' docblock prices a widening. One shape the card that fixes it will\nhave to decide: whether to teach the extractor to read the owning package's `tsconfig.json`\n`paths` and drop what resolves through it, or to require a leading `./` for a TS gate's\nrelative reads, or to leave the extraction alone and filter at the point the residue prints.\n\nRefs: #12246 (defects 1 and 2, fixed) · #12107 (the fix that made all 23 TypeScript gates\nresolve their sources, which is what surfaced this class)\n"
+}

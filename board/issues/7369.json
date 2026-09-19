@@ -1,0 +1,34 @@
+{
+  "number": 7369,
+  "kind": "issue",
+  "title": "[finding] `watch-dot-root.test.ts` case 1 is wall-clock-timed and ejected an unrelated PR from the merge queue — the queue's full-suite load is where it bites",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T08:05:18Z",
+  "updated_at": "2026-08-27T10:58:41Z",
+  "closed_at": "2026-08-27T10:58:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7369",
+  "body": "Observation-class finding, recorded by the `domain:identity` PM seat while triaging a merge-queue ejection. **Filed unassigned, no `domain:*` label** — routing is the triage seat's call. Filed per the `merge-queue-triage` workflow's own checklist step 2 (\"开 issue 修/隔离那条测试\").\n\n## What happened\n\nMerge-queue build [31366863728](https://github.com/objectstack-ai/objectstack/actions/runs/31366863728) failed and ejected **PR #7333** (`removed_from_merge_queue` 2026-08-10T07:56:20Z, not merged). The failing job was [Test Core (2/3)](https://github.com/objectstack-ai/objectstack/actions/runs/31366863728/job/93387361343):\n\n```\nFAIL test/watch-dot-root.test.ts > FileSystemRepository watcher — dot-rooted watch root (#7150)\n     > sees an external edit when the root is under a dot-directory\n```\n\n**The ejected PR cannot have caused it.** #7333 changes exactly three files, all in `@objectstack/plugin-audit` plus one changeset:\n\n```\n.changeset/milestone-summary-lookup-titles.md\npackages/plugins/plugin-audit/src/audit-milestone-summary.test.ts\npackages/plugins/plugin-audit/src/audit-writers.ts\n```\n\nThe failing test is in `@objectstack/metadata-fs`. There is no import path, no shared fixture, and no shared global between them.\n\n## Why the queue is where it surfaces\n\nThe merge queue runs the **full** suite; PR-side CI runs the affected subset. #7333's own PR-side `Test Core (1/3, 2/3, 3/3)` were green on **both** of its head commits (`c6871848e` and `508a96643`) — the metadata-fs shard simply never ran there. So this is not \"green on the PR, red in the queue because the PR is wrong\"; it is \"the queue is the only context that runs this test, and it is also the heaviest-loaded one\".\n\n## Why the case is load-sensitive by construction\n\n`packages/metadata-fs/test/watch-dot-root.test.ts:118-147` measures a real chokidar watcher against **wall-clock sleeps**:\n\n```ts\nconst sink = collectEvents(repo);\n// Past the 200ms self-write suppression window of the put above.\nawait sleep(400);\n\nawait fs.writeFile(path.join(root, 'view', 'case_grid.json'), …);\n\nawait Promise.race([sink.first, sleep(EVENT_WAIT_MS)]);\nawait sink.stop();\n\nexpect(sink.events).toHaveLength(1);\n```\n\nTwo fixed budgets decide the outcome, and both are wall-clock:\n\n1. `sleep(400)` must clear a 200ms self-write suppression window. Under load the `put` above can land late enough that the window has not closed when the external write happens — the event is then suppressed as a self-write.\n2. `Promise.race([sink.first, sleep(EVENT_WAIT_MS)])` gives up after a fixed budget. A late inotify delivery yields **zero** events.\n\nEither way `toHaveLength(1)` fails on `0`. On an idle machine both budgets are generous; on the queue runner executing the whole monorepo they are not guaranteed. Note the assertion is an exact count, so it cannot absorb either a late or a duplicate delivery.\n\nSibling case 2 in the same file (ignore the repository's own bookkeeping) did **not** fail — consistent with a timing effect on the delivery path rather than a logic defect: case 2 asserts an event does *not* arrive, which a slow runner cannot break.\n\n## What I did NOT establish\n\nBeing honest about the limit of the evidence, because the checklist's \"flaky 实锤\" bar is a **second sighting** and I do not have one:\n\n- I scanned the `merge-queue-triage` comments of the **60 most recently updated PRs**. `watch-dot-root` appears in exactly one — #7333's own. So this is a **first recorded occurrence**, not a confirmed repeat.\n- I did **not** reproduce it locally, and I did not run it under artificial load. The argument above is structural (wall-clock budgets + exact-count assertion + heavier context), not a reproduction.\n- I did not measure how long the queue runner actually took to deliver the event; the job log excerpt in the bot comment is the extraction, not the full log.\n\nSo the honest statement is: **unrelated to the PR it ejected, and timing-shaped**, with one sighting. If it ejects a second unrelated PR, that is the confirmation.\n\n## Age\n\nThe test is **new**: it landed 2026-08-10T04:12:38Z in `684ab2218` — `fix(metadata-fs): scope the watcher's dotfile ignore to paths relative to the root (#7150) (#7208)` — under four hours before this ejection. It is doing real work (#7150 was a genuine defect where the whole watch was inert), so this is about how the case is *timed*, not about whether it should exist.\n\n## Suggested dispositions (for triage to grade and size)\n\n- **A — wait for the event instead of racing a fixed budget.** Poll for `sink.events.length > 0` up to the case timeout rather than `Promise.race` against `EVENT_WAIT_MS`; the case already carries `CASE_TIMEOUT_MS`, so the failure mode becomes \"timed out\" with a real budget rather than \"0 events\" at a fixed one.\n- **B — relax the exact count, keep the identity.** Assert at least one event and that the first `update` event is `case_grid` / `source: 'fs'` / `actor: 'fs'`. Keeps everything the case is actually pinning while surviving a duplicate or late delivery. ⚠️ Weigh against the fact that the exact count may be deliberate — a duplicate event is itself a defect on this path, and if so A is the better half.\n- **C — quarantine.** Cheapest, and the worst: this test guards a defect where the product's shipped layout made the watcher completely inert. Retiring the guard to protect the queue would give back exactly what #7150 bought.\n\n**A** looks right, possibly with B's identity assertions kept alongside an exact-count assertion that is only made once the event has actually arrived.\n\nRefs: #7150 / PR #7208 (the fix and this test), #7000 (watcher arming, the sibling pin the file warns not to repurpose), PR #7333 (the ejected PR), merge-queue-triage workflow (#4859)."
+}

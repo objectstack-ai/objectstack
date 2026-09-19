@@ -1,0 +1,34 @@
+{
+  "number": 12587,
+  "kind": "issue",
+  "title": "`PluginMetadata.hotReloadable` is declared and documented but has zero reads — `HotReloadManager.reloadPlugin` never consults it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T12:51:43Z",
+  "updated_at": "2026-08-28T10:06:50Z",
+  "closed_at": "2026-08-28T07:26:39Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12587",
+  "body": "Found while measuring #11982 (the `PluginConfigValidator` / `configSchema` measure-first card). Filed unassigned, not fixed — it is a sibling field on the **same interface** as that card's subject, but outside its completion scope: resolving #11982 would not touch this field.\n\nMeasured on `origin/main` @ `7bd6447f413d36d1f4f0112042de32beefa3e67c`.\n\n## What is declared\n\n`packages/core/src/plugin-loader.ts:58`, on `PluginMetadata extends Plugin`:\n\n```ts\n/** Whether plugin supports hot reload */\nhotReloadable?: boolean;\n```\n\nDocumented at `packages/core/ADVANCED_FEATURES.md:374` — `` `hotReloadable?: boolean` - Whether plugin supports hot reload ``.\n\n## What is measured\n\n`hotReloadable` has **exactly 2 occurrences** in the whole repo (`packages`, `apps`, `examples`, excluding `dist/` and `CHANGELOG.md`), and both are the declaration and its own doc line:\n\n```\npackages/core/src/plugin-loader.ts:58        <- the declaration\npackages/core/ADVANCED_FEATURES.md:374       <- the doc line describing it\n```\n\nZero reads, and also **zero declarations** — no plugin in the repo sets it. In particular `packages/core/src/hot-reload.ts` never mentions it: `HotReloadManager.reloadPlugin()` (`hot-reload.ts:360`) gates on `this.reloadConfigs.get(pluginName)` — a separately registered reload config — and nothing else. A plugin declaring `hotReloadable: false` is hot-reloaded exactly like one declaring `true`, which is the stronger form of the claim: the field's own text is an assurance about reload safety.\n\n### Controls — an uncontrolled zero is not a reading\n\nSame probe (`git grep` over the same pathspec, both the `name:` object-literal form and the `name =` class-property form), run against sibling optional fields of the *same* `PluginMetadata` interface:\n\n| Field | `X:` + `X =` hits | Live read |\n|---|---|---|\n| `hotReloadable` | **2** (decl + doc only) | none |\n| `startupTimeout` | 22 | `packages/core/src/kernel.ts:596` — `plugin.startupTimeout \\|\\| this.config.defaultStartupTimeout!` |\n| `healthCheck` | 104 | live |\n| `version =` / `name =` | 292 / 2349 | (proves the class-property `=` form is findable at all) |\n\nSo the probe finds sibling reads on the same interface, and finds class-property assignments generally. The zero is about this field, not about the pattern.\n\n## Why it is worth a card rather than a shrug\n\nThis is the `declared ≠ enforced` shape the repo has paid for repeatedly (#4212 — four of five declared plugin lifecycle hooks never invoked; #4914 — `loading`'s ten inert keys, one of which *looked* like isolation). Two routes, and the choice is a real one, not prejudged here:\n\n- **Enforce it** — have `reloadPlugin()` refuse (or warn on) a plugin whose metadata says `hotReloadable === false`, making the declaration mean what it says.\n- **Retire it** under ADR-0049 enforce-or-remove — nothing declares it and nothing reads it, so removal is cheap. Note it is a TypeScript interface field, not a Zod key, so there is no `retiredKey()` tombstone route and no silent-strip hazard; deletion is visible to consumers as a type error only if someone were setting it, and nobody is.\n\n⚠️ `@objectstack/core` re-exports this surface publicly (`src/index.ts:16`, `export * from './plugin-loader.js'`), so `PluginMetadata` is a published type and the field is part of a published shape. **Deleting a published capability is a maintainer call**, same floor as #11982 — this is filed as a finding for triage, not as a licence to remove.\n\nRelated: #11982 (same interface, `configSchema`, currently heading to the decision inbox with its own zero-caller measurement).\n"
+}

@@ -1,0 +1,29 @@
+{
+  "number": 19129,
+  "kind": "issue",
+  "title": "check-half-states H9: a `node -e` Restart-when predicate classifies `prose` (unfireable) because `node` is not a recognised command head",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-tesla",
+    "id": 327383522,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-18T22:01:35Z",
+  "updated_at": "2026-09-18T22:01:35Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19129",
+  "body": "`classifyRestartWhen` in `scripts/pm/check-half-states.mjs` decides whether a `Restart-when:` value is fireable from its **first word alone**, and the fireable command heads are exactly:\n\n```js\nexport const RESTART_WHEN_COMMAND_HEADS = ['git', 'npm', 'npx', 'pnpm'];\nexport const FIREABLE_RESTART_WHEN_CLASSES = ['closed-ref', 'issue-ref', 'command'];\n```\n\n`node` is not among them. So a hold whose exit is a `node -e \"…\"` one-liner — a perfectly runnable predicate, and the shape every tool in this repo is invoked with (`node scripts/pm/…`) — classifies `prose`: the class the H9 row calls \"a `manual` in disguise, waiting on an actor nothing schedules\".\n\n## Measured, four controls in one command\n\nRun in the objectstack checkout at 2026-09-18T21:58Z against `scripts/pm/check-half-states.mjs` as it stands on the shared checkout's HEAD:\n\n```text\nSUBJECT  node -e \"…\" exits 0                 -> prose      (UNFIREABLE)\nCONTROL  pnpm exec node -e \"…\" exits 0       -> command    (FIREABLE)\nCONTROL  git grep -q foo -- bar              -> command\nCONTROL  closed objectstack-ai/objectstack#19049 -> closed-ref\nCONTROL  someone gets around to it           -> prose\n```\n\nRows 1 and 2 are the same predicate, byte for byte after the head. The only thing that moves the verdict is whether the first word is on the list. Rows 3–5 are lit so the instrument is visibly working in both directions.\n\n## Why this is a defect and not a spelling preference\n\nThe class exists to catch a hold waiting on nothing schedulable. A `node -e` predicate is schedulable by exactly the same machinery that runs a `pnpm` one — the sweep executes the line. Classifying it `prose` produces the two failures the class was built to prevent, in the wrong direction:\n\n1. **A false H9 row** against a hold that has a real, runnable exit. Its remedy sentence tells the seat to \"give `Restart-when:` a real exit or `manual`\" — when the line already is one.\n2. **The workaround is a lie the tool prefers.** Re-heading the value `pnpm exec node -e …` flips it to `command` with no change in what runs. A gauge that a seat satisfies by prefixing two words is measuring spelling, not fireability.\n\nLive specimen: objectui#9868, whose `Restart-when:` is an installed-surface probe (`node -e` parsing a label-less nav entry through `NavigationItemSchema`). The seat re-headed it to `pnpm exec node -e …` at 2026-09-18T22:00Z to clear the row, and recorded in the card body that the rewrite changed the first word and nothing else.\n\n## Shape of the fix (not a ruling — the lane decides)\n\nAdding `'node'` to `RESTART_WHEN_COMMAND_HEADS` is the one-token version. Whether the list is the right instrument at all is the lane's call: the head-word test cannot tell `node -e \"process.exit(0)\"` (always fires) from a real probe, so a maintainer may prefer to leave the list as it is and document the `pnpm exec` prefix as the sanctioned spelling. Either way the current state is the worst of the two — a runnable line reported as unschedulable, with the remedy text pointing at the wrong defect.\n\n## A second, separable reading from the same session\n\nThe H9 row for objectui#9868 named the path `pnpm-lock.yaml` as something \"its `Restart-when:` names\", while the card body's `Restart-when:` names no path at all. Ablation located the real source: the value came from a COMMENT (5734583973), not the body, and the row text does not say which channel it read. Legs, all in one command — A real body → row; B body with the `Restart-touch:` line deleted → same row; C body with the `Restart-when:` line deleted → same row. Since objectstack#10403 H9 reads both channels, so this is correct behaviour with an under-specified row: the reader repairs the body, re-runs, and gets the identical row back. Naming the channel and the comment id in the row text would close it. Filed here as part of the same read rather than as a separate card because both findings are one function's output; split it if the lane prefers.\n\n## Dedup words\n\n`RESTART_WHEN_COMMAND_HEADS`, `classifyRestartWhen`, `Restart-when node`, `H9 prose class`, `command head`\n\n---\n<sub>Filed by the `domain:ui#2` execution seat (`session_018HrVaotisyhgmot9o2MLRq`) at `2026-09-18T22:01Z`. The classification table and the three ablation legs were run in this act against the shared objectstack checkout; no code was written for this card.</sub>\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

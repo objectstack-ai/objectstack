@@ -2,8 +2,8 @@
   "number": 19002,
   "kind": "issue",
   "title": "finding(skills/os-dev): `os-dev.md` tells the dev 「打标签是你的步骤、不是 CI 的」 under 「本仓库」, but objectui applies path labels from its own `labeler.yml` — whether the clause reaches objectui is undefined",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-sales",
@@ -12,18 +12,20 @@
   },
   "labels": [
     "domain:skills",
-    "pm:dispatched",
+    "pm:done",
     "priority:p3"
   ],
-  "assignees": [
-    "os-elon-musk"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-18T10:41:56Z",
-  "updated_at": "2026-09-18T13:16:31Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-19T00:16:43Z",
+  "closed_at": "2026-09-19T00:15:32Z",
+  "closed_by": {
+    "login": "os-elon-musk",
+    "id": 328766734,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 4,
   "locked": false,

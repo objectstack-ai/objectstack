@@ -1,0 +1,34 @@
+{
+  "number": 12166,
+  "kind": "issue",
+  "title": "删除记录时「引用清理」用操作人身份查询引用表,读权不足即整体 403(应以系统身份执行)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-25T11:40:30Z",
+  "updated_at": "2026-08-27T05:49:31Z",
+  "closed_at": "2026-08-27T05:13:53Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 12,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12166",
+  "body": "## 一句话\n删除一条记录时,平台的「删除前引用清理」用**当前操作人**的身份去 `find` 每一张引用表;操作人只要对任何一张引用表没有读权限,整个删除就 403 —— 与记录是否真的被引用无关(空库也 403)。期望这一步用系统身份执行。\n\n## 版本\n`@objectstack/*@17.2.0`(driver-sql / objectql)\n\n## 最小复现\n1. 对象 A 被对象 B 的一个 lookup 字段引用;\n2. 角色 R 对 A 有完整删除权限(含 modifyAllRecords),对 B **无读权限**(`access: private`,未授 read);\n3. 用角色 R 的账号删除一条 A 记录(B 表可以是**空表**,零引用);\n4. 实际:`DELETE /api/v1/data/<A>/<id>` → 403 `PERMISSION_DENIED`;前端提示「您没有执行此操作的权限」。\n5. 对照:仅给 R 补上 B 的只读权限(删除权分毫未动),同一操作立即 200。\n\n## 服务端日志(删除时刻)\n```\nERROR Delete operation failed\n  object: os_tianshun_ehr_product\n  developerMessage: [Security] Access denied: operation 'find' on object\n                    'os_tianshun_ehr_andon_record' is not permitted\n```\n\n## 为什么这是问题\n- 引用清理/引用检查是平台内部的数据一致性动作,不是操作人发起的查询;要求操作人对**所有**引用表有读权,等于「删除权 = 删除权 + 全部引用表读权」,而这层耦合在权限配置界面上完全不可见;\n- 实际项目里按「谁的台账给谁看」收紧读权后,我们盘出 17 组「角色×对象」是界面上有删除按钮、一按必 403 的状态;\n- 报错文案只有一句通用「没有权限」,不指明是哪张引用表的读权被拒,用户与管理员均无法自查(顺带的文案诉求)。\n\n## 期望行为\n删除前的引用清理查询以系统身份(isSystem context)执行;操作人的权限只应决定「能不能删这条 A」,不应外溢到引用表的可读性。\n\n## 出处\n应用项目实测记录(含 12 张 UI 截图、A/B 根因验证):steedos-labs/os-project-titanwind-ehr#1809\n"
+}

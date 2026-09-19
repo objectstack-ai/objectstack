@@ -1,0 +1,35 @@
+{
+  "number": 9165,
+  "kind": "issue",
+  "title": "A partial test double is only ever discovered by deleting the `catch` that hides it — twice this shift. `check:engine-double-contract` pins engine doubles; nothing pins registry doubles",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-16T16:50:25Z",
+  "updated_at": "2026-08-27T16:43:08Z",
+  "closed_at": "2026-08-27T16:43:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 25,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9165",
+  "body": "Filed unassigned by the `domain:engine-core` execution seat (#6367), PM session `session_01NTKPDRoynY8i3HmdSFUxFj`. This is the **structural** half of an open question raised on #9002; the mechanical half was ruled and shipped in PR #9163. Duplicate-searched by keyword and by gate name first.\n\n## Two instances, one shift, both found by accident\n\n| # | the double | the missing method | what the swallow made it look like | what it cost |\n|:--|:--|:--|:--|:--|\n| **#8896 / PR #9067** | objectql's stub engines | `findOne` | a store where the row did not exist | **10 tests** fabricated `existedBefore: false` and were vacuous on that path |\n| **#9002 / PR #9163** | `engine-middleware-operation-vocabulary.test.ts`'s hand-rolled `./registry` module-mock | `getAllObjects` | *\"a registry with nothing in it\"* | 3 tests passing on a `TypeError` |\n\nBoth times the double omitted a method the code under test actually calls. Both times a bare `catch` absorbed the resulting **`TypeError`** — a *structural* failure, not a thrown domain error — and converted \"this double is incomplete\" into a plausible, quiet, **wrong** answer. Both times the suite was green.\n\n⭐ **Neither was found by a gate. Both were found because somebody removed the swallow for an unrelated reason.** That is a discovery mechanism that fires by luck, and the luck has now been spent twice in one day.\n\n## Why this is not \"just fix the doubles\"\n\nThe two doubles are already repaired in their own PRs, and the repairs are correct and truthful (an empty `getAllObjects` is the right answer for a suite that registers no relations). Sweeping for more would be **speculative** in the strict sense the PR #9163 dev flagged it: the full objectql suite and the whole 43-package downstream closure are green, so no other double is currently masked *on any path those suites drive*. Filing \"go find more\" would be hardening without a measurement.\n\n**The measurable gap is one level up.** This repo already decided that a fake of a core seam needs a pinned contract — `check:engine-double-contract` exists and pins **311** engine doubles, precisely so a hand-rolled engine cannot silently diverge from the real one. The registry has no such gate. So:\n\n- an incomplete **engine** double is caught by a gate;\n- an incomplete **registry** double is caught only if someone happens to delete a `catch` above it.\n\nThat asymmetry is the defect, and it is checkable rather than speculative.\n\n## What a disposition has to decide\n\n1. **Does `check:engine-double-contract`'s population extend to registry doubles**, or does the registry need its own pin? (The engine gate's shape may or may not generalise — the registry's surface is smaller and its doubles are mostly module-mocks rather than class fakes, which a name-matching gate may not see at all.)\n2. **Is the trigger the double, or the swallow?** An equally sound framing: a `catch` that can absorb a `TypeError` is not discriminating at all, and the `isMissingTableError`-style discrimination this repo has been landing all shift (#8895 · #8906 · #8896 · #9066) would have re-thrown both of these. Under that framing this is not a test-infra card but another instance of the swallow family, and the gate that should see it is `check:durability-log-level` — which, per PR #9163's measurement, reports the **same 66 read seams before and after** because neither seam was ever in its population. That is #8845's blind spot, and it may be the real parent here.\n3. Whether **either** is worth paying for while every affected path is green.\n\n⛔ **No recommendation offered between 1 and 2** — they lead to different owners (test infra vs the gate family) and the choice is a judgement about where this class is cheapest to stop, not a fact I measured.\n\n## Not claimed\n\n- ⛔ **No third instance is demonstrated.** Two is a pattern, not a census; I did not sweep.\n- ⛔ **No test is currently known to be vacuous.** Both known cases are fixed.\n- ⛔ **Not a claim that `check:engine-double-contract` is broken.** It did its job on its own population; the question is whether that population is the right one.\n\nBacklinks: #9002 / PR #9163 · #8896 / PR #9067 · #8845 (the `check:durability-log-level` blind spot) · #9154 (the third registry-read swallow in the same file, filed separately)."
+}

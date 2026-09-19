@@ -1,0 +1,35 @@
+{
+  "number": 12473,
+  "kind": "issue",
+  "title": "[decision] Does the v5.0 `project` → `environment` rename extend to the API surface — `client.projects.*` and the `res.project` / `res.projects` response fields?",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-26T05:00:32Z",
+  "updated_at": "2026-08-28T07:49:10Z",
+  "closed_at": "2026-08-28T07:49:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12473",
+  "body": "Filed unassigned and **unlabelled** by the `domain:cli` seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`. ⛔ Not graded, not routed — and ⛔ **not a card an execution seat can answer**: it is a breaking public-API decision.\n\n⚠️ **This seat owed this card at #12153's acceptance and did not file it.** Triage flagged the omission on #12432 (*\"expected from the cli seat at #12153 acceptance per the cross-repo follow-up rule\"*). Filed now, late, and recorded as late so the gap is visible rather than tidied away.\n\n## What is settled, and what is not\n\n**Settled.** ADR-0006 renamed `project` → `environment` at v5.0 **with no aliases**, and AGENTS.md states *\"Project now only means the npm/monorepo sense.\"* Three PRs have carried that through the CLI:\n\n- **#10967 / PR #11227** — the command name (`os projects …` → `os environments …`)\n- **#12153 / PR #12429** — the entity noun in every string `os environments` prints (25 sites)\n- **#12432** — the comment axis (14 docblock sites), in flight\n\n**Not settled, and deliberately fenced out of all three:**\n\n| surface | where |\n|---|---|\n| `client.projects.*` | `@objectstack/client` SDK method names |\n| `res.project` / `res.projects` | control-plane response fields |\n| `packages/client/src/index.ts:1814` | `Provision a new project` — the SDK JSDoc that travels with the above |\n\nEach of the three cards named these as out of scope for the same reason: **they are API surface in other packages, not CLI wording.**\n\n## Why this needs a human, ⛔ not a seat\n\nRenaming any of them is a **breaking change to a published contract** with a migration story:\n\n- `client.projects.*` is a published SDK method namespace — renaming breaks every caller, and an alias is exactly what ADR-0006 says the rename does not get.\n- `res.project` / `res.projects` are **control-plane wire fields**. The producer is the cloud control plane, not this repo, so this is also a **cross-repo** coordination question (`objectstack-ai/cloud`), not a local rename.\n\n⇒ Squarely on the maintainer floor: **protocol / public-contract change**, plus a **cross-repo producer**. ⛔ No execution seat should decide it, and ⛔ no code PR should quietly start it.\n\n## The options, as this seat understands them\n\n1. **Rename with a breaking major** — the SDK namespace and the wire fields both move to `environments` / `environment`. Consistent with ADR-0006's no-alias rule; costs a coordinated cloud-side change and a migration entry.\n2. **Rename the SDK only, leave the wire fields** — the CLI already maps between them (`res?.project` feeding `os environments show`). Cheaper, but leaves the contract half-renamed and the mapping permanent.\n3. **Leave both, and record the boundary** — declare that the rename was scoped to the CLI's user-facing vocabulary and that `project` survives deliberately on the API surface. Costs nothing today; requires the boundary to be written down where the next reader of ADR-0006 will find it, or this question returns every few months.\n\n⛔ **This seat states no recommendation** — with a cross-repo producer and a published namespace in play, a recommendation from the lane that keeps tripping over the drift is not worth much. What the seat can say is that option 3 is not free: the cost is a documented boundary, and its absence is what has produced three cards in three days.\n\n## Why it is worth a card rather than leaving it implicit\n\nThe drift is **generative**: #10967, #12153, #12432 and #12464 are four cards in the same week, each fixing one axis of one rename, each correctly fencing out the API surface, and none able to close the question. Until it is answered, every future reader of a `project`-spelled identifier next to an `environment`-spelled one files another.\n\n## Refs\n\n- ADR-0006 — the v5.0 rename, no aliases\n- #10967 / PR #11227 · #12153 / PR #12429 · #12432 — the three axes already carried\n- #12464 — `doctor.ts`'s copy of the same sentence, filed this round"
+}

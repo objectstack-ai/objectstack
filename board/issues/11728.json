@@ -1,0 +1,35 @@
+{
+  "number": 11728,
+  "kind": "issue",
+  "title": "Pin the boot consequence of a report-only drift entry through the real artifact boot gate (follow-up to #11535)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T14:11:39Z",
+  "updated_at": "2026-08-27T03:22:01Z",
+  "closed_at": "2026-08-27T03:22:01Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11728",
+  "body": "Filed unassigned by the `domain:engine` seat (session `session_01VK8rFDtg8eREaxBGX99Csn`) as a **cross-lane follow-up**: the work lands in `packages/cli`, which is not this seat's lane, so it goes to the queue rather than into the originating PR. ⛔ No `domain:*` set — this seat does not produce that label; triage to route (expected `domain:cli`).\n\n## Provenance\n\nRaised by the #11535 dev in its report and deliberately **not** added, because `packages/cli` was outside that dispatch's declared file surface. Flagged for the PM to dispose of rather than silently skipped; this card is that disposal. Landed alongside PR #11720 (`Part of #11535`).\n\n## One-line executable criterion\n\nA drift entry whose `category` is `needs_confirm` (specifically the new `manual_column_type_change` op) must **not** refuse an artifact-pinned boot — asserted by feeding a real entry through `runArtifactBootMigrationGate` itself, not by asserting the category string.\n\n## Why this pin is worth having\n\n#11535's detection half rests entirely on one measured fact, and today that fact is pinned only *structurally* (the emitted category is asserted, with the measurement written into a comment). The fact is:\n\n- `severity` is read by **no** boot gate — the ordinary boot path warns on every entry regardless of it.\n- `category === 'destructive'` **is** read, by `runArtifactBootMigrationGate` (`packages/cli/src/utils/artifact-boot-migration.ts:137`) at `kernel:ready`, **before the socket opens**, and it **refuses the boot**.\n- Measured through the real gate function: `destructive` → `ok=false`; `needs_confirm` → `ok=true`; `safe` → `ok=true`.\n\nThat asymmetry is why #11535 could ship a *loud* finding without bricking the boot of every already-running deployment it exists to help — those deployments are, by the card's own account, all currently serving with the stale column. If a later change moved this op's category to `destructive`, or made the gate read `severity` as well, **every affected deployment would stop booting**, and nothing in `packages/drivers/driver-sql` can see that happen.\n\nA pin in `driver-sql` cannot cover it: the gate lives in `packages/cli` and the driver package must not acquire a dependency on it.\n\n## Suggested shape (not prescriptive)\n\nNext to `packages/cli/src/utils/artifact-boot-migration.test.ts`, feed a `manual_column_type_change` entry — category `needs_confirm`, severity `error` — through `runArtifactBootMigrationGate` and assert `ok === true`. ⚠️ Worth pairing it with a `destructive` control that asserts `ok === false`, so the test proves the gate can still refuse; without that control the assertion passes for a gate that has stopped refusing anything, which is the false green this whole family keeps producing.\n\n## Related\n\n- **#11535** — the card this follows (its auto-migration half is a live maintainer decision, **#11700**)\n- **#11721** — the drift category vocabulary has no report-only state, so this op borrows `needs_confirm` and is declined by the reconciler\n- `packages/drivers/driver-sql/src/schema-drift.ts` — where the op and its category are emitted"
+}

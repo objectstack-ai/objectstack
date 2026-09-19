@@ -1,0 +1,32 @@
+{
+  "number": 11459,
+  "kind": "issue",
+  "title": "[finding] object-level `userActions` guidance covers sort/search/filter/editInline but not the three view keys adopted at #11195 — group/hideFields/rowColor get a bare rejection without the wrong-layer pointer",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-23T20:33:31Z",
+  "updated_at": "2026-08-27T04:28:27Z",
+  "closed_at": "2026-08-27T04:28:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11459",
+  "body": "Blocked-by: #11195 (meaningful only once the three keys exist on the view block; that card's PR #11458 is held for contract review — neither is closed by this issue).\n\n## Observation\n\n`packages/spec/src/data/object.zod.ts` — the object-level `userActions` strictObject carries curated `guidance` entries for the high-traffic VIEW-vocabulary keys an author writes on the wrong layer: `sort`, `search`, `filter`, `editInline` each answer with a wrong-layer pointer (\"…is a VIEW `userActions` key…\"). Once #11195 lands, the view vocabulary gains `group`, `hideFields`, `rowColor` — three keys with the same wrong-layer trap (an author who learned them on the view writes them on the object) — but the object block has no guidance entries for them, so they get only the generic unknown-key rejection with an edit-distance suggestion (which, over the object block's `create`/`import`/`edit`/`delete`/`exportCsv` shape, has nothing useful to offer).\n\nMeasured on PR #11458's built dist: all three are refused **by name** on the object block (loud, correct), just without the curated pointer the four existing entries provide.\n\n## Remedy (small, mechanical, mirrors the existing convention)\n\nAdd three `guidance` entries to the object block's `userActions` options in `object.zod.ts`, following the existing `sort`/`search`/`filter` wording. Note the alias-integrity audit (#5013) will judge the new entries automatically (each key must be one the shape rejects — holds for all three).\n\nDeliberately NOT folded into #11195's PR: it is a behavioural extension (error-message curation on a surface outside that card's pins), flagged in that card's report instead.\n\nFound while implementing #11195 (session `session_01T9cDbY2NBiVJWYx3BpWfH2`)."
+}

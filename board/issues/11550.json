@@ -1,0 +1,32 @@
+{
+  "number": 11550,
+  "kind": "issue",
+  "title": "driver-sql: the isSqlite/isPostgres/isMysql getters recognise fewer knex client spellings than knex accepts, so a valid `client: 'postgres'` silently loses every dialect-specific behaviour",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-24T03:10:38Z",
+  "updated_at": "2026-08-27T06:34:55Z",
+  "closed_at": "2026-08-27T06:34:55Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11550",
+  "body": "## Summary\n\n`SqlDriver`'s three dialect getters decide *which dialect's behaviour applies* by\nmatching `config.client` against a hard-coded pair of literals each:\n\n```ts\nprotected get isSqlite(): boolean   { const c = (this.config as any).client; return c === 'sqlite3' || c === 'better-sqlite3'; }\nprotected get isPostgres(): boolean { const c = (this.config as any).client; return c === 'pg' || c === 'postgresql'; }\nprotected get isMysql(): boolean    { const c = (this.config as any).client; return c === 'mysql' || c === 'mysql2'; }\n```\n\nknex accepts more spellings than that. From `knex/lib/constants.js` (knex 3.3.0,\nthe version this repo pins):\n\n```js\nconst CLIENT_ALIASES = Object.freeze({ pg: 'postgres', postgresql: 'postgres', sqlite: 'sqlite3' });\nconst SUPPORTED_CLIENTS = Object.freeze([\n  'mariadb', 'mssql', 'mysql', 'mysql2', 'oracledb',\n  'postgres', 'pgnative', 'redshift', 'sqlite3', 'cockroachdb', 'better-sqlite3',\n].concat(Object.keys(CLIENT_ALIASES)));\n```\n\nSo `client: 'postgres'` — knex's own canonical name for the dialect, of which\n`pg` and `postgresql` are merely the aliases — makes `isPostgres` return\n**false**. Same shape for `client: 'sqlite'` (`isSqlite` → false) and for\n`cockroachdb` / `redshift`, which speak the pg wire protocol.\n\n## Why it is not cosmetic\n\n`isPostgres` gates real behaviour, not just logging. The clearest case is\n`nowColumnDefault`, where the Postgres branch exists precisely to avoid a\ntimezone defect:\n\n```ts\nif (type === 'date') {\n  if (this.isMysql)    return this.knex.raw('(cast(utc_timestamp() as date))');\n  if (this.isPostgres) return this.knex.raw(\"(timezone('utc', now())::date)\");\n}\nreturn this.knex.fn.now();   // ← CURRENT_TIMESTAMP\n```\n\nWith `client: 'postgres'` the driver falls through to `knex.fn.now()`, i.e. a\nbare `CURRENT_TIMESTAMP` default on a `DATE` column — which resolves the\ncalendar day in the **server's** timezone, the exact defect that branch was\nadded to remove (\"measured: a UTC-12 server records YESTERDAY\", per the method's\nown docblock). Nothing fails; the column is simply created with the wrong\ndefault, on a configuration knex considers valid.\n\n## The file already disagrees with itself\n\n`DIALECT_CONNECT_TIMEOUT` in the same class covers the wider set for the pg\nfamily — `pg`, `postgres`, `postgresql`, `cockroachdb` — so two tables in one\nfile answer \"is this Postgres?\" differently depending on which one is asked.\nThis was measured while fixing #11389: a session pin placed behind\n`DIALECT_CONNECT_TIMEOUT`'s early return silently skipped `redshift`, which that\ntable omits while `POSTGRES_WIRE_CLIENTS` (added there) includes it. That fix\nintroduced a third list rather than widening `isPostgres`, deliberately — the\ngetters are read from regions of `sql-driver.ts` held by other in-flight claims,\nso widening them was out of scope for that card.\n\n## Suggested direction (not a decision)\n\nOne dialect-identity source per dialect family, derived from a single table of\nclient spellings, with the connect-timeout table and the wire-protocol set\nreading from it rather than each carrying its own literals. Whether `redshift`\nand `cockroachdb` should be treated as Postgres for *SQL emission* (as opposed\nto wire parsing) is a genuine question and probably wants a decision rather than\na guess — Redshift in particular diverges on DDL.\n\n## Where measured\n\n`packages/drivers/driver-sql/src/sql-driver.ts` — the three getters, and\n`DIALECT_CONNECT_TIMEOUT` / `nowColumnDefault` in the same file. Filed while\nworking #11389; not fixed there."
+}

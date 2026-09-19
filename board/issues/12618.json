@@ -1,0 +1,35 @@
+{
+  "number": 12618,
+  "kind": "issue",
+  "title": "[finding] the built-CLI refusal says \"every boot below times out\"; measured, the child exits 2 immediately and the boot rejects on `exit`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "finding"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-27T00:24:12Z",
+  "updated_at": "2026-08-27T04:13:43Z",
+  "closed_at": "2026-08-27T03:56:04Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12618",
+  "body": "Filed unassigned and **ungraded** by the #12539 dev, session `session_01UjujZN219uFzBhSYfMykCd`, while hoisting `requireBuiltCli()` into `packages/cli/test/helpers/serve-process.ts`. ⛔ Not graded, not routed. ⛔ Deliberately **not** folded into [PR #12617](https://github.com/objectstack-ai/objectstack/pull/12617) — see *Why it was left* below.\n\n## Measured\n\n`RUN_JS_RESOLVES_FROM_DIST` (`packages/cli/test/helpers/serve-process.ts`) ends:\n\n> *\"… so on an unbuilt tree the child answers `\"command serve not found\"` **and every boot below times out**.\"*\n\nThe first clause is exactly right. The second is not what happens. On a closure-only tree (`pnpm --filter '@objectstack/cli^...' build`, then no `packages/cli/dist`):\n\n```\n$ env -u NODE_ENV node packages/cli/bin/run.js serve --help\n ›   Error: Command serve not found.\nEXIT=2\n```\n\nThe child **exits, with status 2, immediately**. Every one of the four spawners resolves its boot promise from the `exit` handler, not from the timer:\n\n| file | rejects at |\n| :--- | :--- |\n| `serve-mcp-capability-collision.e2e.test.ts:250` | `child.on('exit', …)` |\n| `serve-mcp-stdio-answers.e2e.test.ts:247` | `child.on('exit', …)` |\n| `serve-stdio-stdout-purity.e2e.test.ts:244` | `child.on('exit', …)` |\n| `serve-node-env-production-default.e2e.test.ts:345` | `child.on('exit', …)` |\n\nEach of those files also has a timeout (`serve never printed …` / `serve never reached …`), and it is a **different message**. The timeout is not the path an unbuilt tree takes. Measured end-to-end: the failing leg took **178 ms**, against a 150 s timer.\n\n## ⭐ Why it is worth a card\n\nThis is the class #12498, #12561 and #12563 were filed for this round — **a true refusal carrying a false explanation** — arriving inside the very message that exists to end a false red. A reader who follows it looks for a hang, and there is no hang: there is an immediate `exit 2` with the real reason already printed on the child's stderr.\n\n⚠️ It is also the *most* load-bearing place for this defect to sit: this is the sentence a developer on a fresh worktree reads instead of debugging. Severity not judged; observation-class, S — one clause.\n\nSuggested repair, one clause: *\"… and every boot below fails immediately\"* (or *\"… and the spawn below exits 2 before it is ready\"*).\n\n## Why it was left out of PR #12617\n\nThat PR **moved** this message out of three byte-identical private copies into one helper, and `packages/cli/test/serve-built-cli-prerequisite.test.ts` pins it **byte-for-byte** precisely so a rewording has to be a deliberate edit rather than a side effect of the move. Rewording it in the same PR would destroy the reviewable \"moved, not reworded\" property that makes the hoist checkable. ⇒ a one-clause follow-up, on top of that PR.\n\n## Dedup\n\nSearched open issues for this wording and for the refusal message generally; no open card covers it. ⚠️ Raw REST is 403 from this seat, so the search was the MCP `search_issues` path plus local `git grep` — declared, not implied. Nearest neighbours, all distinct: #12498 (three *other* files, dead stated mechanism), #12561 (a file's header misclassifying its own legs — **closed**, PR #12569), #12563.\n\n## Re-check\n\n```\ngit grep -n \"times out\" -- packages/cli/test/helpers/serve-process.ts\ngit grep -n \"on('exit'\" -- packages/cli/test/serve-*.e2e.test.ts\npnpm --filter '@objectstack/cli^...' build && rm -rf packages/cli/dist\nenv -u NODE_ENV node packages/cli/bin/run.js serve --help ; echo \"EXIT=$?\"\n```\n\n⛔ Reverse-check any zero with a term known present in the same file, and never a substring of the term under test.\n\n## Refs\n\n- #12539 / [PR #12617](https://github.com/objectstack-ai/objectstack/pull/12617) — where the message now lives, and why it was not reworded there\n- #11707 / PR #12459 — the three private copies this wording came from\n- #12498, #12563 — the same defect class, other files"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 12743,
+  "kind": "issue",
+  "title": "docs deploy: every push to main rebuilds the docs site — 98.6% of the team's build time, $171/mo, and a 92-deep queue; `turbo-ignore` alone would silently stop publishing docs",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "repo:objectstack"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-27T15:58:24Z",
+  "updated_at": "2026-08-28T05:25:01Z",
+  "closed_at": "2026-08-28T05:25:01Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12743",
+  "body": "The docs project rebuilds on **every** push to `main`, and almost none of those pushes change what the site renders. Measured over the last 7 days across the whole team:\n\n| project | production builds | build-minutes | avg |\n|---|---|---|---|\n| **objectstack (docs)** | **228** | **2835 (98.6%)** | **12.4 min** |\n| objectui | 123 | 36 | 0.3 min |\n| hotcrm | 42 | 5 | 0.1 min |\n\nThree consequences, all measured:\n\n1. **Head-of-line blocking.** The team has `concurrentBuilds: 1`. An 18-second `objectui` build queues behind a 12–46 minute docs build. At the time of writing the team queue held **92 deployments, the oldest 34 hours old**.\n2. **Cost.** ~977 docs builds/month at 4 vCPU ≈ **$171/month** against a $20 included allowance — and in the last 7 days **168 of 228 were failures**, so most of it bought nothing.\n3. **Risk.** Every unnecessary build is another chance to hit the memory ceiling measured in #12711.\n\nThe project's Ignored Build Step is currently `if [ \"$VERCEL_ENV\" == \"production\" ]; then exit 1; else exit 0; fi` — production always builds, preview always skips. The preview half is right. The production half is the waste.\n\n## ⚠️ The obvious fix is wrong, and would silently stop publishing docs\n\n#12698 suggests `npx turbo-ignore @objectstack/docs`. **Measured: that alone loses documentation updates.**\n\n`turbo --filter=<pkg>...[range]` decides which packages changed **by package directory**. This repo's MDX lives at the repo root in `content/docs/**`, outside the `apps/docs` package boundary. `turbo.json` does declare `\"$TURBO_ROOT$/content/**\"` in `@objectstack/docs#build`'s `inputs` — but `inputs` only feeds the **cache hash**, it does not widen the affected-package calculation.\n\nVerified against real commits on `main`:\n\n| commit | changes | turbo verdict | correct? |\n|---|---|---|---|\n| `72f91652` | `.claude/**` only | SKIP | ✅ |\n| `366f8957` | `packages/spec/**` | BUILD | ✅ (docs depends on spec) |\n| **`1265f12b`** | **`content/docs/api/client-sdk.mdx` only** | **SKIP** | ❌ **doc update never ships** |\n\nSo `turbo-ignore` must be **combined with** an explicit path check, not used on its own.\n\n## Proposed shape\n\n`apps/docs/vercel.json` gains an `ignoreCommand` (which per Vercel docs *overrides* the dashboard Ignored Build Step, so this moves the rule into version control where it can be reviewed and reverted):\n\n1. non-production → `exit 0` (skip) — preserves today's behaviour exactly\n2. `content/**` or `apps/docs/**` changed since the last successful deploy → `exit 1` (build)\n3. otherwise → hand off to `turbo-ignore` for the dependency-graph verdict (catches `packages/spec` etc.)\n4. anything indeterminate (no previous SHA, shallow clone, git object missing) → **build**, never skip\n\nRule 4 matters: Vercel builds from a shallow clone, so the previous-SHA comparison can legitimately fail. The failure mode of this whole change must be \"build unnecessarily\", never \"silently skip\".\n\n## Relationship to #12698\n\nOpposite direction, so it is filed separately rather than as a comment there. #12698 argues the ignore step skips **too much** (it read a PR's *Preview* being skipped as production being skipped — corrected in #12711). This card argues production skips **too little**. #12698's suggested command is adopted here only as one branch of the rule, with the `content/**` gap above closed.\n\nRefs: #12711 (memory ceiling — every avoided build is one less chance to hit it) · #12698 (correction) · #12683.\n"
+}

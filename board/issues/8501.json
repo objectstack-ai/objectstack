@@ -1,0 +1,32 @@
+{
+  "number": 8501,
+  "kind": "issue",
+  "title": "A licensed `max_nodes` cap still cannot be enforced by any replica: the cluster has no membership view and no slot claim, so a count-carrying gate verdict stays advisory",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-13T16:16:07Z",
+  "updated_at": "2026-08-27T05:32:05Z",
+  "closed_at": "2026-08-27T05:32:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8501",
+  "body": "Filed **unassigned, observation-class** from the `domain:services` dev seat while implementing #8367 (session `session_01ARidKDYSCD56LaygrvDPnk`). Not triaged or routed by me.\n\nBlocked-by: #8367 (the seam widening this would consume; it is necessary but not sufficient on its own)\n\n## Fact (measured on `origin/main` @ `ff1e9b6a9`)\n\nThe maintainer ruled 2026-08-13 (recorded on `objectstack-ai/cloud#1275`) that a licensed `max_nodes` overflow must **refuse the excess replicas, run up to the paid limit, and warn loudly** — explicitly not a whole-cluster degrade. #8367 makes that verdict *expressible* at the `MultiNodeGate` seam. It does **not** make it *enforceable*, and no consumer-side change can, because of three measured properties of the surrounding mechanism:\n\n1. **The gate is consulted once per process, at boot, by each replica independently.** Sole call site: `packages/cli/src/commands/serve.ts:1234-1247`, inside the `OS_CLUSTER_DRIVER` branch of `os serve`.\n2. **There is no cluster membership view.** `nodeId` is generated randomly per process — `generateNodeId()` at `packages/services/service-cluster/src/cluster.ts:123`, used via `parsed.nodeId ?? generateNodeId()` at `cluster.ts:60`. Nothing registers a node, tracks liveness, or counts live members.\n3. **There is no ordinal.** The only count available at the call site is `OS_CLUSTER_REPLICAS` (`packages/services/service-cluster/src/split-brain-guard.ts:33-34,47-51`) — an operator-*declared* desired count, **identical in every replica**, not a live membership count.\n\n## Why that leaves the cap advisory\n\nWith a cap of 3 and 5 replicas booting, every replica calls the gate with the same input and computes the **same** verdict (\"3 admitted\"). None of them can determine whether *it* is one of the admitted 3 or one of the excess 2. The only outcomes reachable from that verdict locally are:\n\n- every replica joins — nothing is actually refused, the cap remains advisory (status quo), or\n- every replica refuses — whole-cluster degrade, precisely the outcome the ruling rejects.\n\nSo \"run N, refuse N+1\" cannot be produced by any per-replica decision over a count alone.\n\n## What would make it binding\n\nAn **atomic slot claim** against the shared cluster primitives this package already ships (`ILock` / `ICounter` / `IKV` on a remote driver): each booting replica claims a slot after connecting the driver; the claim that exceeds the cap fails, and *that* replica downgrades itself to single-node and warns. Needs, at minimum:\n\n- claim ordering that is atomic across processes (the remote driver already provides this);\n- slot release on graceful shutdown, plus TTL expiry so a crashed replica does not leak its seat permanently;\n- a decision on what a replica does when the driver is reachable but the claim is refused (downgrade to in-memory vs. refuse to serve) — note the existing seam's posture is \"multi-node is an add-on, never brick\";\n- interaction with the split-brain guard, which throws when multi-node is declared on an in-process driver.\n\n## Why this is filed rather than fixed\n\n#8367's dispatch scoped the file surface to `packages/services/service-cluster/src` plus tests and a changeset, and the shape above is a new runtime mechanism with its own design decisions (TTL semantics, refusal posture), not a signature change. PR for #8367 documents the advisory limitation in the module doc and changeset rather than implying enforcement.\n\nRefs: #8367 (seam widening), `objectstack-ai/cloud#1275` (the ruling), `objectstack-ai/cloud#1291` (consumer half), cloud `docs/adr/` ADR-0022 D4 (multi-node gating)."
+}

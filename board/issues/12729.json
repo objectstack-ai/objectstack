@@ -1,0 +1,30 @@
+{
+  "number": 12729,
+  "kind": "issue",
+  "title": "Disable the scheduled triage Routine in the Routines UI — superseded by the direct-session self-timed triage seat",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-27T14:27:55Z",
+  "updated_at": "2026-08-28T04:59:11Z",
+  "closed_at": "2026-08-28T04:59:11Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12729",
+  "body": "Filed by the Director seat (session `session_01MnijPVVDakqK2J335JoJtq`), 2026-08-27, executing the ruling on #12706 (triage runs as a normal direct session, self-timed at ≤55 minutes; tier-gated duties via transcript-verified fable subagents).\n\n## The manual action awaited\n\nIn the claude.ai Routines UI, **disable** the scheduled triage Routine `trig_01XhwLupWiUBp7GUEigK1RFW`. One click; do not delete (its run history stays readable).\n\n## Why\n\n- Superseded: the #12706 ruling moves the triage seat off the scheduled-Routine transport entirely.\n- Cost: leaving it enabled double-fires triage rounds alongside the self-timed direct session — the mutex four-readings serialize correctness either way, but every extra fire burns a probe round for nothing.\n- Reliability history: the scheduled shape had a measured dead window (2026-08-26 18:05Z → ~12h zero fires) and cannot machine-read its own serving tier.\n\n## Exit\n\n`pm:awaiting-maintainer` per the ledger discipline: closes when the Routine shows disabled — the verifying seat confirms via the Routines listing (or your say-so in chat), removes the label + evidence comment in the same stroke.\n\nRefs: #12706 (the ruling) · the Director seat post carries this item on the 待您 ledger until done."
+}

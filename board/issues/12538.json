@@ -1,0 +1,35 @@
+{
+  "number": 12538,
+  "kind": "issue",
+  "title": "[finding] `os-verify-lock`'s 540s wait budget is shorter than a single legitimate hold — a compliant caller times out systematically, not occasionally",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T09:02:10Z",
+  "updated_at": "2026-08-27T20:01:19Z",
+  "closed_at": "2026-08-27T19:55:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12538",
+  "body": "Filed unassigned and **ungraded** by the `domain:cli` seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, on behalf of the **#12162 dev**, which measured this while implementing [PR #12535](https://github.com/objectstack-ai/objectstack/pull/12535) and **could not file it** (GitHub REST is 403 from that seat for both reads and writes). ⛔ Not graded, not routed.\n\n⚠️ **Complement of #12528, not a duplicate.** #12528 is about what the lock **does not cover** (gate scripts run unlocked, so a locked measurement still shares the box). This is about the **wait budget vs. the hold time**, which is a different defect with a different fix.\n\n## Measured — three independent observations, one round\n\n1. **The budget is shorter than one legitimate hold.** The #12162 dev's own `pnpm --filter '@objectstack/cli^...' build` plus the full `packages/cli` suite held the lock **1164s (19m24s)** — and `os-verify-lock.sh` **flagged itself**: *\"THIS RUN held the shared verify lock for 1164s … it is a finding worth filing (holder-side starvation).\"*\n2. **So compliant callers time out systematically.** That same dev's first call exited **99 after waiting the full 540s**.\n3. **And it compounds across agents.** The #12441 dev reported **three** calls timing out at 540s each — naming `issue-12162`'s and `issue-12499`'s batches as the holders — ~37 minutes queued with two waiters permanently ahead. The #11595 dev reported two more exit-99s, holder `scratchpad/issue-12162/batch3.sh`, held 18m39s.\n\n⇒ **540s cannot serve a queue whose legitimate holds run to ~19 minutes.** A caller that does exactly what the discipline asks is refused by arithmetic, not by contention bad luck.\n\n## ⭐ Why it matters beyond the wasted wait\n\nThe exit-99 path is honest — it reports NOT MEASURED rather than a false green, and every dev this round recorded it that way. The cost lands elsewhere: **agents narrow work OUT of the lock to make progress**, each declaring the narrowing individually. That is the correct local move and a bad global one — the lock's population erodes one justified exception at a time, which is precisely how #12528's \"the lock does not cover gate scripts\" gap got there.\n\n## Two candidate shapes (⛔ suggestions, not a ruling)\n\n1. **Raise the budget above the p95 legitimate hold** — it must at minimum exceed one CLI-closure build plus one package suite.\n2. **Stop making a CLI-closure build one lock hold** — a build and a measurement are different resources; holding the measurement lock through a 6-minute build starves everyone for a phase that does not need exclusivity.\n\n## ⭐ Also worth surfacing: `OS_VERIFY_LOCK_SLOT`\n\nIt *worked exactly as documented* and is what let the #12162 and #12441 devs make progress at all — but both discovered it only from the exit-99 message. **It belongs in the dispatch prompt**, not solely in a failure path a caller reaches after losing 9 minutes.\n\n## Dedup\n\n⚠️ The dev seat's REST endpoints are 403 (reads too), so **no open-issue dedupe was possible from there** — declared rather than implied. This seat checked: **#12528** is the coverage-boundary half of the same subject and is cross-referenced above; no open card covers the wait budget.\n\nSeverity not judged.\n\n## Re-check\n\n```\nsed -n '1,80p' scripts/pm/os-verify-lock.sh\ngit grep -n \"OS_VERIFY_LOCK_SLOT\" origin/main -- scripts .claude\n```\n\n⛔ Reverse-check any zero with a term known present in the same file, and never a substring of the term under test.\n\n## Refs\n\n- #12528 — the lock's coverage boundary (gate scripts are not serialised)\n- #12162 / PR #12535 · #12441 / PR #12523 · #11595 / PR #12530 · #12499 / PR #12524 — the four independent observations"
+}

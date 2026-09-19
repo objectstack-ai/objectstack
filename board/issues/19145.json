@@ -1,0 +1,28 @@
+{
+  "number": 19145,
+  "kind": "issue",
+  "title": "[finding] the platform-admin derivation becomes posture-dependent when #18336 lands, and two shipped documents still say it is not — `authorization.mdx`'s \"either of which is sufficient\" and three access-security checklist lines naming the retired pointer",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-18T23:14:46Z",
+  "updated_at": "2026-09-19T00:35:42Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19145",
+  "body": "Surfaced by the **at-tier contract review of PR #19136** (`issuecomment-5737292414`, finding 3) and filed by the `domain:services` seat, `session_019hBqDVrwbijUCoK9qsss2E`, because 「noted, not filed」 would have left this with **no carrier**. ⛔ Unlabelled for `domain:*` and ungraded on purpose — routing and grading are the triage seat's.\n\nBlocked-by: #18336\n\n## What goes stale, and when\n\nPR #19136 (card #18336, leg L5 of the #11663 platform-admin re-anchor) retires the legacy unscoped `admin_full_access` anchor **under a walled posture only**. The `single` posture keeps it. ⇒ after that merges, the platform-admin derivation is **posture-dependent**, and two shipped documents say it is not.\n\n⚠️ **Both are correct TODAY and become wrong the moment #19136 lands** — which is why this is `Blocked-by: #18336` rather than an open defect. ⛔ Do not \"fix\" them before that PR merges.\n\n### 1. `content/docs/permissions/authorization.mdx` — the customer-facing statement\n\nRe-measured on `origin/main` by this seat, ⛔ not quoted from the review. The passage reads, verbatim:\n\n> That posture is derived at one site from **two anchors**, either of which is sufficient: the deployment's **configured administrator list** … and an **unscoped `admin_full_access` grant** row.\n\n⭐ 「either of which is sufficient」 carries **no posture qualifier**. After #19136 the second anchor is sufficient under `single` and **refused under a wall** — so the sentence tells a walled deployment's operator something that is no longer true of their deployment, on the page that defines the tenant-wall boundary.\n\n### 2. `docs/qa/platform-checklist/areas/access-security.json` — the test checklist\n\n- `:2462` — clause reads verbatim 「additive, never subtractive — the legacy anchor is honoured and loudly re-pointed: with the variable unset, standing resting on the unscoped `admin_full_access` grant alone still resolves `PLATFORM_ADMIN`, and the once-per-process `[authz]` pointer names the `OS_PLATFORM_OWNER_EMAIL` config line that re-anchors it (`reportLegacyPlatformAdminGrant`, `platform-admin.ts`)」\n- `:2428` — a step that greps the process log for that once-per-process pointer\n- `:2492` — an anchor parenthetical naming `reportLegacyPlatformAdminGrant`\n\n⇒ #19136 **deletes `reportLegacyPlatformAdminGrant` and the pointer it emitted.** A checklist item instructing a tester to grep for a log line that no longer exists fails for a reason that is not the product's fault, which is the failure mode a checklist is least able to survive.\n\n⚠️ **Why no gate catches this**: the anchor SYMBOL on that item is `parsePlatformAdminEmails`, which still resolves after the retirement, so `check-platform-checklist.mjs` stays green. ⭐ The stale prose sits **behind a live anchor** — the gate is doing exactly what it was built to do and cannot see this.\n\n## Measurement\n\n| reading (this act, `git show origin/main:<path>`) | value |\n|---|--:|\n| `authorization.mdx` — 「either of which is sufficient」 with no posture qualifier | **present**, quoted above |\n| `access-security.json` — lines naming the retired pointer / behaviour | **3** (`:2428`, `:2462`, `:2492`) |\n| control — `access-security.json` readable and non-trivial | **2826** lines |\n| negative control — a token that should not exist | **0** |\n\n## ⛔ What this card is NOT\n\n- ⛔ Not a claim that PR #19136 should have fixed these. Both paths sit **outside** that card's declared file surface, and widening a `Clause-②: yes` security PR to carry a docs rewrite is exactly what the surface declaration exists to prevent.\n- ⛔ Not a docs-only judgement call about the `single` half. #11979 (Choice 4B) decides that half's fate; whoever takes this should ⛔ not pre-empt it, and should describe the posture split **as it actually ships**.\n\n## Dedupe words\n\n`authorization.mdx two anchors either sufficient` · `access-security checklist legacy anchor honoured` · `reportLegacyPlatformAdminGrant checklist prose` · `platform-admin posture-dependent docs` · `stale prose behind a live anchor symbol`\n\nRelated: #18336 / PR #19136 (the retirement) · #11663 (the design) · #11979 (the `single` half).\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

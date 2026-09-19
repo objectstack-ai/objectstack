@@ -1,0 +1,32 @@
+{
+  "number": 19121,
+  "kind": "issue",
+  "title": "[decision] with zero measured readers, should spec-changes.json stop emitting aggregate.added / aggregate.removed — or keep them as PR #19115 makes them (honest, scoped, gated)?",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-elon-musk",
+    "id": 328766734,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-18T21:06:15Z",
+  "updated_at": "2026-09-18T21:33:22Z",
+  "closed_at": "2026-09-18T21:33:16Z",
+  "closed_by": {
+    "login": "os-elon-musk",
+    "id": 328766734,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19121",
+  "body": "Derived from in-flight card **#18978** (PR #19115) by the `domain:spec` execution seat (`session_019srGWGCBBCBHqcDoRZpQRh`, seat post #18883). `domain:spec` is **inherited from the parent card** under the derived-card exception, ⛔ not produced by this seat; ⛔ no `priority:*` — grading is the triage seat's. `needs-user-decision` is applied because the question deletes a **published machine-readable capability**, which the charter routes to the maintainer.\n\n## 维护者速读\n\n`spec-changes.json` 的 `aggregate.added` / `aggregate.removed` 现在**诚实了** —— PR #19115 给它加了 `surfaceScope`,说清那两个数组真正跨的是哪一对发布版本,并让发布门禁两向拒绝缺失/错标/不实的声明。但同一轮的普查量出一件事:**这两个数组在可达半径内一个读者都没有**,而且它们装的内容与同文件 `release.added` / `release.removed` **集合完全相同**。\n\n⇒ 也就是说:现在它不再说谎,但它是**冗余**的。要不要干脆**不再发它**?这一问必须您拍,因为删的是一个**已发布的机器可读能力**(需 ADR-0087 处置),而且它的登记项落在 `packages/spec/src/migrations/registry.ts` —— 那个文件今天被**四张** open PR 持着。\n\n⇒ 请选 **A / B / C**(推荐 **A 先留着,B 作为您愿意时开的后续**)。\n\n## 三个选项\n\n| | 做什么 | 得到 | 代价 |\n|---|---|---|---|\n| **A** | 保持 PR #19115 落地后的形态 | 已发布能力保留;面不再说谎(`surfaceScope` 点名版本对);发布门禁两向拒假声明 | 永久冗余:`aggregate.added/removed` 与 `release.added/removed` 集合相同。**加法式改动 ⇒ 之后再取 B 完全兼容** |\n| **B** | 删掉 `aggregate.added` / `aggregate.removed`(连 `SpecSurfaceAddSchema` / `SpecSurfaceRemoveSchema`),只留 release 段作为唯一导出差通道 | 零读者前提下最省的诚实终局;消掉 A 留下的冗余 | 删**已发布**能力 ⇒ 需 ADR-0087 处置;登记项动 `registry.ts`(#19095 · #19090 · #19084 · #18319 四持有者) |\n| **C** | 键留着但永不填(任何输入下恒空) | —— | 有 B 的损失而无 B 的清晰,且「一个搬动了数百个导出的 minor 上 `added: 0`」正是 #18889 落地要终结的那种误读 ⇒ ⛔ 任何排序下都不推荐 |\n\n## 四棱(四轴)\n\n- **实际业务需求** —— 读者侧实测为**零**:可达半径内每一个读 `aggregate` 字段的消费者都只读 `converted`/`migrated`。半径含本仓全树(tracked + untracked)、objectui 全仓、已发布 tarball(17.3.0 / 17.4.0 解包)、以及**已发布到客户项目的** `skills/objectstack-upgrade/SKILL.md`。⛔ 半径外照实申报:`objectstack-ai/cloud` 未挂载;任何第三方消费者从这里不可知。\n- **项目长远合理性(权重 ≥50%)** —— 一个字段与同文件另一个字段**集合相同**,是「一个键一种被承认的拼写」在数据面上的同形违例;长远看 B 更干净。但 A 已经把**说谎**这一半修掉了,而 B 只消冗余 ⇒ 长远轴支持 B 而不急。\n- **防 AI 写错元数据** —— 两个同义数组并存,会让读它的 AI 必须猜哪个是权威;`surfaceScope` 让 A 至少可判别。B 直接消除这个选择。\n- **创业阶段不扩散** —— 本轴支持 B:零读者的已发布面按 implementation-first 处置,已发布零消费的能力**不因沉没成本获得豁免**。⚠️ 但同一条纪律也说「删已发布能力进决策箱」—— 所以它到这里,而不是被执行席自取。\n\n## 证据(全部取自 #18978 那轮的实测,逐条可复核)\n\n- **零读者**:`git grep` 全树(含未跟踪)+ objectui 全仓 + 两份已发布 tarball 解包 + 文档/skills 面。**亮控**:同一支仪器命中 `packages/cli/src/utils/spec-release-changes.ts:80`,它确实读这份 manifest 的 `doc.release` 字段并随 `@objectstack/cli` 发布 ⇒ 零是读数而非哑火;objectui 侧 `@objectstack/spec` 命中 1628 文件而 `spec-changes` 命中 0。\n- **集合相同**:同一轮量到 `aggregate.added/removed` 与 `release.added/removed` **集合完全相同**(不只是相似)。\n- **已发布载体的现状**:GitHub Release 资产 17.4.0 读到 `aggregate.added` 225 / `removed` 51,而独立重算(手写 flattener,⛔ 非本仓代码)同样得 225 / 51,集合两向零差。\n- **尚未进 tarball**:17.3.0 与 17.4.0 两个 npm 包里 `aggregate.added/removed` 都是 0/0,因为把它们写进 tarball 的那条 lane 是 #18889 才落的 ⇒ **下一次发布才是第一份带着它的 tarball**。这条让 B 的窗口比看起来宽。\n- `spec_changes` MCP 工具在本仓**只有散文没有实现**(ADR、文档、changelog、代码注释里都提到它,零实现)⇒ 它不是读者。\n\n## ⛔ 本卡不做的事\n\n- ⛔ 不推翻 A:PR #19115 已按 A 的形态落地并带发布门禁;它是加法式的,所以 B 之后仍可取。\n- ⛔ 不代裁:删已发布能力在人工地板上。\n- ⛔ 不动 `registry.ts`:四张 open PR 持有,B 落地要先排序。\n\nRelated: **#18978**(父卡,PR #19115 已交付 A)· #18889(把 release 段与 tarball lane 落地的那张)· docs/adr/0087(ADR-0087 处置在 B 下必需)· PR #19095 / #19090 / #19084 / #18319(`registry.ts` 的四个持有者)。\n\n\n---\n\nos-decision-facets\n\n- ① 项目长远合理性:A 让已发布面**停止说谎**(`surfaceScope` 点名版本对)且不动 ADR 定下的形状;B 消掉冗余但要改一份**已通过的 ADR** —— 那是修宪,不是处置。\n- ② 实际业务拉动:读者侧**零**(可达半径:本仓全树含未跟踪 · objectui 全仓 · 17.3.0/17.4.0 tarball 解包 · 已发布到客户项目的 `skills/objectstack-upgrade/SKILL.md`;亮控:同仪器命中 `spec-release-changes.ts:80` 确实读该 manifest 的 `doc.release`)。⇒ 零读者既是 B 的理由,也是 A 无成本的理由。\n- ③ 防 AI 犯错:两个同义数组并存会让读它的 AI 必须猜哪个权威;A 用 `surfaceScope` 让它可判别,B 直接消除选择 —— 但 B 要动 ADR。\n- ④ 创业阶段不扩散:本轴偏 B(零消费的已发布面按 implementation-first 处置);⛔ 但它不能越过 ③「不推翻既有维护者裁决」。\n\nPrior rulings read: aggregate export diff,published capability removal,enforce-or-remove,spec-changes → 4 hits; ADR-0087 D4, ADR-0105 D5, ADR-0119 D3, ADR-0120 D7\n\n## ⛔ 本卡按「已裁即执行」退出决策箱 —— 这是本席的更正\n\n`check-prior-rulings.mjs` 对本卡的词集命中 **ADR-0087 D4**,而本席**读了它**(⛔ 不只转述命中):**ADR-0087 状态 `Accepted (2026-07-04, #2582)`**,D4 在 `docs/adr/0087-metadata-protocol-upgrade-contract.md:212` 逐字把 `spec-changes.json` 的形状定成\n\n> `{ from, to, added[], converted[], migrated[], removed[] }`, each entry carrying the replacement, the conversion/migration id, and a rationale anchor.\n\n并接着写 「Per-major manifests **compose** … cross-major consumers get one **aggregate** answer, not four documents to reconcile」,且把 `spec_changes(from, to)` 定为 MCP 面。\n\n⇒ **`added[]` / `removed[]` 是 ADR 已定形状的一部分**,而本卡的选项 **B(不再发它们)会与一份已通过的 ADR 相抵**。按 `SKILL.md` 〈升级与决策〉③ ⛔ 不推翻既有维护者裁决,以及该工具自己的处方 —— 「a card whose question that decision already answers is **EXECUTION, not a decision**」 —— 本卡的问题已被回答:**A 就是 ADR 现行规定的形态**,而 A 已由 **PR #19115** 落地(诚实标注 + 发布门禁两向拒假声明,达档复核 PASS,已入队)。\n\n⇒ 关单 `completed`,⛔ 不留在收件箱占维护者的时间。\n\n## 若你仍想消掉那份冗余\n\n那**不是**本卡:它是一次 **ADR-0087 修订请求**(D4 的形状少两个键),需要 ADR 层的动作,外加 ADR-0087 处置与 `registry.ts`(今天四张 open PR 持有)。⇒ 说一声我就另立一张点名 D4 的修订卡;**重开本卡也免费**。\n\n## 本席的错,记在自己名下\n\n⚠️ 本席 21:06Z 立本卡时**没有跑 `check-prior-rulings.mjs`**,于是把一个已被 ADR 回答的问题当成开放二选一送进了收件箱,并在轮报里向维护者列为「决策箱 2 张」之一。发现它的不是本席的复读,而是**半状态巡查的 H62 行**(它指出本卡缺机器可寻的四棱标记)—— 我为补那个标记才去跑工具,才读到 D4。⇒ 硬规则记在座位贴:**决策卡落卡前先跑 `check-prior-rulings.mjs`,四棱块与 `Prior rulings read:` 行同笔带上**,⛔ 不留待巡查点名。\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

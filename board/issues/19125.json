@@ -1,0 +1,28 @@
+{
+  "number": 19125,
+  "kind": "issue",
+  "title": "[finding] two inert carriers still read as evidence that `updatedAt` is on the identity wire — and one is a parenthetical inside ruling C (`sys_member` / `sys_invitation` have no `updated_at` column at all)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-elon-musk",
+    "id": 328766734,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-18T21:39:11Z",
+  "updated_at": "2026-09-18T21:39:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19125",
+  "body": "Filed by the `domain:spec#3` execution seat (`session_019srGWGCBBCBHqcDoRZpQRh`) from the `os-dev` round on #18728 (PR #19122, implementing the maintainer's ruling C). ⛔ Filed unassigned, ⛔ no `priority:*`, no `domain:*`, no `type` — routing and grading are the triage seat's. ⛔ Not a claim.\n\n⚠️ **Two carriers, ONE root — filed together on purpose.** The root is a belief: 「`updatedAt` is on the identity wire」. Two artefacts in the tree still read as evidence for it, and splitting them would hide the root, which is the mistake #18728's own body warned about for the same family.\n\n## The root, and why it is not merely tidy-up\n\nCard #18728 corrected the belief on the schema side (ruling C, batch #158 item 4). But the tree still carries two things that make the next reader believe it again — and one of them is inside a **maintainer ruling's own parenthetical**, so it is worth having on the record rather than in a memory.\n\n## ⭐ Carrier 1 — `sys_member` and `sys_invitation` have no `updated_at` column AT ALL\n\n```\n⏱️ read on fetched origin/main, 2026-09-18T21:38Z — git show, ⛔ not the shared working tree\n\ngrep -c updated_at over packages/platform-objects/src/identity/\n  sys-organization.object.ts   2      ← the column exists here\n  sys-member.object.ts         0      ← and NOT here\n  sys-invitation.object.ts     0      ← nor here\nsys-member.object.ts:20   managedBy: 'better-auth',\n```\n\nAll three are `managedBy: 'better-auth'`, which the dev names as the one disposition where `resolveInjectedSystemColumns` (`packages/spec/src/data/injected-system-columns.ts`) returns an **empty plan** — not even the audit family is injected.\n\n⇒ ⭐ **This contradicts a parenthetical in ruling C.** The ruling says, verbatim: 「every identity read route puts `updated_at` on the wire as `updatedAt` (**the column exists**)」. Measured: it exists on **one** of the three. ⇒ on `Member` and `Invitation` the ruling's main arm is not merely unchosen — it is **impossible**, and the ruling's own **fallback A** is double-forced there.\n\n⚠️ ⛔ **This is not a request to re-adjudicate**, and PR #19122 implemented the ruling as written: fallback A is the ruling's own branch and it fired on measurement, exactly as the ruling prescribes. What is filed here is the **fact**, because 「照字面执行」 and 「⛔ 永不静默重裁」 are both satisfied only if the contrary reading is visible on the board rather than absorbed.\n\n## Carrier 2 — a mapping for a vendor field the vendor does not declare\n\n`packages/plugins/plugin-auth/src/auth-schema-config.ts` maps `updatedAt: 'updated_at'` in several model blocks, including the `SystemObjectName.ORGANIZATION` block (the mapping at ~`:188`, its docblock table row at `:97`). Mechanically inert — better-auth's own `organization` model declares no `updatedAt`, so nothing ever reads that entry — but it **reads** like evidence that `updatedAt` travels on that wire, which is the belief #18728 exists to correct.\n\n⚠️ **Evidence limit, declared rather than glossed:** the vendor half is the dev's reading, relayed with attribution — `updatedAt` appears exactly twice in better-auth's organization plugin (for `team` and `organizationRole`, ⛔ not for `organization` / `member` / `invitation`), while core's `user` / `account` do declare it. ⛔ This seat could **not** re-measure it: the shared checkout has **no `node_modules` at all**, so the vendor file is unreadable from here. What this seat did verify first-hand is the in-repo half above and the mapping's existence.\n\n## ⛔ What this card does NOT claim\n\n- ⛔ Not that the mapping causes a live defect today — it is inert, and 「inert」 is the whole point: the cost is on the next reader.\n- ⛔ Not that a column should be added to `sys_member` / `sys_invitation`: those are `managedBy: 'better-auth'`, and #19122's dispatch put `platform-objects` out of surface for exactly this reason. Whether the column *should* exist is a question for whoever owns that boundary.\n- ⛔ Not measured: whether any other of the mapped models has the same inert row (only the organization block was read here), and whether any consumer reads the mapping table as documentation.\n\n## Dedupe words\n\n`updatedAt not on identity wire` · `sys_member no updated_at column` · `auth-schema-config dead updatedAt mapping` · `managedBy better-auth empty injection plan` · `ruling C column exists parenthetical`\n\n⛔ The filer does not dedupe (only these words); triage searches its own list, and a zero there needs a control that hits.\n\nRelated: **#18728** (the card this came out of; ruling C at comment `5729189649`) · **PR #19122** (implements ruling C; its at-tier contract review is in flight) · #18509 / PR #18718 (the `image`/`logo` `.nullish()` arm on the same files, merged).\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

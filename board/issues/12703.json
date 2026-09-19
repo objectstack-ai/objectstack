@@ -1,0 +1,30 @@
+{
+  "number": 12703,
+  "kind": "issue",
+  "title": "Per-org disable for packaged record-change flows (ADR-0126 §5 reserved narrow channel) — record card, deferred until real tenant pull",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-27T11:46:56Z",
+  "updated_at": "2026-08-27T11:47:54Z",
+  "closed_at": "2026-08-27T11:47:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12703",
+  "body": "Part of #12701. Record card only — **not** queued for development, per the maintainer-accepted program shape (2026-08-27 live PM chat: the dispatch instruction 「按照你的建议，创建卡片，并使用项目经理技能派发完成所有相关的开放」 adopted the recommendation in which this leg is explicitly 「延后」/deferred; the epic carries the full quotes).\n\n## What this card records\n\nADR-0126 §5 pre-charters exactly one per-org disable channel for packaged artifacts, and this card is its future implementation slot:\n\n- **Record-change-triggered flows only** — the one trigger type whose context carries an organization (survey F4). A per-org disable attempted on any other trigger type refuses loudly at the attempt, naming the trigger type; never a silent fallback to install scope.\n- The ledger column is already reserved: `sys_metadata_activation.organization_id` (nullable, NULL-collapsed uniqueness) — adding per-org rows is additive, not a redesign. Today's store deliberately skips org-carrying rows on read (`packages/core/src/utils/metadata-activation-store.ts`); the per-org consumer adds its own scoped read, it does not widen the install-level one.\n- A per-org row cannot unbind the trigger (registered once env-wide) — entry-time refusal only, a stated accepted cost (§7.2).\n- Write authority: an org admin may flip rows for their own organization only; the install-level row stays platform-operator-gated (§5, `activation-gate.ts`).\n- A3 (org-scoping schedule/time/api trigger contexts) stays not chartered (§9).\n\n## Reopen condition\n\nReopen when a real multi-org tenant asks to switch a packaged record-change flow off for their organization (first-party pull on record, per the ADR-0126 pre-chart discipline). Until then: closed not-planned, reopening is free, this card is the record."
+}

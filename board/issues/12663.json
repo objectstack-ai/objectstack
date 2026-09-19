@@ -1,0 +1,35 @@
+{
+  "number": 12663,
+  "kind": "issue",
+  "title": "sys_secret: build the cross-producer reference union — the primitive any safe orphan sweep needs (unblocks #8103's deletion half)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-27T04:53:22Z",
+  "updated_at": "2026-08-27T17:39:19Z",
+  "closed_at": "2026-08-27T17:39:19Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12663",
+  "body": "Provenance: maintainer ruling 2026-08-27 (PM chat, decision-inbox batch 1, adjudication session `session_01DKWDdUJ2XNRESVVWUvcpnh`), verbatim: 「同意，并继续」 — adopting B′ on #8103: the ruled operator command (2026-08-26, Option B) is sequenced BEHIND this missing precondition. Option C (a sweep keyed on one producer's partial view) stays ruled out. Report-only (A) remains the honest fallback if this card is later judged not worth building — that re-decision belongs to the maintainer.\n\n## What this is\n\nA runtime-enumerable union of every reference to a `sys_secret` handle, spanning all three producer/holder families measured on #8103:\n\n1. `sys_setting.value_enc` handles (SettingsService);\n2. every secret-typed field on every REGISTERED object — instance-specific, enumerated from the metadata registry at runtime (includes tenant-authored objects; cannot be precomputed);\n3. every datasource artefact's `external.credentialsRef`.\n\nOnly \"unreferenced by the COMPLETE union\" is a sound deletion predicate. Measured 2026-08-26 on #8103: attribution by (namespace, key) is a name match, not ownership — a live engine-owned credential classifies `orphaned` under the shipped settings-scoped classifier, and the audit trail (digests, not handles) cannot name an erroneous delete afterwards.\n\n## Measured placement constraints (re-verify on the day, do not cite)\n\n- A bounded scan of all 73 workspace package.json files found exactly two packages with runtime visibility of all three producers: `@objectstack/cli` (operator command surface, bin `objectstack`/`os`) and `@objectstack/verify` (a boot-and-verify harness, no bin). `service-settings` cannot see the other two, and its independence from objectql is a declared architectural property.\n- Routing is triage's call; if the home is `packages/cli`, that is the `domain:cli` lane and cross-lane coordination applies.\n\n## Named reader\n\nThe seat that later builds #8103's deletion command (\"attributable AND unreferenced by the COMPLETE union\"; dry-run default; pre-delete export mandatory; the `unattributable` class is never deleted). #8103 is `pm:blocked` on this card.\n\nRefs: #8103 (ruling + measurements), #8259 (closed vehicle ruling), PR #8261 (shipped report-only classifier)."
+}

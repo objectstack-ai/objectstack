@@ -1,0 +1,35 @@
+{
+  "number": 12834,
+  "kind": "issue",
+  "title": "Five comment-mask ledger rows are measured DELETING live code — convert them off their private strippers",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-28T01:47:59Z",
+  "updated_at": "2026-08-28T10:38:36Z",
+  "closed_at": "2026-08-28T10:19:16Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12834",
+  "body": "Follow-up work sized by #12475's per-row round (measurement landed in #12832). The measurement half is done and recorded in every `why`; this is the conversion half, which that round deliberately did not take because converting is per-row and changes what each guard SEES.\n\n## The five rows, and what each one loses\n\nMeasured on `origin/main` @ `f75a38afa`: each row's own private stripper vs `stripComments` from `scripts/js-comment-mask.mjs`, over the population that file actually scans, whitespace-normalised.\n\n**1. `packages/cli/src/utils/console-route-ledger.conformance.test.ts` — the one #12398 left.**\nPopulation: `packageSourceFiles()`, 110 non-test `.ts` under `packages/cli/src`, 1.6 MB. **10,263 chars of live code deleted on 9 files.** Its scanner is string-aware but REGEX-BLIND, which is the exact defect #12398 found on `packages/metadata/src/plugin.ts` and `packages/cloud-connection/src/marketplace-proxy-plugin.ts`: the doubled slash inside a `https` protocol regex reads as a line-comment opener and the rest of the line goes. Live sites today: `commands/dev.ts:169`, `commands/serve.ts:3021`, `commands/start.ts:460`, `commands/start.ts:475`. It also KEEPS 35,382 chars of block-comment prose swallowed by phantom STRINGS opened at a quote character inside a regex character class — the other family, in the same file.\nThis is the fourth guard in the route-ledger conformance family; the other three were converted in #12398 and this one was out of that card's scope.\n\n**2. `examples/app-showcase/test/inert-wirings.test.ts`.** Population: `sourceFiles()`, 91 `.ts` under `examples/app-showcase/src`. **5,987 chars deleted on 9 files** — the naive block regex opens a phantom comment at a block-comment opener sitting inside a string literal (the accept-glob strings in `src/ui/actions/index.ts`, prose strings in `src/coverage.ts`) and runs to the next terminator far below. Also keeps 1,813 chars of trailing line-comment prose, which its line filter deliberately never removes.\n\n**3. `packages/plugins/plugin-auth/src/rate-limit-storage-isolation.test.ts`.** Population: the import-graph limb (resolver-dependent, measured over a declared superset of every `.ts` under `plugin-auth/src`) plus the two cross-package roots it reads whole, `packages/runtime/src` and `packages/services/service-sms/src` — 423 files, 7.3 MB. **6,375 chars deleted on 15 files**, `auth-manager.ts` included, same regex-blind defect. Also keeps 22,329 chars behind phantom strings.\n\n**4. `packages/drivers/driver-sql/src/live-dialect-matrix.isolation.test.ts`.** Population: all 152 `*.test.ts` in that directory, 2.0 MB. **228 chars deleted** in `logger-receiver-detach.test.ts`, where a fixture STRING quotes a docblock and the naive block regex eats the string. 54 files disagree in total, the rest in the keep direction.\n\n**5. `packages/runtime/src/error-envelope.conformance.test.ts`.** Population: its own 10-module `MODULES` list, 390 KB. **166 chars deleted on 2 modules and nothing kept** — purely the blind direction. The unanchored trailing-line arm eats route paths inside template literals: `dispatcher-plugin.ts` loses the rest of the line at a doubled slash in a mount path, `domains/mcp.ts` at the one in an https URL it builds.\n\n## What is already known about the risk\n\nEach of these five had its OWN gate predicate re-run under both strippers, and all five answer identically today:\n\n- `console-route-ledger`: the `MOUNT_SHAPED` identity is still exactly `[utils/console.ts]`, and the `rootRedirect` probe on `console.ts` still holds.\n- `inert-wirings`: the retired-`retryDelayMs` offender set is empty either way.\n- `plugin-auth`: the extracted import refs are identical on every one of the 423 files, so reachability has not moved.\n- `driver-sql`: the direct-`OS_TEST_*_URL` offender set is empty either way.\n- `error-envelope`: all four per-module counts (numeric code, type-as-code, envelopes, builder calls) are identical across all 10 modules.\n\n⚠️ That makes conversion verdict-preserving **on today's tree and nothing stronger**. \"Green over text it never read\" is the failure, not the absence of one — the deleted spans simply happen not to hold what these gates look for this week. A line added tomorrow inside a swallowed span is invisible to five gates at once.\n\n## Shape of the work\n\nPer row, and per the adoption gate's own header: import `stripComments` or `maskComments` (pick by whether the guard reports a line number or an offset), delete the private declaration, run that package's suite, and **delete the ledger row in the same PR** — the ledger is shrink-only and a recorded row the scan no longer finds is red by design. Row 1 also needs `scripts/cross-package-test-inputs.mjs` checked: the three converted siblings each carry a declared coupling to `js-comment-mask.mjs` there, and `packages/cli` already declares the pair.\n\nFive separate rows, so five separate measurements — ⛔ not a sweep. Splitting into per-row cards is fine if the triage round prefers it; they are grouped here because they are one defect class found in one pass.\n\nDedup: settled on a working channel (repo-scoped REST list over `tooling` and `domain:devx`, positive control — #12475 returns). No open card covers these conversions.\n\nRefs: #12475 (the measuring round) · #12832 (where every number above is recorded in the ledger) · #12398 (the first shrink, same defect) · #12372 (the gate and its ledger)."
+}

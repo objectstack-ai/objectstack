@@ -1,0 +1,35 @@
+{
+  "number": 12491,
+  "kind": "pull_request",
+  "title": "qa+fix: ADR-0126 scoped checklist sweep (#12438) + Setup nav entry for the packaged-automation page (#12457)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-26T05:28:59Z",
+  "updated_at": "2026-08-27T09:52:23Z",
+  "closed_at": "2026-08-27T09:52:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-27T09:52:21Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12491",
+  "body": "Two commits, one scope — the ADR-0126 packaged flow/action disable+clone surface (acceptance card #12438, Epic #12150).\n\n## 1. `qa(checklist)` — scoped coverage sweep (#12438)\n\nThe shipped ADR-0126 surface (`sys_metadata_activation` ledger, packaged flow toggle + subflow guard, flow clone, `ACTION_DISABLED` dispatch consult, §5 operator gate, Setup packaged-automation board) had **zero** checklist coverage. Three read-only gap hunters (routes/runtime · Setup/Studio UI · docs claims) → 14 new items across 5 areas + 1 revision, ledger 207 → 221:\n\n- **automation** ×4: `packaged-flow-disable-durable` (P0, restart durability), `packaged-flow-subflow-disable-refusal`, `packaged-flow-clone-contract`, `setup-packaged-automation-board` (browser); `flow-toggle-kill-switch` rev 2 (re-sourced off the retired `flowEnabled` map onto the ledger projection)\n- **api-backend** ×2: `packaged-action-disabled-dispatch` (P0, both doors + gate ordering), `action-activation-door-contract`\n- **access-security** ×3: `activation-write-operator-gate` (with a `TenancyPostureSchema` enumSource pin), `packaged-flow-write-door-parity`, `packaged-permission-set-lifecycle` (card F1 / #11513 regression guard)\n- **platform-core** ×3: `activation-ledger-registration-home` (card G1 / #12419), `activation-ledger-row-contract` (scope wall: rows only for flow/action), `packaged-object-extend-only`\n- **studio-authoring** ×2: `packaged-automation-studio-lock` (card F2), `packaged-display-class-direct-edit`\n\n`coverage.json` maps every new item (still 0 waivers). `FOLLOW-UPS.md` §8 carries what is NOT a checklist item: product defects **D16–D22** found while grounding (each captured as an expected-fail probe), docs drift, card-accuracy notes for the tester, and fixture asks. Validator green: 221 items, 31 kinds mapped, traps 19/19, all provisioning recipes resolved.\n\n## 2. `fix(platform-objects)` — Setup nav entry for the packaged-automation page (fixes #12457, = D16)\n\nThe page shipped complete in objectui (component ref `automation:packaged`) but no framework `NavigationContribution` ever named the ref — Setup's sidebar carried no entry and the page was reachable only by a hand-typed URL (card A1 failed by construction). This adds `nav_packaged_automation` in `group_apps` beside Packages (ADR-0084: package administration is Operate; ADR-0126 §7.4: \"Studio keeps the editing; Setup gets the operational state\"), deliberately with no `requiresService: 'automation'` (the action switches work without the automation service, #12419) and no `requiredPermissions` (matches `nav_packages`; the write doors enforce `manage_metadata` / the §5 operator gate server-side). Labels in all four locales with recorded source hashes; `setup-packaged-automation-nav.test.ts` pins the framework half of the cross-repo contract (objectui's `PackagedAutomationPage.navContribution.test.tsx` pins its half); changeset included (`@objectstack/platform-objects` patch).\n\n## Verification\n\n- `node scripts/check-platform-checklist.mjs` → OK (221 items, 31 kinds, 0 waived)\n- platform-objects vitest suites green (204 tests incl. i18n parity / tombstone / source-hash / the new nav pin)\n- `check:app-nav-i18n` green: 54 merged `setup` nav ids × 4 locales\n- Server-authoritative: `GET /api/v1/meta/app?id=setup` on a booted showcase serves the entry in `group_apps`\n- Browser (objectui main HMR console → the booted server): admin signs in → sidebar shows \"Packaged Automation\" → **sidebar click** (not a typed URL) lands on `/component/automation/packaged` → page renders 29 packaged flows (toggle + Clone) and the 143-row packaged-actions section; no \"Component not registered\" (screenshots on #12457)\n\n## Out of scope, flagged for the maintainer\n\nThe `.objectui-sha` pin (seeded at `190fbd01` by #12347) predates the page's objectui merge (#6382/#6415), so a stock vendored-console build cannot resolve `automation:packaged` until the pin is bumped ≥ `9602dc8` and the console bundle rebuilt. That bump moves ~700 objectui PRs of console delta — deliberately not ridden on this PR (detail on #12457).\n\nRefs #12438 · Epic #12150 · ADR-0126 · fixes #12457\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01SKUXt6sKgAeCEtjiuwNuhq\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01SKUXt6sKgAeCEtjiuwNuhq)_"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 12732,
+  "kind": "issue",
+  "title": "driver-sql: the varchar differ's expected width disagrees with what `createColumn` would emit — a boot-refusing `narrow_varchar` on a bounded text field, and a `varchar(n)` past the dialect ceiling",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-27T14:43:37Z",
+  "updated_at": "2026-08-27T18:49:02Z",
+  "closed_at": "2026-08-27T18:48:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12732",
+  "body": "Found while working #12121 (which lands the *undeclared* half of the same seam in `packages/drivers/driver-sql/src/schema-drift.ts`). ⛔ Deliberately **not** repaired there: #12121's scope is the case where the author declared **no** bound, and both cases below are the opposite half — the author *did* declare one, and the differ honours it in a way the emitter does not. Filed unassigned rather than ridden along.\n\nBoth measured on `origin/main` at `d29e42f8`, via direct `diffManagedTable` calls against a pre-existing `varchar(255)` column, dialect `postgres`. Duplicate search run before filing (targeted semantic search over this repo): the six hits are the closed family cards #11431 / #11566 / #11565 / #11794 / #11875 / #12017, none of which covers either case.\n\n## The shared root cause\n\nThe varchar differ treats `varchar(field.maxLength)` as the expected physical shape of any bounded field. `SqlDriver.createColumn` does not — and `varcharColumnChars` is its own read-only mirror of that switch, so what the emitter would build is knowable exactly. The two disagree in two measured directions.\n\n## Case A — an unkeyed, bounded TEXT-family field reports `narrow_varchar` at `destructive`\n\n```\n{ type: 'text',      maxLength: 50 } over varchar(255) -> narrow_varchar  error / destructive  expected varchar(50)\n{ type: 'richtext',  maxLength: 50 } over varchar(255) -> narrow_varchar  error / destructive  expected varchar(50)\n{ type: 'signature', maxLength: 50 } over varchar(255) -> narrow_varchar  error / destructive  expected varchar(50)\n{ type: 'markdown',  maxLength: 50 } over varchar(255) -> narrow_varchar  error / destructive  expected varchar(50)\n```\n\nTwo problems, and the second is the serious one:\n\n1. **The expectation is wrong.** Unkeyed, `createColumn` emits TEXT for every one of these (`keyable = keyed ? keyableTextLength(field) : null`). So the differ demands the column be narrowed to a shape the platform itself would never create.\n2. **It is `category: 'destructive'`, which refuses the boot.** `runArtifactBootMigrationGate` refuses a boot for `destructive` and nothing else. So an already-serving deployment whose author adds `maxLength: 50` to a legacy `varchar(255)` text column stops booting — over a divergence that changes no behaviour at all, because the write seam already enforces 50 for exactly `BOUNDED_STRING_FIELD_TYPES` (`record-validator`'s `max_length` branch). No value above 50 can reach the column, so the column's extra width refuses nothing.\n\nThis is the same false positive #11431 closed for genuine TEXT columns (`isCharacterColumn`), arriving through a different door: the column is spelled `varchar` because an *older release* created it, not because the current emitter wants one.\n\n## Case B — a bound past the dialect ceiling plans DDL MySQL refuses\n\n`FieldSchema` declares `maxLength: z.number().int().min(1)` — no upper bound — so this is authorable on any bounded-string type:\n\n```\n{ type: 'email',    maxLength: 100000 } over varchar(255) -> widen_varchar  warning / safe  expected varchar(100000)\n{ type: 'url',      maxLength: 100000 } over varchar(255) -> widen_varchar  warning / safe  expected varchar(100000)\n{ type: 'password', maxLength: 100000 } over varchar(255) -> widen_varchar  warning / safe  expected varchar(100000)\n{ type: 'email',    maxLength: 16384  } over varchar(255) -> widen_varchar  warning / safe  expected varchar(16384)   <- first over the ceiling\n{ type: 'email',    maxLength: 16383  } over varchar(255) -> widen_varchar  warning / safe  expected varchar(16383)   <- last legal one\n```\n\n`declaredVarcharLength` returns `null` above `MAX_VARCHAR_CHARS` (16383) and the column becomes TEXT, precisely so `varchar(100000)` is never emitted — MySQL refuses it (`ERROR 1074 Column length too big … max = 16383`). The differ has no such ceiling, so it plans `ALTER … TYPE varchar(100000)`, categorised `safe` and therefore eligible for **dev auto-reconcile** as well as `os migrate apply`. Postgres accepts it (its own limit is 10485760) and MySQL fails the statement, which is the dialect-divergent enforcement of one declaration this package's conformance matrices exist to close.\n\n## Suggested shape of the remedy (not a decision)\n\nOne predicate rather than two patches: expect the width `createColumn` would actually emit. `SqlDriver.varcharColumnChars(field, keyed)` already answers that and is pinned against `columnInfo()` for every `FieldType` by `sql-driver-11565-row-byte-budget.test.ts`. `null` means \"the emitter would not make this a varchar\", which is the honest expectation in both cases above.\n\n⚠️ It needs input the differ does not currently receive: **which columns an index keys**, since a keyed + bounded text field legitimately takes `varchar(maxLength)`. `indexedKeyColumns()` already computes that map inside `schema-drift.ts`; the missing half is threading it from `SqlDriver.detectManagedDrift` into `diffManagedTable`, i.e. this touches `sql-driver.ts` and wants the serial slot on that file. #12121 avoided needing it by gating strictly on the declaration being absent, which is keyedness-independent; this card cannot.\n\nAlso worth deciding as part of it: Case A's category. Turning a boot-refusing `destructive` into a report is a behaviour change for deployments currently blocked by it.\n\n## Refs\n\n#12121 (the undeclared half, in flight) · #11431 (the ceiling and the positive-integer predicate) · #11794 / #11875 (the TEXT family) · #12017 (the emitter/spec parity pin) · #11565 (`varcharColumnChars` and its `columnInfo()` pin)\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01LZbWd2jNV1FErXTPSS4Dry)_"
+}

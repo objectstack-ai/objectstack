@@ -1,0 +1,33 @@
+{
+  "number": 19154,
+  "kind": "pull_request",
+  "title": "docs(scripts): ratchet-remedy corpus — the i18n-walk-parity ledger no longer ships empty",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-try-charles",
+    "id": 313893388,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-19T00:31:58Z",
+  "updated_at": "2026-09-19T01:31:49Z",
+  "closed_at": "2026-09-19T01:31:48Z",
+  "closed_by": {
+    "login": "os-try-charles",
+    "id": 313893388,
+    "type": "User"
+  },
+  "merged_at": "2026-09-19T01:31:48Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/19154",
+  "body": "Fixes #15189\n\nClause-②: no\n\n## What this changes\n\nOne file, one entry, two prose sentences: `scripts/check-ratchet-remedy-authority.mjs`'s\nhand-classified corpus entry for `check-i18n-walk-parity.mjs` described that gate's\nexemption ledger as shipping **EMPTY**. It has not been empty since the maintainer ruled,\non the parity gate's own first red, that the unwalked groups enter it with their reasons —\nand the described file records that move itself.\n\nBoth sentences now say what is true. Nothing else moved: the classification, the\n`marked`-rather-than-`refused` reason, the ledger, its ceiling and its\n`MAINTAINER-ONLY` marking are all untouched, and `check-i18n-walk-parity.mjs` is not\nedited at all.\n\n## The number question, and the choice taken\n\nThe new prose carries **no count**. The card notes this family's failure mode is precisely\na number copied out of another file going stale, and triage reported this as the seventh\ninstance. Two further facts made the number-free wording the cheaper one here:\n\n- the ledger is **shrink-only**, so any count written here is only ever waiting to be wrong;\n- one of its three entries (`settings`) is declared in that file as a **DEFERRAL** held on\n  #15178, so the ledger is expected to shrink — a quoted \"three\" would be stale by design.\n\nWhat the corpus entry needs to carry is that the ledger is shrink-only and that growing it\nis the maintainer's act — that, and not its size, is what makes `marked` the honest verdict\nrather than `refused`. Triage's literal wording (\"filled to three … shrink-only from\nthree\") would have been equally true today; the dispatch left the choice open and this is\nthe half that does not need re-syncing. ⛔ No house rule is proposed here — whether prose\nmay ever quote another file's number is explicitly another card's question.\n\n## Live reading of the ledger being described\n\nRead in-worktree at **2026-09-19T00:16:13Z** on `origin/main` @ `87f776bd7`, not copied\nfrom the card:\n\n```\nscripts/check-i18n-walk-parity.mjs:209   KNOWN_NO_EXTRACTOR_FACE keys: messages, settingsCommon, settings   (3)\nscripts/check-i18n-walk-parity.mjs:232   LEDGER_CEILING = 3\n```\n\nSame values the dispatch read two minutes earlier; no divergence to report.\n\n## Evidence\n\n**Both batteries, before and after** — they are two different batteries and are reported\nas two:\n\n| invocation | before | after |\n|---|---|---|\n| `node scripts/check-ratchet-remedy-authority.mjs --self-test` | exit **0** | exit **0** |\n| `node scripts/check-ratchet-remedy-authority.mjs` (bare) | exit **0** | exit **0** |\n\nBare run printed the identical verdict line on both sides — `257 scripts swept; 15 mark the\nexpanding remedy, 5 turn it down outright, 237 hand out no ratchet-expanding remedy.\nControl corpus: 30 hand-classified scripts, set-equality audited both ways.` — so no\nverdict moved.\n\n`SELF_TEST_BATTERY_FLOOR` reads **21** before and after. The corpus entry's battery is\n**(16) The corpus-scale positive control**, pinned count **1** before and after; the\nself-test's green is itself the assertion that every declared battery met its floor.\nNothing in the roster moved.\n\n**Residual reading, with a firing control taken from the probed file after the diff\nexisted** (the control was derived by listing terms present in the file and absent from\n`git diff BASE HEAD -- PATH`, not pre-picked):\n\n```\nships EMPTY   -> 0     (also 0 case-insensitively)\nships empty   -> 0\nbattery       -> 48 lines in the file, 0 in the diff   (this control fires)\n```\n\n**The classification survived verbatim:**\n\n- `expect: 'marked'` — 15 occurrences in the file before and after; **0** of them appear as\n  a `+`/`-` line in the diff.\n- the `refused`-would-be-untrue comment block (the reason the entry is `marked` rather than\n  `refused`) — present once before and after, and it does not appear as a `+`/`-` line.\n- inside the one `why` line that did change, the trailing **174 bytes** are byte-identical:\n  `; emitting the group is the author's remedy and is offered first, while exempting one is\n  a decision with an owner, so that path is named with its owner rather than denied.',`\n  Only the leading false clause was replaced.\n\n**Gates** derived in-worktree with\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` over the\nreal changed-file set (1 path) — 28 commands; every one that has reported so far is exit\n**0**. By the tool's own warning that list is not a complete account of CI.\n\n## Changeset\n\n`skip-changeset`. Verified rather than assumed: every published package declares\n`files: [\"dist\",\"README.md\",\"CHANGELOG.md\"]`, all package-relative, and the repo-root\npackage is `private: true` with no `files`. The repo-root `scripts/` directory is inside no\npackage and reachable from no published `files[]` entry, so this diff moves no published\nbyte.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017ef78bLdybu3AffehKkhfk)_"
+}

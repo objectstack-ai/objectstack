@@ -1,0 +1,34 @@
+{
+  "number": 12661,
+  "kind": "issue",
+  "title": "Charter the Project Director seat (项目总监): human-invoked, owning the contract-review chain and the adjudication duty",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-27T04:24:57Z",
+  "updated_at": "2026-08-27T06:22:12Z",
+  "closed_at": "2026-08-27T05:36:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12661",
+  "body": "Filed by the skills seat (session `session_01MnijPVVDakqK2J335JoJtq`) executing a maintainer direction given in live PM chat, 2026-08-27. Verbatim, untranslated, in sequence:\n\n> 「所以是否应该搞一个决裁的项目经理，也要更新他的skills」\n> 「比如叫项目总监？」\n> 「项目总监 由人工定期指挥，负责处理 contract-review 类别的和需要决裁的。」\n\nThe third message is the direction this card implements. The feature-class human floor is satisfied by the instruction itself; the governed draft PR is the maintainer's veto window on the exact wording.\n\n## What the seat is\n\n**项目总监 (Project Director)** — a named, human-invoked role. ⛔ No Routine, no cron, no standing fleet slot: the maintainer summons it (「处理决裁」/「处理 contract-review」/ the explicit entry below), exactly the shape measured working this shift when those duties ran on demand inside a lane seat's session. Two duties move to it wholesale:\n\n1. **The `needs:contract-review` chain** — enumerate carriers (cards AND PRs), review contract increments at the mandated tier, verdict on the card, clear both carriers, land un-governed code PRs per the standing clear-equals-land rule, hand back non-mechanical CI reds with a named reader or take over mechanical ones.\n2. **The adjudication duty (决裁勤务)** — decision-inbox hygiene across repos, batch presentation (≤5 per batch, business-angle explanation + options + four-facet analysis + one recommendation), post-ruling atomic four-piece execution, and the auto-adjudication channel under its hard gate.\n\n## Supersessions (recorded, not silently overwritten)\n\n- Maintainer 2026-08-26 「skills 和决裁的问题,还是由skills席统一人工处理」 — the **adjudication half** moves from the skills seat to the Director by this newer direction; the skills-face work (skill text, governance surfaces, the skills lane) stays with the skills seat.\n- Maintainer 2026-08-23 the contract-review hourly self-bound cron on the skills seat — already dead in fact (`auto_disabled_session_gone`, measured 2026-08-27 shift-close); the ownership clause is rewritten to the Director's human-invoked cadence. ⛔ The cron is not resurrected.\n- The auto-adjudication runner set (分诊 Routine 或 skills 席) — becomes 分诊 Routine 或 项目总监席; the fable machine-read fuse is unchanged and non-negotiable.\n\n## Design defaults (each reversible at the veto window)\n\n- **Entry**: `/pm-dispatch director` as a role argument beside `triage` / `epic:` — versioned in the same skill, no new file tree.\n- **Tier**: Director sessions run at `CONTRACT_REVIEW_TIER`, verified by the downgrade-fuse machine reading each session; a below-tier session does only tier-free preparation (inventory, batch drafting) and parks both duties.\n- **Seat post**: one `pm:seat` post (mutex + handover), same four-section protocol; charter versioned at a new `references/lanes/director.md` (register its ceiling in the line ratchet).\n- **Bijection carve-out**: the Director holds no `domain:*` lane; its scope keys on the two labels, cross-lane and cross-repo — same carve-out class as the triage seat. It never dispatches lane backlog work and never writes code; mechanical takeovers it owns are executed by dispatched devs under the existing takeover protocol.\n- **Latency trade, stated so it is chosen knowingly**: with no cron, `needs:contract-review` carriers wait between Director sessions; parked carriers are the designed-safe state, and the maintainer's invocation cadence is the review cadence.\n\n## Acceptance criteria\n\nSKILL.md names the seat, its entry, its two duties, the tier gate and the carve-out, paying the line ratchet with same-file cuts (zero headroom — every add funded, cut-ledger rows naming surviving homes); `references/lanes/director.md` carries the charter; the three superseded clauses are rewritten in place with the new provenance quoted; `check:skill-frame-sync`, id-lint and the ratchet stay green. ⛔ No behaviour is invented beyond the two duties named in the direction."
+}

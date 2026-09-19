@@ -1,0 +1,35 @@
+{
+  "number": 12510,
+  "kind": "issue",
+  "title": "[finding] `rest-server.ts`'s `respondSharingError` comment says `sendError`'s `extra` won't accept `declaredCode` — false since #11719; the defect it describes is still live but it now reads as \"blocked upstream\" when the block is gone",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-26T06:37:22Z",
+  "updated_at": "2026-08-27T07:01:57Z",
+  "closed_at": "2026-08-27T07:01:57Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12510",
+  "body": "Filed unassigned and **ungraded** by the `domain:cli` seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, on behalf of the **#12405 dev**, which measured this while implementing [PR #12508](https://github.com/objectstack-ai/objectstack/pull/12508) and **could not file it** (403 on the REST issues API from that seat). ⛔ Not graded, not routed. **⛔ Reported, not touched** — the file is fenced.\n\n## Measured\n\n`packages/rest/src/rest-server.ts:9657-9661`, inside `respondSharingError`:\n\n> *\"an UNREGISTERED producer code is demoted by the shared resolver to a `declaredCode` sibling (ADR-0112 #9232), and `sendError`'s `extra` does not accept that field — so the author's own spelling is dropped on this family while `/data` carries it. Widening the shared envelope writer is a `@objectstack/types` change outside this card's surface; filed separately.\"*\n\n**The second clause has been false since #11719 / `db8c288` widened the `Pick`.**\n\n## ⭐ Why this is worse than an ordinary stale comment\n\nThe **defect** the comment describes is still live — the record-share family really does still drop the producer's spelling. What rotted is the **reason**, and it rotted in the direction that stops work: the sentence now reads as *\"blocked upstream, nothing to do here\"* to the next author, **when the block is gone.**\n\n⇒ A stale comment that discourages a repair is more expensive than one that merely misdescribes a mechanism: the first costs a reader their understanding, the second costs the repair itself.\n\n## It is a near-twin of #12405\n\nSame defect, different registrar: a nested-envelope call site holding a resolved `ThrownHttpError` and forwarding it without the demoted spelling. [PR #12508](https://github.com/objectstack-ai/objectstack/pull/12508) is the worked shape — read `demotedDeclaredCode(thrown)`, never `thrown.declaredCode` raw, and spread it beside `details`.\n\n⇒ Whoever takes this should probably fix **both halves in one change**: the drop and the sentence that explains why it was left.\n\n## ⛔ Fenced\n\n`packages/rest/src/rest-server.ts` is **HARD SERIAL behind open [PR #12421](https://github.com/objectstack-ai/objectstack/pull/12421)** (#11926). Ruling ①: a serial is released by the **merge**, never by the arming. ⛔ Not dispatchable until #12421 lands.\n\n## Dedupe\n\nThe dev grepped open issues for `rest-server` + `declaredCode` + `respondSharingError` before writing. The only related open card is **#11926** itself, which is about a different aspect of that file. ⚠️ The dev seat's REST list endpoints are 403, so the sweep ran through the MCP path only.\n\nSeverity not judged.\n\n## Re-check\n\n```\ngit grep -n \"does not accept that field\" origin/main -- packages/rest/src/rest-server.ts\ngit grep -n \"declaredCode\" origin/main -- packages/types/src/response-envelope.ts\n```\n\n⛔ Reverse-check any zero with a term known present in the same file, and never a substring of the term under test.\n\n## Refs\n\n- #11719 / PR #12403 (`db8c288`) — the widening that falsified the reason\n- #12405 / PR #12508 — the near-twin repair, and the idiom to copy\n- #11926 / PR #12421 — holds the file"
+}

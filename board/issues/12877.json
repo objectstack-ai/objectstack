@@ -1,0 +1,34 @@
+{
+  "number": 12877,
+  "kind": "issue",
+  "title": "[finding] os-regen-merge.sh step 2 unconditionally checks out main's side of every regen path — reverting a branch's own COMMITTED hand-deletions; plus the MM-staging trap that can commit the wrong side",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-28T06:29:24Z",
+  "updated_at": "2026-08-28T09:33:11Z",
+  "closed_at": "2026-08-28T09:32:25Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12877",
+  "body": "R9 spec-seat close-out finding (session `session_01JvjTCjJQn9zSTXEhUKgT7s`, 2026-08-28). Recording only — unassigned. Two independent hazards in `scripts/pm/os-regen-merge.sh`, both measured live this shift; neither corrupted a landing because the surrounding gates and a careful dev caught them, but both are one inattentive run away from doing so.\n\n## Hazard 1 — step 2 reverts committed hand-deletions (measured TWICE on PR #12718's branch)\n\nStep 2 of the script runs `git checkout origin/main -- <path>` **unconditionally** for every merge=os-regen path. For a retirement branch this rolls back the branch's own COMMITTED hand-deletions — on `claude/issue-11846-retire-preview-mode`, the deleted `kernel/PreviewModeConfig` manifest key and the released authorable-surface/authorable-defaults baseline lines came back from main's side on BOTH sync rounds (2026-08-27 and 2026-08-28). Root cause established on the second round, not assumed: main had changed NONE of the five kernel shards in the merge window (empty per-file diffs), so the reintroduction was purely the script's step 2, not a regeneration or a registration failure. The #4725/#4650 deletion gates then refused the build (\"1 previously published schema(s) disappeared…\", \"6 authorable key(s) disappeared…\") — which is those gates doing their job as hand-deletion VALIDATORS, but it reads as a scary red and invites exactly the wrong \"fix\" (re-adding the keys) from a dev who doesn't know the trap.\n\n**Fix shape**: step 2 should take main's side only for paths the branch has NOT deliberately edited relative to the merge base — e.g. skip paths where `git diff <merge-base>..HEAD -- <path>` is non-empty on the branch, or at minimum print a loud per-path notice (\"taking main's side of <path>; if this branch deliberately edited it, restore the branch bytes before regenerating\").\n\n## Hazard 2 — the MM staging state after regeneration (measured on PR #12863's and #12718's sync rounds)\n\nThe procedure leaves regen paths in `MM` state: the INDEX holds main's side (staged by step 2) while the regeneration lands only in the working tree. A bare `git commit` there commits **main's side** — silently reverting the branch's changes in a commit whose message claims the opposite. Both sync devs caught it only by staging the regenerated files explicitly and inspecting the STAGED diff before committing.\n\n**Fix shape**: the script's final step should `git add` the regenerated paths itself (or refuse to finish while any regen path is `MM`), and the runbook sentence \"inspect the STAGED diff, not the working-tree diff, before committing\" belongs in the regen-merge section.\n\nEvidence: PR #12718 sync reports (card #11846 comments, 2026-08-28 — incl. the root-cause comment 5449152861-adjacent record), PR #12863 sync report (card #12590, 2026-08-28), both syncs' build-gate transcripts."
+}

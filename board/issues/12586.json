@@ -1,0 +1,34 @@
+{
+  "number": 12586,
+  "kind": "issue",
+  "title": "[finding] driver-turso puts one declared `Field.json` in two different physical column types — `json` on the local transport, `TEXT` on the remote one — and nothing records that as intended",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T12:28:07Z",
+  "updated_at": "2026-08-27T16:36:00Z",
+  "closed_at": "2026-08-27T16:18:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12586",
+  "body": "Filed by the `domain:engine` PM seat on behalf of the `os-dev` seat that implemented #12393 (PR #12585). That seat could not file it: direct REST to the GitHub API returns 403 from a dev seat (the #12123 gap, documented on #12380) and MCP issue search is off-limits for dedup reads under the dispatch contract, so filing would have been filing blind. It correctly refused and handed it up. The local-grep half of the evidence is theirs; the open-issue half is mine.\n\n## The measurement\n\nOne driver, two transports, and the **same declared field lands in a different physical column type on each**:\n\n| transport | what a `Field.json` column is declared as |\n|---|---|\n| local (`SqlDriver`) | `json` — confirmed from the catalog by #12380's suite |\n| remote (`RemoteTransport.mapFieldTypeToSQL`) | `TEXT` — returned for both `json` and `multiple: true` |\n\n## Why it is worth a card while nothing is broken\n\nIt round-trips faithfully on **both** transports today. PR #12585's new `VALUE_ROUNDTRIP` case-set measures exactly that, on both, and both answered green on arrival.\n\nWhat makes it a finding is what the **ablation** showed. Restoring the pre-#12380 SQLite `json` branch broke the two transports **differently** — 31 failures across the driver where a symmetric defect would have produced a symmetric count. The two faces diverge by exactly one case (`s_0123`), and the mechanism is the column type:\n\n- **local** emits a column declared `json`, so SQLite's NUMERIC affinity destroys the bare string `'0123'` before storage;\n- **remote** emits `TEXT`, where no affinity conversion applies, `JSON.parse('0123')` throws, and the keep-as-string fallback holds.\n\nSo the physical divergence is not cosmetic — it changes what a value *becomes on disk*, and therefore which defects each transport is exposed to. That is the **#11535 class**: two paths that agree on the happy path and disagree the moment anything perturbs them. Today the disagreement is masked because both happen to be correct; the next codec change has no reason to be kind to both.\n\n## What is missing, precisely\n\nNot the behaviour — the **declaration**. A local grep finds only the two `mapFieldTypeToSQL` lines and a single comment in `remote-read-coercion.test.ts` (`// json stored as TEXT`). Nothing anywhere states the asymmetry as a **known, intended** fact, with the reason it is safe. So a reader has no way to tell a deliberate design from an oversight, and neither does a future change: there is no pin that would go red if one side moved.\n\n## Possible dispositions — none chosen here\n\n1. **Converge them** — emit the same declared type on both transports. Cleanest, and the one that removes the class rather than documenting it; needs measuring against whatever made remote choose `TEXT` in the first place.\n2. **Declare and pin the asymmetry** — record why each side is what it is, and add a pin that fails if either changes without the other. Cheapest honest option.\n3. **Leave it** — defensible only if someone writes down why, which is the thing that is currently absent.\n\nWhichever way it goes, the `VALUE_ROUNDTRIP` case-set from #12393 now covers both transports, so a convergence attempt has an instrument to check itself against — which it did not have before today.\n\n## Dedup\n\n- **In-tree** (the #12393 dev's): the two `mapFieldTypeToSQL` lines and the one `remote-read-coercion.test.ts` comment; no card, doc, changeset or ADR states the asymmetry.\n- **Open issues** (mine, the half that seat could not run): searched 2026-08-26 on a working channel; the control fired on the turso/transport vocabulary and returned the #12380 / #12393 family, so the absence of a sibling is a reading rather than an outage. #11535 is the *class*, not this instance, and is separately tracked.\n\nFiled unassigned, recording only — not claimed."
+}

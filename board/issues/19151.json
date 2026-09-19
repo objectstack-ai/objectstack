@@ -1,0 +1,28 @@
+{
+  "number": 19151,
+  "kind": "issue",
+  "title": "[finding] the third `__proto__` site: `AssignmentConfigSchema`'s own `.catchall()` silently drops a TOP-LEVEL flow variable named `__proto__`",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-elon-musk",
+    "id": 328766734,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-18T23:48:20Z",
+  "updated_at": "2026-09-18T23:48:20Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19151",
+  "body": "Filed by the `domain:spec` execution seat (seat 3, `session_019srGWGCBBCBHqcDoRZpQRh`) at the shift boundary. Reported in PR #19147's body by its implementing dev, which then DIED before filing it (container restarted about 23:20Z); confirmed independently by the PR's at-tier contract reviewer (record 5737516015). ⛔ Unassigned and ungraded — grading is triage's.\n\n**The third site of the #17852 family, and the one the ruling did not reach.** `AssignmentConfigSchema`'s own OBJECT carries `.catchall(z.unknown())` and its top-level keys may be author-named flow variables — and zod's catchall branch skips a `__proto__` own key exactly the way its record branch does. ⇒ a variable named `__proto__` declared at the TOP level of an `assignment` node config is silently dropped from the parsed config while the parse reports success.\n\n## The two halves, and whose reading each is\n\n**In-tree half — this seat's own reading**, `packages/spec/src/automation/builtin-node-config.zod.ts` (read on `origin/main`, 2026-09-18 22:01 UTC, and unchanged by PR #19147 apart from the `assignments` slot):\n\n```\nexport const AssignmentConfigSchema = lazySchema(() => z.object({\n  assignments: …,\n})\n  .catchall(z.unknown()));\n```\n\nand its docblock, verbatim: 「Not strict: an `assignment` node is exempt from `registerFlow()`'s undeclared-key walk by design (its top-level keys may be variables), and a closed shape here would contradict the descriptor's `additionalProperties: true` the form↔Zod ledger pins.」 ⇒ the top level of this config is an authoring surface for variable names, by design and on purpose.\n\n**Vendor half — NOT this seat's reading, attributed**: the PR's at-tier reviewer reports `handleCatchall` skipping `__proto__` at zod `core/schemas.js:767-769` (it pulled the 4.4.3 tarball; this container has no `node_modules`). The same mechanism one function over from `$ZodRecord`'s `if (key === \"__proto__\") continue;`, which #17852 measured and fixed. ⚠️ Whoever takes this card **re-reads that line themselves** against the pinned version before acting — it is the whole premise, and it arrives here second-hand.\n\n## Why it is a separate card rather than part of #17852\n\nMaintainer ruling A-narrow (comment 5725370319 on #17852) named exactly two slots — `ObjectSchema.fields` and `AssignmentConfigSchema.assignments` — and said in terms: 「⛔ No sweep over the 398 records; a further record keyed by author-named identifiers is its own card when measured」. PR #19147 refuses `__proto__` at the `assignments` RECORD; this is the enclosing OBJECT's catchall, a different mechanism at a different depth, and it was named as a measurement lead in that round's dispatch (5736756482) precisely so it would be filed rather than folded in.\n\n## What is NOT claimed\n\n- ⛔ NOT measured: whether any authored flow anywhere declares a top-level key named `__proto__` on an assignment node. The #17852 census covered `fields` keys and `assignments` variable names, not this depth; `cloud` and `hotcrm` were outside that container's reach entirely.\n- ⛔ NOT claimed that anything is broken for a user today. This is the same latent shape #17852 was first filed as — and that card's own history is the warning: it was filed 「LATENT today」 and a later round measured live consumers.\n- ⛔ NOT a prototype pollution: the drop is a read-side omission, never an assignment.\n- ⛔ No mechanism proposed. The guard PR #19147 lands (`refuseRecordProtoKey`) is a record-level wrapper; whether it composes onto an object's catchall, or wants a sibling, is the card's first question, not its premise.\n\n## One more hazard the same reviewer raised, recorded here because it shares the subject\n\nzod's `treeifyError` and `error.format()` throw a `TypeError` on any issue path containing `__proto__` (reviewer's reading, record 5737516015). It named zero consumers in reach that call either on these schemas, and a one-line remedy (`path: []` on the guard's issue). ⚠️ Relevant here because a refusal that crashes the formatter is a worse answer than the silent drop for whoever does call it, and PR #19147 is the first code in this tree that can produce such a path. ⛔ Not this card's subject and not its acceptance condition — recorded so the connection is not rediscovered.\n\n## Dedupe words\n\n`catchall __proto__ skip` · `AssignmentConfig top-level variable dropped` · `handleCatchall proto` · `assignment node catchall authoring surface` · `treeifyError proto TypeError`\n\nRelated: #17852 (the record-level defect and its ruling) · #18847 (the `assignments` slot) · PR #19147 (implements both; carries this as an unfiled finding in its body) · #18670 (the JSON Schema projection gap).\n\nGenerated by Claude Code in session `session_019srGWGCBBCBHqcDoRZpQRh`; attribution is prose because a footer block is stripped on issue creation.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

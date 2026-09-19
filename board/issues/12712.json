@@ -1,0 +1,34 @@
+{
+  "number": 12712,
+  "kind": "pull_request",
+  "title": "build(docs): stop emitting the 348 MB of server source maps the OOM-killed build was paying for",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-27T13:00:46Z",
+  "updated_at": "2026-08-27T13:13:09Z",
+  "closed_at": "2026-08-27T13:13:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-27T13:13:06Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12712",
+  "body": "Production docs deploys have been OOM-failing all day (`exit 137`, Vercel `errorCode: \"out_of_memory\"`, 4-core/8192 MB build machine). This suppresses 348 MB of server source maps that nothing in production reads.\n\n## Where the build actually dies\n\nEvery failing log places the kill between `Creating an optimized production build ...` and `Compiled successfully`, with **zero output in between**:\n\n```\n11:31:03.206  Creating an optimized production build ...\n11:42:26.615  ERROR ... exited (137)          <- 11m23s of silence\n```\n\nSo the peak is the **Turbopack compile phase**. The build never reaches `Collecting page data` / `Generating static pages` — which retires the prerender-based attribution in #12683, and with it the 403 build-time OG PNGs and 403 markdown routes as suspects. They are `generateStaticParams` work in a phase the process dies before.\n\nIt also explains why neither knob already in the tree reaches this: `experimental.cpus: 2` bounds static-generation workers that have not spawned yet, and `--max-old-space-size` bounds V8 while Turbopack allocates from Rust outside it. Both confirmed by measurement below — which is #12683's own finding, now with the mechanism attached.\n\n## Measured (local cold build, all 403 pages, peak single-process RSS)\n\n| config | peak | compile | verdict |\n|---|---|---|---|\n| before | 5191 MB | 22.6s | — |\n| **`turbopackSourceMaps: false`** | **4757 MB** | **19.5s** | ✅ shipped |\n| `turbopackScopeHoisting: false` | 4806 MB | 19.1s | noise — retired |\n| `--max-old-space-size=2048` | 4734 MB | 18.0s | noise — retired |\n| `turbopackFileSystemCacheForBuild: true` | 4779 MB | 22.2s | noise — retired |\n| + `turbopackMinify: false` | 3785 MB | 16.2s | ⚠️ rejected, see below |\n| `includeProcessedMarkdown: false` | — | — | build fails (`getLLMText`) |\n\nThe negative rows are recorded so they are not re-tried.\n\n## Why `turbopackMinify: false` is not in here\n\nIt takes another 972 MB off the peak, but client JS goes 5.8 MB -> 16 MB (+176%) — a cost every reader pays on every visit, to save memory in a machine they never touch. Confining it to the server side (where the memory is: 589 MB of server chunks vs 5.8 MB client) is not on offer: `experimental.serverMinification` is read only by `dist/build/webpack-config.js` and never on the Turbopack path.\n\n## What this does not claim\n\nIt buys margin; it does not prove the ceiling is cleared. The measurement is macOS/arm64 against a Linux/x86_64 container where the same phase measured 7.6 GB (#12683) vs 4.7 GB locally — the *ratio* is the transferable part, and −8.4% onto 7592 MB leaves ~15% headroom, which is thin. #12683's option A (larger build machine) is untouched by this PR and remains the answer if the next production build still dies. Merging this first costs one build cycle to find out.\n\nSecondary signal worth watching: Vercel spends 11 minutes compiling what takes 20s locally. A 4-vs-10 core gap does not explain 30x — the rest is thrashing near the ceiling, so a successful build should also come back much faster.\n\n## Verification\n\nMerge, then:\n\n```\ncurl -s https://objectstack.ai/ | grep -o 'data-dpl-id=\"[^\"]*\"'\n```\n\nAny id other than `dpl_2nfWjGjSwZjakVEmUG1kBWD6697r` means the outage is over.\n\n## Also corrects #12698\n\n#12698's action 2 (\"fix the Ignored Build Step\") rests on a misreading. The project's rule is `if [ \"$VERCEL_ENV\" == \"production\" ]; then exit 1; else exit 0; fi` — `exit 1` = build, `exit 0` = skip — so production always builds and Preview always skips. The `Canceled by Ignored Build Step` on PR #12684's head was that PR's *Preview* being skipped, as intended. Pushes to `main` do trigger production builds; they were failing, not skipped. No dashboard change is needed there.\n\nRefs #12711, #12683, #12698\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

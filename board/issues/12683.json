@@ -1,0 +1,33 @@
+{
+  "number": 12683,
+  "kind": "issue",
+  "title": "docs build: `next build` holds ~7.6 GB in ONE process — the docs deploy's next memory ceiling, and no in-repo knob bounds it",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "repo:objectstack"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-27T08:49:35Z",
+  "updated_at": "2026-08-28T05:34:13Z",
+  "closed_at": "2026-08-28T05:27:37Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12683",
+  "body": "Found while fixing #12677 (spec's DTS pass was declaring a 12 GB heap ceiling inside the build container). That fix lands separately and is not affected by this card; this records the **next** thing that will take the docs deploy down, because it is now the largest single consumer in the pipeline and nothing in this repo bounds it.\n\n## Measured\n\n`pnpm turbo run build --filter=@objectstack/docs` is two sequential tasks — `@objectstack/spec#build` then `@objectstack/docs#build` (the docs app's only workspace dependency is spec). Measured as peak anonymous RSS of the whole process tree, inside a cgroup capped at the stated size **and** a mount namespace whose `/proc/meminfo` reports the same figure, so tools that size themselves from reported memory see a real container:\n\n| phase | peak | dominant process |\n|---|---|---|\n| `@objectstack/spec#build`, after the #12677 fix | 5654 MB | tsup DTS worker |\n| `@objectstack/docs#build` | **~7.6 GB** | a single `next-build (v16.3.1)` process at **7592 MB** |\n\nThe whole pipeline in an 8192 MB container: **exit 137, `oom_kill=1`**, peak 8143 MB, killed in the docs phase. In a 10240 MB container: completes, 2/2 tasks, 5m02s, peak 8135 MB.\n\nThe turbopack worker-pool children are **not** the problem — they measure 100–430 MB each. One process holds everything.\n\n## Why the existing controls do not bound it\n\nBoth knobs already in `apps/docs/next.config.mjs` and `apps/docs/package.json` were put there for earlier OOMs, and neither reaches this:\n\n- **`NODE_OPTIONS='--max-old-space-size=4096'`** bounds V8's old space only. Next 16 builds with **Turbopack**, which is Rust — its allocations sit outside V8 entirely. Measured: the process reaches 7592 MB while nominally capped at 4096.\n- **`experimental.cpus: 2`** bounds the static-generation worker fan-out. Measured above: the workers are small; capping them cannot move a 7.6 GB main process.\n\nAnd the demand is **fixed, not adaptive** — it does not shrink when given less. Under smaller containers the docs build grows until it is killed rather than sizing down:\n\n| container | result |\n|---|---|\n| 8192 MB | exit 137, `oom_kill=1`, `limit_failcnt=11073` |\n| 6144 MB | exit 137, `oom_kill=1`, killed at 75s |\n| 4096 MB | exit 137, `oom_kill=1`, killed at 34s |\n\nNext 16.3.1 exposes **no** memory-limit option: its config schema carries no `memoryLimit` for turbopack (the only match anywhere in its `dist/` is `TURBO_TRACE_DEFAULT_MEMORY_LIMIT`, which is tracing, not the build).\n\n## Why this is not already an outage\n\nThe docs phase has been building successfully on Vercel at roughly this size for weeks — the `experimental.cpus: 2` comment records a previous OOM fought at this same seam. So the Vercel build container's real envelope is at or above ~8 GB usable. What broke in #12677 was the *other* phase crossing the line, not this one. This card is the standing risk, not a live failure.\n\n## Why it is a real risk anyway\n\nThe margin is thin and only one side of it is under this repo's control. The docs site prerenders 400+ MDX pages; that count grows with the documentation. When this phase crosses, it produces exactly the #12677 signature — `exit 137`, no diagnostic, every production deploy failing — and unlike #12677 there is no in-repo number to lower.\n\n## Options, none of them free\n\n1. **Raise the Vercel build container** (dashboard/maintainer action, not versioned in `apps/docs/vercel.json`). Buys headroom, changes no code, costs money.\n2. **Build the docs app with webpack instead of Turbopack.** Different memory profile, but it is a bundler change for a 400-page site — an architecture decision, and `next.config.mjs` documents that Vercel and CI both currently run Turbopack.\n3. **Shard the prerender** so no single process holds the whole page set. Largest change; also the only one that scales with the page count.\n\nNot filed with a fix attached on purpose: (1) is a maintainer decision and (2)/(3) are architecture decisions, none of which belongs inside the #12677 memory fix.\n\n## Reproducing\n\nPeak was read from a cgroup-v1 `memory.stat` `total_rss` sampler with per-process attribution at each new peak; the harness was validated against a positive control (600 MB allocation under an 8 GB cap completes) and a negative control (2 GB allocation under a 1 GB cap reproduces `exit 137` with `oom_kill=1`). The container emulation is two halves — the cgroup cap **and** a faked `/proc/meminfo` in a private mount namespace; a cap alone is not a container, because it bounds what a process may use without changing what it believes it has.\n\nRefs: #12677 · epic #12243\n\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

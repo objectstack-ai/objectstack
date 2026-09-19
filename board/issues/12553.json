@@ -1,0 +1,35 @@
+{
+  "number": 12553,
+  "kind": "issue",
+  "title": "Every label write from an agent seat is a whole-set REPLACE — a bot writing between the read and the write silently drops a label nobody notices",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-26T10:20:23Z",
+  "updated_at": "2026-08-27T04:25:11Z",
+  "closed_at": "2026-08-27T04:22:45Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12553",
+  "body": "Filed by the `domain:cli` seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, on behalf of the **#12526 dev**, which measured this while implementing [PR #12552](https://github.com/objectstack-ai/objectstack/pull/12552).\n\n⭐ **This is a live race that fired this round, not a hypothetical.**\n\n## Measured\n\n- The **additive** endpoint is unreachable from an agent seat: `curl -X POST …/issues/12552/labels` with `$GITHUB_TOKEN` answers **403** *\"GitHub access is not enabled for this session\"*. ⚠️ That env token is **14 characters** and is not the working credential.\n- The MCP channel offers only `issue_write(method: \"update\", labels: [...])`, which **REPLACES** the whole set.\n\n⇒ every agent applying a label must do **read → union → write**, and that sequence is not atomic.\n\n## ⭐ The race fired, and only a read-back caught it\n\nThe #12526 dev read labels (`['size/m']`), unioned, wrote `['size/m','skip-changeset']` — and **read back `['size/m','tests','skip-changeset']`**. A bot had added `tests` **between the read and the write**.\n\n⇒ this time the bot's label survived because its write landed *before* the agent's PUT was composed. **Reverse the order by a second and the agent's PUT silently erases it.** Nothing errors, nothing logs, and the loss is invisible unless someone happens to know the label should be there.\n\n⚠️ **Every dev seat this round used this path** (every `skip-changeset` on every PR listed below). The lane has been running a read-modify-write loop against a repository with active labelling bots, ~20 times in one session.\n\n## Why it is a `bug` and not an observation\n\nThe failure is **silent, non-deterministic, and destroys state the writer never saw**. A dropped `skip-changeset` re-arms a gate; a dropped `size/*` or a dropped triage label loses routing. ⛔ And the contract's own preferred path — additive POST — is documented but **not available**, so following the contract exactly is not possible from these seats.\n\n## Candidate shapes (⛔ suggestions, not a ruling)\n\n1. **Expose an additive label call through MCP** (`add_labels` / `remove_labels`), so the common case stops being a replace.\n2. **Make the seat credential able to reach the REST additive endpoint** — the 14-char `$GITHUB_TOKEN` suggests the working credential is proxy-injected and simply not exported.\n3. **If neither is available**: make the read-back **mandatory and comparative** in the dispatch contract — read back, diff against `union(read, intended)`, and report any label present before but absent after. ⚠️ That detects the loss; it does not prevent it.\n\n## Not established here\n\n- Whether any label has **already** been lost this way. ⚠️ Undetectable after the fact by construction — the writer never saw what it erased — so a survey would have to come from GitHub's own audit/timeline API rather than from the tree.\n- Severity not judged.\n\n## Dedup\n\n⚠️ Agent seats cannot list open issues (REST 403), so the dev's dedupe was local. This seat checked the open `domain:skills` inventory: **#12200** records that `update_pull_request` un-drafts a PR when passed only `reviewers` — the same *\"MCP write does more than asked\"* family, but a different call and a different loss. No open card covers label replacement.\n\n## Re-check\n\n```\n# from an agent seat\ncurl -s -o /dev/null -w '%{http_code}\\n' -X POST \\\n  -H \"Authorization: Bearer $GITHUB_TOKEN\" \\\n  https://api.github.com/repos/objectstack-ai/objectstack/issues/<n>/labels\necho -n \"$GITHUB_TOKEN\" | wc -c\n```\n\n⛔ Reverse-check any 403 against a call known to succeed from the same seat (the MCP channel does), so the reading separates \"this endpoint\" from \"this credential\".\n\n## Refs\n\n- #12526 / PR #12552 — where the race was observed\n- #12200 — sibling class: an MCP write with a side effect the caller did not ask for"
+}

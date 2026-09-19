@@ -1,0 +1,32 @@
+{
+  "number": 11451,
+  "kind": "issue",
+  "title": "`bootstrapSystemCapabilities` still reads `sys_capability` one name at a time — and it, not the declared seeder, is the loop whose size is the union of every `systemPermissions` string",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-23T20:04:16Z",
+  "updated_at": "2026-08-27T21:41:51Z",
+  "closed_at": "2026-08-27T21:41:51Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11451",
+  "body": "Found while implementing #11096 + #11097 (batching the declared-capability seed and the env overlay reconciler). This is the seeder next door, and it was not in either card's scope.\n\n## The shape\n\n`packages/plugins/plugin-security/src/bootstrap-system-capabilities.ts`:\n\n- the definition set is built in memory first — curated `KNOWN_CAPABILITIES` (line ~326), then every `systemPermissions[]` string across every seeded permission set that is not already curated or already materialized (lines ~332-338);\n- then one loop over that set (line ~347) issues a **per-item existence read**: `const existing = await tryFind(ql, 'sys_capability', lookup, 1)` (line ~356);\n- and the curated half's reconcile is an `UPDATE` (line ~497) that fires whether or not `label`/`description` differ from what is stored.\n\nSame shape as the two loops #10946 measured at slope 4.0000 / R² = 1.000000, and the same shape #11096 has just removed from `bootstrapDeclaredCapabilities`.\n\n## Why this is worth its own card\n\n⚠️ **The cost argument on #11096 actually describes THIS loop.** #11096 said the capability count \"is the union of every capability every package declares, which is typically larger than either axis #10946 measured\" — but `bootstrapDeclaredCapabilities` iterates `stack.capabilities`, i.e. only the EXPLICIT `defineCapability` declarations. The union-of-`systemPermissions` set is the one built here, at lines 332-338. So the larger of the two capability loops is the one still unbatched.\n\nBoth run on every `kernel:ready`, back to back (`security-plugin.ts` ~3209 then ~3218).\n\n## Why it is not a mechanical copy of #11096\n\n⛔ **The two halves do not share a lookup key**, which is exactly the exclusion that makes `buildExistingByName` non-reusable as-is here:\n\n```ts\nconst lookup = isDerived\n  ? { name: def.name }\n  : { name: def.name, managed_by: 'platform', organization_id: null };\n```\n\n`buildExistingByName` (`seed-name-lookup.ts`) answers \"does a row exist for this NAME\", optionally scoped to one organization. The curated half asks a narrower question — *the platform's own organization-less row for this name* — and that narrowing is load-bearing: #8470 put it there precisely because an unqualified `find(..., limit: 1)` has no `ORDER BY` and could reconcile an arbitrary organization's row, leaving the platform's own row unseeded.\n\nSo batching this needs a real design step, one of:\n\n1. two batched reads (one per half) with the curated half post-filtering on `managed_by`/`organization_id` in memory — cheap, but it reads rows the current query never returns;\n2. extending `seed-name-lookup.ts` to carry an extra equality predicate alongside the `$in` — a **shared file** that three seeders now depend on, so widening it is not a drive-by;\n3. leaving the derived half per-item and batching only the curated half, whose size is fixed by `KNOWN_CAPABILITIES` — which optimizes the half that does not grow.\n\nOption 1 or 2 look right; the choice should be made deliberately, not inside another card's PR.\n\n## Not measured\n\nThe slope of this axis has not been measured. The hosted `bootstrap-curve.mjs` rig lives in `objectstack-ai/cloud` and its axes are permission sets / positions / objects. What is established here is the code shape, by reading, plus the round-trip counts #11096 pinned for the sibling seeder in `bootstrap-seed-round-trips.test.ts` — the natural home for a pin on this one too.\n\nRefs #11096 · #10946 (the precedent and the `buildExistingByName` machinery) · #8470 (why the curated lookup is narrowed) · `objectstack-ai/cloud#1555` (the 20s request budget)"
+}

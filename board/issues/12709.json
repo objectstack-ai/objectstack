@@ -1,0 +1,34 @@
+{
+  "number": 12709,
+  "kind": "issue",
+  "title": "Governed-merge audit: detection stays every-seat, the authoritative window and disposition move to the Director seat (no new label)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-27T12:49:00Z",
+  "updated_at": "2026-08-27T15:10:50Z",
+  "closed_at": "2026-08-27T15:10:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12709",
+  "body": "Filed by the skills seat (`session_01MnijPVVDakqK2J335JoJtq`) executing a maintainer ruling from live PM chat, 2026-08-27.\n\n## Ruling (verbatim, untranslated)\n\nThe maintainer's question: 「governed 合并审计，目前流程是怎样？是不是也应该都汇报给项目总监。是否建议新增加一个label ？」\n\nThe seat's recommendation: keep the three-layer regime (`--test` pre-arm gate + human-merge-as-review-record + after-the-fact sweep) and split the third layer 检测双层、处置单席 — lane seats keep the per-round sweep as near-zero-cost early warning; the Director seat runs the AUTHORITATIVE consolidated audit on every summon, `--since-ref`-anchored at the tips recorded by the previous Director audit (anchor = one line in the Director seat post's 说明 section — gap-free, duplicate-free); the list is presented inside the adjudication batch (per entry: recognize / don't); an unrecognized entry is filed as a `needs-user-decision` card on the spot (the #9495 incident regime). NO new label: enumeration is tree-derived (local git, zero API, cannot drift — a label would be a second corruptible index), and disposition reuses the Director's existing inbox.\n\nThe maintainer's execution ruling, verbatim: 「合并审计归总监那件事，同意你的建议」.\n\n**Already live**: the Director's first consolidated run executed 2026-08-27 ~13:00Z (7 governed merges enumerated across 2/2 checked-out repos, all attributed via MCP, presented in the summon's batch report); the anchor tips are recorded on the Director seat post. This card lands the charter text so the practice is versioned, not oral.\n\n## The two changes\n\n1. **SKILL.md 轮次报告 clause (one-sentence amendment)**: the governed 合并审计清单 line stays a lane-round duty (early warning, own window, ⛔ 不凭记忆 unchanged), with the authoritative consolidated window and the recognize/rollback disposition named as the Director seat's (pointer to `references/lanes/director.md`, no mechanics copied).\n2. **`references/lanes/director.md` fourth duty**: anchored governed-merge audit — each summon runs the sweep `--since-ref`-anchored at the previous audit's recorded tips (anchor line lives in the Director seat post 说明 section; the script itself prints the exact next-round flags and stores nothing), folds the list into the adjudication batch (one line per entry, recognize y/n), files an unrecognized entry as `needs-user-decision` in the same stroke, and records the new tips. INCOMPLETE (exit 2) is reported as INCOMPLETE, never as clean. Attribution channels that 403 in-container are completed via MCP per entry. ⛔ No new label; ⛔ no cron (human-invoked cadence is the audit cadence, parked windows are the designed-safe state — same trade as the other three duties).\n\n## Non-goals (binding)\n\n- The `--test` pre-arm predicate, the queue guard, and the human-merge-as-review-record regime (2026-08-18 「同意」) untouched.\n- Lane seats' round-report audit line NOT removed (defense in depth); only the authoritative window/disposition centralize.\n- `check-governed-merges.mjs` itself untouched — protocol text only.\n- No new labels, no new title words, no script changes.\n\n## File surface\n\n`.claude/skills/pm-dispatch/SKILL.md` (one sentence in the 轮次报告 clause) + `.claude/skills/pm-dispatch/references/lanes/director.md` (fourth duty). Both at zero-headroom ratchets (1005/1005; 75/75) — net 0, cut ledger with surviving homes; if director.md cannot absorb the duty at net 0 without destroying meaning, STOP and report the precise shortfall (a ceiling bump is the maintainer's decision).\n\n## Acceptance\n\n- A Director summon replayed under the new text: one anchored sweep, list inside the batch, unrecognized ⇒ card + incident question in the same batch, anchor advanced on the seat post.\n- Lane round reports unchanged except the pointer sentence.\n- Ratchets hold; id-lint (no issue numbers in protocol files), frame-sync, governed-prose green; governed draft PR + human merge four-piece."
+}

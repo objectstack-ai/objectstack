@@ -1,0 +1,35 @@
+{
+  "number": 12702,
+  "kind": "issue",
+  "title": "Org-scoped presentation customization authority: a tenant org admin authors tier-A overlays without platform-wide `manage_metadata`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-27T11:46:42Z",
+  "updated_at": "2026-08-27T13:34:50Z",
+  "closed_at": "2026-08-27T13:34:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12702",
+  "body": "Part of #12701 (hotcrm single-DB multi-org SaaS). Maintainer-decided direction (2026-08-27 live PM chat, direct-dispatch channel; quotes in the epic) — the implementation shape below is open, the contract is not.\n\n## The measured gap (all on `origin/main` @ `15bf9e8`)\n\n- `manage_metadata` is the **only** metadata-authoring capability, and it is `scope: 'platform'` (`packages/spec/src/security/capabilities.ts:43`). Every `/meta` write door demands it (`packages/runtime/src/domains/meta.ts`, pinned by `meta-save-capability-gate.test.ts`).\n- Org-scoped writes are threaded only for the five registry `allowOrgOverride: true` types (view, dashboard, report, translation, email_template) via `organizationIdForMetaWrite` (`packages/metadata-core/src/meta-write-org-scope.ts`); every other type lands env-wide (#6190 discipline).\n- Consequence in a walled posture (`group`/`isolated`): granting a tenant org admin the one key that unlocks per-org tier-A overlays **also** unlocks env-wide tier-B authoring (flows, objects — cross-tenant reach). So a SaaS operator cannot let tenants customize views/dashboards/reports/translations/email templates at all, even though the per-org overlay mechanism (ADR-0005) is complete under the door.\n\n## Contract to build\n\nA tenant org admin in a walled posture can author **org-scoped overlays for exactly the five tier-A types** without holding platform `manage_metadata`:\n\n1. A new **org-scoped** authoring capability (suggested name `manage_org_presentation`; final name is the dev's call inside ADR-0066 conventions) declared in `PLATFORM_CAPABILITIES`, seeded like its siblings.\n2. The metadata write door accepts it **only** when ALL of: the type's registry entry declares `allowOrgOverride: true`; the write is org-scoped to the **caller's own active organization** (never env-wide, never another org); posture semantics unchanged otherwise. Platform `manage_metadata` keeps its exact current behavior — this capability is a subset key, not a re-keying.\n3. Refusals stay loud and name the sanctioned path (no caller-grant disclosure, #7450): a holder attempting a tier-B write or an env-wide write is refused with the existing envelopes (`NOT_OVERRIDABLE` / `PERMISSION_DENIED` family — reuse codes, do not mint).\n4. Read side: verify the org-overlay read path (`organizationIdForMetaRead`) needs no change for this caller class; state the conclusion in the PR body either way.\n\n## Walls (restated so the card cannot drift)\n\n- ⛔ No `allowOrgOverride` flips on any type — the #6190 phantom-overlay wall and its identity pin (`protocol.org-scoped-write-refused.test.ts`, exactly five types) stand; the pin turning red on a flip is the pin working.\n- ⛔ No tier-B reach and no env-wide (`organization_id NULL`) writes through the new capability, under any posture.\n- ⛔ Predicates stay registry-derived (`declaresOrgOverride`) — no hand-written type lists.\n- ADR-0126 surfaces (activation ledger, §5 gate) untouched.\n\n## Acceptance\n\n- Capability declared + seeded + documented in the capability registry's own conventions.\n- Walled-posture pins in both directions: org admin holder CAN write an org-scoped view overlay; the same holder is refused (code + status asserted, ADR-0112 envelope) for a tier-B write, an env-wide write, and a foreign-org write. `single`-posture behavior byte-unchanged for existing callers.\n- Changeset (published packages).\n\nClause-②: **yes** (new capability = widened public surface) — dispatch and review at the contract-review tier."
+}

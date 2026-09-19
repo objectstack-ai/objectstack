@@ -1,0 +1,36 @@
+{
+  "number": 12313,
+  "kind": "issue",
+  "title": "sys_oauth_resource.identifier declares an uncited maxLength: 1024, and now over-declares relative to every column that references it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "needs:contract-review",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T17:26:39Z",
+  "updated_at": "2026-08-27T03:11:07Z",
+  "closed_at": "2026-08-27T03:11:07Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12313",
+  "body": "Filed unassigned by the #11701 dev while discharging that card's narrowing condition. Not fixed there: narrowing this column is a contract change on a different published object *and* would move it off #12198's hash shadow, so it needs its own ruling.\n\n## The observation\n\n`sys_oauth_resource.identifier` (`packages/platform-objects/src/identity/sys-oauth-resource.object.ts`) declares `maxLength: 1024`. Two things are true of that number:\n\n1. **It cites no producer.** Every bound #11374 declared carries a `[#11374]` comment naming where it came from (`sys_session.token` → \"better-auth 1.7.1's own MySQL schema … varchar(255)\"; `sys_oauth_consent.client_id` → \"a referencing column takes the referenced column's bound\"; `sys_account.issuer` → \"transitively from sys_sso_provider.issuer\"). This one has no comment at all. `git log -S` puts it in 4109153184 (#3080), the `@better-auth/oauth-provider` 1.7 schema-drift close — a parity fix that added the object wholesale, not a sourced-bound pass. It reads as generous slack chosen for \"a URI\", never derived.\n\n2. **Measured, the producing contract cannot fill it.** better-auth 1.7.1 is the sole writer (`managedBy: 'better-auth'`, `protection.lock: 'full'`). Its own MySQL migration generator (`better-auth/dist/db/get-migration.mjs`, `getType`) emits this column as **`varchar(255)`** (the `field.unique` branch — `oauthResource.identifier` is `{ type: \"string\", required: true, unique: true }`), and the referring `oauthClientResource.resourceId` as **`varchar(36)`** (the `field.references` branch). On an upstream MySQL deployment a resource identifier longer than 255 characters cannot be registered at all.\n\n## Why it matters now rather than before\n\n#11701 narrowed `sys_oauth_client_resource.resource_id` from 1024 to 768 so its declared non-unique index could exist on MySQL at all. That leaves the pair asymmetric **in the declaration**, not just in practice:\n\n| column | declared | physical (MySQL, measured 8.0.46) |\n|---|---|---|\n| `sys_oauth_resource.identifier` (referent) | 1024 | `text` + UNIQUE on a `varbinary(32)` hash shadow (#12198) |\n| `sys_oauth_client_resource.resource_id` (referrer) | **768** | `varchar(768)`, index with `SUB_PART = NULL` |\n\nSo on PostgreSQL or SQLite an operator can register a resource whose `identifier` is 900 characters — the referent's declared contract admits it — and then no client can ever be granted that resource, because the referring column refuses it. Nothing upstream can produce such a value, which is exactly why #11701's narrowing was ruled safe; but the two declarations still disagree about what a legitimate resource identifier is, and only one of them is sourced.\n\n## Dispositions worth weighing (not ruled)\n\n- **A — narrow `identifier` to 768** to match its referrer. Cheapest; keeps the pair consistent; but ⚠️ it also takes `sys_oauth_resource` **off** #12198's hash shadow (768 × 4 = 3072 bytes is exactly the last direct width), changing physical schema on an object that just landed on that route, and reducing the population that route demonstrates.\n- **B — narrow both to a sourced 255**, matching what upstream can actually store. Most honest against the producer; largest declared-domain reduction, and it rejects values in (255, 768] that the current referrer would accept.\n- **C — leave 1024 and document why**, i.e. accept the asymmetry and add the citation this column is missing. Cheapest by far, and defensible if the band is agreed unreachable — but it keeps a number nothing derives.\n\nNo recommendation carried here — #11701's ruling deliberately scoped itself to the referring column, and picking among these is a fresh decision.\n\n## Evidence trail\n\n- Upstream field declarations: `@better-auth/oauth-provider@1.7.1/dist/authorize-*.mjs` (`resourceId.references = { model: \"oauthResource\", field: \"identifier\" }`) and `dist/oauth-*.d.mts`.\n- Upstream width emission: `better-auth@1.7.1/dist/db/get-migration.mjs`, `getType`'s `mysql` string branch.\n- Physical readings above are from `information_schema.COLUMNS` / `.STATISTICS` on live MySQL 8.0.46 (utf8mb4/InnoDB, `STRICT_TRANS_TABLES`), read as a separate query rather than from emitted DDL.\n\nRelated to #11701 (which narrowed the referrer) and #12198 (which put the referent on a hash shadow).\n\n_Generated by [Claude Code](https://claude.ai/code/session_01W6HFzyH98W1YaQXhJUJt6o)_"
+}

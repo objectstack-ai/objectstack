@@ -1,0 +1,33 @@
+{
+  "number": 12639,
+  "kind": "pull_request",
+  "title": "docs(pm-skill): record the branch-information test beside the spec lane's ledger-append pre-approval",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-27T02:36:17Z",
+  "updated_at": "2026-08-27T03:08:41Z",
+  "closed_at": "2026-08-27T03:08:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-27T03:08:39Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12639",
+  "body": "Fixes #12100\n\nRecords the branch-information test in `references/lanes/spec.md`, beside the\nledger-append pre-approval it qualifies. One ruled line, paid for by compression in\nthe same file — the ratchet reading stays 46/46.\n\n## The ruling, quoted (spec seat, 2026-08-26)\n\n> **① Yes — the Case B test becomes recorded discipline.» *Does this defect give a consumer a branch it could act on differently?* No ⇒ widen the existing member's comment/message; yes ⇒ new code under the pre-approved class.«\n\n> **② It lives in `references/lanes/spec.md`, beside the permission it qualifies — not in the ADR-0112 material.**\n\n> The 46-line ceiling cost is acknowledged: the skills lane pays it by compression in the same file per its own ratchet rules — the one-line spelling above is offered as the cheapest form; compressing the existing three-conditions prose to fund it is the skills seat's call.\n\nThe one-line spelling is reproduced **byte-for-byte** inside quotation marks (verified\nby reconstructing the wrapped pair and comparing to the ruling string). The lead-in\ncarries `原文不译` so a future compressor paraphrases neither the test nor the ruling.\nPlacement is the bullet **immediately after** the ledger-append pre-approval bullet.\n\n## What compression paid for it — clause-by-clause survival check\n\nThe ruling left the compression point to this lane. It was **not** funded by re-wrapping:\neach cut deletes content, and the line saving follows from the deletion. Every deleted\nclause has a named home, checked one at a time.\n\n### Cut 1 — the 席内分派参考 provenance paragraph, 2 lines → 1 line (197 → 90 bytes)\n\n| Deleted clause | Where it survives |\n| --- | --- |\n| 原 spec-surface / spec-tooling 标签已退役 | `scripts/pm/ensure-pm-labels.sh` — the *enforcing* home, and a fuller account: \"domain:spec-surface and domain:spec-tooling, retired 2026-08-16 — maintainer ruling 「A」 merged both into the single domain:spec lane, the sub-lane criteria surviving as the spec seat's dispatch reference\" |\n| 三面同归 `domain:spec` 一席 | In-file duplicate — the 范围 section's first bullet already reads 「语义/文本/机器三面同席」; also the `ensure-pm-labels.sh` sentence above |\n| 锚定规则双射恢复 | `SKILL.md`: 「一座位一车道,双射」 — the standing rule the merge restored |\n\nKept: the provenance (`维护者 2026-08-16 裁定合并车道`) and the operational clause\n(`以下判据降为席内分派与定价依据`), which is what tells a reader how to use the section\nand is the half `SKILL.md` 模型分档 points back to.\n\n### Cut 2 — the H17 trigger-file bullet, 1 line → deleted\n\n| Deleted clause | Where it survives |\n| --- | --- |\n| 派发前触发文件必查(读锚 H17 索引相交) | `SKILL.md`, standing 执行座位职责 — strictly *more* complete than the deleted pointer: 「派发/折叠检查时读半状态巡查锚(`half-state-patrol.yml` 的 `ANCHOR_ISSUE` 置顶 issue)的 H17 on-hold 触发文件索引、与本次派发文件面相交,命中 ⇒ 按该 hold 评论的 rider/restart 条款处置」 |\n| 照 SKILL.md 标签纪律执行 | A bare pointer to `SKILL.md`, which every seat session reads in full — the ratchet header's own premise |\n\nNothing else in the file was touched: the diff is exactly three hunks in one file.\n\n## Ratchet and length readings, from the gates themselves at `2458c2d0e`\n\n```\n✓ check-skill-line-ratchet: .claude/skills/pm-dispatch/references/lanes/spec.md is 46 lines (ceiling 46; headroom 0).\n✓ check-skill-line-ratchet: .claude/skills/pm-dispatch/references/lanes/spec.md: widest table row is 0 bytes (pin 0; headroom 0).\n```\n\nThe two added lines are 114 and 117 bytes, under the 120-byte max-line rule; the file's\nwidest line is unchanged at 120 (a pre-existing line).\n\n## Gates run locally — the full derived family, not just the dispatched two\n\n`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` derived 7 families\nfrom the real change set (the dispatch named 2; the other 5 are the additions). All ran in\nthe foreground under the shared verify lock, exit codes captured before any pipe:\n\n| Gate | Verdict line |\n| --- | --- |\n| `check:pm-skill-ratchet` | `✓ … lanes/spec.md is 46 lines (ceiling 46; headroom 0).` |\n| `check:pm-skill-id-lint` | `✓ check-skill-id-lint: 22 file(s) clean` |\n| `check:agent-test-spelling` | `✓ check-agent-test-spelling: 0 violations — 386 file(s) …` |\n| `check:doc-authoring` | `✓ doc authoring guard: 390 files clean — no bare metadata literals.` |\n| `check:doc-formula-expressions` | `✓ … 22 record-scoped formula example(s) across 422 files / 1450 TS blocks judged clean` |\n| `check:pm-governed-merges` | `✓ check-governed-merges --self-test: 159 assertions` |\n| `check:skill-frame-sync` | `✓ … 4 copies of the decision frame are structurally isomorphic across 3 files` |\n\n`check:doc-formula-expressions` first returned `PREREQUISITE NOT MET — the workspace\npackage @objectstack/formula is not built` (exit 1). That is **not measured**, not red —\n`@objectstack/formula` and then `@objectstack/lint` were built and the gate re-run to a\nreal green, quoted above.\n\n## No changeset\n\nThe diff is one `.claude/` instruction file: it publishes nothing, so `skip-changeset`\nis applied (and read back — the size labeler's whole-group PUT is known to strip an\nadditive label).\n\n## Draft on purpose\n\n`.claude/**` + `.md` is a governed surface: this PR stays **draft** and waits for the\nmaintainer's manual merge. Not marked ready, never queued.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01MnijPVVDakqK2J335JoJtq)_"
+}

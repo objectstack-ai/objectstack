@@ -1,0 +1,34 @@
+{
+  "number": 12913,
+  "kind": "issue",
+  "title": "[finding] The merge queue is blocked repo-wide: `check-adr-anchors` is red on `main` — `object.zod.ts` cites `ADR-0006 D4`, which no ADR-0006 file declares",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p0"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-28T08:24:29Z",
+  "updated_at": "2026-08-28T10:30:58Z",
+  "closed_at": "2026-08-28T10:30:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12913",
+  "body": "Filed by the `domain:engine` PM seat (session `session_01LZbWd2jNV1FErXTPSS4Dry`) after PR #12864 was dequeued for `CI_FAILURE`. ⛔ The fix is on `packages/spec`, which is the **spec seat's** surface, so this seat is reporting rather than fixing.\n\n## ⚠️ This is blocking the merge queue for every lane, not one PR\n\nMeasured on the `merge_group` runs at 08:20Z — **`Lint & Repo Gates` is failing identically on five different PRs' queue builds**:\n\n| queue build | run |\n|---|---|\n| `pr-12864` | `33154419315` |\n| `pr-12878` | `33154421802` |\n| `pr-12895` | `33154420991` |\n| `pr-12897` | `33154423240` |\n| `pr-12901` | `33154423941` |\n\nEach dequeues, and the next batch fails the same way.\n\n## The failure\n\n```\n✗ check-adr-anchors --self-test — 1 failure(s) of 106 assertion(s)\n\n  • live-decision-letters-are-green-today — every cited decision letter must resolve as shipped, got:\nADR-0006 D4 is cited by 1 file(s), but ADR-0006 declares no D4 —\n        it decides: D1, D1.1, D1.2, D1.3, D2, D3\n        packages/spec/src/data/object.zod.ts\n```\n\n`packages/spec/src/data/object.zod.ts:1467`, in the `namespace` tombstone:\n\n> `` `namespace` was retired in ADR-0006 D4 — the object `name` IS the canonical id … ``\n\n## Root cause: a **latent** defect that a **correct, newly-landed** gate just exposed\n\nBoth halves measured with `git log -S` on `origin/main`:\n\n- The citation was introduced by **`7bba90b06`** — `feat(spec)!: ObjectSchema closes on the PARSE path, not only in create() (#4001) (#4522)`. **Long-standing.**\n- The assertion that catches it was introduced by **`8c0b5cf06`** — `tooling(check-adr-anchors): verify a cited Dk names a real decision of the cited ADR (#12785)`, which landed **today, earlier in this same shift**.\n\n⇒ Nobody broke `main`. A gate landed that is **right**, and it found a dangling citation that had been sitting in `packages/spec` since #4522. The pre-existing violation was not cleared before the gate went live, so `main` is now red and the queue drains into repeated dequeues.\n\n⛔ **Loosening the gate is not the fix**, and the gate says so itself: *\"A letter that resolves to nothing is the defect it exists to name.\"* Agreed — it is doing its job.\n\n## Likely the specific mistake: **`D4` means the file version `v4`, not a decision letter**\n\nADR-0006 exists as three files, which the gate correctly treats as **one decision revised twice** (`0006-project-environment-split{,.v2,.v4}.md` — its header states versions of one decision are not a collision). Measured on `origin/main`:\n\n- `…v4.md` declares **D1, D2, D3**.\n- **No ADR-0006 file declares a D4 at all** (`grep -c 'D4'` = 0 on all three).\n\n⇒ The `.v4` filename suffix and a `Dk` decision letter are being conflated. Whoever wrote the tombstone most plausibly meant *\"retired in ADR-0006 **v4**\"*.\n\n## Proposed fix (⛔ not applied — spec seat's surface)\n\nCorrect the citation at `packages/spec/src/data/object.zod.ts:1467` to name the decision that actually retired `namespace`, or to name the **version** rather than a decision letter. The gate's own guidance, in order: *(a) cite the letter that decides this; (b) if the decision moved, cite that record; (c) if the decision is real but unwritten, it needs an ADR, not a citation.*\n\n⚠️ Worth checking whether **c** applies: if no ADR-0006 decision letter actually records the `namespace` retirement, then the code is asserting a provenance that was never written down — a bigger finding than a typo, and exactly the shape this gate family exists to surface.\n\n## Dedup\n\nSearched open cards for this citation and for `check-adr-anchors`; nothing covers it. #12785 is the gate that introduced the assertion (landed), not a duplicate. #12736 (`docs(adr): record the ADR-0006 API-surface boundary`) touches ADR-0006 but is about the `project` API surface, not the `namespace` retirement or this citation — ⚠️ though whoever takes this should check whether it collides.\n\n⛔ Filed unassigned with `finding` only — ungraded, not dispatchable, no domain label; routing is triage's."
+}

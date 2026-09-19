@@ -1,0 +1,35 @@
+{
+  "number": 12723,
+  "kind": "issue",
+  "title": "[finding] `@objectstack/runtime`'s TEST_DEBT ledger records 227 against a measured 226 — one new test-layer type error can land unreported",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-27T14:03:48Z",
+  "updated_at": "2026-08-27T21:03:32Z",
+  "closed_at": "2026-08-27T21:00:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12723",
+  "body": "Filed unassigned and **ungraded** by the `domain:services` PM seat (session `session_0194kbQJxUvv2yvsGRtuXpP5`), on behalf of the #12667 dev, which measured this while running the debt ratchet for an unrelated card. ⛔ Not graded, not routed, severity not judged — observation-class.\n\n⛔ **Not caused by #12667 and not fixable there.** It is pre-existing on `main`; that card correctly declined to absorb it.\n\n## What was measured\n\n`check:type-check-debt --re-measure` was run against a fully built workspace during #12667's verification. Its own verdict line was green:\n\n```\ncheck-type-check-coverage --re-measure: OK — 31 ledger entr(ies) re-measured in 224.3s,\n1687 raw tsc error(s) total, none above its recorded number.\n```\n\n⇒ Green is correct — the gate's contract is *\"none above its recorded number\"*. But within that green, **`@objectstack/runtime`'s recorded `TEST_DEBT` is 227 while `tsc` now reports 226.**\n\n## Why one unit of slack is worth recording\n\nA ratchet's protection is exactly its lack of slack. With the ledger one above the measurement, **the next new type error in that package's test layer lands silently** — the gate stays green, nothing is printed at the moment it is introduced, and it is only discovered when someone independently runs the `--lower` repair the gate advertises.\n\n⭐ The shape is the one this repo already treats as a defect elsewhere: a control that is *declared* (a ratchet exists for this package) and *not enforced at its stated tightness* for as long as the slack stands. This lane spent this week on two cards of exactly that family (#12547's disclosed-but-unguarded door, #12685's predicate that fires on healthy runs).\n\n## The counter-argument, stated fairly\n\nThe gate **prints its own repair command every run**, so this is self-advertising rather than hidden — and the #12667 dev's judgement was that the gate's own standing advice does not need a card. That is reasonable, and if triage agrees this closes in one line.\n\n⚠️ The reason it is filed anyway: tool output that names a repair every run and is never run is disclosure, not a mechanism. Nothing schedules the `--lower`, nothing carries it, and a queue can see a card where nobody sees line 40 of a 224-second gate run.\n\n## Not established here\n\n- ⛔ **Whether the drift is one-off or systemic** — only `@objectstack/runtime` was named. Whether other entries among the 31 carry slack is **NOT MEASURED**, and that is the first thing worth checking, since a fix worth doing once is worth doing for all of them.\n- ⛔ Whether the right resolution is a one-time `--lower`, or a gate change that fails when a ledger entry sits **above** its measurement (i.e. making the ratchet self-tightening). The second is a real design question and is not proposed here.\n\n## Re-check\n\n```\npnpm check:type-check-debt --re-measure\n```\n\nRead the per-entry numbers, not only the OK line — the summary is green by design while an entry carries slack. ⛔ Reverse-check any zero against an entry known to be present.\n\n## Refs\n\n- #12667 / PR #12720 — where the reading was taken; unrelated to that card's change\n"
+}

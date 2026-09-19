@@ -1,0 +1,34 @@
+{
+  "number": 12017,
+  "kind": "issue",
+  "title": "driver-sql's varchar-sizing type list and spec's BOUNDED_STRING_FIELD_TYPES must now agree, and nothing pins them — the same three-lists-disagree defect #11566 was filed for, one layer down",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T04:58:37Z",
+  "updated_at": "2026-08-27T14:01:41Z",
+  "closed_at": "2026-08-27T14:01:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12017",
+  "body": "Found by the `domain:engine` seat's unlock scan while closing #11431. Filed **unlabelled and unassigned** for triage to grade — ⛔ an execution seat does not grade.\n\n## What changed to create this\n\nTwo things landed a day apart and now depend on each other, with no gate between them:\n\n- **#11564** (`c49afd0886`) — `driver-sql` sizes a column from `field.maxLength`, deciding **which types get a varchar at all** in `varcharColumnChars`'s type switch (`packages/drivers/driver-sql/src/sql-driver.ts:13459`).\n- **#11989 / #11566** (`2cc7122245`) — `packages/spec` now decides **which types may declare `maxLength` at all**, via `BOUNDED_STRING_FIELD_TYPES` (`packages/spec/src/data/field.zod.ts:1649`).\n\nMeasured on `origin/main`, the two lists are **related but not identical**, and the difference is deliberate on both sides:\n\n| | list |\n|---|---|\n| spec `BOUNDED_STRING_FIELD_TYPES` | `text, textarea, email, url, phone, password, markdown, html, richtext, code` |\n| driver `varcharColumnChars` → `declaredVarcharLength` (varchar-sized) | `string, email, url, phone, password` |\n| driver `varcharColumnChars` → `keyableTextLength` (TEXT unless keyed) | `text, textarea, html, markdown` |\n\nSo today they are consistent *by reasoning*: spec's list is \"may declare a bound\", the driver splits that into \"gets a varchar\" vs \"gets TEXT\". **Nothing asserts that relationship**, and the two files are owned by two different seats.\n\n## Why this is the #11566 defect one layer down\n\n#11566 was filed precisely because **three hand-maintained lists disagreed** about where `maxLength` applies (`field.form.ts` 3 types, `object.form.ts` 9 types, `record-validator` 10 types). That card fixed the *authoring* half by making spec the single authority. It did not — and could not, from that lane — bind the **driver** to it.\n\n⇒ The failure mode is now: spec adds a type to `BOUNDED_STRING_FIELD_TYPES`, the driver's switch does not learn about it, and the type silently falls to the catch-all `table.string(name)` at knex's 255 — which is **exactly the defect #11431 existed to fix**, re-entering through a different door and against a bound the platform now formally accepts.\n\n⚠️ It is also the mechanism #11794's PR named on the neighbouring case, in its own words: *\"the hand-maintained list is what let one member of a three-member spec group diverge silently.\"* That card pinned the driver's own set as a whole; nothing pins it against **spec's**.\n\n## Not claimed\n\n- ⛔ **No divergence exists today** — the lists were read and are consistent. This is a missing guard, not a live defect, and it should not be described as one.\n- Which side should own the derivation is **not** decided here. Deriving the driver's switch *from* spec's constant is one option; a pin test that fails when the two drift is the cheaper one and needs no cross-package dependency. `@objectstack/lint`'s contract forbids depending on a runtime, so a lint rule may not be the right home — worth checking rather than assuming.\n- ⚠️ `richtext` and `code` are in spec's list but in **neither** driver branch today; PR #11876 (open, with triage) moves exactly those two into the text family. Whoever takes this should read that PR first — the shape of the guard depends on where those two land."
+}

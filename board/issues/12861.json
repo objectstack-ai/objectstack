@@ -1,0 +1,35 @@
+{
+  "number": 12861,
+  "kind": "issue",
+  "title": "fix(engine): CEL has(record.field) reads false for a present field — flat-input get/getOwnPropertyDescriptor trap regression (#12601/#12603 lead)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-28T04:43:40Z",
+  "updated_at": "2026-08-28T09:17:08Z",
+  "closed_at": "2026-08-28T05:01:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12861",
+  "body": "Upstream card for objectstack-ai/cloud#1689 (the symptom record with full diagnosis; this card is where the fix lands). Part of the objectstack-ai/cloud#1653 chain — the only remaining red on cloud PR #1672.\n\n## The defect (measured twice, CI and local, different org ids, same 30-vs-38)\n\nA script validation's `has(record.<field>)` answers **false for a field that is present**. Exercised at volume by HotCRM's seed: predicate `has(record.status) && record.status == \"closed\" && (!has(record.resolution) || isBlank(record.resolution))` refuses 8 of 38 `crm_case` rows — and every refused row CARRIES a non-blank `resolution`, read straight out of the built artifact. Only 1 of the 5 sampled failures involves a deferred reference, so the deferred-write path is not the discriminator.\n\n## Named lead (verify, don't assume)\n\nThe flat-input `get`/`getOwnPropertyDescriptor` trap work (#12601 / #12603) — exactly what a CEL `has()` consults. The regression window contains it; the retired-key tolerance (1ffee5122) is in the same window but touches spec parse, not evaluation.\n\n## Why this is release-blocking in its own right\n\n`has()` is the standard presence guard in **every** script validation, sharing rule, and visibility predicate. A false negative silently rejects valid writes (or hides valid rows) for every customer who wrote a conditionally-required-field rule. HotCRM's seed is merely the first thing that exercised it at volume.\n\n## Requirements\n\n- Root-cause at the evaluator/trap seam; fix where the evaluator lives. Predicate-semantics discipline applies: **enumerate every evaluation surface that consults the same trap** (script validations, sharing rules, visibility predicates, `matches-filter`, RLS compilation) and state per surface whether it was affected and is covered — no silent omissions.\n- Regression tests at the REAL seam, including the exact HotCRM shape (a closed record WITH a present non-blank field behind the same trap path), not only a pure-function matrix.\n- Ablation with disk-proven mutation.\n- Consumer acceptance: `hotcrm-multitenant.acceptance` reaches **13/13** on a rig running your branch (the cloud checkout's harness and artifact recipe are on cloud#1689/#1672); quote the run.\n- `.changeset` per repo convention (bug fix; never major).\n"
+}

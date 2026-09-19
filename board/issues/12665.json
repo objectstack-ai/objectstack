@@ -1,0 +1,34 @@
+{
+  "number": 12665,
+  "kind": "issue",
+  "title": "spec: form-view predicates must loudly reject the `features.*` root — ruled vocabulary narrowing (from objectui#6262)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-27T05:05:04Z",
+  "updated_at": "2026-08-28T04:56:03Z",
+  "closed_at": "2026-08-28T04:54:55Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12665",
+  "body": "Provenance: maintainer ruling 2026-08-27 (PM chat, decision-inbox batch 2, adjudication session `session_01DKWDdUJ2XNRESVVWUvcpnh`), verbatim: 「同意」 — adopting Option B on objectui#6262: form views may not name `features.*` in predicates; the exclusion is declared and enforced at authoring time with a loud rejection.\n\n## Why\n\nOne authored predicate text currently gets two verdicts: inside an app (`/apps/:appName/*`) the `features.*` scope root resolves against real auth-config flags; on the direct route `/forms/:name` the root is unbound, the predicate faults, and `visibleWhen` fails OPEN — a field gated by a feature flag is shown to everyone. Measured on objectui `origin/main` (2026-08-25T14:00Z comment on objectui#6262): ZERO authored `features.*` predicates exist across apps/examples/content, with an 18-hit positive control on authored `visibleWhen` predicates — a latent trap, not a live break. That is why the ruling narrows the vocabulary instead of building parity machinery for zero consumers (the wiring alternative needs an auth-config fetch on a route that makes none, plus pre-load semantics with a visible-then-hidden flash).\n\n## Scope\n\n- Declare and enforce the exclusion where form-view predicates are validated in `packages/spec`: a form-view predicate naming the `features.` root is refused loudly at publish/authoring time — a clear error naming the root and the surface — not silently tolerated.\n- The rejection is the deliverable; the form-view predicate vocabulary docs state the boundary where authors read it.\n- ⛔ Do not widen or change any other predicate surface; app-context surfaces keep `features.*` as-is.\n- Clause-②: yes — this narrows a published accept set; the maintainer ruling above is the authority that floor requires. Contract-review tier at dispatch.\n- FIRST action for the dev: re-verify the zero-consumer reading on the day (measurement commands recorded on objectui#6262) and stop-and-report if any authored `features.*` form-view predicate has appeared since.\n\nNamed reader: the `domain:spec` seat — this lands in `packages/spec`, the spec lane's sole-owner surface (routing note for triage: `domain:spec`). objectui#6262 is `pm:blocked` on this card and closes when the narrowing lands and is re-verified on the objectui surfaces.\n\nRefs: objectui#6262 (the measured asymmetry + ruling record), objectui#6110 / objectui PR #6261 (the `current_user` half, fixed)."
+}

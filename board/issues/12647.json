@@ -1,0 +1,35 @@
+{
+  "number": 12647,
+  "kind": "issue",
+  "title": "[finding] two sibling package-door suites carry the same production-reachability claim about the test-only `resolveExecutionContext` seam",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "finding"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-27T03:02:28Z",
+  "updated_at": "2026-08-27T04:13:44Z",
+  "closed_at": "2026-08-27T04:12:28Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12647",
+  "body": "Filed unassigned and **ungraded** by the #12537 dev (PR #12646), which measured this while correcting the seam census in `packages/rest/src/package-door-declared-code.test.ts`. ⛔ Reported, not touched — triage scoped #12537 to that one file, and these are two other files.\n\n## Measured, on `origin/main` @ `aa5994e17`\n\nThe production `resolveExecutionContext` for the `/api/v1/packages` direct-mount door:\n\n- `rest-api-plugin.ts:471` — the **only** supplier repo-wide: `resolveExecutionContext: (req) => restServer.resolvePackageRouteExecutionContext(req)`\n- `rest-server.ts:1481` — that wrapper is **not** `async`. Whole body: an optional-chained `req?.params?.environmentId` read, then `return this.resolveExecCtx(environmentId, req).catch(() => undefined)`\n- `rest-server.ts:1453` — `private async resolveExecCtx(...)`, so calling it cannot throw **synchronously**\n- `package-routes.ts:81` — the consumer `await`s `options.resolveExecutionContext(req).catch(() => undefined)`, swallowing a rejection a **second** time\n\n⇒ a production resolver delivers a context or `undefined`. Its rejections are swallowed twice and land on the 401 anonymous-deny floor; they never reach `sendThrownError`. The only route from this seam to `sendThrownError` is a **synchronous** throw, and the production wrapper has no statement that can make one. Full derivation and the reverse-checks are in PR #12646.\n\n## The two sites\n\n**1. `packages/rest/src/package-routes-coded-error-mapping.test.ts:38-43` — the sharp one.** It does not merely count the seam; it explicitly defends the seam's realism:\n\n> \"That is not a contrived lever — the composition wires it to the `RestServer`'s own identity/RBAC resolution, which is exactly the kind of code that raises a coded 401/403.\"\n\nThe first clause is true. The conclusion does not follow: precisely because that resolution is reached through an `async` method, the coded 401/403s it raises become **rejections**, and both `rest-server.ts:1483` and `package-routes.ts:81` swallow them before the door sees anything. The lever is exactly as contrived as this sentence denies — a reader is told the opposite of what the composition does.\n\n**2. `packages/rest/src/package-door-5xx-message-sanitization.test.ts:341-347` — milder, same family.**\n\n> \"the resolver throw is the one path that reaches the outer catch on this route regardless of what either data source does, so it keeps proving the DOOR rather than one source\"\n\nTrue as a statement about the test. But \"keeps proving the DOOR\" reads as a claim about a production path, and no production throw reaches that catch through this seam.\n\nBoth files drive the seam with a deliberately non-`async` `vi.fn(() => { throw error; })` — a **sync** throw — which is itself the tell: an `async` one would reject and be swallowed into a 401.\n\n## Suggested shape, not a ruling\n\nThe same shape PR #12646 used: ⛔ do **not** delete either case — each still pins real door behaviour, and `reached()` keeps them from going vacuous. Relabel them as test-only injection points, state the reason **once** and cite it from the other sites rather than copying it.\n\n## Re-check\n\n```\ngit grep -n \"resolveExecutionContext\" origin/main -- packages/rest/src/package-routes-coded-error-mapping.test.ts packages/rest/src/package-door-5xx-message-sanitization.test.ts\ngit grep -n \"resolvePackageRouteExecutionContext\" origin/main -- packages/rest/src\n```\n\n⛔ Reverse-check any zero with a term known present in the same file, and never a substring of the term under test.\n\n## Fences\n\n⛔ `packages/rest/src/rest-server.ts` is held by [PR #12421](https://github.com/objectstack-ai/objectstack/pull/12421) (#11926) — reading it is fine, writing is not. **Neither** file named above is held by that PR.\n\n## Dedup\n\nSearched open issues for this seam / these files; the only related card is #12537, whose graded scope is `package-door-declared-code.test.ts` alone. No open card covers these two files.\n\nSeverity not judged.\n\n## Refs\n\n- #12537 — the card that scoped the census fix to one file\n- PR #12646 — where the production-reachability measurement was made\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01UjujZN219uFzBhSYfMykCd)_"
+}

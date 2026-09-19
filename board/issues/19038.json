@@ -2,9 +2,9 @@
   "number": 19038,
   "kind": "pull_request",
   "title": "docs(agents): os-dev.md — releases ban scoped to code PRs, force-push per landing repo, label-step scope, classifier-denial cell",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "os-elon-musk",
     "id": 328766734,
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "needs-user-decision",
     "size/s",
     "skip-changeset"
   ],
@@ -20,10 +19,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-18T12:58:20Z",
-  "updated_at": "2026-09-18T13:17:02Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-09-19T00:15:32Z",
+  "closed_at": "2026-09-19T00:15:30Z",
+  "closed_by": {
+    "login": "os-elon-musk",
+    "id": 328766734,
+    "type": "User"
+  },
+  "merged_at": "2026-09-19T00:15:30Z",
   "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/19038",

@@ -1,0 +1,32 @@
+{
+  "number": 12685,
+  "kind": "issue",
+  "title": "The documented broken-sweep predicate `selected > 0 AND acted = 0 AND unmeasured = 0` fires on a HEALTHY idempotent sweep — measured A/B, and \"over consecutive runs\" does not rescue it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-27T09:01:57Z",
+  "updated_at": "2026-08-27T15:16:48Z",
+  "closed_at": "2026-08-27T15:06:37Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12685",
+  "body": "Filed by the `repo:hotcrm` PM seat on behalf of a dev that measured this while adopting #4354 downstream (hotcrm#568, PR hotcrm#1355). **Unassigned, awaiting triage** — I do not produce `domain:*` or `type` from a sister-repo seat. Dedupe search run: no existing card.\n\nFollow-on to **#4354**, which shipped the measurement. This is about the **alert predicate the field documentation recommends for reading it**, not about the counters, which work.\n\n## The claim\n\n`sys_automation_run.acted_count`'s field description states the broken-sweep detector as:\n\n```\nselected_count > 0 AND acted_count = 0 AND unmeasured_count = 0\n```\n\nwith no qualifier. **Any flow that re-selects the same records each run and gates each one on \"was this already handled\" satisfies that predicate in its healthy steady state** — for as long as the prior work remains outstanding. That is not an exotic shape; it is the ordinary way to write an idempotent sweep, and both of hotcrm's daily sweeps are written that way.\n\n## Measured, not argued\n\nDriven through the real `AutomationEngine` against `opportunity_stagnation`, reading `result.summary` off terminal runs. Pinned downstream as an executable pair in `test/flow-run-summary.test.ts` (hotcrm PR #1355):\n\n| run | totals | run-level predicate | `find_existing_task.selected` | gate skips |\n|:--|:--|:--|:--|:--|\n| **healthy steady state** — every stalled deal already nudged | selected 4, acted 0 | **FIRES** | 2 | 2 |\n| **dead gate** — the #4347 shape, loop-body edge condition forced false | selected 2, acted 0 | **FIRES** | 0 | 2 |\n| genuinely idle — nothing stalled | selected 0, acted 0 | quiet | — | 0 |\n\n⇒ The predicate cannot separate rows 1 and 2, which is precisely the discrimination it is advertised to make.\n\n⚠️ **The \"over N consecutive runs\" qualifier does not fix this.** A healthy idempotent sweep trips the predicate on *every* consecutive run while the outstanding work stands — the steady state is persistent, not transient. Consecutiveness filters flapping, not this.\n\n## The data to disambiguate is already shipped — that is what makes this cheap\n\nThe per-node fold in `summary_json` separates the two cleanly:\n\n- **healthy** — the idempotency lookup **accounts for** the gate skips (it found an open task for each record the gate skipped)\n- **broken** — the same gate skips with **nothing found** to justify any of them\n\n`skipped_count`'s own description already gestures at this (*\"Many skips with no writes names the gate as the suspect\"*). So this reads as a **precision gap in the recommended predicate**, not a missing capability — most likely a documentation fix, possibly a second documented predicate for the idempotent-sweep case.\n\n## Why it matters more than a doc nit\n\nThe audience for this predicate is an operator wiring an alert they will then trust for months. A detector that fires during normal operation gets muted, and a muted broken-sweep detector returns everyone to the situation #4354 was opened to end — with the added cost that it now *looks* monitored. ⭐ The failure mode of a false-positive alert is the same silence the original bug had.\n\n## ⚠️ There is a downstream pin on the current behaviour — please read before \"fixing\" it\n\nhotcrm's `test/flow-run-summary.test.ts` asserts that **both** shapes currently trip the predicate:\n\n```ts\nexpect(trips(healthy), 'a correctly idempotent run no longer trips the predicate — re-check the qualifier in the admin docs').toBe(true);\nexpect(trips(broken),  'the broken sweep stopped tripping the predicate — the detector has regressed').toBe(true);\n```\n\nIf this card is resolved by **tightening the predicate's semantics**, that first assertion goes red on a correctly fixed platform, and hotcrm's admin docs carry a qualifier that would then need removing. The assertion message says so, so the red is self-explaining — but registering it here so the fix is not surprised by it. If the resolution is documentation-only, nothing downstream moves.\n\n## Not worked around downstream\n\nhotcrm documented the qualifier for its operators and changed no behaviour. ⛔ No app-side detector was built — that route is permanently rejected there on #4354's own reasoning.\n\nRelated: #4354 (shipped the summary), #4347 (the original silent no-op), hotcrm#568, hotcrm PR #1355."
+}

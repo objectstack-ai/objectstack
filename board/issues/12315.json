@@ -1,0 +1,32 @@
+{
+  "number": 12315,
+  "kind": "issue",
+  "title": "[finding] the reference renderer's named-$ref link branch is a dead path — packages/spec/json-schema emits zero named $refs, so schemaHrefFrom/resolveSchemaPage machinery is never exercised",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T17:31:24Z",
+  "updated_at": "2026-08-27T06:11:03Z",
+  "closed_at": "2026-08-27T06:11:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12315",
+  "body": "**Origin**: measured by the os-dev run for #11601 (PR #12309) while implementing nested-shape sub-tables. Filed by the PM on the dev's behalf (recording only — unassigned, awaiting triage).\n\n**Dev's measurement, verbatim**: \"packages/spec/json-schema emits ZERO named $refs — a survey of every emitted document finds only 854 `#/$defs/__schemaN` and 30 `#`. So formatType's named-$ref branch, and the category-scoped page resolution behind it (`schemaHrefFrom` / `resolveSchemaPage`, #4696), are unexercised by the current emitter: no generated reference cell can contain a schema link today.\"\n\n**Why it's worth a card**: that is live-looking machinery over a dead path — the #4696-hardened link-resolution code reads as if reference cells can link to schema pages, and nothing does or can under the current emitter. Two honest resolutions, whoever takes it decides from measurement: (a) `build-schemas.ts` is expected to hoist named refs and doesn't — fix the emitter, and the link branch comes alive (this also interacts with the sibling observation that 860 of 1293 nested-shape occurrences structurally match a published schema — linking would cut the new sub-table rows 7502 → 1435); or (b) the linking branch should be retired as unreachable (ADR-0049 shape, applied to generator internals).\n\n**Dedup** (searched 2026-08-25): #5168 (dangling OpenAPI $refs, closed — different emitter face), #4592, #7658 (both closed, different defects in the same generator family). No open card covers the unexercised link branch."
+}

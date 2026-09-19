@@ -1,0 +1,34 @@
+{
+  "number": 19133,
+  "kind": "issue",
+  "title": "skills(governed): narrow the human-merge floor to the law — Tier H stays human/approved (AGENTS.md · CLAUDE.md · docs/adr/** · docs/NORTH-STAR.md · .claude/settings.json · .claude/hooks/**); Tier S (.claude/skills/** · .claude/agents/**) lands on the seat's CONTRACT_REVIEW_TIER PASS + post-merge audit",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-elon-musk",
+    "id": 328766734,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:done",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-18T22:18:26Z",
+  "updated_at": "2026-09-18T23:49:57Z",
+  "closed_at": "2026-09-18T23:48:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19133",
+  "body": "Filed by the `domain:skills` execution seat (`session_01BTeBejoPUvRHN8WdAJC6oF`, seat post #7623) at 2026-09-18T22:20Z on the maintainer's word in chat 2026-09-18, verbatim: 「现有的pr哪些你能帮我合并的?一直让我点很浪费时间。」 → on the seat's proposal (below) 「同意改规则。」. Labels `domain:skills` · `priority:p1` · `pm:dispatched` set by the seat (its own lane; claimed in the same act).\n\n## The ruling (the seat's proposal, accepted verbatim)\n\n「把『受管 = 人合』的范围缩到真正的法——`AGENTS.md`、`CLAUDE.md`、`docs/adr/**`、`docs/NORTH-STAR.md`、`.claude/settings.json`、`.claude/hooks/**`;而 `.claude/skills/**`、`.claude/agents/**` 这些舰队自己的仪器,凭席内 `CONTRACT_REVIEW_TIER` 复核 PASS 就走队列,事后由总监席的受管合并审计(职责四)抽查。」 Cost named and accepted: AI edits its own operating rules without a human gate; compensating controls = the contract-tier review of record on the PR thread, the post-merge governed-merge audit, and the North Star's 「仪器为车队服务」 question at grading.\n\n## Deliverable — two tiers in one register, the queue guard follows the register\n\n- **Tier H(人合)**: `AGENTS.md` · `CLAUDE.md` · `docs/adr/**` · `docs/NORTH-STAR.md` · `.claude/settings.json` · `.claude/hooks/**` — landing unchanged: the maintainer's hand, or an authorized APPROVED review (`GOVERNED_APPROVERS`) then the owning seat lands (ruling C).\n- **Tier S(席内达档复核落地)**: `.claude/skills/**` · `.claude/agents/**` — the owning seat lands through the queue once a `## Contract review` record with `Served-tier: CONTRACT_REVIEW_TIER` and `**VERDICT: PASS**` for the PR's head is on the PR thread, `check-clause2-carriers.mjs --pair N` reads 0 and every check is green: the mechanism the fact layer (`references/**`) already uses, generalized to the tier. Published `skills/**` stays where it is today (the seat did not propose moving it; the maintainer may).\n- `scripts/pm/check-governed-merges.mjs`: `GOVERNED_SURFACES` carries the tier per surface; `--test` / `--pr` print the tier and the landing it implies; self-test pins both tiers (floors hold or rise). `scripts/pm/check-governed-queue-guard.mjs`: the `merge_group` leg passes a Tier S PR on the record-on-thread predicate (today's fact-layer path, re-keyed to the register's tier), still refuses a Tier H PR without an authorized approval; `pull_request` leg's early warning says which tier and what it waits for.\n- `AGENTS.md` Prime Directive #14: the paragraph names the two tiers and what lifts the landing for each; `check:pm-governed-prose` must stay green (it compares the paragraph's surfaces to the register — both move together).\n- SKILL.md 〈入队与落地〉 :624–:625 (受管面两层) and the red lines :26–:27 keep their words with 受管面 meaning Tier H; `references/contract-review.md` :46 re-keyed to Tier S; `core-rules.md` twins identical. Line-neutral at every ceiling.\n- The seat post protocol and the director's 职责四 need no text change: Tier S merges appear in the audit with their record id; a Tier S merge without a PASS record is the audit's finding, as today for the fact layer.\n\n## Serialisation\n\nSERIAL behind #18489's PR on `check-governed-merges.mjs` (it adds `docs/NORTH-STAR.md` to the register) and on AGENTS.md (it adds the top pointer): the second to land merges `origin/main` first; write the register change as a tiered table that absorbs the North Star line cleanly. Disjoint from the drafts at the terminal on SKILL.md (#18903 :509–:525 / :633–:675, #19021 :339, #19033 :608, #19039 :164–:174) — :624–:625 and :26–:27 are free; AGENTS.md PD #14 (:255–:270) is disjoint from PR #19042 (:495–:500).\n\n## Acceptance\n\n- `check-governed-merges.mjs --test .claude/skills/pm-dispatch/SKILL.md` prints Tier S; `--test AGENTS.md` prints Tier H; `--test docs/NORTH-STAR.md` prints Tier H (after #18489); self-tests green with raised floors; `check:pm-governed-prose` green; ratchets ✓; the queue guard's self-test covers both tiers with a control (a Tier S PR without a record is refused).\n- Governed (AGENTS.md is in the diff ⇒ Tier H) ⇒ draft at the four-piece terminal; `CONTRACT_REVIEW_TIER` construction; the maintainer's one approval lands it — the last click of this kind for Tier S.\n\nRefs: #19131 (North Star), #18489 (enforcement), AGENTS.md Prime Directive #14, `scripts/pm/check-governed-queue-guard.mjs` (`GOVERNED_APPROVERS`, the fact-layer path).\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

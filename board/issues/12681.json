@@ -1,0 +1,36 @@
+{
+  "number": 12681,
+  "kind": "issue",
+  "title": "runtime-config: serve the client error-reporting DSN from the server — platform users consume a prebuilt console and cannot set build-time keys (replaces the just-shipped allowClientErrorReporting boolean)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "repo:objectstack"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-27T08:38:57Z",
+  "updated_at": "2026-08-27T11:07:20Z",
+  "closed_at": "2026-08-27T11:07:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12681",
+  "body": "Provenance: maintainer, 2026-08-27, PM chat (session `session_01DKWDdUJ2XNRESVVWUvcpnh`), reviewing the #5522 (objectui) operating procedure. Verbatim, untranslated:\n\n> 「我是一个开发平台呀，我的用户并不会去构建我的前端，我理解这种应该在服务端传进去。」\n\n## The gap the ruling names\n\nThe shipped two-key gate (objectui #5559 + #5982, this repo's PR #11382) is: build-time `VITE_SENTRY_DSN` **AND** runtime `telemetry.allowClientErrorReporting`. That shape silently assumes the deployer builds the console. **ObjectStack's users don't** — they consume a prebuilt console, and after #5559 the prebuilt artifact deliberately carries no DSN. Consequence, stated plainly:\n\n- A self-hosting operator **cannot enable client error reporting at all today** — the runtime permission exists, but the source half is compiled-in and absent, and rebuilding the frontend is not a thing platform users do.\n- The maintainer's own SaaS *can* work around it (he controls the Vercel build), but only by configuring telemetry in two places (build panel + server env) — two knobs with two silent dead states (\"permission on, no DSN\" / \"DSN in, permission off\"), the same shape-class of quiet failure #5522 was about.\n\n## Ruled direction, and the shape the standing rules pick\n\n**The DSN is served by the operator's server at runtime** — the direction is the maintainer's ruling above. The shape follows from the startup-stage no-gradualism rule (no dual paths, no grace windows; the boolean shipped days ago, is in an unreleased changeset, and **no deployment consumes it**):\n\n1. `/api/v1/runtime/config`'s `telemetry` payload carries the source itself: the DSN (plus a closed enumeration of the client knobs that must travel with it — PII opt-in, environment, sample rates — designed as one object, not scattered fields). **The DSN's presence IS the grant**: no DSN ⇒ reporting off. Fail-closed posture unchanged.\n2. The server's knowledge source is operator env / `RuntimeConfigPlugin` config (name per repo convention, e.g. `OS_TELEMETRY_SENTRY_DSN`-shaped; the existing truthy-vocabulary strictness precedent applies — malformed value refused loudly at mount, never coerced).\n3. **The `allowClientErrorReporting` boolean is replaced, not paralleled** — remove it in the same change (unreleased changeset superseded per changeset conventions; the `content/docs/deployment/environment-variables.mdx` row and `packages/cloud-connection/README.md` move with it, sync-guarded docs updated in the same PR).\n4. objectui half: `app-shell`'s runtime-config consumer reads the DSN object; `initSentry()` already runs after `initRuntimeConfig()` (#5982 sequenced exactly this), so the delivery point exists. The `VITE_SENTRY_DSN` build-time source path retires (no-gradualism); the `committed-telemetry-endpoint.test.ts` ratchet **stays** — its job (nothing endpoint-shaped in the repo) is unchanged.\n5. CSP note for the dev: the console CSP's `connect-src` allows `https://*.sentry.io`; a runtime-delivered DSN on a custom/self-hosted Sentry domain needs the CSP story stated in the docs, not silently broken.\n\n## Sequencing\n\n- objectui#6599 (in flight) rewrites `apps/console/docs/error-tracking.md` to describe the **current** two-key shape — correct to land first; this card updates that doc again to the server-delivered shape as part of its own change. Expected churn, accepted.\n- ⚠️ Contract tier: this changes the accept/reject surface of a public endpoint's payload (`/api/v1/runtime/config`) — the standing contract-review tiering clause applies to construction and review.\n\n## Acceptance\n\n- A self-hosting operator enables client error reporting with **server-side configuration only** — one place, no frontend rebuild; unset ⇒ off, malformed ⇒ loud refusal at mount.\n- The boolean is gone from code, payload, docs, and pending changeset in the same change; no dual-spelling window.\n- Both repos' halves land coherently (cross-repo PRs referencing this card); docs (`environment-variables.mdx`, cloud-connection README, error-tracking.md) describe only the final shape.\n\nRefs: objectui#5522 (the saga card, closed by maintainer ruling 2026-08-27) · objectui#5559 · objectui#5982 · #10805 / PR #11382 · objectui#6599."
+}

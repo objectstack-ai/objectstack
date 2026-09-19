@@ -1,0 +1,34 @@
+{
+  "number": 12839,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0128 — producer-discriminated AAD for CryptoContext (direction only, not implemented)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-28T02:26:18Z",
+  "updated_at": "2026-08-28T07:43:38Z",
+  "closed_at": "2026-08-28T06:27:28Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": "2026-08-28T06:27:28Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12839",
+  "body": "Part of #12599\n\n⛔ **Not `Fixes`, deliberately.** The card's terminal state belongs to the prose PR #12838, not to this one. This PR is the governed face of the same ruling and waits on the maintainer's hand-merge, which is itself the acceptance act (Prime Directive #14). **Stays draft — the PM handles its terminal state; do not flip it ready.**\n\nAuthored in Claude Code session `session_01JvjTCjJQn9zSTXEhUKgT7s` (recorded here in prose so it survives any later body edit).\n\n## What this is\n\nOption B of the maintainer ruling of 2026-08-27 on #12599 (comment 5434987411, verbatim 「其他同意」), recorded as direction and **not implemented**: producer-discriminated AAD for `CryptoContext` — a required scope discriminant naming which of the three vocabularies `(namespace, key)` is drawn from, plus a delimiter-safe encoding, fixed at the producer rather than tolerated downstream.\n\nOne new file: `docs/adr/0128-producer-discriminated-aad-for-cryptocontext.md`. **Zero behaviour change, zero code touched, no card opened by it.**\n\n## What the record carries, per the ruling\n\n- **The measured hazard** — the `mail|api_key` cross-vocabulary construction, with the four in-tree facts that compose it: one shared provider instance across all three producers; `sys_secret` declaring `(namespace, key)` non-unique by design; nothing reserving the colliding names; and the colliding pair already existing on the settings side (the provider's own AAD pin test is literally written on `{ namespace: 'mail', key: 'api_key' }`). Measured live-instance count: **zero** — no intersection between the shipped settings namespaces and the objects carrying a `Field.secret()` field. That zero is the whole of the deferral's evidence, and the record says so.\n- **The migration cost that defers it** — a breaking change to the published `ICryptoProvider` export, plus an at-rest rewrap of every existing ciphertext (each was sealed under the old AAD, so every one fails to decrypt until re-wrapped). §4 also names the ordering constraint that makes this a project rather than a patch: the migration must read under the old derivation and write under the new one, so both must coexist and each ciphertext must know which sealed it.\n- **The triggers that would fund it** — four, any one sufficient, none re-opening the direction: the hazard stops being hypothetical (an intersection appears); a fourth producer of `CryptoContext` is added; `ICryptoProvider` is opened for another breaking change anyway; or a compliance/customer requirement asks the platform to state its at-rest ciphertext binding.\n- **Option C recorded as considered-and-declined** — reserve-and-reject colliding object names, declined by the ruling: enforceable only over what is known at publish time, while the settings-namespace registry is extended by plugins at runtime. Written up so it is not later re-proposed as the cheap substitute for a deferred D1; it is a weaker guarantee, not a cheaper one.\n\nOne thing the record adds beyond the ruling's list, disclosed without an obligation attached: the AAD's separator is an **unescaped** `|`, so the encoding is ambiguous even within one vocabulary. Measured at zero producers, unreachable from object and field names, reachable in principle from a settings specifier key or a caller-supplied datasource namespace. It is why D1 (discriminant) and D2 (encoding) are one change — a third component on an ambiguous join makes the ambiguity worse.\n\n## Relationship to #12838\n\nIndependent branches, green in either landing order. The ADR cites `crypto-provider.ts`; the prose PR deliberately does **not** cite `ADR-0128` by number, because `check:adr-anchors` hard-fails a citation naming no record under `docs/adr/` — so a citation from the prose PR would sit red on `main` for as long as this draft waits. The docblock names the intended end state in prose instead.\n\n`0128` re-checked as free at this branch's base (`f907fbe9`) and again after the prose branch's merge of `origin/main`; latest existing record is `0127`.\n\n## Verification\n\nGate set derived by `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` on the actual changed set (1 path). All five derived families green at **`d9aa00a2`**, exit codes captured before any pipe:\n\n- `pnpm check:adr-anchors` — exit 0 (filename convention, ADR-number uniqueness, and the repo-wide citation scan that resolves every `ADR-NNNN` in tracked text)\n- `node scripts/check-adr-links.mjs` — exit 0 (every relative link in the record resolves; the record links only ADR-0049, ADR-0087, ADR-0100 and ADR-0112, all present)\n- `pnpm check:doc-authoring` — exit 0\n- `pnpm check:pm-governed-merges` — exit 0\n- `pnpm --filter @objectstack/lint run check:doc-formula-expressions` — exit 0 (after building `@objectstack/formula` and `@objectstack/lint`; on an unbuilt workspace this gate exits 1 with `PREREQUISITE NOT MET` and measures nothing)\n\nAlso green: `pnpm check:nul-bytes` and `pnpm check:docs-single-h1`.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

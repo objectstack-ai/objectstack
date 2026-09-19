@@ -1,0 +1,33 @@
+{
+  "number": 12759,
+  "kind": "pull_request",
+  "title": "fix(scripts): make check-cli-command-ids' literal-declaration self-test able to fail",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-27T17:04:56Z",
+  "updated_at": "2026-08-27T17:40:17Z",
+  "closed_at": "2026-08-27T17:40:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-27T17:40:16Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12759",
+  "body": "Fixes #12472\n\n`check-cli-command-ids --self-test` carried a case pinning that `ROOT_DIR_WATCH_HINTS` is\nspelled as a source **literal** rather than computed. The case could not fail: it searched\nthe whole file for a needle it spelled inline, so `includes` found that needle in the\n**assertion** rather than in the declaration, and the case was satisfied by its own text.\n\n## Reproduced before fixing, on `origin/main` at `168941cea`\n\nRewriting only the declaration into the computed form the case exists to reject:\n\n```\ndeclaration line, mutated on disk:\n  184: const ROOT_DIR_WATCH_HINTS = POPULATION_ROOTS.map((r) => `${r}/**`);\n\nself-test verdict on that tree:\n  check-cli-command-ids self-test: 38 cases pass\n  SELFTEST_EXIT=0\n```\n\nNot one case reddened. That confirms the card's reading of the neighbouring case too: it\nasserts the array's runtime **value**, which the computed form still satisfies, so it does\nnot close the gap.\n\n## The harm is real, not theoretical\n\nMeasured against the extractor itself (`extractWatchHints` in `scripts/pm/dispatch-gates.mjs`):\n\n| declaration spelling | subtree hints recovered |\n|---|---|\n| literal | `[\"scripts/**\"]` |\n| computed | `[]` |\n\nSo the computed form really does leave the gate unnameable by every dispatch brief. The\nself-test's own copies of the hint cannot stand in for the declaration, because\n`extractWatchHints` runs `maskSelfTests(maskComments(source))` and blanks the whole\n`selfTest` body before scanning.\n\n## Why this does not use the assembled-needle shape from its sibling\n\nThe card suggests the remedy landed in `scripts/check-objectql-double-limit.mjs` — assemble\nthe needle so the searched byte sequence exists nowhere but the declaration. **Measured\ninsufficient here, on disk.** That file spells its hint exactly twice (declaration,\nassertion), so un-spelling the assertion leaves the declaration as the only copy. This file\nspells it a **third** time, in the runtime-value case just below. Applying the\nassembled-needle remedy alone on top of a computed declaration:\n\n```\nassembled needle present : 1\ninline needle gone       : 0\ncomputed decl present    : 1\nremaining literal spellings anywhere in file:\n  545:    ROOT_DIR_WATCH_HINTS.includes('scripts/**')\n\ncheck-cli-command-ids self-test: 38 cases pass\nSELFTEST_EXIT=0\n```\n\nStill cannot fail. So the fix scopes the search to the **declaration statement** and derives\nthe needle from the declared values — scope is the fix, the derived needle is the hygiene.\nBeing generic over `ROOT_DIR_WATCH_HINTS` rather than pinning one string, it also grows with\nthe declaration. A companion case asserts the declaration statement is located exactly once,\nso the pin cannot silently judge nothing.\n\nThe declaration stays a literal, as the ruling requires; nothing in this change makes it\ncomputed.\n\n## Ablation, both directions, on disk\n\nMutation and restore each proved on disk by anchor counts, and the restore leg additionally\nby `git hash-object` against the HEAD blob plus an empty `git diff HEAD`.\n\n| leg | declaration on disk | verdict |\n|---|---|---|\n| mutate | computed | `1 of 39 case(s) failed` — `the declaration is spelled as a LITERAL in this source, not computed`, `SELFTEST_EXIT=1` |\n| restore | literal | `check-cli-command-ids self-test: 39 cases pass`, `git diff HEAD` empty |\n\nNo build step is involved: this gate is run directly from source by `node`, so there is no\n`dist/` for a stale artifact to hide in.\n\n## Sibling survey\n\n`scripts/check-parse-guard.mjs` is still **cleared**, and for a slightly stronger reason than\nthe card states: it carries no own-source `readFileSync(fileURLToPath(import.meta.url))` pin\nat all, so it has no assertion of this shape to be phantom. Swept all 13 gates carrying the\n`ROOT_DIR_WATCH_HINTS` idiom — exactly two carry an own-source pin\n(`check-cli-command-ids.mjs`, fixed here, and `check-objectql-double-limit.mjs`, whose hint\nis spelled once). No third gate has grown the shape, so nothing is widened into this PR.\n\n## Gates\n\nRe-derived for the actual diff with `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack`\n(no path arguments — the script takes its own change set from the merge base); it named the\nsame families as the dispatch brief, adding none. Union run against `c20665400`, the final\ncommit, all green:\n\n```\ncheck:agent-test-spelling · check:bash32-floor · check:cli-command-ids\ncheck:cross-package-test-inputs · check:entry-guard · check:parse-guard\ncheck:pnpm-filter-targets · check:nul-bytes\nnode scripts/check-ci-filter-parity.mjs · node scripts/check-cross-package-test-inputs.mjs\nnode scripts/pm/bare-root-worklist.mjs --self-test · check:pm-dispatch-gates\n```\n\nBoth convention-triggered ledger obligations were run and are satisfied without a new row —\nthis change adds no population root and moves no spelling:\n\n```\nbare-root-worklist --self-test:\n  OK  self-test: 46 live row(s), 39 unreachable as spelled, 39 recorded verdict(s)\n      — none stale, none missing, none contradicted.\ncheck:pm-dispatch-gates:\n  dispatch-gates self-test: 719 cases pass.\n```\n\n`check-ci-filter-parity.mjs` first reported `PREREQUISITE NOT MET` (it imports `yaml`, absent\nfrom a fresh worktree); `pnpm install` was run and it then passed — recorded here because the\nfirst reading measured nothing and must not be read as either colour.\n\nRepo-wide `pnpm lint` is left to CI, which runs the farm exactly once regardless.\n\n`skip-changeset`: the only file touched is `scripts/check-cli-command-ids.mjs`, a repo-root\ngate script that is not part of any published package, so nothing ships to a consumer.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01PfaSTikked61BkcsB5Rn69)_"
+}

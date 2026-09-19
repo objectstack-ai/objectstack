@@ -1,0 +1,35 @@
+{
+  "number": 12470,
+  "kind": "issue",
+  "title": "[finding] A SINGLE-SEGMENT module-relative literal still contributes no watch hint — measured at 2062 true pairs on two live spec builders",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T04:47:15Z",
+  "updated_at": "2026-08-27T22:20:21Z",
+  "closed_at": "2026-08-27T22:19:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12470",
+  "body": "Found while implementing #12371 (producer-side resolve of module-relative watch-hint literals). Recorded, not proposed — no PR, no queue label.\n\n## What the #12371 fix deliberately did NOT take\n\n#12371 makes `extractWatchHints` resolve a module-relative literal against the writing script's own directory instead of stripping the prefix. **Admission was left exactly where it was**: the `looksPathy` test still reads the literal *as the author wrote it, minus the depth prefix*, so a literal that is one segment after the strip is still no hint at all.\n\nThat is the right call for `'./invoked-as.mjs'` and `'./package.json'` — admitting those hands every gate its own import specifiers as a watched population, a second and unpriced answer to the question `firstPartyImportTargets` already owns, with the wrong provenance label (`gate source` where the import channel says `gate source via <mod>`). It was measured: widening admission to the resolved form put a path population on two gates that carry the `no-path-population` marker, and broke the `--self-test` invariant that a `--self-test` family inherits nothing.\n\nBut the same refusal also drops two literals that are unambiguously real subtree declarations:\n\n```\npackages/spec/scripts/build-docs.ts:61            const SRC_DIR = path.resolve(__dirname, '../src');\npackages/spec/scripts/build-skill-references.ts:35 const SPEC_SRC = path.resolve(__dirname, '../src');\n```\n\nBoth scripts really do walk `packages/spec/src`. After the resolve those literals would name it exactly.\n\n## The reading (this tree, 176 families x 6899 tracked files, driven through `hintCovers`)\n\n| | pairs |\n|---|---|\n| `packages/spec/src` reached from `build-docs.ts` | 1031 |\n| `packages/spec/src` reached from `build-skill-references.ts` | 1031 |\n| **total not taken** | **2062** |\n\nFor contrast, the #12371 change as landed is +749 pairs, 1 lost, 0 re-attributed.\n\n## Why it is not simply \"do it\"\n\nThe naive widening (admit on the resolved form) was measured in the same session and costs the three structural breakages above. A card here would have to find the narrower predicate that separates *\"a single-segment literal that resolves to a real tracked DIRECTORY\"* from *\"a single-segment sibling module or manifest name\"* — and price it, since the `firstPartyImportTargets` docblock's pricing discipline applies to any MATCHED-column widening.\n\nNote that `hintCovers`' own docblock already refuses the neighbouring class (a bare top-level word, +139084 pairs) and refuses a bare root FILE literal on provenance. Whether this class sits with them or apart from them is the judgement the card would owe.\n\nRefs: #12371 (the producer fix, A) · #12299 (the residue repair, B)"
+}

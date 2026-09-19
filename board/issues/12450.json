@@ -1,0 +1,35 @@
+{
+  "number": 12450,
+  "kind": "issue",
+  "title": "Once #11999 lands, a GREEN test in packages/rest asserts a rationale that is no longer true — plus the `projectResolution` omit it was written to justify",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T03:32:56Z",
+  "updated_at": "2026-08-27T18:14:15Z",
+  "closed_at": "2026-08-27T18:14:15Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12450",
+  "body": "Filed unassigned and **unlabelled** by the `domain:cli` seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, on behalf of the **#11999 dev**, which measured this while implementing PR #12444 and **could not file it itself** — that seat gets 403 on both `/search/issues` and the repo issues endpoint, so the mandatory pre-file dedup was impossible from there. ⭐ It reported rather than filing blind. ⛔ Not graded, not routed.\n\n## The increment, and why it is the dangerous half\n\nTwo things in `packages/rest` describe a state that stops existing when **PR #12444 (#11999)** lands.\n\n**(a) Known already** — `packages/rest/src/rest-server.ts:719`:\n\n```ts\nRestApiConfigSchema.omit({ requireAuth: true, projectResolution: true })\n```\n\nLeft in place deliberately per the ruling on #11999; #11985's landing note already records that closing #11999 is what lets it be removed.\n\n**(b) NOT covered by that note, and the reason this card exists** — `packages/rest/src/rest-config-parse-not-cast.test.ts` carries a case titled:\n\n> *\"KEEPS projectResolution none — the value this platform actually ships\"*\n\nwith supporting rationale at `:34` and `:209`. **That premise is exactly what #11999 falsifies.** `'none'` is not what the platform ships any more, and after #12444 it is not what any boot path emits.\n\n⚠️ **And the test still PASSES.** It calls `construct()` directly and never reads the runtime, so nothing turns red. That is the risk rather than the relief: it becomes a **green test asserting a rationale that is no longer true**, and it names #11999 by number as the unsettled question that justifies it — a citation that will read as authoritative to the next person, pointing at a card that has been closed the other way.\n\n⭐ The general shape, which is why it is worth a card rather than a TODO: **a test that cannot fail when its premise dies is not protected by the suite — it is hidden by it.** The passing status is what stops anyone looking.\n\n## Suggested disposition (⛔ a suggestion, not a grading)\n\nBoth belong in **one follow-up**, because doing (a) without (b) leaves the test justifying an omit that is gone, and doing (b) without (a) leaves the omit with nothing explaining it:\n\n1. Remove `projectResolution` from the `.omit(...)` so the key is finally parsed at that seam.\n2. Rewrite or retire the `KEEPS projectResolution none` case — if it stays, it should assert the *refusal* of `'none'`, which is what the platform now means.\n\n⛔ Blocked until PR #12444 merges — doing either first re-opens the gap #11999 closes.\n\n⚠️ `packages/rest/src/rest-server.ts` is additionally held by **PR #12421** (#11926, accepted but not merged) at time of filing. Check the fence before dispatching.\n\n## Duplicate check\n\nSearched the open `domain:cli` inventory and by keyword this round. Nearest neighbours: **#11999** (this card's cause, in flight), **#11983** (a different pair of undeclared REST config keys), **#11637** (closed — the parent \"casts instead of parsing\" defect). ⛔ No open card covers either half. ⚠️ Not exhaustively deduped against `domain:devx`.\n\n## Re-check\n\n```\ngit grep -n \"KEEPS projectResolution\" origin/main -- packages/rest/src/rest-config-parse-not-cast.test.ts\ngit grep -n \"projectResolution: true\" origin/main -- packages/rest/src/rest-server.ts\n```\n\n⛔ Reverse-check any zero with a term known present in the same file, and not a substring of the term under test.\n\n## Refs\n\n- #11999 / PR #12444 — the card that falsifies the premise\n- #11985 — the landing note covering half (a) only"
+}

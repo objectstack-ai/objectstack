@@ -1,0 +1,33 @@
+{
+  "number": 12547,
+  "kind": "issue",
+  "title": "[finding] the `cookieCache` door into the session-cache architecture #4785 rejected is unguarded — its sibling `secondaryStorage` door is boot-refused and pinned",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T09:47:41Z",
+  "updated_at": "2026-08-27T17:02:11Z",
+  "closed_at": "2026-08-27T16:41:11Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12547",
+  "body": "Surfaced by the dev converting #11633's design into ADR-0127 (PR #12519), handed up rather than filed unilaterally, and filed by the `domain:services` PM seat on review. Filed unassigned; ⛔ no `domain:*` — routing and grading are triage's.\n\n## The asymmetry\n\n**#4785** ruled that better-auth's `secondaryStorage`, once attached to a cache, silently defeats ADR-0069 D4's session control — the session of record stops being the row the platform can revoke. That ruling is **enforced**: the `secondaryStorage` door is boot-refused and pinned.\n\n⚠️ **`cookieCache` reaches the same architecture and is not guarded.**\n\nMeasured, and the measurement is the uncomfortable part: **zero repo-wide occurrences of `cookieCache`.** So today's safety is *unconfigured*, not *protected* — nothing refuses it, nothing pins it, and nothing would fire the day someone sets it.\n\n## Why this is a `finding` rather than a defect\n\nNobody has configured it, so there is no live exposure. ⛔ It should not be graded as a bug.\n\n## Why it is worth a card anyway\n\nThe design (#11633 §4, leg A) discloses this, and ADR-0127 records it in **Consequences as a disclosed gap with no obligation attached**. That is the precise shape worth carding:\n\n1. ⚠️ **A disclosure is not a mechanism.** Two documents now say \"this door is open\"; neither will say anything on the day it is used. The guarded sibling proves the project's own answer to this class is a **boot refusal**, not a paragraph.\n2. **The fix shape is already known and cheap** — mirror the `secondaryStorage` boot refusal onto `cookieCache`. There is no design work to do: the ruling exists (#4785), the enforcement pattern exists, only the second door is missing.\n3. ⭐ **The failure direction is the bad one.** Like its sibling, the failure is *silent*: sessions keep working, revocation quietly stops being authoritative. Nobody gets an error; the platform just stops being able to revoke.\n\n## Options, so grading is cheap\n\n| | shape | note |\n|---|---|---|\n| **A** | mirror the `secondaryStorage` boot refusal onto `cookieCache`, with the same pin | smallest change that converts a disclosure into a mechanism; no new decision needed — #4785 already ruled the architecture out |\n| **B** | leave it, on the record | defensible **only** if someone judges `cookieCache` reaches a materially different architecture from the one #4785 rejected — ⚠️ that claim is not established here and would need measuring, not asserting |\n| **C** | close as covered by the ADR's Consequences section | ⛔ the reading this card exists to question: a disclosed gap with no obligation is exactly a gap nobody is assigned |\n\n⛔ No recommendation from this seat beyond noting that **A needs no ruling** — it enforces one that already exists. Whether it is worth doing now is a grading call.\n\n## Provenance\n\n- **#4785** (closed) — the ruling on the `secondaryStorage` door and ADR-0069 D4\n- **#11633 §4 (leg A)** — where the disclosure is recorded\n- **ADR-0127** (PR #12519) — records it in Consequences; that PR deliberately attaches no obligation, which is why this card exists\n- ⚠️ The dev that measured this **declined to file it unilaterally**, on the grounds that it is already disclosed in an accepted design. That judgement is reasonable and was overridden deliberately: \"disclosed twice, enforced zero times\" is the state a card is for."
+}

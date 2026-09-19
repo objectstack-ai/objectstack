@@ -1,0 +1,34 @@
+{
+  "number": 12615,
+  "kind": "issue",
+  "title": "[finding] tsc does not police unknown keys on plugin action-param literals — the only enforcement is the ActionParamSchema strict parse at module load",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T21:52:36Z",
+  "updated_at": "2026-08-28T05:29:21Z",
+  "closed_at": "2026-08-28T05:29:10Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12615",
+  "body": "Measured by the #11992 dev (fable, 2026-08-26, head `3986bafe`) during reverse verification, handed to the PM to file (its dispatch barred label writes). Filed unassigned for triage's first-touch grading; recording only.\n\n## What was measured\n\nA planted unknown key on a plugin action-param literal — `carryOverX: true` in `packages/plugins/plugin-security/src/objects/sys-permission-set.object.ts` — passed `pnpm --filter @objectstack/plugin-security typecheck` CLEAN. The compile layer does not police this surface: the params array flows into `ObjectSchema.create(...)` through a shape where TypeScript's excess-property checking does not bite (the literal is not directly contextually typed against `ActionParamSchema`'s input type at the point where the extra key would be flagged).\n\nThe enforcement that DOES catch it: `ActionParamSchema` is a `strictObject`, and the parse runs at `ObjectSchema.create` module load — the planted key failed `clone-carryover.test.ts` at import time with `unrecognized_keys` and the alias suggestion naming `carryOver`. Evidence: PR https://github.com/objectstack-ai/objectstack/pull/12614's verification section (reverse verification: tsc GREEN, strict parse RED, both mutations disk-confirmed and restore hash-proven).\n\n## Why it is worth recording\n\n- The protection is real but conditional: an unknown key on an action-param literal is caught **only where the object module is parse-validated at import by some test or boot path**. A plugin object module that no test imports would carry the typo silently until first runtime load.\n- An author (human or AI) writing `readonly:`/`disabled:`/any misspelled key gets zero editor/CI signal from the type layer — the first signal is a runtime/parse refusal. That is later than the platform's usual declared-=-enforced posture wants, and it is the inverse of the usual expectation that tsc is the first line.\n- Possible directions for whoever grades this (not prejudged): a lint rule contextually typing action-param literals; asserting `satisfies` on params arrays in plugin object modules; or accepting the current parse-at-import posture and recording it as the intended enforcement point (in which case a note in the authoring docs is the fix).\n\nDedup: MCP `search_issues` for the tsc/unknown-key/action-param shape returned zero on 2026-08-26 (this card's own filing search)."
+}

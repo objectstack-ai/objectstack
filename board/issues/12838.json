@@ -1,0 +1,34 @@
+{
+  "number": 12838,
+  "kind": "pull_request",
+  "title": "docs(spec,service-datasource): name the three CryptoContext producer vocabularies and narrow the AAD guarantee",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-28T02:25:32Z",
+  "updated_at": "2026-08-28T04:55:12Z",
+  "closed_at": "2026-08-28T04:55:11Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": "2026-08-28T04:55:11Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12838",
+  "body": "Fixes #12599\n\nOption A of the maintainer ruling of 2026-08-27 (comment 5434987411, verbatim 「其他同意」): the contract prose tells the truth now. Zero behaviour change, zero schema shape change.\n\n## What was wrong\n\n`CryptoContext.namespace` / `.key` documented themselves as a settings coordinate (\"Settings namespace the value belongs to\" / \"Specifier key within the namespace\"), one layer below the three producers that actually construct the type. Re-verified on this branch's base:\n\n| producer | `ctx.namespace` | `ctx.key` | where `handle.id` is recorded |\n|---|---|---|---|\n| `SettingsService` (`settings-service.ts:1639`) | settings namespace | specifier key | `sys_setting.value_enc` |\n| the ObjectQL engine's secret-field path (`engine.ts:6053`) | **object name** | **field name** | a `secret:` ref on the business row |\n| the datasource secret binder (`datasource-secret-binder.ts:~93`) | caller-supplied, default `datasource` | datasource name | a `sys_secret:` credentialsRef |\n\n## What changed\n\n**The load-bearing correction is the AAD sentence.** It read \"Helps reject ciphertexts that were copied across namespaces\", which overstates what a binding over this pair can provide: `(namespace, key)` is one flat space shared by all three vocabularies, `sys_secret` declares the pair non-unique by design, and nothing reserves a name in one vocabulary against another. It is replaced by the guarantee that actually holds — such a binding rejects a swap **within** one producer's vocabulary and does **not** exclude a cross-vocabulary pair, with the constructible `mail|api_key` case named concretely. Per the ruling, the flat shared space is documented as **current reality, not the intended end state**, and the docblock says so in as many words.\n\nThe rest of the file follows the same correction: the `ICryptoProvider` header gains a \"Producers\" section naming all three, and `CryptoHandle.id`, the lifecycle list, `encrypt()` and `rotateKey()` stop describing `sys_setting.value_enc` as the general destination of a handle.\n\n**Folded in per the ruling** (recorded on the card, no separate issue): the identical settings-only prose on `DatasourceSecretBinderDeps.namespace` — \"Settings namespace recorded on the secret row\".\n\n## Why a changeset rather than `skip-changeset`\n\nMeasured, not assumed. `gen:docs` regenerates **229 files with zero delta**, so — contrary to the usual argument for spec docblocks — these comments are not reader-visible reference pages. But `packages/spec` emits its TSDoc into the published `.d.ts`, so the corrected prose is what every `@objectstack/spec` consumer reads at the call site. That ships, so it gets a `patch` changeset for both packages.\n\n## The ADR is deliberately not cited by number here\n\nDirection B is recorded in a companion **draft** PR adding `docs/adr/0128-*.md`, which waits on the maintainer's hand-merge. Citing `ADR-0128` from this PR would turn `check:adr-anchors` red — it hard-fails a citation naming no record under `docs/adr/` — on this PR and then on `main` until the ADR lands. So the docblock names the intended end state in prose without an id, and the ADR cites the contract rather than the reverse. Each PR is independently green in either landing order.\n\n## Verification\n\nUnion re-run after the final commit, at **`9cb1c6eb`** (`origin/main@f907fbe9` merged in). Gate set derived by `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` from the actual changed set — 32 families, exit codes captured before any pipe.\n\n- **33 of 35 green** (the 32 derived families plus `check:adr-anchors`, `check:adr-links`, `check:nul-bytes`).\n- Regeneration is a **no-op**: `pnpm --filter @objectstack/spec build` (which runs `gen:schema` + `gen:openapi`) and `gen:docs` both leave `git status` showing only the source edits. `check:authorable-surface` and `check:docs` green.\n- `typecheck`: `@objectstack/spec` + `@objectstack/service-datasource`, scope 2 of 79, both echoed — green.\n- `test`: `@objectstack/spec` 436 files / 11560 tests passed; `@objectstack/service-datasource` 27 files / 585 tests passed.\n- **Two families produced no reading and are reported as NOT MEASURED, not green**, both on their own printed `PREREQUISITE NOT MET` line: `check-dev-prereqs` (the container's workspace is not fully built — 66 of 67 packages have no `dist/`) and `scripts/pm/check-half-states.mjs` (exit 3 — no valid GitHub credential in this container; it swept no issue and ran no predicate). Neither reads this diff; CI runs both.\n- **Declared lint narrowing** (a measurement, not a skip): eslint run targeted rather than repo-wide, `--no-inline-config --format json` — 2 files linted, 0 errors, 0 warnings. Population read from eslint's own config, not guessed: the changeset `.md` reports \"File ignored because no matching configuration was supplied\", so the two TS files are the whole of this diff's eslint population. Invariance for untouched files: `eslint.config.mjs` never enables type-aware linting (no `parserOptions.project`, no typed `@typescript-eslint` rules) for any file — stated in the config with its own positive-control measurement — so this diff cannot move the verdict on a file it does not touch.\n\nLanding is serialized behind #12718 and #12737 per the generated-artifact relay; the PM lands. Not flipped ready or enqueued.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JvjTCjJQn9zSTXEhUKgT7s)_"
+}

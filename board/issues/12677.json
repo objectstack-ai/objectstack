@@ -1,0 +1,36 @@
+{
+  "number": 12677,
+  "kind": "issue",
+  "title": "docs deploy: Vercel production build OOM-killed — `@objectstack/spec:build` exits 137, every production deploy since 2026-08-25 ~16:55 fails (root cause behind #12333)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:dispatched",
+    "priority:p1",
+    "repo:objectstack"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-27T07:51:47Z",
+  "updated_at": "2026-08-27T09:56:13Z",
+  "closed_at": "2026-08-27T09:56:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12677",
+  "body": "## What breaks, for whom\n\n`objectstack.ai` production is pinned to a 2026-08-25 build: **every Vercel production build since ~16:55 that day has died**, so 8+ merged docs PRs from epic #12243 are invisible to users and crawlers (full measurement in #12333, which closes into this card). The maintainer read the Vercel build log on 2026-08-27 and pasted it verbatim in the PM session:\n\n```\n15:45:30.171 @objectstack/spec:build:  ELIFECYCLE  Command failed with exit code 137.\n15:45:30.206 @objectstack/spec#build:  ERROR  command (/vercel/path0/packages/spec) /vercel/.local/share/pnpm/.tools/pnpm/10.31.0/bin/pnpm run build exited (137)\n15:45:30.234  ERROR  run failed: command  exited (137)\n15:45:30.307 Error: Command \"cd ../.. && pnpm turbo run build --filter=@objectstack/docs\" exited with 137\n```\n\nExit 137 = 128 + SIGKILL: the build container's OOM killer, not a compile error. The Vercel build command runs `turbo run build --filter=@objectstack/docs`, which builds the docs app's **whole dependency graph in parallel inside one fixed-memory container**. `@objectstack/spec:build` is the process the kernel chose to kill — which does not necessarily make it the process that grew.\n\n## Task\n\nMake the docs production build fit the container's memory, **by changes inside the repo only**. Candidate levers, in preferred order — pick what measurement supports, do not apply all blindly:\n\n1. **Cap turbo parallelism for this pipeline.** Find where the Vercel build command is versioned (`vercel.json` at root or under `apps/docs`; if it turns out to be dashboard-only configuration, stop and report back instead of working around it). `--concurrency=1` (or `2`) trades minutes of build time for a bounded memory peak.\n2. **Measure, then shrink the biggest single build.** Run the same filter locally under a memory observer (`/usr/bin/time -v`, or a cgroup cap emulating the container) at current `main`. If one package's build dominates — `@objectstack/spec`'s dts generation is the usual suspect — bound it (split the dts step, tsup/tsc settings, an explicit `NODE_OPTIONS` heap cap so it fails loud instead of ballooning).\n3. **Name the regression.** Builds succeeded up to the 16:52–16:57 window on 2026-08-25 and have failed ever since; comparing peak memory at that boundary commit vs current `main` may identify exactly what grew.\n\n## Acceptance\n\n- `pnpm turbo run build --filter=@objectstack/docs` from a clean checkout completes with a **measured** peak memory stated in the PR (before/after numbers), fitting the container envelope with headroom.\n- No change to build outputs beyond the memory fix — docs site content identical.\n- Changeset per repo convention if a published package's build config changes.\n- ⛔ Never touch `content/docs/releases/`; no new runtime dependencies; anything requiring a Vercel dashboard change is a report-back to the PM, not a workaround hacked into code.\n\n## Verification after merge (inherited from #12333)\n\nOnce the fix merges and Vercel rebuilds:\n\n```\ncurl -s https://objectstack.ai/ | grep -o 'data-dpl-id=\"[^\"]*\"'\n```\n\nmust show an id other than `dpl_2nfWjGjSwZjakVEmUG1kBWD6697r`. That id moving is the definition of done for the outage; the epic #12243 site-level verification resumes from there.\n\nRefs: #12333 (measurement card, closes into this one) · epic #12243."
+}

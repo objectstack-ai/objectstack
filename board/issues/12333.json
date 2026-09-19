@@ -1,0 +1,35 @@
+{
+  "number": 12333,
+  "kind": "issue",
+  "title": "docs site: production has not deployed since dpl_2nfW… — 19 merges to main, five epic PRs invisible",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "priority:p1",
+    "repo:objectstack"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T18:48:36Z",
+  "updated_at": "2026-08-27T07:52:17Z",
+  "closed_at": "2026-08-27T07:52:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12333",
+  "body": "## Measurement\n\n`https://objectstack.ai` is serving deployment `dpl_2nfWjGjSwZjakVEmUG1kBWD6697r`. That id is **unchanged across 19 merges to `main`**, four of which touched `apps/docs`, over roughly two hours.\n\n```\ndpl: dpl_2nfWjGjSwZjakVEmUG1kBWD6697r | age: 6510 | x-vercel-cache: HIT\n```\n\nThe live generation can be dated precisely by what it does and does not contain:\n\n| landed on main | live? |\n|:--|:--|\n| #12253 `/robots.txt` + `/sitemap.xml` (16:31) | ✅ serving |\n| #12258 dotted-path 404 guard (16:52) | ✅ serving (`/foo.txt` → 404) |\n| #12262 one `<h1>` per page (16:57) | ❌ `/docs/data-modeling/objects` still renders **2** `<h1>` |\n| #12284 homepage title (16:57) | ❌ still `ObjectStack — Apps small enough for AI to hold whole.` |\n| #12303 `X-Robots-Tag` on agent-reader copies | ❌ header absent |\n| #12305 `metadataBase` + canonical | ❌ no canonical on any page type |\n| #12325 Open Graph cards | ❌ (merged after the above) |\n\nSo production is pinned to a build made between 16:52 and 16:57 on 2026-08-25.\n\nControl: this is not CDN staleness that a request can defeat. `Cache-Control: no-cache` / `Pragma: no-cache` request headers and a cache-busting query string both still return `x-vercel-cache: HIT` with an age of 6510s, and the `data-dpl-id` embedded in the HTML — which is a property of the **build**, not of the cache entry — has not moved.\n\n## Why it matters\n\nFive merged PRs from epic #12243 are invisible to users and to crawlers, and the epic's definition of done is written against the live site, so it cannot be verified while this holds. Three of its five boxes were ticked against production earlier today; the rest cannot be.\n\n## What is needed, and why it is not a PM action\n\nEverything visible from GitHub is green: all five PRs merged through the merge queue with full CI. Whatever is stuck is on the Vercel side — a failing production build, a paused project, a promotion that is not happening — and reading that requires the Vercel dashboard or API token for the docs project. No agent in this repo has it.\n\n**Maintainer action**: check the docs project's deployment list for a failed or queued production build since ~16:55 on 2026-08-25.\n\nIf it turns out a build is failing, that failure is the real card and this one closes into it. If deployments simply resumed on their own, close this and the epic's verification continues.\n\n## Re-check command\n\n```\ncurl -s https://objectstack.ai/ | grep -o 'data-dpl-id=\"[^\"]*\"'\n```\n\nAny id other than `dpl_2nfWjGjSwZjakVEmUG1kBWD6697r` means it moved."
+}

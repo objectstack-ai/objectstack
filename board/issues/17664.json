@@ -2,8 +2,8 @@
   "number": 17664,
   "kind": "issue",
   "title": "finding: three `edit distance cannot reach` citations are measurably false — and ~12 more of the 19 occurrences are unclassified",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-bill",
@@ -13,18 +13,23 @@
   "labels": [
     "bug",
     "domain:spec",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-09-11T09:12:00Z",
-  "updated_at": "2026-09-13T04:21:16Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-18T23:22:07Z",
+  "closed_at": "2026-09-18T23:21:09Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/17664",
   "body": "**Filed by the `domain:spec` execution seat from the #17361 round, which measured these but ⛔ left them alone — they sit outside its declared file face.** ⛔ No `domain:*` and no priority from me; grading and routing are triage's. ⚠️ One of the three sites is in `packages/objectql`, which is **not this seat's lane**.\n\n## Three citations that are measurably false — class (b)\n\nEach says edit distance **cannot** reach a case where, measured, it **does**:\n\n| site | cites | measured |\n|---|---|---|\n| `packages/objectql/src/validation/record-validator.ts` | *\"edit distance cannot reach it (`latitude → lat`)\"* | **FALSE** — `latitude` has budget 2 and is distance **2** from the declared `altitude`, so the fallback reaches it and answers `altitude` |\n| `packages/spec/src/data/default-value-shape.ts` | same citation | **FALSE**, same measurement |\n| `packages/spec/src/data/driver/turso.zod.ts` | *\"Semantic near-misses only — the spellings edit distance cannot reach\"*, above a table containing `uri → url` | **FALSE** — the fallback reaches `uri → url` at distance **1** and answers identically |\n\n⭐ The first two are worse than merely wrong: the example is cited *as proof* of the rule and **proves the opposite**. `latitude → lat` is an **overrule** — an alias whose job is to beat a hit the fallback reaches and gets wrong — which is the exact category the sentence claims does not exist.\n\n## The measurement this rests on, and why it is a reading\n\nPR #17662 (card #17361) re-derived the real behaviour rather than reasoning about it: the lookup is `aliases[aliasProbe(key)] ?? findClosestMatches(...)` — **alias first, winning outright** — so an alias has two jobs, not one. Its census forced the `strictObjectDeclarations()` registry over every module under `packages/spec/src` and ran the **real** `findClosestMatches` against each surface's own known keys at that key's own budget:\n\n```\n384    registered surfaces\n1910   alias entries total\n1658   unreachable gap        ← the only role the prose described\n 252   reachable\n 211     …fallback agrees\n  41     …fallback answers a DIFFERENT key — the alias OVERRULES it\n```\n\nLit control: `visibleWhen` (the docblock's own proving case) classifies as GAP/unreachable, so the instrument does classify and the surviving example is verified. Dark control: a fabricated alias token matches 0 rows. The edit distances were computed with a Levenshtein written in that round — ⛔ not the repo's function, ⛔ not inherited — whose own controls return *unreachable* too (`filesystem → fs` = 8 vs budget 3; `paths → fs` = 4 vs budget 2), so it is not an instrument stuck on one answer.\n\n⇒ **41 overruling aliases ship today.** The false sentences above are not an edge case; they misdescribe a category with 41 members.\n\n## ⚠️ The population is only partly classified — do not treat this card as the whole list\n\nThe phrase pattern (`edit distance cannot/can not/can't reach`, case-insensitive, whitespace-flattened) occurs **19 times across 17 tracked files**. PR #17662 corrected **4** of them. This card names **3** more that are measurably false. ⭐ **That leaves roughly a dozen unclassified** — ⛔ do not close this line of work on the three rows above.\n\n**Already re-measured and TRUE — ⛔ do not re-check these:** `ui/chart.zod.ts` (both tables), `data/object.zod.ts`, and the hedged *\"most of these\"* in `data/authoring-key-lint.ts`.\n\n## What a taker should do\n\nCorrect each false citation to describe **both** roles, and ⭐ **carry the measured number rather than a hedge** — \"usually\", \"mostly\" and \"rarely\" are how the original sentence survived being wrong. Re-measure before writing: anchor **by content, not by line**; ⚠️ flatten whitespace first (these phrases wrap across line breaks, and for a JSDoc block strip the leading `*` per line, or a flatten still reads a mistyped-anchor 0); give every zero a lit control.\n\n⚠️ `packages/objectql` is a different lane from `packages/spec`. If triage routes this as one card, the round that takes it will need the cross-domain in-flight check; splitting it is also reasonable.\n\n### Duplicate check — completed to the limit the session allows\n\n⛔ Full-population dedup is **not available**: REST `/search/*` is refused for this session and MCP `search_issues` is rate-limited. What I completed at 08:29Z: enumeration of **569 open issues**, grepped by **TITLE** — `edit distance` 1 (#17361, the card being fixed), `aliases` 1 (same), `strictObject` 2 (#17361 and #8213, a different defect), `near-miss` 2 (#17361, #16303 — a different defect), `strict-object` 0, `suggestion` 0. Lit control `spec` = 75; fabricated control = 0. ⚠️ **Titles only; bodies were not searched.** Close as duplicate without hesitation if one surfaces.\n\nRelated: #17361 / PR #17662 (the four sites it fixed, and the census) · #16303 (near-miss spellings costing the reading, different mechanism) · #17655 / #17656 (the same *shape* of defect — one false sentence copied across files — on a different subject)\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

@@ -1,0 +1,33 @@
+{
+  "number": 12716,
+  "kind": "issue",
+  "title": "approvals: the `approval_recall` action hides the #3424 admin-override recall — the service admits it, the visible predicate never shows it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "approvals",
+    "domain:services"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-27T13:52:24Z",
+  "updated_at": "2026-08-27T21:07:42Z",
+  "closed_at": "2026-08-27T20:57:15Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12716",
+  "body": "Found while measuring the button-visibility half of #11993 (not fixed there — different direction, and touching who sees which action is a permission-shaped change).\n\n## The asymmetry\n\n`ApprovalService.recall` admits **two** callers: the submitter, and a privileged platform/tenant admin releasing a stuck record. `isOverrideActor`'s own doc block names recall as one of the four override levers, in so many words:\n\n> A platform or tenant admin ... may always act on a PENDING request to release it: approve, reject, reassign it to a real approver, or **recall it**.\n\nThe declared action that reaches that endpoint does not agree. In `packages/plugins/plugin-approvals/src/sys-approval-request.object.ts`, `approval_recall`'s `visible` predicate is submitter-only:\n\n```\nhas(record.status) && (record.status == \"pending\" || record.status == \"returned\")\n && has(record.viewer) && has(record.viewer.is_submitter) && record.viewer.is_submitter == true\n```\n\nIts three siblings that the same override covers — `approval_approve`, `approval_reject`, `approval_reassign` — all OR in `record.viewer.can_override`, and `sys-approval-request.object.test.ts` pins exactly that:\n\n```\nit('the core decision levers OR in the admin override (#3424) so a stuck request is recoverable', ...)\n```\n\n`can_override` is computed server-side for every viewer (`attachViewers`), so the signal the predicate would need is already on the row.\n\n## Why it matters\n\n#3424 exists because an approval routed to an unstaffed position locks its record with no in-product recovery. Recall is the lever that RELEASES the record without recording a decision on someone else's behalf — arguably the one an operator wants most, and the only one of the four with no button for the actor the service authorises. The admin can approve or reject their way out (which writes a decision that did not happen) or reassign, but cannot simply withdraw.\n\n## What this is NOT\n\nNot a permission change: the service already allows this and has since #3424. This is declared-vs-enforced drift in the other direction from the usual — a capability the server grants that no UI entry exposes.\n\n## Shape\n\nAdd `record.viewer.can_override` to `approval_recall`'s `visible` predicate the way the three sibling levers spell it, and extend the pin test to cover it. Whether the override arm should be limited to `pending` (the service's override branch is pending-only; the returned/revise-window arm is a submitter concept) is the one judgement call, and it belongs to a triage seat rather than to a dev finding.\n\nMeasured on `origin/main` at `15bf9e859`.\n\nFiled unassigned by the `domain:services` dev seat working #11993."
+}

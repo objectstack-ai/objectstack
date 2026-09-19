@@ -1,0 +1,35 @@
+{
+  "number": 12814,
+  "kind": "issue",
+  "title": "Port the union-arm `type-mismatch` check into the hoisted `sdui-parser` — the half of the lockstep debt that CHANGES what this copy accepts and rejects",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "needs:contract-review"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-27T22:26:23Z",
+  "updated_at": "2026-08-28T04:55:43Z",
+  "closed_at": "2026-08-28T04:54:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12814",
+  "body": "Split out of **#12810** by the triage seat (session `session_01Aujz2zykf5LXt3T98gRsGe`), on that card's own recommendation — *\"They may deserve splitting.\"* ⛔ All measurement below is #12810's, not re-derived here; read it there for the evidence and the controls.\n\n**Why split.** #12810's two items need different treatment, and folding them drags the cheap one behind the expensive one:\n\n| item | shape | treatment |\n|---|---|---|\n| **1** — `dashboard-widget-options` (absent here entirely) | **additive**: a new warning code reporting an already-inert state | same shape as #12719 — stays on #12810, off the manual floor |\n| **2** — union-arm `type-mismatch` (this card) | ⚠️ **changes what this copy accepts and rejects** | Clause-② content leg; contract-review tier |\n\n## What is missing here\n\nobjectui's `checkType` is built on `inputTypeArms(input.type)` (`src/input-type.ts`, absent in this repo) and clears a prop when **any** declared arm accepts the value. This repo's `checkType` is the older single-arm `switch (input.type)`. Two measured consequences:\n\n- A manifest input declaring a **union** type falls through this repo's `default: return null` and draws **no diagnostic at all**, while objectui checks every arm.\n- Where no arm accepts, objectui emits **one** `type-mismatch` naming every arm, at **`error`** severity when an `enum` arm is present. This repo can only emit the single-arm form ⇒ the same value yields a different `code`/`severity` pair across the copies.\n\n## Why this is Clause-② and not a mechanical port\n\n⛔ This is **not** #12719's \"reports an already-inert state\" shape. Today a union-typed input draws nothing; after the port it can draw an `error`. That is a change to what the save gate accepts and rejects, which is the **content leg** — `needs:contract-review` is attached at filing and the dispatch must declare `Clause-②: yes`.\n\n⚠️ **But it is not a new contract decision either, and that is why this is `pm:queue` rather than the decision inbox.** The underlying ruling is **objectui#3832**, already made on the other copy. #12719 establishes the invariant both copies owe each other — *\"both copies byte-agree on the accepted grammar and on diagnostic codes\"* — so **not** porting is the drift, and porting applies an existing ruling to the lagging copy. ⇒ Contract-review tier, ⛔ not a maintainer question. If the implementer finds the port would require deviating from objectui#3832's behaviour rather than matching it, **stop and report** — that would be a new decision.\n\n## ⚠️ Sequencing — settle this before or with the manifest wiring, ⛔ not after\n\nThe blast radius is currently bounded by a **separate unfixed gap**: this repo resolves no `sdui.manifest.json` (none in the tree; `@objectstack/console/dist/sdui.manifest.json` absent), so `resolveSduiManifest()` returns undefined and `validateJsxPages` runs **parse-only** — `validateTree` is not reached from the production gate at all today. ⇒ The drift is latent. **Wiring the manifest is what turns it author-visible**, so this card should land before or with that wiring. That wiring is the second gap recorded on #12719 and is still unowned.\n\n## ⚠️ Interaction with an open maintainer decision\n\n**objectui#6614** (`needs-user-decision`) asks whether `interpretBrace` should materialise a JS literal subset. If it rules to widen the grammar, the set of values reaching `checkType` changes — which may reshape what this port should assert. ⛔ Check #6614's state at dispatch: if it is still open, say so in the report and consider whether the port is stable under either outcome. It probably is (arm checking is orthogonal to what parses), but that is a reading to take, not to assume.\n\n## Not drifted, measured — ⛔ do not re-derive\n\n`interpretBrace` itself is **byte-identical** across the copies (sha256 of the extracted function body agrees, and the comparator was **proved able to detect a disagreement by mutating one side first**). The accepted **grammar** is genuinely in lockstep; the gap is entirely on the diagnostic-code side.\n\nRefs: **#12810** (parent, item 1 and the full measurement) · #12719 (the `inert-expression` port and the invariant) · #11148 (the same two-copy port pattern) · objectui#3832 (the ruling being ported) · objectui#6614 · ADR-0078 · ADR-0080."
+}

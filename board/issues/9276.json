@@ -1,0 +1,35 @@
+{
+  "number": 9276,
+  "kind": "issue",
+  "title": "[drivers] a driver returning a declared field as an own key holding `undefined` is a storage-contract defect — Option C from #8489",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-17T09:26:13Z",
+  "updated_at": "2026-08-27T03:43:08Z",
+  "closed_at": "2026-08-27T03:43:08Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9276",
+  "body": "Restart-when: a THIRD consumer of \"is this declared field present\" is written outside the canonical binder (a bare `in` / `hasOwnProperty` presence test against a declared field under `packages/`, excluding `materializeDeclaredFields`), OR any consumer measured on this input class is fail-OPEN rather than fail-closed, OR `driver-memory` / `driver-mongodb` come out of the #5499 investment freeze\n\n> ⚠️ **Restart condition added 2026-08-20 by the PM seat; nothing else in this body changed.** An incremental unlock scan found this card in `pm:on-hold` with **no `Restart-when:` line at all** — a state no mechanism could ever wake it from. It is kept on hold (not closed) because the trap it records sits on a security-adjacent path; the exit above names the three ways it becomes live. Maintainer authorization for the disposition, verbatim: 「接受你的建议」.\n>\n> ⭐ The second leg is the one that matters most. The only consumer measured so far (#8489's eligibility gate in `plugin-sharing`) was fail-CLOSED both before and after that card — nobody was over-granted. **A fail-open consumer on this input class is a different card entirely, and it should not wait for this one.**\n\nFiled unassigned by the dev seat implementing #8489, per the maintainer's 2026-08-16 ruling on that card: *\"Option C filed as the durable follow-up (driver-side normalization of own-key-`undefined` as a storage-contract defect) — lands in `packages/drivers/*`, its own card in that lane; the implementing dev or the identity seat files it with a backlink.\"*\n\nFollow-up to #8489. ⛔ This records the follow-up only — no fix commitment; the lane grades it.\n\n## The shape\n\n`InMemoryDriver` preserves an explicitly-`undefined` property through `create` and hands it back from `find` as an **own key holding `undefined`**. Measured on `origin/main` in a worktree at `2d11ddbe3`, against the built `driver-memory` dist:\n\n```\nInMemoryDriver.create('article', { id: 'a1', title: 't', status: undefined })\nInMemoryDriver.find('article', {})  ->  row own keys : [ id, title, status, created_at, updated_at ]\n                                        'status' in row : true\n                                        row.status      : UNDEFINED\n```\n\nThe control leg, same driver, same object — a declared field simply never written — behaves correctly and omits the key entirely:\n\n```\nInMemoryDriver.create('article', { id: 'a2', title: 't2' })\nInMemoryDriver.find(...)  ->  row own keys : [ id, title, created_at, updated_at ]\n                              'status' in row : false\n```\n\n`SqlDriver` cannot express the defective shape at all: a SQL NULL arrives as `null`, which is a value. So the divergence is between JS-backed drivers and SQL-backed ones, on a row shape only the former can emit.\n\n## Why it is a contract defect and not a curiosity\n\nThe two states are supposed to be distinguishable and each has a defined meaning — \"the key is absent\" versus \"the key holds a value\". An own key holding `undefined` is **neither**, and every consumer has to pick a reading:\n\n- CEL, measured against the real `@objectstack/formula` engine, reads it as **absent**: `has(record.status)` is `false`, and `record.status == null` faults `No such key: status`.\n- `materializeDeclaredFields` (`packages/objectql/src/declared-fields.ts`) reads it as absent too, deliberately and by documented design — *\"`undefined` counts as absent (not just a missing key): CEL treats an own key holding `undefined` exactly as it treats no key at all.\"*\n- A plain `name in record` presence test reads it as **present**. That is what made it a live divergence in #8489: `plugin-sharing` re-derived the declared-field binder with an `in` check, and the two copies disagreed on exactly this one input class.\n\nSo the row shape is a fork in the road that every consumer must independently know about, and the platform's own helper carries a dedicated sentence to survive it. That is the cost this card proposes to remove at the producer.\n\n## Why fixing it at the producer is the durable half\n\n#8489 converged `plugin-sharing` onto the canonical binder, which resolves the disagreement **for that seam**. It does not stop the shape being emitted, so the next consumer that reasons about key presence re-acquires the bug. Normalising at the driver — a declared field whose stored value is `undefined` is either dropped from the row or returned as `null` — would make the two binder implementations provably agree on every reachable input, and would let consumers stop carrying the special case.\n\n## Scope, as understood from outside the lane\n\n`packages/drivers/*`. `driver-memory` is the measured emitter; `driver-mongodb` is the other JS-backed driver and is worth measuring the same way before deciding, since the two share the family. Note that `driver-memory` / `driver-mongodb` investment was frozen under #5499 — whether that freeze covers this is a lane call, not mine.\n\n⚠️ Severity is for triage to grade, and a filing-time grade is unreliable in both directions. Recording honestly what is and is not established: the shape is **reachable through a first-party shipped driver** (measured above), but reaching it requires in-process code passing an explicitly-`undefined` property to `create` — `undefined` does not survive JSON, so it cannot arrive over the wire. No production consumer was measured. Direction of the consequence at the one consumer studied so far (#8489's eligibility gate) was fail-closed before that card and is fail-closed after it.\n\n## Related\n\n- #8489 — the card that measured this; its 2026-08-16 ruling designates this follow-up. The eligibility seam there is now on the canonical binder, so it no longer depends on this being fixed.\n- #6125 — the same word, the other side of the query: `undefined` as a filter COMPARAND had five readings across the repo (closed; `read-scope-sql` half landed in PR #6390). This card is about `undefined` in a RETURNED ROW VALUE, which that card did not cover.\n- #5299 — `driver-memory` vs `formula` on \"the field has no value\", also matcher-side (closed).\n- #5499 — the memory/mongodb investment freeze."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 12640,
+  "kind": "issue",
+  "title": "[finding] MCP `issue_read get_labels` cannot resolve a PULL REQUEST number — the working label read for a PR is `pull_request_read get`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-27T02:39:19Z",
+  "updated_at": "2026-08-27T05:10:25Z",
+  "closed_at": "2026-08-27T04:49:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12640",
+  "body": "Filed by the skills PM seat (session `session_01MnijPVVDakqK2J335JoJtq`) consolidating the same platform fact measured **independently by two devs in one wave, 2026-08-27**, so it does not stay buried in two report comments.\n\n## The reading\n\nCalling `mcp__github__issue_read` with `method: \"get_labels\"` and a **pull request** number fails with a GraphQL resolution error — \"Could not resolve to an Issue\". The REST convention that a PR is also an issue does not carry over to this method: its GraphQL query resolves the `Issue` type only.\n\nMeasured twice, on different PRs, by different dev runs in the same hour:\n\n- the os-verify-lock scanner dev, reading back a label write on its own PR — `1 failed issue_read get_labels (GraphQL Issue type does not resolve a PR number)`; the read-back was completed with `search_pull_requests` instead;\n- the protocol-hardening fold dev, on its PR — same error, verbatim; the working read used was `pull_request_read get` (whose response carries the `labels` array).\n\n## Why it is worth a row\n\nLabel read-backs on PRs are a **mandated step** (every label write is read back; `skip-changeset` on a PR is the routine case), so every dev hits this path. The failure is loud (an error, not a wrong answer), which is the good direction — but each dev re-derives the workaround alone, and the obvious fallback (`search_pull_requests` by number) spends a search-channel call where a single-PR `get` answers authoritatively.\n\n## Graded disposition (skills-lane finding, self-triaged at filing — one act, noted)\n\nOne `references/platform-readings.md` fact row: `issue_read get_labels` is issue-only (GraphQL `Issue` type; a PR number errors with \"Could not resolve to an Issue\"); the label read for a PR is `pull_request_read get` (labels ride the response). Joins the platform-readings fact-row fold (the four graded siblings covering the session-proxy 403 zero, the enqueue-instrument row, the free-text-negation row and the tier-quota rows) — serial behind the in-flight protocol-hardening chain, which holds that file.\n\n## Re-check\n\nFrom any seat: call `issue_read` with method `get_labels` passing an open PULL REQUEST number (any open PR, for example 12638) as issue_number — the GraphQL resolution error comes back; then call `pull_request_read` with method `get` on the same number — labels are present in the response. (This body's first revision spelled the two placeholders in angle brackets and the sanitizer ate them — the edit you are reading is the repair, and that loss is itself the recorded angle-bracket hazard firing.)"
+}

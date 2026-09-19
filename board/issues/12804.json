@@ -1,0 +1,35 @@
+{
+  "number": 12804,
+  "kind": "issue",
+  "title": "Wire the sys_secret reference union to self-serve family 3 from ObjectQL.listDatasourceDefs(), and correct the three prose sites #12758 falsified",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-27T21:31:07Z",
+  "updated_at": "2026-08-28T07:32:37Z",
+  "closed_at": "2026-08-28T07:32:37Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12804",
+  "body": "Filed unassigned by the `os-dev` seat implementing #12758, session `session_01LZbWd2jNV1FErXTPSS4Dry`. ⛔ Not graded, not routed. The producer half is what #12758 landed; this is the consumer half it deliberately did not take.\n\n**Blocked-by: #12758** (needs `ObjectQL.listDatasourceDefs()`, which that card adds).\n\n## What #12758 changed, and what it did not\n\n#12758 widened `ObjectQL.registerDatasourceDef` to retain `external.credentialsRef` and added `ObjectQL.listDatasourceDefs()` — an unfiltered read over every datasource definition the engine holds, from both entry routes (the direct call and the package-manifest install path). So the engine **can now answer** \"which datasources declared in code hold a `sys_secret` handle\".\n\n`packages/cli/src/utils/secret-reference-union.ts` (#12663 / PR #12754) does **not** ask it. Family 3 is still pure over the artefacts its caller supplies:\n\n- `SecretReferenceUnionInput.declaredDatasources` is required, and `undefined` opens a declared gap that refuses the whole union;\n- `SecretReferenceEngineLike` names only `getConfigs` and `getDriverForObject`, so the union has no way to reach the new accessor.\n\n⇒ the completeness of the union — the precondition #8103's deletion predicate rests on — still depends on every host remembering to pass a list.\n\n## Why #12758 did not do it (the reasoning to inherit, not repeat)\n\n⚠️ It is **not** mechanical wiring, which is why that card's dispatch fenced it as \"small and local, or file it\". It is a contract decision on a shipped module:\n\n1. `SecretReferenceUnionInput` is an exported CLI surface, and what `declaredDatasources: undefined` MEANS is the question. Today it is the loud \"nobody answered\" that triage credited as the reason nothing is broken now. Collapsing it into \"the engine answered\" would remove that guarantee rather than strengthen it.\n2. A host may declare datasources the engine never saw (a config file that was never registered), and the engine may hold definitions the host would not list. So the honest shape is plausibly the **union of both sources** with the gap re-scoped, not a replacement — and that is a design call, not a refactor.\n3. The module's central rationale, its family-3 docblock, its input docblock and its runtime gap message all state the old fact in prose, and one test pins the `undefined` gap (`secret-reference-union.test.ts`, the `declaredDatasources` case).\n\n## ⚠️ Prose that #12758 falsified and deliberately left alone\n\nThree sites now state something that is no longer true, all in `packages/cli/src/utils/secret-reference-union.ts`. They were left untouched on purpose: correcting the prose without the behaviour change would leave the module internally inconsistent, and the #12758 seat does not own this contract.\n\n- the family-3 docblock — \"`registerDatasourceDef` keeps only `schemaMode` and `external.allowWrites`, dropping `credentialsRef` on the way in\";\n- the `declaredDatasources` docblock — \"The engine drops `credentialsRef` from the definitions it keeps, so this module cannot discover code-defined artefacts\";\n- the runtime gap message — \"and the engine drops `external.credentialsRef` from the definitions it keeps\".\n\n⛔ Note the second and third are load-bearing, not decoration: the gap message is operator-facing text explaining why a union was refused. Whoever takes this card must rewrite the REASON, not just delete the clause — the union still cannot discover code-defined artefacts **until it asks**, which is a different sentence from \"the engine drops them\".\n\n## Re-check\n\n```\ngit grep -n \"drops .external.credentialsRef.\\|keeps only\" -- packages/cli/src/utils/secret-reference-union.ts\ngit grep -n \"listDatasourceDefs\" -- packages/objectql/src packages/cli/src\n```\n\n## Duplicate check\n\nOne targeted `search_issues` this round (the repo-scoped REST search endpoint is 403 from this seat, so the channel was switched and is declared here). Control fired: the query returned #12758 itself at rank 1, so the search reached the right corpus. Nine matches reviewed; the only open one is #12758. Nearest neighbours are all closed and different subjects: #4270 (`sys_secret` has three producers), #7990 / #8075 (inline-credential sinks in schemas), #4487 (datasource missing from the liveness ledger). ⛔ No open card covers wiring the union to the engine.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01LZbWd2jNV1FErXTPSS4Dry)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

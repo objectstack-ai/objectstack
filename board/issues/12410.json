@@ -1,0 +1,35 @@
+{
+  "number": 12410,
+  "kind": "issue",
+  "title": "check:objectql-double-limit declares no population over the packages/**/*.test.ts corpus it walks, so dispatch-gates can never name it for a test-file card",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T01:52:51Z",
+  "updated_at": "2026-08-27T23:38:38Z",
+  "closed_at": "2026-08-27T23:38:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12410",
+  "body": "Filed unassigned while measuring #12173 (finding ①). Not claimed, not graded.\n\n## What was measured\n\n`scripts/check-objectql-double-limit.mjs` walks `packages/**/*.test.ts`:\n\n```\nconst SCAN_ROOT = 'packages';          // :231\n...\nelse if (/\\.test\\.ts$/.test(entry)) acc.push(p);   // :714\nfor (const abs of testFilesUnder(join(repoRoot, SCAN_ROOT))) { ... }   // :727\n```\n\nThe only path literals `extractWatchHints` recovers from it are `scripts/objectql-double-limit.baseline.json` and `n/a` — the bare single-segment `'packages'` is not recovered at all, and would not cover a nested path even if it were:\n\n```\n$ node -e \"... m.extractWatchHints(src)\"\nhints: [\"scripts/objectql-double-limit.baseline.json\",\"n/a\"]\nhintCovers('packages','packages/objectql/src/a.test.ts')  -> false\nhintCovers('packages/**','packages/objectql/src/a.test.ts') -> true\n```\n\nConsequence, on a **fully current** tree (`origin/main` = `b000ab59bb`), for a test-file card:\n\n```\n$ node scripts/pm/dispatch-gates.mjs 'packages/plugins/plugin-email/test/send.test.ts'\n   # 175 families discovered; check:objectql-double-limit absent from \"Local gates for this card\"\n\n$ node scripts/pm/dispatch-gates.mjs --residue 'packages/plugins/plugin-email/test/send.test.ts'\n  - pnpm check:objectql-double-limit   [lint.yml]   names: scripts/objectql-double-limit.baseline.json, n/a\n```\n\nIt is in the **residue**, not the family. Nor is it in `CHANGE_KIND_GATES` — its two nearest siblings, `check:engine-double-contract` and `check:where-matcher`, which walk the same `*.test.ts` corpus for the same class of fake-engine double, both are under the `adds or edits a test file` kind.\n\n## Why this matters\n\n#12173 records a dev being broadsided on `check:objectql-double-limit` and attributes the miss to branch-tree staleness (the gate landed on `main` after the branch was cut). That attribution is incomplete: **on today's tree, with the gate fully present, the derivation still cannot name it for a test-file change.** Deriving the family list against the merge base would move it from \"not discovered\" to \"discovered, then dropped into residue\" — the dispatch prompt would still not carry it.\n\n## The fix this repo has already decided\n\nThe tool's own residue note prescribes it, verbatim:\n\n> Read the gate before treating it as one. If it scans packages, the fix belongs there: declare the scan surface beside the roster (the subtree spelling, `packages/**`), after which it is MATCHED here.\n\nSame class as #10790 (`check:parse-guard`, bare `scripts` refused as too generic) and #10648 (`check:doc-authoring`, four bare-word population roots), both closed by declaring the subtree spelling in the gate.\n\n⚠️ Whoever takes this should re-derive the residue after the change and check the opposite direction too: `packages/**` matches ~every package card, so the cost of declaring it is that this gate joins a very large number of families. If that cost is judged too high, the `CHANGE_KIND_GATES` route (beside its two siblings under `adds or edits a test file`) is the alternative — the two routes produce different maintenance shapes and the choice is a judgment call, not a mechanical one.\n\n## Also observed while here\n\n`Lint & Repo Gates` still runs 120 named steps sequentially with no `continue-on-error` key anywhere in the job. Re-derived at `b000ab59bb`: `check:where-matcher` at `lint.yml:2768`, the `ObjectQL double limit gate` step immediately after it at `:2789`, and **10** further gate steps in that job after it — #12173 recorded 46 at the time of filing. That half is #12173's finding ②; recorded here only because the number moved."
+}

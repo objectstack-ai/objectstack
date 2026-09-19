@@ -1,0 +1,35 @@
+{
+  "number": 9592,
+  "kind": "issue",
+  "title": "tooling: `check-adr-anchors` should verify that a cited `ADR-NNNN Dk` decision letter is a real heading of the cited ADR",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-18T12:29:42Z",
+  "updated_at": "2026-08-27T20:01:39Z",
+  "closed_at": "2026-08-27T19:55:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9592",
+  "body": "⛔ **Prerequisite discharged, marker retired 2026-08-27 by the `domain:devx` lane PM (session `session_01PfaSTikked61BkcsB5Rn69`).** This card opened with a `Blocked-by:` line naming **#11501**. Verified against GitHub, ⛔ not against this body: #11501 closed 2026-08-25 via merged PR #11780. This card then landed via **PR #12785**, merged as **`8c0b5cf06`**.\n\nThe marker line is **removed rather than left standing**: a spent `Blocked-by:` is the stale-body-line shadowing defect measured on #11747 — the same defect the Sequencing section below records this card having already been bitten by once, when the line still named the closed #9255.\n\n---\n\nCommissioned by maintainer ruling on #9255 (2026-08-18, live PM chat with the triage seat, session `session_01EUZUjvnLsqwHVkXkTv8TKQ`; remedies 1+3 approved, split into two cards). This card is remedy 3.\n\n## Scope\n\nExtend `scripts/check-adr-anchors.mjs` one layer down: for every `ADR-NNNN Dk` citation appearing in anchor invariants and anchored-file comments, verify `Dk` resolves to an actual decision heading of the cited ADR document. Today the gate checks only the number layer (file exists, number unambiguous per #5992, tombstones unanchorable per #7329), so a decision letter pointing at the wrong decision — the #8386 / #9255 failure family — is green.\n\n## Sequencing (why it was blocked)\n\nOriginally blocked by #9255 (remedy 1, closed 2026-08-19). Re-parked 2026-08-24 by the triage seat on the REAL remaining prerequisite, carded as #11501 — the body line was rewritten to name it on 2026-08-24 (it previously still named the closed #9255, which is the stale-body-line shadowing defect measured on #11747). On first run after the prerequisite lands, any additional bad letters the new check reds out are their own findings, not reasons to weaken the check.\n\n## Refs\n\n#9255 (remedy 1: retarget sweep, closed) · #11501 (the prerequisite, closed via PR #11780) · #8386 (same family: D-content mismatch) · #5992 (number-layer collisions) · #7329 (tombstone anchoring)."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 12590,
+  "kind": "issue",
+  "title": "[finding] 12 duplicate `### Nested Shape:` anchors on 4 reference pages — a union-variant table qualifies its heading by schema+key, and sibling variants share both",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T13:39:40Z",
+  "updated_at": "2026-08-28T06:06:08Z",
+  "closed_at": "2026-08-28T06:06:00Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12590",
+  "body": "**Origin**: measured while implementing #12316 (multi-shape variant sub-tables) on `origin/main@7bd6447`. Recording only — unassigned, awaiting triage. **Pre-existing and unchanged by #12316**: the counts below are byte-identical before and after that change, which adds 113 sub-tables and zero duplicate headings.\n\n## What is wrong\n\n`renderSchemaSection`'s **union branch** (`### Union Options`) calls `renderProperties` once per union variant, and each call emits its own `### Nested Shape:` headings. The heading path is qualified by `` `${schemaName}.${key}` `` — deliberately, and for a good reason (`packages/spec/scripts/lib/schema-section.ts`: *\"one page carries many schemas, and a heading naming only the property would give it two identical anchors\"*). But **both qualifiers are shared by sibling variants of one schema**: two variants of `ViewItem` that each declare a `config` opening a shape produce two headings reading exactly\n\n```\n### Nested Shape: `ViewItem.config`\n```\n\nunder the same `## ViewItem`, i.e. **two identical anchors on one page**. That is the same defect class the `Schema.key` qualification exists to prevent, arriving through the axis it does not cover: *which variant's table this is*.\n\n`check:doc-anchors` is green on it, and correctly so — it verifies that every internal `#fragment` link **resolves to a real heading**, not that a heading is unique. Nothing links to these anchors today, so the failure is silent in both directions: a reader following a deep link, or a tool building a per-page index, gets whichever occurrence the slugger's duplicate counter happened to number first.\n\n## Population, measured on the emitted tree\n\n**12 excess heading occurrences across 4 pages / 9 distinct headings** — every one under a schema whose section renders `### Union Options`:\n\n| page | duplicate heading | occurrences |\n| :--- | :--- | ---: |\n| `data/data-engine.mdx` | `DataEngineRequest.query` | 4 |\n| `data/data-engine.mdx` | `DataEngineRequest.options` | 2 |\n| `system/collaboration.mdx` | `CRDTState.vectorClock` | 2 |\n| `system/tenant.mdx` | `TenantIsolationConfig.database` | 2 |\n| `system/tenant.mdx` | `TenantIsolationConfig.performance` | 2 |\n| `ui/view.mdx` | `ViewItem.config` | 2 |\n| `ui/view.mdx` | `ViewItem.protection` | 2 |\n| `ui/view.mdx` | `ViewItemWire.config` | 2 |\n| `ui/view.mdx` | `ViewItemWire.protection` | 2 |\n| `ui/view.mdx` | `ViewItemWire.columnState` | 2 |\n\nThe sibling relocation, `### Allowed Values:`, is at **zero** duplicates on the same tree — it is emitted from the same `renderProperties` and carries the same `Schema.key` qualification, so it is exposed to the identical defect and simply has no corpus occurrence today. A fix should cover both, or the next wide vocabulary declared on two variants of one schema reopens it.\n\n## Shape of a fix (not prescribed)\n\nThe missing qualifier is the variant. The union branch already names each variant on the page — `#### ${variant.title || 'Option ' + (index + 1)}` — so the addressing vocabulary exists; what is absent is threading that owner into `renderProperties`, which today reads `schemaName` from its closure precisely because #11601 measured that a nested table opens no relocation of its own and an owner parameter would have been unread. It is read now.\n\nNote the interaction with #12316, which lands a variant selector *inside* the accessor (`navigation[number][type='sidebar']`) for a **property** whose type is a union. That is a different axis — the union under one property — and does not address this one, which is a union at the **schema root**. A fix here should stay in that same voice rather than invent a third notation.\n\n## Dedup\n\nSearched 2026-08-26 (title/body, both `Nested Shape` + anchor wording and the renderer wording): only #12316 and #12315 touch this renderer, and neither covers duplicate anchors. #4696 is the closest prior art — the same \"a bare name is not a schema identity\" family, one level up — and is closed.\n"
+}

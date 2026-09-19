@@ -1,0 +1,34 @@
+{
+  "number": 12599,
+  "kind": "issue",
+  "title": "CryptoContext.namespace / .key document themselves as settings-only, one layer below sys_secret's three producers",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T16:12:25Z",
+  "updated_at": "2026-08-28T05:07:24Z",
+  "closed_at": "2026-08-28T04:55:12Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12599",
+  "body": "Observation-class finding, surfaced while fixing #12550 (`sys_secret` field help). ⛔ Not assigned, not queued — recording drift.\n\n## What is declared vs what is true\n\n#12550 corrects the shipped field descriptions on `sys_secret`, whose `(namespace, key)` pair means something different per producer. The **contract those three producers all call** carries the same settings-only prose one layer down, in `packages/spec/src/contracts/crypto-provider.ts`:\n\n```ts\nexport interface CryptoHandle {\n  /** Stable opaque id stored in `sys_setting.value_enc`. */\n  readonly id: string;\n  ...\n}\n\nexport interface CryptoContext {\n  /** Settings namespace the value belongs to. */\n  namespace: string;\n  /** Specifier key within the namespace. */\n  key: string;\n  ...\n}\n\nexport interface ICryptoProvider {\n  /**\n   * Encrypt plaintext and return a handle. The handle is stored in\n   * `sys_secret` and referenced by `sys_setting.value_enc`.\n   */\n  encrypt(plain: string, ctx: CryptoContext): Promise<CryptoHandle>;\n```\n\nMeasured on `origin/main@f93df4db`, by call site rather than by line number — all three producers construct a `CryptoContext`, and only one of them means \"settings\":\n\n| caller | `ctx.namespace` | `ctx.key` | where the handle id ends up |\n|---|---|---|---|\n| `SettingsService` (`services/service-settings/src/settings-service.ts`) | settings namespace | specifier key | `sys_setting.value_enc` |\n| engine `encryptSecretFields` (`packages/objectql/src/engine.ts`) | **object name** | **field name** | a `secret:<id>` ref on the business row itself |\n| datasource credential binder (`services/service-datasource/src/datasource-secret-binder.ts`) | **caller-supplied**, default `datasource` | datasource name | the artefact's `sys_secret:<id>` credentialsRef |\n\nSo `CryptoHandle.id` is not \"stored in `sys_setting.value_enc`\" in general, and `CryptoContext.namespace` is not a settings namespace in general.\n\n## Why it is worth writing down\n\nUnlike #12550's strings these are TS doc comments, not published metadata — nothing ships them to an operator, which is why this is filed separately and graded as an observation rather than folded into that PR (different package, different regeneration/gate family).\n\nWhat makes it more than a typo is the sentence just above `CryptoContext`: *\"so providers can implement Additional Authenticated Data (AAD) bindings — e.g. AWS KMS encryption context. Helps reject ciphertexts that were copied across namespaces.\"* A provider author implementing that binding is being told the pair is a settings coordinate, while in fact one flat `(namespace, key)` space is shared by three vocabularies — an object named `datasource`, or a settings namespace colliding with an object name, is not excluded by anything here. Whether that is merely a doc fix or has a real AAD-collision consequence is the question a triager should decide; this card only records that the prose asserts the single-producer reading.\n\n## Shape of a fix\n\nDoc-comment corrections in `packages/spec/src/contracts/crypto-provider.ts` naming the producer-scoped reality (the same correction #12550 made to the shipped descriptions), plus whatever the AAD question turns out to need. `packages/spec` edits carry their own artifact-regeneration discipline, so it is not a rider on #12550's PR.\n\nFound while working #12550; filed unassigned for triage."
+}

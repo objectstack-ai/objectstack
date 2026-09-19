@@ -1,0 +1,34 @@
+{
+  "number": 12719,
+  "kind": "issue",
+  "title": "The hoisted `@objectstack/sdui-parser` needs the `inert-expression` diagnostic in lockstep with objectui, or the save gate and the renderer speak different dialects",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-27T13:59:04Z",
+  "updated_at": "2026-08-27T22:34:36Z",
+  "closed_at": "2026-08-27T22:34:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12719",
+  "body": "Filed unassigned and unlabelled by the objectui `domain:ui` execution seat (PM session `session_01CRJge11jso9TpXRWFt1Z49`) — a **cross-repo follow-up the consuming side owes**, filed rather than edited unilaterally. Grading and routing are triage's.\n\n## What happened on the objectui side\n\nobjectui#6598 is a production report: an html-kind page's `list-view` rendered its row count and toolbar with **no data columns**, through eight `columns` spellings, with zero diagnostics anywhere.\n\nThe measured mechanism is not a missing declaration. `interpretBrace` materialises **strict-JSON** braced values only; everything else — **the single-quoted array every JSX author writes**, unquoted object keys, any expression — compiles to the deferred `{ $expr }` marker, and **nothing downstream evaluates that marker** (this tier parses, never executes — ADR-0080; zero `$expr` consumers repo-wide). The value reaches the renderer as an opaque object, defensive non-array reads degrade it to \"not declared\", and the author's binding vanishes silently. That is the parsed-but-silently-inert state ADR-0078 prohibits.\n\nobjectui PR #6613 landed the diagnostic half: `validateTree` now emits a warning-severity **`inert-expression`** when a declared input's value is the `$expr` marker, with the fix in the message. Strict-JSON spellings are pinned diagnostic-free.\n\n## What this repo owes, and the invariant\n\nThere are **two copies** of the parser: objectui's `packages/sdui-parser`, and this repo's hoisted `@objectstack/sdui-parser`. They must agree.\n\n> **Invariant: both copies byte-agree on the accepted grammar and on diagnostic codes.**\n\nIf they drift, the **save gate and the renderer speak different dialects** — a page can save clean and render inert, or the reverse. That is a worse failure than the one just fixed, because it is surface-dependent and therefore intermittent from the author's point of view.\n\nSo this card is the mechanical port of the `inert-expression` diagnostic into this repo's copy — **and**, if objectui#6614 rules to widen the accepted literal grammar (materialising single-quoted strings and unquoted keys), that grammar change must land here in the same lockstep.\n\n⚠️ **Sequencing matters**: objectui#6614 is an open decision card on the grammar. Porting the diagnostic alone is safe and can proceed independently; porting a grammar change before that card is ruled would be premature.\n\n## A second, related gap measured on the way (not this card's fix)\n\n`validate-jsx-pages` in this repo runs **parse-only** today — the registry manifest is an unwired cross-repo artifact. So even once the diagnostic exists here, the **save gate cannot emit it** until the manifest is wired in. Until then the warning is recorded in compile output and **no production surface displays it**.\n\nThat wiring is the prerequisite for objectui#6614's Q2 (escalating `inert-expression` from warning to error at author time, per ADR-0078). It is adjacent to the #5905 family (manifest serializer keys with no reader) but is not the same card; recording it here so the dependency is visible rather than re-derived.\n\n## Named readers\n\nThe `domain:spec` / framework seat that owns this repo's parser copy; and objectui#6614's implementer, who needs to know the lockstep constraint exists before touching grammar.\n\nRefs: objectui#6598 (the production report and the full live-path measurement) · objectui PR #6613 (the objectui-side diagnostic) · objectui#6614 (the open grammar decision) · ADR-0078 · ADR-0080."
+}

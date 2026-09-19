@@ -1,0 +1,35 @@
+{
+  "number": 12762,
+  "kind": "issue",
+  "title": "[finding] 11 of the 13 gates declaring ROOT_DIR_WATCH_HINTS have nothing pinning the declaration is a LITERAL — computing any of them away silently re-blinds that gate",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-27T17:08:34Z",
+  "updated_at": "2026-08-28T04:29:52Z",
+  "closed_at": "2026-08-28T04:27:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12762",
+  "body": "Surfaced while fixing #12472 (PR #12759), which repaired the phantom literal-vs-computed pin in `scripts/check-cli-command-ids.mjs`. Filed unassigned and **not touched there** — that card's declared file surface is one gate, and this is a class observation across eleven others. Not a live defect: every declaration in the tree is currently spelled as a literal.\n\n## The mechanism, measured on this tree\n\n`extractWatchHints` in `scripts/pm/dispatch-gates.mjs` reads **source text**, so a `ROOT_DIR_WATCH_HINTS` declaration written as a literal contributes a hint and the same declaration computed from the population constant contributes nothing. Measured directly against the extractor on `scripts/check-cli-command-ids.mjs`:\n\n| declaration spelling | subtree hints recovered |\n|---|---|\n| literal | `[\"scripts/**\"]` |\n| computed from the population constant | `[]` |\n\nA gate that loses its hint becomes unnameable by every dispatch brief and scores a quiet green for every card in the tree. That is the harm #12472 documents.\n\n## The population\n\nSwept the 13 gates carrying a `ROOT_DIR_WATCH_HINTS` declaration under `scripts/`. Exactly **two** carry an own-source `readFileSync(fileURLToPath(import.meta.url))` pin holding the declaration to a literal spelling:\n\n- `scripts/check-cli-command-ids.mjs` — the pin was phantom; fixed in #12759\n- `scripts/check-objectql-double-limit.mjs` — cleared, hint spelled once, assembled needle\n\nThe remaining **11 have no such pin at all**:\n\n```\ncheck-agent-test-spelling · check-comment-mask-adoption · check-driver-conformance\ncheck-entry-guard · check-examples-live-imports · check-parse-guard\ncheck-pnpm-filter-targets · check-published-files · check-role-word\ncheck-skill-compatibility-version · check-skill-frame-sync\n```\n\nNothing local to those files would redden if an author rewrote the declaration as a mapped expression over the population constant — which is a natural-looking tidy-up, since in every case the hint is literally the population root plus a subtree glob.\n\n## What is NOT measured here, and should be checked first\n\nI did **not** measure whether the repo-level ledger gates already catch this from the other side. `node scripts/pm/bare-root-worklist.mjs --self-test` and `pnpm check:pm-dispatch-gates` both reason about gates whose population is unspelled, and it is plausible that computing a declaration away trips one of them as a STALE or CONTRADICTED verdict. **If it does, this card is already covered and should be closed as such** — that check is the first step, not the remedy.\n\nReproduce by mutating one declaration in a worktree and running both ledger gates.\n\n## If it is genuinely uncovered\n\nThe remedy the repo already prefers is one shared guard closing the whole class rather than eleven copies of a per-file pin: a check that, for every gate declaring `ROOT_DIR_WATCH_HINTS`, locates the declaration statement and asserts each declared hint appears inside **that statement** as a quoted literal. #12759 implements exactly that shape for one file and its ablation is recorded there, so the predicate is already written and measured; generalising it is mostly relocation.\n\nNote the scoping detail that cost #12472 its enforcement: searching the whole file is not sufficient, because a gate may spell its own hint again in a neighbouring runtime-value assertion, and a whole-file `includes` then finds that copy and stays green. The search has to be scoped to the declaration statement.\n\nMeasured on `objectstack-ai/objectstack` at `168941cea`."
+}

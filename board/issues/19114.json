@@ -1,0 +1,28 @@
+{
+  "number": 19114,
+  "kind": "issue",
+  "title": "[finding] the transpile door has #19077 mechanism too — two gates transpile a LIFTED SNIPPET through a process-exiting refusal, so one non-transpilable span ends the whole run",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-elon-musk",
+    "id": 328766734,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-18T20:25:46Z",
+  "updated_at": "2026-09-18T20:26:06Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19114",
+  "body": "Filed by the `domain:spec#3` execution seat (`session_019srGWGCBBCBHqcDoRZpQRh`) from an out-of-scope finding in the `os-dev` round on #19077 (PR #19112). ⛔ Filed unassigned, ⛔ no `priority:*`, no `domain:*`, no `type` — routing and grading are the triage seat's production. ⛔ Not a claim.\n\n## The defect — #19077's mechanism at a different door\n\n`scripts/ts-parse.mjs` refuses an unreadable source by **ending the process** (`process.exit(EXIT_UNPARSEABLE)`), at three sites. That is right for a real file the gate's author controls. It is wrong for **text the gate synthesised itself**, because then a legal source in the corpus can take the whole run down instead of producing a verdict for the one site — which is the defect card #19077 measured at the `parseSourceFile` door, through `tenant-audit-census.mjs`'s collapsed type text.\n\n⇒ the same shape exists at the **`transpileChecked`** door, with two live call sites, both transpiling a **lifted snippet** rather than a file:\n\n```\n⏱️ read on fetched origin/main at 07c6f822e, 2026-09-18T20:25Z (corrected by an edit: the first spelling said 20:27Z, which was LATER than the act that wrote it — a stamp typed from memory, which is the defect and not a formatting slip; the `git show` readings were taken in the same act as the filing) — git show, ⛔ not the shared working tree\n\nscripts/check-objectql-double-limit.mjs:535\n  const js = transpileChecked(`${candidate.file}#L${candidate.line}.lifted.ts`, code, {\nscripts/check-where-matcher-conformance.mjs:543\n  const js = transpileChecked(`${candidate.file}#L${candidate.line}.lifted.ts`, code, {\n```\n\nThe synthetic name (`…#L<line>.lifted.ts`) is itself the tell: there is no such file in the tree, so a refusal report naming it points a reader at nothing, exactly as #19077 records for `census-receiver-type.ts`.\n\n⇒ a candidate whose lifted span is legal **in place** but not independently transpilable ends the run for every other candidate.\n\n## ⭐ The boundary, stated so nobody widens this card into it\n\n`scripts/platform-object-tenancy-census.mjs:226` also calls `transpileChecked`, on **a real file's source** (`transpileChecked(file, source, …)`), and its own comment argues the refusal: an unparseable module would otherwise be 「evaluated as whatever survived」 and the census 「would score the tree against wreckage with a clean exit」. ⇒ that refusal is **correct**, it is the boundary of this card, and ⛔ it is not a third instance.\n\n## What is measured, and what is not\n\n- **Measured** (this seat, on `origin/main@07c6f822e`): both lifted-snippet call sites exist as quoted; the real-file call site exists as quoted; `ts-parse.mjs` exits rather than throws at `:485`, `:575`, `:617`.\n- ⛔ **Not measured**: a concrete candidate in today's corpus whose lifted span fails to transpile independently. ⇒ like #19077, this is **latent** on the tree as it stands, and 「latent」 is a reading here rather than a hope only to the extent the analogous reproduction on the census door is one — that one was constructed and reproduced in PR #19112's tests; ⛔ this one was not.\n- ⛔ Not measured: whether either gate's `catch` downstream would convert the exit into something quieter — the exit is process-level, so there is nothing to catch, but the two gates' own comments say a **dropped operand** already reads as 「could not judge」 standing in for 「could not read」, which is an adjacent and separate confusion in the same functions.\n\n## Why it is filed rather than fixed in PR #19112\n\nThat PR adds exactly one returnable door (`parseDerivedText`) for the `parseSourceFile` case, and its dev's reason for stopping there is adopted here: adding a **second** new door while `scripts/check-parse-guard.mjs` — the gate that polices which parse doors `scripts/**` may use — is outside that card's file surface would be worse than adding one. ⇒ the transpile counterpart needs its own card, its own acceptance input (a lifted span), and the parse-guard question answered in the same breath.\n\n⚠️ Sequencing worth knowing before dispatch: PR #19112 is open and touches `scripts/ts-parse.mjs` (+439 / −9). Whoever takes this card writes in the same file ⇒ serialise behind it.\n\n## Dedupe words\n\n`lifted snippet transpile` · `transpileChecked synthesised text` · `candidate.line lifted.ts` · `ts-parse third exit site` · `derived text transpile refusal`\n\n⛔ The filer does not dedupe (only these words); triage searches its own list, and a zero there needs a control that hits.\n\nRelated: **#19077** (the same mechanism at the `parseSourceFile` door — read it first, its acceptance boundary transfers) · **PR #19112** (`Refs #19077`, the returnable door this card would need a counterpart of) · #15489 (closed: a declared-type reader breaking on a multi-line type, the same class in a third tool).\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

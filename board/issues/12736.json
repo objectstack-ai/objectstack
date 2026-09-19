@@ -1,0 +1,34 @@
+{
+  "number": 12736,
+  "kind": "pull_request",
+  "title": "docs(adr): record the ADR-0006 API-surface boundary — three surfaces keep `project` deliberately",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-27T15:18:33Z",
+  "updated_at": "2026-08-28T07:49:11Z",
+  "closed_at": "2026-08-28T07:49:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-28T07:49:08Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12736",
+  "body": "Fixes #12473\n\nRecords the maintainer's Option 3 ruling (2026-08-27, decision-inbox batch, verbatim 「其他同意」) as an addendum on ADR-0006. **Doc-only: one file, zero code changes** — on this question, not touching the three named API surfaces *is* the deliverable.\n\n## What landed\n\n`docs/adr/0006-project-environment-split.v4.md` (the Accepted revision of the record; v2/v3 are superseded and untouched):\n\n1. **New section** — a top-level heading reading *Addendum (2026-08-27, #12473) — the rename stops at the CLI's user-facing vocabulary: three API surfaces keep* `project` *deliberately*, appended after References, following the convention measured in this repo.\n2. **Status line amended** to point at it, so a reader who lands on the header meets the boundary without scrolling — the same shape ADR-0069, ADR-0085 and ADR-0099 use for their addenda.\n\nThe addendum carries the three parts the ruling requires: D1 names the retained surfaces, D2 pre-registers Option 1, D3 declines Option 2 with its reason. It also records what it does not change, and why it is an addendum rather than a new ADR (the ADR-0094 precedent).\n\n## The three surfaces, measured today and named by quoted phrase\n\nThe card anchored one of the three to a **line number**, and that anchor was already stale when this branch was cut — the sentence sits one line further down on `main`. The addendum therefore identifies all three by quoted phrase. Measured on `main` at a65db7658:\n\n| surface | how the addendum identifies it | measured |\n|---|---|---|\n| SDK method namespace | the `projects` block on the `@objectstack/client` client class, reached as `client.projects.list` / `.get` / `.create` / `.update` / `.delete` / `.activate`, plus the nested `projects.packages` methods | present, unchanged; no `environments` namespace exists on that client |\n| control-plane response fields | the envelope keys `project` and `projects` returned by the `/api/v1/cloud/environments` endpoints | **consumer side only** — the SDK's declared unwrap shapes, plus `res?.projects ?? []` in `packages/cli/src/commands/environments/list.ts` and `res?.project` in the sibling `create.ts` / `show.ts` |\n| SDK JSDoc | the sentence \"Provision a new project. Delegates to `ProjectProvisioningService.provisionProject` on the server.\" on that namespace's `create` method | present, unchanged |\n\nTwo limits stated in the addendum rather than glossed: the **producer** of the wire fields is the cloud control plane in `objectstack-ai/cloud`, which is not this repository — nothing here claims to have measured it, and nothing cross-repo was touched. And worth noting for the next reader: the routes underneath the SDK namespace are **already** renamed (every method calls `/api/v1/cloud/environments`), so the namespace identifier is the only `project` spelling left on that face.\n\n## Deliberately not touched\n\n`packages/client/src/index.ts` — both because the JSDoc sentence in it is **ruled retained** (editing it executes the permanently-declined Option 2) and because the file is held by #11925 in another container. Two independent reasons, either one sufficient.\n\n## Addendum convention — measured, not invented\n\n29 of the 130 records under `docs/adr/` carry at least one addendum. The dominant shape is a top-level `## Addendum (DATE, #issue) — one-line summary` section appended at the end of the record, after References where one exists (ADR-0057), with the Status line amended to point at it when the addendum changes how the record should be read (ADR-0069, ADR-0085, ADR-0099). ADR-0094 additionally carries a \"Why an addendum, not a new ADR\" paragraph, which this one follows.\n\n## Gates\n\nUnion re-run after the final commit, on `0fdf6eb9f`, working tree clean. Families derived with `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` (re-derived after the commit; same five):\n\n| gate | verdict line |\n|---|---|\n| `pnpm check:adr-anchors` | `check-adr-anchors: OK (52 anchored file(s) … 29630 citation(s) across 3722 file(s) resolve)` |\n| `pnpm check:doc-authoring` | `doc authoring guard: 391 files clean — no bare metadata literals` |\n| `pnpm --filter @objectstack/lint run check:doc-formula-expressions` | `22 record-scoped formula example(s) across 424 files / 1450 TS blocks judged clean` |\n| `node scripts/check-adr-links.mjs` | `check-adr-links: 564 relative link destination(s) under docs/adr/ resolve` |\n| `pnpm check:pm-governed-merges` | self-test 206 assertions pass; `live: the real generator declared 9 output(s) and certified this tree` |\n| `pnpm check:nul-bytes` | `check-nul-bytes: OK (scanned 7067 text file(s) … no raw ASCII control bytes)` |\n\n`check:doc-formula-expressions` first reported PREREQUISITE NOT MET (unbuilt `@objectstack/formula`, then `@objectstack/lint`); it was re-run to a real green after `turbo run build --filter=@objectstack/lint`.\n\n**Changeset**: none — derived, not assumed. The changeset gate exempts a PR only via a changeset or the `skip-changeset` label, with no docs-only path of its own; this diff publishes nothing from any package, so `skip-changeset` is the correct declaration.\n\n## Governance\n\n`docs/adr/**` is a governed surface (AGENTS.md Prime Directive 14). **This PR stays draft and is merged by the maintainer, by hand.** No auto-merge is armed, and no seat should flip it ready.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01UjujZN219uFzBhSYfMykCd)_"
+}

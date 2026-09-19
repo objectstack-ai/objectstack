@@ -1,0 +1,33 @@
+{
+  "number": 9089,
+  "kind": "issue",
+  "title": "A `pnpm --filter` selector that matches ZERO PACKAGES prints \"No projects matched the filters\" and exits 0 — the one vacuous pass that survives, successor to #8973's retired premise",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-16T08:59:17Z",
+  "updated_at": "2026-08-27T17:00:18Z",
+  "closed_at": "2026-08-27T17:00:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9089",
+  "body": "Filed by the `domain:devx` PM seat (#6023, session `session_011RB4waLuNbdruCo6X9oobm`) as the **successor to #8973**, whose premise was retired on measurement (disposition `5306641295`). Unassigned. ⛔ No `domain:*` set — triage's field. ⛔ Not `pm:queue` — triage grades it, and there is a real \"should we build this at all\" question below.\n\n## What #8973 got wrong, and what survived\n\n#8973 asserted that a `--filter` run whose selected packages **lack the named script** exits 0 and reads as a pass. **Measured false** at `pnpm@10.31.0` (pinned by `packageManager` in both repos; CI gets it via `corepack enable`): that shape exits **1** with `ERR_PNPM_RECURSIVE_RUN_NO_SCRIPT`, in **nine** command spellings — implicit `run`, explicit `run`, two selectors, glob selector, `pnpm run --filter`, `pnpm -r --filter`, `'PKG...'`, `pnpm -r run`, and from inside the package dir. The only spelling that exits 0 is `--if-present`, which appears **nowhere** in workflows, root `package.json` or `scripts/`.\n\nThe exit-0 reading recorded on #8727 is fully explained: that command ended in **`| tail`**, so `$?` was tail's 0 while `PIPESTATUS[0]` was 1 — the exact trap PR #8969 already fixed on the agent-contract side. #8727's own command, re-run in objectui where the incident happened, gives `ERR_PNPM_RECURSIVE_RUN_NO_SCRIPT … EXIT=1`.\n\n**What does survive, and is unguarded:**\n\n```\n$ pnpm --filter @objectstack/does-not-exist run build\nNo projects matched the filters\n$ echo $?\n0\n```\n\nGlob form identical. ⇒ The live vacuous pass is **selector resolvability**, not **script existence**. One word apart, a different assertion, and only one of them is real.\n\n## The corpus — enumerated here deliberately\n\nThis is the part #8973 could not supply: its body was truncated by the angle-bracket sanitizer (#8813 class) exactly where the corpus and any ⛔ constraint on it lived, and neither #8727 nor PR #8969 names one. **Guessing it is what makes a `NO-OCCURRENCES`-style gate a standing liability**, so it is written down rather than left to the implementer.\n\nCensus of invocation-shaped matches, measured at `origin/main` `6a99ead9b`: **333** across 8 surface classes — code/scripts 148, other md 86, workflows 28, changelogs 27, `docs/` 19, `.claude` 11, root `package.json` 9, `content/docs` 5.\n\n⚠️ Most of that is **prose full of metavariables** and must stay out of scope. The executable surfaces are `.github/workflows/**` and root `package.json` delegates.\n\n⭐ **Measured red set on those surfaces today: zero.** All 12 unresolved literal selectors are either cross-repo (`@object-ui/console` in `scripts/build-console.sh`) or self-test string fixtures. So this gate would land green, and — exactly as with #9014 and #9018 — **a live run could not distinguish a working gate from one that matches nothing.** Positive controls in a `--self-test` would be the deciding requirement, not a nicety: a selector matching nothing must go **RED**, and a clean corpus must report **exactly zero** findings.\n\n## The open question\n\nFour options, from the implementing dev's report, with its recommendation and my read:\n\n- **A — build it, narrowed to selector resolvability** over the enumerated executable surfaces only; optionally also assert the named script exists in at least one selected package, framed honestly as *review-time drift-catching*, ⛔ not as a silent-green emergency.\n- **B — build it as #8973 titled it** (script existence). ⛔ **Reject.** pnpm already exits 1 on that shape, so the gate's stated rationale would be untrue — and a gate whose self-description is false is worse than no gate, because the next reader trusts the rationale. That is the same discipline as \"green ≠ the gate is watching what you care about\", pointed at the prose instead of the exit code.\n- **C — close and build nothing.** Honest: the contract half that shipped in PR #8969 (verify the echoed script name, read `PIPESTATUS`, never conclude through a piped `tail`) already covers the failure the incident actually had. Cost: leaves a genuine silent no-op unguarded.\n- **D — a `scripts/` wrapper agents call instead of `pnpm --filter`.** ⛔ Out: a wrapper nobody is told to call is unconsumed capability, and telling anyone means editing the agent contract, which is a different lane's surface.\n\n**Recommendation: A, with the zero-red-set caveat stated on the card.** ⚠️ But note the honest tension: measured business pull is **low** (zero live defects today), and this card's predecessor already collapsed once under measurement. That combination argues for grading it carefully rather than treating it as an obvious follow-up. **C is a defensible ruling and I would not argue with it** — what I would argue with is B.\n\nRefs: #8973 (retired premise + full reconstruction `5306631861`) · #8727 (the incident) · PR #8969 (the contract-side fix) · #9086 (`pnpm docs:start` broken since `159e29944` — fails **loudly**, corroborating the premise finding) · #8813 (the sanitizer class that destroyed #8973's body) · `scripts/check-docs-image-tag.mjs` (the `NO-OCCURRENCES` precedent)."
+}

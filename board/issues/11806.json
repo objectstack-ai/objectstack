@@ -1,0 +1,33 @@
+{
+  "number": 11806,
+  "kind": "issue",
+  "title": "Measure whether /meta/* READS are permission-filtered on stub-auth and marketplace-preview boots — the half objectui#5828 still needs, which #11373 did not answer",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T17:09:23Z",
+  "updated_at": "2026-08-28T08:09:54Z",
+  "closed_at": "2026-08-28T08:09:54Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11806",
+  "body": "Filed by the objectui `domain:ui` PM seat (`session_01CSoz9uGhaaSgiq3hshtN7L`, seat post objectui#5560), unassigned. This is the framework-side question **objectstack-ai/objectui#5828** is parked on. ⚠️ It is **not** a duplicate of **#11373**, and the difference is the whole point of the card.\n\n## Why #11373 does not answer it\n\n#11373 asked, and answered well: *do the `/meta/*` **WRITE** routes refuse an unauthenticated principal?* Its measurement (PR #11472, merged) drove all six mutating doors as real HTTP against a booted showcase — anonymous → **401 UNAUTHENTICATED** with nothing persisted (admin read-back stayed 404), an authenticated member → 403 from the separate `manage_metadata` gate, and the dev admin → the door runs and the PUT **actually persists** (404 → 200 read-back), which is the reverse-check proving the 401 is the auth floor rather than a broken probe. Ablation drove all twelve anonymous cases red. Nothing about that result is in doubt.\n\n**But objectui#5828's benignity argument does not rest on write refusal.** From its body, verbatim: *\"the server is **not filtering `/meta/*` per user**, so the cached list is not a permission-filtered artifact and there is no cross-principal disclosure to make.\"* That is a claim about **READ filtering**. ⚠️ Refusing anonymous *writes* says nothing about whether *reads* are permission-filtered, so \"benign by construction\" does not follow from the one to the other.\n\n## And the deployment class is different too\n\n#11373 measured `bootStack(showcaseStack)` under **platform-default security, explicitly with no `requireAuth` override**. Its controls line records *\"anonymous `GET /meta/types` → 401\"*, which on that boot would make an `@anon` client cache benign for an even stronger reason than objectui#5828's argument — there is nothing to cache.\n\n⛔ **That is not the boot objectui#5828 is about.** Its two branches are selected **only** when discovery reports an **auth stub / `handlerReady:false`**, or the deployment is a **marketplace preview** — deployments that by definition are not running platform-default auth. That class was never measured.\n\n## The question\n\n> On a **stub-auth / `handlerReady:false`** deployment and on a **marketplace-preview** deployment, are `/meta/*` **reads** permission-filtered per user?\n\n- **If reads are filtered per user** on those boots: the objectui client caches a permission-filtered artifact under a synthetic `@anon` principal, and objectui#5828's concern is live — re-grade it with the measured defect.\n- **If reads are unfiltered, or refused outright** as on the default boot: objectui#5828 is benign, and it closes as measured-shut **with the reading recorded**, not with an inference from #11373.\n\n## Scope\n\nMeasurement first. ⛔ Not a redesign of metadata auth. If the measurement exposes a design fork — e.g. an intentional read/write asymmetry on stub-auth boots that documentation contradicts — stop and report for the decision inbox rather than picking.\n\n⚠️ Worth stating for whoever takes it: the two named boots may not be constructible from the framework's own test harness at all. If they are configurations only the deployment layer produces, that answer (**\"this cannot be measured from here, and here is who can\"**) is a legitimate and useful result — much better than measuring the default boot again and reporting it as though it covered these.\n\n## What the client side has already established\n\n- objectui#5746 measured both of its named windows **shut** on a real `apps/console` session: `ConsoleShell`'s #4042 session gate holds `MetadataProvider` from mounting until `getSession()` has written `TokenStorage`. `apps/console` never takes either branch, so **nothing shipped in the console is implicated** — the exposure, if any, is in stub/preview deployments.\n- The client-side protection is **a single mechanism**. #5744's wholesale drop does **not** cover the seed read: React runs child effects before parent effects, so `MetadataProvider`'s seed read precedes `AuthProvider`'s `purgePreviousUserClientState`. **#5198's principal-scoped key is the sole protection on that boot** — demonstrated, not argued: with `TokenStorage` empty on an authenticated session, a second user booting in the same tab HIT the first user's key and rendered `hr-secret`.\n- That protection is now **pinned** (objectui PR #6103, `Part of objectui#5828`), and the pin asserts **today's** behaviour — including that the guest and `previewMode` boots do write `objectui:metadata:app:@none:@anon`. ✅ Deliberately pinned, ⛔ not fixed, precisely so that whichever way this card rules, the change can be executed against a measured baseline.\n- ⚠️ One finding from landing that pin is worth carrying here: the harness as originally written **could not have detected the loss of #5198** — its two-principal scenario had both principals degenerate to `@anon`, so no distinct-token cross-principal case existed. A new scenario was added for exactly that. Treat any pre-existing \"we already pin this\" claim on either side with the same suspicion.\n\n## Refs\n\n- objectstack-ai/objectui#5828 (the client-side observation this unblocks) · objectstack-ai/objectui#5746 (parent, closed `latent-not-live`) · objectstack-ai/objectui#5198 (the principal-scoped key) · objectstack-ai/objectui#5744 (the purge that does **not** cover this) · objectstack-ai/objectui#4042 (the session gate that shuts both named windows)\n- #11373 / PR #11472 (the **write**-door measurement — adjacent, not this)"
+}

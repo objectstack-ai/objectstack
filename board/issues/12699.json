@@ -1,0 +1,36 @@
+{
+  "number": 12699,
+  "kind": "issue",
+  "title": "feat(spec,security): OrgScopingEntitlement grows platform-global exemption + unbounded-admin suppression, consumed by Layer 0 arming",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "security"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-27T10:47:18Z",
+  "updated_at": "2026-08-27T14:43:51Z",
+  "closed_at": "2026-08-27T14:43:51Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12699",
+  "body": "Part of objectstack-ai/cloud#1653 (epic — the ruling and the measured evidence live there; read the ruling comment and cost-analysis comment 5410466814 before designing).\n\n## Deliverable — Phase 1: the deployment-entitlement contract Layer 0 consumes\n\n`OrgScopingEntitlement` (`packages/spec/src/security/tenancy-posture.ts`) grows two declared-by-the-runtime keys, both consumed by plugin-security when arming the Layer 0 wall:\n\n1. **Platform-global object exemption** (name yours, e.g. `platformGlobalObjects?: readonly string[]`): objects the deployment declares platform-owned — Layer 0 must not wall them on this deployment. Semantics: per-deployment, declared by the mounted org-scoping service, NOT authorable app metadata. **Fail closed**: key absent ⇒ every object walls exactly as today. Junk shapes refused loudly at the seam (the `MembershipPolicy` entry-validation precedent).\n2. **Unbounded-admin suppression** (name yours): the deployment declares that arming a walled posture must NOT auto-grant the `organization_admin` role's unbounded `viewAllRecords`/`modifyAllRecords` superbits (the epic's measured regression: `sys_secret` 403→200, 17 objects regaining cross-tenant writes, cloud#1257's write gate voided). Fail closed the same way: absent ⇒ today's behaviour.\n\n## Why this exists (ruled, not re-adjudicable)\nThe alternative seams are dead: host self-declaration of the boundary is a paywall bypass (ruled out), and the objectExtensions merge silently drops `tenancy` (objectstack#12680 — measured). This contract keeps the paywall intact (only a mounted enterprise runtime can declare anything) while letting a deployment that genuinely IS walled carve out its platform tables.\n\n## Mechanism assumptions (MUST verify; refuting = good outcome)\n- Find the actual consumer of `supportedPostures` today and mirror its read pattern — this seat's grep found no consumer inside plugin-security, so locate where the tenancy service reads the entitlement and whether SecurityPlugin should read via the same path or via `getService('org-scoping')` directly. Argue the placement in the report.\n- Confirm SecurityPlugin's per-object wall predicate (`security-plugin.ts` ~6345/~6639 reads `tenancy.enabled`/`systemFields.tenant` from the live registry) is the single choke point, so the exemption composes there and nowhere else.\n\n## Tests\nExempted object not walled / non-exempted still walled / absent-key = byte-identical behaviour to today / junk entitlement refused loudly / superbit suppression on + off / the entitlement shape itself. Ablation on both keys.\n\n## Consumer\ncloud Phase 2 consumes this verbatim: PR body MUST publish the final key names, shapes, and the exact declaration site pattern.\n\nClause-②: YES (widens the spec contract surface) — contract-tier dispatch, `needs:contract-review` chain applies at ACCEPT regardless.\n"
+}

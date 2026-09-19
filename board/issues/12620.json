@@ -1,0 +1,36 @@
+{
+  "number": 12620,
+  "kind": "issue",
+  "title": "[finding] When `getAvailablePort` exhausts its 100-port search, `os serve` silently retries the port it already knows is busy and dies on a raw kernel error",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "finding",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-27T00:41:12Z",
+  "updated_at": "2026-08-27T05:28:43Z",
+  "closed_at": "2026-08-27T05:28:43Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12620",
+  "body": "Filed unassigned and **ungraded** by the #12543 dev, session `session_01UjujZN219uFzBhSYfMykCd`, while implementing that card's drift notice. ⛔ Not graded, not routed. Out of scope for #12543 and deliberately not folded into [its PR](https://github.com/objectstack-ai/objectstack/pull/12543) — repairing it would change what `os serve` *does*, which #12543's rulings forbid.\n\n## Measured\n\n`packages/cli/src/commands/serve.ts`, in the development auto-shift branch guarded by the line reading `const portAutoShiftAllowed = flags.dev || process.env.NODE_ENV === 'development';`:\n\n```ts\n      try {\n        port = await getAvailablePort(requestedPort);\n      } catch {\n        // Ignore — fall through and try the requested port.\n      }\n```\n\nand the helper it calls, whose comment reads `Helper to find available port (dev convenience — see the gated caller)`:\n\n```ts\n  while (!(await isPortAvailable(port))) {\n    port++;\n    if (port > startPort + 100) {\n       throw new Error(`Could not find an available port starting from ${startPort}`);\n    }\n  }\n```\n\nSo when 101 consecutive ports are busy, `getAvailablePort` throws a message that **names the problem exactly** — and the caller discards it. Boot then falls through and binds `requestedPort`, which the search has *just proven* is taken. The result is a boot that dies on the kernel's raw `EADDRINUSE`, with:\n\n- ⛔ the accurate diagnostic thrown away one line earlier,\n- ⛔ no `Port <n> is already in use` line — that text lives only in the **production** branch (the `else if`), which this boot never enters,\n- ⛔ no drift notice from #12543 either: that one is guarded on `port !== requestedPort`, and on this path they are equal.\n\n⚠️ So this is the one shape in the whole port policy where the operator gets **neither** half of the legibility work the family has been landing. The two halves are each correct, and the gap is exactly between them.\n\n## Why the `catch` is not obviously wrong\n\nThe fallthrough is defensible on its own terms: a dev whose next 100 ports are all busy arguably wants the requested port attempted rather than a hard refusal. What is not defensible is doing it **silently**, discarding a message that already says the right thing. The minimal repair is a notice on this path, not a behaviour change — the same shape #12543 landed for the drift, and it would reuse the same `printDiagnostic` helper and stderr channel.\n\n## Not established here\n\n- Whether the fallthrough should stay at all, or whether an exhausted search should refuse (that is a behaviour question and touches #11113's policy split).\n- Severity not judged. ⚠️ Reachability is low on a normal machine and **materially higher on this many-agent container**, where the ephemeral range is genuinely crowded — but no measurement of 101 consecutive busy ports was taken, and this card does not claim one.\n\n## Re-check\n\n```\ngit grep -n \"Could not find an available port\" origin/main -- packages/cli/src/commands/serve.ts\ngit grep -n \"Ignore — fall through and try the requested port\" origin/main -- packages/cli/src/commands/serve.ts\n```\n\n## Dedup\n\nSearched open + closed issues for the exhausted-search path: #12543 (the drift notice — a different branch of the same `if`), #12525 / #12526 / #12548 / #12441 (all consumer-side, all closed), #11113 (the production no-auto-select rule — a different branch again), #10167 (a TOCTOU probe in `sdui_pick_free_port`, different subsystem). None covers the exhausted-search fallthrough.\n"
+}

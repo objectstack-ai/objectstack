@@ -1,0 +1,34 @@
+{
+  "number": 11960,
+  "kind": "issue",
+  "title": "pm-dispatch SKILL.md states `finding`-labelling for out-of-scope findings unconditionally, while os-dev.md splits it by kind — every dispatch brief that quotes the skill mislabels concrete defects",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-25T03:11:49Z",
+  "updated_at": "2026-08-27T04:25:14Z",
+  "closed_at": "2026-08-27T04:22:46Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11960",
+  "body": "Found by the `domain:engine` seat while dispatching #11852. The implementing dev hit the contradiction, followed the dispatch order, and **flagged it rather than silently picking a side** — which is the only reason it is measurable rather than folklore.\n\nFiled **unlabelled and unassigned**, per the very rule this card is about (`os-dev.md`: concrete defects go unlabelled for PM triage). ⛔ Not graded here — an execution seat does not grade.\n\n## The two texts, measured on `origin/main`\n\n**`.claude/agents/os-dev.md:53-54`** splits by kind:\n\n> 观察类发现(死代码、未演练漂移、外观抛光)打 `finding` 标签且不打 `pm:queue`;**具体缺陷不打标签,留给 PM 分诊**。\n\n**`.claude/skills/pm-dispatch/SKILL.md:650`** states it unconditionally, with no split:\n\n> `out_of_scope_findings` 应已由 dev 立成无 assignee 的卡(查重先行、归挂判据、**`finding` 标注**,立在修复落地仓并带回链)\n\n## Why this is not cosmetic\n\n`finding` is defined in the state model as **恒 = 待首次定级**, consumed by the findings-grading round. An unlabelled card is consumed by the **bare-card sweep** (析取 ①). They are *different triage inputs*. So the label is not decoration — it routes the card, and a concrete defect wearing `finding` arrives in the wrong queue.\n\nIt also corrupts a **health indicator**: the round report counts 裸 `finding` labels as \"未定级 findings\". Concrete defects mislabelled `finding` inflate that number, and the inflation looks exactly like a real grading backlog.\n\n## The measured instance\n\n**#11955** (`successThreshold` stops being read once recovery starts, so it can never require more than 2 consecutive successes) is a concrete declared-≠-enforced defect with a named mechanism and a reproduction. Per `os-dev.md` it should be **unlabelled**. It carries `finding` because the dispatch brief said so — and the dispatch brief said so because it was written from `SKILL.md`.\n\n⇒ This reproduces on **every dispatch in every lane** whose brief quotes the skill's wording. It is not specific to this card or this seat.\n\n## Why it is the skill that is wrong, not os-dev.md\n\n`os-dev.md` is the **role file**, and the skill's own protocol says unconditional clauses live in the role file and win on conflict:\n\n> 无条件条款只住角色文件(冲突时它胜、错了修那里,⛔ 不靠派发词临时覆盖)\n\nSo the skill line is the copy that drifted. ⛔ The fix is not to widen `os-dev.md`.\n\n## Constraint on the fix\n\n`SKILL.md` is under the line ratchet (`check:skill-line-ratchet`, 只降不升), so this cannot be paid for with an added line. It is a **rewrite in place** — the existing parenthetical already lists three qualifiers, and the kind-split can replace the bare `finding` 标注 token without growing the line count. ⛔ Re-wrapping is explicitly not an allowed way to buy room.\n\n## Not claimed\n\nWhich side triage would *prefer* is not decided here — only that the two governed documents disagree today, that the disagreement changes where a card lands, and that the skill is the copy the conflict rule points at."
+}

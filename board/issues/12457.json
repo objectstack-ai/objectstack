@@ -1,0 +1,34 @@
+{
+  "number": 12457,
+  "kind": "issue",
+  "title": "缺陷:Setup 导航缺「Packaged automation」入口 —— objectui 页面已合并,framework nav contribution 从未落地(ADR-0126 §7.4,验收卡 A1 必失败)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-26T04:00:35Z",
+  "updated_at": "2026-08-27T10:03:22Z",
+  "closed_at": "2026-08-27T09:52:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12457",
+  "body": "## 现象\n\nADR-0126 的 Setup「打包自动化」页面在 objectui 侧已完整合并,但 **objectstack 侧没有任何 nav contribution 指向它**。stock 启动下 Setup 侧边栏不出现该页面,唯一可达方式是手输 URL:\n\n```\n/apps/setup/component/automation/packaged\n```\n\n验收卡 #12438 的 **A1(入口)因此必然失败**;文档 `content/docs/build-without-code.mdx:37` 已公开承诺「a dedicated packaged automation page here lets you switch it off and clone your own」—— 文档先于可达表面发布,正是 ADR-0126 §8.5 要求避免的顺序。\n\n## 证据(objectstack @ af56546 · objectui @ f7c52e2)\n\n**objectui 半边已就绪:**\n- 页面组件:`packages/app-shell/src/views/setup/PackagedAutomationPage.tsx`(+ `PackagedActionsSection.tsx`),经 objectui #6382 / #6415 合并\n- 组件注册:`packages/app-shell/src/services/builtinComponents.tsx:64-69`,ref = `automation:packaged`,由 `ComponentNavView` 解析\n- 其 nav 测试自述契约:「app navigation names a REGISTRY KEY … ⛔ No bespoke `<Route>` is added for this page」(`PackagedAutomationPage.navContribution.test.tsx`)—— 该测试只能钉住 objectui 半边,看不到 framework 半边缺失\n\n**objectstack 半边缺失:**\n- `packages/platform-objects/src/apps/setup-nav.contributions.ts:32-171` 声明 25 个 `nav_*` 项,无一与 automation 相关;全仓 grep `automation:packaged` 零命中(Setup 中唯一的 componentRef 是 `:51` 的 `developer:packages`)\n\n**不是在途工作:** Epic #12150 的 L5(objectui#6301,页面)与 L6-UI(objectui#6412,动作区)均已关闭 —— nav contribution 这半边被遗漏,而非待办。\n\n## 预期\n\n`GET /api/v1/meta/app?id=setup` 的合并导航中存在一个 `type:'component'`、`componentRef:'automation:packaged'` 的条目;管理员从 Setup 侧边栏点击可达「Packaged automation / 打包自动化」页面。\n\n## 修复方向(一处小改)\n\n在 `packages/platform-objects/src/apps/setup-nav.contributions.ts` 为 Setup 增加一条 nav contribution,指向 `automation:packaged`(归属分组由维护者定,自动化/开发者区均可);随后 `platform-core.builtin-apps-nav-render` 的全目的地遍历会自动把该页纳入走查。\n\n## 关联\n\n- 验收卡 #12438(A1)· Epic #12150 · ADR-0126 §7.4 / §8.5\n- 测试清单侧已有持久断言:`automation.setup-packaged-automation-board` 的 nav-reachability 子句(expected-fail,手输 URL 通过不得计为 pass);登记于 `docs/qa/platform-checklist/FOLLOW-UPS.md` §8a **D16**"
+}

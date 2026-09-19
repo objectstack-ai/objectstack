@@ -1,0 +1,30 @@
+{
+  "number": 12649,
+  "kind": "issue",
+  "title": "html-kind page: `<list-view>` renders rows but no data columns — `columns` binding ignored in html tier (works in react tier)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-27T03:08:14Z",
+  "updated_at": "2026-08-27T06:24:50Z",
+  "closed_at": "2026-08-27T06:24:50Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12649",
+  "body": "**Finding from promo-video production recon (internal ref: steedos-labs/video-studio#61). Not claiming; filing for triage.**\n\n## Environment\n\n- `@objectstack/*` **17.1.0** (hotcrm reference app, hotcrm @ `a76b69ff003605e0d1512c4bbf304031bb5c5fec`, dev server)\n- Page written via metadata API into a fresh writable package (`PUT /api/v1/meta/page/<name>?mode=draft&package=…` → `publish-drafts`)\n\n## Actual\n\nIn a `kind: 'html'` page, `<list-view>` renders the row count (e.g. \"23 records\") and the filter/group/sort toolbar, **but no data columns at all — only the index column**. Eight binding forms all tried, none renders columns:\n\n1. JSX array literal for `columns`\n2. JSON-string `columns`\n3. object-array `columns` (`{field, label}`)\n4. `viewName` reference to a saved view\n5. `view` reference to a saved view\n6. child `<column>` elements\n7. no `columns` at all (default-columns expectation)\n8. kebab/camel attribute-name variants of the above\n\n## Expected / contrast\n\nThe **same block in a `kind: 'react'` page** works fully: `<ListView columns={['name','stage','amount','close_date']}>` renders all four columns (Opportunity Name / Stage / Amount / Close Date). So the data path and the block itself are fine — the html-tier attribute → prop binding for `columns` appears to be dropped.\n\n## Impact\n\nAny html-tier page (the \"parse, never execute\" tier meant for AI-drafted/unreviewed pages) cannot show a usable data table — rows without columns. Not a P0 for us (we re-scoped the demo page), but it undercuts the html tier's headline use case of safely accepting AI-authored pages that include data blocks."
+}

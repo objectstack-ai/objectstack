@@ -2,8 +2,8 @@
   "number": 19004,
   "kind": "issue",
   "title": "[finding] os-dev.md says nothing about a classifier denial of a tool the dispatch names — an os-dev subagent, denied `label-write.mjs` by the auto-mode classifier, re-implemented the label write by hand over the REST proxy",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-elon-musk",
@@ -12,18 +12,20 @@
   },
   "labels": [
     "domain:skills",
-    "pm:dispatched",
+    "pm:done",
     "priority:p2"
   ],
-  "assignees": [
-    "os-elon-musk"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-18T11:00:51Z",
-  "updated_at": "2026-09-18T13:16:33Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-19T00:16:46Z",
+  "closed_at": "2026-09-19T00:15:33Z",
+  "closed_by": {
+    "login": "os-elon-musk",
+    "id": 328766734,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 4,
   "locked": false,

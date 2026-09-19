@@ -1,0 +1,35 @@
+{
+  "number": 11846,
+  "kind": "issue",
+  "title": "`RuntimeMode: 'preview'` and the whole `KernelContext.previewMode` block are declared, documented as an auth bypass, and enforced by nothing",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "security"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T20:34:35Z",
+  "updated_at": "2026-08-28T07:50:17Z",
+  "closed_at": "2026-08-28T07:49:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11846",
+  "body": "Found while measuring #11806 (the `/meta/*` READ half of objectui#5828). ⛔ Filed unassigned and deliberately **not** fixed in that card's PR — it is a separate surface, and which way it goes is a maintainer ruling, not a dev's pick.\n\n## The gap\n\n`packages/spec/src/kernel/context.zod.ts` declares two things:\n\n- `RuntimeMode` carries a `'preview'` member, commented in as many words: *\"Demo/preview mode — bypass auth, simulate admin identity\"*.\n- `KernelContextSchema.previewMode` is a full `PreviewModeConfigSchema` — six authorable keys with defaults (`autoLogin` = `true`, `simulatedRole` = `'admin'`, `simulatedUserName`, `readOnly`, `expiresInSeconds`, `bannerMessage`). Its own docstring says preview mode *\"should NEVER be used in production\"* and that **\"The runtime must enforce this constraint.\"**\n\nNothing enforces it, and nothing implements it:\n\n- No runtime branches on `mode === 'preview'`. The only non-test, non-generated hits for `RuntimeMode` outside the declaration are its own unit test and a type-alias pin.\n- No consumer of `KernelContext.previewMode` exists in `packages/**`. Outside the schema, the only hits are its own unit test and the generated reference page.\n- `OS_PREVIEW_MODE` exists but is unrelated to identity: its single consumer (`packages/cli/src/commands/serve.ts`) uses it to widen the better-auth **trusted-origin** list for preview subdomains. `content/docs/deployment/environment-variables.mdx` describes it as *\"Preview deployment routing mode\"*.\n\nSo the declared behaviour (auto-login as a simulated admin) is produced by the deployment layer if it is produced at all — `serve.ts` records that on a host kernel *\"Auth is owned per-project by `ArtifactKernelFactory` in the cloud distribution.\"*\n\n## Why it is worth a card rather than a shrug\n\nThree separate reasons, none of which is \"the code is untidy\":\n\n1. **The six `previewMode` keys are in the authorable surface** (`packages/spec/authorable-surface.base.json` carries `kernel/PreviewModeConfig:*`, and `packages/spec/authorable-defaults/kernel.json` carries their defaults). An author — human or AI — can write `previewMode: { autoLogin: true, simulatedRole: 'admin' }` into a kernel context today, have it parse and default cleanly, and get **no** behaviour and **no** diagnostic. That is the declared-≠-enforced shape ADR-0049 exists to close.\n2. **It is published as a real capability.** `content/docs/references/kernel/context.mdx` documents `previewMode` on the kernel context in two places. A reader has no way to tell it from the keys that do something.\n3. **The one safety property it names is the one nobody owns.** \"The runtime must enforce this constraint\" is a requirement addressed to a runtime that never received it. If a deployment layer does implement preview auto-login, the production guard the schema promises is not standing behind it — and the framework cannot say whether it is, because the framework has no seat in that decision.\n\n## The fork — for the decision inbox, not for a dev to pick\n\nADR-0049 enforce-or-remove leaves exactly two routes, and they point at different owners:\n\n- **Enforce** — implement preview mode in the framework (a simulated principal, the `readOnly` restriction, session expiry, and a hard refusal to boot `mode: 'preview'` under a production posture). This grows the platform's security surface and needs the production-refusal to be the load-bearing half, not the auto-login.\n- **Remove** — retire the `'preview'` `RuntimeMode` member and the `PreviewModeConfig` block under the ADR-0087 registries, on the ground that the behaviour belongs to the deployment layer that actually produces preview deployments, and a spec declaration the framework cannot honour is worse than no declaration.\n\n⚠️ Startup-scope discipline (maintainer, 2026-08-04) leans toward **remove**: this is a declared surface with **zero** measured consumers in this repo, and \"already published\" is sunk cost rather than pull. But that reading turns on a fact this repo cannot see — whether the cloud distribution's marketplace-preview deployments read these keys off `KernelContext` today. If they do, removal is a breaking change to a live contract and the answer is \"enforce, or move the declaration to the layer that owns it\". **That question has to be answered from the deployment layer, not from here.**\n\n## In-repo basis\n\n- `packages/spec/src/kernel/context.zod.ts` — `RuntimeMode`, `PreviewModeConfigSchema`, `KernelContextSchema.previewMode`\n- `packages/spec/authorable-surface.base.json`, `packages/spec/authorable-defaults/kernel.json` — the six keys and their defaults\n- `packages/cli/src/commands/serve.ts` — the `OS_PREVIEW_MODE` trusted-origin block, and the `ArtifactKernelFactory` note\n- `content/docs/references/kernel/context.mdx`, `content/docs/deployment/environment-variables.mdx` — what is published about both\n\nRelated: #11806 (the measurement that surfaced it; its PR records preview mode as not constructible from the framework harness, which is the same fact from the other side)."
+}

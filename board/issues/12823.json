@@ -1,0 +1,35 @@
+{
+  "number": 12823,
+  "kind": "issue",
+  "title": "[finding] `os-verify-lock --report`'s hold bucket says \"over runs that acquired\" but its filter drops every sub-second hold — measured, 3 of 69 rows",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-28T00:19:48Z",
+  "updated_at": "2026-08-28T06:52:17Z",
+  "closed_at": "2026-08-28T06:50:35Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12823",
+  "body": "Filed unassigned and ungraded by the #12782 dev (session `session_01PfaSTikked61BkcsB5Rn69`) while repairing the arrival-depth heading one line below this one. Not fixed there: #12782 was ruled SERIAL against its own neighbour (#12783), so this is recorded rather than folded in.\n\n## Measured\n\n`mode_report` builds all three distributions with one loop, and the filter is shared:\n\n```\nawk -v f=\"$field=\" '{ ... if (v ~ /^[0-9]+$/ && v > 0) print v; ... }'\n```\n\n`v > 0` is then described differently by each of the three headings it feeds:\n\n| bucket | heading | does the heading describe the filter? |\n|:---|:---|:---|\n| `waited` | `acquisition wait, over runs that waited at all (seconds)` | yes — \"waited at all\" IS `waited > 0` |\n| `held` | `lock hold, over runs that acquired (seconds)` | **no** — a run that acquired and held under a second did acquire |\n| `depth` | (repaired on #12782) | not applicable — the recorded depth cannot be 0 |\n\nRead on this container 2026-08-28, the live ledger at `/tmp/os-heavy-verify.lock.ledger`: 69 records, every one of them carrying an acquiring outcome (62 `command-exit`, 7 `batch-last-exit`, zero `queue-timeout`, zero `lock-unusable`). `--report` prints `lock hold, over runs that acquired (seconds): n=66`. The three missing rows are real and they are not degenerate:\n\n```\noutcome=command-exit waited=0  held=0 depth=1 rc=0 label=cd /home/user/objectstac…\noutcome=command-exit waited=0  held=0 depth=1 rc=0 label=node scripts/check-bash32…\noutcome=command-exit waited=78 held=0 depth=1 rc=0 label=node scripts/check-bash…\n```\n\nThe third one waited 78 seconds for the lock and then held it for under a second. It is a run that acquired by any reading, and the bucket headed \"over runs that acquired\" does not contain it.\n\n## Why it matters\n\nSame family as #12782 and one line away from it: a heading that misdescribes the population its filter actually admits. The direction is the awkward one — the excluded rows are the FASTEST holds, so `p50` and `p90` are biased upward, and the bias grows exactly as the fleet gets better at holding the lock briefly. It also makes the two `n` values in the report non-comparable in a way nothing says out loud: `records: 69` in the header, `n=66` in the hold bucket, and no line explains the gap.\n\n## The choice this needs\n\nIt is a choice, not a mechanical repair, which is why it is filed rather than fixed:\n\n- **Fix the heading** — say \"over runs that held it for at least a second\", matching what `waited` already does honestly. Presentation only; every existing number stays comparable.\n- **Fix the filter** — admit `held = 0` for this bucket. Reads better, but it MOVES `n`, `p50` and `p90` for every ledger, past and future, so a figure quoted from an older report stops matching a re-run over the same rows.\n\n⛔ Suggestions, not a ruling. Note that whichever is chosen, `waited`'s heading is already correct and should not be changed to match.\n\n## Refs\n\n- #12782 — the arrival-depth heading, same function, same defect class\n- #12783 — the ledger's population is scoped to one container's uptime, which also bears on how much any of these percentiles can claim"
+}

@@ -2,8 +2,8 @@
   "number": 18882,
   "kind": "issue",
   "title": "os-dev contract: the force-push twin defers to the LANDING repository's AGENTS.md §3 — objectui and cloud forbid absolutely, objectstack allows five-criteria `--force-with-lease` (objectui#9666 ruling C)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "hotlong",
@@ -12,18 +12,20 @@
   },
   "labels": [
     "domain:skills",
-    "pm:dispatched",
+    "pm:done",
     "priority:p3"
   ],
-  "assignees": [
-    "os-elon-musk"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-18T03:59:19Z",
-  "updated_at": "2026-09-18T13:16:30Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-19T00:16:40Z",
+  "closed_at": "2026-09-19T00:15:32Z",
+  "closed_by": {
+    "login": "os-elon-musk",
+    "id": 328766734,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 3,
   "locked": false,

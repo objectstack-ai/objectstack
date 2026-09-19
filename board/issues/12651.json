@@ -1,0 +1,34 @@
+{
+  "number": 12651,
+  "kind": "issue",
+  "title": "`IPubSub`'s contract docblock states a delivery guarantee no shipped driver provides (\"At-least-once delivery\")",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-27T03:22:54Z",
+  "updated_at": "2026-08-28T04:56:06Z",
+  "closed_at": "2026-08-28T04:55:12Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12651",
+  "body": "Found while building the `authz.invalidated` channel for #11968 (PR on `claude/issue-11968-authz-cache-substrate`). Filed unassigned, no repair attempted there — it is a `packages/spec` change and out of that card's scope.\n\n## The contradiction, measured on `origin/main`\n\n`packages/spec/src/contracts/cluster-service.ts:73`, the docblock on the `IPubSub` interface itself:\n\n> Fan-out messaging primitive. **At-least-once delivery**; handlers MUST be idempotent. The memory driver delivers synchronously within a process; remote drivers (redis pub/sub, postgres LISTEN/NOTIFY, nats) deliver across nodes.\n\n`content/docs/kernel/cluster.mdx` §4.2, on the same `at-least-once` value:\n\n> **No shipped driver provides this yet.** The `redis` driver publishes over plain Redis pub/sub, which is *at-most-once* — fire-and-forget, no persistence, no replay for a node that was down at publish time.\n\nAnd `@objectstack/service-cluster-redis`'s own `publish` docblock says the same in its own words: at-most-once, *\"acceptable **only** for events that are pure cache-invalidation hints, never the source of truth.\"* The `memory` driver does not cross a process boundary at all.\n\nSo the two statements disagree, and the one on the **interface** — the place a consumer reads before writing a subscriber — is the one that is wrong. `cluster.mdx` §4.2 and the driver docblocks are the measured statements.\n\n## Why this is worth a card rather than a shrug\n\nThe interface docblock is the load-bearing one for the failure mode it invites. A consumer that reads \"At-least-once delivery; handlers MUST be idempotent\" reasonably concludes that a message will arrive and that its only obligation is to tolerate *duplicates*. The actual transport's failure mode is the opposite — a **lost** message, with no replay and no upper bound on how long a node stays wrong. An author who designs for duplicates and not for loss has designed for the wrong hazard, and nothing in the type or the tests contradicts them.\n\nTwo things narrow the blast radius today and neither closes it:\n\n- `deliverySemantics` on a channel declaration is a separate, more honest surface, and §4.2 carries the correction — but it is a doc a consumer has to go find, while the docblock is the one their editor shows them at the call site.\n- #11968's `authz.invalidated` module states the correct rule at its own channel and records this contradiction inline so nobody resolves it in the wrong direction. That covers exactly one channel.\n\n## Suggested shape (not a decision — this is a spec-seat call)\n\nCorrect the `IPubSub` docblock to state the shipped guarantee (at-most-once; a missed message is expected; handlers must be idempotent **and** tolerate loss), and point at `deliverySemantics` for the per-channel declaration. Whether the interface should say \"at-most-once\" flatly or \"whatever the driver declares, and no shipped driver exceeds at-most-once\" is the question worth answering deliberately, because the second phrasing keeps the door open for a durable driver without re-writing the contract when one lands.\n\nAnything stronger — a declared per-driver guarantee the type system can read, or refusing an `at-least-once` channel declaration at boot while no driver can honour it — is a larger design question and deliberately not proposed here.\n\n## Not in scope of this report\n\nWhether any *existing* consumer of `IPubSub` was written against the wrong guarantee. Only `metadata.changed` and (with #11968) `authz.invalidated` are in production use, and both are cache-invalidation hints, which is the one thing the transport is documented as acceptable for. A sweep of subscribers is a separate task if someone wants it.\n"
+}

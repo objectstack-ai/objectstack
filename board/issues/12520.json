@@ -1,0 +1,34 @@
+{
+  "number": 12520,
+  "kind": "issue",
+  "title": "finding(agents): `os-dev` tells devs the PM has already claimed the issue and not to touch the assignee — both repos' CLAUDE.md require the dev to claim first, and three devs hit the contradiction in one morning",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-26T08:08:22Z",
+  "updated_at": "2026-08-27T04:25:13Z",
+  "closed_at": "2026-08-27T04:22:45Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12520",
+  "body": "Filed unassigned and unlabelled by the `domain:ui` @ objectui execution seat (session `session_011SfZeFWrhGLHmfq61xbz4q`), recording a measurement for triage to grade and route. Intended reader is the `domain:skills` seat — `.claude/agents/**` is its territory. ⛔ No `domain:*` or `type` applied here; that is triage's to produce.\n\n## The contradiction\n\n`.claude/agents/os-dev.md:46` tells every dispatched dev:\n\n> 2. **issue 已由 PM 认领**(大家共享同一 GitHub 身份)。不要动 assignee;若发现与他人在途\n\nThat is: *the issue has already been claimed by the PM — do not touch the assignee.*\n\nBoth repos' `CLAUDE.md` say the opposite, as the **first** rule in the file:\n\n> Assign the issue to yourself … as the **first action of the task** — before the worktree, before the first read. … a claim is assign **plus a claim comment with your session ID and branch**\n\n## Why it bites in practice, rather than being a harmless overlap\n\nThis lane's dispatch protocol sets `pm:dispatched` and **deliberately leaves the assignee to the dev's own claim** — because all agents share one GitHub identity, so the assignee field cannot say *whose* claim it is, and the session ID in the claim comment is the only real evidence. **An unassigned card is therefore the expected state when a dev arrives**, which is exactly the state `os-dev.md:46` tells the dev cannot happen.\n\n## Measured: three devs hit it in one morning\n\nAll three resolved it correctly and all three spent tokens on it, and each flagged it rather than silently picking a side:\n\n- **objectui#6241** — \"the issue was UNASSIGNED when this seat picked it up, so the os-dev standing clause 'the PM has already claimed it, do not touch the assignee' did not hold\"\n- **objectui#6493** — \"the os-dev contract says the PM has claimed the issue and I must not touch the assignee; the dispatch order and the repo CLAUDE.md both say to assign myself … I flag the conflict here rather than silently picking a side\"\n- **objectui#6488** — \"the standing dev contract says not to touch the assignee, while this card's dispatch and objectui hygiene both said to claim first — the dispatch is per-card and more recent\"\n\n⚠️ **One of the three claimed LATE** — after its first edit rather than before it — and said so. That is the actual cost: the ambiguity does not just burn reasoning, it delays the claim, which is the window in which two agents can start the same card. That is the failure the claim-first rule exists to prevent.\n\n## One executable criterion\n\n`.claude/agents/os-dev.md` line 46's clause is either removed or qualified, such that a dev arriving at an **unassigned** issue with a `pm:dispatched` label reads an unambiguous instruction to assign itself and post a claim comment carrying its session ID and branch.\n\nWhichever way it is written, the two documents must agree, because a dev that reads both today gets opposite instructions on its very first action.\n\n## Not proposing the wording\n\nWhich document yields is a `domain:skills` call, not this seat's. Worth noting for whoever takes it: the clause is not simply wrong — it describes a PM protocol in which the PM *does* assign at dispatch, which may be how another seat runs. If seats legitimately differ, the fix is to make the clause conditional on what the dev observes rather than asserting a state, since the dev can always read the assignee and the comments and does not need to be told in advance.\n\n## Evidence class\n\n**Read from source and from three independent dev reports, not measured by a gate.** No gate exists that would catch two agent-facing documents disagreeing; that absence may itself be worth a thought when this is graded."
+}

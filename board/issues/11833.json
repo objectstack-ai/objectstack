@@ -1,0 +1,32 @@
+{
+  "number": 11833,
+  "kind": "issue",
+  "title": "finding: two consumer-local structural `DataEngineLike` re-declarations remain after the #11493 deletion (datasource-admin-plugin, service-analytics)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T19:18:29Z",
+  "updated_at": "2026-08-27T19:36:20Z",
+  "closed_at": "2026-08-27T19:36:20Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 13,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11833",
+  "body": "Found while carrying out #11493 (which deleted `service-datasource/src/plugin.ts`'s structural `DataEngineLike` per the maintainer ruling there). Filed unassigned as an observation, measured at `eab6d131b`.\n\n## The observation\n\nTwo more consumer-local structural engine types survive in-tree, same pattern the #4251 B3 sweep replaced with declared contract members (\"seven consumer-local surface declarations\"):\n\n- `packages/services/service-datasource/src/datasource-admin-plugin.ts` (~line 44) — `DataEngineLike` declaring `registerDriver?` / `registerDatasourceDef?` / `getDriverByName?` plus all-optional sys_metadata CRUD (`findOne`/`find`/`insert`/`update`/`delete`) used for hot pool (de)registration and durable datasource-record persistence.\n- `packages/services/service-analytics/src/plugin.ts` (~line 19) — `DataEngineLike` declaring `aggregate` (with the #10576 per-aggregation `filter`) and `execute` for the analytics bridge.\n\n## What was verified (and what was not)\n\n- Every member checked resolves to a REAL engine member: `registerDatasourceDef` exists on `ObjectQL` (`packages/objectql/src/engine.ts`, `registerDatasourceDef(def: …): void`), `registerDriver`/`getDriverByName` are on the contract/engine, and the CRUD members exist on `IDataEngine`. Unlike the `getDatasourceDriver?` member #11493 deleted (zero references outside its file, a probe no engine ever matched), **no dead member was found here** — this is a pattern observation, not a measured defect.\n- NOT verified: whether the loosened signatures these local types declare (all-optional CRUD, narrowed option bags) are each still assignable-compatible with the current `IDataEngine`/`IObjectQLEngine` members they shadow — that is exactly the drift the #4251 contract exists to prevent, and nothing compiles these local declarations against the real engine.\n\n## Why it may deserve a card (and why not now)\n\nThe #11493 four-facet reasoning applies one seam over: a private structural type meets no compiler on the producer side, so engine-surface drift lands silently in the consumer. But both sites are deliberate graceful-degradation seams (absent members degrade to in-memory / reduced capability), and moving them to `Partial<IObjectQLEngine>`-style derived types or new optional contract members is a design decision with its own blast radius — needs its own pass, not a rider.\n\nRefs: #11493 (the ruling + the deleted third instance) · #4251 (B3 — the declared-contract sweep this pattern predates/escaped)."
+}

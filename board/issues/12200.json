@@ -1,0 +1,34 @@
+{
+  "number": 12200,
+  "kind": "issue",
+  "title": "finding(platform): the GitHub MCP `update_pull_request` tool un-drafts a PR when you pass only `reviewers` — it published a governed-surface draft into a merge queue",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T12:47:17Z",
+  "updated_at": "2026-08-27T03:13:27Z",
+  "closed_at": "2026-08-27T03:06:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12200",
+  "body": "Filed by the `domain:devx` @ objectui execution seat (objectstack-ai/objectui#5748), PM session `session_012CZgmFFzqA9cX8tBMhvpFe`, 2026-08-25 R30. Filed **here** rather than in objectui because the fix is a line in the pm-dispatch skill's platform fact table (`.claude/skills/pm-dispatch/references/platform-readings.md`), which lives in this repo — the incident was in objectui, the repair is not.\n\nUnassigned. Grading and `domain:*` are the triage seat's; on the routing judgement above it looks like `domain:skills` (the fact table is under `.claude/skills/**`).\n\n## The reading\n\nCalling the GitHub MCP tool `update_pull_request` with **only** `reviewers` **also sets `draft: false`**. The tool sends the `draft` field whether or not the caller supplies it, so a call whose visible intent is \"request a review\" silently **publishes a draft pull request**.\n\nMeasured, not inferred — the same PR, twenty minutes apart, with one call between:\n\n| time | reading | source |\n|:--|:--|:--|\n| ~12:05Z | `\"draft\": true`, `requested_reviewers: []` | `pull_request_read` on objectui#6183 |\n| ~12:11Z | — | `update_pull_request(pullNumber: 6183, reviewers: [\"os-zhuang\"])` — **no `draft` argument passed** |\n| 12:45Z | `\"draft\": false`, `requested_reviewers: [\"os-zhuang\"]` | `list_pull_requests` on the same head ref |\n\nNothing else touched that PR in the window (it had no commits since 2026-08-24T23:07Z).\n\n## Why it is worth a card and not a note\n\n⚠️ **It defeats the governed-surface rule by making the safe action the dangerous one.** The pm-dispatch ACCEPT path requires, for a governed-surface PR: leave it draft, ⛔ never ready / enqueue / auto-merge, **and request review from `os-zhuang`** so it is visible in a human's queue. Those two instructions are given together — and performing the second, through this tool, breaks the first.\n\nIn this instance the PR (objectui#6183, an `AGENTS.md` change) went ready and entered objectui's **merge queue**, where it was found third in a five-PR chain. It was converted back to draft and did not land — `origin/main` was verified not to contain its commit. Caught by re-reading the queue refs for an unrelated reason, ⛔ not by any check: no gate fires on \"a governed file is about to merge without a human\", because the entire defence is seat discipline.\n\nThe window between \"ready\" and \"merged\" on a repo with an active merge queue is minutes.\n\n## Dispositions\n\n1. **Fact-table line** (cheapest, and the reason this is filed here): record in `references/platform-readings.md` that `update_pull_request` un-drafts, and that any call against a draft PR must pass `draft: true` explicitly. Same register as the existing \"`list_issues` `labels` is a UNION, not an intersection\" entry.\n2. **Skill text**: the ACCEPT-path fork instructs seats to request review on a draft. That instruction is unsafe as written with this tool, so it should carry the `draft: true` requirement inline where it is given — a fact-table line alone is not read at the moment of the call.\n3. **Consider whether requesting a reviewer needs this tool at all.** A dedicated review-request path would not carry the `draft` field; worth checking what else is available before hardening around the general-purpose updater.\n\n⚠️ The same hazard applies to `title`, `body`, `labels` and any other single-field `update_pull_request` call on a draft — the reviewers case is just the one that has now happened. Whoever takes this should state the rule over the whole tool, not over one argument.\n\n## Related\n\n- objectui#6183 — the affected PR; the incident is recorded on it in full.\n- objectui#6069 — its card.\n- The 2026-08-18 maintainer ruling establishing the governed surface (`docs/adr/**`, `.claude/**`, `skills/**`, `AGENTS.md`, `CLAUDE.md`) as draft-only with human merge, cross-repo."
+}

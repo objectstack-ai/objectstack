@@ -1,0 +1,35 @@
+{
+  "number": 12828,
+  "kind": "issue",
+  "title": "[finding] The verify lock's ledger was measured surviving a container restart — `/proc/uptime` reported 608s while all 74 records predated that boot, so \"starts empty on every reset\" is not reliable",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-28T01:29:59Z",
+  "updated_at": "2026-08-28T10:07:35Z",
+  "closed_at": "2026-08-28T09:59:16Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12828",
+  "body": "Filed unassigned and ungraded by the #12783 dev (session `session_01PfaSTikked61BkcsB5Rn69`) while implementing the scope disclosure on `--report`. Not fixed there: #12783 was ruled shape-1-only, and this bears on the fenced-out shape 2, so it is recorded rather than folded in.\n\n## Measured\n\n`scripts/pm/os-verify-lock.sh` states the mechanism in a source comment, in the paragraph explaining why `SLOT_MAX_AGE_S` cannot be sized against a p95:\n\n```\n# holds: it lives in this container's /tmp and starts empty on every reset, so\n# the population it holds is one shift's worth of whatever ran since\n```\n\nRead on this container 2026-08-28T01:00Z, against the live ledger at `/tmp/os-heavy-verify.lock.ledger`:\n\n```\n/proc/uptime                       608s      ⇒ derived boot 2026-08-28T00:50:13Z\n/proc/1 start (ctime)              2026-08-28T00:50:15Z    (starttime 32 ticks = 0.32s after boot)\nledger, 74 records                 first 2026-08-27T16:51:12Z   last 2026-08-28T00:25:24Z\nledger file birth time (stat %W)   2026-08-27T16:51:12Z\nrecords at or after derived boot   0\nrecords before derived boot        74\n```\n\n**Every record, and the ledger file itself, predate the boot the uptime clock reports — the oldest by 8h11m.** The last record was written 25 minutes *before* that boot.\n\nControls, in the same command, because a zero is only a reading if the instrument can also return non-zero:\n\n- **positive** — a file `touch`ed at that moment read as *after* the derived boot (so the comparison is live);\n- **negative** — PID 1 started 0.32s after the derived boot, so `/proc/uptime` and the process tree agree with *each other*. It is the **filesystem** that did not restart with them, not the clock that is wrong.\n\nNo clock skew is needed to explain the timeline: records up to 00:25, boot at 00:50, now 01:00.\n\n## Why it matters\n\n⭐ **It is an input to the persistence decision, and it points the opposite way from the assumption that shaped it.** The triage on #12783 fenced persistence out under two constraints: this file must create nothing that outlives a process and needs reaping, and the ledger must never redden a gate. Both were reasoned against a ledger believed to be reliably per-container and ephemeral. On this host it is neither — the file already outlives every process that writes it, is already unreaped except by `LEDGER_MAX_BYTES`, and already survived a restart.\n\nThat does not make persistence unnecessary. It arguably makes the current situation **worse than reliably-ephemeral**: a population whose lower bound moves for reasons nobody has characterised is harder to reason about than one that resets predictably. But whoever picks up persistence should start from a measurement of what `/tmp` actually does here rather than from the sentence above.\n\n⚠️ Note what is **not** claimed: that `/tmp` always survives. One container was measured. The finding is that the stated mechanism is **not reliable**, which is enough to disqualify it as a premise — and enough to disqualify `/proc/uptime` as a correlate for the ledger's population start, which is why PR #12827 states that floor as the first record's timestamp instead of pairing it with uptime.\n\n## Suggested repair (⛔ suggestion, not a ruling)\n\nCorrect the source comment to claim only what holds — that the ledger's population begins wherever the file does, for reasons not characterised — or re-measure `/tmp`'s lifetime across restarts and state the real rule. The arithmetic conclusion the paragraph draws (that `SLOT_MAX_AGE_S` cannot be sized from this ledger) is unaffected either way: it rests on the population being bounded, not on why.\n\n## Refs\n\n- #12783 — the scope disclosure, shipped in PR #12827; this is the premise underneath it\n- #12538 — the card whose p95 could not be priced from this ledger"
+}

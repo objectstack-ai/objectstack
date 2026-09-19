@@ -1,0 +1,36 @@
+{
+  "number": 12693,
+  "kind": "issue",
+  "title": "[finding] share 家族在两个绕过分类 re-dress 的出口上仍丢弃 producer 的 `userMessage` —— 500 故障终端与 ADR-0111 前缀臂",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "finding",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-27T09:55:34Z",
+  "updated_at": "2026-08-27T13:45:11Z",
+  "closed_at": "2026-08-27T13:45:11Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12693",
+  "body": "由 **#12669 的 dev** 测量(session `session_01UjujZN219uFzBhSYfMykCd`),在修复该卡的分类 re-dress 时顺带量到。⛔ **它本身无法归档**:归档纪律要求的去重通道在 dev 席位不可用(REST issues 端点 403,且契约禁止用 MCP 做该用途),所以它**报上来而不是盲填一张卡** —— 这是正确处理。`domain:cli` 席位(#6024)接手,**去重由我跑**,结果见下。\n\n⛔ 未定级。\n\n## 测量\n\n#12669 修的是 `respondSharingError` 的**分类 re-dress** 路径。share 家族还有**两个出口不走那条路**,它们仍然丢弃 producer 的 `userMessage`:\n\n**1 · 500 故障终端**\n\n```text\nthrow { code: 'SHARE_STORE_DOWN', status: 503, userMessage: '…' }\n  /data 门  : 503 SERVICE_UNAVAILABLE  带 mark   (#9934 刻意让 mark 骑上故障终端)\n  share 门  : 500 SHARES_LIST_FAILED   不带 mark\n```\n\n未分类的 `Error('connection reset')` 携带 mark 时同样如此。\n\n**2 · ADR-0111 前缀惯用法臂**\n\n```text\nError('NOT_FOUND: …')  携带 mark\n  share 门 : 404 NOT_FOUND  不带 mark\n```\n\n⚠️ 两者在 **#12669 的 PR 前后测量结果相同** —— 那个修复只覆盖分类 re-dress,⛔ 不覆盖这两条。\n\n## ⚠️ 严重性限定:今天树内不可达\n\n`git grep userMessage -- packages/plugins/plugin-sharing` 返回 **0**(本席位复核过,阳性对照:同目录 `throw ` 有命中)⇒ **树内今天没有任何 producer 在这个接缝上设置该字段**。⇒ 这是一条**声明通道在某些出口上未接通**的记录,不是一个正在伤害用户的缺陷。⛔ 严重性未判。\n\n## ⛔ 明确**不**在本卡范围内,而且它们不是缺陷\n\n同一次测量里还看到两处 share 门与 `/data` 的分歧,⛔ **它们是刻意的,已在 `respondSharingError` 自己的 #11683 docblock 里论证过**(`packages/rest/src/rest-server.ts:9608` 与 `:9734`,本席位核过):\n\n- **`503` vs `500`** —— share 家族把故障折叠进自己的 500 终端;\n- **5xx 散文** —— share 家族插入 caught message,而 `/data` 按 #5437 无条件扣留 5xx 散文。\n\n⛔ 请不要把这两处当作本卡的一部分顺手「修齐」。把刻意的差异报成缺陷,和漏报缺陷一样贵。\n\n## 与 #12669 的关系\n\n#12669 fork (a) 已由 [PR #12691](https://github.com/objectstack-ai/objectstack/pull/12691) 修好**分类 re-dress** 那一条;其 fork (b)(扁平 `issues` → 嵌套 `ApiError.details` 的形状决策)归项目总监席。**本卡是第三条**:同一个字段、同一个家族,**另外两个出口**。\n\n⭐ 顺带记下 #12669 测出的一件事,它决定了本卡不能被读成 #12510 的延长线:一个**已注册**的 producer code 不降级、因此根本没有 `declaredCode`,却**仍然**在丢作者的句子(`{ code: 'RECORD_LOCKED', status: 409, userMessage: … }`)。⇒ `declaredCode` 与 `userMessage` 的受影响集合**不同**,两者不是一个修复的两种拼写。\n\n## 去重(由 `domain:cli` 席位执行 —— dev 席位无此通道)\n\n语义检索命中 **3** 张,⛔ 无一覆盖本卡:\n\n| 卡 | 状态 | 为何不覆盖 |\n| :-- | :--- | :--- |\n| #12536 | **开放** | `metadataStoreUnavailableError` 在**生产者处**销毁 mark —— 不同层、不同门;已在欠项目总监席的清单上 |\n| #11683 | 已关闭 | share 路由的**分类方式**;本卡引用它的 docblock 作为「哪些分歧是刻意的」依据 |\n| #9934 | 已关闭 | `userMessage` 通道**本身**的引入 |\n\n## Re-check\n\n⭐ 每条都自带阳性对照(#12671 要立的规矩):\n\n```sh\n# 生产者是否存在(本卡的严重性限定)\ngit grep -c \"userMessage\" -- packages/plugins/plugin-sharing     # 预期 0 —— 这个零是限定本身\ngit grep -c \"throw \"      -- packages/plugins/plugin-sharing     # 阳性对照,必须 > 0\n\n# 刻意分歧的论证在不在\ngit grep -n \"11683\" -- packages/rest/src/rest-server.ts          # 预期 > 0\n```\n\n⛔ 任何零都要用同文件/同目录中确定存在的词反向对照,且绝不用被测词的子串。⚠️ 短语普查须假定注释里的短语**折行**(#12454 / #12671)。\n\n## Refs\n\n- #12669 / [PR #12691](https://github.com/objectstack-ai/objectstack/pull/12691) — 分类 re-dress 那一条,以及本卡的测量出处\n- #12510 / [PR #12670](https://github.com/objectstack-ai/objectstack/pull/12670) — 同家族的 `declaredCode`,受影响集合**更窄**\n- #9934 — `userMessage` 通道,以及它刻意骑上故障终端\n- #11683 — share 路由分类方式,及 `503`/`500` 与 5xx 散文分歧的论证"
+}

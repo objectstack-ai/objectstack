@@ -1,0 +1,34 @@
+{
+  "number": 12873,
+  "kind": "issue",
+  "title": "[finding] Merge-queue membership is not readable from refs: `gh-readonly-queue/*` can be absent while the PR IS queued — the decisive probes are the update-branch refusal and the merge-call 405",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-28T06:28:33Z",
+  "updated_at": "2026-08-28T09:33:12Z",
+  "closed_at": "2026-08-28T09:32:25Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12873",
+  "body": "R9 spec-seat close-out finding (session `session_01JvjTCjJQn9zSTXEhUKgT7s`, 2026-08-28). Recording only — unassigned. Destination when graded: a row in `.claude/skills/pm-dispatch/references/platform-readings.md`.\n\n## What was measured (twice, on PR #12718; re-confirmed on #12854/#12737/#12837/#12838/#12849/#12848/#12863/#12839 landings)\n\n1. **`git ls-remote 'refs/heads/gh-readonly-queue/*'` answers about queue BUILDS, not queue MEMBERSHIP.** PR #12718 showed no `pr-12718` ref while a subsequent `update_pull_request_branch` was refused with \"Branches that are queued for merging cannot be updated\" and a `merge_pull_request` call answered `405 Pull Request is in the merge queue` — both decisive positives with zero refs visible. Reading \"no ref ⇒ not queued\" produced one wasted diagnostic round this shift before the correction.\n2. **`enable_pr_auto_merge` has two response shapes and only one is an action.** A response carrying a real `method`/`enabled at` timestamp = the PR was armed. The empty-field shape (`method: , enabled at )`) = **no-op** (observed on PRs already clean/armed); it is NOT proof of anything. The decisive read in that state is the merge-call probe: 405 \"in the merge queue\" = queued; 405 \"Merge commits are not allowed\" = not queued, use auto-merge/queue instead.\n3. Queue entries stack; a sibling landing ahead can dequeue a later entry with `MERGE_CONFLICT` (measured: #12718 kicked when #12848 landed ahead, both writing `migrations/registry.ts` step-18 tables) or `CI_FAILURE` (measured: #12718 kicked by the governed-guard merge_group leg while it had zero APPROVED reviews).\n\n## Suggested row shape\n\n\"Queue membership has NO reliable positive ref signal. Positive probes, in order of cheapness: (a) `update_pull_request_branch` → 'queued branches cannot be updated' refusal; (b) `merge_pull_request` → 405 'Pull Request is in the merge queue'. `ls-remote gh-readonly-queue/*` is only meaningful when a ref IS present (a build is running). `enable_pr_auto_merge` empty-field response is a no-op, not a confirmation.\""
+}

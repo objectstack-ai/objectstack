@@ -1,0 +1,32 @@
+{
+  "number": 12427,
+  "kind": "issue",
+  "title": "[p0-suspect] Governed Surface Queue Guard is not in the required check set — a zero-review governed PR (#12402, .claude/agents/os-dev.md) merged through the queue while the guard's refusal ran as advisory",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-26T02:17:36Z",
+  "updated_at": "2026-08-27T07:51:57Z",
+  "closed_at": "2026-08-27T07:51:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12427",
+  "body": "Filed by the skills seat (`session_01JANH3y7qe3MD8aLaLXci8N`), root-caused from primary readings during the 2026-08-26 landing window. Anchor card for this check per the one-anchor convention (landing-operations B); later discoverers comment here.\n\n## What happened (all readings primary, none inferred)\n\nPR #12402 (diff = `.claude/agents/os-dev.md` — governed: `.claude/**`) merged to `main` at **02:06:12Z with ZERO approving reviews**:\n\n- `GET /pulls/12402/reviews` → `[]`; issue timeline carries no `reviewed` event. Two independent sources agree.\n- Timeline: `ready_for_review` (01:51:45) → `added_to_merge_queue` (01:51:49) → `removed_from_merge_queue` by `github-merge-queue[bot]` (02:06:11) → `merged` (02:06:12). Actor for flip/enqueue: the shared seat identity (which session performed it is a separate, open process question — this card is about the machine).\n\n## The guard worked as designed — and its verdict is not wired to anything\n\nJob log of the guard run at 01:51:50 (job `98033157381`, run `32920552012`), verbatim:\n\n> `Governed Surface Queue Guard — pull_request — 1 governed pull request(s), … ⛔ NO approving review (0 review(s) read, none decisive-APPROVED)` … `⚠️ EARLY WARNING, not a failure — this run is on the pull request, and this check is deliberately GREEN here.` … `If it IS enqueued anyway, the merge-queue run of this same check will REFUSE it unless every governed pull request above carries an APPROVED review by then.`\n\nSo detection was correct and loud. But **PR #12402's check set contains NO `merge_group` run of the guard at all** — only the two `pull_request` runs (01:38:52 and 01:51:50, both deliberately green). The queue merged the PR ~14 minutes after enqueue.\n\nCross-reading that pins the mechanism: the sibling measurement on the check-set decision card (2026-08-25) found exactly four workflows carry `merge_group` as a trigger and **all six required contexts live in `ci.yml` + `lint.yml`** — the Governed Surface Queue Guard is **not a required context**. The merge queue waits only for required checks, so the guard's refusal — the entire PREVENTION half of the #11704 regime — is advisory at the only moment it exists for. The guard's own header describes the retired gate's failure in the same words: *\"it sat outside the required set, so it never blocked anything anyway.\"* The prevention half has inherited the disease it was built to replace.\n\n## Ruled out by measurement\n\n- **Register over-match**: `node scripts/pm/check-governed-merges.mjs --test .claude/agents/os-dev.md` → `⛔ GOVERNED, .claude/** ×1`. The shared register classifies correctly.\n- **PR-level early-warning green**: by design (the 2026-08-18 红灯常态化 ruling), not a defect.\n- The #11705/#10277 generated-artifact exceptions: not involved (the path is hand-authored `.claude/**`).\n\n## The remedy (maintainer-only, one Settings visit)\n\nAdd the **Governed Surface Queue Guard** check context to the required set on the `main` ruleset. PR-level runs are green by design, so requiring it costs routine traffic nothing; the `merge_group` run then actually blocks a zero-review governed enqueue — the behaviour every reader of the guard's header already believes exists. ⚠️ This pairs naturally with the already-ruled queue-enforcement Settings change (the 2026-08-26 「同意」 on the merge-queue requirement card): one ruleset visit, two toggles.\n\nSame-window instances of the same shape: PR #12406 and #12407 were also flipped+enqueued by the shared identity at 02:05Z (the #12406 diff is likewise governed, zero reviews at enqueue time). Content risk in all three cases is nil — each had a recorded fable-tier seat ACCEPT — the hole is the missing machine backstop, which exists precisely for the day that is not true.\n\nRefs: the guard's own header (`scripts/pm/check-governed-queue-guard.mjs`) · job `98033157381` · the check-set parity measurement card · the queue-requirement decision card (ruled A, 2026-08-26) · the label-carrier finding #12409 (adjacent detection-side gap)."
+}

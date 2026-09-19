@@ -1,0 +1,34 @@
+{
+  "number": 12905,
+  "kind": "pull_request",
+  "title": "docs(core): retract the config-validation claim that never ran, and record its retirement",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-28T07:44:00Z",
+  "updated_at": "2026-08-28T09:59:16Z",
+  "closed_at": "2026-08-28T09:59:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-28T09:59:14Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12905",
+  "body": "Fixes #12688\n\n`packages/core/REFACTORING_SUMMARY.md` section 5 recorded a configuration-validation fix that **never took effect**, and named a mechanism that has **since been retired**. Rewriting it as merely \"later retired\" would have preserved the false claim that it once worked, so the correction answers both defects.\n\n## What this document is for, and why the section is corrected in place\n\nIt is an internal historical record of one refactoring episode — titled *Kernel Refactoring Summary*, present since the repository's root commit, and it ships in no package (verified below). Its value is the record, which argues against deleting the section: a gap where section 5 sat teaches a later reader nothing and leaves the same false claim free to be re-added by someone who finds the scaffold and assumes it was never wired.\n\nSo the section keeps its slot and heading and is corrected in place. That mirrors what the retirement itself chose to do in code — it left tombstones in `src/plugin-loader.ts` and `src/security/index.ts` rather than deleting silently. The doc layer now matches the code layer.\n\n## Defect 1 — the claimed fix never ran (measured, not assumed)\n\nTwo independent legs, both over this repository's whole recorded history:\n\n**Reachability.** The only production call site was `plugin-loader.ts:157`, `this.validatePluginConfig(metadata)` — one argument, so `config === undefined`. The method returned from its `config === undefined` branch, logging `config validation postponed`, before reaching `this.configValidator.validatePluginConfig(...)`. The code's own comment conceded it: \"In loadPlugin, we often don't have the config yet ... let's keep the logging behavior\". Searching all refs for changes to `this.validatePluginConfig(` returns exactly three commits — the root import and the two retirement commits — so the call site was never rewired in between.\n\n**The enclosing guard.** That call sat under `if (metadata.configSchema)`. No plugin ever declared a `PluginMetadata.configSchema`: the only declarations anywhere were documentation examples (`ADVANCED_FEATURES.md`, `content/docs/guides/plugins.mdx`) and unrelated `configSchema` concepts (DataSource connection config, a manifest path string). Positive control on the same ref and query shape — `startupTimeout`, the live sibling — finds real code declarations in `kernel.test.ts` and `examples/kernel-features-example.ts`.\n\nBoth legs agree with two sources written independently of this card: the retirement commit (\"the loader's one call site passed no config\"; \"the always-early-returning `validatePluginConfig` path\") and ADR-0025 section 3.7 (\"the mechanism could never run\").\n\n## Defect 2 — the retirement landed\n\nVerified independently rather than taken on trust. At HEAD the surviving mentions in `packages/core` are all tombstones: the `configSchema` field comment in `plugin-loader.ts`, the barrel comment in `security/index.ts`, and `plugin-loader.retired-fields.pin.test.ts`. A correct ADR-0049 retirement *leaves* tombstones, so these are the expected shape, not residue. Before this PR, `REFACTORING_SUMMARY.md` was the only place left in `packages/core` naming `PluginConfigValidator` and `plugin.configSchema` as live. Positive control: `PluginMetadata` still reads 26 files at HEAD.\n\n## Deliberately NOT touched: the adjacent `## Verification` line\n\nLeft alone and reported to the PM instead of fixed, because it is a **different class** of defect and widening a doc card is not mine to decide.\n\nIt claims `100% Pass rate (380/380 tests) across 22 test suites`. Measured at `716185a98`: `Test Files 41 passed (41)`, `Tests 1015 passed (1015)`. However, at the root commit `packages/core` had exactly **22 top-level `describe()` blocks** — an exact match for \"22 test suites\". So unlike section 5, this line was accurate when written and has merely drifted since. It is stale, not false, and the \"100% pass rate\" half still holds.\n\n## Changeset\n\nNone, and `skip-changeset` is applied. `@objectstack/core` is public (v17.2.0), but its `files` field is `[\"dist\", \"README.md\", \"CHANGELOG.md\"]`, and `npm pack --dry-run` confirms `REFACTORING_SUMMARY.md` is absent from the tarball. The file ships in no package, so this change is not user-visible and gives release notes nothing to compile.\n\n## Verification\n\nGate family derived from the real changeset with `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` (not from a hand-written diff), all run at `716185a98`, every exit code captured before any pipe:\n\n| gate | verdict line |\n| --- | --- |\n| `check:page-declaration-shape` | exit 0 |\n| `check:published-files` | `✓ check:published-files --self-test` |\n| `check:slot-lookup` | `✓ slot-lookup ratchet holds` |\n| `check:test-source-alias` | `check-test-source-alias OK` |\n| `check:type-source-resolution` | `check-type-source-resolution OK` |\n| `check-comment-mask-adoption.mjs` | `OK check:comment-mask-adoption` |\n| `check-plugin-teardown-shape.mjs` | `✓ check:plugin-teardown-shape` |\n| `docs-audit/check-affected-docs.mjs` | exit 0 |\n| `docs-audit/check-drift-comment.mjs` | `✓ check-drift-comment: 56 cases pass` |\n| `check-nul-bytes.mjs` | `check-nul-bytes: OK (scanned 7169 text file(s))` |\n\n`pnpm --filter @objectstack/core test` at `716185a98`, through the shared verify lock: `Test Files 41 passed (41)`, `Tests 1015 passed (1015)`, `VERDICT command-exit 0`.\n\nScope: one file, documentation only. Nothing under `packages/core/src` is touched — the retirement's tombstones are correct as they stand.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01LZbWd2jNV1FErXTPSS4Dry)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01LZbWd2jNV1FErXTPSS4Dry)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 12760,
+  "kind": "issue",
+  "title": "check-bash32-floor's `has-v` row sees only the `[[ -v ]]` spelling — `test -v` and `[ -v ]` pass",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-27T17:07:51Z",
+  "updated_at": "2026-08-27T20:54:45Z",
+  "closed_at": "2026-08-27T20:53:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12760",
+  "body": "`scripts/check-bash32-floor.mjs` carries a `has-v` row for the bash `-v` variable-is-set unary. Its token is anchored to the `[[` spelling alone:\n\n```\nhas-v row today: {\"since\":\"4.2\",\"token\":\"\\\\[\\\\[[ \\\\t]+-v[ \\\\t]\",\"spelling\":\"[[ -v name ]]\"}\n```\n\nbash added `-v` to `test`, `[` and `[[` in the same release, so the other two spellings of the same construct are not refused.\n\n## Measured\n\nScanned with the gate's own `scanText`, on the tip of `main` plus the pipe-both sweep branch:\n\n```\nscan of `[[ -v name ]] && echo yes`  ->  [\"has-v\"]\nscan of `[ -v name ] && echo yes`    ->  []\nscan of `test -v name`               ->  []\n\ntest -v / [ -v occurrences in the 22-file shell population: 0\n```\n\nSo this is a **coverage hole, not a live break** — nothing in the tracked population uses either spelling today. On a 3.2 host `[ -v name ]` reports `[: -v: unary operator expected` and the test evaluates FALSE, which is the quiet direction the row's own `breaks` text already describes for the `[[` form.\n\n## Second, smaller thing in the same row\n\nThe row records `since: '4.2'`. The bash NEWS text reached while sweeping the 4.0 operators attributes the `-v` unary to **4.1** (\"test/[/[[ have a new -v variable unary operator\"), with 4.3 adding array references and 5.1 adding positional parameters. `since` is documentation and not a predicate — nothing branches on it — so this changes no verdict, but the failure message prints it, and the point of printing it is to tell an operator why their green local run proves nothing. Worth confirming against a primary source in whichever pass closes the spelling gap, rather than flipping it on one summarised read.\n\n## Why the pipe-both sweep did not just fix it\n\nWidening `has-v` is not the mechanical edit the four rows that sweep added were. `[ -v` is also the opening of an ordinary **bracket expression**: `tr -d '[ -v]'` is the character range space-to-v, and a shell script that builds a glob or a `sed` class can carry that shape legitimately. A widened row therefore needs a false-positive judgement, and a wrong one reddens the tree on correct 3.2 code — which is the one failure mode this gate cannot afford, because its remedy text is what operators follow.\n\nThe omission and its reason are now recorded in the gate's own header (\"The 4.0 operator set, and what is deliberately NOT in the table\"), so the next reader inherits the list instead of re-deriving it. This card is the queue entry for actually closing it.\n\nFiled unassigned, no label, from the sweep on #12634. No fix attempted here."
+}

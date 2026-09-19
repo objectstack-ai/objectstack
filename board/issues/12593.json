@@ -1,0 +1,34 @@
+{
+  "number": 12593,
+  "kind": "issue",
+  "title": "[finding] `sql-driver.ts` twice cites a `Field.string` builder that has never existed — and the prose demonstrably steered a ruling onto an unauthorable target",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-26T14:15:41Z",
+  "updated_at": "2026-08-27T17:03:53Z",
+  "closed_at": "2026-08-27T17:03:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12593",
+  "body": "Filed unassigned from the premise measurement carried out under #12131. Not fixed there: that card's own verdict is a fork returned to the maintainer, and this is a separate prose defect in a file that card does not touch.\n\n## What was measured\n\nTwo comments in `packages/drivers/driver-sql/src/sql-driver.ts` (the `text`-family branch of `createColumn`) assert that a `Field.string` builder exists:\n\n```\n14492:        // finally agreeing with the differ. `Field.string` has always taken\n14502:        // have been had the field been declared `Field.string`.\n```\n\nMeasured on `origin/main` @ `da1126a032`, each measurement paired with a positive control:\n\n- **The builder has no `string` member.** `Object.keys(Field)` returns 37 keys; `typeof Field.string === 'undefined'`. Control: `typeof Field.text === 'function'`.\n- **`'string'` is not in the field vocabulary.** `FieldType.options` has 49 members and does not include `'string'`. Controls: `'text'` present, `'zzznope'` absent.\n- **The spec refuses it.** `FieldSchema.safeParse({ type: 'string', label: 'ID' })` fails with `invalid_value` at `[type]`. Control: `{ type: 'text', … }` parses.\n- **It never existed.** `git log -S \"  string: (config: FieldInput\" -- packages/spec/src/data/field.zod.ts` returns no commits, as does `git log -S \"'string',\" --` on the same file. No commit ever added or removed such a member — this is not stale-after-removal, it is a reference to an API that was never there.\n\nThe name is not arbitrary: `'string'` is the **knex column-builder** method (`table.string(name)`), and the driver uses that spelling internally as its untyped default (`const type = field?.type || 'string'`, plus a `case 'string':` branch at `sql-driver.ts:14102` / `:14385`). That branch is reachable only via the default, never from a spec-valid declaration. So the driver has two vocabularies in play and the comments spell an authoring-side API in the storage-side one.\n\n## Why it matters\n\nThis is not a cosmetic comment nit. The prose has already produced a bad decision: the triage and decision-box analyses on #12131 both proposed, and the maintainer then ruled, a mechanical sweep rewriting ~45 system objects from `Field.text(...)` to `Field.string(...)`. That sweep cannot be executed — it would put the platform's own metadata into a state `FieldSchema` rejects. The ruling was formed on the belief the builder exists, and the most reachable source for that belief is this file.\n\nA comment that names a non-existent authoring API is exactly the \"declared ≠ real\" failure the repo's gates exist to close, one layer up: it is metadata about the platform, read by humans and increasingly by AI authors, and it is false.\n\n## Shape of a fix (not decided here)\n\nCorrect the two comments to name what is actually true — the emitted column is knex's `table.string(name)` i.e. `varchar(255)`, and the authorable spelling closest to it is `Field.text({ maxLength: n })` on a keyed column. Whether the driver's internal `'string'` default and its `case 'string':` branch should also be renamed to stop colliding with an authoring vocabulary that has no such member is a larger question and deliberately not proposed here.\n\nRelated: #12131 (where it was measured), #12015.\n"
+}

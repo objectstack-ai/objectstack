@@ -1,0 +1,35 @@
+{
+  "number": 12121,
+  "kind": "issue",
+  "title": "[finding] An UNDECLARED signature/qrcode column on a pre-existing table stays varchar(255) and no drift op reports it — the #11875 repair reaches new tables only",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T09:58:06Z",
+  "updated_at": "2026-08-27T15:52:57Z",
+  "closed_at": "2026-08-27T15:52:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12121",
+  "body": "Filed by the `domain:engine` PM seat while reviewing PR #12119 (#11875). ⛔ **Not a defect in that PR, and not a reason to hold it** — #12119 strictly improves the situation and declares this boundary honestly in its own changeset. Recorded so the remaining half is not rediscovered as a surprise.\n\n## What #11875 fixes, and where it stops\n\nAfter #12119, `signature` / `qrcode` are in the TEXT family, so a **newly created** column holds a data URI correctly. The changeset states the boundary in as many words:\n\n> Nothing about existing tables changes — `createColumn` runs on `CREATE TABLE` and `ALTER TABLE ADD COLUMN`, so the column it sizes is always empty; a pre-existing `signature` / `qrcode` column stays `varchar(255)` until an operator migrates it, and the additive sync never rewrites a column's type on its own.\n\nThat is correct and is standard additive-sync behaviour. The part **not** stated is what the drift reporter does about it.\n\n## The measurement\n\n`packages/drivers/driver-sql/src/schema-drift.ts`, the varchar differ. `declaredMaxLength !== undefined` is a **required** condition of the whole branch:\n\n```ts\nconst declaredMaxLength =\n  typeof field.maxLength === 'number' && Number.isInteger(field.maxLength) && field.maxLength > 0\n    ? field.maxLength\n    : undefined;\nif (\n  enforcesVarcharLength(dialect) &&\n  !declaresJsonColumn &&\n  declaredMaxLength !== undefined &&        // <-- the gate\n  isCharacterColumn(col.type) &&\n  typeof col.maxLength === 'number' &&\n  declaredMaxLength !== col.maxLength\n) { … widen_varchar / narrow_varchar … }\n```\n\n⇒ Split by whether the author declared a bound, on a **pre-existing** table:\n\n| declaration | physical column | drift says | outcome |\n|---|---|---|---|\n| `Field.signature({ maxLength: 4096 })` | `varchar(255)` | `widen_varchar`, severity `warning`, category `safe` — *\"metadata allows 4096 chars but the column caps at 255 — widen via `os migrate`\"* | ✅ reported, remedy exists |\n| `Field.signature()` — **no bound** | `varchar(255)` | **nothing** — no number on the declared side to compare | ⛔ silent |\n\nThe second row is the common case (the card's own motivating example is field-zoo writing a data-URI PNG into a plain `signature`), and it is the same `declared ≠ enforced` shape the whole #11374 / #11431 / #11875 family exists to close — arriving one door further along, at the **migration** seam rather than the authoring or write seam.\n\nScope of harm: an existing deployment upgrading to the release carrying #11875 sees no change and no diagnostic for these columns. A 1000-character data URI is still refused by the server (`22001` / `ER_DATA_TOO_LONG`) exactly as the card measured, and nothing anywhere says why the fix did not reach them.\n\n## Not claimed\n\n- ⛔ No claim that #12119 is wrong or incomplete against its ruling. The maintainer ruled the authoring / write-seam / storage triple, and it delivered all three.\n- ⛔ No frequency measured — how many deployed tables actually carry a `signature` / `qrcode` column is unknown, and an inventory is probably the honest first step rather than a new drift op.\n- ⛔ No opinion on the remedy. Candidates, all needing their own measurement: a drift op keyed on *TEXT-family membership* rather than on a declared number; a one-off migration in the release carrying #11875; or accepting it and documenting the manual `os migrate` step. The second and third interact with release notes, which is not a code-PR surface.\n\n## Refs\n\n#11875 (the ruling) · PR #12119 · #11794 (the invariant) · #11374 / #11431 (the family) · #11722 (a neighbouring `applyMigrationEntries` reporting gap, currently in flight)"
+}

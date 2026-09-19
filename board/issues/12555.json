@@ -1,0 +1,35 @@
+{
+  "number": 12555,
+  "kind": "issue",
+  "title": "check-test-source-alias loses a bare side-effect `import 'x';` whenever any later `import … from …` follows it, so the clocked-window rule reports a file that already applied the fix it prescribes",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-26T10:25:19Z",
+  "updated_at": "2026-08-28T06:31:53Z",
+  "closed_at": "2026-08-28T06:22:15Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12555",
+  "body": "Found while adopting `assertEngineFindOnePredicate` in `packages/services/service-datasource` (#12068). Filed unassigned; not fixed there — the fix needs its own `--self-test` cases, which is a different verification surface from that card.\n\n## The defect\n\n`IMPORT_PATTERNS` in `scripts/check-test-source-alias.mjs` (line 670) puts the `import … from '…'` alternative FIRST, and its clause capture is an unbounded lazy `[\\s\\S]*?`:\n\n```js\n/(?:^|[\\s;})])(?:import|export)\\s+([\\s\\S]*?)\\s*from\\s*['\"]([^'\"]+)['\"]| … |(?:^|[\\s;}])import\\s+['\"]([^'\"]+)['\"]/g\n```\n\nAt the position of a bare side-effect `import 'x';`, alternative 1 is tried first. It can succeed by letting `[\\s\\S]*?` run across the rest of that statement and into the *next* import, terminating at that one's `from '…'`. The whole side-effect import is swallowed inside the clause capture, and only the later specifier is reported. Nothing anchors the clause to one statement.\n\n`moduleLoadSites()` therefore never adds `'x'` to `moduleScope`, and `clockedWindowFindings()` — which suppresses a finding only `if (moduleScope.has(site.spec))` — reports a dynamic load as an unpaid clocked window even though the file pays it at module top.\n\n## Minimal reproduction\n\nRun against the regex as it stands (the same three inputs differ only in whether/where a second import appears):\n\n```\nA  bare import, NO later from  -> [\"pkg/kernel\"]\nB  bare import THEN a from     -> [\"other\"]            <-- 'pkg/kernel' LOST\nC  a from THEN bare import     -> [\"other\",\"pkg/kernel\"]\n```\n\nCase B is the defect. Case C is the same two statements reordered, and it reads correctly — so the verdict depends on import ORDER, not on what the file loads.\n\n## Why it matters: the gate contradicts its own remedy\n\n`packages/services/service-datasource/src/__tests__/datasource-admin-plugin.test.ts` has carried `import '@objectstack/spec/kernel';` at module top since PR #10120 — placed there *by this gate's instruction*. Adding one ordinary `import … from '@objectstack/metadata-core';` on the following line made the gate report:\n\n```\n✗ …/datasource-admin-plugin.test.ts:199: `import('@objectstack/spec/kernel')` is paid inside a function body — a CLOCKED window.\n  This file has no module-scope load of `@objectstack/spec/kernel`, …\n  Add a module-top side-effect import …:\n    import '@objectstack/spec/kernel';\n```\n\nThe prescribed line is already there, three lines above the import that triggered the misreading. An author who trusts the message adds a duplicate and stays red; an author who does not is left to conclude the gate is noise. Both outcomes cost more than the rule buys.\n\nThe rule only runs when `offendingSpecs.size > 0`, so a package acquires this misreport the first time it gains any unaliased artifact import — which is exactly when someone is already editing it and least able to tell a real finding from a false one.\n\n## Blast radius\n\n`scripts/check-type-source-resolution.mjs` (line 692) carries a near-identical `IMPORT_PATTERNS` with the same unbounded first alternative, so it should be measured for the same shape and fixed in the same act if it shares it.\n\nSame family as #12320 (`check-driver-conformance`: \"the unbounded import regex still spans two import statements\"), which was fixed for that gate; this is the unfixed instance of the same class two gates over.\n\n## Suggested shape (not prescriptive)\n\nBound the clause so it cannot cross a statement boundary — an import clause never contains `;`, while a legal multi-line clause never does either, so a `;`-excluding class is a candidate that keeps multi-line imports working. Whatever the fix, per AGENTS.md it lands with `--self-test` cases pinning all three rows of the table above, since a detector that silently stops matching reports a spotless repo.\n\n## Current state in the tree\n\nNot worked around in the gate. `#12068` reordered the two imports in that one test file so the detector reads the truth, and says so in its PR body. That reordering is fragile by construction: the next author who adds an import after the side-effect line re-breaks it, with no comment able to prevent it."
+}

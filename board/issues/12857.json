@@ -1,0 +1,36 @@
+{
+  "number": 12857,
+  "kind": "pull_request",
+  "title": "fix(sdui-parser): port the union-arm coarse type check in lockstep with objectui",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "needs:contract-review",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-28T04:12:52Z",
+  "updated_at": "2026-08-28T04:54:56Z",
+  "closed_at": "2026-08-28T04:54:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-28T04:54:54Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12857",
+  "body": "Fixes #12814\n\nClause-②: yes — this PR changes what this copy of the parser accepts and rejects for union-typed manifest inputs, so it carries the `needs:contract-review` tier. It is **not** a new contract decision: the underlying ruling is objectui#3832, already landed on the other copy, and #12719's invariant (both copies agree on the accepted grammar **and** on diagnostic codes) makes *not* porting the drift. Out of scope, staying where they are: item 1 (`dashboard-widget-options`) remains open on #12810, and the manifest wiring gap recorded on #12719 remains open and unowned — neither is addressed here.\n\n## What is ported (the objectui#3832 ruling, byte-equal)\n\n`ManifestInput.type` now carries one coarse kind **or an array of kinds** when the key's contract is a union. `validateTree`'s coarse check clears a prop when **any** declared arm accepts the value; when **no** arm accepts it emits **one** `type-mismatch` naming every arm — `error` severity when an `enum` arm is present, `warning` otherwise. Single-arm inputs keep byte-identical diagnostics, `invalid-enum` included.\n\nPorted regions are **byte-equal** to objectui `packages/sdui-parser` at `objectui@38a123c` (sha256-compared, and the comparator was first proved able to detect a disagreement by mutating one side — the mutated section hashed differently before the real comparison was trusted):\n\n| region | verdict |\n|---|---|\n| `src/input-type.ts` (new module: `inputTypeArms`, `canonicalizeInputType`, `MANIFEST_INPUT_TYPES`) | whole file byte-equal |\n| `src/codegen.ts` | whole file byte-equal |\n| `src/types.ts` `ManifestInput` block | byte-equal |\n| `src/validate.ts` `enumValues`/`armAccepts`/`armExpectation`/`checkType` | byte-equal |\n| `src/index.ts` `RegistryConfigLike.type` hunk + `manifestFromConfigs` body | byte-equal |\n\n`packages/sdui-parser/src/parse.ts` is untouched; `interpretBrace` remains byte-identical across the copies (measured on #12810 — not re-derived here).\n\n## Behaviour delta\n\n| input declaration | value | before | after |\n|---|---|---|---|\n| `type: ['string','number']` | `true` | **no diagnostic at all** (fell through `default: return null`) | one `warning` `type-mismatch`: `expected a string or a number` |\n| `type: ['enum','object']`, enum `['compact','detailed']` | `\"ultra\"` | **no diagnostic at all** | one `error` `type-mismatch`: `expected one of [\"compact\",\"detailed\"] or an object`; `compile().ok` flips to `false` |\n| any single-arm declaration | any | unchanged | byte-identical diagnostic (incl. single-`enum` → `invalid-enum`) |\n| union codegen | — | `.d.ts` typed a union input `string` (fell through) | emits the TS union (`string \\| number`), deduplicated |\n| `manifestFromConfigs` union config | `['string','number']` | coerced to `'string'` (Set.has on an array is false) | canonicalized: arrays survive, one-element arrays collapse, unknown arms dropped |\n\n**The accept/reject change is latent in the production gate today** (measured in this worktree): the tree has no `sdui.manifest.json` and the installed `@objectstack/console` ships no `dist/` at all, so `resolveSduiManifest()` returns `undefined` and `validateJsxPages` runs parse-only — `validateTree` is unreached from `os validate`/`os lint`/`os build`. Landing before that wiring is the card's required sequencing; unit tests are the witness surface.\n\n## Interaction with objectui#6614 (open decision)\n\nobjectui#6614 (whether `interpretBrace` materializes a JS-literal subset) is **still open and undecided** — re-measured at dispatch time (2026-08-28; latest activity 2026-08-27T16:49:20Z). Measured reading of the dependency chain: `interpretBrace` either materializes strict JSON or produces the `{ $expr }` marker (`parse.ts`); `validateTree` branches on `isExpr(value)` **before** `checkType`, so the arm check only ever sees materialized values; and every `armAccepts` predicate tests the runtime shape (`typeof` / `Array.isArray` / enum `includes`) with no reference to spelling. A #6614 ruling changes **which** values arrive materialized, not how any arm judges them — a value like `{'foo'}` materialized under Q1→A is judged identically to `{\"foo\"}` today. The port is stable under either outcome; the copies stay in lockstep because the deciding functions are byte-equal.\n\n## Tests and reverse controls\n\n- New pin file `src/__tests__/union-arm-type-mismatch.test.ts` (14 cases): any-arm acceptance, one-diagnostic-naming-every-arm (both severities), single-arm byte-identity, slot/off-vocabulary arms accept everything, `manifestFromConfigs` canonicalization, `.d.ts` union emission.\n- **Ablation** (fix committed first; restore via trap with absolute paths; mutation proved on disk by anchor counts 1→0/0→1 and blob hash change; restore proved by state: `git diff HEAD` empty, blob equal to HEAD): flipping the strictest-arm severity to always-`warning` turned exactly the predicted **1 test red / 38 green** — the enum-arm-severity pin — with the failure shape being the severity flip. The suite resolves the subject via in-package relative src imports (no dist leg for this suite; dist was rebuilt afterwards for the consumer runs).\n- **Consumer `.d.ts` reverse verification**: a probe in `packages/lint` (the sole downstream importer — consumer direction, found by package.json scan) compiled the union form clean against the rebuilt `dist/index.d.ts` (0 probe errors), and an off-vocabulary arm drew `TS2322 … not assignable to 'ManifestInputType | ManifestInputType[]'` — proving the rebuilt types are what consumers read, in both directions.\n- Union at final head `59282399b` (tree clean): `@objectstack/sdui-parser` test **39/39** + typecheck 0, `@objectstack/lint` test **2300/2300** + typecheck 0, full-repo `pnpm lint` VERDICT command-exit 0. All 21 path-derived gate families plus the test-file convention set (`engine-double-contract`, `where-matcher`, `query-options-erasure`, `type-check-coverage`, `type-check-debt` on the fully built closure, `nul-bytes`) exit 0 locally — except `check-half-states`, NOT MEASURED locally (PREREQUISITE NOT MET: no real GitHub credential in this container; CI runs it with one).\n\nRefs: #12810 (parent measurement) · #12719 (the invariant) · objectui#3832 (the ruling) · objectui#6614 · ADR-0078 · ADR-0080.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01PfaSTikked61BkcsB5Rn69)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01PfaSTikked61BkcsB5Rn69)_"
+}

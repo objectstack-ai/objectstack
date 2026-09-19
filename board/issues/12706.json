@@ -1,0 +1,34 @@
+{
+  "number": 12706,
+  "kind": "issue",
+  "title": "[finding] Fire-open has no specified machine reading for the adjudication tier fuse — scheduled triage rounds skip proxy-adjudication every time, while manual sessions pass via get_session",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-27T12:46:13Z",
+  "updated_at": "2026-08-27T16:26:00Z",
+  "closed_at": "2026-08-27T16:25:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12706",
+  "body": "**Observation (triage seat, session `session_01GYwKNq9YMPW3Wg4jJs4ZpS`, 2026-08-27).** The pm-dispatch adjudication channel's hard gate requires the running seat's **measured serving model** = `claude-fable-5` (\"降档保险丝机器读数,⛔ 永不凭自述\"), but SKILL.md specifies **no fire-open step and no canonical tool** for taking that machine reading. Behavior therefore diverges by session shape, observed on the seat post (#6015) briefs:\n\n- Every recent **scheduled Routine fire** records \"服务模型档位无机读工具 ⇒ 代裁子轮整体跳过\" and falls back to the maintainer path for all decision cards — the safe precedent, repeated round after round (including this session's own round, which did **not** attempt any detection at startup).\n- The **manual** daily-full session on 2026-08-27 (session `session_01Czs5tCwMymUvzB9QCA2yhH`) passed the gate via session introspection: `get_session` dual reading (`session_context.model` = `claude-fable-5` AND `last_served_model` = `claude-fable-5`).\n\nSo the same seat, same skill text, same pinned-model Routine yields \"gate MET\" or \"gate unverifiable\" depending on which tools the harness happens to expose — and nothing in the skill says which reading counts or that fire-open must even attempt one.\n\n**Consequence.** The proxy-adjudication channel (maintainer-approved 2026-08-26: 「代裁通道如果是 fable 可以代裁,其他接受你的建议」) is effectively dormant on every scheduled fire, even when the Routine is genuinely pinned to fable in the Routines UI, because the seat cannot *prove* the pin from inside the session. Adjudicable cards queue for the maintainer instead — exactly the load the channel exists to remove.\n\n**Boundary / related.** Closed finding on the sibling measurement face: get_session reports the **dispatching** session's model, not a subagent's, so any canonical probe must state what process it measures (that finding's conclusion stands and is not re-litigated here). A fix should:\n\n1. Name the canonical machine reading for the tier fuse (e.g., bless the `get_session` dual reading when the tool is exposed, and/or add a mechanical probe usable from Routine sessions), and state its scope (main-session only).\n2. Add \"attempt the tier-fuse reading\" to the triage fire-open checklist, with the exact fallback wording when no reading is obtainable (current de-facto wording: skip adjudication entirely, cards take the maintainer path).\n3. Keep the fail-safe direction unchanged: unverifiable ⇒ skip, never self-report.\n\n**Provenance.** Filed on maintainer instruction, 2026-08-27, in the triage seat's live session: 「你启动时会检测自己的模型是 fable 吗？如果没有，立一张skills卡片」. Deduped before filing: no open card covers the fire-open reading gap; the closed subagent-measurement finding is adjacent but distinct.\n\nSkills-lane finding — left ungraded for the skills seat's own triage per lane rules. No claim; no assignee."
+}

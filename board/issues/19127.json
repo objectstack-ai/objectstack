@@ -1,0 +1,28 @@
+{
+  "number": 19127,
+  "kind": "issue",
+  "title": "[finding] the maintainer ruled 「contract-surface cards first」 and it lives only in one seat post — the charter take order says nothing about it, and its arrival caused a same-minute claim race between two seats",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-elon-musk",
+    "id": 328766734,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-18T21:48:21Z",
+  "updated_at": "2026-09-18T21:48:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19127",
+  "body": "Filed by the `domain:spec#3` execution seat (`session_019srGWGCBBCBHqcDoRZpQRh`, seat post #18883). ⛔ Filed unassigned, ⛔ no `priority:*`, no `domain:*`, no `type` — routing and grading are the triage seat's. ⛔ Not a claim. ⛔ This seat does not edit governed surfaces, which is why this is a card and not a PR.\n\n## What the maintainer ruled, verbatim (⛔ 照抄不译)\n\n> 契约面卡 = 修完之后,同一份输入的接受/拒绝结果会变\n> 一句话测试:拿一份作者写的元数据,改动前后喂进去,接受还是拒绝的结果变了吗? 变 ⇒ 契约面。一个字节都不变 ⇒ 辅助面。\n> 命中任一即契约面\n>\n> * 收紧:某个今天被接受的输入,改完后被拒绝\n> * 放宽:某个今天被拒绝的输入,改完后被接受\n> * 公开导出面增删:可写 key、enum 成员、错误码、导出的类型或 schema\n> * 声明了但运行时不兑现 / 静默丢弃 —— 修它就是把行为拉回声明\n> * 退役:删除已发布的可写键或 enum 成员\n>\n> 应该优先处理 契约面卡 卡\n\nDelivered to the `domain:spec#3` seat in a live session at 2026-09-18T21:4xZ. ⇒ it sits in the **维护者裁决** tier of the priority order, above every other clause of `SKILL.md`.\n\n## Why this needs a charter PR and not just a seat post\n\n⚠️ **Measured, not argued**: right now that rule exists in exactly two places — one seat's post (#18883, comment posted 2026-09-18T21:47Z) and the dispatch words this seat wrote after it. Neither is a fleet surface:\n\n- `SKILL.md`〈执行座位职责〉's 候选与批次 section is what a **fresh seat** reads to build its take order. It carries the current order (open · unassigned · no `needs-user-decision` · no `pm:retriage`, then 最新优先 / 最老优先 by queue state) and ⛔ says nothing about contract surface.\n- ⇒ a seat that starts tomorrow and reads the charter will not apply this rule, and 「循环须能从全新会话恢复」 is the invariant that makes that a defect rather than an inconvenience.\n- ⭐ And the rule is **load-bearing on ordering**, not on taste: this seat re-screened its 82 dispatchable candidates by it and the take changed — the p1 it would have taken by recency (`check:generated --fix` writing artifacts from an unmeasured dist, #19086) is **auxiliary** under the test, while a p2 (#16354, a new lint refusal ⇒ 收紧) is **contract surface** and was taken instead.\n\n## ⭐ The second, measured reason to write it down centrally\n\nTwo seats received the rule and re-screened independently, **and both landed on the same card within the same minute**: #18670. Seat 4 completed its claim at 2026-09-18T21:42:37Z; this seat's assignee write landed at **21:42:58Z**, 21 seconds late, and withdrew (timeline evidence and the withdrawal are on #18670). ⇒ a new ordering rule that arrives by conversation rather than by charter creates a **claim-race spike**, because every seat re-sorts the same queue at the same instant. A charter line would have let the seats re-sort at their own fire times instead.\n\n## What the fix is, and what it is not\n\n- **In scope**: a `SKILL.md` edit (with its `references/core-rules.md` twin, per 「一条规则在本文与核心条款一处改动,另一处同 PR 同改」) that states the contract-surface test, its five hit-any criteria, and its place in the take order — plus whether it outranks the existing 最新优先/最老优先 rule or composes with it (the maintainer's words say 「优先处理」, which reads as a tier above recency, ⛔ but this filer does not decide that).\n- ⛔ **Out of scope for this card**: re-grading anything. The test is about **take order**, ⛔ not about `priority:*`, and this seat's screen changed no label.\n- ⚠️ Worth deciding in the same PR: whether a card whose fix is **auxiliary but whose subject is a contract** (e.g. #19085 — two declared keys the authoring form omits, while the schema still accepts them, so the verdict on the same metadata does not change) counts. This filer read it as **auxiliary** by the byte test and recorded that reading publicly, but the charter should say so rather than leaving each seat to re-derive it.\n\n## Dedupe words\n\n`contract surface take order` · `契约面卡优先` · `accept reject flips before after` · `auxiliary surface deprioritised` · `take order maintainer ruling 2026-09-18`\n\n⛔ The filer does not dedupe (only these words); triage searches its own list, and a zero there needs a control that hits.\n\nRelated: #18883 (this seat's post, where the rule and the 82-candidate screen are recorded) · #18670 (the claim race the rule's arrival caused, with per-second timeline evidence) · #16354 (the card the new order made this seat take, where the test is written into the acceptance as an artifact).\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

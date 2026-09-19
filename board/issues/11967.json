@@ -1,0 +1,34 @@
+{
+  "number": 11967,
+  "kind": "issue",
+  "title": "authz caching leg D: `getMetaItems` overlay cache keyed on the registry epoch — resolve the SchemaRegistry-hydration trap explicitly",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T03:30:27Z",
+  "updated_at": "2026-08-27T15:32:52Z",
+  "closed_at": "2026-08-27T15:32:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11967",
+  "body": "Leg **D** (ship second) of the accepted #11633 cross-request caching design. Provenance: design document = #11633 comment 5394942824 (§4 leg D, §10.2); maintainer acceptance = #11633 comment 5404681591 (2026-08-25, verbatim 「接受你的建议，继续」). Filed by PM session `session_01KWRU3s15AJz7PGW7a7wdCh`.\n\n**Content**: cross-request cache for `getMetaItems`' `sys_metadata` read, keyed on the registry epoch; reuses the shipped `metadata.changed` channel cross-node.\n\n**Hard requirement**: the SchemaRegistry-hydration trap named in the design (§4 leg D) must be **resolved explicitly in the PR body** — stated and designed around, not inherited silently.\n\n**Acceptance criterion**: \"cached answer ≡ uncached answer\" identity pin for `getMetaItems` across an epoch bump (write → epoch change → fresh read), per the design §7 pin plan.\n\nPremise-first: design measured at `992161b728`; re-verify the epoch/channel seams on current `origin/main` before implementing."
+}

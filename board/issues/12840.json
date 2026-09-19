@@ -1,0 +1,35 @@
+{
+  "number": 12840,
+  "kind": "issue",
+  "title": "feat(spec): retired-defaulted-key tolerance — the retired default parses as inert residue and strips; non-default values keep the loud refusal (#12497 class rule)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-28T02:33:10Z",
+  "updated_at": "2026-08-28T03:44:46Z",
+  "closed_at": "2026-08-28T03:44:46Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12840",
+  "body": "Part of objectstack-ai/cloud#1653 (via cloud#1685 — the ruling record with the maintainer's three-question rationale lives there; read it first).\n\n## Deliverable — retired-defaulted-key tolerance (a CLASS rule)\n\nThe #12497 retirement of `allowRestore`/`allowPurge` currently refuses the keys outright (`expected: 'never'`, measured refusal: `permissions[5].objects.crm_campaign_member.allowRestore`). But every PUBLISHED @objectstack/spec still carries `z.boolean().default(false)` for them, so every artifact built by the released toolchain has the keys MATERIALIZED as `false` in every permission entry (75 occurrences in the HotCRM artifact; its sources declare neither — verified). Refusing the emitted default sentences every existing built artifact — marketplace packages, installed environments — to death on the next runtime upgrade.\n\nRuled semantics (maintainer, 2026-08-28 — not re-adjudicable):\n- Value **equals the retired default** (`false`) ⇒ accepted as inert residue and **STRIPPED on parse** — the parsed/normalized output must NOT carry the key (no re-emission; a round-trip must converge to the clean shape). Optionally a low-noise notice, never a warning storm (75 per artifact).\n- Value is **non-default** (`true`) ⇒ the existing #12497 refusal, byte-for-byte guidance preserved.\n- Implement as a REUSABLE helper for the class (\"retired defaulted key\" tombstone shape), applied to both keys — the next defaulted-key retirement uses the same helper rather than reinventing the judgement. Follow the repo's existing tombstone conventions (`object.zod.ts` has the doctrine block for retired keys).\n\n## Consumer acceptance (must be demonstrated)\nA permission entry carrying `{\"allowRestore\": false, \"allowPurge\": false}` (the published-toolchain shape) parses, boots, and round-trips WITHOUT the keys; one carrying `true` for either is refused with the #12497 guidance. Ideal proof: the actual HotCRM artifact case from cloud PR #1672's red step — its shape is in cloud#1685.\n\n## Bounds\n- ⛔ This does not un-retire anything: no schema re-declares the keys as authorable; the authoring surface still refuses them in source metadata the way #12497 ruled — the tolerance applies to PARSED artifacts' inert defaults. If the parse and authoring paths cannot be distinguished where the tombstone sits, say so precisely and STOP (that would change the card's shape).\n- Changeset `minor` (launch-window rule; never major). Tests: the acceptance matrix + round-trip convergence + the helper's own contract. Ablation with disk-proven mutation.\n"
+}

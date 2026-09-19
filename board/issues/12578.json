@@ -1,0 +1,34 @@
+{
+  "number": 12578,
+  "kind": "issue",
+  "title": "[finding] The flat-input Proxy's `ownKeys` lists only `data`'s ENUMERABLE keys — an own non-enumerable key is invisible to `getOwnPropertyNames` while `hasOwnProperty` and the descriptor trap both report it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T11:52:14Z",
+  "updated_at": "2026-08-27T15:35:19Z",
+  "closed_at": "2026-08-26T17:46:27Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12578",
+  "body": "Found while implementing #12397 (descriptor mirror). **Unassigned, observation class** — no measured consumer, and the repair is a behaviour decision rather than a mechanical one, so it is recorded rather than ridden along.\n\n## What it does\n\n`installFlatInput` (`packages/objectql/src/hook-wrappers.ts`) answers `ownKeys` from `Object.keys(data)`:\n\n```ts\nownKeys(target) {\n  const dataKeys = target.data && typeof target.data === 'object'\n    ? Object.keys(target.data)\n    : [];\n  return Array.from(new Set(dataKeys));\n},\n```\n\n`Object.keys` is own **enumerable string** keys only. So a key `data` holds as own-but-non-enumerable — or under a symbol — is absent from `Object.getOwnPropertyNames(ctx.input)` and `Reflect.ownKeys(ctx.input)` entirely, even though it is genuinely an own property of the payload the engine persists.\n\n## Why it is worth writing down now\n\n#12277 routed `defineProperty` into `data`, so a hook can put such a key there for the first time; #12397 then made the descriptor trap tell the truth about it. After that fix the trap set answers one payload three ways:\n\n```js\nObject.defineProperty(ctx.input, 'k', { value: 1, enumerable: false, configurable: true });\n\nObject.getOwnPropertyDescriptor(ctx.input, 'k');            // { value: 1, enumerable: false, … }  ← own, per #12397\nObject.prototype.hasOwnProperty.call(ctx.input, 'k');       // true                                ← own\nObject.getOwnPropertyNames(ctx.input);                      // [ 'subject' ]                       ← not own?\n```\n\n`Object.keys` / spread / `Object.entries` are all **correct** here (they filter by `enumerable` and the key is not enumerable), which is why this is narrow: the inconsistency is confined to the own-key *enumeration* surfaces. It is legal for a proxy — the target is extensible and carries no non-configurable own key, so no `[[OwnPropertyKeys]]` invariant is violated — just untrue.\n\n## Why it was not repaired inside #12397\n\nThat card's charter was the descriptor trap, and the `ownKeys` filtering is **deliberate and documented** at the call site: it exists to keep the wrapper keys (`id`/`options`/`ast`/`data`) out of `Object.keys`/`for-in`. Its use of `Object.keys(data)` rather than `Reflect.ownKeys(data)` looks incidental to that intent, but replacing it is a decision with reach, not a mechanical fix:\n\n- `Reflect.ownKeys(data)` would newly expose **symbol** keys through the proxy, which nothing has considered.\n- `packages/runtime/src/sandbox/body-runner.ts` documents its snapshot as \"materialises only what `installFlatInput`'s `ownKeys` enumerates\" (`unwrapProxyToPlain`, via `Object.entries`). `Object.entries` filters by `enumerable`, so the marshalled set would not in fact change — but that is a claim about today's spelling of the consumer, and the sandbox test double at `body-runner.test.ts:141` models the trap as `Reflect.ownKeys(t)`, i.e. the two already disagree about what the contract is.\n- Which surface is authoritative for \"what keys does the payload have\" — `ownKeys`, or the descriptor trap — is exactly the question, and it is answerable only against what a payload is allowed to hold (open in #12397's terms).\n\n## Repro\n\n```js\n// beforeInsert hook, caller payload { subject: 'help' }\nObject.defineProperty(ctx.input, 'k', { value: 1, enumerable: false, configurable: true });\nObject.getOwnPropertyNames(ctx.input);  // ['subject'] — 'k' is on `data`, own, and absent here\n```\n\n## Dedup\n\nScanned the 100 most recently created open issues plus a local grep for `ownKeys` / `getOwnPropertyNames` across `packages/**` — no existing card. ⚠️ The contract's prescribed REST dedup channel returned **403** (`GitHub access is not enabled for this session`) for this session too, which is #12293's shape, so the issue scan went through the MCP list endpoint — declared rather than reported as a clean search."
+}

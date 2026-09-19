@@ -1,0 +1,35 @@
+{
+  "number": 12778,
+  "kind": "pull_request",
+  "title": "fix(objectql): relax registerObject packageId to optional (#12623)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-27T18:44:08Z",
+  "updated_at": "2026-08-27T19:29:51Z",
+  "closed_at": "2026-08-27T19:29:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-27T19:29:49Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12778",
+  "body": "Fixes #12623\n\n## What\n\nRelaxes `SchemaRegistry.registerObject`'s `packageId` parameter from `string`\n(required) to `packageId?: string` (optional, **no default value**), matching\nthe sibling `registerItem` and the behaviour `applyProtection` already\ndocuments as intended.\n\n**Clause ② — this is a ruled public-API accept-set widening, not a silent\none.** Maintainer ruling: issue #12623 comment\n[5434929046](https://github.com/objectstack-ai/objectstack/issues/12623#issuecomment-5434929046),\nOption A. Widening breaks no existing caller — every call site already\nsupplied `packageId`, or (for the 68 sites with no `tsc` test-layer gate)\nalready ran with `packageId === undefined` at runtime since JS does not\nenforce TS arity. The 82 single-argument call sites this repo carries stop\nbeing latent type errors, and the 14 ledgered `TS2554` in `packages/rest`'s\ntest layer dissolve in the same stroke.\n\n## The risk the ruling names by hand, and how it's pinned\n\nThe one way this fix goes wrong is a **default** sneaking onto the widened\nparameter (mirroring `engine.ts`'s facade default of `'__runtime__'`) —\n`applyProtection` runs unconditionally on every `registerObject` call, so a\ndefaulted `packageId` would silently stamp `_packageId` / `_provenance:\n'package'` onto every bare-call fixture, exactly what the helper's own\ncomment says a package-less registration must avoid.\n\nPinned in\n`packages/objectql/src/registry-register-object-optional-package-id.test.ts`:\na bare `registry.registerObject(schema)` call is asserted **provenance-free**\nby key absence (`hasOwnProperty`, not `=== undefined` — a key present-and-\n`undefined` must still fail), paired with a positive control that a call\n*with* a `packageId` still gets stamped.\n\n**Ablation**, following the trap-guarded protocol: predicted (committed\nbefore mutating, `009fb03ba`) that giving the parameter a default\n(`packageId: string = '__runtime__'`) turns the bare-call assertion red\nwhile the positive control stays green. Mutated `registry.ts` line 1590\nunder `trap ... EXIT INT TERM` with absolute paths, confirmed the mutation\nlanded via anchored grep + `git hash-object`, ran the pin (observed exactly\nas predicted — 1 failed / 1 passed, log line\n`\"...bare_fixture (own, priority=100) from __runtime__\"` confirms the\ndefault routed), then restored and proved it (`git diff HEAD` empty,\n`git hash-object` equal to the pre-mutation HEAD blob, zero marker residue,\npin re-run green). Recorded in `bca89a89c`.\n\n## A necessary, narrowly-scoped consequence\n\n`ObjectContributor.packageId` (the internal per-contributor bookkeeping\nrecord, also exported from the package) widens from `string` to\n`string | undefined` to match — it is the exact value `registerObject`'s own\nparameter is called with, and TypeScript would otherwise refuse the\ncontributor construction. This is the only other type touched; every\n`.packageId` read on it already tolerated the value being effectively\noptional at runtime, confirmed by a clean `tsc --noEmit` across the whole\npackage with zero other ripples.\n\n`SchemaRegistry.registerNamespace` (a separate, still-required-`packageId`\nmethod) is called from inside `registerObject` only when a `namespace` is\nalso supplied; since a namespace registration needs an owning package id to\nmean anything, that call is now guarded on `packageId` being present too\n(`if (namespace && packageId)`) rather than widening `registerNamespace`'s\nown contract, which is out of scope here.\n\n## Explicitly out of scope (per the ruling and the dispatch)\n\n- Option B (passing a package id at the 82 call sites) and Option C (leave\n  it) — both declined by the ruling.\n- The `as any` / `as never` casts on the schema argument at several of the\n  82 sites (#5543 residue, a separate card).\n- The engine facade's own `packageId` default (`engine.ts`) — deliberate\n  there.\n\n## Changeset\n\n`minor` on `@objectstack/objectql` — a public-API accept-set widening that\nbreaks no caller, but does change the method's declared TypeScript contract,\nso it earns a real bump rather than riding as an implicit patch. Full\nFROM → TO in the changeset body; ADR-0087 marked `not-required` (no key,\nexport or shape removed/renamed — nothing for `objectstack migrate meta` to\nrewrite).\n\n## Tests\n\n- `packages/objectql`: full suite — 245 files / 4243 tests passed;\n  `typecheck` clean (`tsc --noEmit` + `tsc --noEmit -p tsconfig.scripts.json`).\n- `packages/rest`: `typecheck` clean, including `check:test-typecheck`\n  (ledger re-recorded via `gen:test-typecheck-debt`: 20 → 6 errors across\n  3 files, the 6 pre-existing/unrelated `TS2345`/`TS6133` debt untouched);\n  the 6 files whose `TS2554` dissolved re-run at the vitest layer — 90\n  tests passed.\n- New pin test: 2/2 passed against the correct fix; ablation above.\n\nSee the PR comment for the full structured report (gate results, premise\nre-measurement, MCP call count).\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01LZbWd2jNV1FErXTPSS4Dry)_"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 12751,
+  "kind": "issue",
+  "title": "feat(auth): walled deployment's declared owner is email-verified at operator-provisioned creation (extends #11343 to production walled boots)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "security"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-27T16:26:46Z",
+  "updated_at": "2026-08-27T18:33:41Z",
+  "closed_at": "2026-08-27T18:33:41Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12751",
+  "body": "Part of objectstack-ai/cloud#1653 (via cloud#1677 — the walled-EE owner-verification half; the maintainer's ruling is recorded there, 2026-08-28).\n\n## Deliverable\n\nOn a **walled** deployment (audience `invite_only`/walled posture family), when the account whose email equals the declared platform owner (`OS_PLATFORM_OWNER_EMAIL`) is created through the OPERATOR's own bootstrap/provisioning path, stamp it email-verified at creation — the same trust shape as os#11343's dev-boot seeded-admin stamp (that precedent's own comment already argues the class: \"provisioned by the deployment's own boot command with operator-known credentials — not an unknown self-registrant\"). Today that stamp is NODE_ENV-gated to dev, so a production walled EE deployment whose `.env.example` ships no mail transport has an owner that can NEVER verify → NEVER elevate (`WALLED_OWNER_NO_VERIFICATION_PATH` warns and nothing else can happen).\n\nBounds (the contract, not suggestions):\n- ONLY the account matching the declared owner email, ONLY when created via the operator bootstrap/seed path — never self-registration, never other users, never a later email change (an email UPDATE to the owner address must not inherit the stamp).\n- Walled posture context; dev-boot behaviour (os#11343) unchanged.\n- The `WALLED_OWNER_NO_VERIFICATION_PATH` warning should stop firing for the case this closes and keep firing for genuinely dead-ended shapes (owner exists, unverified, created outside the operator path, no transport).\n- Consumer: `apps/objectos-ee`'s `signup-membership-policy` e2e in the cloud repo has 2 red cases asserting exactly this dead end (diagnosis on cloud#1677); they must go green on a rig running your branch WITHOUT fixture changes to those cases.\n\nVerify premises against origin/main first (locate the #11343 stamp, the bootstrap path, the warning's predicate); `premise_still_valid:false` + evidence is a first-class deliverable. Tests: the stamp matrix (owner-via-operator ⇒ verified; owner-via-self-serve ⇒ not; non-owner-via-operator ⇒ not; email-change ⇒ no inheritance; dev boot unchanged), plus the warning's two-sided behaviour. Ablation, mutation proven on disk. `.changeset` (never major).\n"
+}

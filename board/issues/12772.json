@@ -1,0 +1,37 @@
+{
+  "number": 12772,
+  "kind": "issue",
+  "title": "Artifacts built by released 17.x tooling are REFUSED by the 17.2 runtime: retired-key tombstones fire at artifact parse, and no artifact-ingestion door runs the ADR-0087 conversion that exists for exactly this",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "priority:p0",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-27T17:49:55Z",
+  "updated_at": "2026-08-28T06:13:43Z",
+  "closed_at": "2026-08-28T06:13:43Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 12,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12772",
+  "body": "Found on a real isolated-posture dogfood boot (epic #12701 program; PM session `session_01SVYmuhHW6qZmNBqciaS7BN`, 2026-08-27).\n\n## Measured\n\n- hotcrm@main built with its pinned **released** toolchain (`@objectstack/cli` 17.1.0) emits `dist/objectstack.json` carrying **75** occurrences of `allowPurge`/`allowRestore` — hotcrm source contains **zero**; the released builder injects the (then-legal) permission bits.\n- Booting that artifact on the current framework main (`packages/spec` **17.2.0** — still the v17 line) through cloud's composed-artifact mode (`OS_COMPOSED_ARTIFACT_URL`) **refuses the boot**: `invalid_type` at `permissions[5].objects.crm_campaign_member.allowPurge`, the #12497 `retiredKey` tombstone message verbatim (\"Run `os migrate meta --from 17` …\").\n- The mechanical fix EXISTS in the platform already: `packages/spec/src/conversions/registry.ts` (~line 8123) declares the `allowRestore`/`allowPurge` **stripKeys conversion** for stored permissions. The stored-metadata read path runs conversions (`packages/metadata-protocol/src/protocol.ts`, stored-row conversion machinery ~line 3916). The artifact-ingestion doors do not: neither the framework `OS_ARTIFACT_URL` path (whose `artifact-boot-migration.ts` covers physical schema drift only) nor cloud's composed path applies key conversions before the strict parse.\n- Workaround used to unblock the dogfood run (proving the conversion is sufficient): stripping the two keys from a copy of the artifact makes the same boot succeed and the whole multi-org battery pass.\n\n## Why this is a v17-line compatibility break, not a v18 migration story\n\nThe removal shipped inside the v17 line (spec 17.1.0 → 17.2.0). Every already-built marketplace/composed artifact — including the one cloud's own acceptance builds at its pin — becomes unbootable the moment a deployment's runtime moves to ≥17.2, with no operator action available except hand-editing an artifact JSON (`os migrate meta` targets sources, not built artifacts). The epic-#12150 line's own upgrade promise (\"smooth upgrade for existing installs\") is what breaks.\n\n## Suggested shape (dev/triage to confirm)\n\nRun the ADR-0087 conversions over a versioned artifact's metadata at every artifact-ingestion door (the artifact carries its authored `specVersion`/protocol handshake, so \"older 17.x, convert forward\" is decidable), the same way the stored-row read path already does — one policy, not per-door copies. Whether the seam lands in the framework (artifact parse) or each consumer (cloud composed loader) is the routing decision; the framework parse is the single place all doors share.\n\nRepro is cheap: build hotcrm at its released toolchain, boot on current main via either artifact door."
+}

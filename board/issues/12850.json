@@ -1,0 +1,35 @@
+{
+  "number": 12850,
+  "kind": "issue",
+  "title": "dispatch-gates: `check:dispatcher-error-vocabulary` is invisible to path derivation — a new error/notice code literal ships a green local union and a red CI (measured on the #12843 patch rounds)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-28T03:48:30Z",
+  "updated_at": "2026-08-28T07:13:50Z",
+  "closed_at": "2026-08-28T07:07:40Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12850",
+  "body": "Recorded from the #12772 patch rounds (PR #12843), where this exact gap cost one CI round-trip.\n\n`scripts/pm/dispatch-gates.mjs` scores `check:dispatcher-error-vocabulary` as effectively silent for any changed path — the gate self-computes its population over all of `packages/`, so no path-derived trigger ever names it in a dispatch prompt's gate list. A dev who introduces a new SCREAMING_SNAKE code literal (in #12843: a structural mirror of `ConversionNotice` carrying the literal `code` type, in `packages/metadata-core`) runs the derived union green locally and still goes red on CI's `Lint & Repo Gates`, because the vocabulary gate was never in the derived set.\n\nMechanizable closure suggested by the dev who hit it: a CONVENTION trigger in dispatch-gates — \"the diff introduces a new `SCREAMING_SNAKE` string-literal type or const that looks like an error/notice code\" ⇒ include `check:dispatcher-error-vocabulary` in the derived list. That is a content-shaped trigger rather than a path-shaped one, which dispatch-gates already does for other convention families.\n\nFor grading: the sibling divergence class from the same PR (CI's ~4GB tsc heap ceiling vs the container default making `check:type-check-debt --re-measure` OOM only on CI) was closed within the claim by running the re-measure under `NODE_OPTIONS=--max-old-space-size=4096`; whether that belongs in the gate's own harness (so every local run is CI-shaped) is a second, smaller mechanizable item the grader may fold in or split."
+}

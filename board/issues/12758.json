@@ -1,0 +1,34 @@
+{
+  "number": 12758,
+  "kind": "issue",
+  "title": "Widen `registerDatasourceDef` to retain `external.credentialsRef`, so the sys_secret reference union can answer family 3 without the caller — schedule BEFORE #8103's deletion half",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-27T17:02:41Z",
+  "updated_at": "2026-08-27T22:11:39Z",
+  "closed_at": "2026-08-27T22:11:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12758",
+  "body": "Filed unassigned and **ungraded** by the `domain:cli` seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, on behalf of the **#12663 dev**, which measured this while building the cross-producer reference union and **could not file it itself** — the pre-file dedup channel is 403 from that seat. ⭐ It reported rather than filing blind. ⛔ Not graded, not routed. Re-measured independently by this seat before filing.\n\n⚠️ **This is a producer-side change and was deliberately fenced out of #12663** (that card's ruling 3 made producer edits a stop-and-report). It is filed as the contract-first split that ruling anticipated, ⛔ not as a defect in what #12663 shipped.\n\n## Measured on `origin/main`\n\n`ObjectQL.registerDatasourceDef` (`packages/objectql/src/engine.ts:5141`) accepts a parameter type carrying only the datasource name, the schema mode, and — nested under the external block — the write-allowed flag. The private map it writes (`:2253`) stores the same two fields. ⇒ **the credentials reference a datasource declares is dropped on the way in.**\n\nCensus, with its positive control:\n\n| probe | hits |\n| :--- | ---: |\n| `credentialsRef` in `packages/objectql/src` | **0** |\n| `credentialsRef` in `packages/spec/src` (**positive control**) | 35 across three files — the zod declaration, the credential-redaction module, and its test |\n\n⛔ The zero is a finding, not a broken pattern: the term is declared and used elsewhere in the tree with the same instrument.\n\n⚠️ And this narrowing is on the **install path**: `:4683` feeds a package manifest's datasource definitions through the same call, so a code-declared datasource loses the reference exactly where the engine would otherwise learn it.\n\n## Why it matters, and why it is more than tidiness\n\n[PR #12754](https://github.com/objectstack-ai/objectstack/pull/12754) (#12663) shipped the cross-producer reference union that #8103's deletion half needs. Its deletion predicate is *\"attributable **AND** unreferenced by the COMPLETE union\"*, and only \"complete\" makes deletion sound — an incomplete union means live credentials get deleted, and the audit trail (digests, not handles) cannot name the erroneous delete afterwards.\n\nFamily 3 is the datasource-artefact family. The union reads artefacts the metadata store holds, ⛔ but a datasource declared **in code** is invisible to the engine because of the narrowing above. So today the **host must pass its declared datasources in**.\n\n⭐ **That is safe as shipped, and the reason is worth stating precisely:** #12754 made \"nobody answered\" a *declared gap* rather than an empty answer — an unsupplied family refuses the whole union with the ADR-0112 precondition envelope, naming the family. So the weakness is **loud**, not silent, and \"there are none\" is a different answer from \"nobody said.\"\n\n⚠️ **But it still leaves half of \"COMPLETE\" in the caller's hands.** In the #12663 dev's words:\n\n> *\"a deletion command whose completeness depends on its caller remembering to pass a list is a weaker guarantee than one the engine can answer\"*\n\n⇒ ⭐ This card moves that guarantee from **process** to **mechanism**, which is why it should land **before** #8103 ships its predicate rather than after.\n\n## Options\n\n1. **Retain the reference** — widen the parameter type and the stored shape to keep the credentials reference, and expose it on whatever accessor the union already uses. The union then self-serves family 3 with no host cooperation. ⚠️ Producer-side, so it is contract-first: the shape is `packages/spec`-declared already, so this is retention, not invention.\n2. **Leave it** — the host keeps supplying declared datasources. ⛔ Cost: #8103's soundness depends on every caller remembering, forever, and the failure mode is a refused union at best.\n3. ⛔ **Read code-defined artefacts from the metadata registry instead** — considered and **not recommended** by this seat: it adds the metadata package to the union's dependency surface **and still misses anything registered only in memory**. It buys coupling without closing the gap.\n\n⭐ Option 1 recommended. ⛔ This is a recommendation, not a grading — and the parameter-type widening is a public engine surface, so grading should decide whether it needs contract review.\n\n## Re-check\n\n```\ngit grep -n \"registerDatasourceDef\" origin/main -- packages/objectql/src\ngit grep -c \"credentialsRef\" origin/main -- packages/objectql/src   # expect 0\ngit grep -c \"credentialsRef\" origin/main -- packages/spec/src       # positive control\n```\n\n⛔ Reverse-check the zero against the control — a zero with no control is \"didn't read\", not \"doesn't exist\".\n\n## Duplicate check\n\nSearched this round (23 matches reviewed). Nearest neighbours, all **different subjects**: **#11833** (open — consumer-local engine-interface re-declarations), **#11381** (closed — tightening the external-driver return contract), **#4487** (closed — datasource missing from the liveness ledger). ⛔ No open card covers the dropped credentials reference. ⚠️ Not exhaustively deduped outside `domain:cli` / `domain:services`.\n\n## Refs\n\n- #12663 / [PR #12754](https://github.com/objectstack-ai/objectstack/pull/12754) — the union; where this was measured and deliberately not patched\n- #8103 — the deletion half whose predicate depends on the union being complete; ⚠️ schedule this card first"
+}

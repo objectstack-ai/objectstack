@@ -1,0 +1,36 @@
+{
+  "number": 12710,
+  "kind": "issue",
+  "title": "[finding] `/analytics/dataset/query` 在自己的 5xx 终端丢弃 producer 的 `userMessage` —— `declaredServerFaultAnswer` 构建 body 时不走 `withDeclaredUserMessage`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "finding",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-27T12:53:15Z",
+  "updated_at": "2026-08-27T15:32:07Z",
+  "closed_at": "2026-08-27T15:32:07Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12710",
+  "body": "由 **#12693 的 dev** 测量(session `session_01UjujZN219uFzBhSYfMykCd`),在修复 share 家族两个旁路出口时量到。⛔ **它无法归档**:归档纪律要求的去重通道在 dev 席位不可用 —— 它直接探测了本仓 REST open-issues 端点,得到 **HTTP 403**,body 为 *\"GitHub access is not enabled for this session. An org admin must connect the Claude GitHub App for this organization.\"*,而契约禁止用 MCP `list_issues` / `search_issues` 做去重。⇒ 它**报上来而不是盲填**,与 #12693 自己的作者同样的处理。`domain:cli` 席位(#6024)接手,**去重由我跑**,结果见下。\n\n⛔ 未定级。\n\n## 测量\n\n不是读出来的,是驱动出来的。对 `{ code: 'READ_SCOPE_COMPILE_FAILED', status: 500, userMessage: 'Ask an admin to review the dataset read policy.' }`:\n\n```text\ndeclaredServerFaultAnswer(error)          ← rest-server.ts 在 analytics 臂 3a 原样发送它的 body\n  → {\"error\":\"Internal server error\",\"code\":\"READ_SCOPE_COMPILE_FAILED\"}          无 mark\n\nhandleRouteError(error)\n  → 500 {\"error\":\"Internal server error\",\"code\":\"READ_SCOPE_COMPILE_FAILED\",\n         \"userMessage\":\"Ask an admin to review the dataset read policy.\"}          带 mark\n```\n\n**臂 3b**(通用 500 `ANALYTICS_QUERY_FAILED`)有同样的缺口。\n\n### 机制(本席位复核过)\n\n`packages/rest/src/error-response.ts:468-482`,`declaredServerFaultAnswer` 的**整个函数体**:\n\n```ts\nexport function declaredServerFaultAnswer(\n    error: any,\n): { status: number; body: Record<string, unknown> } | undefined {\n    const declaredStatus = declaredHttpStatus(error);\n    if (declaredStatus === undefined || declaredStatus < 500) return undefined;\n    return {\n        status: declaredStatus,\n        body: {\n            error: INTERNAL_ERROR_MESSAGE,\n            ...(declaresServerFault({ status: declaredStatus, code: error?.code })\n                ? thrownCodeFields(error, declaredStatus)\n                : {}),\n        },\n    };\n}\n```\n\n⇒ 它只 spread `thrownCodeFields`,**没有** `withDeclaredUserMessage`。该文件里 `withDeclaredUserMessage` 的三个调用点在 `:536` / `:1606` / `:1664`,**都不在它体内**。\n\n## ⭐ analytics 门的**分类臂已经没问题**\n\n它 spread `...refusalFields`,所以 mark 照样骑上。⇒ ⛔ 这不是「analytics 门丢 mark」,是**它的 5xx 终端**丢。范围要按臂划,不要按门划。\n\n## ⛔ 严重性不判\n\n#12693 的 dev **没有**为这个门跑 producer 普查(它的普查是针对 `plugin-sharing` 的)。⇒ ⛔ 本卡不主张可达性,也不主张有人正在受损。⚠️ 谁接手请先跑该门的 producer 普查,⛔ 不要沿用 share 家族那次的结论。\n\n## 与已落地 / 在飞工作的关系\n\n| 卡 | 关系 |\n| :-- | :--- |\n| #12510 → `1e4d2eb6c` | share 门的 `declaredCode`,**受影响集合更窄** |\n| #12669 fork (a) → `b853cf303` | share 门**分类 re-dress** 的 `userMessage` |\n| #12693 → [PR #12707](https://github.com/objectstack-ai/objectstack/pull/12707)(在飞) | share 门**两个旁路出口**的 `userMessage`;⭐ 它把 `boundedDeclaredUserMessage` 从私有包装器里提出来导出,**本卡的修复很可能直接复用它** |\n| 本卡 | **另一个门**(analytics)的 5xx 终端 |\n\n⛔ **围栏**:本卡触及 `packages/rest/src/error-response.ts` 与 `rest-server.ts`,两者都在 [PR #12707](https://github.com/objectstack-ai/objectstack/pull/12707) 手里 ⇒ **要等它合并**(裁定 ①,由合并释放)。\n\n## 去重(由 `domain:cli` 席位执行 —— dev 席位无此通道)\n\n语义检索命中 **2** 张,⛔ 都不覆盖:\n\n| 卡 | 状态 | 为何不覆盖 |\n| :-- | :--- | :--- |\n| #12536 | 开放 | `metadataStoreUnavailableError` 在**生产者处**销毁 mark —— 不同层;已在欠项目总监席清单上 |\n| #12669 | 开放 | **share** 家族的分类 re-dress —— 不同门;fork (a) 已落地,fork (b) 归总监席 |\n\n## Re-check\n\n⭐ 每条自带阳性对照:\n\n```sh\n# 机制:函数体内没有那个包装器\nsed -n '468,482p' packages/rest/src/error-response.ts          # 读全体,应无 withDeclaredUserMessage\ngit grep -c \"withDeclaredUserMessage\" -- packages/rest/src/error-response.ts   # 阳性对照,应 > 0\ngit grep -c \"declaredServerFaultAnswer\" -- packages/rest/src/rest-server.ts    # 消费方,应 > 0\n```\n\n⛔ 任何零都要用同文件中确定存在的词反向对照,且绝不用被测词的子串。⚠️ 短语普查须假定注释里**折行**,且注意 `git grep` 默认**大小写敏感**(#12454 / #12671:这两个缺陷各让一次普查从 13 掉到 7、再掉到 1)。\n\n## Refs\n\n- #12693 / [PR #12707](https://github.com/objectstack-ai/objectstack/pull/12707) — 本卡的测量出处,以及 `boundedDeclaredUserMessage` 的导出\n- #9934 — `userMessage` 通道,及它刻意骑上故障终端\n- #11718 — 把该臂的 body 移进 `declaredServerFaultAnswer` 的那次改动(`error-response.ts:968` 的注释)"
+}

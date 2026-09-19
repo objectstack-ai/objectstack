@@ -1,0 +1,34 @@
+{
+  "number": 12624,
+  "kind": "issue",
+  "title": "finding(tooling): every generated test-typecheck ledger states a cause that #5543 fixed 18 days ago, and `--update` overwrites any correction written into the file",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-27T01:09:38Z",
+  "updated_at": "2026-08-27T22:43:01Z",
+  "closed_at": "2026-08-27T22:42:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12624",
+  "body": "Filed unassigned and **ungraded** while paying down `packages/rest`'s test-typecheck ledger (part of #12573). ⛔ Not graded, not routed. Measured on `origin/main` @ `527e0505d`.\n\n## The fact\n\n`scripts/check-test-typecheck.mts:107` builds the `_comment` every ledger carries, interpolating the package name into an otherwise fixed string:\n\n```js\nconst LEDGER_COMMENT =\n  `Per-file tsc error debt of the ${PKG_NAME} TEST layer (#5286). ` +\n  // …\n  'and every file below still carries errors from before that gate existed, ' +\n  'almost all of them fixture literals annotated with a schema OUTPUT type (`z.infer`) while holding ' +\n  'an authored INPUT literal. EXACT ratchet, …';\n```\n\nTwo things follow, and the second is what makes the first hard to notice.\n\n### 1 · The stated cause is a fossil\n\nThat clause is the finding from #5478 / #5543: `registerObject`'s `schema` parameter was annotated `ServiceObject` (the `z.infer` **OUTPUT** type) instead of `ServiceObjectInput`, so legal authored literals raised `TS2740`. **#5543 was closed as completed on 2026-08-08** by [PR #6786](https://github.com/objectstack-ai/objectstack/pull/6786), which dropped the 135 `as any` that had been dodging it.\n\n`packages/rest`'s ledger was created 18 days later, by [PR #12570](https://github.com/objectstack-ai/objectstack/pull/12570) on 2026-08-26 — and was stamped with the fixed cause as though it were present tense.\n\nMeasured against the ledger's own 12 non-fenced files:\n\n```\nz.infer occurrences: 0 0 0 0 0 0 0 0 0 0 0 0      (all 12 ledgered files)\npositive control:    65 `expect` in export-integration.test.ts, 95 in import-integration.test.ts\n```\n\nThe zero is a reading, not a broken grep. The 37 errors that ledger actually recorded are four unrelated stories, none of them the named one:\n\n| class | count | what it really is |\n| :--- | ---: | :--- |\n| `TS2554` | 14 | `registry.registerObject(x)` missing the required `packageId` — see #12623 |\n| `TS18048` | 13 | `getRoutes().find()` is `Route \\| undefined` |\n| `TS2345` | 5 | request literals missing `IHttpRequest`'s required `headers` / `path` |\n| `TS7006` | 4 | untyped `mock.calls` callback parameters |\n| `TS6133` | 1 | an unused import |\n\n⚠️ I measured this for `packages/rest` only. `packages/spec`'s 55 entries were **not** checked against the claim — for that package the clause may well still be accurate, since #5478 is where the wording came from.\n\n### 2 · The ledger cannot correct itself\n\n`check-test-typecheck.mts:258` rebuilds the object from the constant on every `--update`:\n\n```js\nconst ledger: Ledger = { _comment: LEDGER_COMMENT, entries };\n```\n\nSo a corrected `_comment` written into `test-typecheck-debt.json` survives exactly until the next `gen:test-typecheck-debt` — which the ratchet **requires** a dev to run on every repair (a file that loses errors is red until its number is re-recorded). I hit this directly: corrected the prose, re-ran the regenerator, and the refuted claim came back. The one workflow that guarantees the ledger's numbers are honest also guarantees its stated cause cannot be.\n\n## Why it is worth fixing rather than shrugging at\n\nThe `_comment` is the first thing a dev picking up a paydown card reads, and it is load-bearing: #12573's dispatch made \"test the ledger's own hypothesis before repairing anything\" its first ruling precisely because a wrong cause sends the reader file-by-file down the wrong shape. Here it also points at a *resolved* issue, so a reader who follows it finds a closed card and no obvious next step.\n\n`packages/client`'s ledger is the sharpest case — **0 entries**, and it still asserts a cause for the debt it does not have.\n\nThree ledgers carry the identical clause today:\n\n```\npackages/client/test-typecheck-debt.json   claim present | entries: 0\npackages/rest/test-typecheck-debt.json     claim present | entries: 9\npackages/spec/test-typecheck-debt.json     claim present | entries: 55\n```\n\n## Options\n\n- **A.** Drop the causal clause from `LEDGER_COMMENT` entirely. The mechanism sentences (EXACT ratchet, the three red directions, the regenerate command) are the part that is true for every package; the cause never was.\n- **B.** Keep a causal note but make it per-package — read from the ledger file's existing `_comment` when one is present, so a package can record what its own debt actually is and a regeneration preserves it.\n- **C.** Leave it and rely on readers distrusting it. ⛔ Not recommended: the regenerator actively restores it over corrections.\n\nNo urgency claimed — no gate reads `_comment`, so nothing is red and nothing regresses. This is about the prose the ratchet hands its next reader.\n\n## Re-check\n\n```\nsed -n '107,116p' scripts/check-test-typecheck.mts\nsed -n '255,260p' scripts/check-test-typecheck.mts\nfor f in packages/*/test-typecheck-debt.json; do echo \"$f\"; done\n```\n\n## Refs\n\n- #12573 — the paydown card whose ruling 1 required testing this claim; 0 of 33 matched\n- #12623 — what the largest remaining class actually is\n- #5478 / #5543 / [PR #6786](https://github.com/objectstack-ai/objectstack/pull/6786) — where the clause came from, and where its cause was fixed\n- #5286 / #12542 / [PR #12570](https://github.com/objectstack-ai/objectstack/pull/12570) — the mechanism and this ledger's creation"
+}

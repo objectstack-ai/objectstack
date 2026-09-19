@@ -1,0 +1,35 @@
+{
+  "number": 12606,
+  "kind": "pull_request",
+  "title": "docs(spec): wrong-layer guidance for group/hideFields/rowColor on object userActions",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "protocol:data",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-26T18:32:34Z",
+  "updated_at": "2026-08-27T04:28:09Z",
+  "closed_at": "2026-08-27T04:28:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-27T04:28:07Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12606",
+  "body": "Fixes #11459\n\n## What\n\nAdds three curated `guidance` entries to the object-level `userActions` `strictObject` in `packages/spec/src/data/object.zod.ts` — `group`, `hideFields`, `rowColor` — mirroring the existing `sort`/`search`/`filter`/`editInline` wrong-layer wording convention.\n\n## Why\n\n`ui/view.zod.ts`'s `UserActionsConfigSchema` adopted `group`/`hideFields`/`rowColor` at #11195 (merged via #11458). Those three keys share a name-collision trap with the object block's own `userActions` (disjoint vocabulary, same key names elsewhere): an author who learned them on the view writes them on the object and, until this PR, got only the generic unknown-key rejection with an edit-distance suggestion — which has nothing useful to offer over the object block's `create`/`import`/`edit`/`delete`/`exportCsv` shape.\n\n**Acceptance is byte-identical.** All three keys were already rejected by name on the object block before this change (measured on `origin/main` pre-PR) and are rejected after it; only the refusal's message gains the same curated pointer the other four wrong-layer keys already carry. Clause-② does not apply — the accept/reject set does not move.\n\n## Changes\n\n- `packages/spec/src/data/object.zod.ts` — three `guidance` entries (`group`, `hideFields`, `rowColor`), placed after `editInline`; updated the block's leading comment to note the three keys now carry curated pointers too.\n- `packages/spec/src/data/object-strictness-batch20.test.ts` — new test `userActions.group / .hideFields / .rowColor name the VIEW block, same as sort (#11459)`, asserting the \"VIEW\" pointer for all three, mirroring the existing `sort` pin. The pre-existing disjoint-vocabulary test (which already asserted these three are rejected by name) is untouched.\n- `.changeset/object-useractions-view-key-guidance.md` — patch changeset, following the precedent set by the prior pure-guidance-text change (`visible-when-alias-guidance.md`, #7884): guidance/describe-text changes on `@objectstack/spec` get a real changeset, not `skip-changeset`.\n\n## Verification\n\nLocal commands run under `scripts/pm/os-verify-lock.sh`, on merge commit `a413af29c` (merge base `23d52f99c` of `origin/main`):\n\n- `pnpm --filter @objectstack/spec build` — clean, 34/34 declared `.d.ts` present.\n- `pnpm --filter @objectstack/spec exec vitest run --maxWorkers=2 src/data/object-strictness-batch20.test.ts src/shared/alias-integrity.test.ts src/data/object.test.ts` — **253 passed (253)**, including the #5013 alias-integrity audit (`no guidance key is itself a declared key` — the three new entries are keys the object shape rejects, so they pass automatically) and the new pin.\n- `pnpm --filter @objectstack/spec exec vitest run --maxWorkers=2` (full package) — **432 test files / 11499 tests passed**.\n- `pnpm --filter @objectstack/spec check:generated` — all 14 generated artifacts up to date, no regeneration needed (guidance prose is not a `.describe()`/authorable key).\n- `pnpm --filter @objectstack/spec run typecheck` — clean (`tsc --noEmit`, `check:scripts-typecheck`, `check:test-typecheck`).\n- Full `pnpm build` (needed as a prerequisite for `check:dev-prereqs` / `check:type-check-debt`) — 71/71 tasks successful.\n- `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` derivation, and every gate it named for this diff — all green: `check:authorable-surface`, `check:cross-package-test-inputs` (both the pnpm script and the raw script invocation), `check:doc-authoring`, `check:doc-formula-expressions`, `check:empty-state`, `check:liveness`, `check:merge-driver`, `check:objectql-double-limit`, `check:page-declaration-shape`, `check:published-files`, `check:slot-lookup`, `check:spec-parsed-alias`, `check:strictness-ledger`, `check:test-source-alias`, `check:type-source-resolution`, `check:variant-docs`, `check:ci-filter-parity`, `check:comment-mask-adoption`, `check:dev-prereqs`, `check:plugin-teardown-shape`, `docs-audit/check-affected-docs`, `docs-audit/check-drift-comment`.\n- Convention-triggered gates for the edited test file: `check:type-check-coverage` (OK), `check:type-check-debt --re-measure` (31 ledger entries re-measured, **none above their recorded ceiling**), `check:query-options-erasure`, `check:engine-double-contract` (689 pinned / 134 debt / 3 exempt, unchanged), `check:where-matcher` (303/303) — all green.\n- Changeset-triggered family: `check:changeset-gate-self-tests`, `check:objectui-changeset`, `check-adr-0087-registration.mjs`, `check-changeset-no-major.mjs`, `check-empty-changeset.mjs`, `release-rehearsal-clone.mjs --self-test` — all green.\n- Scoped `eslint --no-inline-config` over the two touched source files (`object.zod.ts`, `object-strictness-batch20.test.ts`): 0 errors / 0 warnings, 2 files (per `--format json`). Collapse to this scope is a measured, not assumed, safe narrowing: `eslint --print-config` on the touched file confirms no `parserOptions.project` is set for this tree (no type-aware linting), so the diff cannot move any judgment on an untouched file.\n- Self-scanned both touched source files and the changeset for control-byte contamination (`grep -naP '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f]'`) — clean.\n\nPer this batch's constraints, `packages/spec/src/api/**` and `packages/rest` (sibling PR #12605's surface) are untouched, and `content/docs/releases/**` is untouched.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012xGvxcwPRTJfA7RfjXEYA4)_"
+}

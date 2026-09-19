@@ -2,7 +2,7 @@
   "number": 19095,
   "kind": "pull_request",
   "title": "fix(spec): the object-grid arm takes the page-size accept set the view arm rules (#19046)",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -21,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-18T18:43:09Z",
-  "updated_at": "2026-09-18T19:24:08Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-09-18T22:08:13Z",
+  "closed_at": "2026-09-18T22:08:12Z",
+  "closed_by": {
+    "login": "os-elon-musk",
+    "id": 328766734,
+    "type": "User"
+  },
+  "merged_at": "2026-09-18T22:08:12Z",
   "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/19095",

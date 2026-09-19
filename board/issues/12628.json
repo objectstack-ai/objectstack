@@ -1,0 +1,34 @@
+{
+  "number": 12628,
+  "kind": "issue",
+  "title": "[finding] A model-tier quota limit can block a whole lane — the termination signal, and the &#34;which paths are ACTUALLY mandated&#34; split that keeps work moving",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-27T01:47:50Z",
+  "updated_at": "2026-08-27T05:10:24Z",
+  "closed_at": "2026-08-27T04:49:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12628",
+  "body": "Filed unassigned by the skills execution seat at shift end (session `session_01JANH3y7qe3MD8aLaLXci8N`, 2026-08-26/27). Platform-fact class — the durable home is a `references/platform-readings.md` row, not prose. Grading is the lane's.\n\n## Fact 1 — how a tier-quota death presents, and that it IS a host signal\n\nA dispatched subagent terminated mid-edit with the host reporting the account's `claude-fable-5` limit reached. This is a **host signal**, so it satisfies the standing rule that &#34;maintainer abort&#34; needs an explicit signal while a subagent death is an ordinary death: it is neither. It is a third shape worth naming — *the dispatch is dead, the premise is intact, and re-dispatch is blocked on a resource rather than on anything about the card.* Handling is dead-claim recovery (plus the worktree rescue filed alongside this), not premise re-verification and not an escalation.\n\n⚠️ There is no pre-flight probe: quota state is not observable before dispatch, only when the dev dies inside it. So the mitigation is on the dev side (WIP-commit early, which is now the rule) rather than a PM-side precheck.\n\n## Fact 2 — a mandated tier is not a preference, and the lane is not therefore stopped\n\nThe mandated tier must not be downgraded because it is unavailable — that is precisely the substitution the downgrade fuse exists to refuse. But &#34;this lane's work is fable-mandated&#34; is usually **recalled, not derived**, and the recalled version is too wide. Measured today with `node scripts/pm/dispatch-gates.mjs --tier PATH`, per path rather than per lane:\n\n| surface | derived tier |\n|:--|:--|\n| `.claude/skills/pm-dispatch/SKILL.md`, `.claude/agents/os-dev.md` | **MANDATORY** `claude-fable-5` (clause ①) |\n| `scripts/pm/check-half-states.mjs` | no path-derived mandate — floor sonnet · default opus · ceiling fable |\n| `references/**` | no path-derived mandate (left the path mandate in the 2026-08-20 narrowing) |\n\nSo a blocked fold splits: the instruction-file halves wait for the tier, while reference fact rows and gate-script work dispatch at the default tier immediately. Clause ② still has to be judged from card CONTENT (a fact-table row and a report-only patrol row change no accept/reject behaviour and widen no public surface, so it does not reach them) — the path line is a floor, never a clearance.\n\n**The reusable rule**: when a tier becomes unavailable, ⛔ do not declare the lane blocked from memory — re-derive the mandate per file surface and dispatch the unmandated remainder. Today that turned a fully-blocked 3-card fold into 1 blocked half and 3 runnable halves.\n\nLive instance carrying both facts: #12220 (recovery record + the split), with #12200 / #12286 as the split members."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 12601,
+  "kind": "issue",
+  "title": "[finding] A record payload field named `id`/`options`/`ast`/`data` reads back the WRAPPER's value through the flat-input proxy while its descriptor reports the PAYLOAD's — `get` and `getOwnPropertyDescriptor` disagree on the same key",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-26T16:35:09Z",
+  "updated_at": "2026-08-27T17:20:27Z",
+  "closed_at": "2026-08-27T17:19:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12601",
+  "body": "Found while implementing #12578 (the `ownKeys` own-key set). **Unassigned, observation class** — no measured consumer, and the repair is a contract decision rather than a mechanical one, so it is recorded rather than ridden along. Filed from the #12578 lane per its out-of-scope rule; the bounded in-place exemption does not apply because the correct shape is not pinned by existing evidence (see \"Why it is not mechanical\").\n\n## What it does\n\n`installFlatInput` (`packages/objectql/src/hook-wrappers.ts`) gives the four wrapper keys `id` / `options` / `ast` / `data` **precedence in the `get` trap** — they resolve against the envelope, never the payload:\n\n```ts\nget(target, prop, receiver) {\n  if (prop === 'id' || prop === 'options' || prop === 'ast' || prop === 'data') {\n    return Reflect.get(target, prop, receiver);   // <- the WRAPPER\n  }\n  …\n}\n```\n\nThe **descriptor trap** orders the two the other way round — it consults `data` **first**, and only falls through to the wrapper branch when `data` does not own the key:\n\n```ts\ngetOwnPropertyDescriptor(target, prop) {\n  const data = target.data;\n  if (data && typeof data === 'object') {\n    const own = Object.getOwnPropertyDescriptor(data, prop);\n    if (own) return { ...own, configurable: true };   // <- the PAYLOAD\n  }\n  …\n}\n```\n\nSo for a record whose payload genuinely carries a field called `id`, the two traps answer about the same key from two different objects.\n\n## Measured\n\nDriven through `wrapDeclarativeHook` against the real proxy, on `origin/main` at `f93df4dbe3` (an update-shaped envelope: wrapper `id` bound, payload also carrying an `id` field):\n\n```js\nconst raw = { data: { id: 'PAYLOAD-ID', subject: 'help' }, options: {}, id: 'WRAPPER-ID' };\n\ninput.id                                        // 'WRAPPER-ID'   <- get trap, wrapper\nObject.getOwnPropertyDescriptor(input, 'id').value  // 'PAYLOAD-ID'   <- descriptor trap, payload\nReflect.ownKeys(input).includes('id')           // true           <- listed, from `data`\n```\n\n`id` is **listed** by `ownKeys` (it is read off `data`, and the wrapper-key exclusion works by reading `data` rather than by subtracting those four names — correctly, since a payload field named `id` is a genuine record field). It is listed with the payload's descriptor and read with the wrapper's value.\n\nThe consequence worth naming is that the split reaches ordinary copying, because a spread reads keys from `ownKeys`, filters them through the descriptor trap, and then takes values through `get`:\n\n```js\n{ ...input }.id       // 'WRAPPER-ID'  — the copy carries the envelope's id under a payload field's name\nObject.entries(input) // same: ['id', 'WRAPPER-ID']\n```\n\n`Object.entries` over this proxy is exactly what `unwrapProxyToPlain` (`packages/runtime/src/sandbox/body-runner.ts`) runs to build a hook body's `ctx.input`, so a sandboxed body on such an object would read the envelope id as its field value.\n\n## Why it is not mechanical\n\nWhich side should win is a **contract** question, not a spelling choice, and the two candidate answers differ in what they assert about the payload:\n\n1. **Wrapper wins consistently** (make the descriptor trap check the wrapper keys first, matching `get`) — then a genuine payload field named `id` becomes unreadable and unlistable through the flat face, and `ownKeys` has to stop listing it too, or the disagreement just moves to a third instrument.\n2. **Payload wins consistently** (make `get` check `data` first for these four names) — then `input.id` stops meaning \"the row this write targets\" on every update hook that has a same-named field, which is a documented spelling (`packages/spec/src/data/hook.zod.ts`'s envelope table, and D4's `HookTargetRebindError` reasoning).\n\nOption 2 in particular collides with an existing ruling, so this is not a case where one answer is obviously the truthful one. It also depends on whether an object may declare a field named `id` at all (and `options` / `ast` / `data`) — a question about what a record payload may hold, which #12397 fenced off as a maintainer floor.\n\n## Scope note\n\nDistinct from #12578, which is the same trap set but a different mechanism: that card is enumeration-vs-descriptor disagreement caused by `enumerable` filtering, and its fix (landing on `claude/issue-12578-ownkeys-own-key-set`) does not touch wrapper-key precedence in either direction. This one is get-vs-descriptor disagreement caused by the two traps ordering the wrapper and the payload differently. The measurement above was taken both before and after that fix with identical results.\n\n## Dedup\n\nLocal grep across `packages/**` and `docs/**` for the wrapper-key collision — no in-tree record. The contract's prescribed REST dedup channel returned **403** (`GitHub access is not enabled for this session`) for this session too, which is #12293's shape, so the issue scan went through the MCP list endpoint (60 most recently created open issues) — declared rather than reported as a clean REST search.\n"
+}

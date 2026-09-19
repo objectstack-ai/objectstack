@@ -1,0 +1,34 @@
+{
+  "number": 11966,
+  "kind": "issue",
+  "title": "authz caching leg C: cache successful localization reads (`sys_setting`) — settings-bus invalidation, engine-seam backstop, TTL bound",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T03:30:22Z",
+  "updated_at": "2026-08-27T10:45:23Z",
+  "closed_at": "2026-08-27T10:44:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11966",
+  "body": "Leg **C** (ship first) of the accepted #11633 cross-request caching design. Provenance: design document = #11633 comment 5394942824 (§4 leg C, §10.1); maintainer acceptance = #11633 comment 5404681591 (2026-08-25, verbatim 「接受你的建议，继续」, forks 1A/2B/3A/TTL-0). Filed by PM session `session_01KWRU3s15AJz7PGW7a7wdCh`.\n\n**Content**: cache successful `sys_setting` localization reads. Invalidation: subscribe to the existing settings change bus (measured in the design as shipped and unused by the localization path) + engine-seam backstop on `sys_setting` writes; TTL bound per the design's config surface. Note #10221 deliberately caches **failures** only — this card adds the success-read cache with invalidation-on-write; the two must not fight.\n\n**Hard requirement carried from the design's re-measurement**: invalidation must be **synchronous in-process** — the existing `analytics-timezone.dogfood.test.ts` is this leg's acceptance test for \"write-invalidation primary\", and a TTL alone (or deferred invalidation) does not satisfy it.\n\n**Acceptance criterion**: `analytics-timezone.dogfood.test.ts` passes against the cached path (read-after-write observes the write), plus a \"cached answer ≡ uncached answer\" identity pin per the design §7.\n\nPremise-first: design measured at `992161b728`; re-verify cited seams on current `origin/main` before implementing."
+}

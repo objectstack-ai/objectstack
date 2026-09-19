@@ -1,0 +1,34 @@
+{
+  "number": 12645,
+  "kind": "issue",
+  "title": "finding(check-governed-merges): a PR-less mainline entry — the loudest line the audit prints — says \"every channel failed\" when no attribution channel was ever tried, and points at a note that is not printed",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-27T02:49:09Z",
+  "updated_at": "2026-08-27T05:49:32Z",
+  "closed_at": "2026-08-27T05:32:14Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12645",
+  "body": "Found while implementing #12633 (PR #12643); out of that card's scope and its file surface's defect class, so filed rather than fixed there.\n\n## The reading\n\n`renderReport` in `scripts/pm/check-governed-merges.mjs` picks the attribution column on the presence of `entry.attribution` alone:\n\n```js\nconst who = e.attribution\n  ? `merged_by ${…} @ ${…} (via ${…})`\n  : `merged_by UNAVAILABLE — every channel failed; see the attribution note below`;\n```\n\nBut the attribution loop in `main()` skips an entry with no PR number entirely — `if (entry.pr == null) continue; // its own loud entry; nothing to look up`. So for that entry **zero channels were tried**, and the line asserts that every one of them failed. It also refers the reader to \"the attribution note below\", which `summariseAttributionFailures` does not produce for it either: that function groups only entries carrying `attributionError`, and this one has none. Measured on a constructed sweep (2026-08-27, PR #12643's QS-7 fixture, zero API lookups):\n\n```\n  • objectstack-ai/objectstack ⚠️  NO PR NUMBER IN SUBJECT — direct push to main? investigate — docs(adr): kernel object ownership\n      commit b2d8707f6 @ 2026-08-14T05:40:28+00:00; merged_by UNAVAILABLE — every channel failed; see the attribution note below\n```\n\n`0 API lookup(s)` is printed four lines above it, in the same report.\n\n## Why it is worth a card rather than a shrug\n\nThis is the one entry shape the header calls out as more anomalous than any PR merge — a direct push to `main` touching a governed surface. Attaching to it a false claim about what was tried, plus a pointer to a note that does not exist, is exactly the kind of line a reader learns to discount; and the audit's whole product is a list a human reads entry by entry to decide \"do I recognise this\". The two facts differ and the report should keep them apart, the same way it keeps \"nothing was found\" apart from \"nothing was looked at\" everywhere else (#4690).\n\n## Shape of a fix (not taken here)\n\nSplit the column three ways rather than two: resolved · UNAVAILABLE, every channel failed (there is an `attributionError`) · NOT LOOKED UP, no PR number in the subject (nothing to query). Only the middle one should point at the attribution note. Small, report-only, no judgment moves — and `--self-test` already has the fixtures for the first two, so the third is one more case beside them."
+}

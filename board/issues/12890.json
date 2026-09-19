@@ -1,0 +1,33 @@
+{
+  "number": 12890,
+  "kind": "pull_request",
+  "title": "docs(agents): os-dev applies `skip-changeset` at PR-open time, with the releases-nothing test stated once",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-28T07:06:43Z",
+  "updated_at": "2026-08-28T09:32:26Z",
+  "closed_at": "2026-08-28T09:32:24Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": "2026-08-28T09:32:24Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12890",
+  "body": "Fixes #12876\n\nThe `skip-changeset` bullet in `.claude/agents/os-dev.md` already said the label is the\ndev's own step, not CI's, and that it goes on when the PR is created. What it did not\ncarry was a **qualifying test** and a **closed category list** — it named only\n\"tests/workflow/`.claude/`\", so an ADR-only companion PR read as uncovered, met\n`Check Changeset` as a red, and was recovered with a label edit plus a re-run. Cheap,\nbut pure waste, and once per releases-nothing PR.\n\n## The sentence as landed\n\nBoth clauses live inside the existing bullet, beside the guidance they qualify:\n\n- **The test, stated once** — 判据:**不从任何包发布东西**;闭合清单:仅含 `docs/adr/**` ·\n  `.claude/**` · `scripts/pm/**` · tests/workflow · 注释 的 diff。\n- **At PR-open time** — **PR 一开出就打**,⛔ 永不等 Check Changeset 转红再补。\n\nThe list is a **superset** of what the bullet named before, not a swap: `docs/adr/**`\n(the shape that produced this finding), `scripts/pm/**` and comments-only are added;\ntests/workflow and `.claude/**` are the two it already had, kept.\n\n## The cut ledger — net 0 against a zero-headroom ceiling\n\nThe file sits at 470/470, headroom 0, so both clauses are funded in place, same file and\nsame bullet. Neither cut removes a rule; each is a restatement whose meaning survives at\na named address:\n\n1. **`(挂上去只是给 PR 挂一个假状态,再铸一次幻影)`**, −61 B. Surviving home: the same\n   sentence already states it as a rule — `但零 workflow/脚本读它、豁免不了任何东西,pin\n   测试钉着这条` — and the sentence immediately before it is the phantom-gate warning\n   `读回验的是「写落了」,验不出「有门在读」——幻影门标签读回同样成功`. The `⛔ 永不在那边\n   施加该标签` prohibition it trailed is untouched.\n2. **`但「不发布」的声明方式因仓库而异。`** Surviving home: the bullet's own bolded\n   headline, one sentence earlier — `标签按仓库分流——先认清目标仓库有没有这个机制`. The\n   per-repo split it announced (`**本仓库**` / `**objectui**`) is untouched.\n\nArithmetic: paragraph 1467 B → 1486 B (+19 B), 13 lines → 13 lines, file 470 → 470.\n\n## Incidental, and disclosed rather than hidden\n\nThe bullet was re-flowed with the ratchet's own `wrapLine`, and the re-flow was proved\ncontent-preserving by whitespace normalization before it was written. Two consequences\nare visible in the diff and are not content changes:\n\n- The 169-byte line the bullet used to carry is gone. It passed only through the\n  `quotation` exemption (it opened a 「…」 it closed on the next line). Every line of the\n  bullet now sits at or under the 120-byte rule **on its own merit**, using no exemption.\n- Two legacy soft breaks disappear, both of the class the length rule refuses to produce:\n  `仅含 tests/` | `workflow/...` (a break inside a Latin run) and `必要不充分:` | `实测`\n  (a Han + ASCII-punctuation break, the #12081 class). Both rendered as a stray space;\n  neither adds or removes a character of content.\n\n## This PR practices what it preaches\n\nThe diff is `.claude/**`-only. It publishes nothing from any package, so it takes the\n`skip-changeset` **label**, applied at PR-open time — not a changeset file, and not an\nempty one. No `Check Changeset` red was waited for.\n\n## Gates — run on `8b02f78c7`, the final commit\n\nThe branch merges `origin/main` at `93a554d71`; the diff against `main` is this one file\n(13 insertions, 13 deletions). Union derived from the real changeset, not from memory:\n`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` named 10 families.\nExit codes captured before any pipe; the verdict lines below are each gate's own.\n\n- `✓ check-skill-line-ratchet: .claude/agents/os-dev.md is 470 lines (ceiling 470; headroom 0).`\n- `✓ check-skill-line-ratchet: .claude/agents/os-dev.md: widest table row is 0 bytes (pin 0; headroom 0).`\n- `✓ check-skill-frame-sync: 4 copies of the decision frame are structurally isomorphic across 3 files` —\n  the enforced copy of the decision frame was not touched.\n- `✓ check-skill-id-lint: 23 file(s) clean (pattern /#[0-9]{3,}/g).`\n- `✓ check:doc-formula-expressions: 22 record-scoped formula example(s) across 425 files / 1453 TS blocks judged clean by @objectstack/formula.`\n- `check:agent-model-declared`, `check:agent-test-spelling`, `check:doc-authoring`,\n  `check:nul-bytes`, `check:pm-governed-merges`, `check:skill-frame-freshness` — all exit 0.\n- `check-governed-queue-guard` — **not measured locally**: it reads the workflow event\n  payload and there is none outside CI, so it exits 1 saying \"could not look\". That is a\n  prerequisite miss, not a finding. CI runs it.\n\n`check:doc-formula-expressions` first exited 1 with `PREREQUISITE NOT MET` twice\n(`@objectstack/formula`, then `@objectstack/lint` not built); both were built and the gate\nthen measured clean. Recorded because an unbuilt prerequisite is not a red gate.\n\nGoverned surface: no reviewer requested from here — the PM runs the four-piece review.\nTier: this path is clause-① mandated, taken under the recorded exit for a\none-sentence-class mechanical governed edit, compensated by the PM's collection review at\nthe mandated `claude-fable-5` tier.\n\nSession: https://claude.ai/code/session_01MnijPVVDakqK2J335JoJtq\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01MnijPVVDakqK2J335JoJtq)_"
+}

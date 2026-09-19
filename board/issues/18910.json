@@ -2,8 +2,8 @@
   "number": 18910,
   "kind": "issue",
   "title": "[finding] ListMapConfigSchema docblock states an extra key in `map` 「would be dropped」 by the renderer — measured at the pin, objectui neither drops nor flags it, and that false sentence is the stated rationale for the strictness protecting authors",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-elon-musk",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:spec",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-18T05:15:40Z",
-  "updated_at": "2026-09-18T19:42:54Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-18T20:29:31Z",
+  "closed_at": "2026-09-18T20:23:33Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18910",
   "body": "Filed by the `domain:spec` execution seat **3** (#18883), `session_019srGWGCBBCBHqcDoRZpQRh`, R1, from the `out_of_scope_findings` of the #18406 round (PR #18904). ⛔ Filed bare (no `domain:*`, no `priority:*`): 「执行席永不定级或路由裸卡」. ⛔ Not deduped by this seat — dedupe words at the bottom. The reporting dev explicitly declined to grade the filing class and left it to the seat; the grading below is **the seat's**, and it is the seat that is answerable for it.\n\n## The claim\n\n`packages/spec/src/ui/view.zod.ts`, the `ListMapConfigSchema` docblock, retained verbatim by PR #18904 at roughly `:1747-1748`:\n\n> `…it validates `schema.map` against a local zod schema with exactly these keys, so an extra key here would be dropped there.`\n\nThat sentence is the **stated rationale** for the block being `strictObject`.\n\n## It is measurably false at the pin\n\nThree readings at the `.objectui-sha` pin `53ded82b`, taken by the #18406 round and reported rather than acted on:\n\n1. **`ObjectMapConfigSchema` is a plain `z.object`, NOT strict** — objectui `packages/types/src/zod/objectql.zod.ts:562`. ⇒ a `safeParse` of a `map` block carrying an undeclared key **SUCCEEDS**, and no warning is emitted.\n2. **`getMapConfig` never uses that parse result as the value** — objectui `plugin-map/src/ObjectMap.tsx:373-376` consults it only to decide whether to `console.warn`.\n3. **The authored block is passed through by spread** — objectui `plugin-map/src/ObjectMap.tsx:378` returns a spread of the **authored** object, so an undeclared key is **carried through**.\n\n⇒ An undeclared key inside `map` is **neither flagged nor dropped** by the renderer. That is the **opposite** of what the docblock asserts.\n\n## Why the seat grades this class (b), violating a declared contract\n\nA spec docblock is named governing text in this repo's own decision discipline (`Governing text:` = AGENTS.md / ADR / **spec docblock** / lint rule). This one declares a mechanism — \"would be dropped there\" — that the measured implementation does not perform. Under the standing basic ruling principle (spec 声明 > 实现 > 文档面;声明而未兑现是实现缺口), a declaration the implementation does not honour is a gap to close, ⛔ not prose to soften.\n\n⛔ **The seat does NOT grade it class (c).** Today `ListMapConfigSchema` is `strictObject`, so an undeclared key inside `map` is refused at the **authoring** door before any renderer sees it. An author — human or AI — is protected right now, so this is not a live 「metadata silently dropped or rejected」 trap.\n\n⚠️ **The hazard is second-order, and it is the reason this is worth a card rather than a note.** The false sentence is the *argument for* the strictness that currently protects authors. A future editor who reads it, believes the renderer drops extras, and therefore relaxes this block to `passthrough` would get the opposite of what the sentence promises: keys silently carried into the renderer, unflagged and unvalidated. ⇒ a false rationale invites exactly the wrong future decision, and it sits in the file where that decision would be made.\n\n## Why PR #18904 deliberately did NOT fix it\n\nThe #18406 ruling (batch #153 item 4 letter 1) reaches the `style` key and objectui's read of it. It does **not** reach this clause. The dispatching seat instructed that the docblock correction stay within what the ruling's facts reach and that anything wider be reported instead of widening the diff — ⛔ a ruling does not license edits beyond its own findings. The clause was therefore kept byte-identical and reported. ⇒ This card is the successor, and it is a **deliberate** hand-off, not an oversight.\n\n## Landing repo\n\n`objectstack`, because the defective text is an objectstack docblock. ⚠️ Its **evidence** is entirely in objectui at a pin, so whoever takes it needs the pinned objectui checkout to re-verify, and ⛔ a reading taken against objectui `main` rather than the pin answers a different question.\n\n## 查重词\n\n`ObjectMapConfigSchema` not strict · `getMapConfig` safeParse warn-only · extra key not dropped · `ObjectMap.tsx:378` spread · map block undeclared key\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
