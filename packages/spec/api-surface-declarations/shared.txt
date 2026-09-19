@@ -730,7 +730,7 @@ declare function canonicalMetaUrlType(type: string): string;
 declare function cel(strings: TemplateStringsArray, ...values: unknown[]): EvaluatedExpression;
 
 // ── cron (function) ──
-declare function cron(strings: TemplateStringsArray, ...values: unknown[]): Expression;
+declare function cron(strings: TemplateStringsArray, ...values: unknown[]): EvaluatedExpression;
 
 // ── expression (function) ──
 declare function expression(source: string, dialect?: ExpressionDialect, meta?: ExpressionMeta): EvaluatedExpression;
@@ -811,7 +811,7 @@ declare function strictUnknownKeyError(options: StrictUnknownKeyErrorOptions): z
 declare function suggestFieldType(input: string): string[];
 
 // ── tmpl (function) ──
-declare function tmpl(strings: TemplateStringsArray, ...values: unknown[]): Expression;
+declare function tmpl(strings: TemplateStringsArray, ...values: unknown[]): EvaluatedExpression;
 
 // ── unrecognisedMetaTypeRefusal (function) ──
 declare function unrecognisedMetaTypeRefusal(urlType: string): {
