@@ -893,11 +893,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ #17003: the list is DERIVED three-dot, or refused': 43,
   '⭐ #18055: the INCOMPLETE banner is BUILT, never thrown away': 11,
   '⭐ the SIZE predicate: over the human-merge line threshold, whatever the paths': 30,
+  '⭐ #18989: the guard is the CALLER\'s name, and the mirror is pinned to its owner': 18,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 28;
+const SELF_TEST_BATTERY_FLOOR = 29;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -2603,7 +2604,15 @@ export function attributionChannels(env) {
   return channels;
 }
 
-/** The node flag that points fetch at the session proxy, and the re-exec guard. */
+/**
+ * The node flag that points fetch at the session proxy, and the re-exec guard
+ * THIS file sets on the child it re-execs.
+ *
+ * ⚠️ The guard is a NAME, and it is this file's own. Every instrument in this
+ * family sets its own variable, so a plan that reads one hard-coded name
+ * answers "already re-armed" for a tool that never re-armed — see the plan
+ * below, whose `guard` parameter is what keeps each name to its owner.
+ */
 export const PROXY_FLAG = '--use-env-proxy';
 export const PROXY_REARM_GUARD = 'OS_GOVERNED_MERGES_PROXY_REARMED';
 
@@ -2612,14 +2621,83 @@ export const PROXY_REARM_GUARD = 'OS_GOVERNED_MERGES_PROXY_REARMED';
  * GitHub at all? Pure, so every branch is offline-testable — and the branches
  * are the whole point: a proxied run without the flag reads 401/403 on every
  * channel and looks exactly like a credential problem (#9642).
+ *
+ * ## The guard is a NAME, and it belongs to the CALLER (#18939, #18989)
+ *
+ * This plan is imported by `ci-failure.mjs` as well as called here, and each of
+ * those two tools sets its OWN variable on the child it re-execs. While the
+ * guard was read from one hard-coded name — this file's — either tool's
+ * variable, once inherited by the other, answered "already re-armed" for a run
+ * that had never re-armed; the suppressed run then took the bypassed route and
+ * answered 401 Bad credentials on every endpoint, `/rate_limit` included. A
+ * uniform 401 is a self-consistent story — the credential is dead — and it was
+ * read as one for about an hour against a channel that was alive the whole
+ * time. `guard` is therefore a parameter: a caller passes the name it actually
+ * sets, and only its own guard can stop its own re-exec.
+ *
+ * And a suppressed run must not be a SILENT one. `rearm: false, hint: false`
+ * prints nothing at any consumer, so the suppression left no line anywhere in
+ * the run log, which is the whole cost of that chain. The guard branch
+ * therefore sets `hint: true` — the branch every consumer prints — and its
+ * reason names the variable, the route and the 401 it would be mistaken for. It
+ * can only fire on the anomaly: a real re-exec's child carries `PROXY_FLAG` in
+ * its `execArgv` and is answered by the branch above, never here.
+ *
+ * ## ⛔ This is a MIRROR of `check-half-states.mjs`'s plan, and it cannot be an
+ *    import — both directions measured
+ *
+ * The patrol OWNS this decision (that file's `proxyRearmPlan` carries the same
+ * branch set and the same `guard` contract). A second implementation forks every
+ * future invariant, so the copy is a debt, not a design — but the edge that
+ * would retire it deadlocks the process, measured on 2026-09-19 in a throwaway
+ * copy of `scripts/`:
+ *
+ *   + import { proxyRearmPlan } from './check-half-states.mjs';   // module scope
+ *     node scripts/pm/check-governed-merges.mjs --test AGENTS.md
+ *       -> exit 13, "Detected unsettled top-level await at
+ *          check-half-states.mjs:10044" (that file's `GOVERNED_REGISTER`)
+ *     control, same argv, no import                -> exit 3, the GOVERNED verdict
+ *
+ *   + const patrol = await import('./check-half-states.mjs');     // in selfTest()
+ *     node scripts/pm/check-governed-merges.mjs --self-test
+ *       -> exit 13, unsettled top-level await at THIS file's `await selfTest()`
+ *
+ * The cycle is real and short: that file resolves its H43 register at module
+ * scope with a top-level `await loadGovernedRegister()`, which awaits
+ * `import('./check-governed-queue-guard.mjs')`, which imports THIS file at
+ * module scope. The lazy door `check-governed-queue-guard.mjs`'s
+ * `CONTRACT_REVIEW_LABEL` describes is shut here too, because this file's own
+ * `--self-test` dispatch is a module-scope `await`. And the reverse edge is
+ * barred for a second, independent reason the patrol's own header records: that
+ * file TRAVELS — a sibling repo's `scripts/pm/` holds it alone — so it can
+ * never statically import the governed pair either.
+ *
+ * So the mirror stays, and the `--self-test` battery pins it to its OWNER the
+ * way `CONTRACT_REVIEW_LABEL` is pinned: by reading that file's SOURCE off disk,
+ * plus the REASON — when the patrol's module-scope `await` goes away, the case
+ * that fails says to make this a real import.
+ *
+ * @param {{ env?: Record<string,string|undefined>, execArgv?: string[],
+ *           flagSupported?: boolean, guard?: string }} [ctx]
+ * @returns {{ rearm: boolean, hint: boolean, flag?: string, guarded?: string, reason: string }}
  */
-export function proxyRearmPlan({ env = {}, execArgv = [], flagSupported = true }) {
+export function proxyRearmPlan({ env = {}, execArgv = [], flagSupported = true, guard = PROXY_REARM_GUARD } = {}) {
   const proxy = env.HTTPS_PROXY || env.https_proxy || null;
   if (!proxy) return { rearm: false, hint: false, reason: 'no HTTPS_PROXY in the environment — fetch reaches GitHub directly' };
   if (execArgv.includes(PROXY_FLAG) || (env.NODE_OPTIONS ?? '').includes(PROXY_FLAG)) {
     return { rearm: false, hint: false, reason: `already running with ${PROXY_FLAG}` };
   }
-  if (env[PROXY_REARM_GUARD] === '1') return { rearm: false, hint: false, reason: 'already re-armed once this run' };
+  if (env[guard] === '1') {
+    return {
+      rearm: false,
+      hint: true,
+      guarded: guard,
+      reason:
+        `${guard}=1 is set and this process is NOT running with ${PROXY_FLAG}, so the one re-exec this run ` +
+        `allows was already spent and every request below bypasses ${proxy} — if they answer 401 Bad credentials, ` +
+        `that inherited guard is why, and unsetting ${guard} is the fix rather than a new token`,
+    };
+  }
   if (!flagSupported) {
     return { rearm: false, hint: true, reason: `this node does not accept ${PROXY_FLAG}; fetch will bypass ${proxy}` };
   }
@@ -3254,7 +3332,18 @@ function rearmProxyOrNull(args, what, whatLower) {
     env: process.env,
     execArgv: process.execArgv,
     flagSupported: process.allowedNodeEnvironmentFlags.has(PROXY_FLAG),
+    guard: PROXY_REARM_GUARD,
   });
+  // ⭐ A suppressed re-exec SPEAKS here (#18989). Both `hint` branches — an
+  // older node, and a guard already set — used to return through the
+  // `!rearm.rearm` line below without printing anything, so the only place the
+  // hint ever reached a reader was the sweep's INCOMPLETE banner, and only when
+  // the incompleteness was about attribution. Every other mode bypassed the
+  // proxy in silence and reported the resulting 401 as the container's verdict.
+  if (rearm.hint) {
+    console.error(`⚠️  ${rearm.reason}. ${what} below may be answered by the ROUTE, not by the credential.`);
+    return null;
+  }
   if (!rearm.rearm) return null;
   console.error(`ℹ️  re-exec with ${rearm.flag}: ${rearm.reason}. ${what} would otherwise fail on every channel.`);
   // The proxy agent is experimental and says so once per run; the operator
@@ -3559,6 +3648,7 @@ async function main() {
       env: process.env,
       execArgv: process.execArgv,
       flagSupported: process.allowedNodeEnvironmentFlags.has(PROXY_FLAG),
+      guard: PROXY_REARM_GUARD,
     });
     return reportSweepIncomplete({ unaudited, edged, attributionFailed, rearm });
   }
@@ -4495,6 +4585,85 @@ async function selfTest() {
   assert('a-resolved-entry-names-the-channel-it-came-from', resolvedReport.includes('merged_by os-steve') && resolvedReport.includes('(via anonymous)'), resolvedReport);
   assert('a-resolved-column-carries-the-account-is-not-a-principal-caveat', resolvedReport.includes('names an ACCOUNT, not a principal'), resolvedReport);
   assert('the-caveat-is-absent-when-nothing-resolved', !unresolvedReport.includes('names an ACCOUNT, not a principal'));
+
+  // ── ⭐ #18989: the re-exec guard is the CALLER's name, and this copy is a
+  // ── MIRROR pinned to its OWNER ────────────────────────────────────────────
+  //
+  // Two facts, one battery, because the card is one mechanism seen twice. The
+  // guard the plan reads is the CALLER's, so no sibling instrument's inherited
+  // variable can silence a tool that never re-armed (#18939's chain, replayed in
+  // a second plan); and the plan itself is a mirror of `check-half-states.mjs`'s,
+  // kept only because both edges that would retire it are measured deadlocks —
+  // so the mirror is pinned to its owner's SOURCE, and so is the REASON.
+  battery('⭐ #18989: the guard is the CALLER\'s name, and the mirror is pinned to its owner');
+  const guardProxy = { HTTPS_PROXY: 'http://127.0.0.1:40309' };
+  const SIBLING_GUARD = 'OS_SIBLING_PROXY_REARMED';
+  const ownGuarded = proxyRearmPlan({ env: { ...guardProxy, [PROXY_REARM_GUARD]: '1' } });
+  assert('the-default-guard-is-still-THIS-files-own-name-so-its-own-re-exec-is-unchanged',
+    ownGuarded.rearm === false && ownGuarded.guarded === PROXY_REARM_GUARD, JSON.stringify(ownGuarded));
+  assert('a-caller-that-names-its-OWN-guard-is-suppressed-by-that-one',
+    proxyRearmPlan({ env: { ...guardProxy, [SIBLING_GUARD]: '1' }, guard: SIBLING_GUARD }).rearm === false);
+  assert('and-THIS-files-name-does-NOT-suppress-it-the-cross-suppression-is-gone',
+    proxyRearmPlan({ env: { ...guardProxy, [PROXY_REARM_GUARD]: '1' }, guard: SIBLING_GUARD }).rearm === true);
+  assert('and-the-suppressing-variable-is-reported-machine-readably',
+    proxyRearmPlan({ env: { ...guardProxy, [SIBLING_GUARD]: '1' }, guard: SIBLING_GUARD }).guarded === SIBLING_GUARD);
+  // Silence is the whole cost of this chain: `rearm:false, hint:false` prints
+  // nothing at any consumer. The guard branch HINTS, which every consumer prints.
+  assert('a-guard-that-suppresses-SPEAKS-rather-than-closing-the-route-silently', ownGuarded.hint === true, JSON.stringify(ownGuarded));
+  assert('the-line-names-the-variable-a-reader-has-to-unset', ownGuarded.reason.includes(PROXY_REARM_GUARD), ownGuarded.reason);
+  assert('and-names-the-401-the-silence-would-otherwise-be-read-as', ownGuarded.reason.includes('401 Bad credentials'), ownGuarded.reason);
+  assert('and-the-proxy-the-request-was-supposed-to-take', ownGuarded.reason.includes('http://127.0.0.1:40309'), ownGuarded.reason);
+  // The Actions-runner leg, re-pinned ACROSS the new branch: a guard set where
+  // no proxy is configured must still spawn nothing, hint nothing, print nothing.
+  assert('with-no-proxy-configured-the-guard-is-inert-the-Actions-runner-leg',
+    proxyRearmPlan({ env: { [PROXY_REARM_GUARD]: '1' } }).rearm === false && proxyRearmPlan({ env: { [PROXY_REARM_GUARD]: '1' } }).hint === false);
+  assert('and-an-already-flagged-run-is-answered-by-the-FLAG-not-by-the-guard',
+    Boolean(proxyRearmPlan({ env: { ...guardProxy, [PROXY_REARM_GUARD]: '1' }, execArgv: [PROXY_FLAG] }).guarded) === false);
+  // Structural: the DEFAULT is not the contract, because this plan is imported.
+  // Both live call sites hand it this file's own name.
+  const ownPlanSource = readFileSync(scriptPath, 'utf8');
+  assert('structural-both-live-call-sites-hand-the-plan-THIS-files-guard',
+    (ownPlanSource.match(/^\s+guard: PROXY_REARM_GUARD,$/gm) ?? []).length === 2,
+    String((ownPlanSource.match(/^\s+guard: PROXY_REARM_GUARD,$/gm) ?? []).length));
+  // ⭐ The other half of the pair, read from ITS source rather than typed from
+  // memory: `ci-failure.mjs` imports this plan and sets its OWN variable on the
+  // child it re-execs, so a rename on either side reds here.
+  const guardSpellingIn = (rel, decl) => {
+    try {
+      const source = readFileSync(join(repoRoot, rel), 'utf8');
+      return { source, guard: new RegExp(`^${decl} PROXY_REARM_GUARD = '([^']+)';$`, 'm').exec(source)?.[1] ?? null };
+    } catch (error) {
+      return { source: null, guard: null, error: String(error?.message ?? error).split('\n')[0] };
+    }
+  };
+  const consumer = guardSpellingIn('scripts/pm/ci-failure.mjs', 'const');
+  const patrol = guardSpellingIn('scripts/pm/check-half-states.mjs', 'export const');
+  assert('both-sibling-files-are-readable-so-these-mirrors-can-be-pinned-at-all',
+    typeof consumer.source === 'string' && typeof patrol.source === 'string', `${consumer.error ?? 'ok'} / ${patrol.error ?? 'ok'}`);
+  assert('the-importer-names-its-OWN-guard-so-the-pair-no-longer-shares-one',
+    typeof consumer.guard === 'string' && consumer.guard !== PROXY_REARM_GUARD, String(consumer.guard));
+  assert('and-the-importers-inherited-guard-does-NOT-suppress-THIS-files-re-exec',
+    consumer.guard !== null && proxyRearmPlan({ env: { ...guardProxy, [consumer.guard]: '1' } }).rearm === true, String(consumer.guard));
+  // ⭐ The MIRROR: the patrol OWNS this decision. Its spelling and its `guard`
+  // contract are read off disk — a constant asserting against itself proves
+  // nothing — and its name must not silence this file either.
+  assert('the-patrol-owns-an-equivalent-plan-whose-guard-is-its-OWN-name',
+    typeof patrol.guard === 'string' && patrol.guard !== PROXY_REARM_GUARD, String(patrol.guard));
+  assert('and-the-patrols-inherited-guard-does-NOT-suppress-THIS-files-re-exec',
+    patrol.guard !== null && proxyRearmPlan({ env: { ...guardProxy, [patrol.guard]: '1' } }).rearm === true, String(patrol.guard));
+  assert('the-owners-plan-takes-the-CALLERS-guard-too-so-the-two-mirrors-agree',
+    /export function proxyRearmPlan\(\{[^)]*guard = PROXY_REARM_GUARD/.test(patrol.source ?? ''), 'the owner no longer takes a `guard` parameter');
+  // ⭐ And the REASON the plan is mirrored instead of imported. Measured
+  // 2026-09-19 on a throwaway copy of `scripts/`: a module-scope import of the
+  // owner exits 13 ("Detected unsettled top-level await") against a control
+  // exit 3, and a lazy `await import(…)` inside this very function exits 13 too,
+  // because this file's `--self-test` dispatch is itself a module-scope await.
+  // When the line below goes away, the cycle may be gone with it — and then this
+  // mirror should become a real import.
+  assert('⭐-the-REASON-this-plan-is-a-mirror-and-not-an-import-is-still-true',
+    /^export const GOVERNED_REGISTER = await loadGovernedRegister\(\);$/m.test(patrol.source ?? ''),
+    'the owner no longer resolves its register with a module-scope await — re-measure the cycle and make this an import',
+  );
 
   // ── the attribution column's THIRD case (#12645) ──────────────────────────
   // The two fixtures above are cases 1 and 2; the PR-less mainline entry —
