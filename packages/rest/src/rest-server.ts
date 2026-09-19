@@ -11692,6 +11692,20 @@ export class RestServer {
                 ) {
                     return respondError(res, 403, 'PERMISSION_DENIED', msg.slice(0, 1000));
                 }
+                // [#18253] The name asked about is not a declared object
+                // (`ExplainObjectNotFoundError`, plugin-security `errors.ts`) —
+                // a REFUSAL, not a fault, so it keeps its declared answer
+                // instead of falling to the 500 below. 404 `OBJECT_NOT_FOUND`
+                // is what this package already answers for an unregistered
+                // object name (`mapDataError`, `error-response.ts`), emitted
+                // here through this family's ONE refusal emitter so the body
+                // is the same ADR-0112 D5 envelope every other arm sends.
+                // Matched by `code`/`name`, exactly as the 403 arm above is:
+                // `@objectstack/plugin-security` is not a dependency of this
+                // package, and the thrown shape is the contract (#8016).
+                if (error?.code === 'OBJECT_NOT_FOUND' || error?.name === 'ExplainObjectNotFoundError') {
+                    return respondError(res, 404, 'OBJECT_NOT_FOUND', msg.slice(0, 1000));
+                }
                 logError('[REST] Security explain error:', error);
                 // The 500 arm keeps its 500-char cap: an unexpected fault's
                 // message is not a contract, and truncating it stays a
