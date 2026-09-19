@@ -346,9 +346,13 @@ export function enumWithRetiredValues<const T extends readonly [string, ...strin
   return z.enum(values, {
     // `hasOwnProperty`, never a bare `retired[input]`: a plain object literal
     // inherits `constructor`, `toString` and friends from Object.prototype, so
-    // an author writing `variant: 'constructor'` would otherwise be handed a
-    // FUNCTION as their error message. `typeof === 'string'` guards the same
-    // lookup against a non-string input (a number, an object) reaching it.
+    // the bare lookup answers an author's `variant: 'constructor'` with a
+    // FUNCTION where this map's contract is `string | undefined`. Measured on
+    // zod 4.4.3: zod ignores a non-string return and falls back to its own
+    // message, so the guard buys nothing OBSERVABLE today — it keeps the map
+    // honest instead of resting on that leniency, and the pin for it asks this
+    // map directly rather than through a parse. `typeof === 'string'` guards
+    // the same lookup against a non-string input (a number, an object).
     error: (issue) =>
       (typeof issue.input === 'string'
       && Object.prototype.hasOwnProperty.call(retired, issue.input)

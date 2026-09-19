@@ -200,22 +200,32 @@ describe('enumWithRetiredValues (#17109)', () => {
     expect(typo.error!.issues[0]!.message).toContain('Invalid option');
   });
 
-  it('never hands back an inherited Object.prototype member as the message', () => {
-    // A bare `retired[input]` lookup answers `constructor` with a FUNCTION and
-    // `toString` with another — an author's typo turning into a garbage error
-    // message, or worse. The helper asks `hasOwnProperty`.
+  it('never hands back an inherited Object.prototype member as the prescription', () => {
+    // Asked THROUGH zod this assertion is vacuous: zod 4.4.3 ignores a
+    // non-string error-map return and falls back to its own message, so a bare
+    // `retired[input]` lookup — which answers `constructor` with a FUNCTION —
+    // is indistinguishable at the message level. Measured, not assumed: an
+    // ablation dropping the `hasOwnProperty` guard left all 15 cases green.
+    // So this asks the helper's OWN error map, where the lookup's answer IS
+    // the contract — `string` for a retired member, `undefined` for anything
+    // else — rather than pinning zod's leniency as if it were ours.
+    const errorMap = (VariantEnum as unknown as {
+      _zod: { def: { error?: (issue: { code: string; input: unknown }) => unknown } };
+    })._zod.def.error;
+    expect(typeof errorMap).toBe('function');
+    expect(errorMap!({ code: 'invalid_value', input: 'heading' })).toBe(HEADING_RETIRED);
     for (const inherited of ['constructor', 'toString', 'hasOwnProperty', '__proto__', 'valueOf']) {
-      const r = VariantEnum.safeParse(inherited);
-      expect(r.success).toBe(false);
-      expect(typeof r.error!.issues[0]!.message).toBe('string');
-      expect(r.error!.issues[0]!.message).toContain('Invalid option');
+      expect(errorMap!({ code: 'invalid_value', input: inherited })).toBeUndefined();
     }
-    // Non-string inputs reach the same lookup and must not match either.
+    // A non-string input reaches the same lookup and must not match either.
     for (const nonString of [5, null, {}, ['heading']]) {
-      const r = VariantEnum.safeParse(nonString);
-      expect(r.success).toBe(false);
-      expect(r.error!.issues[0]!.message).not.toBe(HEADING_RETIRED);
+      expect(errorMap!({ code: 'invalid_value', input: nonString })).toBeUndefined();
     }
+    // End to end, the author of such a typo still meets zod's own message,
+    // which lists the legal tokens.
+    const r = VariantEnum.safeParse('constructor');
+    expect(r.success).toBe(false);
+    expect(r.error!.issues[0]!.message).toContain('Invalid option');
   });
 
   it('composes with `.optional()` — absence is fine, the member still refuses', () => {
