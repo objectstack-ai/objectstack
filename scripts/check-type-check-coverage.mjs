@@ -548,6 +548,7 @@ import {
   SELF_TEST_CASE_COUNT as TYPECHECK_CONFIGS_CASES,
   selfTest as typecheckConfigsSelfTest,
 } from './typecheck-configs.mjs';
+import { definePopulationFloor } from './population-floor.mjs';
 
 // Anchored to the script, not to cwd: the verdict must not depend on where the
 // guard was invoked from.
@@ -2271,89 +2272,48 @@ const MIN_WALKED_TEST_FILES = 2800;
 const MIN_WALKED_SOURCE_FILES = 2000;
 
 /**
- * The first floor a run falls below, as a refusal message -- or `null` when
- * every count clears. Pure, so `--self-test` drives every row with no tree.
+ * The POPULATION FLOORS and the provenance line, over the row table THIS gate
+ * declares. The row-walk, the refusal wording and the provenance formatting are
+ * shared with the two other gates that carry the same mechanism
+ * (`scripts/population-floor.mjs`); the rows stay HERE, because each `why` is a
+ * claim about this gate's internals and is true of nothing else.
  *
  * ⛔ Each `why` names ONLY the stage its own count measures. A row that fell
  * says which reader went quiet and nothing else: the other rows report
  * themselves, and listing every way a run can collapse would put causes that
  * did not occur in front of the reader.
  *
- * @param {{packages?: number, walkedTestFiles?: number, walkedSourceFiles?: number}} counts
- * @returns {string | null}
- *
  * ⛔ NOT exported, deliberately. `check:entry-guard` refuses a `scripts/**` file
  * that exports a binding AND runs on import -- whatever its top level does then
  * runs inside the importer -- and this file's top level IS its dispatch. The
- * self-test lives in this same module and reaches it directly, so an export
- * would buy nothing and cost that rule. (The precedent this shape is copied
- * from, `check-dual-build-cjs-loads.mjs`, exports because it already guards its
- * dispatch with `isEntrypoint`; retrofitting that here is a change to two large
- * gates' argv handling and not this card's subject.)
+ * self-test lives in this same module and reaches these directly, so an export
+ * would buy nothing and cost that rule. The shared module is the other half of
+ * the same rule: it only ever exports and never runs, so importing it costs
+ * this file nothing.
+ *
+ * @type {{populationFloorProblem: (counts?: object) => string | null,
+ *         populationProvenanceLine: (counts?: object) => string}}
  */
-function populationFloorProblem(counts) {
-  const rows = [
-    [counts?.packages ?? 0, MIN_PACKAGES, MEASURED_POPULATION.packages,
-      'workspace package(s) enumerated',
-      'This is the population every per-package clause is asked about. With none of it, each '
+const { populationFloorProblem, populationProvenanceLine } = definePopulationFloor({
+  ref: MEASURED_POPULATION.ref,
+  rows: [
+    { key: 'packages', min: MIN_PACKAGES, measured: MEASURED_POPULATION.packages,
+      what: 'workspace package(s) enumerated',
+      why: 'This is the population every per-package clause is asked about. With none of it, each '
         + 'clause is vacuously satisfied and the summary line reports a coverage ratio over an '
-        + 'empty set.'],
-    [counts?.walkedTestFiles ?? 0, MIN_WALKED_TEST_FILES, MEASURED_POPULATION.walkedTestFiles,
-      'test file(s) found by the per-package walk',
-      'TESTS_COVERED and PINS_CHECKED are decided against what this walk hands over. A walk that '
+        + 'empty set.' },
+    { key: 'walkedTestFiles', min: MIN_WALKED_TEST_FILES, measured: MEASURED_POPULATION.walkedTestFiles,
+      what: 'test file(s) found by the per-package walk',
+      why: 'TESTS_COVERED and PINS_CHECKED are decided against what this walk hands over. A walk that '
         + 'returns nothing hides no tests and pins nothing, which is the same silence a fully '
-        + 'covered workspace produces.'],
-    [counts?.walkedSourceFiles ?? 0, MIN_WALKED_SOURCE_FILES, MEASURED_POPULATION.walkedSourceFiles,
-      'non-test source file(s) found by the per-package walk',
-      'SOURCES_COVERED is decided against this half of the same walk. With none of it every '
+        + 'covered workspace produces.' },
+    { key: 'walkedSourceFiles', min: MIN_WALKED_SOURCE_FILES, measured: MEASURED_POPULATION.walkedSourceFiles,
+      what: 'non-test source file(s) found by the per-package walk',
+      why: 'SOURCES_COVERED is decided against this half of the same walk. With none of it every '
         + 'source directory reads as accounted for, because the clause reports the REMAINDER and '
-        + 'the remainder of nothing is nothing.'],
-  ];
-  for (const [got, min, measured, what, why] of rows) {
-    if (got >= min) continue;
-    return `measured only ${got} ${what}, below the floor of ${min} `
-      + `(${measured} on ${MEASURED_POPULATION.ref}).\n`
-      + `  ${why}\n`
-      + '  ⛔ NOT a pass: nothing, or nearly nothing, was read. This says WHICH population fell and\n'
-      + '  nothing about why the others stand — they are reported by their own rows.';
-  }
-  return null;
-}
-
-/**
- * The provenance footer for a PASSING run: what this run read, the floors it
- * cleared, and the census those floors came from, side by side.
- *
- * The floors are inequalities on purpose, so no run can contradict the record.
- * Without this line the record could stop describing the tree with nothing
- * anywhere saying so. The delta is INFORMATION, never a verdict: this
- * population moves in both directions for good reasons -- a package merged
- * away, a test tree deleted -- and only the floors decide. Pure.
- *
- * @param {{packages?: number, walkedTestFiles?: number, walkedSourceFiles?: number}} counts
- * @returns {string}
- *
- * ⛔ NOT exported, deliberately. `check:entry-guard` refuses a `scripts/**` file
- * that exports a binding AND runs on import -- whatever its top level does then
- * runs inside the importer -- and this file's top level IS its dispatch. The
- * self-test lives in this same module and reaches it directly, so an export
- * would buy nothing and cost that rule. (The precedent this shape is copied
- * from, `check-dual-build-cjs-loads.mjs`, exports because it already guards its
- * dispatch with `isEntrypoint`; retrofitting that here is a change to two large
- * gates' argv handling and not this card's subject.)
- */
-function populationProvenanceLine(counts) {
-  const got = [counts?.packages ?? 0, counts?.walkedTestFiles ?? 0, counts?.walkedSourceFiles ?? 0];
-  const rec = [MEASURED_POPULATION.packages, MEASURED_POPULATION.walkedTestFiles,
-    MEASURED_POPULATION.walkedSourceFiles];
-  const floors = [MIN_PACKAGES, MIN_WALKED_TEST_FILES, MIN_WALKED_SOURCE_FILES];
-  const delta = got.map((g, i) => (g === rec[i] ? '=' : `${g > rec[i] ? '+' : ''}${g - rec[i]}`));
-  return `  provenance — packages/walkedTestFiles/walkedSourceFiles: this run ${got.join('/')}`
-    + ` · floors ${floors.join('/')} · derived from ${rec.join('/')} measured on ${MEASURED_POPULATION.ref}`
-    + ` (${delta.join('/')} vs the record).\n`
-    + '  ⚠ The delta is information, not a verdict — this population grows AND shrinks for good'
-    + ' reasons, and only the floors decide.';
-}
+        + 'the remainder of nothing is nothing.' },
+  ],
+});
 
 function workspacePackages() {
   // Membership comes from scripts/workspace-enumerator.mjs (#11510) — this repo's
