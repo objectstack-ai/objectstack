@@ -158,6 +158,14 @@ const RELEASE_RE = /^v\d+(\.\d+)?$/;
  * exchange it REQUIRES `personas`: who the capability is for is what makes a
  * gap readable to the next sweep, and it is knowable the day the gap is found.
  *
+ * ⚠️ On `since` the claim is kept as narrow as the enforcement. What is checked
+ * is the SHAPE — `null`, or a release-looking string. Whether the release named
+ * has already SHIPPED is not checkable here and is not checked: this ledger
+ * holds no release timeline and `RELEASE_RE` is a spelling rule. A planned item
+ * targeting a release that is already out is an authoring error, and it passes.
+ * Saying otherwise in the refusal would advertise a check that does not exist,
+ * which is the one thing a refusal must never do.
+ *
  * @param {{status?: string, since?: unknown, steps?: unknown, personas?: unknown}} item
  * @returns {string[]}
  */
@@ -168,7 +176,7 @@ function statusFieldProblems(item) {
 
   if (item.status === 'planned') {
     if (!(item.since === null || isRelease)) {
-      problems.push('"since" on a planned item must be null (no target release chosen yet) or the TARGET release, e.g. "v18" — never a release that already shipped without it');
+      problems.push('"since" on a planned item must be null (no target release chosen yet) or a TARGET release, e.g. "v18". ⛔ Only the SHAPE is checked here: this ledger holds no release timeline, so a target naming a release that already shipped PASSES and is an authoring error no gate can see');
     }
     if (hasSteps) {
       problems.push('a planned item carries NO "steps" — there is nothing to drive yet. Steps arrive in the PR that implements the capability, in the same edit that promotes it to "active"');
@@ -227,6 +235,82 @@ function coverageEntryProblems(ids, statusOf) {
     );
   }
   return { problems, bearing };
+}
+
+/**
+ * ⭐ The BINDING of the two predicates above into the walks that judge the
+ * ledger, read out of this file's own source so it can be driven ON and OFF.
+ *
+ * ## The hole this closes, measured rather than supposed
+ *
+ * `statusFieldProblems` and `coverageEntryProblems` are pure, which is what
+ * lets the battery drive them on fixtures — and a pure function's battery says
+ * NOTHING about whether anything calls it. Both severings were run on this
+ * file:
+ *
+ *   - revert the coverage call site to the pre-`planned` loop so
+ *     `coverageEntryProblems` is never called → `--self-test` exit 0 with all
+ *     207 assertions passing, the live gate green, and a fixture kind whose
+ *     ONLY item is planned green too;
+ *   - drop `statusFieldProblems(item)` from the item walk → `--self-test`
+ *     exit 0 with 207, and an ACTIVE item carrying `since: null` and no
+ *     `steps` green.
+ *
+ * ⇒ a severed call site left every instrument in this file reporting success.
+ * That is worse here than it would be almost anywhere else: the subject of
+ * these two functions IS a ratchet, so a ratchet whose binding nothing pins is
+ * one that can be switched off without a single number moving.
+ *
+ * The remedy is the one the line-citation limb already uses below — a source
+ * read driven BOTH ways over ONE text, so a green is the binding holding and
+ * not a read that matched everything, or nothing.
+ *
+ * ⚠️ This pin is SPELLING-SENSITIVE on purpose, and that is its whole cost:
+ * rewording a call site reds it. ⛔ The repair is to update the pinned spelling
+ * in the same edit — ⛔ never to delete the row, which is indistinguishable
+ * from severing the call it guards.
+ *
+ * @param {string} source this module's own text
+ * @returns {string[]} one message per binding that is not present
+ */
+function statusBindingProblems(source) {
+  const problems = [];
+  /**
+   * EXACTLY ONE occurrence, not "at least one" — and the second direction is
+   * the one this was rewritten for. The OFF legs below sever a call site over
+   * a copy of this text, so anything that leaves a SECOND literal copy of a
+   * pinned spelling anywhere in this file (a needle written out longhand, a
+   * commented-out draft, a doc example) keeps this check green after the real
+   * call is gone. That is a decoy, and the first draft of this very function
+   * shipped one: its severing needles were plain string literals, the predicate
+   * matched THOSE, and both OFF legs read as passes. The OFF legs caught it.
+   */
+  const bound = (re, what) => {
+    const hits = source.match(re)?.length ?? 0;
+    if (hits === 1) return;
+    problems.push(
+      hits === 0
+        ? what
+        : `${what} — and this spelling occurs ${hits} times in the file; a second literal copy of a pinned call site is a DECOY that holds this check green after the real one is severed`,
+    );
+  };
+  bound(
+    /for \(const msg of statusFieldProblems\(item\)\) where\(msg\);/g,
+    'the item walk does not consume `statusFieldProblems(item)` — every status-keyed field rule (a planned item\'s `since`/`steps`/`personas`, and the release-and-steps rules for every other status) is then declared and never applied',
+  );
+  bound(
+    /const \{ problems, bearing \} = coverageEntryProblems\(entry\.items, statusOf\);/g,
+    'the capability-coverage limb does not call `coverageEntryProblems(entry.items, statusOf)` — the planned-items-are-not-coverage rule is then declared and never applied',
+  );
+  bound(
+    /for \(const msg of problems\) err\('coverage\.json', kind, msg\);/g,
+    'the capability-coverage limb computes `problems` and never reports them — an UNMAPPED kind is then found and swallowed',
+  );
+  bound(
+    /if \(bearing > 0\) mappedCount\+\+;/g,
+    'the capability-coverage limb does not gate `mappedCount` on `bearing` — a kind mapped only to planned items is then counted as covered on the OK line',
+  );
+  return problems;
 }
 
 const errors = [];
@@ -932,7 +1016,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // nothing but these fixtures can tell a working ratchet rule from a deleted
   // one — the unreferenced-recipe argument, applied to a rule whose subject
   // population is empty on purpose rather than by luck.
-  [BATTERY_PLANNED_STATUS]: 28,
+  //
+  // 28 → 38: the fixtures above drive two PURE functions and so could say
+  // nothing about whether anything CALLS them. Both call sites were severed and
+  // measured green at 207/207, so the G-rows pin the BINDINGS by a source read
+  // driven ON and OFF, and two F-rows pin the `since` rule's own limit in the
+  // direction it deliberately does not go.
+  [BATTERY_PLANNED_STATUS]: 38,
 });
 const SELF_TEST_BATTERY_FLOOR = 7;
 
@@ -2135,6 +2225,21 @@ function selfTestPlannedStatus() {
     if (!ok) failures.push(`${what}${note ? ` — ${note}` : ''}`);
   };
 
+  // ── the live ledger, read FIRST so every count below is derived ───────────
+  // ⛔ Read here rather than from the item walk: this battery runs before that
+  // walk on every invocation, and behind `--self-test` the walk never runs.
+  // ⛔ And nothing below may TYPE a count of this ledger. A hand-typed 264 in an
+  // assertion label reads false on the 265th item and nothing moves — the same
+  // rot the census docblock in `scripts/pm/dispatch-gates.mjs` warns about.
+  const liveStatuses = new Set();
+  let liveItems = 0;
+  for (const f of readdirSync(AREAS_DIR).filter((n) => n.endsWith('.json'))) {
+    for (const it of JSON.parse(readFileSync(join(AREAS_DIR, f), 'utf8')).items ?? []) {
+      liveItems += 1;
+      liveStatuses.add(it.status);
+    }
+  }
+
   // ── the accept set ────────────────────────────────────────────────────────
   t('S1 `planned` is an accepted status — the widening this rule is', STATUSES.has('planned'));
   t('S2 the statuses that were accepted before still are — a widening that narrowed something else is a different change',
@@ -2160,10 +2265,20 @@ function selfTestPlannedStatus() {
   t('F10 an ACTIVE item is judged exactly as before — release `since`, non-empty steps', active().length === 0, active().join('; '));
   t('F11 an active item may NOT use `since: null` — the relaxation is scoped to planned', active({ since: null }).length === 1);
   t('F12 an active item still owes steps', active({ steps: [] }).length === 1);
-  t('F13 an active item owes NO personas — this battery did not widen a requirement onto the 264 live items',
+  t(`F13 an active item owes NO personas — this battery did not widen a requirement onto the ${liveItems} live items`,
     active({ personas: undefined }).length === 0);
   t('F14 a planned item is never asked for steps AND a release at once — the two relaxations compose',
     planned({ since: null, steps: undefined }).length === 0);
+
+  // ── the `since` rule's own LIMIT, pinned in the direction it does NOT go ──
+  // The shape is enforced; the release TIMELINE is not, because this ledger
+  // holds none. Recorded as an assertion rather than left to prose, so the
+  // unenforced direction is a measured fact — and so that anyone who later adds
+  // a real floor finds a row that reds and tells them to move it.
+  t('F15 a planned item whose `since` names an already-shipped release PASSES — the shape is all this rule checks, and that is deliberate',
+    planned({ since: 'v1' }).length === 0);
+  t('F16 and the refusal says so, so an author is never told this gate checks a timeline it cannot read',
+    planned({ since: 'someday' })[0]?.includes('Only the SHAPE is checked'));
 
   // ── the coverage ratchet, both directions ────────────────────────────────
   // A miniature ledger: one kind's worth of ids, each with a status.
@@ -2203,26 +2318,71 @@ function selfTestPlannedStatus() {
   t('C10 ⛔ the bearing set does not contain `planned` — folding it in is the ONE edit that turns this ratchet into a way to green an untested kind',
     !COVERAGE_BEARING_STATUSES.has('planned') && !COVERAGE_BEARING_STATUSES.has('retired'));
 
+  // ── ⭐ the BINDING, driven ON and OFF over ONE text ───────────────────────
+  //
+  // Everything above drives two PURE functions, and a pure function's battery
+  // cannot see whether anything calls it. Both call sites were severed and
+  // measured: the self-test stayed at 207/207 green, the live gate stayed
+  // green, and even a fixture kind whose only item is planned stayed green.
+  // So these rows pin the CALL SITES, the way the line-citation limb below
+  // pins its own binding — the ON leg says the bindings are there, and each
+  // OFF leg severs exactly one of them over a COPY of this source and requires
+  // the predicate to notice. Without the OFF legs this would be a check that
+  // can never fail, which is the thing it exists to refuse.
+  const OWN_SOURCE = readFileSync(new URL(import.meta.url).pathname, 'utf8');
+  /**
+   * Sever ONE spelling over a COPY; `changed` is what says the cut landed.
+   *
+   * ⛔ The needle arrives in TWO halves and is joined here, and that is not
+   * style: written out longhand it would be a second literal copy of the very
+   * call site being pinned, sitting in this file forever. `statusBindingProblems`
+   * counts occurrences precisely so such a decoy reds — and the split keeps this
+   * battery from being the thing that trips it. Each break falls INSIDE an
+   * identifier, so no contiguous copy exists in the source at rest.
+   */
+  const sever = (head, tail) => {
+    const text = OWN_SOURCE.replace(head + tail, '/* severed for the OFF leg */');
+    return { text, changed: text !== OWN_SOURCE };
+  };
+
+  t('G1 ON — every binding these rules ride on is present in this file',
+    statusBindingProblems(OWN_SOURCE).length === 0,
+    statusBindingProblems(OWN_SOURCE).join(' | '));
+
+  const offWalk = sever('for (const msg of statusField', 'Problems(item)) where(msg);');
+  t('G2 the item-walk severing really landed on a copy — an anchor that missed would make G3 a pass about nothing', offWalk.changed);
+  t('G3 OFF — with `statusFieldProblems(item)` gone from the walk the binding check FIRES. Measured before this row existed: that severing left `--self-test` at 207/207 and an ACTIVE item with `since: null` and no `steps` green',
+    statusBindingProblems(offWalk.text).some((p) => p.includes('statusFieldProblems(item)')),
+    statusBindingProblems(offWalk.text).join(' | '));
+
+  const offCov = sever('const { problems, bearing } = coverageEntry', 'Problems(entry.items, statusOf);');
+  t('G4 the coverage-call severing really landed on a copy', offCov.changed);
+  t('G5 OFF — with `coverageEntryProblems` never called the binding check FIRES. Measured before this row existed: that severing left the live gate green on a kind whose ONLY item is planned',
+    statusBindingProblems(offCov.text).some((p) => p.includes('coverageEntryProblems')),
+    statusBindingProblems(offCov.text).join(' | '));
+
+  const offReport = sever("for (const msg of problems) err('cover", "age.json', kind, msg);");
+  t('G6 OFF — a coverage limb that computes the problems and never reports them FIRES: found and swallowed is not found',
+    offReport.changed && statusBindingProblems(offReport.text).some((p) => p.includes('swallowed')));
+
+  const offCount = sever('if (bearing > 0) mapped', 'Count++;');
+  t('G7 OFF — an ungated `mappedCount` FIRES: a kind mapped only to promises would otherwise be counted as covered on the OK line',
+    offCount.changed && statusBindingProblems(offCount.text).some((p) => p.includes('mappedCount')));
+
+  t('G8 CONTROL — the same read reaches this file and finds a landmark that is NOT one of the four pinned spellings, so G1 is the bindings holding rather than a read that matches anything it is handed',
+    OWN_SOURCE.length > 10000 && /const COVERAGE_BEARING_STATUSES = new Set/.test(OWN_SOURCE),
+    `${OWN_SOURCE.length} bytes read`);
+
   // ── the live control ──────────────────────────────────────────────────────
-  // The fixtures above prove the rule; this reads the ledger the gate actually
-  // validates and proves the rule is pointed at IT. Every assertion above would
+  // The fixtures prove the rules; this reads the ledger the gate actually
+  // validates and proves they are pointed at IT. Every assertion above would
   // pass just as well against a `planned` no area file could ever carry.
-  // ⛔ Read here rather than from the item walk below: this battery runs before
-  // that walk on every invocation, and behind `--self-test` the walk never runs.
-  const liveStatuses = new Set();
-  let liveItems = 0;
-  for (const f of readdirSync(AREAS_DIR).filter((n) => n.endsWith('.json'))) {
-    for (const it of JSON.parse(readFileSync(join(AREAS_DIR, f), 'utf8')).items ?? []) {
-      liveItems += 1;
-      liveStatuses.add(it.status);
-    }
-  }
   t('L1 every status on the live ledger is one this gate accepts — the control that says the assertions above are about THIS ledger',
     liveItems > 0 && [...liveStatuses].every((s) => STATUSES.has(s)),
     `${liveItems} items, statuses: ${[...liveStatuses].sort().join(', ')}`);
 
   plannedStatusReachedVerdict = true;
-  return { checked, failures };
+  return { checked, failures, liveItems };
 }
 
 if (process.argv.slice(2).includes('--self-test')) {
@@ -2258,7 +2418,7 @@ if (process.argv.slice(2).includes('--self-test')) {
         ' and the `/meta` call-spelling refusal reads its vocabulary out of the live generated contract, fires on every folded spelling a `call` can instruct, and stays silent on the canonical singular, on parameter placeholders, and on the `why`/`expect`/`source`/`requires` prose that narrates the fold;' +
         ' and the line-citation limb DETECTS NOTHING ITSELF EITHER: the last forked grammar in this file went into the shared core at #18592, so what is pinned here is the BINDING — the corpus declaring `pathlessLineCitations`, a source read finding no citation regex and no detector while the same read DOES find the declaration, the binding driven ON and OFF against ONE text so the green is the declaration working rather than a text that would have matched anyway, the DARK case that a citation both grammars already agreed on keeps its verdict either way, the refusal to over-fire on this ledger\'s own HTTP statuses, config literals, URL ports, clock times and quoted JSON, and the live zero with the control that says it is a reading;' +
         ' and the symbol-anchor limb DETECTS NOTHING AND RESOLVES NOTHING ITSELF: it is a registered corpus (#18107), so the grammar, the walk and the verdict are all `scripts/symbol-anchors.mjs`\'s, pinned here by a source read that finds no local extension set, no anchor regex and no detector while the same read DOES find the registration, by the anchorable-extension vocabulary being the shared OBJECT rather than a copy of it, by the `runs/` exclusion driven three ways on the live corpus (the subtree holds files, none is swept, the areas beside it still are, and dropping the exclusion puts them back), and by the #16898 binding re-taken through the registration — a call site / import / local parameter / string-substring all reading ABSENT, the positive control that a declaration and a complete quoted token still resolve, a `.json` key resolving where a `.json` value does not, an INLINE object-literal key reading absent where one at the start of a line resolves — with the closed, grow-never residual and the per-file anchor floor held in both directions beside it;' +
-        ' and the `planned` status is driven on fixtures rather than on a ledger that carries none of it — the accept set widened without losing its closure, `since: null`/no-steps/personas relaxed for planned alone while the 264 live items are judged exactly as before, and the coverage ratchet held BOTH ways: a planned item beside an active one is silent, a kind whose only items are planned is UNMAPPED, and the bearing set is pinned NOT to contain `planned`.',
+        ` and the \`planned\` status is driven on fixtures rather than on a ledger that carries none of it — the accept set widened without losing its closure, \`since: null\`/no-steps/personas relaxed for planned alone while the ${plannedStatus.liveItems} live items are judged exactly as before, and the coverage ratchet held BOTH ways: a planned item beside an active one is silent, a kind whose only items are planned is UNMAPPED, and the bearing set is pinned NOT to contain \`planned\`; and the two CALL SITES those rules ride on are pinned by a source read driven ON and OFF, because severing either one left this very self-test green.`,
     );
     process.exit(0);
   }

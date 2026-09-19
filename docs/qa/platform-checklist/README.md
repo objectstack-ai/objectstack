@@ -304,9 +304,11 @@ listed capability had nowhere to live: the backlog sweep had nothing to point a 
 at, and the platform's implementation status lived in nobody's head. The North Star's
 definition line (「做出来的是什么」…「缺任何一样就不是这个应用」) makes such a piece a
 **requirement**, so it belongs on the ledger — as a fourth status, not as a second
-document. A separate feature list would drift against this one with no gate able to say
-which is wrong (the ADR-0136 lesson), and the reading entry carries numbers only because
-a command produces them.
+document. A separate feature list drifts against this one the moment either is edited,
+and nothing can then say which of the two is wrong: there is no ratchet between two
+hand-maintained documents, only a pair of disagreeing readings. Hence one ledger, one id
+space, one more status — and a reading entry that carries numbers only because a command
+produces them.
 
 **`status: "planned"`** — the definition requires this capability and the platform does
 not yet implement or verify it. What a planned item carries, and what it deliberately
@@ -316,7 +318,7 @@ does not:
 |:---|:---|
 | `id` · `title` · `priority` · `surface` · `revision` · `history` | as for any item — an id is picked once and is immutable, so it can be pointed at from the day the gap is found |
 | `personas` | **required** — who the capability is for is knowable the day the gap is found, and is what makes the gap readable to the next sweep |
-| `since` | `null` (no target release chosen) **or the TARGET release** — never a release that already shipped without it |
+| `since` | `null` (no target release chosen) **or a TARGET release**. ⛔ Only the SHAPE is checked: this ledger holds no release timeline, so a target naming a release that already shipped is an authoring error no gate here can see |
 | `steps` | **none.** There is nothing to drive. Steps arrive in the PR that implements the capability, in the same edit that promotes the item |
 | `acceptance` | not required — no oracle can be consulted yet. Clauses drafted early are still validated |
 
