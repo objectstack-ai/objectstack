@@ -388,8 +388,12 @@ depends on:
      permissions, or superuser wildcards; an agent principal never runs `isSystem`.
   3. **Human co-sign for `DESTRUCTIVE_OPERATIONS`** regardless of grants — grants decide what an
      agent may *initiate*, not what it may *complete alone*.
-  4. **Dual attribution**: every write records `performed_by` (agent) + `on_behalf_of` (user) +
-     run id; explain (D6) reports both sides of the intersection.
+  4. **Dual attribution**: every write **by an agent principal** records `performed_by` (agent) +
+     `on_behalf_of` (user) + run id; explain (D6) reports both sides of the intersection. An
+     agent principal is a caller a door resolves to `principalKind: 'agent'` — today the OAuth /
+     MCP client door alone. A caller of any other kind records the principal it authenticates as,
+     and the missing `performed_by` is itself the record that the principal acted for itself; for
+     the API-key case see the 2026-09-16 note at the end of this decision.
   Task-scoped, time-boxed agent grants build on the grant-lifecycle follow-up ADR (see
   *Named follow-ups*).
 - **`guest`** — resolves to the `guest` position (D9) and nothing else.
@@ -397,6 +401,38 @@ depends on:
 The ctx **shape** (kind / audience / onBehalfOf) is a P1 deliverable: it must exist before launch
 even where evaluation semantics phase in later — retrofitting a principal model post-launch is an
 alias tax on every API.
+
+> **Note (2026-09-16, #18335) — an API key is its owner's CREDENTIAL, not an agent principal, so
+> rule 4 does not reach it.** [ruled]
+>
+> Rule 4 as first written said 「every write」, which left one caller unclassified: an **API key**.
+> Is it an agent acting for its owner, or a tool the owner acted through? It is the tool — decided
+> here, not merely observed.
+>
+> **Why.** A credential is *how* a principal acted, never a second *who*. That is the mainstream
+> audit reading, and it is already what the doors do. An agent principal is produced at exactly one
+> seam — the `/mcp` OAuth door, where an access token naming an authorized client (`azp`) becomes
+> `principalKind: 'agent'` + `onBehalfOf` + `performedBy`
+> (`packages/core/src/security/assemble-execution-context.ts#entryFields`). An API key takes a
+> different path — `packages/core/src/security/api-key.ts#resolveApiKeyAdmission` into
+> `packages/core/src/security/resolve-authz-context.ts#resolveAuthzContext` — which resolves the
+> key's OWNER and nothing else. The assembled principal is therefore `human`, carries neither
+> `onBehalfOf` nor `performedBy`, and its `sys_audit_log` row is the owner's own. The REST door,
+> which is where keys are honoured, hands the assembler no OAuth provenance at all, so an agent
+> principal is not representable there by construction.
+>
+> **What this changes.** Nothing in the runtime — the behaviour above IS the decided behaviour.
+> What changes is the DECLARATION: rule 4's 「every write」 is narrowed to agent principals in the
+> same edit, so the declared rule says what the doors enforce. ⛔ A note without that narrowing
+> would have left a fresh declared ≠ enforced — the defect class ADR-0049 exists to refuse.
+>
+> **What is NOT decided here.** Making the key a principal category of its own — key-held grants,
+> a key-scoped audit subject — was considered and refused: zero measured pull, and a principal
+> category is hard to retire once granted. If a compliance requirement to tell credential-driven
+> writes from hand-driven ones is ever stated, that is a new decision with the requirement named,
+> ⛔ not a reading of this one.
+>
+> Ruling: director seat, batch #139 item 1, maintainer 「同意」 2026-09-16 — letter **A**.
 
 ### D11 — OWD gains an external dimension (`externalSharingModel`)
 
