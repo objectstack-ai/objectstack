@@ -74,7 +74,60 @@
  *
  * `--filesOnly` globs test paths and never imports them, so neither leg depends
  * on build state; the refusing leg aborts at config load before even the glob.
- * Measured on this tree: 16 children, ~9s wall for the eight packages.
+ *
+ * ## ⭐ WHY BOTH CHILDREN ARE SPAWNED AT MODULE TOP AND NOT INSIDE THE `it()`
+ *
+ * The CONTROL leg used to spawn its child inside its own clocked `it()` window,
+ * and it reddened `Test Core (1/6)` on pull requests that changed no file under
+ * `packages/qa/` at all, with `Test timed out in 5000ms.` — vitest's DEFAULT
+ * budget, never a number chosen for a leg whose body is a child process.
+ * ⛔ The budget was not too small. It was judging something it cannot act on,
+ * and two measurements on this tree say so:
+ *
+ *  1. **A `testTimeout` cannot interrupt a SYNCHRONOUS body**, so on this leg it
+ *     was a post-hoc wall-clock assertion and nothing else. `execFileSync`
+ *     blocks the worker's event loop, so vitest's timer cannot fire until the
+ *     call has already returned — with the right answer. Probed on vitest
+ *     4.1.11: a 1200 ms synchronous spin under an explicit 300 ms budget runs to
+ *     completion (reported duration 1210 ms) and is THEN failed with `Test timed
+ *     out in 300ms.` ⇒ the budget protected nothing — a child that truly HANGS
+ *     blocks that same timer forever — and its only reachable effect was to fail
+ *     a leg that had already produced the correct verdict.
+ *  2. **What it measured was runner load, not the property.** Eight subjects x
+ *     five runs, this container, under the shared verify lock: the CONTROL leg
+ *     is 432-704 ms for seven subjects and 1521-1942 ms (median 1663) for
+ *     `packages/cli`, whose config walks the tier files to derive its two
+ *     projects. 1663 ms is 33% of the 5000 ms budget — the band #18982 names as
+ *     the crossing condition — and the card's own CI readings of this leg on
+ *     sibling subjects (2098 ms and 1442 ms, where this container reads
+ *     432-704 ms) put the loaded-runner factor near 3x, which lands
+ *     `packages/cli` on 5 s exactly.
+ *
+ * ⇒ ⛔ Raising the number would have bought tolerance for a reading that was
+ * never about the property. The clock is removed from the VERDICT instead: both
+ * children are spawned once at MODULE TOP — outside every clocked window, which
+ * is where AGENTS.md puts loading ("Clocked windows measure behaviour, never
+ * loading") — and each `it()` below asserts on the recorded `status` and
+ * `output` in microseconds. ⛔ Nothing is skipped, retried or quarantined, and
+ * no budget anywhere is raised or disabled: the two legs assert exactly what
+ * they asserted before, minus the wall clock.
+ *
+ * ⭐ The liveness bound moves onto the thing that can actually hang —
+ * `CHILD_LIVENESS_TIMEOUT_MS` on the child itself, which `spawnSync` enforces by
+ * KILLING it. That is protection this file did not have, and `expectChildRan`
+ * below is what stops a killed or unspawnable child reading as a refusal, which
+ * a bare `status !== 0` would have done.
+ *
+ * ⚠️ The named cost: a `-t`-filtered run inside this file now pays all sixteen
+ * children even when it selects one `it()`. One pass, medians, is 16 children
+ * and ~9.0 s wall for the eight packages — the same total as before, moved.
+ *
+ * ⛔ Answering the CONTROL in-process instead — importing each config with a
+ * clean `process.argv` and watching stderr — was measured (10-55 ms for seven
+ * subjects, ~1.0 s for `packages/cli`) and REJECTED: it executes the config
+ * MODULE but never vitest's project resolution or its glob, so it cannot see a
+ * config that refuses nothing and still resolves no runnable project, which
+ * `expect(run.status).toBe(0)` does see.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -108,9 +161,30 @@ const VITEST_ENTRY = resolve(dirname(require.resolve('vitest/package.json')), 'v
 /** The refusal's headline, exactly as `renderInertOverrideNotice` prints it. */
 const REFUSAL = 'TIMEOUT OVERRIDE CANNOT REACH THIS PACKAGE';
 
+/**
+ * How long a swept package's `vitest list` child may take before it is KILLED.
+ *
+ * ⛔ Not a performance budget — this file's verdict no longer has a wall-clock
+ * component at all (see the header). Its only job is to turn "never exits" into
+ * "this leg failed, and here is why", so it sits far above any plausible load
+ * multiple: measured p100 over 80 children on this container is 1942 ms, and the
+ * card's loaded-runner factor of ~3x projects that to ~5.8 s, so 60 s is ~31x
+ * the measured p100 and ~10x the projected one. The job-level stall guard
+ * (`scripts/run-with-stall-guard.mjs`, 10 min of silence) is the outer bound
+ * this one sits inside; what it adds is a failure NAMED at the leg.
+ */
+const CHILD_LIVENESS_TIMEOUT_MS = 60_000;
+
 interface ChildRun {
-  readonly status: number;
+  /** The child's own exit code, or `null` when it never exited on its own. */
+  readonly status: number | null;
   readonly output: string;
+  /**
+   * Why the child produced no exit code of its own — `ETIMEDOUT` for the
+   * liveness kill above, `ENOENT` for a spawn failure — or `null` when it did
+   * exit and `status` is therefore a reading.
+   */
+  readonly failure: string | null;
 }
 
 /**
@@ -132,7 +206,10 @@ function childEnv(): NodeJS.ProcessEnv {
 }
 
 /**
- * `vitest list --filesOnly [flags]` inside one swept package, never throwing.
+ * `vitest list --filesOnly [flags]` inside one swept package, never throwing and
+ * ⛔ never asserting — it runs at MODULE TOP, where a failed `expect` would be
+ * a collection error that takes every assertion in this file down with it. Each
+ * leg judges the record it returns.
  *
  * ⛔ `execFileSync` throws on a non-zero exit and the non-zero exit is half of
  * what this measures, so the status is read off the thrown error. `stdout` and
@@ -147,15 +224,37 @@ function runVitestList(cwd: string, ...flags: string[]): ChildRun {
       env: childEnv(),
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: CHILD_LIVENESS_TIMEOUT_MS,
     });
-    return { status: 0, output: stdout };
+    return { status: 0, output: stdout, failure: null };
   } catch (error) {
-    const e = error as { status?: number | null; stdout?: string; stderr?: string };
-    // ⛔ A child that never ran (spawn failure) has a NULL status. Reading that
-    // as a refusal would be this card's own defect in a new place.
-    expect(typeof e.status).toBe('number');
-    return { status: e.status ?? -1, output: `${e.stdout ?? ''}${e.stderr ?? ''}` };
+    const e = error as {
+      status?: number | null;
+      signal?: string | null;
+      code?: string;
+      stdout?: string;
+      stderr?: string;
+    };
+    const output = `${e.stdout ?? ''}${e.stderr ?? ''}`;
+    if (typeof e.status === 'number') return { status: e.status, output, failure: null };
+    // The child never exited on its own: killed by the liveness bound, or never
+    // spawned at all. Both carry a NULL status, which is why the reason is
+    // recorded rather than folded into a number.
+    const reason = e.code ?? 'UNKNOWN';
+    return { status: null, output, failure: e.signal ? `${reason} (${e.signal})` : reason };
   }
+}
+
+/**
+ * ⛔ A child that never exited on its own has a NULL status, and `not.toBe(0)`
+ * is SATISFIED by null — reading that as a refusal would be this card's own
+ * defect in a new place. Both legs ask this FIRST, so a spawn failure, an
+ * unresolvable config or the liveness kill fails by NAME instead of arriving at
+ * the refusal assertion wearing a pass.
+ */
+function expectChildRan(run: ChildRun, rel: string): void {
+  expect(run.failure, `the vitest child for ${rel} never exited on its own`).toBeNull();
+  expect(typeof run.status).toBe('number');
 }
 
 /** The config spellings `scripts/check-console-intercept-disarm.mjs` accepts. */
@@ -226,6 +325,34 @@ const SUBJECTS: Subject[] = packageRoots(join(REPO, 'packages')).flatMap((dir) =
   ];
 });
 
+interface SubjectReadings {
+  readonly refusal: ChildRun;
+  readonly control: ChildRun;
+}
+
+/**
+ * Both children for every subject, spawned ONCE here at module top — outside
+ * every clocked window. The header carries the two measurements that moved them
+ * out of the `it()` bodies; what stays in those bodies is the judgement, which
+ * costs microseconds and can no longer be decided by how loaded the runner was.
+ */
+const READINGS: ReadonlyMap<string, SubjectReadings> = new Map(
+  SUBJECTS.map((subject): [string, SubjectReadings] => [
+    subject.rel,
+    {
+      refusal: runVitestList(subject.dir, '--hookTimeout=1'),
+      control: runVitestList(subject.dir),
+    },
+  ]),
+);
+
+/** The recorded pair for one subject — absent is a defect, never an empty pass. */
+function readingsFor(rel: string): SubjectReadings {
+  const readings = READINGS.get(rel);
+  if (!readings) throw new Error(`no child readings were recorded for ${rel}`);
+  return readings;
+}
+
 describe('the derived population', () => {
   it('finds the eight packages #17978 measured, at least', () => {
     // ⛔ A floor, not an equality: a ninth package joining this population must
@@ -292,7 +419,8 @@ describe.each(SUBJECTS.map((s) => [s.rel, s] as const))('%s', (_rel, subject) =>
   });
 
   it('⭐ REALLY refuses `--hookTimeout` — asked of a real vitest child (#18788)', () => {
-    const run = runVitestList(subject.dir, '--hookTimeout=1');
+    const run = readingsFor(subject.rel).refusal;
+    expectChildRan(run, subject.rel);
 
     expect(run.status).not.toBe(0);
     expect(run.output).toContain(REFUSAL);
@@ -307,7 +435,18 @@ describe.each(SUBJECTS.map((s) => [s.rel, s] as const))('%s', (_rel, subject) =>
     // ⛔ Without this leg, every assertion in this file is satisfied by a config
     // that refuses every run — a worse defect than the one being fixed, and one
     // that would take this package's entire suite down with it.
-    const run = runVitestList(subject.dir);
+    //
+    // ⭐ The reading is the same real vitest child it always was (#18982 moved
+    // only WHEN it is taken, never WHAT it observes): a clean `vitest list`
+    // must exit ZERO, which is also the one assertion in this file that
+    // witnesses a healthy run of the real harness still working end to end.
+    // `not.toContain(REFUSAL)` is a NEGATIVE assertion and is lit by the leg
+    // above, which requires the same constant to appear on the same output
+    // channel of the same child — a `REFUSAL` that drifted from what
+    // `renderInertOverrideNotice` prints reddens there before it can make this
+    // line vacuous.
+    const run = readingsFor(subject.rel).control;
+    expectChildRan(run, subject.rel);
 
     expect(run.status).toBe(0);
     expect(run.output).not.toContain(REFUSAL);
