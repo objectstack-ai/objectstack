@@ -7,7 +7,7 @@ chore(spec)!: the metadata migration chain is supported from protocol 16 — `MI
 
 Clause-②: yes (narrowing)
 
-<!-- adr-0087: not-required (no-migration-prescription) nothing an author WROTE changes shape: no spec key, export or config field is removed or renamed, so there is no FROM -> TO rewrite for a D2 conversion or a D3 semantic entry to carry. What narrows is the accepted `fromMajor` ARGUMENT RANGE of `applyMetaMigrations`, which the ledger has no vocabulary for — a conversion rewrites metadata, and this metadata is untouched. The prescription such a consumer needs is "reach protocol 16 by another path, then re-run", which is the `MigrationFloorError` message itself. -->
+<!-- adr-0087: not-required (no-migration-prescription) no authorable surface moves: no spec key, export or config field is removed or renamed, so there is no source rewrite for a D2 conversion or a D3 semantic entry to carry, and nothing for `os migrate meta` to rewrite. What narrows is the accepted `fromMajor` ARGUMENT RANGE of `applyMetaMigrations`, which the ledger has no vocabulary for - a conversion rewrites metadata, and this metadata is untouched. The one instruction a stopped consumer needs - reach protocol 16 by another path, then re-run - is carried by the `MigrationFloorError` message itself. -->
 
 **BREAKING** for a consumer still authored against protocol **10, 11, 12, 13, 14
 or 15**. Landing in the launch window as `minor` under the lockstep convention.
