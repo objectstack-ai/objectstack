@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Args, Command, Flags } from '@oclif/core';
-import { printError, printSuccess, emitJson, errorCodeFields } from '../../utils/format.js';
+import { printError, printSuccess, printWarning, emitJson, errorCodeFields } from '../../utils/format.js';
 import { createApiClient, requireAuth } from '../../utils/api-client.js';
 import { formatOutput } from '../../utils/output-formatter.js';
 
@@ -76,7 +76,37 @@ export default class DataDelete extends Command {
       } else if (flags.format === 'yaml') {
         await formatOutput({ success: true, object: result.object, id: result.id, deleted: result.success }, 'yaml');
       } else {
-        printSuccess(`Record deleted: ${result.id}`);
+        // [#19413] The human arm reads the SAME `result.success` the two
+        // machine arms lower into `deleted` above. It used to print
+        // `Record deleted` unconditionally, so one command and one call could
+        // state opposite facts about the same row depending only on
+        // `--format`. The distinction the `[#5638]` note above draws — the
+        // CLI envelope's "the command completed" versus the server's "the
+        // deletion happened" — is the one this arm was missing.
+        //
+        // Read as `=== false`, NOT as falsiness, for the reason
+        // `MetadataProtocol.deleteData` states where it reads the driver
+        // contract: `false` is the protocol's positive "no row was deleted"
+        // value, while an absent or `undefined` flag from an off-contract
+        // server is not a signal at all — and turning "no signal" into "not
+        // deleted" would make this command deny deletions that really
+        // happened.
+        //
+        // The exit code does NOT move, on either arm. The two machine arms
+        // publish `success: true` — the envelope's command-completed flag —
+        // beside `deleted: false`, and they exit `0`; moving only this arm
+        // off `0` would re-create this very defect one layer down, with the
+        // same call exiting `0` under `--format json` and non-zero by
+        // default. Moving it on all three arms would narrow a published CLI
+        // accept set (a script that succeeds today would start failing),
+        // which is a contract change and not this fix. `delete-arms-agree`
+        // pins the code in both directions so the next change cannot move it
+        // silently.
+        if (result.success === false) {
+          printWarning(`Not deleted: ${result.id} — the server reported the deletion did not happen`);
+        } else {
+          printSuccess(`Record deleted: ${result.id}`);
+        }
       }
     } catch (error: any) {
       if (flags.format === 'json') {
