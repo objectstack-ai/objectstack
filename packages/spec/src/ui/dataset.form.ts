@@ -48,7 +48,23 @@ export const datasetForm = defineForm({
       label: 'Dimensions',
       description: 'Groupable axes. Use a base field, or `relationship.field` (e.g. account.region) for a relationship included above.',
       fields: [
-        { field: 'dimensions', type: 'repeater', required: true, helpText: 'Each: name (referenced by presentations), field, type, and — for dates — a default bucketing granularity' },
+        {
+          field: 'dimensions',
+          type: 'repeater',
+          required: true,
+          helpText: 'Each: name (referenced by presentations), field, type, and — for dates — a default bucketing granularity',
+          // Row-property names (#17508): every authorable row property, `label`
+          // equal to the item schema's `.meta({ title })`, so `os i18n extract`
+          // emits a catalog key per column and the panel keeps its schema-derived
+          // widgets (no `type` here).
+          fields: [
+            { field: 'name', label: 'Name' },
+            { field: 'label', label: 'Label' },
+            { field: 'field', label: 'Field' },
+            { field: 'type', label: 'Type' },
+            { field: 'dateGranularity', label: 'Date Granularity' },
+          ],
+        },
       ],
     },
     {
@@ -56,7 +72,26 @@ export const datasetForm = defineForm({
       label: 'Measures',
       description: 'Aggregatable values defined once and referenced by name. A measure is sum/avg/count/… of a field; a derived measure combines other measures (ratio/sum/difference/product). Measure-scoped filters and derived ops are edited per-row in the dataset designer.',
       fields: [
-        { field: 'measures', type: 'repeater', required: true, helpText: 'Each: name, aggregate, field (optional for count), and display format/currency' },
+        {
+          field: 'measures',
+          type: 'repeater',
+          required: true,
+          helpText: 'Each: name, aggregate, field (optional for count), and display format/currency',
+          // Row-property names (#17508): every authorable row property, `label`
+          // equal to the item schema's `.meta({ title })`, so `os i18n extract`
+          // emits a catalog key per column and the panel keeps its schema-derived
+          // widgets (no `type` here).
+          fields: [
+            { field: 'name', label: 'Name' },
+            { field: 'label', label: 'Label' },
+            { field: 'aggregate', label: 'Aggregate' },
+            { field: 'field', label: 'Field' },
+            { field: 'filter', label: 'Filter' },
+            { field: 'format', label: 'Format' },
+            { field: 'currency', label: 'Currency' },
+            { field: 'derived', label: 'Derived From' },
+          ],
+        },
       ],
     },
   ],

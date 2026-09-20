@@ -62,10 +62,10 @@ export const pageForm = defineForm({
           // hand. Reconciled against PageVariableSchema by
           // metadata-form-zod-reconciliation.test.ts (#3786).
           fields: [
-            { field: 'name', required: true, helpText: 'Variable name — exposed to expressions as `page.<name>`' },
-            { field: 'type', helpText: 'Value type' },
-            { field: 'defaultValue', helpText: 'Initial value (defaults to a type-appropriate empty value)' },
-            { field: 'source', widget: 'ref:component', helpText: 'Component (by id) that writes this variable — e.g. an element:record_picker' },
+            { field: 'name', label: 'Name', required: true, helpText: 'Variable name — exposed to expressions as `page.<name>`' },
+            { field: 'type', label: 'Type', helpText: 'Value type' },
+            { field: 'defaultValue', label: 'Default Value', helpText: 'Initial value (defaults to a type-appropriate empty value)' },
+            { field: 'source', label: 'Written By', widget: 'ref:component', helpText: 'Component (by id) that writes this variable — e.g. an element:record_picker' },
           ],
         },
       ],
@@ -81,7 +81,20 @@ export const pageForm = defineForm({
         // layout, slotted pages compose via `slots`, and list pages ignore regions
         // entirely. Marking it required made the form unsatisfiable when no region
         // editor was rendered (the metadata form can't yet edit a region tree).
-        { field: 'regions', type: 'repeater', helpText: 'Layout regions (header, main, sidebar, footer) with components' },
+        {
+          field: 'regions',
+          type: 'repeater',
+          helpText: 'Layout regions (header, main, sidebar, footer) with components',
+          // Row-property names (#17508): every authorable row property, `label`
+          // equal to the item schema's `.meta({ title })`, so `os i18n extract`
+          // emits a catalog key per column and the panel keeps its schema-derived
+          // widgets (no `type` here).
+          fields: [
+            { field: 'name', label: 'Region' },
+            { field: 'width', label: 'Width' },
+            { field: 'components', label: 'Components' },
+          ],
+        },
       ],
     },
     {
@@ -114,7 +127,20 @@ export const pageForm = defineForm({
             // 'source'` tells the picker which object's fields to offer.
             { field: 'columns', widget: 'field-multi', dependsOn: 'source', helpText: 'Columns to show — defined directly on the page (blank = all object fields)' },
             { field: 'filterBy', widget: 'filter-builder', dependsOn: 'source', helpText: 'Always-on base filter for the page — same visual builder as the list toolbar.' },
-            { field: 'sort', type: 'repeater', dependsOn: 'source', helpText: 'Default sort order for the page, defined directly on the page.' },
+            {
+              field: 'sort',
+              type: 'repeater',
+              dependsOn: 'source',
+              helpText: 'Default sort order for the page, defined directly on the page.',
+              // Row-property names (#17508): every authorable row property, `label`
+              // equal to the item schema's `.meta({ title })`, so `os i18n extract`
+              // emits a catalog key per column and the panel keeps its schema-derived
+              // widgets (no `type` here).
+              fields: [
+                { field: 'field', label: 'Field' },
+                { field: 'order', label: 'Direction' },
+              ],
+            },
             { field: 'levels', helpText: 'Hierarchy levels to display (tree-like sources)' },
             // ── Appearance ──
             { field: 'appearance', type: 'composite', disclosure: 'popover', helpText: 'Allowed visualizations (Grid / Kanban / Calendar / …) and description visibility' },
