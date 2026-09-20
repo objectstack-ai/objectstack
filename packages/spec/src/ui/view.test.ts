@@ -59,6 +59,9 @@ import {
 // schemas deliberately leave open — imported so the two-door split is asserted
 // from the side that can see both.
 import { checkViewCompleteness } from '../kernel/functional-completeness';
+// [#19088] The object-field `scale` site #18972 bounded — read only, to pin
+// that this row's refusal text and that one's are the same platform fact.
+import { FieldSchema } from '../data/field.zod';
 describe('HttpMethodSubsetSchema', () => {
   it('should accept valid HTTP methods', () => {
     const methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
@@ -1787,6 +1790,129 @@ describe('FormFieldSchema', () => {
       for (const key of ['maxLength', 'minLength', 'min', 'max', 'precision', 'scale']) {
         expect(key in parsed).toBe(false);
       }
+    });
+  });
+
+  /**
+   * #19088 (the third site of #18972 / objectui#9808) — this row's `scale` also
+   * needs an UPPER bound, and the number is the PLATFORM's, not a policy.
+   *
+   * The block above bounds the *bottom* of the range (#8321: a digit count is a
+   * non-negative integer). The top was open: `scale: 101` parsed clean here
+   * while every renderer that turns it into fraction digits throws. The route
+   * from this row to those renderers is the one the schema comment already
+   * states — objectui's spec bridge (`form-view.ts` `mapField`) and plugin-form
+   * (`sectionFields.ts`) copy the row's constraint keys onto the runtime field,
+   * and the number cell renderer passes `scale` straight into
+   * `Intl.NumberFormat`'s `maximumFractionDigits`. So a spec-valid declaration
+   * published clean and arrived as a `RangeError` in someone else's repository,
+   * with no signal to its author.
+   *
+   * The refusal is pinned on its SUBSTANCE, not just its code: it has to say
+   * WHY (the renderer ceiling), because "too big" alone leaves an author
+   * guessing at a cap somebody chose.
+   *
+   * The malformed-declaration refusals in the #12174 block above are this
+   * change's dark control — narrowing the top of the range must not restate the
+   * bottom of it — and they are re-asserted here against the same probe so the
+   * before/after reading is one test's worth of evidence.
+   */
+  describe('an unrenderable scale is refused at authoring (#19088)', () => {
+    const parseScale = (scale: number) => FormFieldSchema.safeParse({ field: 'amount', scale });
+
+    /** Did `fn` throw a RangeError? (Probing the platform, not the schema.) */
+    const throwsRangeError = (fn: () => unknown): boolean => {
+      try { fn(); return false; } catch (e) { return e instanceof RangeError; }
+    };
+
+    it('accepts the ceiling itself — 100 is renderable and round-trips', () => {
+      const result = parseScale(100);
+      expect(result.success).toBe(true);
+      if (result.success) expect((result.data as Record<string, unknown>).scale).toBe(100);
+    });
+
+    it('refuses 101 with a too_big issue at [scale]', () => {
+      const result = parseScale(101);
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const issue = result.error.issues.find((i) => i.path[0] === 'scale');
+        expect(issue?.code).toBe('too_big');
+      }
+    });
+
+    it('the refusal says WHY — it names the renderer ceiling, not just the size', () => {
+      const result = parseScale(101);
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const message = result.error.issues.find((i) => i.path[0] === 'scale')?.message ?? '';
+        // Both primitives, the failure mode, and the legal maximum: an author
+        // can verify the claim without leaving the message.
+        expect(message).toMatch(/toFixed/);
+        expect(message).toMatch(/maximumFractionDigits/);
+        expect(message).toMatch(/RangeError/);
+        expect(message).toMatch(/100/);
+      }
+    });
+
+    it('the bound IS the platform ceiling, measured here rather than asserted', () => {
+      // If a future runtime moves either limit, this goes red and the
+      // declaration is re-argued — the number is not ours to keep by habit.
+      expect(throwsRangeError(() => (1.5).toFixed(100))).toBe(false);
+      expect(throwsRangeError(() => (1.5).toFixed(101))).toBe(true);
+      expect(throwsRangeError(() => new Intl.NumberFormat(undefined, { maximumFractionDigits: 100 }))).toBe(false);
+      expect(throwsRangeError(() => new Intl.NumberFormat(undefined, { maximumFractionDigits: 101 }))).toBe(true);
+      // ... and the schema's own accept/refuse boundary sits exactly there.
+      expect(parseScale(100).success).toBe(true);
+      expect(parseScale(101).success).toBe(false);
+    });
+
+    it('refuses with the SAME text as the object-field site — one fact, not two dialects', () => {
+      // #19088's shared-constant half, pinned from the consuming end. This row
+      // reads `shared/scale-ceiling.ts`; `data/field.zod.ts` still carries the
+      // module-private copy #18972 minted, because that file belongs to another
+      // card's declared surface. Byte-identity is what keeps the two copies one
+      // platform fact: if either drifts, this goes red instead of shipping two
+      // different explanations of the same limit. When that file adopts the
+      // shared module the assertion simply keeps holding.
+      const here = parseScale(101);
+      const there = FieldSchema.safeParse({ name: 'amount', label: 'Amount', type: 'number', scale: 101 });
+      expect(here.success).toBe(false);
+      expect(there.success).toBe(false);
+      if (!here.success && !there.success) {
+        const hereMessage = here.error.issues.find((i) => i.path[0] === 'scale')?.message;
+        const thereMessage = there.error.issues.find((i) => i.path[0] === 'scale')?.message;
+        expect(hereMessage).toBeDefined();
+        expect(hereMessage).toBe(thereMessage);
+      }
+    });
+
+    it('leaves the malformed-declaration refusals (#8321/#12174) reading exactly as before', () => {
+      // The dark control, in one place: the codes and the wording below are the
+      // readings taken on this same probe BEFORE the upper bound was added.
+      const negative = parseScale(-1);
+      expect(negative.success).toBe(false);
+      if (!negative.success) {
+        const issue = negative.error.issues.find((i) => i.path[0] === 'scale');
+        expect(issue?.code).toBe('too_small');
+        expect(issue?.message).toBe('Too small: expected number to be >=0');
+      }
+      const fractional = parseScale(2.5);
+      expect(fractional.success).toBe(false);
+      if (!fractional.success) {
+        const issue = fractional.error.issues.find((i) => i.path[0] === 'scale');
+        expect(issue?.code).toBe('invalid_type');
+        expect(issue?.message).toBe('Invalid input: expected int, received number');
+      }
+    });
+
+    it('does NOT bound `precision` — a different key this card does not claim', () => {
+      // Recorded so the next reader knows the omission was measured, not
+      // missed: `precision` is a TOTAL digit count and reaches no `toFixed` /
+      // `Intl` argument, so the renderer-ceiling argument does not carry to it.
+      // #18972 measured the same on the object-field surface and left it alone;
+      // whether the three `precision` arms should agree is its own judgement.
+      const result = FormFieldSchema.safeParse({ field: 'amount', precision: 101 });
+      expect(result.success).toBe(true);
     });
   });
 });

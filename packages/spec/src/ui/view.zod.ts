@@ -64,6 +64,11 @@ import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 import { ChartTypeSchema } from './chart.zod';
 import { SharingConfigSchema } from './sharing.zod';
 import { retiredKey } from '../shared/retired-key';
+// [#19088] The decimal-places ceiling every renderer enforces, and the refusal
+// text that explains it. A `src/shared/` leaf that no package entry re-exports,
+// so the bound this row applies costs no published export — see that module's
+// docblock for the measurement and for the two routes that were not taken.
+import { MAX_RENDERABLE_SCALE, SCALE_UPPER_BOUND_MESSAGE } from '../shared/scale-ceiling';
 import { FieldType, SelectOptionSchema } from '../data/field.zod';
 import { BulkActionDefSchema } from './bulk-action.zod';
 
@@ -2897,7 +2902,19 @@ const FormFieldBaseSchema = lazySchema(() => {
   min: z.number().optional().describe('Minimum value (for number/currency/percent/slider)'),
   max: z.number().optional().describe('Maximum value'),
   precision: z.number().int().min(0).optional().describe('Total digits (non-negative integer; for number/currency)'),
-  scale: z.number().int().min(0).optional().describe('Decimal places (non-negative integer)'),
+  // #19088 — the UPPER bound is the SAME platform ceiling #18972 landed on the
+  // two `scale` declarations in `data/field.zod.ts`, reached from this row by
+  // the same route the comment above describes: objectui's spec bridge
+  // (`form-view.ts` mapField) and plugin-form (`sectionFields.ts`) copy this
+  // key onto the runtime field, and the number cell renderer
+  // (`packages/fields/src/index.tsx`) hands it straight to
+  // `Intl.NumberFormat`'s `maximumFractionDigits`, which throws above 100. So a
+  // declaration past the ceiling was spec-valid and unrenderable at once.
+  // `precision` deliberately keeps no maximum: it is a TOTAL digit count and
+  // reaches neither primitive, so this argument does not carry to it (#18972
+  // measured the same and left it alone). See {@link MAX_RENDERABLE_SCALE}.
+  scale: z.number().int().min(0).max(MAX_RENDERABLE_SCALE, { message: SCALE_UPPER_BOUND_MESSAGE }).optional()
+    .describe('Decimal places (integer 0-100). The upper bound is the platform\'s, not a policy: renderers turn `scale` into fraction digits through `toFixed` and `Intl.NumberFormat`\'s `maximumFractionDigits`, both of which throw a RangeError above 100 — so a larger declaration is unrenderable by any conforming consumer.'),
   
   /** Multi-value flag */
   multiple: z.boolean().optional().describe('Allow multiple values (for select/lookup/file/image)'),
