@@ -6070,8 +6070,8 @@ declare const DiscoverySchema: z.ZodObject<{
     scoping: z.ZodOptional<z.ZodObject<{
         enabled: z.ZodBoolean;
         resolution: z.ZodEnum<{
-            optional: "optional";
             required: "required";
+            optional: "optional";
             auto: "auto";
         }>;
         scoped: z.ZodBoolean;
@@ -6110,8 +6110,8 @@ declare const DispatcherConfigSchema: z.ZodObject<{
         }>;
         authRequired: z.ZodDefault<z.ZodBoolean>;
         criticality: z.ZodDefault<z.ZodEnum<{
-            optional: "optional";
             required: "required";
+            optional: "optional";
             core: "core";
         }>>;
         permissions: z.ZodOptional<z.ZodArray<z.ZodString>>;
@@ -6181,8 +6181,8 @@ declare const DispatcherRouteSchema: z.ZodObject<{
     }>;
     authRequired: z.ZodDefault<z.ZodBoolean>;
     criticality: z.ZodDefault<z.ZodEnum<{
-        optional: "optional";
         required: "required";
+        optional: "optional";
         core: "core";
     }>>;
     permissions: z.ZodOptional<z.ZodArray<z.ZodString>>;
@@ -8209,8 +8209,8 @@ declare const GetDiscoveryResponseSchema: z.ZodObject<{
     scoping: z.ZodOptional<z.ZodOptional<z.ZodObject<{
         enabled: z.ZodBoolean;
         resolution: z.ZodEnum<{
-            optional: "optional";
             required: "required";
+            optional: "optional";
             auto: "auto";
         }>;
         scoped: z.ZodBoolean;
@@ -26704,7 +26704,7 @@ declare const ObjectDefinitionResponseSchema: z.ZodObject<{
             actions: { [I in keyof As]: As[I] extends infer T_1 ? T_1 extends As[I] ? T_1 extends {
                 params: infer Ps extends readonly unknown[];
             } ? T_1 & {
-                params: { [I_1 in keyof Ps]: Ps[I_1] & Record<Exclude<keyof Ps[I_1], "name" | "type" | "options" | "field" | "required" | "reference" | "label" | "visible" | "multiple" | "accept" | "defaultValue" | "maxSize" | "placeholder" | "helpText" | "requiresFeature" | "carryOver" | "objectOverride" | "defaultFromRow">, never>; };
+                params: { [I_1 in keyof Ps]: Ps[I_1] & Record<Exclude<keyof Ps[I_1], "name" | "required" | "type" | "options" | "field" | "reference" | "label" | "visible" | "multiple" | "accept" | "defaultValue" | "maxSize" | "placeholder" | "helpText" | "requiresFeature" | "carryOver" | "objectOverride" | "defaultFromRow">, never>; };
             } : T_1 : never : never; };
         } : unknown)) => Omit<ServiceObject, "fields"> & Pick<T, "fields">;
     };
@@ -30331,8 +30331,8 @@ declare const RestApiConfig: z.ZodObject<{
     enableSearch: z.ZodDefault<z.ZodBoolean>;
     enableProjectScoping: z.ZodDefault<z.ZodBoolean>;
     projectResolution: z.ZodDefault<z.ZodEnum<{
-        optional: "optional";
         required: "required";
+        optional: "optional";
         auto: "auto";
     }>>;
     requireAuth: z.ZodOptional<z.ZodNever>;
@@ -30381,8 +30381,8 @@ declare const RestApiConfigSchema: z.ZodObject<{
     enableSearch: z.ZodDefault<z.ZodBoolean>;
     enableProjectScoping: z.ZodDefault<z.ZodBoolean>;
     projectResolution: z.ZodDefault<z.ZodEnum<{
-        optional: "optional";
         required: "required";
+        optional: "optional";
         auto: "auto";
     }>>;
     requireAuth: z.ZodOptional<z.ZodNever>;
@@ -31145,8 +31145,8 @@ declare const RestServerConfig: z.ZodObject<{
         enableSearch: z.ZodDefault<z.ZodBoolean>;
         enableProjectScoping: z.ZodDefault<z.ZodBoolean>;
         projectResolution: z.ZodDefault<z.ZodEnum<{
-            optional: "optional";
             required: "required";
+            optional: "optional";
             auto: "auto";
         }>>;
         requireAuth: z.ZodOptional<z.ZodNever>;
@@ -31240,8 +31240,8 @@ declare const RestServerConfigSchema: z.ZodObject<{
         enableSearch: z.ZodDefault<z.ZodBoolean>;
         enableProjectScoping: z.ZodDefault<z.ZodBoolean>;
         projectResolution: z.ZodDefault<z.ZodEnum<{
-            optional: "optional";
             required: "required";
+            optional: "optional";
             auto: "auto";
         }>>;
         requireAuth: z.ZodOptional<z.ZodNever>;

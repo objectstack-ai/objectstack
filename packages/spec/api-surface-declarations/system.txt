@@ -69266,8 +69266,8 @@ type ServiceCriticality = z.input<typeof ServiceCriticalitySchema>;
 
 // ── ServiceCriticalitySchema (const) ──
 declare const ServiceCriticalitySchema: z.ZodEnum<{
-    optional: "optional";
     required: "required";
+    optional: "optional";
     core: "core";
 }>;
 
