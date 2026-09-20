@@ -1414,9 +1414,9 @@ declare const ExecutionContextSchema: z.ZodObject<{
     principalKind: z.ZodOptional<z.ZodEnum<{
         agent: "agent";
         system: "system";
-        guest: "guest";
         human: "human";
         service: "service";
+        guest: "guest";
     }>>;
     audience: z.ZodOptional<z.ZodEnum<{
         external: "external";
@@ -1437,9 +1437,9 @@ declare const ExecutionContextSchema: z.ZodObject<{
         principalKind: z.ZodOptional<z.ZodEnum<{
             agent: "agent";
             system: "system";
-            guest: "guest";
             human: "human";
             service: "service";
+            guest: "guest";
         }>>;
     }, z.core.$strip>>;
     performedBy: z.ZodOptional<z.ZodObject<{
@@ -4806,12 +4806,12 @@ type PermissionAction = z.input<typeof PermissionActionSchema>;
 declare const PermissionActionSchema: z.ZodEnum<{
     delete: "delete";
     update: "update";
-    admin: "admin";
-    execute: "execute";
-    create: "create";
     read: "read";
-    import: "import";
+    create: "create";
     export: "export";
+    execute: "execute";
+    admin: "admin";
+    import: "import";
     manage: "manage";
     configure: "configure";
     share: "share";
@@ -5462,12 +5462,12 @@ declare const PluginPermissionSchema: z.ZodObject<{
     actions: z.ZodArray<z.ZodEnum<{
         delete: "delete";
         update: "update";
-        admin: "admin";
-        execute: "execute";
-        create: "create";
         read: "read";
-        import: "import";
+        create: "create";
         export: "export";
+        execute: "execute";
+        admin: "admin";
+        import: "import";
         manage: "manage";
         configure: "configure";
         share: "share";
@@ -5540,12 +5540,12 @@ declare const PluginPermissionSetSchema: z.ZodObject<{
         actions: z.ZodArray<z.ZodEnum<{
             delete: "delete";
             update: "update";
-            admin: "admin";
-            execute: "execute";
-            create: "create";
             read: "read";
-            import: "import";
+            create: "create";
             export: "export";
+            execute: "execute";
+            admin: "admin";
+            import: "import";
             manage: "manage";
             configure: "configure";
             share: "share";
@@ -5996,8 +5996,8 @@ declare const PluginSearchFiltersSchema: z.ZodObject<{
         relevance: "relevance";
     }>>;
     sortOrder: z.ZodOptional<z.ZodDefault<z.ZodEnum<{
-        desc: "desc";
         asc: "asc";
+        desc: "desc";
     }>>>;
     page: z.ZodOptional<z.ZodDefault<z.ZodNumber>>;
     limit: z.ZodOptional<z.ZodDefault<z.ZodNumber>>;
@@ -6043,12 +6043,12 @@ declare const PluginSecurityManifestSchema: z.ZodObject<{
             actions: z.ZodArray<z.ZodEnum<{
                 delete: "delete";
                 update: "update";
-                admin: "admin";
-                execute: "execute";
-                create: "create";
                 read: "read";
-                import: "import";
+                create: "create";
                 export: "export";
+                execute: "execute";
+                admin: "admin";
+                import: "import";
                 manage: "manage";
                 configure: "configure";
                 share: "share";

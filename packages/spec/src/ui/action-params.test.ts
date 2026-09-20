@@ -10,6 +10,7 @@ import {
   type ResolvedActionParam,
 } from './action-params.zod';
 import type { FilterCondition } from '../data/filter.zod';
+import type { EngineQueryOptions } from '../data/data-engine.zod';
 import { MIGRATIONS_BY_MAJOR } from '../migrations/registry';
 
 const codes = (issues: ReturnType<typeof validateActionParams>) => issues.map((i) => i.code).sort();
@@ -396,76 +397,113 @@ describe('#5779 — ActionSession `positions` canonical + `roles` deprecated ali
 });
 
 // ---------------------------------------------------------------------------
-// #14175 — `ActionEngineFacade.find` takes a FILTER, never an ObjectQL envelope
+// #15124 — `ActionEngineFacade.find` takes the engine's QUERY ENVELOPE
+// (#14175's bare-filter parameter shape is withdrawn)
 // ---------------------------------------------------------------------------
 
 type Eq< A, B > = (< T >() => T extends A ? 1 : 2) extends (< T >() => T extends B ? 1 : 2) ? true : false;
 type Assert< T extends true > = T;
 
 // The declared slot, read off the interface — not a retyped copy of it, so a
-// re-widening back to an open record, or a rename of the type behind it, fails
-// HERE rather than in the first consumer to notice.
-type FindFilter = Parameters<ActionEngineFacade['find']>[1];
+// re-widening back to an open record, a re-narrowing back to the bare filter,
+// or a rename of the type behind it, fails HERE rather than in the first
+// consumer to notice.
+type FindQuery = Parameters<ActionEngineFacade['find']>[1];
 
 // The type-level pin (the tsc channel, `tsc -p tsconfig.test.json`). `Eq` is
-// the strict mutual-assignability test, so `Record<string, unknown>` — the type
-// this slot carried before, and the one it must not drift back to — does not
-// satisfy it (measured: the same `Assert` against `Record<string, unknown>` is
-// a TS2344). Exported, as the sibling pins are, so `noUnusedLocals` does not
-// read a type that exists only to be checked as one that is never used.
-export type FindFilterIsFilterCondition = Assert< Eq< FindFilter, FilterCondition > >;
+// the strict mutual-assignability test, so neither `Record<string, unknown>`
+// nor `FilterCondition` — the type this slot carried between #14175 and
+// #15124, and the one it must not drift back to — satisfies it. Reading the
+// engine's published type BY IDENTITY is the whole point of the ruling ("one
+// platform, one query shape"): a structural copy of the envelope would pass a
+// weaker pin and then drift the moment the engine's own options grow a key.
+// Exported, as the sibling pins are, so `noUnusedLocals` does not read a type
+// that exists only to be checked as one that is never used.
+export type FindQueryIsEngineQueryOptions = Assert< Eq< FindQuery, EngineQueryOptions > >;
 
-describe('#14175 — ActionEngineFacade.find takes a FILTER (the `where` half), never an ObjectQL envelope', () => {
-  it('types the second parameter as the published `FilterCondition` (the tsc channel)', () => {
-    // The value-level half of `FindFilterIsFilterCondition` above: a literal
+describe('#15124 — ActionEngineFacade.find takes the engine query envelope, never a bare filter', () => {
+  it('types the second parameter as the published `EngineQueryOptions` (the tsc channel)', () => {
+    // The value-level half of `FindQueryIsEngineQueryOptions` above: a literal
     // annotated with the slot type, so the runtime run exercises the same
     // declaration the type pin reads.
-    const filter: FindFilter = { position_code: 'qa_lead', active: true };
-    expect(Object.keys(filter)).toEqual(['position_code', 'active']);
+    const query: FindQuery = { where: { position_code: 'qa_lead', active: true } };
+    expect(Object.keys(query)).toEqual(['where']);
   });
 
-  it('positive control — every shape a handler legitimately passes compiles, the empty filter included', () => {
-    const implicitEquality: FindFilter = { status: 'completed' };
-    const explicitOperator: FindFilter = { position_code: { $in: ['qa_lead', 'qa_manager'] }, active: true };
-    const logical: FindFilter = {
-      $and: [{ active: true }, { $or: [{ tier: 'a' }, { tier: 'b' }] }],
-      $not: { archived: true },
+  it('positive control — the envelope spellings a handler passes compile, the unfiltered read included', () => {
+    const implicitEquality: FindQuery = { where: { status: 'completed' } };
+    const explicitOperator: FindQuery = { where: { position_code: { $in: ['qa_lead', 'qa_manager'] }, active: true } };
+    const logical: FindQuery = {
+      where: {
+        $and: [{ active: true }, { $or: [{ tier: 'a' }, { tier: 'b' }] }],
+        $not: { archived: true },
+      },
     };
-    // The runtime passes THIS one through unwrapped — the unfiltered read, and
-    // the one call that kept working in the reporting app under either belief.
-    const unfiltered: FindFilter = {};
+    // The rest of the envelope is reachable from a handler for the first time:
+    // under the bare-filter shape a handler could not project, sort or page at
+    // all, because the parameter had nowhere to carry those keys.
+    const projected: FindQuery = { where: { status: 'completed' }, fields: ['id', 'subject'], limit: 50 };
+    const sorted: FindQuery = { orderBy: [{ field: 'due_date', order: 'asc' }], offset: 20 };
+    // The unfiltered read — `{}` was the one call that worked under EITHER
+    // reading before this card, and it still means "every row".
+    const unfiltered: FindQuery = {};
 
-    expect([implicitEquality, explicitOperator, logical, unfiltered].every((f) => typeof f === 'object')).toBe(true);
+    expect([implicitEquality, explicitOperator, logical, projected, sorted, unfiltered]
+      .every((q) => typeof q === 'object')).toBe(true);
   });
 
-  it('refuses at compile time what `FilterCondition` refuses — a primitive and a mistyped logical operator', () => {
-    // Each `@ts-expect-error` is itself checked: if the type ever ADMITS one of
-    // these, the directive goes unused and `tsc -p tsconfig.test.json` reds.
-    // @ts-expect-error — a filter is an object; a bare string is not a `where` half.
-    const primitive: FindFilter = 'position_code = qa_lead';
-    // @ts-expect-error — `$and` is `FilterCondition[]`; a string is refused.
-    const andNotArray: FindFilter = { $and: 'active' };
-    // @ts-expect-error — `$or` is `FilterCondition[]`; a bare object is refused.
-    const orNotArray: FindFilter = { $or: { active: true } };
-    // @ts-expect-error — `$not` is a `FilterCondition`; a string is refused.
-    const notNotFilter: FindFilter = { $not: 'archived' };
+  it('REFUSAL PIN — the bare filter #14175 declared no longer type-checks (the trap is inverted, not narrowed)', () => {
+    // This is the pin #14175 recorded as a MEASURED GAP, flipped. The envelope
+    // that returned `[]` in silence in the reporting app is now the RIGHT
+    // spelling (the positive controls above), and the bare filter that used to
+    // be right is the one tsc refuses. Each `@ts-expect-error` is itself
+    // checked: if the slot ever re-admits one of these, the directive goes
+    // unused and `tsc -p tsconfig.test.json` reds.
+    //
+    // The refusal is the object-literal excess-property check, which is what
+    // makes it LOUD at the call site an author actually writes: a field name is
+    // not an envelope key, so `{ status: … }` has nowhere to land.
+    // @ts-expect-error — `status` is a field name, not an envelope key; write `{ where: { status } }`.
+    const bareImplicitEquality: FindQuery = { status: 'completed' };
+    // @ts-expect-error — the same for an explicit operator: it belongs under `where`.
+    const bareExplicitOperator: FindQuery = { position_code: { $in: ['qa_lead'] } };
+    // @ts-expect-error — `$and` is a FILTER operator; at envelope level it is an unknown key.
+    const bareLogical: FindQuery = { $and: [{ active: true }] };
+    // @ts-expect-error — an envelope is an object; a bare string is not one.
+    const primitive: FindQuery = 'position_code = qa_lead';
 
-    expect([primitive, andNotArray, orNotArray, notNotFilter]).toHaveLength(4);
+    expect([bareImplicitEquality, bareExplicitOperator, bareLogical, primitive]).toHaveLength(4);
   });
 
-  it('MEASURED GAP — the exact envelope mistake still compiles; the doc comment, not the type, is the contract', () => {
-    // `FilterCondition`'s string index signature is what lets a field NAME be a
-    // key, and `where` is a string — so the shape that returned `[]` in silence
-    // in the reporting app (`{ where: { position_code: 'qa_lead' } }`) is
-    // admitted by the type, one level down too. This pin RECORDS that
-    // measurement rather than hiding it: a later narrowing that refuses `where`
-    // at the top level turns it red on purpose, so the member's "does NOT
-    // refuse `{ where: … }`" sentence is updated with the type instead of
-    // drifting from it.
-    const envelope: FindFilter = { where: { position_code: 'qa_lead' } };
-    const nested: FindFilter = { where: { where: { position_code: 'qa_lead' } } };
+  it('refuses a mistyped envelope key — the keys are the engine\'s, and they are typed', () => {
+    // @ts-expect-error — `where` is a `FilterCondition`; a bare string is refused.
+    const whereNotFilter: FindQuery = { where: 'status = completed' };
+    // @ts-expect-error — `fields` is an array of field nodes; a comma string is refused.
+    const fieldsNotArray: FindQuery = { fields: 'id,subject' };
+    // @ts-expect-error — `limit` is a number.
+    const limitNotNumber: FindQuery = { limit: '50' };
 
-    expect('where' in envelope && 'where' in nested).toBe(true);
+    expect([whereNotFilter, fieldsNotArray, limitNotNumber]).toHaveLength(3);
+  });
+
+  it('the refusal survives the VARIABLE path too — not just the object-literal check', () => {
+    // The obvious worry about narrowing an all-optional target is that only
+    // FRESH object literals get the excess-property check, so a filter reaching
+    // the call through a variable would slide in structurally and fail at
+    // runtime instead. MEASURED: it does not. `EngineQueryOptions` is a weak
+    // type (every key optional), and a `FilterCondition` holding field names
+    // has no property in common with it, so tsc answers TS2559 — "has no
+    // properties in common with" — on the assignment itself. `FilterCondition`'s
+    // string index signature does not rescue it.
+    //
+    // Pinned because it is the half a reader assumes is open: the member doc
+    // says the old spelling fails at COMPILE time, and this is the leg of that
+    // claim the literal pin above does not cover.
+    const held: FilterCondition = { status: 'completed' };
+    // @ts-expect-error — TS2559: a bare filter has no property in common with the envelope.
+    const viaVariable: FindQuery = held;
+
+    expect(Object.keys(viaVariable)).toEqual(['status']);
   });
 });
 

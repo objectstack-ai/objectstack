@@ -23,6 +23,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 ## Transitive dependencies
 
 - `node_modules/@objectstack/spec/src/api/errors.zod.ts` — Standardized Error Codes Protocol
+- `node_modules/@objectstack/spec/src/data/data-engine.zod.ts` — Data Engine Protocol
 - `node_modules/@objectstack/spec/src/data/date-macros.zod.ts` — Date Macro Tokens — the declarative placeholders the UI substitutes
 - `node_modules/@objectstack/spec/src/data/feed.zod.ts` — Activity-timeline UI config enums, and the `sys_activity.type` built-in set.
 - `node_modules/@objectstack/spec/src/data/field-value.zod.ts` — Field runtime VALUE-shape contract (ADR-0104 D1).
@@ -30,7 +31,9 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/data/filter.zod.ts` — Unified Query DSL Specification
 - `node_modules/@objectstack/spec/src/data/hook-body.zod.ts` — Exports: HookBodyCapability, ExpressionBodySchema, ScriptBodySchema, HookBodySchema
 - `node_modules/@objectstack/spec/src/data/query.zod.ts` — QueryAST — Abstract Syntax Tree for data queries.
+- `node_modules/@objectstack/spec/src/kernel/execution-context.zod.ts` — Exports: ExecutionContextSchema
 - `node_modules/@objectstack/spec/src/kernel/metadata-protection.zod.ts` — Metadata Protection Model — Phase 1 (ADR-0010)
+- `node_modules/@objectstack/spec/src/security/explain.zod.ts` — [ADR-0090 D6] Access-explanation contract — `explain(principal, object,
 - `node_modules/@objectstack/spec/src/shared/enums.zod.ts` — Exports: SortDirectionEnum, SortItemSchema, MutationEventEnum, IsolationLevelEnum
 - `node_modules/@objectstack/spec/src/shared/expression.zod.ts` — Expression Protocol
 - `node_modules/@objectstack/spec/src/shared/http.zod.ts` — Shared HTTP Schemas

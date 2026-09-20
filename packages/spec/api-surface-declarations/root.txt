@@ -11106,7 +11106,7 @@ declare const ObjectStackDefinitionSchema: z.ZodObject<{
                 reason: z.ZodString;
                 docsUrl: z.ZodOptional<z.ZodString>;
             }, z.core.$strict>>;
-        }, z.core.$strict>>>(config: T & Record<Exclude<keyof T, "external" | "description" | "_lock" | "_lockReason" | "_lockSource" | "_lockDocsUrl" | "_provenance" | "_packageId" | "_packageVersion" | "name" | "enable" | "label" | "requiredPermissions" | "fields" | "pluralLabel" | "icon" | "actions" | "validations" | "protection" | "indexes" | "listViews" | "sharingModel" | "managedBy" | "userActions" | "highlightFields" | "datasource" | "fieldGroups" | "searchableFields" | "isSystem" | "ownership" | "tenancy" | "systemFields" | "access" | "lifecycle" | "fileAccessDelegate" | "activityMilestones" | "nameField" | "displayNameField" | "titleFormat" | "stageField" | "editMode" | "externalSharingModel" | "publicSharing">, never> & (T extends {
+        }, z.core.$strict>>>(config: T & Record<Exclude<keyof T, "external" | "description" | "_lock" | "_lockReason" | "_lockSource" | "_lockDocsUrl" | "_provenance" | "_packageId" | "_packageVersion" | "name" | "enable" | "label" | "requiredPermissions" | "fields" | "pluralLabel" | "icon" | "actions" | "validations" | "protection" | "indexes" | "listViews" | "sharingModel" | "managedBy" | "userActions" | "highlightFields" | "datasource" | "ownership" | "isSystem" | "fieldGroups" | "searchableFields" | "tenancy" | "systemFields" | "access" | "lifecycle" | "fileAccessDelegate" | "activityMilestones" | "nameField" | "displayNameField" | "titleFormat" | "stageField" | "editMode" | "externalSharingModel" | "publicSharing">, never> & (T extends {
             actions: infer As extends readonly unknown[];
         } ? {
             actions: { [I in keyof As]: As[I] extends infer T_1 ? T_1 extends As[I] ? T_1 extends {
@@ -22484,8 +22484,8 @@ declare const ObjectStackDefinitionSchema: z.ZodObject<{
                 append_only: "append_only";
             }>>>;
             direction: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
-                import: "import";
                 export: "export";
+                import: "import";
                 bidirectional: "bidirectional";
             }>>>;
             realtimeSync: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
@@ -32983,7 +32983,7 @@ declare const ObjectStackSchema: z.ZodObject<{
                 reason: z.ZodString;
                 docsUrl: z.ZodOptional<z.ZodString>;
             }, z.core.$strict>>;
-        }, z.core.$strict>>>(config: T & Record<Exclude<keyof T, "external" | "description" | "_lock" | "_lockReason" | "_lockSource" | "_lockDocsUrl" | "_provenance" | "_packageId" | "_packageVersion" | "name" | "enable" | "label" | "requiredPermissions" | "fields" | "pluralLabel" | "icon" | "actions" | "validations" | "protection" | "indexes" | "listViews" | "sharingModel" | "managedBy" | "userActions" | "highlightFields" | "datasource" | "fieldGroups" | "searchableFields" | "isSystem" | "ownership" | "tenancy" | "systemFields" | "access" | "lifecycle" | "fileAccessDelegate" | "activityMilestones" | "nameField" | "displayNameField" | "titleFormat" | "stageField" | "editMode" | "externalSharingModel" | "publicSharing">, never> & (T extends {
+        }, z.core.$strict>>>(config: T & Record<Exclude<keyof T, "external" | "description" | "_lock" | "_lockReason" | "_lockSource" | "_lockDocsUrl" | "_provenance" | "_packageId" | "_packageVersion" | "name" | "enable" | "label" | "requiredPermissions" | "fields" | "pluralLabel" | "icon" | "actions" | "validations" | "protection" | "indexes" | "listViews" | "sharingModel" | "managedBy" | "userActions" | "highlightFields" | "datasource" | "ownership" | "isSystem" | "fieldGroups" | "searchableFields" | "tenancy" | "systemFields" | "access" | "lifecycle" | "fileAccessDelegate" | "activityMilestones" | "nameField" | "displayNameField" | "titleFormat" | "stageField" | "editMode" | "externalSharingModel" | "publicSharing">, never> & (T extends {
             actions: infer As extends readonly unknown[];
         } ? {
             actions: { [I in keyof As]: As[I] extends infer T_1 ? T_1 extends As[I] ? T_1 extends {
@@ -44361,8 +44361,8 @@ declare const ObjectStackSchema: z.ZodObject<{
                 append_only: "append_only";
             }>>>;
             direction: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
-                import: "import";
                 export: "export";
+                import: "import";
                 bidirectional: "bidirectional";
             }>>>;
             realtimeSync: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;

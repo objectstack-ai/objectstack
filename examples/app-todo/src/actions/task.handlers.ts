@@ -38,6 +38,11 @@ import type { ActionHandlerContext } from '@objectstack/spec/ui';
 // written against the published type at all. The declaration now says
 // `string | string[]` (#15117), so the copy is gone and this example
 // type-checks against exactly the types a real app gets.
+//
+// And the copy's `query` bag turned out to be the shape the platform kept:
+// #15124 withdrew the bare-filter parameter and `ctx.engine.find` now takes the
+// ENGINE's query envelope — `find(object, { where: … })`, the same options bag
+// `engine.find` takes anywhere else. One platform, one query shape.
 
 /**
  * Mark a single task as complete.
@@ -106,7 +111,9 @@ export async function massCompleteTasks(ctx: ActionHandlerContext): Promise<void
 /** Delete all completed tasks */
 export async function deleteCompletedTasks(ctx: ActionHandlerContext): Promise<void> {
   const { engine } = ctx;
-  const completed = await engine.find('todo_task', { status: 'completed' });
+  // [#15124] The filter goes under `where` — the second argument is the
+  // engine's query envelope, not the `where` half on its own.
+  const completed = await engine.find('todo_task', { where: { status: 'completed' } });
   const ids = completed.map((r) => r.id as string);
   if (ids.length > 0) {
     await engine.delete('todo_task', ids);
@@ -135,6 +142,7 @@ export async function setReminder(ctx: ActionHandlerContext): Promise<void> {
 /** Export tasks to CSV format */
 export async function exportTasksToCSV(ctx: ActionHandlerContext): Promise<string> {
   const { engine } = ctx;
+  // An EMPTY envelope is still the unfiltered read — unchanged by #15124.
   const tasks = await engine.find('todo_task', {});
   const header = 'subject,status,priority,category,due_date';
   const rows = tasks.map((t) =>
