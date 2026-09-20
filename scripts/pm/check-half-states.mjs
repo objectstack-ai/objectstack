@@ -9194,22 +9194,48 @@ export function seatPostLastEventMs(seat, commentRows) {
  * The `Seat:` line of a claim body — the seat NUMBER the claiming PM sits on
  * (`Seat: domain:<x>#<n>`, free-claim multi-seat), read with the same key-line
  * tolerance as `threadReadField` (leading bullet or blockquote, bold or code
- * decoration around the key).
+ * decoration around the key). Three answers, and the middle one is the reason
+ * this reader is not a one-liner:
  *
- * Absent ⇒ 1. Every claim written before the line existed belongs to seat 1,
- * which is the only seat those lanes had, so the default is backward
- * compatible with every existing claim rather than a guess. A line that is
- * PRESENT but names no `#<n>` is unreadable and returns null: it matches no
- * seat, so its claim is invisible to the seat filter below — the file's
- * under-reporting direction on every unrecognised spelling — and ⛔ never
- * silently read as seat 1.
+ * · ABSENT ⇒ 1. Every claim written before the line existed belongs to seat 1,
+ *   which is the only seat those lanes had, so the default is backward
+ *   compatible with every existing claim rather than a guess.
+ * · PRESENT but unreadable ⇒ null. It matches no seat, so the claim is
+ *   invisible to the seat filter below — the file's under-reporting direction
+ *   on every unrecognised spelling — and ⛔ never silently read as seat 1.
+ *   TWO spellings reach it: a line-initial key naming no `#<n>`, and a
+ *   declaration the key line cannot see at all (mid-sentence, inside a code
+ *   span, inside a subscript tag, behind a `> - ` prefix).
+ * · Otherwise the number the line names.
+ *
+ * ⚠️ The second spelling of the second answer is the repair, and the cost it
+ * removes is measured: a wrong answer that is a REAL seat does not surface as
+ * an error, it surfaces as an ACCUSATION against whoever sits there — three
+ * claims of one round declared their seat inside the opening sentence, were
+ * read as seat 1, and H38 rowed another seat's post as stale over it. ⛔ The
+ * presence probe below therefore does NOT widen `CLAIM_SEAT_KEY_LINE`:
+ * accepting a malformed declaration would leave the writer no way to find out
+ * either, which is the same defect wearing the other costume. Refusing it at
+ * the writing path is a different instrument's job.
  */
 const CLAIM_SEAT_KEY_LINE = /^[ \t]*(?:[-*+][ \t]+)?>?[ \t]*(?:\*\*)?`?Seat`?(?:\*\*)?[ \t]*:[ \t]*(.*)$/im;
 
-/** @returns {number|null} the seat number, 1 when the line is absent, null when it is present but unreadable. */
+/**
+ * PRESENCE only — consulted solely when the key line matched nothing, and it
+ * ⛔ never yields a number. Case-SENSITIVE, and it demands the whole declared
+ * payload (`domain:<lane>#<n>`), because off the line start there is no
+ * position left to tell a declaration from prose: the pinned control
+ * 「the seat: domain:services#2 is busy」 has to keep reading as seat 1. Pinned
+ * to the measured shape; an unmeasured variant it misses falls back to 1,
+ * which is the defect, so widen it on evidence rather than narrowing it.
+ */
+const CLAIM_SEAT_DECLARATION_ANYWHERE = /(?:\*\*)?`?Seat`?(?:\*\*)?[ \t]*:[ \t]*`?domain:[a-z0-9_-]+[ \t]*#\d/;
+
+/** @returns {number|null} the seat number, 1 when NO declaration is present at all, null when one is present but unreadable. */
 export function claimSeatNumber(body) {
-  const m = CLAIM_SEAT_KEY_LINE.exec(String(body ?? ''));
-  if (!m) return 1;
+  const text = String(body ?? '');
+  const m = CLAIM_SEAT_KEY_LINE.exec(text);
+  if (!m) return CLAIM_SEAT_DECLARATION_ANYWHERE.test(text) ? null : 1;
   const n = /#(\d+)\b/.exec(String(m[1] ?? ''));
   return n ? Number(n[1]) : null;
 }
@@ -31527,10 +31553,16 @@ async function selfTest() {
   t('H38 seat: `Seat: domain:services#2` reads 2', claimSeatNumber('Claim: x\nSeat: domain:services#2'), 2);
   t('H38 seat: …backticked too', claimSeatNumber('Claim: x\nSeat: `domain:services#2`'), 2);
   t('H38 seat: …and behind a bullet then a blockquote, bold key', claimSeatNumber('- > **Seat**: domain:services#4'), 4);
-  // ⛔ Blockquote-then-bullet is out, exactly as `claimedBranches` pins for `Branch:` — invisible, so absent, so seat 1.
-  t('H38 seat: a `> - Seat:` line is not read (measured shape, same as `Branch:`)', claimSeatNumber('> - Seat: domain:services#4'), 1);
+  // ⛔ Blockquote-then-bullet is still out, exactly as `claimedBranches` pins for `Branch:` — but it is PRESENT, so unreadable, ⛔ not seat 1.
+  t('H38 seat: a `> - Seat:` line is still no line-initial match — now unreadable, ⛔ not seat 1', claimSeatNumber('> - Seat: domain:services#4'), null);
   t('H38 seat: a `Seat:` line naming no number is unreadable, not seat 1', claimSeatNumber('Claim: x\nSeat: domain:services'), null);
   t('H38 seat: prose mentioning a seat is not a `Seat:` line', claimSeatNumber('the seat: domain:services#2 is busy'), 1);
+  // The measured misread: the declaration carried somewhere the key line cannot see is PRESENT, so null — ⛔ never a real seat.
+  t('H38 seat: a declaration mid-sentence in a code span is unreadable, ⛔ not seat 1', claimSeatNumber('**Claim:** dispatched by the `domain:spec` execution seat. `Seat: domain:spec#3` · claimed 2026-09-18T19:31Z'), null);
+  t('H38 seat: …and the same declaration inside a subscript tag', claimSeatNumber('<sub>Seat: domain:spec#3</sub>'), null);
+  // The two controls that keep the probe from swallowing the default: prose (above) needs the capital key, and a lane token alone is not a declaration.
+  t('H38 seat: a lane token with no `Seat:` key is not a declaration, so the absent default holds', claimSeatNumber('Claim: x\nre-graded for `domain:spec#3` work'), 1);
+  t('H38 seat: a body with no declaration at all is still seat 1 — every pre-line claim keeps its default', claimSeatNumber('Claim: x\nSession: `session_y`\nWorktree: `objectstack-issue-1`'), 1);
   const seatRow = (seatLine, iso) => [{ body: `Claim: PM loop round 1\nSession: \`session_x\`\n${seatLine}`, created_at: iso }];
   const oneCard = [laneCard(1, ['pm:dispatched', 'domain:services'])];
   const seat2Claim = new Map([[1, seatRow('Seat: `domain:services#2`', '2026-08-30T00:00:00Z')]]);
@@ -31541,6 +31573,9 @@ async function selfTest() {
   t('H38 seat: …and the seat 2 post does not', newestLaneClaim('domain:services', oneCard, seat1Claim, 2), null);
   t('H38 seat: the default seat argument is 1, so every pre-existing call reads as before', newestLaneClaim('domain:services', laneIssues, laneComments).number, 13398);
   t('H38 seat: an unreadable `Seat:` line matches no seat', newestLaneClaim('domain:services', oneCard, new Map([[1, seatRow('Seat: domain:services', '2026-08-30T00:00:00Z')]]), 1), null);
+  const midLineClaim = new Map([[1, [{ body: '**Claim:** by the `domain:services` seat. `Seat: domain:services#3` · claimed', created_at: '2026-08-30T00:00:00Z' }]]]);
+  t('H38 seat: a mid-line declaration is invisible to the seat it names…', newestLaneClaim('domain:services', oneCard, midLineClaim, 3), null);
+  t('H38 seat: …and — the whole point — invisible to seat 1 too, so no post is rowed over it', newestLaneClaim('domain:services', oneCard, midLineClaim, 1), null);
   t('H38 seat: the newest SAME-seat claim wins over a newer other-seat one', newestLaneClaim('domain:services', oneCard, new Map([[1, [...seatRow('Seat: domain:services#1', '2026-08-29T00:00:00Z'), ...seatRow('Seat: domain:services#2', '2026-08-30T00:00:00Z')]]]), 1).at, at38('2026-08-29T00:00:00Z'));
   // End to end on the post: a seat-2 post is judged against the claim handed to it, and names its seat.
   t('H38 seat: a seat-2 post behind a same-seat claim -> finding', typeof h38SeatPostStale(seat38(seat2Title), SEAT_AT_38, claim38(13398, '2026-08-30T07:30:00Z')), 'string');
