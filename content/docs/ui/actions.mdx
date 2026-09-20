@@ -189,6 +189,16 @@ The parameter is typed `EngineQueryOptions` (`ActionEngineFacade` in
 a `FilterCondition` variable. A hand-written test double must honour the envelope
 too.
 
+**One envelope key is not on this parameter: `context`.** A handler's
+`ctx.engine` is trusted and mints its own elevated `ExecutionContext`, so a
+`context` you write here would be overridden, never honoured — and writing one
+reads as narrowing a query to an identity or a tenant when it does nothing of
+the kind. It is subtracted from the type, so `ctx.engine.find('todo_task', {
+where: { … }, context: { tenantId: 'org_acme' } })` is a compile error rather
+than a silent no-op. To scope a read, put the scope in `where`. (An *untyped*
+handler still passes the key and still has it overridden, with no error — one
+more reason to annotate `ctx`.)
+
 If you do **not** annotate it — a handler in an `objectstack.config.js` /
 `.mjs`, your own copy of the context type, or `(ctx: any)` — the facade refuses
 the bare filter at **runtime** instead, naming the stray key and prescribing the
