@@ -7,6 +7,10 @@
  *
  *   node scripts/check-issue-citations.mjs                 # judge what this change ADDS
  *   node scripts/check-issue-citations.mjs --base <ref>    # ...relative to <ref>
+ *
+ * A runner declares the base instead, through `OS_GATE_MERGE_GROUP_BASE_SHA`
+ * -- see `baseSpellings` below for the `merge_group` reading that makes it the
+ * only correct answer there.
  *   node scripts/check-issue-citations.mjs --census        # the whole declared surface
  *   node scripts/check-issue-citations.mjs --list          # extraction only, no network
  *   node scripts/check-issue-citations.mjs --json          # machine-readable
@@ -138,8 +142,10 @@
  *                           report-only and scheduled -- the right posture for a
  *                           reading whose verdict a third party can change.
  *
- * Neither is installed here. That is a DECLARED gap, recorded in the PR body and
- * the report, not an oversight.
+ * Both are installed (#18224): the diff-scoped verdict in `lint.yml`'s
+ * `Lint & Repo Gates` job, the `--census` in `half-state-patrol.yml`. The
+ * verdict step also declares the base -- see `baseSpellings` below for why a
+ * `merge_group` build cannot be left to guess one.
  *
  * ## The local route -- why this gate re-execs itself
  *
@@ -601,14 +607,91 @@ export function addedLines(base, root) {
   return out;
 }
 
-/** The merge-base this repo's PRs are judged against. */
-export function defaultBase(root) {
-  for (const ref of ['origin/main', 'main']) {
-    try {
-      return execFileSync('git', ['merge-base', ref, 'HEAD'], { cwd: root, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
-    } catch { /* try the next spelling */ }
+/**
+ * Every diff-base spelling a run may use, in order, each carrying the reason it
+ * is on the list -- the refusal below prints them, so a reader who acts on it
+ * looks where the run actually looked.
+ *
+ * ⭐ A runner that DECLARES a base replaces the ref guesses entirely, and on a
+ * `merge_group` build that is not a convenience, it is the only correct answer.
+ * A queue entry is built on the GROUP's base, which carries the entries AHEAD
+ * of it in the queue and has NOT landed on `main` yet; the published
+ * `origin/main` the runner fetched is therefore BEHIND that base, and
+ * `merge-base origin/main HEAD` lands at the published tip. Everything between
+ * the two -- other people's PRs -- then reads as "added by this change".
+ *
+ * MEASURED on the ejection this spelling exists for: on queue entry
+ * `a7109d1f08` the ref guess resolved to the published main of 14:30Z and
+ * judged 15 file(s) / 16 citations, 3 of them unresolvable and every one of
+ * those written by the two entries ahead in the queue -- `#6361` twice from
+ * `ada701220`, `#18003` from `8271c81425`, both landing on `main` AFTER that
+ * checkout (14:36:53Z and 14:47:59Z). The declared base judged 0 file(s). So
+ * the ref guess failed a PR for citations its author did not write, which is
+ * the same defect class this gate's own diff scoping exists to prevent.
+ *
+ * ⛔ `pull_request` and `push` keep the ref guesses, deliberately: there the
+ * checked-out merge ref already CONTAINS the main it was computed against, so
+ * the merge base IS that main and nothing newer can leak into the added set.
+ *
+ * The variable is the name `lint.yml` already uses for this fact
+ * (`scripts/ci/select-gate-families.sh`) -- one fact, one spelling. It is
+ * deliberately NOT `PROXY_REARM_GUARD`'s own-name case: a re-exec guard is this
+ * PROCESS's state, which a sibling instrument must never answer for, while a
+ * group's `base_sha` is a fact about the build that every reader of it shares.
+ */
+export function baseSpellings({ base = null, env = process.env } = {}) {
+  if (base) return [{ ref: base, verbatim: true, why: 'the `--base` argument' }];
+  const declared = (env.OS_GATE_MERGE_GROUP_BASE_SHA ?? '').trim();
+  if (declared) return [{ ref: declared, verbatim: true, why: 'OS_GATE_MERGE_GROUP_BASE_SHA -- `github.event.merge_group.base_sha`' }];
+  return [
+    { ref: 'origin/main', verbatim: false, why: 'the remote-tracking main a CI checkout fetches' },
+    { ref: 'main', verbatim: false, why: 'a local main, for a clone that tracks no remote' },
+  ];
+}
+
+/** @returns {string|null} what git printed, or null when the command refused. */
+function gitLine(root, args) {
+  try {
+    return execFileSync('git', args, { cwd: root, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim() || null;
+  } catch { return null; }
+}
+
+/**
+ * The base a diff-scoped run is judged against, plus every spelling tried.
+ *
+ * ⛔ It never returns a base it did not VERIFY resolves to a commit in this
+ * checkout. An unverified base reaches `git diff` as-is, which answers
+ * `fatal: bad revision` and THROWS -- an uncaught exception whose exit code is
+ * none of this gate's three answers, so a failed read arrives wearing an
+ * unclassified number. "could not resolve" and "resolves" are not the same
+ * answer, so an unresolvable spelling answers `{ base: null }` here and the
+ * caller refuses loudly with `EXIT_PREREQUISITE_NOT_MET`.
+ */
+export function resolveDiffBase({ root = process.cwd(), base = null, env = process.env } = {}) {
+  const tried = baseSpellings({ base, env });
+  for (const spelling of tried) {
+    /* A declared base is taken VERBATIM -- it already IS the fork point. A ref
+     * guess goes through `merge-base`, because a branch TIP is not one. */
+    const sha = spelling.verbatim
+      ? gitLine(root, ['rev-parse', '--verify', '--quiet', `${spelling.ref}^{commit}`])
+      : gitLine(root, ['merge-base', spelling.ref, 'HEAD']);
+    if (sha) return { base: sha, used: spelling, tried };
   }
-  return null;
+  return { base: null, used: null, tried };
+}
+
+/**
+ * The refusal text for a base that does not resolve. It names every spelling
+ * TRIED and what to pass instead: "no merge-base with `origin/main`" is a true
+ * sentence about a run that never looked at `origin/main` at all, and a reader
+ * who acts on it looks in the wrong place.
+ */
+export function unresolvedBaseMessage({ tried }) {
+  const spellings = tried.map((s) => `\`${s.ref}\` (${s.why})`).join(', ');
+  return `no diff base resolves to a commit in this checkout — tried ${spellings}. `
+    + 'A diff-scoped run has no baseline to judge against. Pass one with `--base <ref>`, '
+    + 'or set OS_GATE_MERGE_GROUP_BASE_SHA to a commit this checkout has, or fetch `main` '
+    + '(a shallow clone carries no merge base).';
 }
 
 /**
@@ -709,9 +792,11 @@ function prerequisiteRefusal(message) {
 }
 
 export async function run({ root = process.cwd(), scope = 'diff', base = null, json = false, probeCause = false, ownerRepo = 'objectstack-ai/objectstack', strategy = 'auto' } = {}) {
-  const resolvedBase = scope === 'diff' ? (base ?? defaultBase(root)) : null;
-  if (scope === 'diff' && !resolvedBase) {
-    prerequisiteRefusal('no merge-base with `origin/main` or `main` — a diff-scoped run has no baseline to judge against.');
+  let resolvedBase = null;
+  if (scope === 'diff') {
+    const attempt = resolveDiffBase({ root, base });
+    if (!attempt.base) prerequisiteRefusal(unresolvedBaseMessage(attempt));
+    resolvedBase = attempt.base;
   }
   const { rows, files } = collectCitations({ root, scope, base: resolvedBase });
 
@@ -810,7 +895,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   causes: 12,
   transport: 7,
   'scope-contract': 12,
-  'diff-scope': 6,
+  'diff-scope': 13,
   'live-corpus': 3,
   'proxy-rearm': 10,
 });
@@ -995,6 +1080,27 @@ export async function selfTest() {
       const board = boardFromSets({ numbers: [100], pulls: [], frontier: 1000, source: 'stub' });
       check(classifyCitation(after.rows[0], board, { ownerRepo: 'o/r' }).cause === CAUSE.ALLOCATED_BUT_ABSENT,
         'the added citation must classify as unresolvable against a board that lacks it');
+
+      /* ⭐ THE BASE, both directions. The base decides WHICH diff is judged, so
+       * a wrong one does not fail loudly -- it judges somebody else's change
+       * and reports the answer as this one's. */
+      const absent = '0'.repeat(40);
+      check(resolveDiffBase({ root: tmp, base }).base === base,
+        'a resolvable explicit base must be used verbatim -- it already IS the fork point');
+      check(resolveDiffBase({ root: tmp, base: absent }).base === null,
+        '⛔ a `--base` naming no commit here must answer null, NEVER be handed to `git diff` -- unverified, it throws, and an uncaught throw is a failed read wearing an unclassified exit code');
+      const refusal = unresolvedBaseMessage(resolveDiffBase({ root: tmp, base: absent }));
+      check(refusal.includes(absent) && refusal.includes('--base <ref>') && refusal.includes('OS_GATE_MERGE_GROUP_BASE_SHA'),
+        '...and the refusal must name the spelling that was TRIED and what to pass instead');
+      check(resolveDiffBase({ root: tmp, env: { OS_GATE_MERGE_GROUP_BASE_SHA: base } }).base === base,
+        'a runner-DECLARED merge-group base must become the base, so a queue build judges its own diff and not the entries ahead of it in the queue');
+      check(resolveDiffBase({ root: tmp, env: { OS_GATE_MERGE_GROUP_BASE_SHA: absent } }).base === null,
+        '⛔ ...and a declared base this checkout does not have must REFUSE, never fall back to a ref guess that would silently judge a different diff');
+      check(baseSpellings({ env: {} }).map((s) => s.ref).join() === 'origin/main,main'
+        && baseSpellings({ env: { OS_GATE_MERGE_GROUP_BASE_SHA: '' } }).map((s) => s.ref).join() === 'origin/main,main',
+      'with nothing declared -- and on the events where that variable renders EMPTY -- the ref guesses are unchanged, so `pull_request` and `push` keep the base they already had');
+      check(/if \(!attempt\.base\) prerequisiteRefusal\(unresolvedBaseMessage\(attempt\)\);/.test(readFileSync(SELF_PATH, 'utf8')),
+        'structural: the null answer must reach `prerequisiteRefusal` -- exit 3, never 0 and never an uncaught throw');
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }

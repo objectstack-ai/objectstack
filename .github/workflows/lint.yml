@@ -4705,14 +4705,45 @@ jobs:
       # never here, and never blocking. ⛔ Do not "upgrade" this step to
       # `--census`.
       #
-      # The diff base is `git merge-base origin/main HEAD`, which is why this
-      # job checks out at `fetch-depth: 0` (the checkout step above says so for
-      # its own reason). On a `push` to main the merge base IS the head, so the
-      # added set is empty, the run makes ZERO requests and exits 0 before it
-      # asks the board anything.
+      # THE DIFF BASE, per event, and the merge_group row is the whole of
+      # #19259's ejection:
       #
-      # ⛔ A failed read is never a pass: an unreadable board exits
-      # PREREQUISITE NOT MET rather than reporting a clean tree.
+      #   pull_request  `git merge-base origin/main HEAD`. CORRECT and left
+      #                 alone: the checked-out merge ref already CONTAINS the
+      #                 main it was computed against, so the merge base IS that
+      #                 main and nothing newer can leak into the added set.
+      #   push (main)   the merge base IS the head, so the added set is empty,
+      #                 the run makes ZERO requests and exits 0 before it asks
+      #                 the board anything.
+      #   merge_group   ⭐ the group's own `base_sha`, declared below. A queue
+      #                 entry is built on the GROUP's base, which carries the
+      #                 entries AHEAD of it in the queue and has NOT landed on
+      #                 `main` yet, so the published `origin/main` this runner
+      #                 fetched is BEHIND that base and the ref guess lands at
+      #                 the published tip — attributing every entry ahead in the
+      #                 queue to THIS change.
+      #
+      # MEASURED, on this step's own first queue build (entry `a7109d1f08`,
+      # 2026-09-20): the ref guess resolved to the published main of 14:30Z and
+      # judged 15 file(s) / 16 citations, 3 unresolvable — `#6361` twice from
+      # `ada701220` (#19364) and `#18003` from `8271c81425` (#19363), the two
+      # entries ahead in the queue, both of which landed on `main` only at
+      # 14:36:53Z and 14:47:59Z. The step exited 2 (its findings code) and the
+      # queue ejected the PR for citations its author never wrote. Against
+      # `base_sha` the same tree judges 0 file(s).
+      #
+      # ⛔ Do NOT `if:`-skip this step on `merge_group` instead: this file's
+      # header asserts that every gate step here runs on merge_group, and a
+      # blocking gate turned off on the one event that guards what is about to
+      # reach `main` is a gate that is not one. Both halves of the repair are
+      # this: the base above, and the gate's own refusal below.
+      #
+      # `fetch-depth: 0` is what makes either spelling resolvable (the checkout
+      # step above says so for its own reason).
+      #
+      # ⛔ A failed read is never a pass: an unreadable board — and now an
+      # unresolvable base, which used to throw an unclassified exit code —
+      # exits PREREQUISITE NOT MET rather than reporting a clean tree.
       - name: Issue citations this change adds resolve on the board
         env:
           # The board read is one GET per distinct number the change cites
@@ -4720,6 +4751,11 @@ jobs:
           # anyway: the gate uses the token when it finds one, and an
           # unauthenticated runner shares one IP's 60 requests/hour.
           GITHUB_TOKEN: ${{ github.token }}
+          # Renders the group's base on `merge_group` and EMPTY on every other
+          # event, where the gate keeps the `origin/main` / `main` guesses. Same
+          # name, same expression, same fact as the gate-family selector above
+          # — one fact, one spelling.
+          OS_GATE_MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
         run: pnpm check:issue-citations && node scripts/check-issue-citations.mjs
 
       # #15149. Grep-level guard for the defect this very repo just shipped: an
