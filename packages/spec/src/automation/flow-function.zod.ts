@@ -222,6 +222,10 @@ export const FlowFunctionLoweredDeclarationSchema = lazySchema(() => FlowFunctio
     .describe('The lowered handler ref (built artifacts) — the callable rides in the sibling ESM module'),
 }).describe('A lowered `functions` declaration: what the function declared about itself, with its callable replaced by a handler ref'));
 
+export type FlowFunctionLoweredDeclaration = z.input<typeof FlowFunctionLoweredDeclarationSchema>;
+/** Post-parse shape of {@link FlowFunctionLoweredDeclaration} — defaults applied, transforms run (ADR-0122). */
+export type FlowFunctionLoweredDeclarationParsed = z.infer<typeof FlowFunctionLoweredDeclarationSchema>;
+
 /**
  * One entry of the `functions` map, in the four shapes it legitimately takes:
  * the handler alone (pure), a {@link FlowFunctionDeclarationSchema} that states

@@ -12,8 +12,8 @@
 # excluded: documentation drift is `check:docs`'s axis, not this one.
 #
 # entry: .
-# exported names: 219
-# declarations: 220
+# exported names: 225
+# declarations: 226
 #
 # GENERATED — ⛔ never hand-edited. Regenerate after a real build:
 #   pnpm --filter @objectstack/spec build && pnpm --filter @objectstack/spec gen:api-surface-declarations
@@ -255,6 +255,15 @@ type ArtifactPackageParsed = z.infer<typeof ArtifactPackageSchema>;
 declare const ArtifactPackageSchema: z.ZodObject<{
     manifest: z.ZodType<Record<string, unknown>, Record<string, unknown>, z.core.$ZodTypeInternals<Record<string, unknown>, Record<string, unknown>>>;
 }, z.core.$strict>;
+
+// ── ArtifactStagePackageBody (type) ──
+type ArtifactStagePackageBody = z.input<typeof ArtifactStagePackageBodySchema>;
+
+// ── ArtifactStagePackageBodyParsed (type) ──
+type ArtifactStagePackageBodyParsed = z.infer<typeof ArtifactStagePackageBodySchema>;
+
+// ── ArtifactStagePackageBodySchema (const) ──
+declare const ArtifactStagePackageBodySchema: z.ZodType<Record<string, unknown>, Record<string, unknown>>;
 
 // ── AssembledPackageBody (type) ──
 type AssembledPackageBody = z.input<typeof AssembledPackageBodySchema>;
@@ -44926,6 +44935,15 @@ declare const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>>
 
 // ── RETIRED_KEYS_BY_MAJOR (const) ──
 declare const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>>;
+
+// ── RecordStagePackageBody (type) ──
+type RecordStagePackageBody = z.input<typeof RecordStagePackageBodySchema>;
+
+// ── RecordStagePackageBodyParsed (type) ──
+type RecordStagePackageBodyParsed = z.infer<typeof RecordStagePackageBodySchema>;
+
+// ── RecordStagePackageBodySchema (const) ──
+declare const RecordStagePackageBodySchema: z.ZodType<Record<string, unknown>, Record<string, unknown>>;
 
 // ── ReleaseSurfaceDiff (interface) ──
 interface ReleaseSurfaceDiff {

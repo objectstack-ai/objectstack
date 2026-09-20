@@ -1471,11 +1471,7 @@ declare const AssembledInstalledPackageSchema: z.ZodObject<{
         migrationLog: z.ZodOptional<z.ZodArray<z.ZodString>>;
     }, z.core.$strip>>>;
     registeredNamespaces: z.ZodOptional<z.ZodArray<z.ZodString>>;
-    manifest: z.ZodObject<{
-        readonly [x: string]: z.core.$ZodType<unknown, unknown, z.core.$ZodTypeInternals<unknown, unknown>>;
-        functions: z.ZodOptional<z.ZodUnknown>;
-        hooks: z.ZodOptional<z.ZodUnknown>;
-    }, z.core.$strip>;
+    manifest: z.ZodType<Record<string, unknown>, Record<string, unknown>, z.core.$ZodTypeInternals<Record<string, unknown>, Record<string, unknown>>>;
 }, z.core.$strip>;
 
 // ── AuditMetaItemRequest (type) ──
@@ -8813,11 +8809,7 @@ declare const GetInstalledPackageResponseSchema: z.ZodObject<{
             migrationLog: z.ZodOptional<z.ZodArray<z.ZodString>>;
         }, z.core.$strip>>>;
         registeredNamespaces: z.ZodOptional<z.ZodArray<z.ZodString>>;
-        manifest: z.ZodObject<{
-            readonly [x: string]: z.core.$ZodType<unknown, unknown, z.core.$ZodTypeInternals<unknown, unknown>>;
-            functions: z.ZodOptional<z.ZodUnknown>;
-            hooks: z.ZodOptional<z.ZodUnknown>;
-        }, z.core.$strip>;
+        manifest: z.ZodType<Record<string, unknown>, Record<string, unknown>, z.core.$ZodTypeInternals<Record<string, unknown>, Record<string, unknown>>>;
     }, z.core.$strip>]>;
 }, z.core.$strip>;
 
@@ -13548,11 +13540,7 @@ declare const InstalledPackageAtEitherStageSchema: z.ZodUnion<readonly [z.ZodObj
         migrationLog: z.ZodOptional<z.ZodArray<z.ZodString>>;
     }, z.core.$strip>>>;
     registeredNamespaces: z.ZodOptional<z.ZodArray<z.ZodString>>;
-    manifest: z.ZodObject<{
-        readonly [x: string]: z.core.$ZodType<unknown, unknown, z.core.$ZodTypeInternals<unknown, unknown>>;
-        functions: z.ZodOptional<z.ZodUnknown>;
-        hooks: z.ZodOptional<z.ZodUnknown>;
-    }, z.core.$strip>;
+    manifest: z.ZodType<Record<string, unknown>, Record<string, unknown>, z.core.$ZodTypeInternals<Record<string, unknown>, Record<string, unknown>>>;
 }, z.core.$strip>]>;
 
 // ── ListAiConversationsRequest (type) ──
@@ -14073,11 +14061,7 @@ declare const ListInstalledPackagesResponseSchema: z.ZodObject<{
                 migrationLog: z.ZodOptional<z.ZodArray<z.ZodString>>;
             }, z.core.$strip>>>;
             registeredNamespaces: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            manifest: z.ZodObject<{
-                readonly [x: string]: z.core.$ZodType<unknown, unknown, z.core.$ZodTypeInternals<unknown, unknown>>;
-                functions: z.ZodOptional<z.ZodUnknown>;
-                hooks: z.ZodOptional<z.ZodUnknown>;
-            }, z.core.$strip>;
+            manifest: z.ZodType<Record<string, unknown>, Record<string, unknown>, z.core.$ZodTypeInternals<Record<string, unknown>, Record<string, unknown>>>;
         }, z.core.$strip>]>>;
         total: z.ZodOptional<z.ZodNumber>;
         nextCursor: z.ZodOptional<z.ZodString>;
@@ -27209,11 +27193,7 @@ declare const PackageApiContracts: {
                         migrationLog: z.ZodOptional<z.ZodArray<z.ZodString>>;
                     }, z.core.$strip>>>;
                     registeredNamespaces: z.ZodOptional<z.ZodArray<z.ZodString>>;
-                    manifest: z.ZodObject<{
-                        readonly [x: string]: z.core.$ZodType<unknown, unknown, z.core.$ZodTypeInternals<unknown, unknown>>;
-                        functions: z.ZodOptional<z.ZodUnknown>;
-                        hooks: z.ZodOptional<z.ZodUnknown>;
-                    }, z.core.$strip>;
+                    manifest: z.ZodType<Record<string, unknown>, Record<string, unknown>, z.core.$ZodTypeInternals<Record<string, unknown>, Record<string, unknown>>>;
                 }, z.core.$strip>]>>;
                 total: z.ZodOptional<z.ZodNumber>;
                 nextCursor: z.ZodOptional<z.ZodString>;
@@ -27422,11 +27402,7 @@ declare const PackageApiContracts: {
                     migrationLog: z.ZodOptional<z.ZodArray<z.ZodString>>;
                 }, z.core.$strip>>>;
                 registeredNamespaces: z.ZodOptional<z.ZodArray<z.ZodString>>;
-                manifest: z.ZodObject<{
-                    readonly [x: string]: z.core.$ZodType<unknown, unknown, z.core.$ZodTypeInternals<unknown, unknown>>;
-                    functions: z.ZodOptional<z.ZodUnknown>;
-                    hooks: z.ZodOptional<z.ZodUnknown>;
-                }, z.core.$strip>;
+                manifest: z.ZodType<Record<string, unknown>, Record<string, unknown>, z.core.$ZodTypeInternals<Record<string, unknown>, Record<string, unknown>>>;
             }, z.core.$strip>]>;
         }, z.core.$strip>;
     };

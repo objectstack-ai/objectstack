@@ -130,6 +130,7 @@
     "FlowFunctionEntry (type)",
     "FlowFunctionEntryParsed (type)",
     "FlowFunctionEntrySchema (const)",
+    "FlowFunctionLoweredDeclarationSchema (const)",
     "FlowGraph (interface)",
     "FlowNode (type)",
     "FlowNodeAction (const)",
