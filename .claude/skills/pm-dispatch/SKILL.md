@@ -125,7 +125,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - `pm:queue` 卡逾三天欠一次显式转换(派发/转箱/停放/撤单/改前提),⛔ 不是排期。
 - hold/blocked 的行契约、双通道与 `Restart-touch:` 触发文件细则见 `references/state-machine.md`。
 - hold 放行须双查:只放最近一次转换评论的条件,其后卡上有更新的 merged PR 即拒。
-- `Unlock-action: re-check PR #M` 行改写完工卡的解锁动作,只认此一值,别的拼写静默回落。
+- `Unlock-action:` 只认 `re-check PR #M` 与 `re-check #N when label <标签> <absent|present>`,余者静默回落。
 - `needs-user-decision` 是决定待做,`pm:on-hold` 是决定已做;`manual — <理由>` ⛔ 不是合法出口。
 - 无机制可唤醒的卡 ⛔ 不 hold:关 not planned,理由/出处载关单评论;重开免费,维护者可否决。
 - 缺陷卡 ⛔ 不藏进 hold 也不自行关闭:可复现且用户可达 ⇒ 回 `pm:queue`。

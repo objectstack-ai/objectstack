@@ -30,7 +30,7 @@
 - hold 放行须双查:只放最近一次转换评论的条件,其后有更新的 merged PR 即拒。
 - 没有可点火出口的卡 ⛔ 不 hold,直接关 not planned 并把理由与出处写进关单评论。
 - 缺陷卡 ⛔ 不可自行关闭或藏进 hold:可复现回队列、未兑现走 enforce-or-remove、余下进箱。
-- `pm:blocked` 配正文行 `Blocked-by:`,工已完而卡在门禁的同用此态并写 `Unlock-action:` 行。
+- `pm:blocked` 配正文行 `Blocked-by:`,完工卡遇门禁或等换标的同用此态并写 `Unlock-action:` 行。
 - `pm:awaiting-maintainer` 只剩站外人工动作,恒带 `Maintainer-action:` 行;`pm:blocking` ⛔ 不手工挂。
 - `pm:retriage` 并存 ⛔ 不摘原标且跳过派发;`finding` 恒等于待首次定级、定级即离标。
 - 插队标签可超 `batch` 立即派发,⛔ 不豁免同文件串行、深度等待与认领协议。
