@@ -207,8 +207,17 @@ export type FlowFunctionDeclarationParsed = z.infer<typeof FlowFunctionDeclarati
  * the `'pure'` default — but `defineStack({…}, { strict: false })` skips that
  * parse, and requiring `effect` would hand that path the identical
  * `invalid_union` this member exists to end.
+ *
+ * EXPORTED, where the authored form beside it is the one that cannot publish:
+ * this is the serialisable half of the pair, and the declaration an
+ * inert-JSON stage is built from — `ArtifactStagePackageBodySchema` and
+ * `RecordStagePackageBodySchema` in `../stack.zod` reference it by name rather
+ * than transcribing a second lowered shape beside it. Keeping it module-local
+ * was what made `unemitted-schemas.baseline.json`'s reason for
+ * {@link FlowFunctionDeclarationSchema} — 「the lowered record … publishes
+ * normally」 — point at a schema no consumer could reach.
  */
-const FlowFunctionLoweredDeclarationSchema = lazySchema(() => FlowFunctionDeclarationSchema.extend({
+export const FlowFunctionLoweredDeclarationSchema = lazySchema(() => FlowFunctionDeclarationSchema.extend({
   handler: z.string().min(1)
     .describe('The lowered handler ref (built artifacts) — the callable rides in the sibling ESM module'),
 }).describe('A lowered `functions` declaration: what the function declared about itself, with its callable replaced by a handler ref'));

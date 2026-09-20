@@ -8,7 +8,7 @@ import { UpgradePlanSchema } from '../kernel/package-upgrade.zod';
 import { PackageArtifactSchema } from '../kernel/package-artifact.zod';
 import { ManifestSchema } from '../kernel/manifest.zod';
 import { ArtifactReferenceSchema } from '../marketplace/marketplace.zod';
-import { AssembledPackageBodySchema } from '../stack.zod';
+import { RecordStagePackageBodySchema } from '../stack.zod';
 
 /**
  * # Package API Protocol
@@ -76,15 +76,9 @@ export type PackagePathParams = z.input<typeof PackagePathParamsSchema>;
  * The body half is deliberately typed `Record<string, unknown>`; the reason is
  * recorded at `AssembledPackageBodySchema` and is not repeated here. The RUNTIME
  * schema still carries the manifest's every field plus every collection's full
- * declaration, so a wrong-shaped body is refused exactly as it is there — with
- * the one measured exception {@link AssembledPackageRecordBodySchema} states
- * and pins.
- */
-/**
- * The assembled package body AS THE REGISTRY RECORDS IT — the same declaration,
- * with the two collections that have no JSON form left unchecked.
+ * declaration, so a wrong-shaped body is refused exactly as it is there.
  *
- * ## Why this exists at all, measured rather than assumed
+ * ## The row's manifest is the RECORD stage, not the assembled one
  *
  * `SchemaRegistry.installPackage` does not store the caller's object; it stores
  * `toRecordManifest(manifest)`, a structural JSON projection that DROPS
@@ -96,37 +90,34 @@ export type PackagePathParams = z.input<typeof PackagePathParamsSchema>;
  * - `hooks` — a `z.custom()` branch (a lifecycle handler).
  *
  * Those same two are the reason `AssembledPackageBodySchema` has NO JSON Schema
- * at all: `z.toJSONSchema` refuses a function and a custom type, which is also
- * why `ArtifactPackageSchema` and `ObjectStackDefinitionSchema` publish none.
- * Embedding the body verbatim in the two published response schemas below made
- * BOTH of them disappear from `json-schema/api/`, which the build's own
- * disappearance ratchet refuses and whose only other remedy is retiring two
- * published defs. `build-schemas.ts` names the remedy taken here instead:
+ * at all: `z.toJSONSchema` refuses a function and a custom type, and embedding
+ * the body verbatim in the two published response schemas below made BOTH of
+ * them disappear from `json-schema/api/`, which the build's own disappearance
+ * ratchet refuses. `build-schemas.ts` names the remedy taken here:
  * «make it emit — narrow the unrepresentable member».
  *
- * ⛔ The override set is NOT hand-picked, and must never become so. It is the
- * measured set of shape members with no JSON form, pinned key-by-key in
- * `./package-api.test.ts`: a new collection with no JSON form reddens there,
- * naming itself, instead of silently unpublishing these responses again.
+ * ⚠️ ⛔ Those two members are NOT why `ArtifactPackageSchema` and
+ * `ObjectStackDefinitionSchema` publish no JSON Schema — an earlier version of
+ * this docblock said they were, and it is false. `src/stack.zod.ts` is not one
+ * of the subpath namespaces `build-schemas.ts` walks, so neither schema is ever
+ * reached by the emit loop; repairing the two branches would not make either
+ * appear. What the narrowing below buys is this file's own two responses, which
+ * ARE in the emit loop.
  *
- * ⚠️ What `unknown` costs, stated plainly: on THIS surface those two keys are
- * accepted without being checked. It is a widening from today, where both are
- * refused outright by `ManifestSchema`'s strict close while the door really can
- * serve them — so the declaration moves from wrong to incomplete, never from
- * checked to tolerant. Every other key, `objects` included, is checked at the
- * assembled stage exactly as `AssembledPackageBodySchema` declares it. The
- * ARTIFACT surface is untouched and keeps both collections fully declared.
+ * ⭐ The narrowing is a DECLARATION rather than a hole. Until #17518 these two
+ * keys were `z.unknown().optional()` here — accepted without being checked —
+ * and that hole is what `RecordStagePackageBodySchema` replaces: the registry
+ * record stage, declared in `../stack.zod` beside the assembled and artifact
+ * stages, is the assembled body with both collections lowered and
+ * `functions[].handler` optional. ⛔ Never widen either key back to `unknown`
+ * to make a row fit: a row that parses through neither declared stage is a
+ * producer defect, and the record stage exists to keep saying so. The set of
+ * members that need the treatment is MEASURED, never hand-picked — pinned
+ * key-by-key in `./package-api.test.ts`, so a new collection with no JSON form
+ * reddens there, naming itself.
  */
-const AssembledPackageRecordBodySchema = lazySchema(() =>
-  (AssembledPackageBodySchema as unknown as z.ZodObject<z.ZodRawShape>).extend({
-    functions: z.unknown().optional()
-      .describe('Named handler functions, as they survived the record JSON projection'),
-    hooks: z.unknown().optional()
-      .describe('Object lifecycle hooks, as they survived the record JSON projection'),
-  }).describe('One package as assembled, as the registry RECORDS it (JSON only)'));
-
 export const AssembledInstalledPackageSchema = lazySchema(() => InstalledPackageSchema.extend({
-  manifest: AssembledPackageRecordBodySchema.describe('The ASSEMBLED package body this row carries'),
+  manifest: RecordStagePackageBodySchema.describe('The ASSEMBLED package body this row carries, at the stage the registry records it'),
 }).describe('Installed package row whose manifest is the assembled package body'));
 export type AssembledInstalledPackage = z.input<typeof AssembledInstalledPackageSchema>;
 /** Post-parse shape of {@link AssembledInstalledPackage} — defaults applied, transforms run (ADR-0122). */

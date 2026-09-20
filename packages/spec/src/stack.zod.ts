@@ -34,7 +34,7 @@ import { ActionSchema, InlineActionSchema } from './ui/action.zod';
 // Automation Protocol
 import { FlowSchema } from './automation/flow.zod';
 import { resolveFlowTriggerKind } from './automation/flow-trigger-kind';
-import { FlowFunctionEntrySchema, FlowFunctionEffectSchema } from './automation/flow-function.zod';
+import { FlowFunctionEntrySchema, FlowFunctionEffectSchema, FlowFunctionLoweredDeclarationSchema } from './automation/flow-function.zod';
 import { JobSchema } from './system/job.zod';
 
 // Security Protocol
@@ -1292,6 +1292,148 @@ export const AssembledPackageBodySchema: z.ZodType<Record<string, unknown>, Reco
 export type AssembledPackageBody = z.input<typeof AssembledPackageBodySchema>;
 /** Post-parse shape of {@link AssembledPackageBody} — defaults applied, transforms run (ADR-0122). */
 export type AssembledPackageBodyParsed = z.infer<typeof AssembledPackageBodySchema>;
+
+/**
+ * `hooks`, as a JSON document can hold it: the assembled declaration with its
+ * `handler` narrowed to the lowered string ref.
+ *
+ * The narrowing is written HERE rather than on `HookSchema`, because the
+ * authoring door must keep accepting the inline callable — `objectstack build`
+ * is what lowers it, and `data/hook.zod.ts` says so in its own words: 「The
+ * JSON artifact therefore only ever contains the string form.」 `handler` keeps
+ * the base's `.optional()`: a hook that carries a `body` instead declares no
+ * handler at all, and the registry record of a hook whose handler was an inline
+ * callable has none either (the projection drops it).
+ */
+function jsonStageHooksKey() {
+  return z.array(HookSchema.extend({
+    handler: z.string().optional()
+      .describe('Handler function name — the lowered string ref the JSON artifact carries'),
+  })).optional().describe('Object Lifecycle Hooks, as a JSON document carries them');
+}
+
+/**
+ * `functions`, as a JSON document can hold it: the two LOWERED members of
+ * {@link FlowFunctionEntrySchema} for the map form, and the array member with
+ * its callable branch dropped.
+ *
+ * Both lowered spellings are kept, not just the record one: `objectstack build`
+ * emits `{ myFn: 'myFn' }` for a bare entry and
+ * `{ myFn: { handler: 'myFn', effect: 'writes' } }` for a declared one, so a
+ * stage that admitted only the second would refuse artifacts this repo really
+ * writes.
+ *
+ * @param handlerOptional the RECORD stage's one difference from the artifact
+ * stage. A registry row is `toRecordManifest`'s structural JSON projection of
+ * the live assembled body, and that projection drops the callable it finds
+ * under `handler` — so the record of a declared function is the declaration
+ * MINUS its handler. Nothing replaces it, and nothing should: a ref minted
+ * anywhere but `objectstack build` is not guaranteed to be the ref `build`
+ * mints, so an absent `handler` is the honest statement 「declared here, not
+ * serialisable」. `effect` carries whatever optionality each form already gives
+ * it — `.default('pure')` on the map declaration, `.optional()` on the array
+ * entry — and neither is restated here.
+ */
+function jsonStageFunctionsKey(handlerOptional: boolean) {
+  const handlerRef = z.string().min(1)
+    .describe('The lowered handler ref (built artifacts) — the callable rides in the sibling ESM module');
+  return z.union([
+    z.record(z.string(), z.union([
+      handlerRef,
+      handlerOptional
+        ? FlowFunctionLoweredDeclarationSchema.extend({ handler: handlerRef.optional() })
+        : FlowFunctionLoweredDeclarationSchema,
+    ])),
+    // Transcribed rather than derived from the authoring array member above:
+    // that member is declared INLINE inside the assembled body's own shape, and
+    // narrowing it in place is the one thing this pair may not do. The key sets
+    // are held equal by a pin in `stack-json-stage-package-body.test.ts`, so a
+    // key added there and not here reddens by name.
+    z.array(z.object({
+      name: z.string(),
+      handler: handlerOptional ? handlerRef.optional() : handlerRef,
+      packageId: z.string().optional(),
+      effect: FlowFunctionEffectSchema.optional(),
+    })),
+  ]).optional().describe('Named handler functions, lowered to the refs a JSON document carries');
+}
+
+/**
+ * One package as an INERT JSON release artifact carries it — the third of the
+ * four stages a package body passes through, and the first one that is really
+ * JSON.
+ *
+ * ## Why this is a separate declaration and not a narrowing of the assembled body
+ *
+ * {@link AssembledPackageBodySchema} spans the IN-MEMORY composed stage, where
+ * `functions` and `hooks` legitimately hold live callables:
+ * `composeStacks(stacks, { manifest: 'preserve' })` builds exactly such a body
+ * and the load path registers it, which is the invariant this file states
+ * further down. Narrowing the assembled body would refuse a published
+ * composition function's own output — so the artifact stage gets its own name
+ * instead, and the assembled one is ⛔ untouched.
+ *
+ * ## What it buys, measured
+ *
+ * Exactly two of the assembled body's members have no JSON Schema form —
+ * `functions` (a `z.function()` branch) and `hooks` (a `z.custom()` branch) —
+ * and one unrepresentable member costs every embedder its whole JSON Schema.
+ * With both narrowed to their lowered spellings this body converts under
+ * `z.toJSONSchema`, so a JSON surface that wants the assembled stage can
+ * declare it instead of writing `z.unknown()` and accepting anything.
+ *
+ * ADR-0130 D4 is what says an artifact is inert JSON: 「a plugin written inside
+ * `packages[i].manifest` could never be constructed by a loader, so a reader
+ * that resolved it there would register garbage where it used to skip in
+ * silence.」 A callable in an artifact is the same case.
+ */
+/*
+ * ANNOTATED with the same STRUCTURAL type as the assembled body above, for the
+ * same two measured reasons recorded there (TS7056 on the inferred type; a
+ * named alias turning `stack.zod` into a shared chunk). ⛔ Do not replace either
+ * annotation with an inferred or named type without re-reading that note.
+ */
+export const ArtifactStagePackageBodySchema: z.ZodType<Record<string, unknown>, Record<string, unknown>> =
+  lazySchema(() =>
+    ManifestSchema.extend({
+      ...assembledPackageBodyShape(),
+      functions: jsonStageFunctionsKey(false),
+      hooks: jsonStageHooksKey(),
+    }).describe('One package as an inert-JSON release artifact carries it (ADR-0130 D4)'));
+
+/** The artifact-stage package body as authored. */
+export type ArtifactStagePackageBody = z.input<typeof ArtifactStagePackageBodySchema>;
+/** Post-parse shape of {@link ArtifactStagePackageBody} — defaults applied, transforms run (ADR-0122). */
+export type ArtifactStagePackageBodyParsed = z.infer<typeof ArtifactStagePackageBodySchema>;
+
+/**
+ * One package as the package REGISTRY records it — the fourth stage, and the
+ * one that had no declaration until now.
+ *
+ * It is {@link ArtifactStagePackageBodySchema} with `functions[].handler`
+ * OPTIONAL, in both the map-record form and the array form, and nothing else.
+ * That single difference is the whole distance between an artifact and a
+ * record: an artifact is written by `objectstack build`, which lowers every
+ * callable to a ref, while a record is `toRecordManifest`'s structural JSON
+ * projection of a LIVE body, which drops the callable and mints nothing in its
+ * place. A record therefore reports what each function is named and what it
+ * declared, with `handler` absent where the callable was.
+ *
+ * ⛔ Never widen this to `z.unknown()` to make a row fit. A row that parses
+ * through neither this stage nor the authoring one is a producer defect, and
+ * this is the declaration that has to keep saying so.
+ */
+/* ANNOTATED structurally — see the note on the artifact stage above. */
+export const RecordStagePackageBodySchema: z.ZodType<Record<string, unknown>, Record<string, unknown>> =
+  lazySchema(() =>
+    (ArtifactStagePackageBodySchema as unknown as z.ZodObject<z.ZodRawShape>).extend({
+      functions: jsonStageFunctionsKey(true),
+    }).describe('One package as the package registry records it — the artifact stage with `functions[].handler` optional'));
+
+/** The record-stage package body as authored. */
+export type RecordStagePackageBody = z.input<typeof RecordStagePackageBodySchema>;
+/** Post-parse shape of {@link RecordStagePackageBody} — defaults applied, transforms run (ADR-0122). */
+export type RecordStagePackageBodyParsed = z.infer<typeof RecordStagePackageBodySchema>;
 
 /**
  * One package carried by a release artifact, in its ASSEMBLED form — the
