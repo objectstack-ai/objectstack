@@ -3883,6 +3883,10 @@ const OBJECT_TIMELINE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * `limit` (`:234`, `:254` — the fetch's top-level `$top`, renderer default
  * `DEFAULT_TIMELINE_LIMIT` = 100 at `:28`), `items` (`:170`, `:247`, `:299`,
  * `:480` — the authored pass-through that short-circuits the object query),
+ * `data` (`:171`, `:247`, `:254`, `:256` — the pre-fetched record source,
+ * read off REACT PROPS rather than `schema`; the door's own docblock carries
+ * how an authored key reaches that channel and why a `schema.*` sweep alone
+ * publishes a false refusal),
  * `descriptionField` (`:290`), `mapping` (`:263`, `:288`, `:290`, `:291`),
  * `variant` (`:518`) and `navigation` (`:462-466` → `:597` → `:652`).
  * Four more are read by the presentational renderer off the schema this
@@ -3940,8 +3944,35 @@ export const ObjectTimelinePropsSchema = lazySchema(() => strictObject({
     .describe('Row order for the fetched entries — the SortItem array form `[{ field, order }, ...]`, the one sort orthography every declared `sort` door on this platform shares; lowered to the wire `$orderby`. The legacy string clause (`name desc`) is refused — see migration `object-block-sort-item-array`'),
   limit: z.number().int().positive().optional()
     .describe("Maximum number of records loaded onto the rail (row cap); lowered to the query's top-level `$top` (renderer default 100). A timeline renders one rail with no pagination control, so this is the author's window rather than a page size"),
+  /**
+   * Pre-fetched RECORDS — the same door `object-kanban` and `object-calendar`
+   * declare, with the same shape, so the third object-bound face does not fork
+   * a vocabulary its siblings already have.
+   *
+   * ⚠️ This key is read off REACT PROPS, not off `schema` — which is why a
+   * sweep of `schema.*` read points missed it, and the reason is worth keeping
+   * next to the door rather than in a commit message. An authored
+   * `properties.data` reaches the component anyway: `SchemaRenderer` hoists
+   * every `properties.*` key except `type`/`id` onto the node, `data` is not
+   * on its strip list (`dataSource` / `visibleWhen` / `responsiveStyles` and
+   * the visibility flags are), and `createElement` spreads every remaining
+   * non-metadata node key as a prop — which `ObjectTimelineRenderer` forwards
+   * whole into this component. ⭐ So on this family a read point is
+   * `schema.<key>` OR `props.<key>`, and a measurement that greps only the
+   * first publishes a refusal for a key the renderer honours.
+   *
+   * Read points at the `.objectui-sha` pin `53ded82b`, all in
+   * `ObjectTimeline.tsx`: `:171` seeds the loading state off it, `:247`
+   * SKIPS the object query when it is present, `:254` tracks it, and `:256`
+   * is the row source itself — `(props as any).data || boundData ||
+   * fetchedData`, so it wins over both the data-scope binding and the fetch.
+   * Unlike `items` one line down, these rows are RECORDS: they go through the
+   * same `timeline` field bindings a fetched row takes (`:300`, `:367`).
+   */
+  data: z.array(z.unknown()).optional()
+    .describe("Pre-fetched records — read FIRST as the rail's row source, ahead of the data-scope binding and the fetch, and composed into entries through the same `timeline` field bindings a fetched row takes; authoring it suppresses the object query entirely. Distinct from `items`, which is the already-composed entry shape and wins over this key when both are written"),
   items: z.array(z.unknown()).optional()
-    .describe('Static inline entries — read FIRST and bypasses the object query entirely (the renderer becomes a pass-through and the author owns the item shape)'),
+    .describe('Static inline entries — read ahead of every record source, `data` above included, and bypasses the object query entirely (the renderer becomes a pass-through and the author owns the item shape)'),
   variant: z.enum(['vertical', 'horizontal', 'gantt']).optional()
     .describe("Rail layout (renderer default `vertical`). ⚠️ `gantt` needs authored `items`: the object-bound path composes flat feed entries, which the gantt branch cannot draw, and refuses that combination with a named diagnostic instead of drawing an empty chart"),
   dateFormat: z.enum(['short', 'long', 'iso']).optional()

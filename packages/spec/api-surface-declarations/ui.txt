@@ -5370,6 +5370,7 @@ declare const ComponentPropsMap: {
             }>;
         }, z.core.$strip>>>;
         limit: z.ZodOptional<z.ZodNumber>;
+        data: z.ZodOptional<z.ZodArray<z.ZodUnknown>>;
         items: z.ZodOptional<z.ZodArray<z.ZodUnknown>>;
         variant: z.ZodOptional<z.ZodEnum<{
             gantt: "gantt";
@@ -12526,6 +12527,7 @@ declare const ObjectTimelinePropsSchema: z.ZodObject<{
         }>;
     }, z.core.$strip>>>;
     limit: z.ZodOptional<z.ZodNumber>;
+    data: z.ZodOptional<z.ZodArray<z.ZodUnknown>>;
     items: z.ZodOptional<z.ZodArray<z.ZodUnknown>>;
     variant: z.ZodOptional<z.ZodEnum<{
         gantt: "gantt";

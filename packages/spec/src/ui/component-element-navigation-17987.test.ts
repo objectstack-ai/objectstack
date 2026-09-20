@@ -209,6 +209,7 @@ describe('[#17987] the `object-timeline` row judges the block in BOTH directions
       filter: [{ field: 'status', operator: 'eq', value: 'open' }],
       sort: [{ field: 'start_at', order: 'desc' }],
       limit: 250,
+      data: [{ subject: 'Kickoff', start_at: '2026-01-15' }],
       items: [{ title: 'Kickoff', time: '2026-01-15' }],
       variant: 'vertical',
       dateFormat: 'long',
@@ -230,6 +231,49 @@ describe('[#17987] the `object-timeline` row judges the block in BOTH directions
       expect(message, flat).toContain(flat);
       expect(message, flat).toContain('`timeline` config object');
     }
+  });
+
+  /**
+   * The contract review's BLOCKING finding, pinned so the row cannot lose the
+   * key again.
+   *
+   * `data` is read off REACT PROPS (`ObjectTimeline.tsx:171`, `:247`,
+   * `:256`), not off `schema`, and an authored `properties.data` reaches that
+   * channel through `SchemaRenderer`'s hoist-and-spread. The first cut of this
+   * row measured `schema.*` read points only, so it declared fourteen keys and
+   * refused this one BY NAME — reproducing this card's own defect sentence on
+   * the one face that, before the row existed, refused nothing at all.
+   *
+   * Two controls, because "accepts `data`" alone would pass on a face that
+   * accepts everything and on a face that forked the shape: the bogus key is
+   * still refused ON THIS FACE in the same run, and the two sibling
+   * object-bound faces are asserted to take the identical document, which is
+   * what "the same door, not a third dialect" means here.
+   */
+  it('accepts `data`, the pre-fetched row source its renderer honours', () => {
+    const doc = {
+      objectName: 'task',
+      timeline: { startDateField: 'start_at', titleField: 'subject' },
+      data: [{ subject: 'Kickoff', start_at: '2026-01-15' }],
+    };
+    const r = TIMELINE.safeParse(doc);
+    expect(r.success, JSON.stringify(codesOf(r))).toBe(true);
+
+    // Sibling parity: the same shape the two faces this card left untouched
+    // already declare, so the third face is not a second vocabulary.
+    for (const sibling of ['object-kanban', 'object-calendar'] as const) {
+      const s = ComponentPropsMap[sibling].safeParse({ objectName: 'task', data: doc.data });
+      expect(s.success, `${sibling} refused the same \`data\` document`).toBe(true);
+    }
+
+    // The control, on the SAME face and in the same call shape: the row is
+    // still closed, and the refusal names the bogus key and not `data`.
+    const bogus = TIMELINE.safeParse({ ...doc, [BOGUS_KEY]: 1 });
+    expect(bogus.success).toBe(false);
+    expect(codesOf(bogus)).toContain('unrecognized_keys');
+    const message = unknownKeyMessage(bogus);
+    expect(message).toContain(BOGUS_KEY);
+    expect(message).not.toContain('`data`');
   });
 
   /**

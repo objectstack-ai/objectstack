@@ -914,6 +914,7 @@
     "ui/ObjectNavItem:type",
     "ui/ObjectNavItem:viewName",
     "ui/ObjectNavItem:visible",
+    "ui/ObjectTimelineProps:data",
     "ui/ObjectTimelineProps:dateFormat",
     "ui/ObjectTimelineProps:descriptionField",
     "ui/ObjectTimelineProps:filter",

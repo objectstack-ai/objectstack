@@ -29,9 +29,9 @@ through the component type union's open string arm with no entry in
 `ComponentPropsMap`, so the authoring gate skipped it entirely: a real key and
 a typo rode through alike. The row declares the key set measured from the
 renderer's own read points at the `.objectui-sha` pin this repo builds against
-— `objectName`, `timeline`, `filter`, `sort`, `limit`, `items`, `variant`,
-`dateFormat`, `rowLabel`, `minDate`, `maxDate`, `descriptionField`, `mapping`
-and `navigation` — and refuses everything else, the flat `startDateField` /
+— `objectName`, `timeline`, `filter`, `sort`, `limit`, `data`, `items`,
+`variant`, `dateFormat`, `rowLabel`, `minDate`, `maxDate`, `descriptionField`,
+`mapping` and `navigation` — and refuses everything else, the flat `startDateField` /
 `titleField` / `scale` handoff spellings with a prescription pointing at the
 `timeline` config block that owns them.
 
