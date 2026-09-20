@@ -934,8 +934,23 @@ function bodyDocsOf(packages: unknown, index: number): DocItem[] {
  * cross-package throw is retired"). What survives there is exactly what this
  * is: an authoring-time hygiene lint. ⚠️ That `os build` refuses the shape at
  * all is a standing disagreement with ADR-0048 §3.4 which PREDATES this card
- * and is filed rather than changed here — ⛔ relaxing a refusal that shipped is
- * not a rider on a widening.
+ * and is filed as #19248 rather than changed here — ⛔ relaxing a refusal that
+ * shipped is not a rider on a widening.
+ *
+ * #19248 read §3.4 back and settled the justification rather than moving it.
+ * The clause retires a RUNTIME throw and nothing else — *"The cross-package
+ * **throw is retired**; two distinct packages coexist on the same bare name by
+ * construction."* — while keeping the class this lint belongs to: *"Authoring-time
+ * hygiene — an author shipping two `page/home` in one package — stays covered by
+ * the `naming/namespace-prefix` lint in `os lint`."* So the reason stated above is
+ * the one that survived §3.4, and ⛔ no wording change was warranted. What #19248
+ * left open is the SEVERITY, not the reason: §3.4 hands authoring hygiene to a
+ * warning-only lint while this one is `severity: 'error'`.
+ *
+ * ⚠️ "this module's older framing" above is not gone — it is still live in this
+ * file's HEADER docblock, which states the retired claim as the current reason for
+ * the naming lints. Out of #19248's file surface (it also justifies
+ * `docs/namespace-prefix`), so it is reported, not edited here.
  */
 function lintDocNamesAcrossOwners(
   sets: ReadonlyArray<{ label: string; docs: readonly DocItem[] }>,

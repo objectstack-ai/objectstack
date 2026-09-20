@@ -73,7 +73,24 @@ export const fieldForm = defineForm({
         { field: 'precision', visibleWhen: "data.type == 'currency' || data.type == 'number'", helpText: 'Decimal places (e.g., 2 for $10.50)' },
         { field: 'scale', visibleWhen: "data.type == 'number'", helpText: 'Number of decimal digits' },
         // Select field options
-        { field: 'options', type: 'repeater', visibleWhen: "data.type == 'select' || data.type == 'multiselect'", helpText: 'Available options (label/value pairs)' },
+        {
+          field: 'options',
+          type: 'repeater',
+          visibleWhen: "data.type == 'select' || data.type == 'multiselect'",
+          helpText: 'Available options (label/value pairs)',
+          // Row-property names (#17508): every authorable row property, `label`
+          // equal to the item schema's `.meta({ title })`, so `os i18n extract`
+          // emits a catalog key per column and the panel keeps its schema-derived
+          // widgets (no `type` here).
+          fields: [
+            { field: 'label', label: 'Label' },
+            { field: 'value', label: 'Value' },
+            { field: 'description', label: 'Description' },
+            { field: 'color', label: 'Color' },
+            { field: 'default', label: 'Default' },
+            { field: 'visibleWhen', label: 'Visible When' },
+          ],
+        },
         // Reference field options
         { field: 'reference', widget: 'ref:object', visibleWhen: "data.type == 'lookup' || data.type == 'master_detail'", helpText: 'Referenced object name' },
         // Two declarations of one key, with disjoint `visibleWhen` (#11410) —

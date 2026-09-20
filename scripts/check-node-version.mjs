@@ -32,12 +32,36 @@
 // Deliberately NOT checked: `engines.node` in package.json. That is a promise
 // to users about what the published packages support, which is independent of
 // what CI validates on, and tightening it is a breaking change. See #3825.
+//
+// ## The population is BOTH `.github/workflows/` and `.github/actions/` (#19229)
+//
+// A `uses: actions/setup-node@` step decides which Node a job runs on wherever
+// it is written, and a composite action is a legal place to write one. Rooting
+// the census at `.github/workflows` alone made that a place the pin could drift
+// unwatched -- and the drift would have been invisible in exactly this gate's
+// own signature, because the OK line reports how many steps it audited and a
+// step that moved out of the census simply stops being counted.
+//
+// The cost was already being paid in the tree rather than merely risked:
+// `.github/actions/setup-pnpm/action.yml` carries a comment declaring that it
+// deliberately does NOT hold a `setup-node` step, and names THIS gate's
+// workflows-only census as the reason. That is a real composition being shaped
+// around a gate's blind spot, which is the strongest evidence a population is
+// wrong. With both roots read, the constraint is gone: put the step wherever
+// the composition wants it.
+//
+// A missing `.github/actions/` is not an error -- a repo may hold no composite
+// action at all -- and both counts are printed separately so the scope line
+// says what was read rather than implying it.
 
 import { execFileSync } from 'node:child_process';
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 const WORKFLOW_DIR = '.github/workflows';
+const ACTION_DIR = '.github/actions';
+/** The file names GitHub accepts for a local action, in the order it resolves them. */
+const ACTION_FILES = ['action.yml', 'action.yaml'];
 const PIN_FILE = '.nvmrc';
 
 const root = execFileSync('git', ['rev-parse', '--show-toplevel'], {
@@ -123,9 +147,31 @@ if (daysLeft <= WARN_WITHIN_DAYS) {
   );
 }
 
-const files = readdirSync(join(root, WORKFLOW_DIR))
+const workflowFiles = readdirSync(join(root, WORKFLOW_DIR))
   .filter((f) => f.endsWith('.yml') || f.endsWith('.yaml'))
   .sort();
+
+// Every `action.yml` / `action.yaml` under `.github/actions/`, walked rather
+// than read one level deep because a local action may be nested
+// (`uses: ./.github/actions/a/b`). An absent directory answers [].
+function actionFilesUnder(dir, prefix = '') {
+  const out = [];
+  if (!existsSync(dir)) return out;
+  for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+    if (entry.isDirectory()) out.push(...actionFilesUnder(join(dir, entry.name), `${prefix}${entry.name}/`));
+    else if (ACTION_FILES.includes(entry.name)) out.push(`${prefix}${entry.name}`);
+  }
+  return out;
+}
+const actionFiles = actionFilesUnder(join(root, ACTION_DIR));
+
+// One list, each entry carrying the path it will be REPORTED under, so an
+// offender names the file a reader can open rather than a name that is only
+// unique inside one of the two roots.
+const files = [
+  ...workflowFiles.map((f) => ({ rel: `${WORKFLOW_DIR}/${f}`, abs: join(root, WORKFLOW_DIR, f) })),
+  ...actionFiles.map((f) => ({ rel: `${ACTION_DIR}/${f}`, abs: join(root, ACTION_DIR, f) })),
+];
 
 // A step ends at the next YAML list item; `with:` keys live between the
 // `uses: actions/setup-node` line and that boundary.
@@ -139,8 +185,8 @@ const unquote = (v) => v.replace(/^['"]|['"]$/g, '').trim();
 const offenders = [];
 let steps = 0;
 
-for (const file of files) {
-  const lines = readFileSync(join(root, WORKFLOW_DIR, file), 'utf8').split('\n');
+for (const { rel: where, abs } of files) {
+  const lines = readFileSync(abs, 'utf8').split('\n');
   for (let i = 0; i < lines.length; i++) {
     if (!SETUP_NODE.test(lines[i])) continue;
     steps++;
@@ -161,7 +207,6 @@ for (const file of files) {
       }
     }
 
-    const where = `${WORKFLOW_DIR}/${file}`;
     if (!found) {
       // No pin at all: the step silently inherits whatever Node the runner
       // image ships, which GitHub bumps without telling us.
@@ -214,7 +259,8 @@ for (const file of files) {
 if (offenders.length === 0) {
   const phase = inMaintenance ? 'maintenance' : 'active LTS';
   console.log(
-    `check-node-version: OK (${steps} setup-node step(s) across ${files.length} workflow(s), all on Node ${pin}).\n` +
+    `check-node-version: OK (${steps} setup-node step(s) across ${workflowFiles.length} workflow(s) ` +
+      `and ${actionFiles.length} composite action(s), all on Node ${pin}).\n` +
       `  Node ${major} is in ${phase}; supported until ${lifecycle.end} (${daysLeft} days).`,
   );
   process.exit(0);
@@ -234,5 +280,6 @@ newer one can abort the test worker mid-run, which vitest reports as a PASSING
 suite with silently missing cases (#3812).
 
 To move the whole repo to a new Node version, edit ${PIN_FILE} and then update
-every step this guard lists.`);
+every step this guard lists. The census covers ${WORKFLOW_DIR}/ and
+${ACTION_DIR}/ alike -- a setup-node step is a Node pin wherever it is written.`);
 process.exit(1);

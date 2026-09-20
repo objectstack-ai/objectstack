@@ -994,20 +994,28 @@ describe('check:liveness — the drill recurses past one level (#17424)', () => 
   // depth-two container is now VISIBLE. Before the walk recursed, a container
   // sitting under a drilled child was neither classified, nor deferred, nor
   // recorded — it was not in any population at all, which is why nothing could
-  // ever have gone red about it. `dashboard/widgets.chartConfig` was the #17385
-  // coordinate that could not be drilled until this landed — and it has since
-  // BEEN drilled, on that card, which is why this pin no longer names it. Two
-  // coordinates stand in its place and the pair is deliberate: `widgets.compareTo`
-  // is its exact structural replacement (a container that is a drilled child, the
-  // shape that was invisible before the recursion), and `widgets.chartConfig.xAxis`
-  // is one level deeper again — a container under TWO drilled levels, which exists
-  // only because the #17385 drill landed. A pin naming a coordinate that a card is
-  // about goes stale the moment that card lands; naming the SHAPE does not.
+  // ever have gone red about it. Two coordinates are pinned and the pair is
+  // deliberate: `widgets.compareTo` is the exact structural replacement (a
+  // container that is a drilled child, the shape that was invisible before the
+  // recursion), and `widgets.chartConfig.annotations` is one level deeper again
+  // — a container under TWO drilled levels.
+  //
+  // ⚠️ The depth-3 half has now gone stale TWICE for the same reason, so read
+  // the warning the previous author wrote here rather than only the assertion:
+  // a pin naming a coordinate that a card is about goes stale the moment that
+  // card lands; naming the SHAPE does not. It named `widgets.chartConfig` until
+  // the #17385 drill landed, then `widgets.chartConfig.xAxis` until #17385's
+  // second half tombstoned that key on the dashboard carrier (a tombstone has no
+  // children, so the container left the population). `annotations` is chosen
+  // because it is an appearance key — the half of `chartConfig` the ownership
+  // ruling deliberately leaves with the author — so the next card about chart
+  // STRUCTURE cannot move it. Any depth-3 container serves; what is pinned is
+  // that one EXISTS in the population.
   it('SEES a container that sits under a drilled child, at either depth', () => {
     const r = report();
     const seen = [...r.undrilled.map((u: any) => u.key), ...r.deferredContainers.map((d: string) => d.split(' → ')[0])];
     expect(seen).toContain('dashboard/widgets.compareTo');
-    expect(seen).toContain('dashboard/widgets.chartConfig.xAxis');
+    expect(seen).toContain('dashboard/widgets.chartConfig.annotations');
   });
 
   it('is green against a verbatim copy of the shipped ledgers', () => {
