@@ -12209,19 +12209,19 @@ export const H52_ANSWERED_HEADING =
  * Does the thread carry a seat ANSWER NEWER than its newest `os-dev-report`?
  *
  * A SIBLING of `latestDevReport`, ⛔ never a change to it — that reader is shared
- * with other rows and still returns exactly what it returned. ⛔ A report is never
- * the answer here: a report stands this row down by its own empty array, so the
- * newest heading carrier BEING one declines rather than clears (it re-raised the
- * questions after any older answer). Ordering is CALLED rather than restated —
- * `latestMarkedComment` is the newest-of rule, `releaseAnswersClaim` the "is this
- * the later record" one.
+ * with other rows and still returns exactly what it returned. Ordering is CALLED
+ * rather than restated: `latestMarkedComment` is the newest-of rule,
+ * `releaseAnswersClaim` the "is this the later record" one — and that pair is ALSO
+ * what refuses a REPORT, so ⛔ no second guard excludes one. The newest report is
+ * BY CONSTRUCTION at least as new as any report carrying the heading, so ordering
+ * already answers false; a guard there was written, ABLATED (the suite stayed
+ * green without it) and removed as the phantom check it was.
  */
 export function h52AnswerStandsDown(commentRows) {
   const rows = Array.isArray(commentRows) ? commentRows : [];
   const report = latestMarkedComment(rows, OS_DEV_REPORT_MARKER);
   const answer = latestMarkedComment(rows, H52_ANSWERED_HEADING);
   if (!report || !answer) return false;
-  if (OS_DEV_REPORT_MARKER.test(String(rows[answer.index]?.body ?? ''))) return false;
   return releaseAnswersClaim(answer, report);
 }
 
@@ -33548,7 +33548,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('H52 answer: ⛔ an answer OLDER than the report does not clear — the report re-raised them', typeof h52(answered52(A8348, '2026-09-06T09:00:00Z')), 'string');
   t('H52 answer: ⛔ nor the same words in PROSE, with no heading', typeof h52(answered52('The two open questions are answered above.')), 'string');
   t('H52 answer: ⛔ nor a QUOTE of another card\'s answer', typeof h52(answered52('> ' + A8348)), 'string');
-  t('H52 answer: ⛔ a REPORT carrying the heading never clears — its own array governs', typeof h52([cm52(1, report52(Q52_TWO), T52), cm52(2, 'os-dev-report\n\n' + A8348 + '\n\n```json\n{"open_questions":[{"question":"q"}]}\n```', '2026-09-08T09:00:00Z')]), 'string');
+  t('H52 answer: ⛔ a REPORT carrying the heading never clears — ordering refuses it, its own array governs', typeof h52([cm52(1, report52(Q52_TWO), T52), cm52(2, 'os-dev-report\n\n' + A8348 + '\n\n```json\n{"open_questions":[{"question":"q"}]}\n```', '2026-09-08T09:00:00Z')]), 'string');
   t('H52 answer: an answer with NO report is not a clearing, and ⛔ the marker carries no `g` flag', h52AnswerStandsDown([cm52(1, A8348, T52)]) === false && H52_ANSWERED_HEADING.global === false, true);
   t('H52 answer: a SIBLING reader — `latestDevReport` still names the report row', latestDevReport(answered52(A8348)).row.id, 1);
   t('H52 sentence: the remedy names the thread route beside the report one', h52row(OPEN52).includes('under a HEADING that names `open_questions` and says ANSWERED'), true);
