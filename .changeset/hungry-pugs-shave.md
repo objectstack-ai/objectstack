@@ -24,4 +24,8 @@ On the wire:
 - unknown id — `404 RECORD_NOT_FOUND` (unchanged: zero-removed is deliberately not read as
   not-found, because the record is still there to GET).
 
+The read-back that decides this is fail-closed: a read that cannot answer reports the record
+as NOT deleted and warns on the durability channel, because "the read failed" and "the row is
+gone" are opposite facts and only the second may claim a deletion.
+
 Clause-②: no
