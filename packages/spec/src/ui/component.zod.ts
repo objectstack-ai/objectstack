@@ -2132,7 +2132,15 @@ export const ElementButtonPropsSchema = lazySchema(() => strictObject({
    * `lucide-react` directly — and the registration's two ranges both moved and
    * SHRANK, the input list having lost its per-input `label` and
    * `defaultValue` members. What each anchor asserts is re-stated below from
-   * the new tree, never inferred from the old one (#10274); the read point
+   * the new tree, never inferred from the old one — the re-READ discipline
+   * this block records, and which the later paragraph below still cites by
+   * number. ⚠️ That number does NOT resolve: objectstack issue 10274 was probed
+   * 2026-09-20 with `scripts/check-issue-citations.mjs --probe-cause` and came
+   * back minted, gone from the board and 404 on the web endpoint too — DELETED,
+   * not transferred. ⛔ No replacement number is guessed here: the live record
+   * of the discipline is THIS BLOCK, together with
+   * `check:objectui-pin-citations`, whose header states the same rule and whose
+   * refusal text enforces it. The read point
    * first MOVED rather than died on the earlier hop onto `9602dc820`, which is
    * why the anchors span a second
    * file):

@@ -2951,7 +2951,7 @@ const FormFieldBaseSchema = lazySchema(() => {
    * tier. ⚠️ This is the re-read the previous revision of this block asked for:
    * objectui#9244 / objectui#9253 (objectui `bd09957380`, 2026-09-12) land
    * inside the `53ded82bf7...87af769e9` range, so the widest-tier-only
-   * under-span this block used to record (objectstack#17328: one cell of two at
+   * under-span this block used to record (#17328: one cell of two at
    * 720px) no longer reproduces at the pin this repo builds against.
    */
   span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `87af769e9`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest."),
