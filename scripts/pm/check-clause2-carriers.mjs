@@ -1460,6 +1460,20 @@ function newestFirst(a, b) {
 }
 
 /**
+ * The claim comment's own EDIT reading, from the two stamps ALREADY on the row
+ * this reader holds — ⛔ never asserted, which is what #18892 measured: the note
+ * below testified 「NOT edited」 about objectui#9764's claim 5724909959, whose
+ * `updated_at` is 29 min past its `created_at`. THREE readings, ⛔ never two — a
+ * missing stamp is a GAP, ⛔ not an unedited; ⛔ report-only per that ruling, an
+ * edit is legitimate and moves no exit. The untaken testimony was the defect. */
+function claimEditReading(row) {
+  const [c, u] = [row?.created_at, row?.updated_at].map((v) => (typeof v === 'string' ? v : null));
+  if (c === null || u === null) return 'whether it has been EDITED is NOT READ — its row carries no `created_at`/`updated_at` pair to compare, so ⛔ read that as a gap and never as "unedited"';
+  if (c === u) return `it reads UNEDITED — its \`created_at\` and \`updated_at\` are both \`${c}\``;
+  return `⚠️ it WAS EDITED at \`${u}\` (\`created_at\` \`${c}\`) — REPORTED and ⛔ never a failure: read its edit history before taking the declaration under it for the one the seat first wrote`;
+}
+
+/**
  * Which correction, if any, governs this card's declaration — and when none
  * does, WHY, in a sentence that names an act the claiming seat can perform.
  *
@@ -1468,8 +1482,8 @@ function newestFirst(a, b) {
  * here that a seat cannot answer would rebuild that door one room over, so the
  * note always names what to post next.
  *
- * @param {{ id?: number|string, body?: string, created_at?: string }[]} commentRows
- * @param {{ id?: number|string, body?: string }[]} pool — the governing claim rows.
+ * @param {{ id?: number|string, body?: string, created_at?: string, updated_at?: string }[]} commentRows
+ * @param {{ id?: number|string, body?: string, created_at?: string, updated_at?: string }[]} pool — the governing claim rows.
  * @returns {{ state: 'none' }
  *   | { state: 'applies', value: 'yes'|'no', detail?: string, note: string }
  *   | { state: 'ignored', note: string }}
@@ -1521,8 +1535,8 @@ function applicableCorrection(commentRows, pool) {
   const claimRow = claimById.get(chosen.claimId);
   const claimSession = readSessionId(claimRow?.body);
   const shared =
-    `it supersedes claim comment ${chosen.claimId}'s own declaration, which is NOT edited and ` +
-    'still reads as it was written. ⛔ Nothing was filled in on the seat\'s behalf: the value is ' +
+    `it supersedes claim comment ${chosen.claimId}'s own declaration, and ${claimEditReading(claimRow)}. ` +
+    '⛔ Nothing was filled in on the seat\'s behalf: the value is ' +
     'the seat\'s, in the fixed spelling, and this script still writes nothing.';
 
   if (claimSession === null) {
@@ -4797,8 +4811,8 @@ export function pairRows(pair, pairs = null) {
  * a pair that answers 0 because a CORRECTION comment carries its declaration is
  * answering about a carrier the claim comment does not hold, and a seat reading
  * only `$?` must be able to find out from the run which comment was read. The
- * row also states, in as many words, that the claim comment was NOT edited —
- * because the whole value of the shape is that nothing had to be.
+ * shape's whole value is that nothing had to be EDITED, so the row states that
+ * as a reading it takes from the claim's two stamps, ⛔ never as one it assumes.
  */
 export function c2CorrectionNote(pair) {
   const d = cardDeclaration(pair?.cardComments ?? null);
@@ -6491,9 +6505,9 @@ export function greenPairLine({ pr, card, sibling = false, corrected = false, re
       ? 'readable in the fixed spelling on a SIBLING card this same PR delivers rather than on ' +
         `this card (the reading above names which, and what it says), ${LABEL_CARRIERS_AGREE}`
       : corrected
-        ? 'readable in the fixed spelling on a CORRECTION comment superseding the claim\'s own ' +
-          'line (the reading above names which comment, and says the claim was not edited), ' +
-          LABEL_CARRIERS_AGREE
+        ? 'readable in the fixed spelling on a CORRECTION comment superseding the claim\'s own line ' +
+          '(the ℹ️ reading printed above on stderr names which comment, and states what that claim ' +
+          'comment\'s own `created_at`/`updated_at` say about whether it was edited), ' + LABEL_CARRIERS_AGREE
         : `readable in the fixed spelling, ${LABEL_CARRIERS_AGREE}`) +
     (record
       ? ', and a review of record names this head (the note above says which comment it is, and ' +
@@ -7945,8 +7959,7 @@ export async function selfTest() {
   const CLAIMED = (extra, o = {}) => ({
     id: o.id ?? C_CLAIM_ID,
     created_at: o.created_at ?? '2026-09-12T00:41:08Z',
-    // ⭐ EQUAL on a comment nobody edited, so the default fixture is the
-    // unedited control and an edited one names `updated_at` alone (#18892).
+    // ⭐ EQUAL on a comment nobody edited: the default is the unedited control, and an edited fixture names `updated_at` alone (#18892).
     updated_at: o.updated_at ?? o.created_at ?? '2026-09-12T00:41:08Z',
     body:
       `Claim: PM loop round 1\n` +
@@ -8031,7 +8044,7 @@ export async function selfTest() {
   t('⛔ …so the governing claim does not move, and the card is not re-claimed', governingClaim(REPAIRED_THREAD)?.createdAt === governingClaim(BROKEN_THREAD)?.createdAt);
   t('⛔ nor is the correction read as a MISPLACED declaration — it is the designated second carrier', cardDeclaration(REPAIRED_THREAD).state !== 'misplaced');
   t('the reading PRINTS: a note names the correction rather than answering 0 in silence', typeof c2CorrectionNote(repairedPair) === 'string');
-  t('…and says the claim comment was NOT edited', says(c2CorrectionNote(repairedPair), 'NOT edited'));
+  t('…and STATES the claim comment\'s edit reading, measured from its own two stamps (#18892)', says(c2CorrectionNote(repairedPair), 'UNEDITED'));
   t('…and names the comment id it corrects, so a reader can find it', says(c2CorrectionNote(repairedPair), String(C_CLAIM_ID)));
   t('…and states the attribution ceiling rather than claiming a verification', says(c2CorrectionNote(repairedPair), 'DECLARED identity, never a verified one'));
   t('…and it rides as a NOTE, never as a finding — pairNotes carries it, pairRows does not', pairNotes(repairedPair).some((n) => n.code === 'C2-CORRECTION') && pairRows(repairedPair).every((r) => r.code !== 'C2-CORRECTION'));
@@ -9426,13 +9439,10 @@ export async function selfTest() {
   t('⛔ CONTROL: the label the line names is the constant C1 compares, ⛔ not a second spelling of it', says(LABEL_CARRIERS_AGREE, CONTRACT_REVIEW_LABEL) && CONTRACT_REVIEW_LABEL === 'needs:contract-review');
   t('the pair is still identified in the line, in the spelling the round reports paste', says(G_BRANCHES[0][1], '✓ check-clause2-carriers: PR #16761 / card #16568 — the clause-② declaration is readable in the fixed spelling'));
 
-  // -- #18892: the claim comment's EDIT reading, taken rather than asserted --
-  //
-  // ⭐ Measured specimen: objectui#9764's claim 5724909959 was EDITED
-  // (`created_at` 2026-09-18T03:54:37Z vs `updated_at` 2026-09-18T04:23:23Z)
-  // and the note under its correction testified 「NOT edited」 anyway. The
-  // retired sentence is ASSEMBLED below, never written out, or the source pin
-  // would hit itself — the #16770 idiom above, control included.
+  // -- #18892: the EDIT reading, taken rather than asserted. ⭐ Measured specimen:
+  // objectui#9764's claim 5724909959 was EDITED (`created_at` 2026-09-18T03:54:37Z
+  // vs `updated_at` 04:23:23Z) and the note testified 「NOT edited」 anyway. The
+  // retired sentence is ASSEMBLED below, or the source pin hits itself (#16770).
   battery('#18892: the claim comment\'s EDIT reading — taken from the two stamps already in hand, reported and never failed');
   const E_EDITED = [CLAIMED(MEASURED_PROSE[1], { updated_at: '2026-09-18T04:23:23Z' }), FIXED_CORRECTION('no')];
   const E_UNEDITED = [CLAIMED(MEASURED_PROSE[1]), FIXED_CORRECTION('no')];
