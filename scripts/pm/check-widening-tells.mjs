@@ -1588,7 +1588,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#18702 — a declaring factory PRIVATE to one file, resolved through its own DEFINITION': 54,
   "#18721 — a hunk's LEADING CONTEXT is not a reason to abandon the parameter reading": 14,
   '#19099 — the enclosing-delimiter walk says when it STOPPED READING and started guessing': 15,
-  '#19384 — a bare element is not a member until the hunk shows one of the four forms above it': 43,
+  '#19384 — a bare element is not a member until the hunk shows one of the four forms above it': 45,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -5823,6 +5823,8 @@ export function selfTest() {
   // -- the sentence says only what was MEASURED -----------------------------
   const PAREN_FRAME_ROW = tells({ filename: 'packages/spec/src/a.zod.ts', patch: patchOf(3, '+  note: z.string().describe(', "+    'prose',") }).find((r) => r.line === 4);
   t('⛔ the NOT-MEASURED sentence claims only that — on a `(` frame the hunk DOES show the enclosing construct, and a row saying otherwise asserts a second thing it never measured', says(PAREN_FRAME_ROW?.why, 'does not show it inside one of the four closed-set forms') && !says(PAREN_FRAME_ROW?.why, 'which construct encloses it'));
+  t("⭐ `calleeOfFrameHead` is the refusal's whole evidence, read on its own — the call answers its name", calleeOfFrameHead('const S = new Set(') === 'Set' && calleeOfFrameHead('  note: z.string().describe(') === 'describe');
+  t('⛔ …and a head that is NOT a call answers `null`, which is what leaves the tell firing', calleeOfFrameHead('export const CORE_PLUGIN_TYPES = ') === null && calleeOfFrameHead('const X = (') === null && calleeOfFrameHead('  kinds: ') === null);
   // -- the residual quiet direction, PINNED so it cannot move unnoticed ------
   t('⚠️ STATED SILENCE — the fourth form wrapped in `Object.freeze([… ] as const)` still reads `refused`: the `as const` sits below the members and `freeze` closes no set, so this is disclosed in the header rather than read', closedSetMembership([CTX('export const CORE_PLUGIN_TYPES = Object.freeze(['), CTX("  'workflow',")], 1) === 'refused');
 
