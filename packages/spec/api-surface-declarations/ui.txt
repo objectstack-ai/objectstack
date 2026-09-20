@@ -12,8 +12,8 @@
 # excluded: documentation drift is `check:docs`'s axis, not this one.
 #
 # entry: ./ui
-# exported names: 474
-# declarations: 488
+# exported names: 476
+# declarations: 490
 #
 # GENERATED — ⛔ never hand-edited. Regenerate after a real build:
 #   pnpm --filter @objectstack/spec build && pnpm --filter @objectstack/spec gen:api-surface-declarations
@@ -5335,6 +5335,7 @@ declare const ComponentPropsMap: {
                 week: "week";
                 quarter: "quarter";
             }>>;
+            limit: z.ZodDefault<z.ZodNumber>;
         }, z.core.$strict>>;
         filter: z.ZodOptional<z.ZodArray<z.ZodObject<{
             field: z.ZodString;
@@ -5418,6 +5419,9 @@ declare const DATE_RANGE_DEFAULT_RANGES: readonly ["today", "yesterday", "this_w
 
 // ── DATE_RANGE_PRESETS (const) ──
 declare const DATE_RANGE_PRESETS: readonly ["today", "yesterday", "this_week", "last_week", "this_month", "last_month", "this_quarter", "last_quarter", "this_year", "last_year", "last_7_days", "last_30_days", "last_90_days"];
+
+// ── DEFAULT_VIEW_ROW_LIMIT (const) ──
+declare const DEFAULT_VIEW_ROW_LIMIT = 100;
 
 // ── Dashboard (const) ──
 declare const Dashboard: {
@@ -8744,6 +8748,7 @@ declare const GalleryConfigSchema: z.ZodObject<{
     }>>;
     titleField: z.ZodOptional<z.ZodString>;
     visibleFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    limit: z.ZodDefault<z.ZodNumber>;
 }, z.core.$strict>;
 
 // ── GanttConfig (type) ──
@@ -9687,12 +9692,16 @@ declare const KNOWN_COMPONENT_TYPE_CANDIDATES: readonly string[];
 // ── KanbanConfig (type) ──
 type KanbanConfig = z.input<typeof KanbanConfigSchema>;
 
+// ── KanbanConfigParsed (type) ──
+type KanbanConfigParsed = z.infer<typeof KanbanConfigSchema>;
+
 // ── KanbanConfigSchema (const) ──
 declare const KanbanConfigSchema: z.ZodObject<{
     groupByField: z.ZodString;
     summarizeField: z.ZodOptional<z.ZodString>;
     titleField: z.ZodOptional<z.ZodString>;
     columns: z.ZodArray<z.ZodString>;
+    limit: z.ZodDefault<z.ZodNumber>;
 }, z.core.$strict>;
 
 // ── LIST_VIEW_GROUP_COUNT_ALIAS (const) ──
@@ -10153,6 +10162,7 @@ declare const ListViewSchema: z.ZodObject<{
         summarizeField: z.ZodOptional<z.ZodString>;
         titleField: z.ZodOptional<z.ZodString>;
         columns: z.ZodArray<z.ZodString>;
+        limit: z.ZodDefault<z.ZodNumber>;
     }, z.core.$strict>>;
     calendar: z.ZodOptional<z.ZodObject<{
         startDateField: z.ZodString;
@@ -10239,6 +10249,7 @@ declare const ListViewSchema: z.ZodObject<{
         }>>;
         titleField: z.ZodOptional<z.ZodString>;
         visibleFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        limit: z.ZodDefault<z.ZodNumber>;
     }, z.core.$strict>>;
     timeline: z.ZodOptional<z.ZodObject<{
         startDateField: z.ZodString;
@@ -10254,6 +10265,7 @@ declare const ListViewSchema: z.ZodObject<{
             week: "week";
             quarter: "quarter";
         }>>;
+        limit: z.ZodDefault<z.ZodNumber>;
     }, z.core.$strict>>;
     chart: z.ZodOptional<z.ZodObject<{
         chartType: z.ZodDefault<z.ZodEnum<{
@@ -11876,6 +11888,7 @@ declare const ObjectListViewSchema: z.ZodObject<{
         }>>;
         titleField: z.ZodOptional<z.ZodString>;
         visibleFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        limit: z.ZodDefault<z.ZodNumber>;
     }, z.core.$strict>>;
     chart: z.ZodOptional<z.ZodObject<{
         chartType: z.ZodDefault<z.ZodEnum<{
@@ -11926,6 +11939,7 @@ declare const ObjectListViewSchema: z.ZodObject<{
         summarizeField: z.ZodOptional<z.ZodString>;
         titleField: z.ZodOptional<z.ZodString>;
         columns: z.ZodArray<z.ZodString>;
+        limit: z.ZodDefault<z.ZodNumber>;
     }, z.core.$strict>>;
     gantt: z.ZodOptional<z.ZodObject<{
         startDateField: z.ZodString;
@@ -12006,6 +12020,7 @@ declare const ObjectListViewSchema: z.ZodObject<{
             week: "week";
             quarter: "quarter";
         }>>;
+        limit: z.ZodDefault<z.ZodNumber>;
     }, z.core.$strict>>;
     calendar: z.ZodOptional<z.ZodObject<{
         startDateField: z.ZodString;
@@ -12492,6 +12507,7 @@ declare const ObjectTimelinePropsSchema: z.ZodObject<{
             week: "week";
             quarter: "quarter";
         }>>;
+        limit: z.ZodDefault<z.ZodNumber>;
     }, z.core.$strict>>;
     filter: z.ZodOptional<z.ZodArray<z.ZodObject<{
         field: z.ZodString;
@@ -19954,6 +19970,7 @@ declare const TimelineConfigSchema: z.ZodObject<{
         week: "week";
         quarter: "quarter";
     }>>;
+    limit: z.ZodDefault<z.ZodNumber>;
 }, z.core.$strict>;
 
 // ── TreeConfig (type) ──
@@ -20859,6 +20876,7 @@ declare const VIEW_METADATA_MEMBERS: {
                 }>>;
                 titleField: z.ZodOptional<z.ZodString>;
                 visibleFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
+                limit: z.ZodDefault<z.ZodNumber>;
             }, z.core.$strict>>;
             chart: z.ZodOptional<z.ZodObject<{
                 chartType: z.ZodDefault<z.ZodEnum<{
@@ -20909,6 +20927,7 @@ declare const VIEW_METADATA_MEMBERS: {
                 summarizeField: z.ZodOptional<z.ZodString>;
                 titleField: z.ZodOptional<z.ZodString>;
                 columns: z.ZodArray<z.ZodString>;
+                limit: z.ZodDefault<z.ZodNumber>;
             }, z.core.$strict>>;
             gantt: z.ZodOptional<z.ZodObject<{
                 startDateField: z.ZodString;
@@ -20989,6 +21008,7 @@ declare const VIEW_METADATA_MEMBERS: {
                     week: "week";
                     quarter: "quarter";
                 }>>;
+                limit: z.ZodDefault<z.ZodNumber>;
             }, z.core.$strict>>;
             calendar: z.ZodOptional<z.ZodObject<{
                 startDateField: z.ZodString;
@@ -22097,6 +22117,7 @@ declare const VIEW_METADATA_MEMBERS: {
                 }>>;
                 titleField: z.ZodOptional<z.ZodString>;
                 visibleFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
+                limit: z.ZodDefault<z.ZodNumber>;
             }, z.core.$strict>>;
             chart: z.ZodOptional<z.ZodObject<{
                 chartType: z.ZodDefault<z.ZodEnum<{
@@ -22147,6 +22168,7 @@ declare const VIEW_METADATA_MEMBERS: {
                 summarizeField: z.ZodOptional<z.ZodString>;
                 titleField: z.ZodOptional<z.ZodString>;
                 columns: z.ZodArray<z.ZodString>;
+                limit: z.ZodDefault<z.ZodNumber>;
             }, z.core.$strict>>;
             gantt: z.ZodOptional<z.ZodObject<{
                 startDateField: z.ZodString;
@@ -22227,6 +22249,7 @@ declare const VIEW_METADATA_MEMBERS: {
                     week: "week";
                     quarter: "quarter";
                 }>>;
+                limit: z.ZodDefault<z.ZodNumber>;
             }, z.core.$strict>>;
             calendar: z.ZodOptional<z.ZodObject<{
                 startDateField: z.ZodString;
@@ -23172,6 +23195,7 @@ declare const VIEW_METADATA_MEMBERS: {
             summarizeField: z.ZodOptional<z.ZodString>;
             titleField: z.ZodOptional<z.ZodString>;
             columns: z.ZodArray<z.ZodString>;
+            limit: z.ZodDefault<z.ZodNumber>;
         }, z.core.$strict>>;
         calendar: z.ZodOptional<z.ZodObject<{
             startDateField: z.ZodString;
@@ -23258,6 +23282,7 @@ declare const VIEW_METADATA_MEMBERS: {
             }>>;
             titleField: z.ZodOptional<z.ZodString>;
             visibleFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
+            limit: z.ZodDefault<z.ZodNumber>;
         }, z.core.$strict>>;
         timeline: z.ZodOptional<z.ZodObject<{
             startDateField: z.ZodString;
@@ -23273,6 +23298,7 @@ declare const VIEW_METADATA_MEMBERS: {
                 week: "week";
                 quarter: "quarter";
             }>>;
+            limit: z.ZodDefault<z.ZodNumber>;
         }, z.core.$strict>>;
         chart: z.ZodOptional<z.ZodObject<{
             chartType: z.ZodDefault<z.ZodEnum<{
@@ -25189,6 +25215,7 @@ declare const ViewSchema: z.ZodObject<{
             }>>;
             titleField: z.ZodOptional<z.ZodString>;
             visibleFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
+            limit: z.ZodDefault<z.ZodNumber>;
         }, z.core.$strict>>;
         chart: z.ZodOptional<z.ZodObject<{
             chartType: z.ZodDefault<z.ZodEnum<{
@@ -25239,6 +25266,7 @@ declare const ViewSchema: z.ZodObject<{
             summarizeField: z.ZodOptional<z.ZodString>;
             titleField: z.ZodOptional<z.ZodString>;
             columns: z.ZodArray<z.ZodString>;
+            limit: z.ZodDefault<z.ZodNumber>;
         }, z.core.$strict>>;
         gantt: z.ZodOptional<z.ZodObject<{
             startDateField: z.ZodString;
@@ -25319,6 +25347,7 @@ declare const ViewSchema: z.ZodObject<{
                 week: "week";
                 quarter: "quarter";
             }>>;
+            limit: z.ZodDefault<z.ZodNumber>;
         }, z.core.$strict>>;
         calendar: z.ZodOptional<z.ZodObject<{
             startDateField: z.ZodString;
@@ -26427,6 +26456,7 @@ declare const ViewSchema: z.ZodObject<{
             }>>;
             titleField: z.ZodOptional<z.ZodString>;
             visibleFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
+            limit: z.ZodDefault<z.ZodNumber>;
         }, z.core.$strict>>;
         chart: z.ZodOptional<z.ZodObject<{
             chartType: z.ZodDefault<z.ZodEnum<{
@@ -26477,6 +26507,7 @@ declare const ViewSchema: z.ZodObject<{
             summarizeField: z.ZodOptional<z.ZodString>;
             titleField: z.ZodOptional<z.ZodString>;
             columns: z.ZodArray<z.ZodString>;
+            limit: z.ZodDefault<z.ZodNumber>;
         }, z.core.$strict>>;
         gantt: z.ZodOptional<z.ZodObject<{
             startDateField: z.ZodString;
@@ -26557,6 +26588,7 @@ declare const ViewSchema: z.ZodObject<{
                 week: "week";
                 quarter: "quarter";
             }>>;
+            limit: z.ZodDefault<z.ZodNumber>;
         }, z.core.$strict>>;
         calendar: z.ZodOptional<z.ZodObject<{
             startDateField: z.ZodString;
