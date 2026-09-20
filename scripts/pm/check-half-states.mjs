@@ -11987,17 +11987,22 @@ export function h50ThreadReadMismatch(issue, commentRows, sinceMs = Date.parse(T
 // current statement of what is open: a later round that closes a question out
 // writes `open_questions: []`, and that empty array is the record that stands
 // this row down. ⚠️ The known and deliberate cost of that choice is stated
-// rather than hidden: a question ANSWERED in the thread — by a ruling comment,
-// a chat reply recorded on the card — with no newer report and no label still
-// reads as open here. That is an over-report, and it is the direction this row
-// chooses on purpose, because the two repairs it asks for are both repairs the
-// board needs anyway: route the question if it is open, and record the answer
-// in a report or on the label if it is not. ⛔ The opposite direction — teach
-// the row to recognise a ruling — was refused: `isTriageRulingComment`'s anchor
-// set is H33's population, the live answer that motivated this row (「Ruling
-// recorded — the three residuals …」) matches none of its five anchors, and
-// widening them would be a change to H33 rather than an addition beside it.
-//
+// rather than hidden: a question ANSWERED in the thread — by a ruling comment, a
+// chat reply recorded on the card — with no newer report and no label still reads
+// as open here. ⛔ Teaching the row to recognise a RULING was refused:
+// `isTriageRulingComment`'s anchor set is H33's population, the live answer that
+// motivated this row (「Ruling recorded — the three residuals …」) matches none of
+// its five anchors, and widening them would be a change to H33 rather than an
+// addition beside it. ⚠️ But that over-report has NO floor on a card no dev is
+// dispatched to (#19160): closing is forbidden
+// (「缺陷卡 ⛔ 不藏进 hold 也不自行关闭」), re-hanging `needs-user-decision` is
+// forbidden by this row's own remedy for a residual, and no newer report can
+// exist — a `pm:on-hold` card is dispatched to nobody. Two live carriers
+// (objectui#8348, objectui#9868) answered on the thread NEWER than the report and
+// re-fired every sweep: the 「无机制可唤醒的卡 ⛔ 不 hold」 shape the charter
+// refuses one layer down, for a CARD. So a FOURTH exit — `H52_ANSWERED_HEADING`
+// on a NON-report comment newer than the report, a shape the answer DECLARES and
+// ⛔ never a ruling: the ruling comment stays a FIRING case, pinned.
 // ## Population — measured, not assumed
 //
 // The first census is what set it. The row was first written over open
@@ -12230,6 +12235,42 @@ export function latestDevReport(commentRows) {
 }
 
 /**
+ * A seat's ANSWER to the report's questions, as a HEADING of its comment.
+ *
+ * MEASURED, ⛔ not invented: the only two live answers carry it UNEDITED —
+ * objectui#8348 `5737496254` 「### The two open questions, answered」 and
+ * objectui#9868 `5736885341` 「## Half-state patrol H52 — the two `open_questions`
+ * on this card are ANSWERED …」. ONE heading line naming the array and saying
+ * ANSWERED is all they share, and that pair IS the pin. LINE-anchored (`m`) where
+ * `OS_DEV_REPORT_MARKER` is body-anchored, because one of the two carries its
+ * heading 32 lines into a seat review; the ATX heading is what keeps that safe,
+ * so ⛔ a blockquoted `> ###` (a QUOTE of another card's answer) and the same
+ * words in prose are both refused. ⛔ No `g` flag.
+ */
+export const H52_ANSWERED_HEADING =
+  /^#{1,6}[ \t]+(?=[^\n]*\bopen[\s_`*]*questions?\b)(?=[^\n]*\banswered\b)/im;
+
+/**
+ * Does the thread carry a seat ANSWER NEWER than its newest `os-dev-report`?
+ *
+ * A SIBLING of `latestDevReport`, ⛔ never a change to it — that reader is shared
+ * with other rows and still returns exactly what it returned. Ordering is CALLED
+ * rather than restated: `latestMarkedComment` is the newest-of rule,
+ * `releaseAnswersClaim` the "is this the later record" one — and that pair is ALSO
+ * what refuses a REPORT, so ⛔ no second guard excludes one. The newest report is
+ * BY CONSTRUCTION at least as new as any report carrying the heading, so ordering
+ * already answers false; a guard there was written, ABLATED (the suite stayed
+ * green without it) and removed as the phantom check it was.
+ */
+export function h52AnswerStandsDown(commentRows) {
+  const rows = Array.isArray(commentRows) ? commentRows : [];
+  const report = latestMarkedComment(rows, OS_DEV_REPORT_MARKER);
+  const answer = latestMarkedComment(rows, H52_ANSWERED_HEADING);
+  if (!report || !answer) return false;
+  return releaseAnswersClaim(answer, report);
+}
+
+/**
  * Which cards this row can speak about AT ALL — exported for the
  * counting-policy reason every such predicate is: the predicate that decides
  * what is even counted is where a silent hole would live.
@@ -12266,6 +12307,9 @@ export function h52OpenQuestionsUnrouted(issue, commentRows) {
   if (!report.parsed) return null;
   const questions = report.questions.filter((q) => q !== null);
   if (report.questions.length === 0) return null;
+  // The FOURTH exit (#19160) — a seat ANSWER newer than that report, the only
+  // clearing act a card no dev is dispatched to can write.
+  if (h52AnswerStandsDown(commentRows)) return null;
   const reportId = commentIdText(report.row?.id);
   const named = reportId ? `comment ${reportId}` : 'a comment carrying no readable id';
   const stamped = report.row?.created_at ?? 'unstamped';
@@ -12291,7 +12335,9 @@ export function h52OpenQuestionsUnrouted(issue, commentRows) {
     're-flagged card leaves the inbox unable to say WHICH question is open and invites a reader to re-present ' +
     'a ruling that has already been executed, and because this card\'s close would take the label, and the ' +
     'question\'s only visibility, with it. If the question has already been ANSWERED, say so in the next ' +
-    'report, whose empty `open_questions` is the record that stands this row down. ⛔ Nothing here changes ' +
+    'report, whose empty `open_questions` is the record that stands this row down — or, on a card no dev is ' +
+    'dispatched to and which therefore can never get one, answer them on the thread in a comment NEWER than ' +
+    'that report, under a HEADING that names `open_questions` and says ANSWERED. ⛔ Nothing here changes ' +
     'the report contract: the array is the right place for the question. Report-only patrol INPUT: nothing is ' +
     'blocked and no label is written.'
   );
@@ -33567,6 +33613,20 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('H52 order: a non-report comment after the report changes nothing', typeof h52([cm52(1, report52(Q52), T52), cm52(2, 'ACCEPT.', '2026-09-08T09:00:00Z')]), 'string');
   t('H52 order: ⛔ a ruling comment does NOT stand the row down — the documented over-report', typeof h52([cm52(1, report52(Q52), T52), cm52(2, 'Ruling recorded — A, A, A.', '2026-09-08T09:00:00Z')]), 'string');
   t('H52 order: …and H33 cannot see that ruling either, which is why it was not reused', isTriageRulingComment('Ruling recorded — the three residuals: A, A, A'), false);
+
+  // The FOURTH exit (#19160) — both live headings are fixtures VERBATIM: measured, ⛔ not invented.
+  const A8348 = '### The two open questions, answered';
+  const A9868 = '## Half-state patrol H52 — the two `open_questions` on this card are ANSWERED, and this comment is the record that stands the row down';
+  const answered52 = (answer, at = '2026-09-08T09:00:00Z') => [cm52(1, report52(Q52_TWO), T52), cm52(2, answer + '\n\nQ1 and Q2 taken by name.', at)];
+  t('H52 answer: objectui#8348\'s live heading, verbatim, stands the row down', h52(answered52(A8348)), null);
+  t('H52 answer: …and objectui#9868\'s, verbatim — both carry the shape UNEDITED', h52(answered52(A9868)), null);
+  t('H52 answer: ⛔ an answer OLDER than the report does not clear — the report re-raised them', typeof h52(answered52(A8348, '2026-09-06T09:00:00Z')), 'string');
+  t('H52 answer: ⛔ nor the same words in PROSE, with no heading', typeof h52(answered52('The two open questions are answered above.')), 'string');
+  t('H52 answer: ⛔ nor a QUOTE of another card\'s answer', typeof h52(answered52('> ' + A8348)), 'string');
+  t('H52 answer: ⛔ a REPORT carrying the heading never clears — ordering refuses it, its own array governs', typeof h52([cm52(1, report52(Q52_TWO), T52), cm52(2, 'os-dev-report\n\n' + A8348 + '\n\n```json\n{"open_questions":[{"question":"q"}]}\n```', '2026-09-08T09:00:00Z')]), 'string');
+  t('H52 answer: an answer with NO report is not a clearing, and ⛔ the marker carries no `g` flag', h52AnswerStandsDown([cm52(1, A8348, T52)]) === false && H52_ANSWERED_HEADING.global === false, true);
+  t('H52 answer: a SIBLING reader — `latestDevReport` still names the report row', latestDevReport(answered52(A8348)).row.id, 1);
+  t('H52 sentence: the remedy names the thread route beside the report one', h52row(OPEN52).includes('under a HEADING that names `open_questions` and says ANSWERED'), true);
 
   // Population — every OPEN card, and ⛔ deliberately not one `pm:*` state.
   t('H52 population: an open `pm:dispatched` card is in', h52SpeaksAbout(DISPATCHED52), true);
