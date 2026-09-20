@@ -82,6 +82,7 @@ import { z } from 'zod';
 import { EvaluatedExpressionSchema } from '../shared/expression.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
+import { refuseRecordProtoKey } from '../shared/record-proto-key-guard';
 import { isExpressionEnvelopeShaped } from './flow-node-expression-paths';
 
 /** What a rejected key on these contracts silently did before #4001 批 9. */
@@ -920,13 +921,21 @@ export const ASSIGNMENT_ARRAY_FORM_PRESCRIPTION =
  */
 export const AssignmentConfigSchema = lazySchema(() => z.object({
   /** Variable name → value; the canonical authoring surface. */
-  assignments: z.record(z.string().min(1), AssignmentValueSchema, {
-    // The array form is a TYPE error on this slot; the message is the
-    // prescription, carried on the record's own `invalid_type` issue because
-    // an object-level refinement never runs once a property has failed its
-    // type (Zod aborts the object) — measured, not assumed.
-    error: (issue) => (Array.isArray(issue.input) ? ASSIGNMENT_ARRAY_FORM_PRESCRIPTION : undefined),
-  }).optional()
+  assignments: refuseRecordProtoKey(
+    z.record(z.string().min(1), AssignmentValueSchema, {
+      // The array form is a TYPE error on this slot; the message is the
+      // prescription, carried on the record's own `invalid_type` issue because
+      // an object-level refinement never runs once a property has failed its
+      // type (Zod aborts the object) — measured, not assumed.
+      error: (issue) => (Array.isArray(issue.input) ? ASSIGNMENT_ARRAY_FORM_PRESCRIPTION : undefined),
+    }),
+    // [objectstack#18847] `__proto__` ONLY. This slot's key type carries no
+    // grammar (`z.string().min(1)`), so `constructor` and `prototype` are
+    // legal flow-variable names today and are left legal — only `__proto__`
+    // is structurally unreachable by any key schema (see
+    // `refuseRecordProtoKey`'s docblock), so it alone is refused here.
+    'assignments',
+  ).optional()
     .describe('Variables to set: each key is a variable name, each value a `{token}` template, a CEL value envelope, or a literal'),
 })
   .catchall(z.unknown()));
