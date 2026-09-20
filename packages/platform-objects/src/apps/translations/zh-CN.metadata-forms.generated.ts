@@ -109,8 +109,8 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "新记录的默认值（JSON 字面量）"
       },
       "fields.placeholder": {
-        label: "Placeholder",
-        helpText: "Hint text shown inside the empty input; disappears once a value is entered"
+        label: "占位文本",
+        helpText: "显示在空输入框内的提示文本；输入内容后消失"
       },
       "fields.maxLength": {
         label: "最大长度",
@@ -121,12 +121,12 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "最小字符数"
       },
       "fields.valueDomain": {
-        label: "Value Domain",
-        helpText: "Standard the written value must belong to; a write carrying a non-member is refused"
+        label: "值域",
+        helpText: "写入值必须归属的标准；写入非成员值将被拒绝"
       },
       "fields.rows": {
-        label: "Rows",
-        helpText: "Inline editor height (text rows)"
+        label: "行数",
+        helpText: "内联编辑器高度（文本行数）"
       },
       "fields.min": {
         label: "最小值",
@@ -165,44 +165,44 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "目标对象名称。tree 字段可省略；若填写，必须是本对象自身（树是同一对象内部的层级 — 链接到其他对象请用 lookup）"
       },
       "fields.lookupFilters": {
-        label: "Lookup Filters",
-        helpText: "Filter rules applied to the picker ({field, operator, value})"
+        label: "Lookup 筛选条件",
+        helpText: "应用于选择器的筛选规则（{field, operator, value}）"
       },
       "fields.deleteBehavior": {
-        label: "Delete Behavior",
-        helpText: "What happens when the referenced record is deleted"
+        label: "删除行为",
+        helpText: "被引用记录删除时的处理方式"
       },
       "fields.multiple": {
         label: "多选",
         helpText: "允许选择多条记录"
       },
       "fields.expression": {
-        label: "Expression",
-        helpText: "CEL formula expression"
+        label: "表达式",
+        helpText: "CEL 公式表达式"
       },
       "fields.returnType": {
         label: "返回类型",
         helpText: "公式结果类型"
       },
       "fields.summaryOperations": {
-        label: "Summary Operations",
-        helpText: "Roll-up: which child object, which field, which aggregation"
+        label: "汇总操作",
+        helpText: "汇总：取哪个子对象、哪个字段、用哪种聚合"
       },
       "fields.summaryOperations.object": {
-        label: "Object",
-        helpText: "Source child object name"
+        label: "对象",
+        helpText: "来源子对象名称"
       },
       "fields.summaryOperations.field": {
-        label: "Field",
-        helpText: "Field on the child object to aggregate (ignored for count)"
+        label: "字段",
+        helpText: "子对象上参与聚合的字段（count 时忽略）"
       },
       "fields.summaryOperations.function": {
-        label: "Function",
-        helpText: "Aggregation function"
+        label: "函数",
+        helpText: "聚合函数"
       },
       "fields.autonumberFormat": {
-        label: "Autonumber Format",
-        helpText: "e.g. \"INV-{0000}\"; date tokens {YYYY}/{MM}/{DD} and {field_name} interpolation supported"
+        label: "自动编号格式",
+        helpText: "例如 \"INV-{0000}\"；支持日期占位符 {YYYY}/{MM}/{DD} 以及 {field_name} 插值"
       },
       "fields.language": {
         label: "语言",
@@ -213,16 +213,16 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "在记录的活动时间线上概述该字段的变更"
       },
       "fields.visibleWhen": {
-        label: "Visible When",
-        helpText: "CEL predicate — field is shown only when TRUE"
+        label: "可见条件",
+        helpText: "CEL 判定式——结果为 TRUE 时才显示该字段"
       },
       "fields.readonlyWhen": {
-        label: "Readonly When",
-        helpText: "CEL predicate — field is read-only when TRUE (enforced server-side)"
+        label: "只读条件",
+        helpText: "CEL 判定式——结果为 TRUE 时该字段只读（由服务端强制）"
       },
       "fields.requiredWhen": {
-        label: "Required When",
-        helpText: "CEL predicate — field is required when TRUE (enforced server-side)"
+        label: "必填条件",
+        helpText: "CEL 判定式——结果为 TRUE 时该字段必填（由服务端强制）"
       },
       enable: {
         label: "Enable",
@@ -1398,16 +1398,16 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "报表类型：tabular / summary / matrix / joined"
       },
       dataset: {
-        label: "Dataset",
-        helpText: "Dataset to bind (measures/dimensions come from its semantic layer)"
+        label: "数据集",
+        helpText: "要绑定的数据集（度量/维度来自其语义层）"
       },
       values: {
-        label: "Values",
-        helpText: "Measure names (from the dataset) to display"
+        label: "度量",
+        helpText: "要展示的度量名（来自该数据集）"
       },
       rows: {
-        label: "Rows",
-        helpText: "Dimension names (from the dataset) to group rows by"
+        label: "行",
+        helpText: "用于分组行的维度名（来自该数据集）"
       },
       columns: {
         label: "列",
@@ -1540,7 +1540,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "日期粒度"
       },
       measures: {
-        label: "Measures",
+        label: "度量",
         helpText: "每个度量：名称、聚合函数、字段（count 时可省略）、显示格式/货币"
       },
       "measures.name": {

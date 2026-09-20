@@ -1,0 +1,432 @@
+# Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+#
+# half-state-patrol -- the repo-agnostic BODY of the standing half-state sweep,
+# packaged so a sibling board CALLS it instead of copying it (#18471).
+#
+# ## The defect this closes: the delivery, not the predicates
+#
+# `scripts/pm/check-half-states.mjs` changed on 30 of the 36 days before this
+# was written, and every sibling board ran it from a hand-made copy. A copy of a
+# file that changes on five days in six is behind by construction: the cloud
+# board's copy was three weeks and ~25 commits stale, which left 23 of its 38
+# live half-states invisible -- not undetected, INVISIBLE, because the
+# predicates that would have named them were not in the copy.
+#
+# The copy also could not be installed correctly from its own instructions. The
+# install list in `.github/workflows/half-state-patrol.yml` said TWO files until
+# 2026-09-03 while the sweeper had imported a third since well before that, so
+# the documented install was a patrol that could not start; two weeks later the
+# same list was short by four again. ⛔ That is not a discipline failure to be
+# fixed with a sterner comment. An install list is a hand-maintained copy of an
+# import graph, and this one is now DELETED rather than lengthened: the runner
+# fetches the whole repository this action lives in, at the pinned sha, so the
+# import graph travels with the code and no list can be short.
+#
+# ## Why a composite action rather than a reusable workflow
+#
+# This repo holds exactly one precedent of each shape -- `.github/actions/
+# setup-pnpm` and `.github/workflows/docker-publish.yml` -- and the choice is
+# decided by ONE mechanical property rather than by taste.
+#
+# `uses: <owner>/<repo>/.github/actions/<name>@<sha>` makes the runner place the
+# WHOLE repository at that sha on disk and exposes it as `github.action_path`;
+# GitHub documents that path as the way "to access other files in that action's
+# repository". So the sweeper and the helper it imports arrive with the action,
+# at the same sha, with no credential and no second checkout.
+#
+# A reusable workflow gets none of that. `workflow_call` transfers the YAML FILE
+# only -- the repository's contents are not placed on the runner -- so a
+# reusable patrol would have to `actions/checkout` this repo itself, and then
+# the thing a sibling pins and the thing a sibling executes would be two refs
+# that have to be kept equal by hand. That is the copy problem again, one layer
+# down. The composite shape has no such seam.
+#
+# ⛔ A sibling pins a SHA, never `@main`: `@main` reintroduces the drift in the
+# other direction -- every board silently re-adopting whatever landed upstream
+# an hour ago, with no reviewed moment and nothing to roll back to.
+#
+# ## What deliberately did NOT move into here, and why
+#
+# Two steps stay in the CALLING workflow, both because a gate in this repo
+# derives its population from `.github/workflows/` and only from there:
+#
+#   - `actions/setup-node`. `scripts/check-node-version.mjs` scans
+#     `.github/workflows/*.yml` and reports how many setup-node steps it
+#     audited; a step moved in here would drop out of that census and the gate
+#     would still print OK. `.github/actions/setup-pnpm` records the same
+#     reasoning for the same gate, and the same answer: callers keep their own
+#     setup-node step with its literal `node-version` pin.
+#   - the closed-card sweep. `scripts/check-self-test-wired.mjs` builds its
+#     population from the scripts a WORKFLOW names, and the only CI invocation
+#     of `scripts/pm/sweep-closed-cards.mjs --self-test` in this repo is the one
+#     in that workflow. Moved in here it would leave that gate green while
+#     auditing one script fewer. It is also the one step in the old file that
+#     was never repo-agnostic -- it WRITES to cards and was gated on the
+#     repository name -- so leaving it in the objectstack caller states plainly
+#     what the `if:` used to state obliquely.
+#
+# ## Where this runs, and against which board
+#
+# Every `run:` below executes with the working directory at
+# `github.workspace` -- the CALLER's checkout, never this action's copy of
+# objectstack -- with ONE deliberate exception, `Run the live sweep`, which
+# stands in this action's own root and NAMES the caller's tree instead (next
+# section). Either way the split is the same: the SCRIPT comes from this
+# action's tree; the SUBJECT comes from the workspace, and the two are never
+# the same file set in a sibling.
+#
+# The subject half is load-bearing. The sweeper's H57 pass reads the swept
+# repo's own `.github/workflows/` from the local checkout and refuses unless
+# `git remote get-url origin` agrees with the board being swept, and its
+# tracked-file oracle shells out to `git ls-files`. All three of those reads go
+# through the sweeper's ONE git reader, whose cwd is `PM_SWEEP_CHECKOUT` when
+# that is set and the process cwd when it is not -- so a step standing anywhere
+# but the workspace MUST pass it, and the sweep step does.
+#
+# ## Why the sweep step stands in this action's root (#18471)
+#
+# The invocation has to be READABLE -- by a person, and by
+# `scripts/pm/dispatch-gates.mjs`, which derives the gate families a dispatch
+# prompt names. That derivation follows a `uses: ./.github/actions/NAME` into
+# this file and reads the script path out of the `run:` text, so a step here
+# reads exactly like an inline one -- but only for a path written LITERALLY.
+# Measured on this tree: `node "$SWEEPER"`, with the path carried in a step
+# `env:` value, derives ZERO families, and so does every spelling that keeps
+# the root in a variable (`node "$ROOT/scripts/pm/check-half-states.mjs"` and
+# its unquoted and split-quote variants). A patrol that appears in no gate list
+# is the invisible-instrument failure one layer up from the stale copy this
+# action deleted.
+#
+# So the sweep step stands in `steps.sources.outputs.root` -- the repository
+# the runner placed for this action, at the pinned sha -- and spells the
+# sweeper `node scripts/pm/check-half-states.mjs`, relative to THAT root.
+# ⛔ Never relative to the workspace: a bare relative path resolved in the
+# caller's checkout runs the CALLER's copy of the sweeper, which is the drift
+# this whole action exists to remove, and it would look identical in the diff.
+#
+# ⚠️ One behaviour moves with it, in the loud direction. Because the sweep now
+# NAMES the checkout it sweeps, a workspace that cannot be shown to serve the
+# swept board refuses (exit 3) instead of running with H57 unresolved and the
+# tracked-file oracle unreadable; the remedy is the one the workspace check
+# below already prints. ⛔ And the knob is not optional here: with this step's
+# cwd off the workspace, leaving it unset would point those three reads at
+# THIS action's objectstack tree while the report named the CALLER's board --
+# internally consistent, externally wrong, which is the failure
+# `PM_SWEEP_CHECKOUT` exists to remove.
+#
+# `PM_SWEEP_REPO` is `github.repository`, which inside an action invoked from
+# another repo is the CALLING repository. It is not an input on purpose: a
+# board identifier that can be typed is a board identifier that can be typed
+# wrong, and a patrol sweeping the repo it was installed FROM would file a fully
+# green report about the wrong board.
+
+name: Half-state patrol
+description: >-
+  Sweep the calling repository's board for half-states and rewrite that
+  repository's pinned anchor issue with the result. Report-only: findings never
+  fail the run, but a sweep that could not run does.
+
+inputs:
+  github-token:
+    description: >-
+      The calling workflow's own `secrets.GITHUB_TOKEN`. ⛔ Never a cross-repo
+      PAT: each install reads and writes its own board only, which is the
+      credential floor the 2026 grading refusal fixed in place. Needs
+      `issues: write` for the one anchor PATCH and `contents: read`.
+    required: true
+  anchor-issue:
+    description: >-
+      The number of the `tracking`-labeled issue in the CALLING repository whose
+      body this patrol owns end-to-end. An issue number is only ever meaningful
+      in the repo it was minted in, so there is no default and no fallback: left
+      empty, the run says so loudly and fails rather than guessing a number and
+      rewriting an unrelated card four times a day.
+    required: false
+    default: ''
+  closed-floor:
+    description: >-
+      Optional `YYYY-MM-DD` floor for the sweeper's closed-card pass, passed
+      through as `PM_SWEEP_CLOSED_FLOOR`. Per-board by nature -- a board's floor
+      is a date in ITS history. Empty means unset, which is the sweeper's own
+      default.
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    # The adopt list, replaced by an assertion. A list of files to copy is a
+    # hand-kept mirror of an import graph and was measured wrong twice; this
+    # step instead POSITIVELY LOCATES what the run is about to execute and
+    # fails by name when it is not there. A layout change therefore reddens the
+    # patrol that depends on it instead of quietly finding nothing.
+    - name: Locate the patrol sources
+      id: sources
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        GH_TOKEN_IN: ${{ inputs.github-token }}
+      run: |
+        set -euo pipefail
+
+        # <action_path>/.github/actions/half-state-patrol -> the repository root
+        # the runner placed for this action. Resolved with `cd`+`pwd` so the
+        # printed path is the real one a reader can check, not a `..`-laden
+        # spelling that hides which tree it landed in.
+        root="$(cd "$ACTION_PATH/../../.." && pwd)"
+        echo "patrol sources: $root"
+
+        missing=''
+        for rel in scripts/pm/check-half-states.mjs scripts/invoked-as.mjs; do
+          [ -f "$root/$rel" ] || missing="${missing}${missing:+, }$rel"
+        done
+        if [ -n "$missing" ]; then
+          echo "::error::The half-state patrol action cannot find its own sources under '$root' (missing: $missing). Either this action was referenced at a ref that predates them, or the runner's action layout changed and this resolution is no longer measuring anything -- fix the resolution, do not delete it."
+          exit 1
+        fi
+
+        # ⚠️ The message below names the secret in WORDS on purpose. A composite
+        # action's `run:` body is template-expanded before it is a script, and a
+        # composite action may not read `secrets` at all, so spelling the
+        # expression form here — even inside a string, even backslash-escaped —
+        # is a LOAD-TIME `Unrecognized named-value: 'secrets'` that fails the
+        # whole action before its first line runs. Measured on this repo's
+        # runner (2026-09-20, run 35481043482), where it took the patrol down
+        # while the caller's other steps went on running.
+        if [ -z "$GH_TOKEN_IN" ]; then
+          echo "::error::The 'github-token' input is empty. Pass the calling workflow's own secrets.GITHUB_TOKEN through this input; an unauthenticated sweep cannot read the board and must not be reported as a clean one."
+          exit 1
+        fi
+
+        # The runtime floor travels WITH the sweeper, read from the .nvmrc of
+        # the tree this action shipped from. Deliberately not a literal typed
+        # here: a second hand-written Node pin is the exact drift
+        # `check-node-version.mjs` exists to abolish, and that gate cannot
+        # reach a sibling repo's caller at all. A caller whose `setup-node` pin
+        # is older than this floor is told so by name.
+        floor=''
+        if [ -f "$root/.nvmrc" ]; then
+          floor="$(tr -cd '0-9' < "$root/.nvmrc" | head -c 3)"
+        fi
+        have="$(node -p 'process.versions.node.split(".")[0]')"
+        if [ -n "$floor" ] && [ "$have" -lt "$floor" ]; then
+          echo "::error::This patrol is verified on Node $floor and the runner is on Node $have. Raise the 'node-version' pin in your caller's actions/setup-node step to at least $floor."
+          exit 1
+        fi
+        echo "node: $have (floor ${floor:-unknown})"
+
+        echo "root=$root" >> "$GITHUB_OUTPUT"
+
+    # H57 classifies the swept board's scheduled workflows from the LOCAL
+    # checkout, and the tracked-file oracle shells out to `git ls-files`. Since
+    # #18471 the sweep step NAMES that checkout (`PM_SWEEP_CHECKOUT`) instead of
+    # inheriting it as cwd, so a missing checkout is no longer two degraded rows
+    # -- it is a refusal from the sweeper itself. This step still runs first and
+    # still only warns, because its job is to name the REMEDY in the job that
+    # produced the failure; the refusal it predicts arrives one step later,
+    # where the reading it invalidates would actually have been taken.
+    - name: Check the workspace serves the swept board
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        SWEPT_REPO: ${{ github.repository }}
+      run: |
+        set -uo pipefail
+        origin="$(git remote get-url origin 2>/dev/null || true)"
+        if [ -z "$origin" ]; then
+          echo "::warning::No git checkout in the workspace, so the sweep step will REFUSE (exit 3): it names this directory as the checkout serving the swept board, and a directory with no origin remote cannot be shown to serve it. The passes that read the swept repo's own files are H57's scheduled-workflow classification and the tracked-file oracle. Add an actions/checkout step to the calling workflow before this action."
+        else
+          echo "workspace origin: $origin (sweeping $SWEPT_REPO)"
+        fi
+
+    - name: Run the live sweep
+      id: sweep
+      shell: bash
+      # This ACTION's own checkout, at the pinned sha, and load-bearing twice:
+      # it is what makes the literal `node scripts/pm/check-half-states.mjs`
+      # below resolve to the sweeper that shipped WITH this action, and what
+      # makes that path visible to the gate-family derivation. The header
+      # section "Why the sweep step stands in this action's root" is the
+      # authority; `PM_SWEEP_CHECKOUT` below is the other half of it.
+      working-directory: ${{ steps.sources.outputs.root }}
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        # WHICH board this run reads: the repository the calling workflow lives
+        # in, always. The sweeper would resolve the same answer on its own from
+        # the runner's `GITHUB_REPOSITORY` (`resolveSweepRepo`), and it is passed
+        # explicitly anyway so the wiring is visible to a reader -- the two agree
+        # by construction and no install can end up sweeping the repo this action
+        # was fetched from.
+        PM_SWEEP_REPO: ${{ github.repository }}
+        PM_SWEEP_CLOSED_FLOOR: ${{ inputs.closed-floor }}
+        # WHICH checkout SERVES that board -- passed because this step's cwd is
+        # this action's tree and not the caller's. The sweeper's three local git
+        # reads (H17's tracked-file oracle, H57's `on:`-block classification,
+        # and the repo-root resolution under it) take this path as their cwd,
+        # and a tree whose `origin` is not the swept board REFUSES rather than
+        # rendering another repository's files as this board's.
+        PM_SWEEP_CHECKOUT: ${{ github.workspace }}
+        PROVENANCE: >-
+          run [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          · commit `${{ github.sha }}` · trigger `${{ github.event_name }}`
+      run: |
+        set +e
+        # Spelled LITERALLY, resolved against this step's working directory --
+        # this action's own root. ⛔ Not `node "$SWEEPER"` with the path in an
+        # `env:` value: that runs the identical file and is named by no gate
+        # list, inline or through an action. Measured, see the header.
+        node scripts/pm/check-half-states.mjs \
+          --format=markdown \
+          --provenance="$PROVENANCE" \
+          > "$RUNNER_TEMP/report.md" 2> "$RUNNER_TEMP/report.err"
+        code=$?
+        set -e
+        # Captured with NO pipe in between. `cmd | tail` would report the
+        # PIPE's status -- `tail` essentially never fails, so a green and a red
+        # sweep both read as 0, and the script's own header calls this trap out
+        # by name (its exit codes are 0 / 2 / 3 and the split is the point).
+        echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+        echo "check-half-states exited $code"
+        cat "$RUNNER_TEMP/report.err" >&2 || true
+
+    - name: Resolve the anchor issue
+      # An install with no anchor configured has nowhere to land its report, and
+      # the ONLY safe behaviour is to say so loudly. The two alternatives are
+      # both the failure this patrol exists to prevent: guessing a number would
+      # rewrite an unrelated card in the calling repo, and skipping the write
+      # quietly would leave a patrol that runs, finds, and tells nobody --
+      # indistinguishable from a clean board.
+      #
+      # Placed AFTER the sweep so the run summary still carries the rendered
+      # findings (the same "land the truth, then raise the alarm" order the final
+      # step keeps), and skipped on a pull_request run, which never writes an
+      # anchor at all.
+      if: github.event_name != 'pull_request'
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        ANCHOR_ISSUE: ${{ inputs.anchor-issue }}
+      run: |
+        if [ -z "${ANCHOR_ISSUE//[[:space:]]/}" ]; then
+          echo "::error::No anchor issue configured for ${{ github.repository }}. The sweep RAN (see the run summary) but has nowhere to land. Open a \`tracking\`-labeled anchor issue in this repo and pass its number as the 'anchor-issue' input of the half-state-patrol action."
+          exit 1
+        fi
+        case "$ANCHOR_ISSUE" in
+          *[!0-9]*|'') echo "::error::The 'anchor-issue' input is '$ANCHOR_ISSUE', which is not an issue number."; exit 1 ;;
+        esac
+        echo "anchor: #$ANCHOR_ISSUE in ${{ github.repository }}"
+
+    - name: Update the pinned anchor issue
+      # A pull_request run proves the sweep; it must not touch the board.
+      if: github.event_name != 'pull_request'
+      uses: actions/github-script@v9
+      env:
+        SWEEP_EXIT: ${{ steps.sweep.outputs.exit_code }}
+        ANCHOR_ISSUE: ${{ inputs.anchor-issue }}
+      with:
+        github-token: ${{ inputs.github-token }}
+        # Delivery is retried, never assumed: this single PATCH is the entire
+        # product of the run, and a transient answer from the issues endpoint
+        # would otherwise discard a completed sweep.
+        retries: 3
+        script: |
+          const fs = require('fs');
+          const path = require('path');
+          const exitCode = Number(process.env.SWEEP_EXIT);
+          const anchor = Number(process.env.ANCHOR_ISSUE);
+          const runUrl = `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`;
+          const read = (name) => {
+            try { return fs.readFileSync(path.join(process.env.RUNNER_TEMP, name), 'utf8'); }
+            catch { return ''; }
+          };
+
+          // The composition split, deliberately: a COMPLETED sweep renders its
+          // own body (in the script, where --self-test pins every property of
+          // it). Only the did-not-run body is composed here, because saying
+          // "my callee failed" is the caller's job and the script's classified
+          // output is already the authored explanation -- this wraps it, it
+          // does not re-word it.
+          let body;
+          if (exitCode === 0) {
+            body = read('report.md');
+            if (!body.trim()) {
+              throw new Error('the sweep exited 0 but produced an empty report — refusing to blank the anchor');
+            }
+          } else {
+            const classified = (read('report.err') || read('report.md') || '(no output captured)').trim();
+            const kind = exitCode === 3
+              ? 'PREREQUISITE NOT MET — the runner could not reach the board'
+              : 'SWEEP FAILED — an unclassified failure';
+            body = [
+              'os-half-state-sweep — machine-findable marker for this generated view.',
+              '',
+              `# ⛔ THE SWEEP DID NOT RUN (exit ${exitCode})`,
+              '',
+              `_Attempted ${new Date().toISOString()} · [run log](${runUrl}) · ${kind}._`,
+              '',
+              'Nothing below is a finding. **No issue was judged**, so this body says nothing about whether',
+              'the board carries half-states — it is not a clean board and it is not a dirty one, it is no',
+              'reading at all. A sweep that could not run must never read as a clean board.',
+              '',
+              'The standing patrol is DOWN until this is fixed; the previous run\'s findings are in this',
+              'issue\'s edit history. The sweeper\'s own classified output:',
+              '',
+              '```',
+              classified,
+              '```',
+            ].join('\n');
+          }
+
+          await github.rest.issues.update({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: anchor,
+            body,
+          });
+          core.info(`anchor #${anchor} updated (${body.length} chars, sweep exit ${exitCode})`);
+
+    - name: Publish the rendered body to the run summary
+      # Always: on a PR this IS the delivery, and on a scheduled run it makes the
+      # run log self-contained when someone opens it after an alert.
+      if: always()
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        {
+          echo "### Half-state patrol — sweep exit ${{ steps.sweep.outputs.exit_code }}"
+          echo
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "_Anchor write skipped: a pull_request run proves the sweep without touching the board._"
+            echo
+          fi
+          echo '<details><summary>Rendered anchor body</summary>'
+          echo
+          cat "$RUNNER_TEMP/report.md" 2>/dev/null || echo '(no report produced)'
+          echo
+          echo '</details>'
+          echo
+          echo '<details><summary>stderr</summary>'
+          echo
+          echo '```'
+          cat "$RUNNER_TEMP/report.err" 2>/dev/null || true
+          echo '```'
+          echo
+          echo '</details>'
+        } >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Fail the run if the sweep could not run
+      # LAST, on purpose: the anchor is updated with the did-not-run report
+      # BEFORE the job goes red. Land the truth, then raise the alarm -- a run
+      # that failed early would leave the previous body in place with its old
+      # timestamp, which is precisely the stale-reads-as-clean shape this patrol
+      # exists to prevent.
+      #
+      # Findings are NOT a failure condition and never appear here: exit 0 with
+      # 40 half-states is a successful patrol.
+      if: steps.sweep.outputs.exit_code != '0'
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        echo "::error::check-half-states exited ${{ steps.sweep.outputs.exit_code }} — the standing patrol did not read the board. See the anchor issue and this run's stderr."
+        exit 1

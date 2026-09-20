@@ -60,6 +60,10 @@ import { DEFAULT_METADATA_TYPE_REGISTRY, getMetadataTypeSchema } from '@objectst
 import { METADATA_FORM_REGISTRY } from '@objectstack/spec/system';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import { acceptsNothing } from './unauthorable-nodes.js';
+// [#19295] The emitter's OWN erased-authoring hook — the baseline below is
+// derived with the code the server derives with, so the one difference this
+// pin reads is the strip's.
+import { markErasedAuthoringInput } from './erased-authoring-mark.js';
 
 const SERVED_TYPES = Array.from(new Set([
     ...DEFAULT_METADATA_TYPE_REGISTRY.map((e) => e.type),
@@ -107,12 +111,31 @@ async function servedSchemas(): Promise<Map<string, Record<string, unknown> | un
     return map;
 }
 
-/** The derivation the endpoint ran BEFORE this card's strip stage. */
+/**
+ * The derivation the endpoint ran BEFORE this card's strip stage.
+ *
+ * [#19295] Derived with the emitter's OWN erased-authoring hook, for the same
+ * reason the degeneracy pin's baseline carries it: that hook ADDS a vendor
+ * keyword to a husk arm, and this pin's whole question is whether the served
+ * payload is a derivation minus deletions and nothing else. A baseline without
+ * the hook would report the mark as an unexplained addition on the eight types
+ * that carry one and this pin would be red for a reason it does not own —
+ * blind, meanwhile, to the over-drop it exists to catch.
+ *
+ * ⚠️ Its strength is unchanged: any OTHER addition or rewrite still lands in
+ * `other`, and every removal is still judged by `acceptsNothing`. Whether the
+ * mark itself sits in the right places is a different question, asked in
+ * `protocol.meta-types-erased-authoring-mark.test.ts`.
+ */
 function preStripDerivation(type: string, io: 'output' | 'input' = 'output'): Record<string, unknown> | undefined {
     const schema = getMetadataTypeSchema(type);
     if (!schema) return undefined;
     try {
-        return z.toJSONSchema(schema as z.ZodTypeAny, { unrepresentable: 'any', io }) as Record<string, unknown>;
+        return z.toJSONSchema(schema as z.ZodTypeAny, {
+            unrepresentable: 'any',
+            io,
+            override: markErasedAuthoringInput,
+        }) as Record<string, unknown>;
     } catch {
         return undefined;
     }

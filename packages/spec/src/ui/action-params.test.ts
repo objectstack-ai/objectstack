@@ -414,16 +414,43 @@ type FindQuery = Parameters<ActionEngineFacade['find']>[1];
 // the strict mutual-assignability test, so neither `Record<string, unknown>`
 // nor `FilterCondition` — the type this slot carried between #14175 and
 // #15124, and the one it must not drift back to — satisfies it. Reading the
-// engine's published type BY IDENTITY is the whole point of the ruling ("one
+// engine's published type BY REFERENCE is the whole point of the ruling ("one
 // platform, one query shape"): a structural copy of the envelope would pass a
 // weaker pin and then drift the moment the engine's own options grow a key.
 // Exported, as the sibling pins are, so `noUnusedLocals` does not read a type
 // that exists only to be checked as one that is never used.
-export type FindQueryIsEngineQueryOptions = Assert< Eq< FindQuery, EngineQueryOptions > >;
+//
+// #19237 subtracts exactly ONE key from that reference. The pin is written as
+// `Omit<EngineQueryOptions, 'context'>` rather than a spelled-out key list for
+// the same reason the slot is: the envelope's OTHER keys stay by reference, so
+// a key the engine grows tomorrow is reachable from a handler on the same day
+// without touching this line, and the only thing this file asserts about the
+// envelope's content is the subtraction itself.
+export type FindQueryIsEngineQueryOptionsWithoutContext =
+  Assert< Eq< FindQuery, Omit< EngineQueryOptions, 'context' > > >;
+
+// The subtraction, stated as its own fact rather than inferred from the `Eq`
+// above — because the two fail differently and a reader needs to know WHICH
+// moved. `Eq` reds for any drift at all (a re-widening, a re-narrowing, a
+// rename of the type behind the slot); this one reds only when `context`
+// becomes writable again, which is the ADR-0049 regression #19237 closed.
+//
+// ⚠️ This is a TYPE-level pin, deliberately, and not a runtime one. The card's
+// remedy is a pure narrowing of a declaration: the runtime's behaviour is
+// UNCHANGED (`buildActionEngineFacade` still spreads its own context last, and
+// its `assertActionEngineFindEnvelope` still reads `context` off
+// `EngineQueryOptionsSchema` as a legal key for the untyped channel). A
+// runtime pin here would assert a refusal that does not exist and must not:
+// adding one is a runtime permission change, which is not this card's to make.
+// The runtime side of the contract keeps its own pin, unchanged, in
+// `packages/runtime/src/action-engine-facade-find-envelope.test.ts`.
+export type FindQueryCarriesNoContextKey =
+  Assert< Eq< 'context' extends keyof FindQuery ? true : false, false > >;
 
 describe('#15124 — ActionEngineFacade.find takes the engine query envelope, never a bare filter', () => {
   it('types the second parameter as the published `EngineQueryOptions` (the tsc channel)', () => {
-    // The value-level half of `FindQueryIsEngineQueryOptions` above: a literal
+    // The value-level half of `FindQueryIsEngineQueryOptionsWithoutContext`
+    // above: a literal
     // annotated with the slot type, so the runtime run exercises the same
     // declaration the type pin reads.
     const query: FindQuery = { where: { position_code: 'qa_lead', active: true } };
@@ -484,6 +511,29 @@ describe('#15124 — ActionEngineFacade.find takes the engine query envelope, ne
     const limitNotNumber: FindQuery = { limit: '50' };
 
     expect([whereNotFilter, fieldsNotArray, limitNotNumber]).toHaveLength(3);
+  });
+
+  it('#19237 REFUSAL PIN — `context` is not an envelope key on THIS facade (ADR-0049 remove arm)', () => {
+    // The key the engine honours and this facade does not. It was declared
+    // here and unenforced between #15124 and #19237: the write below
+    // type-checked, and the runtime stamped the facade's own elevated context
+    // over it with no signal — so an author who wrote `context: { tenantId }`
+    // believing they had NARROWED the read got a broader one.
+    //
+    // `@ts-expect-error` is the whole assertion: if the slot ever re-admits
+    // the key, the directive goes unused and `tsc -p tsconfig.test.json` reds.
+    // @ts-expect-error — `context` is subtracted from this parameter; the facade mints its own and a caller-supplied one is never honoured.
+    const narrowingAttempt: FindQuery = { where: { status: 'open' }, context: { tenantId: 'org_acme' } };
+    // @ts-expect-error — the same on its own, with no other key to carry the literal.
+    const contextAlone: FindQuery = { context: { isSystem: true } };
+
+    // POSITIVE CONTROL, in the same test: the rest of the envelope is
+    // untouched by the subtraction. Without this, a pin that "passes" because
+    // the whole parameter degenerated to `never` would read exactly the same.
+    const rest: FindQuery = { where: { status: 'open' }, fields: ['id'], orderBy: [{ field: 'id', order: 'asc' }], limit: 5, offset: 0 };
+
+    expect([narrowingAttempt, contextAlone]).toHaveLength(2);
+    expect(Object.keys(rest)).toEqual(['where', 'fields', 'orderBy', 'limit', 'offset']);
   });
 
   it('the refusal survives the VARIABLE path too — not just the object-literal check', () => {

@@ -20,15 +20,38 @@
  *     multi-package layout that is where a moved docs directory lands — so it
  *     is REPORTED rather than passed over, because a build that keeps none of
  *     the author's docs and says nothing is the defect (#18170).
- *   - **Lint**: namespace-prefix naming (doc uniqueness is logical — the
- *     metadata registry key carries no package coordinate, so a bare-name
- *     collision silently overwrites across packages), the v1 syntax bans
- *     (no MDX, no images), and same-package link resolution.
+ *   - **Lint**: namespace-prefix naming (`docs/namespace-prefix`,
+ *     `docs/namespace-required`), duplicate names (`docs/duplicate-name`), the
+ *     v1 syntax bans (no MDX, no images), and same-package link resolution.
  *
  * Cross-package links (a target whose prefix is not this package's
  * namespace) are deliberately not checked here: they resolve against
  * dependency docs at publish time, and render-side they degrade to a
  * "doc not found" notice rather than coupling into dependency resolution.
+ *
+ * ⚠️ What the naming lints rest on — and ⛔ what they no longer rest on.
+ * Doc uniqueness is logical rather than physical (ADR-0046 §3.2), but ⛔ NOT
+ * because "a bare-name collision silently overwrites across packages": that
+ * sentence is ADR-0048 §1.1 *context*, overturned by the same ADR's §3.3/§3.4
+ * (the write is already composite-keyed — §1.2, "the silence is in the read,
+ * not the write" — and "the cross-package throw is retired"), and it is
+ * declined by name at {@link lintDocNamesAcrossOwners}. ⛔ The two lints that
+ * one sentence used to cover are not interchangeable:
+ *
+ *   - `docs/duplicate-name` rests on **authoring hygiene**, the class §3.4
+ *     keeps. ⛔ The reading is deliberately NOT restated here — it lives at
+ *     {@link lintDocNamesAcrossOwners}, and a second copy of a justification is
+ *     exactly how this header went stale.
+ *   - `docs/namespace-prefix` / `docs/namespace-required` rest on the **flat
+ *     link namespace**, and the prefix is load-bearing *in this module*: a doc
+ *     link is `[text](./<name>.md)` — a bare name with nowhere to put a
+ *     package coordinate, flat on purpose so an editor or a GitHub preview
+ *     resolves it natively (ADR-0046 §3.1/§3.3) — so the prefix is the only
+ *     thing separating a same-package link, checked in {@link lintDocs}, from
+ *     a cross-package one, deferred to publish as above. ⚠️ ADR-0048 §3.3
+ *     repaired metadata reads by ADDING a package-id argument to `getItem`;
+ *     the link form has nowhere to put one, so nothing §3.4 retired was ever
+ *     load-bearing for these two.
  */
 
 import fs from 'fs';
@@ -947,10 +970,11 @@ function bodyDocsOf(packages: unknown, index: number): DocItem[] {
  * left open is the SEVERITY, not the reason: §3.4 hands authoring hygiene to a
  * warning-only lint while this one is `severity: 'error'`.
  *
- * ⚠️ "this module's older framing" above is not gone — it is still live in this
- * file's HEADER docblock, which states the retired claim as the current reason for
- * the naming lints. Out of #19248's file surface (it also justifies
- * `docs/namespace-prefix`), so it is reported, not edited here.
+ * ⚠️ "this module's older framing" above was, when #19248 landed, still live in
+ * this file's HEADER docblock as the current reason for the naming lints. Out of
+ * that round's file surface (it also justified `docs/namespace-prefix`), it was
+ * reported there rather than edited, and #19359 corrected the header — which now
+ * separates the two lints instead of covering both with the one retired sentence.
  */
 function lintDocNamesAcrossOwners(
   sets: ReadonlyArray<{ label: string; docs: readonly DocItem[] }>,

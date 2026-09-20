@@ -109,8 +109,8 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "Valor predeterminado para registros nuevos (literal JSON)"
       },
       "fields.placeholder": {
-        label: "Placeholder",
-        helpText: "Hint text shown inside the empty input; disappears once a value is entered"
+        label: "Marcador de posición",
+        helpText: "Texto de ayuda que se muestra dentro del campo vacío; desaparece al introducir un valor"
       },
       "fields.maxLength": {
         label: "Longitud máxima",
@@ -121,12 +121,12 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "Mínimo de caracteres"
       },
       "fields.valueDomain": {
-        label: "Value Domain",
-        helpText: "Standard the written value must belong to; a write carrying a non-member is refused"
+        label: "Dominio de valores",
+        helpText: "Estándar al que debe pertenecer el valor escrito; se rechaza una escritura con un valor que no pertenezca"
       },
       "fields.rows": {
-        label: "Rows",
-        helpText: "Inline editor height (text rows)"
+        label: "Filas",
+        helpText: "Altura del editor en línea (filas de texto)"
       },
       "fields.min": {
         label: "Mínimo",
@@ -165,44 +165,44 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "Nombre del objeto de destino. En un campo tree es opcional y, si se indica, debe ser este mismo objeto (un árbol es una jerarquía dentro de su propio objeto — para enlazar con otro objeto, usa un lookup)"
       },
       "fields.lookupFilters": {
-        label: "Lookup Filters",
-        helpText: "Filter rules applied to the picker ({field, operator, value})"
+        label: "Filtros de lookup",
+        helpText: "Reglas de filtro aplicadas al selector ({field, operator, value})"
       },
       "fields.deleteBehavior": {
-        label: "Delete Behavior",
-        helpText: "What happens when the referenced record is deleted"
+        label: "Comportamiento al eliminar",
+        helpText: "Qué ocurre cuando se elimina el registro referenciado"
       },
       "fields.multiple": {
         label: "Selección múltiple",
         helpText: "Permitir seleccionar varios registros"
       },
       "fields.expression": {
-        label: "Expression",
-        helpText: "CEL formula expression"
+        label: "Expresión",
+        helpText: "Expresión de fórmula CEL"
       },
       "fields.returnType": {
         label: "Tipo de retorno",
         helpText: "Tipo de resultado para fórmulas"
       },
       "fields.summaryOperations": {
-        label: "Summary Operations",
-        helpText: "Roll-up: which child object, which field, which aggregation"
+        label: "Operaciones de resumen",
+        helpText: "Roll-up: qué objeto hijo, qué campo y qué agregación"
       },
       "fields.summaryOperations.object": {
-        label: "Object",
-        helpText: "Source child object name"
+        label: "Objeto",
+        helpText: "Nombre del objeto hijo de origen"
       },
       "fields.summaryOperations.field": {
-        label: "Field",
-        helpText: "Field on the child object to aggregate (ignored for count)"
+        label: "Campo",
+        helpText: "Campo del objeto hijo que se agrega (se ignora para count)"
       },
       "fields.summaryOperations.function": {
-        label: "Function",
-        helpText: "Aggregation function"
+        label: "Función",
+        helpText: "Función de agregación"
       },
       "fields.autonumberFormat": {
-        label: "Autonumber Format",
-        helpText: "e.g. \"INV-{0000}\"; date tokens {YYYY}/{MM}/{DD} and {field_name} interpolation supported"
+        label: "Formato de autonumeración",
+        helpText: "p. ej. \"INV-{0000}\"; admite tokens de fecha {YYYY}/{MM}/{DD} e interpolación de {field_name}"
       },
       "fields.language": {
         label: "Idioma",
@@ -213,16 +213,16 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "Resume este campo en la cronología de actividad del registro"
       },
       "fields.visibleWhen": {
-        label: "Visible When",
-        helpText: "CEL predicate — field is shown only when TRUE"
+        label: "Condición de visibilidad",
+        helpText: "Predicado CEL: el campo solo se muestra cuando es TRUE"
       },
       "fields.readonlyWhen": {
-        label: "Readonly When",
-        helpText: "CEL predicate — field is read-only when TRUE (enforced server-side)"
+        label: "Condición de solo lectura",
+        helpText: "Predicado CEL: el campo es de solo lectura cuando es TRUE (aplicado en el servidor)"
       },
       "fields.requiredWhen": {
-        label: "Required When",
-        helpText: "CEL predicate — field is required when TRUE (enforced server-side)"
+        label: "Condición de obligatoriedad",
+        helpText: "Predicado CEL: el campo es obligatorio cuando es TRUE (aplicado en el servidor)"
       },
       enable: {
         label: "Enable",
@@ -1398,16 +1398,16 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "Tipo de informe: tabular/summary/matrix/joined"
       },
       dataset: {
-        label: "Dataset",
-        helpText: "Dataset to bind (measures/dimensions come from its semantic layer)"
+        label: "Conjunto de datos",
+        helpText: "Conjunto de datos a vincular (las medidas/dimensiones provienen de su capa semántica)"
       },
       values: {
-        label: "Values",
-        helpText: "Measure names (from the dataset) to display"
+        label: "Medidas",
+        helpText: "Nombres de medida (del conjunto de datos) que se mostrarán"
       },
       rows: {
-        label: "Rows",
-        helpText: "Dimension names (from the dataset) to group rows by"
+        label: "Filas",
+        helpText: "Nombres de dimensión (del conjunto de datos) por los que agrupar las filas"
       },
       columns: {
         label: "Columnas",
@@ -1540,7 +1540,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Granularidad de fecha"
       },
       measures: {
-        label: "Measures",
+        label: "Medidas",
         helpText: "Cada medida: nombre, agregación, campo (opcional para count) y formato de visualización/moneda"
       },
       "measures.name": {

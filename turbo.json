@@ -502,6 +502,7 @@
         "$TURBO_ROOT$/content/**",
         "$TURBO_ROOT$/scripts/sync-template-versions.mjs",
         "$TURBO_ROOT$/scripts/invoked-as.mjs",
+        "$TURBO_ROOT$/scripts/git-env.mjs",
         "$TURBO_ROOT$/.github/workflows/scaffold-e2e.yml",
         "$TURBO_ROOT$/packages/cli/src/commands/serve.ts",
         "$TURBO_ROOT$/scripts/gen-sdui-manifest.sh",

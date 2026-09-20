@@ -20,6 +20,12 @@ import { omitInternalFieldsFromWriteResponse } from './write-response-internal-f
 // `{ not: {} }` — is dropped from it. See the module header for the channels
 // that keep carrying the retirement's prescription.
 import { stripUnauthorableProperties } from './unauthorable-nodes.js';
+// [#19295] The output derivation of a `ZodPipe` erases the arm's own input
+// type, so an authoring arm that accepts a bare string is served as the
+// anonymous `{}`. This annotates that husk — and only that husk — so a
+// consumer can tell an ERASED authoring type from a member that genuinely
+// admits anything. See the module header for the predicate and its controls.
+import { markErasedAuthoringInput } from './erased-authoring-mark.js';
 import {
     evaluateRuntimeAuthoringGate,
     CLOSURE_CONTEXT_KEY_BY_TYPE,
@@ -466,6 +472,21 @@ const _warnedDegenerateDerivation = new Set<string>();
  * documented for and it returns `undefined` as it always did — no retry. Not
  * one type's conversion throws today, so retrying there would move no payload
  * while widening the change past the ruling.
+ *
+ * ## [#19295] Why both derivations carry the erased-authoring `override`
+ *
+ * The degeneracy above is a WHOLE-TYPE husk. The same erasure also happens one
+ * level down, per MEMBER: a predicate slot's string arm is a `ZodPipe`, so the
+ * output derivation describes the transform's result and the arm itself is
+ * served as `{}` — indistinguishable from a member that admits anything.
+ * {@link markErasedAuthoringInput} annotates exactly those arms; it adds a
+ * vendor keyword and changes no keyword zod emitted, so what each document
+ * ACCEPTS is untouched and the refused `io: 'input'` widening stays refused.
+ *
+ * It is passed to BOTH calls on purpose. On the authoring retry a pipe derives
+ * from its input side, nothing is erased, and the hook marks nothing — so a
+ * type served from the retry (`action`) carries a real authoring arm instead
+ * of a marked husk, which is the honest answer rather than a gap.
  */
 const _jsonSchemaCache = new WeakMap<z.ZodTypeAny, Record<string, unknown> | null>();
 function toJsonSchemaSafe(schema: z.ZodTypeAny, typeLabel?: string): Record<string, unknown> | undefined {
@@ -474,7 +495,10 @@ function toJsonSchemaSafe(schema: z.ZodTypeAny, typeLabel?: string): Record<stri
 
     let output: Record<string, unknown>;
     try {
-        output = z.toJSONSchema(schema, { unrepresentable: 'any' }) as Record<string, unknown>;
+        output = z.toJSONSchema(schema, {
+            unrepresentable: 'any',
+            override: markErasedAuthoringInput,
+        }) as Record<string, unknown>;
     } catch {
         // Conversion failed outright — the original hand-crafted-fallback case.
         _jsonSchemaCache.set(schema, null);
@@ -491,7 +515,11 @@ function toJsonSchemaSafe(schema: z.ZodTypeAny, typeLabel?: string): Record<stri
     // before giving up — for a `ZodPipe` this is the derivation that can see
     // the object at all.
     try {
-        const authoring = z.toJSONSchema(schema, { unrepresentable: 'any', io: 'input' }) as Record<string, unknown>;
+        const authoring = z.toJSONSchema(schema, {
+            unrepresentable: 'any',
+            io: 'input',
+            override: markErasedAuthoringInput,
+        }) as Record<string, unknown>;
         if (!isDegenerateDerivation(authoring)) {
             const authorable = stripUnauthorableProperties(authoring);
             _jsonSchemaCache.set(schema, authorable);
@@ -22325,8 +22353,31 @@ export class ObjectStackProtocolImplementation implements
      *      rows back into the registry on boot).
      *
      * The DB write is best-effort and non-fatal: when the `package` service is
-     * absent (e.g. the `marketplace` capability is off) the package is still
-     * registered in-memory and visible for the lifetime of the process.
+     * absent the package is still registered in-memory and visible for the
+     * lifetime of the process — and that in-memory-only branch STAYS, as the
+     * documented degraded path for reduced hosts (#17676 ruling A' item 2,
+     * decision batch #125 item 2). ⛔ It is not a bug to delete: a host that
+     * mounts no provider (`objectstack serve --preset minimal`, a metadata-only
+     * embedding) must still be able to install a package for the life of its
+     * process, and the `warn` below is what keeps the degradation from being
+     * silent.
+     *
+     * Which capability OWNS the service is no longer `marketplace`: ruling A'
+     * item 1 split the persistence half — the `sys_packages` container and the
+     * boot hydration that replays it — out under its own always-on token
+     * `package-registry` (`PLATFORM_ALWAYS_ON_CAPABILITIES`,
+     * `packages/spec/src/kernel/platform-capabilities.ts`), leaving
+     * `marketplace` naming only the optional catalogue / browsing half. ⚠️ The
+     * runtime half of that split is NOT landed: measured on `origin/main` at
+     * c334ba0f3a, `Serve.CAPABILITY_PROVIDERS`
+     * (`packages/cli/src/commands/serve.ts`) keys `marketplace` and does not key
+     * `package-registry`, so the always-on token is force-appended to every
+     * app's `requires` and then resolves to no provider — silently, because the
+     * resolver only warns for tokens outside the vocabulary. ⇒ on a stock
+     * `objectstack dev` boot of an app that does not itself declare
+     * `requires: ['marketplace']`, this branch is still the one taken, which is
+     * the defect #17676 reports. Recorded here rather than worked around: the
+     * fix belongs to the capability resolver, not to this primitive.
      *
      * [#19277] `request.enableOnInstall` is HONOURED here, under the same rule
      * the HTTP door implements — 「缺省 = 保持，有旗 = 设置」: `true` enables,
@@ -22469,6 +22520,10 @@ export class ObjectStackProtocolImplementation implements
      * service so the edit survives a restart. Persistence is best-effort and
      * non-fatal (matching `installPackage`): the registry write already
      * succeeded, so a persist failure is logged, never thrown.
+     *
+     * The service-absent branch below is the same documented degraded path
+     * #17676 ruling A' item 2 keeps — see `installPackage`'s note for which
+     * capability owns the service and for the measured state of that split.
      */
     async updatePackage(request: {
         packageId: string;

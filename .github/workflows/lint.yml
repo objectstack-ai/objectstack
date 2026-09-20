@@ -184,6 +184,27 @@ jobs:
       # `scripts/report-unmeasured-gate-tail.mjs`. Nothing else in this job
       # reads it, and no step writes anything anywhere.
       actions: read
+      # ⭐ Added by #18224, for the issue-citation step far below: it resolves
+      # the numbers THIS change cites against the board. Read-only and one
+      # scope wide — no issue, comment, label or assignee is ever written. It
+      # is spelled even though this board is PUBLIC, because an explicit
+      # `permissions:` block sets every unnamed scope to `none`, and a BLOCKING
+      # gate whose transport depends on repository visibility is a gate that
+      # goes red on a settings change no file here can assert.
+      issues: read
+      # ⭐ AND `pull-requests`, which is NOT redundant with the row above —
+      # MEASURED, on run 35495222460 of `half-state-patrol.yml`, whose token
+      # carries `issues` and NOT this scope: its census reported 3,628
+      # unresolvable citation sites where a full-scope read of the same tree
+      # reported 2,168, and the difference is 1,460 — EXACTLY the
+      # `resolves-as-pull-request` tally. `GET /repos/{owner}/{repo}/issues`
+      # answers with the pull requests omitted, so every citation naming a PR
+      # number reads as a number the board never had. On THIS blocking step
+      # that is a false RED on a correct citation, and the frontier probe
+      # (`?per_page=1&sort=created&direction=desc`) is read from the same
+      # response — so an understated frontier turns later numbers into
+      # `never-issued` too. ⛔ Do not drop this row as tidying.
+      pull-requests: read
 
     steps:
       - name: Checkout repository
@@ -4637,6 +4658,105 @@ jobs:
       # false-zero control -- a walker that drops either class fails them.
       - name: workspace manifest dependency graph has no cycle
         run: pnpm check:workspace-manifest-cycles
+
+      # Merged-result budget probe, wired by the card that wired the citation
+      # gate below (#18224). `node scripts/check-merged-result.mjs --self-test`
+      # IS the whole gate and is exactly what the root manifest registers as
+      # `check:merged-result`; the probe landed in #18338 with the file surface
+      # of its own card excluding `.github/workflows/**`, so until this step no
+      # workflow named it and its self-test ran nowhere. Offline: no build, no
+      # network, no credential, sub-second. Its defect class is a MATCHING RULE,
+      # which a clean tree cannot tell from a rule that stopped matching — the
+      # self-test is the only instrument that can, and an instrument nobody runs
+      # is silence.
+      - name: Merged-result probe self-test
+        run: pnpm check:merged-result
+
+      # Issue citations (#17512, wired by #18224). TWO commands, and the split
+      # is the point:
+      #
+      #   `pnpm check:issue-citations`               the checker's own
+      #                                              `--self-test` — offline,
+      #                                              no board, no credential.
+      #   `node scripts/check-issue-citations.mjs`   the DIFF-SCOPED verdict —
+      #                                              the live run, judging only
+      #                                              the citations THIS change
+      #                                              adds.
+      #
+      # ⛔ The manifest alias is NOT the verdict. It runs `--self-test` and
+      # nothing else — the shape every credential-needing gate in this manifest
+      # uses (`check:pm-half-states`, `check:pm-closed-card-sweep`), because a
+      # live mode needs a board and a credential. Wiring the alias ALONE would
+      # run the self-test twice and scan nothing. Both spellings are here on
+      # purpose, self-test first: `check-self-test-wired` requires CI to run the
+      # self-test of every script CI runs, and a verdict from a checker whose
+      # own cases were never exercised is a verdict about nothing.
+      #
+      # ⭐ WHY DIFF-SCOPED AND NOT TREE-WIDE, which is the whole ruling. The
+      # standing population is ~2,785 unresolvable citation sites, and the
+      # predicate is NOT a function of this tree: #16783, #16786 and #16787 were
+      # measured RESOLVING on 2026-09-10 and 404 on 2026-09-14, with no change
+      # to this repository. A tree-wide blocking verdict therefore reds a
+      # MOTIONLESS tree because somebody else deleted an issue, and fails a PR
+      # for a change its author did not make and cannot repair. The diff-scoped
+      # half is the part an author owns, it is small, and it is the only thing
+      # that stops 2,785 becoming 3,000. The tree-wide reading is a `--census`
+      # and it runs REPORT-ONLY in `half-state-patrol.yml`, four times a day —
+      # never here, and never blocking. ⛔ Do not "upgrade" this step to
+      # `--census`.
+      #
+      # THE DIFF BASE, per event, and the merge_group row is the whole of
+      # #19259's ejection:
+      #
+      #   pull_request  `git merge-base origin/main HEAD`. CORRECT and left
+      #                 alone: the checked-out merge ref already CONTAINS the
+      #                 main it was computed against, so the merge base IS that
+      #                 main and nothing newer can leak into the added set.
+      #   push (main)   the merge base IS the head, so the added set is empty,
+      #                 the run makes ZERO requests and exits 0 before it asks
+      #                 the board anything.
+      #   merge_group   ⭐ the group's own `base_sha`, declared below. A queue
+      #                 entry is built on the GROUP's base, which carries the
+      #                 entries AHEAD of it in the queue and has NOT landed on
+      #                 `main` yet, so the published `origin/main` this runner
+      #                 fetched is BEHIND that base and the ref guess lands at
+      #                 the published tip — attributing every entry ahead in the
+      #                 queue to THIS change.
+      #
+      # MEASURED, on this step's own first queue build (entry `a7109d1f08`,
+      # 2026-09-20): the ref guess resolved to the published main of 14:30Z and
+      # judged 15 file(s) / 16 citations, 3 unresolvable — `#6361` twice from
+      # `ada701220` (#19364) and `#18003` from `8271c81425` (#19363), the two
+      # entries ahead in the queue, both of which landed on `main` only at
+      # 14:36:53Z and 14:47:59Z. The step exited 2 (its findings code) and the
+      # queue ejected the PR for citations its author never wrote. Against
+      # `base_sha` the same tree judges 0 file(s).
+      #
+      # ⛔ Do NOT `if:`-skip this step on `merge_group` instead: this file's
+      # header asserts that every gate step here runs on merge_group, and a
+      # blocking gate turned off on the one event that guards what is about to
+      # reach `main` is a gate that is not one. Both halves of the repair are
+      # this: the base above, and the gate's own refusal below.
+      #
+      # `fetch-depth: 0` is what makes either spelling resolvable (the checkout
+      # step above says so for its own reason).
+      #
+      # ⛔ A failed read is never a pass: an unreadable board — and now an
+      # unresolvable base, which used to throw an unclassified exit code —
+      # exits PREREQUISITE NOT MET rather than reporting a clean tree.
+      - name: Issue citations this change adds resolve on the board
+        env:
+          # The board read is one GET per distinct number the change cites
+          # (none at all when it cites none), against a PUBLIC board. Spelled
+          # anyway: the gate uses the token when it finds one, and an
+          # unauthenticated runner shares one IP's 60 requests/hour.
+          GITHUB_TOKEN: ${{ github.token }}
+          # Renders the group's base on `merge_group` and EMPTY on every other
+          # event, where the gate keeps the `origin/main` / `main` guesses. Same
+          # name, same expression, same fact as the gate-family selector above
+          # — one fact, one spelling.
+          OS_GATE_MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+        run: pnpm check:issue-citations && node scripts/check-issue-citations.mjs
 
       # #15149. Grep-level guard for the defect this very repo just shipped: an
       # unquoted `- name:` step name containing ` #` is silently truncated by
