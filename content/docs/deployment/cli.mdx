@@ -614,8 +614,9 @@ successful collection prints.
 Under an **ADR-0130 multi-package layout**, docs that moved into a package are
 collected too: a `src/<pkg>/docs/` directory whose `<pkg>` names one of the
 artifact's declared `packages[]` entries is read into **that package's own
-body**, and the step line says so — `12 collected (4 from 2 package
-directories)`. `<pkg>` is matched against three spellings of the package: its
+body**, and the step line says so:
+`12 collected (4 from 2 package directories)`.
+`<pkg>` is matched against three spellings of the package: its
 `id`, the last dot-separated segment of that `id`, and its `name`. A directory
 that matches **none** of the declared packages, or **more than one**, is still
 not read — that case keeps the warning that names the files it skipped and the
