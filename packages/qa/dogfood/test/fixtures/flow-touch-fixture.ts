@@ -71,7 +71,7 @@ export const flowTouch: Flow = {
 /** A minimal, self-contained app config the dogfood harness can boot. */
 export const flowFixtureStack = defineStack({
   manifest: {
-    id: 'com.dogfood.flow_fixture',
+    id: 'com.dogfood.flow-fixture',
     namespace: 'flow',
     version: '0.0.0',
     type: 'app',

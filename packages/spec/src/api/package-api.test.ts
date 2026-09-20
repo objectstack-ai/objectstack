@@ -867,12 +867,23 @@ describe('#18058 — install contract bound to the live door', () => {
       expect(PackageInstallBodySchema.safeParse(DOOR_DRIVE_REGISTRY).success).toBe(false);
     });
 
-    it('the missing keys are what decide it — completing each drive turns it green', () => {
+    it('the missing keys are what decide it — and since #17534 the registry drive needs its id repaired too', () => {
       // The control that makes the two refusals above a measurement of the
       // MANIFEST's required keys rather than of the bare branch existing at all.
       expect(PackageInstallBodySchema.safeParse({ ...DOOR_DRIVE_CONFLICT, type: 'app' }).success).toBe(true);
+      // ⭐ #17534 moved this half. `ManifestSchema.id` carries
+      // `MANIFEST_ID_PATTERN` now, and `pkg-a` is not reverse-domain notation,
+      // so completing the missing keys is no longer sufficient for THIS drive —
+      // it stays refused, on the id's shape rather than on an absent key.
+      // ⛔ The remedy is to say that, not to relax the pattern: the drive posts
+      // an id the registry face has always refused to publish.
+      const registryKeysCompleted = { ...DOOR_DRIVE_REGISTRY, version: '1.0.0', type: 'app' };
+      expect(PackageInstallBodySchema.safeParse(registryKeysCompleted).success).toBe(false);
+      // Lit control — the id is what decides it now: the same body with a
+      // reverse-domain id parses green, so the refusal above is not the missing
+      // keys coming back.
       expect(PackageInstallBodySchema.safeParse({
-        ...DOOR_DRIVE_REGISTRY, version: '1.0.0', type: 'app',
+        ...registryKeysCompleted, id: 'com.acme.pkg-a',
       }).success).toBe(true);
     });
 
@@ -893,10 +904,20 @@ describe('#18058 — install contract bound to the live door', () => {
       }
     });
 
-    it('and the residual runs the OTHER way too — a whitespace-only `id` parses here and the door answers 400', () => {
-      // `handlePackages` trims before keying and refuses an empty id, so this
-      // is the one class where the declaration is WIDER than the door.
-      expect(PackageInstallBodySchema.safeParse({ manifest: { ...SDK_MANIFEST, id: '   ' } }).success).toBe(true);
+    it('⭐ #17534 closed the one spelling that ran the OTHER way — a whitespace-only `id` is refused HERE now, not only by the door', () => {
+      // What this pinned before: `handlePackages` trims before keying and
+      // refuses an empty id, while this declaration ADMITTED `'   '` — the one
+      // measured class where the declaration was WIDER than the door.
+      // `ManifestSchema.id` now carries `MANIFEST_ID_PATTERN`, which no
+      // whitespace-only string matches, so the declaration refuses it first and
+      // the two faces agree on this spelling.
+      expect(PackageInstallBodySchema.safeParse({ manifest: { ...SDK_MANIFEST, id: '   ' } }).success).toBe(false);
+      // Lit control — the id is what decided it: the same wrapped body with the
+      // fixture's own conforming id parses green.
+      expect(PackageInstallBodySchema.safeParse({ manifest: SDK_MANIFEST }).success).toBe(true);
+      // ⛔ NOT a claim that declaration and door are now equal: the refusals
+      // pinned above still run the other way — bodies the door answers 201 to
+      // that this declaration refuses. One spelling closed; the class remains.
     });
   });
 

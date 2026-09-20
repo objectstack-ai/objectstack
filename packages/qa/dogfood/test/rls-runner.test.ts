@@ -32,7 +32,7 @@ import { runRlsProofs, declaredPositionNames } from '@objectstack/verify';
 import type { VerifyStack } from '@objectstack/verify';
 
 const CONFIG = {
-  manifest: { id: 'fixture' },
+  manifest: { id: 'com.example.fixture' },
   objects: [{ name: 'note', fields: { name: { type: 'text', required: true } } }],
 };
 

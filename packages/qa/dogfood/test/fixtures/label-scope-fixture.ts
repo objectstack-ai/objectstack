@@ -47,7 +47,7 @@ export const Deal = ObjectSchema.create({
 
 export const labelScopeStack = defineStack({
   manifest: {
-    id: 'com.dogfood.label_scope',
+    id: 'com.dogfood.label-scope',
     namespace: 'lbl',
     version: '0.0.0',
     type: 'app',

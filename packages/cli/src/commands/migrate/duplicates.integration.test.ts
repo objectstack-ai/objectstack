@@ -101,7 +101,7 @@ beforeAll(async () => {
   writeFileSync(
     join(dir, 'dist', 'objectstack.json'),
     JSON.stringify({
-      manifest: { id: 'dup_smoke', name: 'Duplicates Smoke', version: '0.0.0', type: 'app' },
+      manifest: { id: 'com.example.dup-smoke', name: 'Duplicates Smoke', version: '0.0.0', type: 'app' },
       objects: [
         {
           name: 'crm_case',

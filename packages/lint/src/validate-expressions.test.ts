@@ -3012,7 +3012,7 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
 /**
  * ── The alias spellings this rule deliberately does NOT read (#5017) ─────────
  */
-const MANIFEST = { id: 'expr_probe', name: 'expr_probe', version: '1.0.0', type: 'app' } as const;
+const MANIFEST = { id: 'com.example.expr-probe', name: 'expr_probe', version: '1.0.0', type: 'app' } as const;
 
 /** A fixture is only a fixture if the spec accepts it. */
 function specValid(stack: Record<string, unknown>): Record<string, unknown> {

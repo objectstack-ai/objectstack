@@ -117,7 +117,7 @@ export const runasUserRead = readFlow('runas_user_read', 'user');
 /** A minimal, self-contained app config the dogfood harness can boot. */
 export const runasFixtureStack = defineStack({
   manifest: {
-    id: 'com.dogfood.runas_fixture',
+    id: 'com.dogfood.runas-fixture',
     namespace: 'runas',
     version: '0.0.0',
     type: 'app',

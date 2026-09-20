@@ -51,7 +51,7 @@ export const etPasswordReset = defineEmailTemplateDefinition({
 
 export const emailTemplateFixtureStack = defineStack({
   manifest: {
-    id: 'com.dogfood.email_template_fixture',
+    id: 'com.dogfood.email-template-fixture',
     namespace: 'et',
     version: '0.0.0',
     type: 'app',

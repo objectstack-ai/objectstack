@@ -49,7 +49,7 @@ export const RlsNote = ObjectSchema.create({
 /** A minimal, self-contained app config the dogfood harness can boot. */
 export const rlsFixtureStack = defineStack({
   manifest: {
-    id: 'com.dogfood.rls_fixture',
+    id: 'com.dogfood.rls-fixture',
     namespace: 'rls',
     version: '0.0.0',
     type: 'app',
