@@ -83,7 +83,15 @@ const legitBoard = () => ({
             dataset: 'orders_ds',
             dimensions: ['status'],
             values: ['order_count'],
-            chartConfig: { type: 'bar', xAxis: { field: 'status' }, yAxis: [{ field: 'order_count' }] },
+        // ⚠️ The `chartConfig` on these two widgets carried `type` / `xAxis` /
+        // `yAxis` / `series`, which are refused on a dataset-bound widget since the
+        // chart-structure ownership ruling (ADR-0021; 2026-09-12): the dataset
+        // decides which series exist and which column each one reads. The board is
+        // still a legitimate three-widget board — the bindings it used to restate
+        // are the `dimensions` / `values` on the very same widgets — so the fixture
+        // keeps an APPEARANCE `chartConfig` rather than dropping the key, which is
+        // what keeps this fixture exercising the key at all.
+            chartConfig: { title: 'By Status', showLegend: false },
         },
         {
             id: 'by_region',
@@ -92,7 +100,7 @@ const legitBoard = () => ({
             dataset: 'orders_ds',
             dimensions: ['region'],
             values: ['order_count'],
-            chartConfig: { type: 'donut', series: [{ name: 'order_count' }] },
+            chartConfig: { title: 'By Region' },
         },
     ],
 });

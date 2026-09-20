@@ -5509,7 +5509,20 @@ const step18: MigrationStep = {
     + 'from all three authored sites (`dashboards[].widgets[].chartConfig`, `reports[].chart`, '
     + '`reports[].blocks[].chart`) as a pure lossless delete — it never had an effect to lose. '
     + 'The two alias spellings that pointed at it, `accessibility` and `ariaProps`, became '
-    + 'refusals carrying the same prescription rather than renames onto a tombstone.',
+    + 'refusals carrying the same prescription rather than renames onto a tombstone. '
+    + 'It also states, and enforces, who owns a dataset-bound chart\'s STRUCTURE '
+    + '(ADR-0021; maintainer ruling 2026-09-12, decision batch #121 item 1): the dataset '
+    + 'decides which series exist and which column each one reads, `chartConfig` carries '
+    + 'appearance, and `dashboard.widgets[].chartConfig`\'s `type`, `xAxis`, `yAxis` and '
+    + '`series` are refused by name on that carrier — the widget\'s own `type` is the chart '
+    + 'family and `dimensions`/`values` are the selection. An authored `yAxis[].field` was a '
+    + 'live membership channel: the renderer synthesised a series from it when the chart '
+    + 'declared none, so one authored axis could silently re-point a dataset-bound series at '
+    + 'another column and the chart still drew. The D2 conversion strips the four keys from '
+    + 'dashboard widgets only — `ReportChartSchema` and the inline-data react `<ObjectChart>` '
+    + 'tier keep their own axes — and the paired semantic entry carries what the stripped '
+    + 'keys were saying, because an authored axis field may name a column the widget never '
+    + 'selected and no walker can move that intent into the dataset.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5541,6 +5554,7 @@ const step18: MigrationStep = {
     'list-view-sort-string-clause-to-array',
     'page-assigned-profiles-removed',
     'chart-config-aria-removed',
+    'dashboard-widget-chart-config-structure-removed',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
@@ -6802,6 +6816,78 @@ const step18: MigrationStep = {
         + 'buttons meant to open an object\'s form declare `actionType: \'form\'` with an '
         + '`<object>.<view>` target instead. Clicking each converted button opens the intended '
         + 'page or form rather than a refusal dialog.',
+    },
+    // The judgement half of `dashboard-widget-chart-config-structure-removed`. The
+    // D2 conversion strips the four keys mechanically; what they CARRIED cannot be
+    // moved by a walker, because the intent lands one level up in a selection the
+    // stripped widget may not hold — an authored `xAxis.field` can name a dataset
+    // dimension the widget never selected, and a `series[]` entry can name a
+    // measure outside `values` entirely.
+    {
+      id: 'dashboard-widget-chart-config-structure-refused',
+      surface:
+        '`dashboard.widgets[].chartConfig.type` / `.xAxis` / `.yAxis` / `.series` — the four keys '
+        + 'that said which chart family to draw, which series exist and which column each one reads '
+        + 'on a DATASET-BOUND widget (REMOVED)',
+      replacement:
+        'the widget’s own `type` and its ADR-0021 dataset selection. `chartConfig.type` becomes the '
+        + 'widget’s `type` (the chart family has always been the widget’s — the dashboard renderer '
+        + 'maps the widget type to the chart family and never read the chart config’s). '
+        + '`chartConfig.xAxis.field` becomes an entry in the widget’s `dimensions`: the dataset '
+        + 'dimension the category axis plots. Each `chartConfig.yAxis[].field` becomes an entry in '
+        + 'the widget’s `values`: the dataset measure that axis plots, one entry per mark, and a '
+        + 'second axis is a second measure rather than a second axis declaration. Each '
+        + '`chartConfig.series[].name` is the same measure name, so a series list that matched '
+        + '`values` needs nothing and one that did not was already being ignored. What has NO '
+        + 'replacement, and is the reason this is a TODO rather than a rewrite: the PRESENTATION '
+        + 'those objects carried alongside the binding — `ChartAxis.title` / `format` / `min` / '
+        + '`max` / `stepSize` / `showGridLines` / `position` / `logarithmic`, and '
+        + '`ChartSeries.label` / `color` / `type` / `yAxis` / `stack` / `dashArray` / `opacity`. '
+        + 'The dataset’s own dimension and measure declarations are what label and format a '
+        + 'dataset-bound chart now; `colors` on the same chart config remains the palette channel, '
+        + 'and a per-series mark type (the combo chart a widget could author through '
+        + '`series[].type`) has no authoring channel on this face at all.',
+      reason:
+        'Maintainer ruling 2026-09-12, decision batch #121 item 1, verbatim 「同意」, on options '
+        + 'C+D together: the protocol states the ownership split AND refuses the structural keys by '
+        + 'name, because stating it without refusing them leaves the declared-but-inert shape '
+        + 'ADR-0049 exists to end, and refusing them without stating it leaves an author with no '
+        + 'reason. The defect being closed is not cosmetic: an authored `yAxis[].field` was a LIVE '
+        + 'MEMBERSHIP CHANNEL — the renderer synthesised a series from the authored axes when the '
+        + 'chart declared none — so one authored axis could silently re-point a dataset-bound '
+        + 'series at a different column while the chart still drew, which reads as a true statement '
+        + 'about the data. ⛔ Not mechanically convertible: the D2 conversion can delete the keys '
+        + 'from a stored widget, but moving what they MEANT into the dataset selection needs facts '
+        + 'the item does not carry — whether the dataset declares a dimension by that name, whether '
+        + 'the measure is in the dataset at all, and whether the author wanted the axis they wrote '
+        + 'or the one the selection derives. An authored field naming a column outside the '
+        + 'selection is exactly the case where a walker guessing would produce a different chart '
+        + 'rather than a refused one. The keys are NOT retired from the chart config itself: '
+        + '`ReportChartSchema` keeps its own `xAxis`/`yAxis` (narrowed to its bound dataset’s '
+        + 'dimension and measure names), and the react `<ObjectChart data={…}>` tier keeps all '
+        + 'four, because an inline-data chart has no dataset to derive structure from and the '
+        + 'author’s axes are the only ones there are.',
+      acceptanceCriteria:
+        'Measured against the shipped schema, not restated from the card. (1) No dashboard widget '
+        + 'carries `chartConfig.type`, `.xAxis`, `.yAxis` or `.series`: the D2 conversion '
+        + '`dashboard-widget-chart-config-structure-removed` strips them from authored sources on a '
+        + 'chain replay and `os migrate meta --stored --apply` covers rows already at rest, and a '
+        + 'value that reaches a parse is refused at that key’s own path with the prescription '
+        + 'naming the dataset selection. (2) For every widget that carried one, the chart it draws '
+        + 'after the migration is the chart the author meant: the family is the widget’s `type`, '
+        + 'the category axis plots the dimension named in `dimensions`, and there is one mark per '
+        + 'measure named in `values` — verified by rendering the dashboard, not by reading the '
+        + 'metadata, because the pre-migration chart may have been plotting a column the selection '
+        + 'never named. (3) A widget whose authored axes AGREED with its selection renders '
+        + 'identically before and after, and that is the expected case; a widget that renders '
+        + 'differently was relying on the membership channel this removes and is the case the '
+        + 'ruling was made about. (4) Axis titles, number formats, axis bounds, grid lines and '
+        + 'per-series labels/colours/mark types are gone from the widget and are NOT expected back: '
+        + 'a dataset-bound chart takes them from the dataset’s dimension and measure declarations. '
+        + 'A combo chart that was authored through `series[].type` on a dataset-bound widget has no '
+        + 'authoring channel on this face after the change — that capability loss is ruled, not '
+        + 'incidental, and an inline-data react `<ObjectChart>` is where a per-series mark type is '
+        + 'still authored.',
     },
     {
       id: 'dashboard-widget-metric-family-multi-measure-refused',
@@ -15565,6 +15651,78 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // actually ships the rename; until then the renderer sees an absent key and
     // does not start its timer.
     'ui/Dashboard:refreshInterval',
+    // ADR-0021 (the dataset is the single author-facing analytics shape on the
+    // dashboard face) + ADR-0049 enforce-or-remove; maintainer ruling 2026-09-12,
+    // decision batch #121 item 1, verbatim 「同意」. On a dataset-bound widget the
+    // dataset decides which series exist and which column each one reads, and
+    // `chartConfig` carries appearance — so this structure key is tombstoned on the
+    // widget carrier. `series[].name` named which dataset measure a series read —
+    // series MEMBERSHIP, which follows from `values` and the split in `dimensions`
+    // — and an entry naming a measure outside the selection was ignored, so the
+    // declaration and what rendered could differ silently.
+    // Select the measures and the split instead.
+    // ⚠️ Scoped to THIS carrier. The same key stays authorable on the base
+    // `ChartConfigSchema` (the react `<ObjectChart data={…}>` tier publishes it in
+    // that block's `dataProps`, and an inline-data chart has no dataset to derive
+    // it from) and `ReportChartSchema` keeps its own narrowed `xAxis`/`yAxis`. The
+    // tombstone therefore registers under `ui/DashboardWidgetChartConfig` only.
+    // D2: `dashboard-widget-chart-config-structure-removed`; D3 semantic:
+    // `dashboard-widget-chart-config-structure-refused`.
+    'ui/DashboardWidgetChartConfig:series',
+    // ADR-0021 (the dataset is the single author-facing analytics shape on the
+    // dashboard face) + ADR-0049 enforce-or-remove; maintainer ruling 2026-09-12,
+    // decision batch #121 item 1, verbatim 「同意」. On a dataset-bound widget the
+    // dataset decides which series exist and which column each one reads, and
+    // `chartConfig` carries appearance — so this structure key is tombstoned on the
+    // widget carrier. Nothing on this face ever read it: the dashboard renderer
+    // maps the WIDGET's own `type` to the chart family, and the presentation
+    // lowering carries no `type` branch at all — so an author who wrote a family
+    // here got the widget's.
+    // Write the family on the widget instead.
+    // ⚠️ Scoped to THIS carrier. The same key stays authorable on the base
+    // `ChartConfigSchema` (the react `<ObjectChart data={…}>` tier publishes it in
+    // that block's `dataProps`, and an inline-data chart has no dataset to derive
+    // it from) and `ReportChartSchema` keeps its own narrowed `xAxis`/`yAxis`. The
+    // tombstone therefore registers under `ui/DashboardWidgetChartConfig` only.
+    // D2: `dashboard-widget-chart-config-structure-removed`; D3 semantic:
+    // `dashboard-widget-chart-config-structure-refused`.
+    'ui/DashboardWidgetChartConfig:type',
+    // ADR-0021 (the dataset is the single author-facing analytics shape on the
+    // dashboard face) + ADR-0049 enforce-or-remove; maintainer ruling 2026-09-12,
+    // decision batch #121 item 1, verbatim 「同意」. On a dataset-bound widget the
+    // dataset decides which series exist and which column each one reads, and
+    // `chartConfig` carries appearance — so this structure key is tombstoned on the
+    // widget carrier. `xAxis.field` named the plotted column, which the widget's
+    // `dimensions` selection already names — and it was a LIVE membership channel:
+    // the renderer synthesised a series from an authored axis when the chart
+    // declared none, so one authored field could silently re-point a dataset-bound
+    // series at another column.
+    // Select the dimension instead.
+    // ⚠️ Scoped to THIS carrier. The same key stays authorable on the base
+    // `ChartConfigSchema` (the react `<ObjectChart data={…}>` tier publishes it in
+    // that block's `dataProps`, and an inline-data chart has no dataset to derive
+    // it from) and `ReportChartSchema` keeps its own narrowed `xAxis`/`yAxis`. The
+    // tombstone therefore registers under `ui/DashboardWidgetChartConfig` only.
+    // D2: `dashboard-widget-chart-config-structure-removed`; D3 semantic:
+    // `dashboard-widget-chart-config-structure-refused`.
+    'ui/DashboardWidgetChartConfig:xAxis',
+    // ADR-0021 (the dataset is the single author-facing analytics shape on the
+    // dashboard face) + ADR-0049 enforce-or-remove; maintainer ruling 2026-09-12,
+    // decision batch #121 item 1, verbatim 「同意」. On a dataset-bound widget the
+    // dataset decides which series exist and which column each one reads, and
+    // `chartConfig` carries appearance — so this structure key is tombstoned on the
+    // widget carrier. Each `yAxis[].field` named a plotted measure, which the
+    // widget's `values` selection already names; the array length also declared
+    // the secondary axis, which follows from the measures selected.
+    // Select the measures instead.
+    // ⚠️ Scoped to THIS carrier. The same key stays authorable on the base
+    // `ChartConfigSchema` (the react `<ObjectChart data={…}>` tier publishes it in
+    // that block's `dataProps`, and an inline-data chart has no dataset to derive
+    // it from) and `ReportChartSchema` keeps its own narrowed `xAxis`/`yAxis`. The
+    // tombstone therefore registers under `ui/DashboardWidgetChartConfig` only.
+    // D2: `dashboard-widget-chart-config-structure-removed`; D3 semantic:
+    // `dashboard-widget-chart-config-structure-refused`.
+    'ui/DashboardWidgetChartConfig:yAxis',
     // #9220 — ADR-0049 enforce-or-remove at ELEMENT grain. `element:filter` never
     // had a renderer or reader anywhere: objectui registers none (its
     // renderers/basic/elements.tsx header deferred the element to "owning plugins"
