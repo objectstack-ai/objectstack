@@ -5886,8 +5886,8 @@ export function packageRootAnchoredHint(hint, base, tree, files) {
  *
  * ## The census, measured on this tree
  *
- * Re-measured with the `DEFERRED` arm in place, on objectstack-ai/objectstack
- * `7ec8534127`. The METHOD, which this block used to leave implicit: run
+ * Re-measured with the `DEFERRED` arm in place, over the objectstack-ai/objectstack
+ * tree at `e6a03e6491`. The METHOD, which this block used to leave implicit: run
  * `topLevelDecls` over every tracked JS/TS file under `scripts/`, keep the
  * non-callable declarations, test each name against the predicate, and price
  * the arm by diffing `extractWatchHints` against a build of this module whose
