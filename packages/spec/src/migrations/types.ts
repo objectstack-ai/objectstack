@@ -7,11 +7,16 @@
  * at load for one major — the migration chain is the L2 rung: *break
  * executably*. For the breaks D2 cannot hide (semantic changes with no lossless
  * mapping) and for the graduated conversions retired from the load path, the
- * spec ships a **permanent, ordered chain of per-major steps**. A consumer that
- * slept through four majors runs `objectstack migrate meta --from N` and replays
- * every step in one command — it never needed to be present, warned, or reading
- * anything while those majors shipped. This is the database-migration model
- * applied to metadata source files; **timeliness is never load-bearing**.
+ * spec ships a **permanent, ordered chain of per-major steps**, back to the
+ * chain's support floor (`MIGRATION_SUPPORT_FLOOR`, `registry.ts`). A consumer
+ * at or above the floor runs `objectstack migrate meta --from N` and replays
+ * every remaining step in one command, however many majors that spans — it
+ * never needed to be present, warned, or reading anything while those majors
+ * shipped; from the floor forward this is the database-migration model applied
+ * to metadata source files, and **timeliness is never load-bearing**. Below
+ * the floor the command refuses (`MigrationFloorError`) rather than
+ * half-migrating — reaching the floor is the one prerequisite this model does
+ * not remove.
  *
  * Two feeders compose each major's step (ADR-0087 D3):
  *  - **graduated conversions** — the D2 entries with `toMajor === N`, retired

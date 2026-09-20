@@ -197,9 +197,13 @@ const flowNodeFilterAlias: MetadataConversion = {
  *
  * A pure key rename — the value (ordered field-name list) is unchanged.
  * **Retired from the load path**: the schema tombstones `compactLayout` with a
- * fix-it error, so the loader must NOT quietly accept it; the entry exists so
- * `migrate meta --from 10|11` rewrites old *sources* (backfilled per the
- * ADR-0087 true-up — the rename shipped before the conversion layer existed).
+ * fix-it error, so the loader must NOT quietly accept it. Protocol 11 is below
+ * `MIGRATION_SUPPORT_FLOOR`, so no migration step carries this conversion any
+ * more and `migrate meta --from 10|11` refuses before it would ever reach it
+ * (backfilled per the ADR-0087 true-up — the rename shipped before the
+ * conversion layer existed). Its one remaining reader is the stored-row replay
+ * (`applyConversionsToStoredItem`, `conversions/stored.ts`), which is not
+ * floor-scoped and still walks it for rows at rest.
  */
 const objectCompactLayoutRename: MetadataConversion = {
   id: 'object-compactLayout-to-highlightFields',
@@ -232,9 +236,12 @@ const objectCompactLayoutRename: MetadataConversion = {
  * The distribution concept was renamed Role → Position across the platform;
  * the stack-definition collection key renamed with it. A pure key move — the
  * item shapes migrate separately (`position.parent` removal is semantic, see
- * the step-13 TODOs). **Retired from the load path**: ADR-0090 shipped this as
- * a pre-launch one-step rename with no alias window; the entry preserves it as
- * replayable chain history.
+ * the step-13 TODOs, historically). **Retired from the load path**: ADR-0090
+ * shipped this as a pre-launch one-step rename with no alias window. Protocol
+ * 13 is below `MIGRATION_SUPPORT_FLOOR`, so no migration step carries this
+ * conversion any more; the entry now survives only as the stored-row replay
+ * (`applyConversionsToStoredItem`, `conversions/stored.ts`), which is not
+ * floor-scoped.
  */
 const stackRolesToPositions: MetadataConversion = {
   id: 'stack-roles-to-positions',
@@ -381,8 +388,11 @@ const sharingRecipientRoleToPosition: MetadataConversion = {
  *
  * Packages own permission sets but never positions (ADR-0090 D9), so the
  * gate is a capability reference. Value carried over 1:1. **Retired from the
- * load path** — the zod union rejects `{ profile }` at parse; this entry is
- * the replayable chain history the one-step ship skipped.
+ * load path** — the zod union rejects `{ profile }` at parse. Protocol 14 is
+ * below `MIGRATION_SUPPORT_FLOOR`, so no migration step carries this
+ * conversion any more; this entry now survives only as the stored-row replay
+ * (`applyConversionsToStoredItem`, `conversions/stored.ts`) the one-step ship
+ * skipped, which is not floor-scoped.
  */
 const bookAudienceProfileToPermissionSet: MetadataConversion = {
   id: 'book-audience-profile-to-permission-set',

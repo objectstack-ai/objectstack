@@ -5,7 +5,7 @@
 
 Current protocol: **17.0.0** · chain support floor: **protocol 16** · generated from the ADR-0087 registries (`@objectstack/spec` `conversions/` + `migrations/`).
 
-## How to upgrade — from any past major
+## How to upgrade — from protocol 16 onward
 
 ```bash
 objectstack migrate meta --from <your-major>   # replays every step below, in order
@@ -13,7 +13,9 @@ objectstack migrate meta --from 16 --step      # checkpoint after each major (bi
 objectstack validate && tsc --noEmit && <your tests>   # your own verify loop is the acceptance test
 ```
 
-Mechanical rewrites are applied for you and reported as a diff; **semantic TODOs** are printed with acceptance criteria and are yours to resolve — the chain never auto-applies a change that requires judgment. Arriving several majors late is the designed-for case: timeliness is never load-bearing (ADR-0087).
+Mechanical rewrites are applied for you and reported as a diff; **semantic TODOs** are printed with acceptance criteria and are yours to resolve — the chain never auto-applies a change that requires judgment.
+
+The chain's support floor is protocol **16** — 1 major behind the current protocol **17**, and no earlier. A consumer further behind must reach protocol 16 by another path first (an older `@objectstack/cli` still carries the retired steps) before this command will run. From protocol 16 forward, replaying every remaining hop in one command **is** the designed-for case — that part of timeliness is never load-bearing (ADR-0087); arriving from *before* the floor is not supported at all.
 
 ## Protocol 16 → 17
 

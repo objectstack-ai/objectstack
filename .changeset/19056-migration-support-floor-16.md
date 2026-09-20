@@ -59,7 +59,7 @@ Counted on `src/migrations/registry.ts` at `e6a03e649` (17,718 lines):
 Everything but the first row stays. What the raise buys is a **narrower support
 promise**: six permanently-replayable chains no longer have to be maintained,
 and the CI replay shrinks to the range the project actually promises — 10 of the
-99 conversion fixtures leave the chain-replay gate, because the chain no longer
+97 conversion fixtures leave the chain-replay gate, because the chain no longer
 reaches the major that graduated them.
 
 ## What was deliberately NOT removed

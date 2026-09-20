@@ -41,7 +41,7 @@ function build(): string {
       'generated from the ADR-0087 registries (`@objectstack/spec` `conversions/` + `migrations/`).',
   );
   out();
-  out('## How to upgrade — from any past major');
+  out(`## How to upgrade — from protocol ${MIGRATION_SUPPORT_FLOOR} onward`);
   out();
   out('```bash');
   out(`objectstack migrate meta --from <your-major>   # replays every step below, in order`);
@@ -55,8 +55,23 @@ function build(): string {
   out(
     'Mechanical rewrites are applied for you and reported as a diff; **semantic TODOs** are printed ' +
       'with acceptance criteria and are yours to resolve — the chain never auto-applies a change that ' +
-      'requires judgment. Arriving several majors late is the designed-for case: timeliness is never ' +
-      'load-bearing (ADR-0087).',
+      'requires judgment.',
+  );
+  out();
+  const supportedLateness = PROTOCOL_MAJOR - MIGRATION_SUPPORT_FLOOR;
+  out(
+    supportedLateness > 0
+      ? `The chain's support floor is protocol **${MIGRATION_SUPPORT_FLOOR}** — ` +
+          `${supportedLateness} major${supportedLateness === 1 ? '' : 's'} behind the current protocol ` +
+          `**${PROTOCOL_MAJOR}**, and no earlier. A consumer further behind must reach protocol ` +
+          `${MIGRATION_SUPPORT_FLOOR} by another path first (an older \`@objectstack/cli\` still carries ` +
+          `the retired steps) before this command will run. From protocol ${MIGRATION_SUPPORT_FLOOR} ` +
+          'forward, replaying every remaining hop in one command **is** the designed-for case — that part ' +
+          'of timeliness is never load-bearing (ADR-0087); arriving from *before* the floor is not supported ' +
+          'at all.'
+      : `The chain's support floor is protocol **${MIGRATION_SUPPORT_FLOOR}**, which is also the current ` +
+          'protocol — there is no supported lateness window right now; the next major to ship widens it ' +
+          'again.',
   );
   out();
 
