@@ -1,0 +1,36 @@
+{
+  "number": 13928,
+  "kind": "issue",
+  "title": "[finding] troubleshooting 文档把 `tree` 型与 lookup/master_detail 并列为「需要 reference」,但 lint RELATIONSHIP_TYPES 与 #13632 收窄都只盖后两型——tree 的 reference 语义(必需/默认自指/可选)未测未裁",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T17:13:19Z",
+  "updated_at": "2026-09-03T10:17:20Z",
+  "closed_at": "2026-09-03T10:16:26Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13928",
+  "body": "Found during #13632(PR #13927)收口移交;filed unassigned 供分诊。无严重度断言。\n\n## The shape\n\ntroubleshooting 文档页把 **`tree`** 型与 `lookup`/`master_detail` 并列为「requires reference」;但 lint 的 `RELATIONSHIP_TYPES` 与 #13632 落地的 parse 收窄都**只覆盖 lookup/master_detail**。tree 字段的 `reference` 到底是必需、默认自指(树天然指向本对象)、还是可选——**未测量、未裁定**。当前状态:文档主张一个任何门都不强制的要求。\n\n## 待分诊路线\n\n小普查(tree 字段的语料形状 + 渲染/引擎消费点读什么)→ 三选一裁定 → 按结果对齐文档或补门。#13632 的普查方法与 fixture 三分法可复用。\n\n## Refs\n\n#13632 / PR #13927(现场与方法先例)· lint `relationship/missing-reference`(现行覆盖面)"
+}

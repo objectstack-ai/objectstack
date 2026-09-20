@@ -1,0 +1,34 @@
+{
+  "number": 14909,
+  "kind": "issue",
+  "title": "[Decision] Skills optimization program — batch 5 (2 items): objectui `check-skill-examples.mjs` — where the root-devDependency resolution bound lives (objectui#7463 item 2), and whether the marked-fence population becomes shrink-only (objectui#7359 step 3)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T09:57:37Z",
+  "updated_at": "2026-09-03T22:42:11Z",
+  "closed_at": "2026-09-03T22:42:10Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14909",
+  "body": "Decision batch 5 of the skills catalog optimization program #14292 (maintainer mandate 2026-09-02, verbatim: 「审核所有的 skills，进行全面的优化。」). Filed by the skills lane seat (session `session_01LraLgQVGq8egUwfYZpbYt1`). Two items, both on objectui's skill-example gate; a two-letter reply (for example `1A 2A`) executes both. Item 1 comes from the objectui#7463 flight, which measured it and stopped with `needs_decision` per its brief's stop condition (report comment 5523867580 on objectui#7463; PR objectui#7490 delivers items 1 and 3 of that card and carries no code for item 2). Item 2 is objectui#7359's step 3, deferred when the gate landed (PR objectui#7427) and deferred again by the #7463 brief as \"a separate decision\". Nothing waits on item 2; objectui#7463's item 2 waits on item 1.\n\nMeasured by the flight at objectui PR #7490's head `2df07b7` (2026-09-03T09:41Z); the seat re-ran the gate's exported `findBareAny` in a compare worktree at the same head at 09:57Z. No file was edited by this card.\n\n---\n\n## 1. objectui#7463 项 2 —— 根 devDependency 解析的边界放在哪里：共享 harness、按门禁参数化、还是不设\n\n**一句话问题**：`check-skill-examples.mjs` 编译标记示例时借用 `check-doc-snippet-types.mjs` 的 `compileSnippets`；这个共享 harness 让仓库**根** `package.json` 声明的裸说明符（实测标记人口里恰好两个：`@playwright/test`、`vitest`）经 pnpm 根 `node_modules` 解析成功，于是一个示例可以 import 读者从未被告知要安装的包而保持绿。继承的 UNDECLARED 控制只封传递依赖，是另一种泄漏。门禁今天每次运行打印 `Unmapped specifiers` 一行，不判红。\n\n**实测（飞行在 `2df07b7`）**：把边界放进 `compileSnippets` 会让 docs 门禁自己的 432 个编译片段里**恰好 1 个**新红 —— `content/docs/guide/objectos-integration.mdx:638`，它 import `@playwright/test`。这是本飞行不拥有的门禁在自己面上的判定变动，飞行简报明写为停止条件，dev 照做，零猜测。\n\n**选项 × 真实代价**\n- **A** 边界写进 `compileSnippets`，对两个门禁无条件生效。一种解析制度、一个答案；代价是那 1 个 docs 片段必须在同一 PR 里修正（改成读者能装的写法）或按 docs 门禁自己的申报机制申报，由 docs 面 owner 审。\n- **B** 边界作为 `compileSnippets` 的参数，默认关，只有 skills 门禁打开。skills 半边立刻落地、不碰 docs 语料；代价是共享代码里从此有**两种**解析制度，docs 门禁永久停在宽松那种，\"解析有没有越界\"这个问题的答案变成\"看谁在问\"。\n- **C** 不设边界，继续打印 `Unmapped specifiers` 行。零改动；一条已知未强制的性质靠读者记得去看。\n\n**四维**：① 长远合理性 —— A 最强：harness 已经拥有语法/语义分层和四个自控，边界属于它，且只说一次；B 最弱，是消费端宽容的形态（一个函数背后两套规则）；C 次弱（已知不强制）。② 实际拉动 —— 真实但窄：2 个 skills 说明符 + 1 个 docs 片段；一个依赖本工作区 devDependencies 才绿的示例，对复制它的 AI 就是\"照抄即失败\"。③ 防 AI 犯错 —— A 最强（declared = enforced）；B 的严格度是调用方参数，每个调用点都得重读；C 一行打印不是门禁。④ 不扩散 —— A 面最小（无开关、无第二制度、无分期），只多 1 个 docs 片段的处理；B 看似便宜实则永久多一个配置面；C 最便宜但等于宣布不强制。\n\n**推荐 A**（长远合理性 ≥ 50%）；dev 的推荐相同，理由在其报告里逐轴写明。回退 C —— 若你判断拉动太小不值一次 docs 编辑，则把它记录为**明示不强制**（写进门禁自述），而不是留成看起来像待办的 follow-up。⛔ B 在任何权重下都不推荐。置信缺口：那 1 个 docs 片段由谁处理 —— 本席建议 skills lane 派单、同一 PR 内处理、请 docs 面 owner 复审；若你要 docs 面自己处理，则 A 拆成两趟（先 docs 后 harness）。\n\n**裁后执行**：A ⇒ 派 objectui#7463 项 2 第二趟（同卡、新分支），harness 内加边界 + 自控双向证明 + 那 1 个片段的处理 + `check-doc-snippet-types` 自己的 pin 套件更新，PR `Part of` objectui#7463；C ⇒ 在 objectui#7463 记录后关闭，门禁自述改为明示不强制；B ⇒ 派同一趟但按参数化实现（不推荐）。\n\n---\n\n## 2. objectui#7359 步骤 3 —— 标记示例人口是否 shrink-only\n\n**一句话问题**：门禁是 opt-in 的：只有带 `os:check` 标记的围栏才被编译/解析。今天标记人口是 **ts 17 + json 39 = 56**（候选 121 + 56；#7463 把扫描根扩到 `.claude/skills` 后候选加 9、标记不变）。一个围栏**去掉标记**就退出门禁，diff 里只是删一行 HTML 注释，没有任何门禁判红 —— 而\"门禁判红时去掉标记\"正是 #7463 飞行自己遇到并拒绝的诱惑（4 处裸 `any` 它选择申报而非去标）。#7359 落地时把\"人口是否只准缩小\"留作单独决定；这是那个决定。\n\n**选项 × 真实代价**\n- **A** 按类别设标记数**下限**（ts 17、json 39），只能由加标记的 PR 抬高；去掉一个标记必须在同一 PR 里连同理由降下限，自测双向 pin。形态同 `check-doc-fence-languages.mjs` 对其申报人口的 SHRINK-ONLY 处理。代价：两个常量 + 一条自测腿；合法的去标（示例连同正文一起删）多一行改动和一句理由。\n- **B** 按 `file:line` 申报标记围栏清单。可定位，但围栏上方每加一行正文就要重申报 —— 与 `KNOWN_BARE_ANY_EXAMPLES` 的键同样脆，而那里脆是有意为之（逼人重看），这里只是噪音。\n- **C** 不设（现状）：去标只在 code review 里可见。\n\n**四维**：① 长远合理性 —— A：门禁对自己的覆盖面有一个可核对的数字，\"静默退出门禁\"从此判红；B 同样效果但维护成本不对称；C 让门禁的覆盖面成为随时可缩的软值。② 实际拉动 —— 实测：两轮人工清扫（#7360、#7405）之后仍是人读发现问题；#7463 飞行里去标的诱惑真实出现过一次。③ 防 AI 犯错 —— A 最强：AI 面对红门禁最省力的动作就是删那一行注释，A 让这个动作自己判红。④ 不扩散 —— A 是两个常量，零新面；B 多一张清单；C 零。\n\n**推荐 A**；回退 C。置信缺口：下限是否也该对候选总数（121/56）设——本席认为不该：候选数随正文增减是正常的，只有**标记**人口才是门禁的承诺。\n\n**裁后执行**：A ⇒ 立一张 S 卡（objectui，seat 定级派单），落 `MARKED_FLOOR` 两个常量 + 自测 + 自述一段，`Part of` objectui#7359 的后继；C ⇒ 在 objectui#7359 记录\"步骤 3 裁 C：不设\"，不再列为候选。\n\n---\n\nNot in this batch (unmeasured, stays on the seat ledger): whether `scripts/check-ratchet-remedy-authority.mjs`'s non-recursive `scripts/*.{mjs,mts}` walk should cover `scripts/pm/**` — a coverage question the seat will measure before it is presented.\n\nRefs: #14292 (programme anchor) · objectui#7463 (card; report 5523867580) · objectui PR #7490 · objectui#7359 (step 3) · objectui PR #7427 · #14685 / #14859 (batches 3 and 4)."
+}

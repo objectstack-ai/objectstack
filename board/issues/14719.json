@@ -1,0 +1,33 @@
+{
+  "number": 14719,
+  "kind": "issue",
+  "title": "claimSeedOwnership claims nothing at all on an object with more than 10k rows under one unowned predicate, because MAX_BULK_PER_ROW_HOOK_ROWS refuses the whole write",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T20:36:24Z",
+  "updated_at": "2026-09-03T01:17:17Z",
+  "closed_at": "2026-09-03T01:17:17Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14719",
+  "body": "Follow-up recorded while implementing #14530 (PR #14718). Not fixed there: #14530's ruled scope is disposition 2 (turn the single-id loop into a predicate write), and paginating the claim is a different decision. Filing it so the boundary is on the record rather than only in a PR body.\n\n## The shape\n\n`claimSeedOwnership` (`packages/plugins/plugin-security/src/claim-seed-ownership.ts`) now issues one predicate write per unowned shape:\n\n```ts\nawait ql.update(name, { owner_id: adminUserId }, { where: { owner_id: null }, multi: true, context: SYSTEM_CTX });\nawait ql.update(name, { owner_id: adminUserId }, { where: { owner_id: 'usr_system' }, multi: true, context: SYSTEM_CTX });\n```\n\nA predicate write carries no `limit`, so the bound is now the engine's own per-row hook ceiling. `MAX_BULK_PER_ROW_HOOK_ROWS` is 10 000 (`packages/spec/src/data/bulk-write-hook-conformance.ts`), and D6 makes the refusal **total** — a predicate write matching more than that on an object carrying `beforeUpdate`/`afterUpdate` hooks is refused whole, never downgraded. Every object carries them in practice: objectql's own audit-stamp and fetch-previous builtins are registered on `object: '*'`.\n\nMeasured on a real ObjectQL engine (in-memory driver, 21 000 seeded rows, 10 500 per predicate):\n\n```\nWARN [security] claimSeedOwnership failed for crm_lead; those rows stay unowned and the next run will claim them\n  Refusing the bulk write on 'crm_lead': it matches 10500 rows, and 'beforeUpdate' hooks are contracted to fire\n  PER ROW on a predicate write (ADR-0058, bulk-write addendum), which is over the 10000-row ceiling for one write.\n  Nothing was written. Narrow the predicate so the batch matches fewer rows (paginate the write), or remove the\n  'beforeUpdate' hook from this object.\n```\n\n`claimed: 0`.\n\n## What it is and is not\n\n**Not a regression in reachable population.** The pre-#14530 code scanned at `limit: 10_000` per predicate, so it too could only ever claim 10 000 rows per predicate per run.\n\n**It is a change in what happens past that line.** The old code claimed the first 10 000 rows **silently** and left the rest; the new code claims none of them and logs the engine's refusal. The old half-claimed state is also not self-healing: `bootstrapPlatformAdmin` short-circuits at `already_have_admin` (`bootstrap-platform-admin.ts:412`) before the claim on every later pass, so nothing re-runs the claim automatically once an admin exists. Loud-and-total was judged better than silent-and-partial for #14530's purpose, but neither one finishes the job for a large seeded dataset.\n\n## Why it is left open rather than solved\n\nThe obvious fix — page the claim — is the shape #14530 deliberately deleted, so it needs a decision rather than a reflex. Sketch of the options, unranked:\n\n1. **Leave it.** An app seeding more than 10 000 rows of one object with no `owner_id` is outside anything shipped; the operator now gets an actionable message naming the remedy.\n2. **Page the predicate write** — repeat the same predicate until it resolves 0 affected rows, with a bounded number of rounds. Each round is still one set-based write, so it keeps #14530's win; it re-introduces a loop, but over writes rather than over rows, and the predicate is self-consuming so the rounds terminate.\n3. **Raise or exempt the ceiling for this path.** Almost certainly wrong — the ceiling is a per-row hook fan-out bound the sharing hooks are exactly the reason for, and exempting a system writer from it is the shape #13533 just closed on the other side.\n\nWants a maintainer or triage call, not an implementer's.\n\n## Where to look\n\n* `packages/plugins/plugin-security/src/claim-seed-ownership.ts` — the two predicate writes and the per-predicate warn.\n* `packages/spec/src/data/bulk-write-hook-conformance.ts` — `MAX_BULK_PER_ROW_HOOK_ROWS`, D6, `resolveBulkPerRowHookBudget`.\n* `packages/objectql/src/engine.ts` — `assertBulkPerRowHookBudget`, raised before the driver call so nothing is written."
+}

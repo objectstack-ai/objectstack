@@ -1,0 +1,36 @@
+{
+  "number": 15056,
+  "kind": "issue",
+  "title": "check:skill-frame-sync cannot see any references/ subtree - 32 of 72 hand-written markdown files under its two scan roots, incl. all 12 published skill reference pages, are invisible to the anti-dormancy scan",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-03T19:10:22Z",
+  "updated_at": "2026-09-03T20:10:46Z",
+  "closed_at": "2026-09-03T20:09:22Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15056",
+  "body": "Measured by the dev seat while implementing #14869 (branch `claude/issue-14869-runbook-frame-paste-step`), at `origin/main` `d5b330dc` plus that branch's one-bullet diff. Unassigned, bare, for triage. The file surface is `scripts/check-skill-frame-sync.mjs`.\n\n## What\n\n`check-skill-frame-sync`'s anti-dormancy half exists to catch \"another copy of the decision frame appears somewhere under `.claude/` or `skills/` and nothing keeps it in sync\". Its own header states the job: after the batch-3 item-4 ruling reduced COPIES from four to two, \"the anti-dormancy scan below is what keeps a dev-side copy from quietly coming back.\"\n\nThe scan cannot see any `references/` subtree. `walkMarkdown` skips a fixed directory-name set:\n\n```js\nconst SCAN_ROOTS = ['.claude', 'skills'];\nconst SCAN_SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'references']);\n```\n\n`node_modules`, `.git` and `dist` are installed or generated trees — nothing hand-written lives there. `references` is not that kind of directory: under both scan roots it holds hand-written operative prose.\n\n## Measured\n\nWalking the two SCAN_ROOTS for `.md`/`.mdx`, once with the real skip set and once without `references`:\n\n| population | files |\n|:--|--:|\n| what the scan reads today | 40 |\n| all markdown under the two roots | 72 |\n| invisible to the scan (`references/` only) | **32 (44%)** |\n\nThe gate's own pass line agrees with the first row: `check-skill-frame-sync: ... 40 markdown files scanned for undeclared copies.`\n\nThe 32 split into two groups, both hand-authored:\n\n- **20 internal PM protocol files** under `.claude/skills/pm-dispatch/references/` — `dispatch-runbook.md`, `platform-readings.md`, `decision-analysis.md`, `contract-review.md`, `state-machine.md`, `true-green.md`, the eight `lanes/*.md`, and the rest. `decision-analysis.md` is the file whose subject matter *is* escalation analysis, so it is the single most likely place for a fourth copy to be pasted.\n- **12 published skill reference pages** under `skills/objectstack-*/references/` — these ship verbatim to third-party projects via `npx skills add`, which is the exact distribution path the gate's header gives as the reason the published copy is watched at all.\n\nSo a copy of the frame pasted into any of those 32 files today is undetected, and the FINGERPRINTS list that would have caught it (`/固定评估轴/`, `/条评估轴/`, `/fixed axes/i`) never runs against them.\n\n## Why it matters\n\nThis is the dormancy the scan was built to prevent, one directory level down. The drift incident recorded in the gate's own header — the internal frame widened to three axes while the published mirror stayed at two for two days — is precisely what an unwatched fourth copy reproduces, and the gate would stay green throughout.\n\nIt also has a live edge right now. The bullet landing on #14869 quotes the frame's two anchor sentences inside `dispatch-runbook.md` on purpose (the ruling directs pointing at the frame by its anchors rather than copying it). The first anchor contains `四条固定评估轴`, which matches FINGERPRINTS. That bullet is legal today only because `references/` is skipped — so whoever narrows the skip set has to decide, in the same stroke, how a deliberate anchor *pointer* is told apart from a *copy*.\n\n## Not asserted\n\nNo claim that a fourth copy exists in the tree today — the sweep run for this card found none of the fingerprints in the 32 files. The defect is the missing coverage, not a present violation.\n\n## Suggested shape (for triage, not a decision)\n\nNarrow the skip set to the trees that are genuinely generated or installed (`node_modules`, `.git`, `dist`) and give the anchor-pointer case an explicit, declared exemption — a pointer names the anchors and does not carry the axis entries between them, which is a structural difference the gate already knows how to read. Widening the population without that distinction turns every legitimate pointer red.\n\n## Dedup\n\nComplete enumeration of open items, 2026-09-03T19:2xZ: REST `GET /repos/objectstack-ai/objectstack/issues?state=open&per_page=100&page=1..6` returned 100+100+100+100+100+30 = 530, reconciled against the repository's own `open_issues_count` of 530 (506 issues, 24 PRs); local grep over titles and bodies for `frame-sync`, `anti-dormancy`, `SCAN_SKIP_DIRS`, `SCAN_ROOTS`, `walkMarkdown`, `undeclared copy`, `decision frame`, `评估轴`. Nearest neighbour is #14870 (four gate-script comments still say \"four\"/\"two enforced\" copies) — a stale-comment card in the same gate family, not this coverage hole. No carrier found."
+}

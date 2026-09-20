@@ -1,0 +1,35 @@
+{
+  "number": 14149,
+  "kind": "issue",
+  "title": "A digest — one message per recipient listing their N records — is not authorable in a flow",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-09-01T08:18:53Z",
+  "updated_at": "2026-09-04T02:54:59Z",
+  "closed_at": "2026-09-04T02:52:46Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 12,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14149",
+  "body": "Measured on `@objectstack/spec` / `@objectstack/service-automation` / `@objectstack/formula` **17.2.0**, while building the manager-facing notifications of an ObjectStack application (`objectstack-ai/duly` #11).\n\n## The shape that cannot be written\n\n> A manager with 30 overdue tasks under them receives **one** message listing 30 — never 30 messages.\n\nThis is the commonest outbound-notification shape a business application has, and every part of the flow language is there for it except the joints. Three independent things are missing, and any one of them is enough to block it.\n\n### 1 · No aggregation / group-by node\n\n`FlowNodeAction` ships `start, end, decision, assignment, loop, create_record, update_record, delete_record, get_record, http, notify, script, screen, wait, subflow, map, connector_action, parallel_gateway, join_gateway, boundary_event`. None of them buckets a result set by a field.\n\n`get_record` with `limit > 1` returns a flat list; `loop` iterates it one item at a time, and there is no way to accumulate across iterations (`assignment` sets a variable, it cannot append). So the only expressible route to \"per recipient\" is to enumerate the recipient population separately and re-query per recipient — an N+1 that is only possible at all when a **stored** column already carries the grouping key, and impossible when the grouping key is one join away.\n\n### 2 · `notify` cannot render a collection\n\n`notify.message` is a flat string, interpolated by `interpolate()`. A token resolving to an array goes through `stringifyForTemplate`, which is `JSON.stringify` — so `{vars.overdue_tasks}` delivers a JSON blob, not a digest.\n\nThe localizable path is no better: `sys_email_template` holes are rendered by `renderTemplate()`, which does `String(raw)` per `{{path}}` and has **no iteration construct** (no `{{#each}}`, no repeat block). A template cannot list rows either.\n\n### 3 · No authoring slot evaluates CEL to a *value*\n\nThis is the part that makes it feel closest to solvable and then isn't. The CEL stdlib already ships the exact primitive a digest body needs:\n\n```\njoinNonEmpty(list, string): string\n```\n\nand there is no way to call it. `FLOW_NODE_EXPRESSION_PATHS` declares only two roles — `predicate` and `flow-template` — so CEL is reachable only where the answer must be a boolean (`condition`, `decision.conditions[].expression`, `screen field visibleWhen`). The `assignment` node, the one slot whose whole job is to compute a value into a variable, runs `interpolate(value, variables, context)`, not the expression engine. So `joinNonEmpty` is declared, documented, tested, listed in `CEL_STDLIB_FUNCTIONS`, and unreachable from metadata.\n\n## Why this matters beyond one app\n\nThe workaround is a `script` node calling a registered function that does the grouping and the string building in TypeScript. That is: every application that mails somebody a summary re-implements the same fifty lines, in application code, where nothing about it is declarative, inspectable in Studio, or checked by `validate`. It is also precisely the \"AI-authored metadata app\" failure mode — the generated app looks metadata-first everywhere except the one node that actually decides who gets told what.\n\nAnd the two halves fail differently, which is worth separating in whatever the fix is:\n\n- **Grouping** is a genuine language gap (a node type, or a `groupBy` on `get_record`).\n- **Rendering** is arguably already solved and just not wired: a `role: 'value'` expression slot — an `assignment` whose value may be a CEL envelope rather than a `{token}` template — would make `joinNonEmpty(rows.map(r, r.subject), \"\\n\")` authorable with no new vocabulary at all.\n\n## Related, same surface\n\nA fourth asymmetry showed up next to this and belongs on the record even if it is a separate fix: **a `time_relative` flow gets a persisted dispatch-claim ledger and a `schedule` (cron) flow gets nothing.** `TimeRelativeTrigger.claimDispatch()` takes a claim through the automation service (`sys_flow_dispatch`, #10220) keyed per `(flow, window, record)` before launching, so per-record once-only delivery is free. A digest necessarily runs on the cron path — one run per tick, no record — so it has no claim surface at all, and \"a re-run must not re-notify\" falls back to application state that the platform is already tracking for the other trigger type.\n\n## Repro\n\nNothing exotic is needed: author a `schedule` flow that queries a set of records and try to send one message per owner listing that owner's rows. Each of the three points above is reachable by reading the shipped schemas (`automation/io-node-config.zod.ts`, `automation/builtin-node-config.zod.ts`, `automation/node-executor.zod.ts`'s `FLOW_NODE_EXPRESSION_PATHS`, `system/email-template.zod.ts`) and the two executors (`service-automation` `assignment`/`notify`, `plugin-email` `renderTemplate`).\n\nFiled rather than worked around, per the maintainer instruction on the duly card: an application-side workaround is how a platform gap becomes permanent and invisible.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01SqkTcrxUFci7nqXdbBSe2p)_"
+}

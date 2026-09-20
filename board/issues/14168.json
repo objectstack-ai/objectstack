@@ -1,0 +1,35 @@
+{
+  "number": 14168,
+  "kind": "issue",
+  "title": "No declarative way to constrain an object FIELD to a value domain (`iana_time_zone`), and neither extension point an app can reach can express it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-09-01T09:48:36Z",
+  "updated_at": "2026-09-04T04:11:13Z",
+  "closed_at": "2026-09-04T04:05:21Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 14,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14168",
+  "body": "Found while adding \"this must be a real IANA zone\" to an application field (`duly_duty.timezone`, objectstack-ai/duly#24). Filing per that app's rule \"if the platform genuinely cannot express it, file upstream rather than quietly working around it\".\n\n## The gap\n\n`packages/spec` already publishes the vocabulary and, valuably, the **definition of membership** — `SpecifierValueDomainSchema` in `system/settings-manifest.zod.ts`:\n\n```\n'iana_time_zone' | 'iso_4217_currency' | 'iso_3166_alpha2'\n```\n\nwith the note that for `iana_time_zone` *\"membership is the `Intl.DateTimeFormat` probe … NOT `Intl.supportedValuesOf('timeZone')`\"*. That note is correct and it saved me a bug — see the measurement below.\n\nBut `valueDomain` is reachable **only from a settings `Specifier`**. An object field has no equivalent. `FieldType` has no `timezone` member, and `FieldSchema` carries `maxLength` / `minLength` / `min` / `max` but no value-domain slot. So an authored zone field is a bare `Field.text` and nothing checks it; the value is discovered to be wrong wherever it is finally consumed.\n\n## Why an application cannot close it at its own layer either\n\nBoth extension points an app can reach were measured on `@objectstack/spec` / `@objectstack/runtime` / `@objectstack/objectql` **17.2.0**, Node v22.22.2.\n\n**1. A `script` / `cross_field` validation rule (CEL) cannot.** The whole stdlib registered in `@objectstack/formula`'s `registerStdLib` is:\n\n```\nnow today daysFromNow daysAgo isBlank coalesce trim joinNonEmpty daysBetween\naddDays addMonths date datetime abs round floor ceil min max upper lower\ncontains startsWith endsWith matches len isEmpty\n```\n\nThere is no zone/currency/country oracle, and no app-level way to register one — `buildEnv` is internal to the package. The only reachable spelling is `matches(record.timezone, '<regex>')`, which either checks shape only (`Europe/Munich` passes) or freezes a tzdata snapshot into metadata — precisely what the `iana_time_zone` note warns is a measurably different set from what the host accepts.\n\n**2. An L2 hook `body` cannot: the sandbox has no `Intl`.** Measured directly against the runtime's own sandbox (`quickjs-emscripten` 0.32.0, `newQuickJSWASMModule`, the variant `AppPlugin` wires through `QuickJSScriptRunner`):\n\n```\ntypeof Intl  -> undefined\ntypeof Date  -> function\ntypeof JSON  -> object\n```\n\n`HookBodyCapability` is `api.read | api.write | api.transaction | crypto.uuid | log` — nothing grants `Intl`, so this is not a capability the author forgot to declare.\n\n## The part that makes this actively hazardous, not merely missing\n\n`objectstack build` **silently lowers a self-contained inline handler into an L2 `body`** — confirmed in a real artifact, where a hook authored as `handler: <inline fn>` ships as:\n\n```json\n{ \"handler\": \"duly_task_lifecycle_stamps\",\n  \"body\": { \"language\": \"js\", \"source\": \"…\", \"capabilities\": [] } }\n```\n\nand `resolveHandler` in `bindHooksToEngine` prefers `body` and **ignores `handler`** whenever both are present. So the natural way to write this check — an inline `beforeInsert` handler doing the `Intl.DateTimeFormat` probe — behaves like this:\n\n- `pnpm validate`, `typecheck`, `test` and `build` are all **green** (in-process tests run the raw JS function in Node, where `Intl` exists);\n- in production the lowered body throws `ReferenceError: Intl is not defined` inside the sandbox;\n- with the `onError: 'abort'` that a validation-shaped hook must declare, **every write to that object is refused**.\n\nNothing anywhere in that sequence says the handler moved to a runtime that lacks the global it uses.\n\nThe only route that keeps the probe in Node is the string handler ref (`handler: 'my_fn'` + `defineStack({ functions })`), resolved against the bundle functions map + `runtimeModule`. That works — but `hook.zod.ts` marks `handler` **\"DEPRECATED, prefer `body`\"** and `warnLegacyHandler` prints \"Move the handler source into `Hook.body`\". Following that advice on any host-API-dependent check converts a working guard into a refuse-everything hook. The deprecation direction and the only viable route for this class of check point opposite ways.\n\n## What would close it\n\nIn rough order of preference:\n\n1. **`valueDomain` on a field** — `Field.text({ valueDomain: 'iana_time_zone' })`, enforced on the write path with the membership definition already written down in `settings-manifest.zod.ts`. Declarative, translatable refusal message, visible to Studio / OpenAPI / the form layer, and one oracle for settings and fields alike.\n2. A `format` validation member alongside `email | url | phone | json` drawn from the same closed vocabulary.\n3. Failing both: state in `hook.zod.ts` that a body cannot reach host intrinsics and that the string handler ref is the supported route for checks that need them, so the deprecation does not read as advice to break them.\n\nIndependently of (1)-(3), the sandbox-lowering hazard seems worth a build-time diagnostic on its own: an inline handler that references a global the sandbox does not provide is lowerable, buildable, testable and broken only in production.\n\n## Meanwhile\n\nobjectstack-ai/duly is using the string handler ref with the `Intl.DateTimeFormat` probe in Node, sharing one oracle with the period engine that consumes the value, and pointing at this issue in the code.\n\n---\n\nMeasurement backing the `iana_time_zone` note, since it is the crux and it is worth having twice — Node v22.22.2:\n\n```\nIntl.supportedValuesOf('timeZone').length          -> 418\n  includes 'UTC'                                   -> false\n  includes 'GMT'                                   -> false\n  includes 'Asia/Kolkata'                          -> false\n  includes 'Europe/Kyiv'                           -> false\n  includes 'US/Eastern'                            -> false\nnew Intl.DateTimeFormat('en-US', { timeZone: v })  -> resolves for every one of them\n```\n\nA field constrained against the enumerated list would reject `UTC` — the platform's own declared default.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01SqkTcrxUFci7nqXdbBSe2p)_"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 14103,
+  "kind": "issue",
+  "title": "Sharing rules cannot name a RECORD-RELATIVE recipient (the owner's manager; the value of a user field on the matched record), and no other declarative surface can widen a private object either",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p2",
+    "security"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-09-01T05:22:08Z",
+  "updated_at": "2026-09-03T22:08:22Z",
+  "closed_at": "2026-09-03T22:07:24Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 13,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14103",
+  "body": "Found while implementing the security model of the `duly` metadata application (objectstack-ai/duly#8). Filed unassigned.\n\n## The shape\n\nA criteria sharing rule can express any predicate over the RECORD, but its recipient is a single static principal resolved once per rule:\n\n```ts\nsharedWith: { type: 'user' | 'team' | 'position' | 'unit_and_subordinates' | 'business_unit', value: '<static id or code>' }\n```\n\n`plugin-sharing`'s `expandRecipient` reads `rule.recipient_id` and expands it without ever looking at the matched record, so every `sys_record_share` row a rule materialises names the same recipients. There is no way to say **\"share this row with the principal named by a field ON this row\"** — or with a principal DERIVED from one, such as the owner's manager.\n\nTwo independent requirements in one small application hit this in the same afternoon:\n\n1. **`duly_log_entry` where `visibility == 'manager'` → that person's manager and nobody else.** The predicate lowers fine. The recipient does not exist.\n2. **`duly_assignment` → the users in its `assignees` field.** Same shape: the recipient is a value on the matched record.\n\n## Why the near-misses are not answers\n\n**`position` is not \"the manager\".** The only recipient that resolves to managers at all is `position: '<manager position>'`, which shares every matched row with *every* holder of that position across the tenant — the skip-level, the manager two teams over, everyone. For a personal work log that is precisely the disclosure the feature exists to prevent, so the application ships the grant UNAUTHORED and fails closed rather than take it.\n\n**RLS is not an answer for a `private` object, despite the lint hint saying so.** `@objectstack/lint`'s `sharing-rule-runtime-variable-condition` tells authors:\n\n> Express per-user access with the mechanism that runs per request instead — an RLS policy on a permission set (`rowLevelSecurity[].using`, where `current_user.*` IS resolved)\n\nThat advice does not hold on a private object, because the two layers are AND-composed, not OR-composed. `plugin-security` `getReadFilter`:\n\n```js\nreturn andComposeLayers(andComposeLayers(filter, cbpFilter), sharingFilter) ?? void 0;\n```\n\nand `plugin-sharing` `buildReadFilter`, for a private object with an owner column, returns\n\n```js\nownerMatch                                  // owner_id ∈ (depth-resolved set)\n// or, when the caller holds record shares:\n{ $or: [ownerMatch, { id: { $in: grantedIds } }] }\n```\n\nBecause that filter is AND-ed on top, an RLS policy can only ever NARROW a private object's readable set. It cannot add a row the sharing layer already excluded. So widening a private object has exactly two doors:\n\n- the ADR-0057 depth scopes (`own_and_reports` / `unit` / `unit_and_below` / `org`) — which widen by OWNER, not by predicate, so they cannot be conditioned on a field like `visibility` and would expose the rows the field marks private; and\n- a `sys_record_share` row, which only a criteria sharing rule writes.\n\nBoth doors are shut for a record-relative recipient, by different bolts. The lint hint is therefore actively misleading for the `private` case and probably wants a carve-out sentence either way.\n\n**Approvals already have the vocabulary.** `spec/src/automation/approval.zod.ts` declares `manager` as a first-class approver source — \"Submitter's manager (`sys_user.manager_id`)\", resolved by the engine at runtime — alongside `field` (derive the principal from a field on the record). Sharing has neither. The concept exists on the platform; it just is not reachable from the surface that grants record access.\n\n## What would close it\n\nSketches, not a design ask — the shape matters more than the spelling:\n\n- `ShareRecipientType` gains `manager` (the matched record's owner's manager, via `sys_user.manager_id`) and `field` (`sharedWith: { type: 'field', value: 'assignees' }` — the user or users named by that column, honouring `multiple: true`).\n- `expandRecipient` becomes per-record for those two members. That is the real cost: the current materialiser expands once per rule and writes N share rows; a record-relative recipient expands once per matched record. The `owner`-type rule was removed from the authoring surface for a related reason (live-membership-dependent re-materialisation), so this needs the same \"what re-materialises when the graph moves\" answer — when a person's manager changes, their marked rows must re-point.\n- Whatever lands, it must not validate-and-do-nothing (ADR-0078/ADR-0049): if per-record expansion is not on the table, an author-time diagnostic saying so is worth more than silence, because today the only feedback is that the desired rule is simply unwritable and the tempting wrong rule lints clean.\n\n## Impact today\n\n`duly` ships `duly_log_entry.visibility` with a `My manager` option that stores correctly and grants nothing, and `duly_assignment` readable only by the person who raised it. Both are fail-closed, both are documented in the application's `docs/deployment/security.md` as blocked on this issue. Measured on `@objectstack/spec` 17.2.0 and the 17.2.0 runtime.\n"
+}

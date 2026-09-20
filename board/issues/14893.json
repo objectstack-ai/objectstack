@@ -1,0 +1,36 @@
+{
+  "number": 14893,
+  "kind": "issue",
+  "title": "Publish the transition-gate vs invariant tool-choice line in the data-modeling skill (deliverable 2 of #13879)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T08:00:55Z",
+  "updated_at": "2026-09-03T18:33:39Z",
+  "closed_at": "2026-09-03T18:22:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14893",
+  "body": "Filed by the `domain:spec` seat at ACCEPT of PR #14889 (#13879), as the cross-lane follow-up the dispatch reserved: deliverable 2 of #13879 — the tool-choice line an app author reads before choosing between `requiredWhen` / a field bound and a `validations[]` `script` rule — lives in the published `skills/**`, which is `domain:skills` and a governed surface, so it was kept out of the spec PR. `domain:*` is left to the triage seat (single-producer rule).\n\n## What to publish (one executable criterion)\n\nThe skill that teaches field declarations and validation rules (`skills/objectstack-data/**` — its `rules/` pages on field types and validation are the natural home; the skills seat picks the exact page) gains a tool-choice statement that says, in substance, what the spec's own contract text now says at each declaration (PR #14889: `Field.requiredWhen`, `min` / `max` / `minLength` / `maxLength`, the inline-grid column `requiredWhen`, and `ScriptValidationSchema.condition`). Done = an app author reading the skill before writing \"required when X\" is told that it is a transition gate, not an invariant, and is pointed at the invariant tool — and the reverse.\n\n## Proposed wording (from the PR #14889 body, \"Proposed skills tool-choice line\")\n\n> Need an **invariant** — a condition every stored record must satisfy (\"discount may never exceed 60\") — declare it as a `validations[]` `script` rule: it is re-checked against the merged record on every write, so a row that already violates it is refused on any edit until a repairing write lands (frozen, not bricked).\n> Need a **transition condition** — something that must hold from a given point onward (\"a quote must name a contact by the time it is presented\") — use `requiredWhen` or a field bound (`min` / `max` / `maxLength`): these judge the write, not the stored row, so rows that predate the rule keep passing unrelated edits. \"Required when X\" reads like an invariant and is not one.\n\n## Evidence the wording rests on (measured against the engine, PR #14889 body table)\n\n- `requiredWhen`: refused iff the merged record violates AND the pre-write record complied — `packages/objectql/src/validation/rule-validator.ts` `evaluateValidationRules`, the ADR-0113 non-regression branch (`preViolated` → \"legacy rows rest\").\n- `min` / `max` / `minLength` / `maxLength`: checked on the written value only — `record-validator.ts` `validateRecord` iterates the UPDATE payload.\n- `script` / `cross_field`: evaluated on the merged record on every write, no pre-state exemption — frozen until repaired, never bricked.\n\nThe downstream pull is hotcrm#1069 / hotcrm#1017 (three rules written as invariants, all implemented with the gate tool, zero signal); the spec-side statement is PR #14889.\n\n---\nBlocked-by: #13879"
+}

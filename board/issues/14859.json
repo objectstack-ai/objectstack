@@ -1,0 +1,35 @@
+{
+  "number": 14859,
+  "kind": "issue",
+  "title": "[Decision] Skills optimization program — batch 4 (1 item): #14685 item 2's replacement form — ruling C's \"date + pointer to the authoritative GitHub comment\" collides with the 2026-08-12 \"numbers go\" ruling that `check-skill-id-lint` enforces on the same surface",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T05:54:35Z",
+  "updated_at": "2026-09-03T14:48:02Z",
+  "closed_at": "2026-09-03T14:21:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14859",
+  "body": "Decision batch 4 of the skills catalog optimization program #14292 (maintainer mandate 2026-09-02, verbatim: 「审核所有的 skills，进行全面的优化。」). Filed by the skills lane seat (session `session_01LraLgQVGq8egUwfYZpbYt1`) from the item-2 flight of #14685, which stopped at this fork with `needs_decision` and edited nothing (report comment on #14685, branch `claude/issue-14685-x0-quote-policy` pushed at `origin/main` with zero commits). One item; a one-word reply (`A1` / `A2` / `B` / `C`) executes it. What waits on this: #14685 item 2 (the X0 quote-policy rewrite, 44 sites). Items 3, 4 and 5 of #14685 are unaffected and proceed.\n\nMeasured by the flight at objectstack `origin/main` `f3ae441fa2`, re-verified by the seat at `5ff5f9576c` (2026-09-03T05:53Z). No file was edited.\n\n---\n\n## 1. #14685 项 2 —— 裁决 C 的「日期 + 指向 GitHub 权威评论的指针」在这两个面上写不出来，而且按字面写会被门禁判红\n\n**一句话问题**：#14685 项 2 裁 **C**：「在 `.claude/skills/pm-dispatch/**` 与 `.claude/agents/os-dev.md` 内，维护者裁决只在引文本身就是操作性判据处保留原话，其余改为日期 + 指向权威 GitHub 评论的指针。」执行 dev 完成了全部分类（54 处维护者引文：SKILL.md 48、os-dev.md 6，共 1,793 引文字符；KEEP 5、frame-sync 框架文本跳过 4、可改指针 44），但「指针」这一半有三条实测阻塞：\n\n- **M1** 这两个面上**零**个 issue 号、**零**个评论 id —— 没有任何一处自带指针可写（seat 复测：`git grep -c -E \"#[0-9]{3,}\"` 在 `.claude/skills/pm-dispatch/**` 与 `os-dev.md` 命中 0 个文件）。\n- **M2** 这个「零」是一条**有门禁的在册裁决**：`scripts/pm/check-skill-id-lint.mjs:13-18` 原文引用 2026-08-12 维护者裁决「处理 issue 时犯的错应该总结成经验,保留 issue id没有意义」并写明后果「Maintainer-ruling provenance keeps DATE + VERBATIM QUOTE — numbers go」；扫描面 `SCAN_ROOT='.claude/skills/pm-dispatch'` + `EXTRA_FILES=['.claude/agents/os-dev.md','AGENTS.md']`，`ID_PATTERN=/#[0-9]{3,}/g`。`AGENTS.md:10-14` 也写着「maintainer rulings keep their date and verbatim quote」。dev 用门禁导出的 ID_PATTERN 实测：`(2026-09-01 裁,#14030)` 红、`(… 评论 5487849265)` 绿、`(2026-09-01 裁定)` 绿。\n- **M3** 「权威维护者评论」常常**不存在**：例如 2026-09-01 的四轴权重裁决（SKILL.md:904 / os-dev.md:418 / decision-analysis.md:50 三处引用）记录在卡 #14030 的**正文**里（「Maintainer ruling, 2026-09-01, PM chat channel … verbatim」）—— 裁决在 PM 聊天里做出，GitHub 上的持久形式是席位写的 issue 正文，唯一带这段文字的评论是 triage 席的，不是维护者的。\n\n**选项 × 真实代价**\n- **A1** issue 号指针，如 `（2026-08-12 裁定，#NNNN）`。完全贴合裁决 C 字面；但今天在 `check:pm-skill-id-lint` 上是**红**的 —— 需要同时改门禁、并撤回 2026-08-12 裁决，这是与项 5 的棘轮例外同级的维护者决定。两文件约省 15–25 行。\n- **A2** 裸评论 id 指针，如 `（2026-08-12 裁定，评论 {id}）`。门禁绿；但要对 44 处逐一做语义搜索 + 读卡恢复出处，其中不少只能落到 issue 正文或席位转述而非维护者评论；裸 id 不带 issue 号无法解引用，读起来像出处、实际给不了出处 —— 违反门禁自述的「经验必须自含」；「不得编造 id」使每处都变成「查得到才写，查不到就删」。省行数同上。\n- **B** 只写日期，如 `（2026-08-12 裁定）`，规则由周围正文陈述（44 处全部已如此 —— 这正是分类为「可改指针」的判据）。门禁绿、不需别的改动、省行数同上；但放弃裁决 C 字面里「指针」这一半。\n- **C** 全部 UNRESOLVED：按飞行简报的兜底保留全部原话。零收益，项 2 变成空操作。\n\n**四维**：① 长远合理性 —— 真正的缺陷是**两条维护者裁决在同一个有门禁的面上指向相反方向**（08-12「去掉号码」vs 09-03「加指针」），只有维护者能撤其一；B 让两条裁决**相容**而不是相抵：裁决是什么以 GitHub 为权威（C 的本意），指令面保持自含（08-12 与门禁的本意）。② 实际拉动 —— 内部面，拉动是每轮每席加载的 token（1,793 引文字符、44 处可减）。③ 防 AI 犯错 —— A2 最差：不可解引用的裸 id 就是「幽灵出处」形态；A1 反转一条有门禁的在册裁决。④ 不扩散 —— A1 要改门禁 + 撤裁决，A2 约 88 次查找；B 零额外开销。\n\n**推荐 B**；回退 A1（若维护者确要撤回 08-12 裁决，则同一 PR 改门禁自述并引本裁决）。置信缺口：是否维护者本意就是要用裁决 C 覆盖 08-12 裁决 —— 本席不重裁。**分类结果在 A1 / A2 / B 下完全相同**，裁后项 2 一趟落地。\n\n**裁后执行**：B ⇒ 重派项 2（同一分支），44 处改「（日期 裁定）」+ 核对周围正文已陈述规则，5 处 KEEP 原样，PR 正文逐处表；A1 ⇒ 先立门禁修订卡（`check-skill-id-lint` + `AGENTS.md:10-14` 一句），项 2 随其后；A2 ⇒ 重派项 2，逐处「查得到才写」；C ⇒ #14685 项 2 记录后关闭。\n\n---\n\nAlso recorded by the flight, filed separately by the seat after dedup (not a decision): the same maintainer quotation is written out two or three times across `SKILL.md:928/:929` vs `references/lanes/director.md:8/:54`, `SKILL.md:645` vs `os-dev.md:320`, and `SKILL.md:904` / `os-dev.md:418` / `decision-analysis.md:50` — a single-source defect independent of which option is chosen here.\n\nRefs: #14685 (batch 3, item 2 ruled C, comment 5520452691) · #14292 (programme anchor) · #13597 (corpus audit, Phase 3) · `scripts/pm/check-skill-id-lint.mjs:13-18, :54-56` · `AGENTS.md:10-14` · #14030 (the M3 example)."
+}

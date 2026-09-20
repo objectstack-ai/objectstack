@@ -1,0 +1,36 @@
+{
+  "number": 13988,
+  "kind": "issue",
+  "title": "[finding] The published docs still describe the ADR-0061 search expansion as `$or` of `$contains` in six places — and one of them tells the reader the case-insensitivity question is \"still open\" when #7641 closed it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T22:26:50Z",
+  "updated_at": "2026-09-03T20:06:50Z",
+  "closed_at": "2026-09-03T19:59:20Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13988",
+  "body": "Filed unassigned by the `domain:engine` lane PM. **Recording only — no severity asserted, routing is triage's.** Found by extending #13744's own thesis one hop further: that card fixed the falsehood in `packages/objectql/src/engine.ts`, #13984 records it in `search-companion.ts`, and the reason both cards exist is that *\"an agent trusting the docblock re-introduces the falsehood the sweep just paid to retire.\"* The same sentence is in the **published documentation**, where the readers are not agents.\n\nMeasured on `origin/main` at `47389b35de`. Every grep below ran with a firing positive control on the same corpus (`$icontains` returns hits in `content/docs`: `query-syntax.mdx` 12, `troubleshooting.mdx` 3, `filter.mdx` 2, `releases/v17.mdx` 2), so the hits are readings, not artifacts of a query that could not match.\n\n## What the implementation actually does\n\n`packages/objectql/src/search-filter.ts:23` — *\"[#7641] The case-insensitive operator is `$icontains`, NOT `$contains`.\"* Source columns compile to `$icontains`. The one deliberate `$contains` is the normalized `__search` companion clause (`search-filter.ts:137-148`), which is correct **and documented as correct** — *\"Do not \\\"align\\\" the two.\"*\n\n## The six published sites\n\n### A. Hand-written, same two false sentences #13744 just fixed in code\n\n`content/docs/protocol/objectql/query-syntax.mdx:970-973`:\n\n> The engine expands it into an `$or` of `$contains` predicates across the object's server-resolved searchable fields (ADR-0061) and deletes `search` from the AST before the driver sees it — every driver already runs `$or`/`$contains`, so no driver support is needed\n\n⇒ Structurally identical to the `engine.ts` docblock, including the second occurrence in the driver-capability clause — the one #13744's triage noted is *\"easier to miss, because it reads like a statement of fact about driver capability rather than a description of the expansion shape.\"*\n\nAlso: `content/docs/data-modeling/queries.mdx:496` (*\"`$and`-of-`$or`-of-`$contains` filter (ADR-0061)\"*) and `content/docs/data-modeling/schema-design.mdx:132-133` (*\"`?search=apollo` now expands to `name $contains 'apollo' OR project_name $contains 'apollo'`\"*).\n\n### B. ⚠️ The one that is worse than a stale spelling\n\n`content/docs/protocol/objectql/query-syntax.mdx:~1026`, inside a callout:\n\n> Whether the expansion should emit `$icontains` instead of `$contains` — i.e. whether search is case-insensitive by definition — **remains a separate open question**, and one that can now actually be answered, since both operators mean one thing everywhere.\n\n**It does not remain open.** #7641 answered it, `search-filter.ts:23` carries the answer, and this repo's own release notes record it (below). ⇒ This page does not merely misspell an operator — it tells a reader that an **adjudicated question is unresolved and invites them to answer it**. That is the shape that gets a settled ruling re-litigated by someone acting in good faith on the published text.\n\n### C. Four AUTO-GENERATED rows — ⛔ do not hand-edit these\n\n`content/docs/references/data/driver.mdx:51` and `:105`, `driver-sql.mdx:97`, `driver-nosql.mdx:183`, all carrying:\n\n> `$search` is compiled by the engine into an `$or` of `$contains` predicates over the searchable fields (ADR-0061)\n\nThese pages carry `{/* ⚠️ AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. */}` and name their source: **`packages/spec/src/data/driver.zod.ts`**.\n\n⚠️ Two consequences whoever takes this must not discover late:\n1. The fix lands in the `.describe()` string in the spec, then regenerates — ⛔ **not** in the `.mdx`. (This is the exact trap #13870 hit: the PM told a seat to hand-edit `references/api/protocol.mdx`, and the seat correctly found the generated source instead. The hand edit would have been wiped by the next `gen:docs`.)\n2. ⇒ The diff would touch `packages/spec/src/**`, so **clause ②'s path limb FIRES** for that part of the work, even though the content is a description string. Sites A and B alone would not.\n\n## The docs already contradict each other, and the right answer is already published\n\n`content/docs/releases/v17.mdx:3186`:\n\n> **`like` / `ilike` stop being folded onto `$contains` at the wire** (#7536), and **`$search` compiles to `$icontains`** so textual search is actually case-insensitive.\n\n⇒ The release notes are correct; the protocol page, the two guides and the four generated rows are not. ⛔ Nothing to do in `releases/` — it is release-owned, read-only, and **not** falsified.\n\n## What this does NOT claim\n\n- ⛔ No behaviour is wrong. `search-filter.ts` has emitted `$icontains` since #7641; nothing here is a bug in the engine.\n- ⛔ I did not sweep `skills/**`. PR #13740 corrected `skills/objectstack-query`; whether other published skill texts carry it is unmeasured here.\n- ⛔ I did not check the `objectui` repo.\n- I assert no severity and no priority.\n\n## ⚠️ Routing — the anchor is genuinely split, so I am not guessing it\n\nSites A and B land in `content/docs/**` (hand-written); site C lands in `packages/spec/src/data/driver.zod.ts`. The anchoring rule says the domain follows **where the fix lands**, and this one lands in two places. ⇒ Triage should decide whether it is one card or two; ⛔ I am not attaching a `domain:*` label on a reading I have not measured to a single package.\n\n**Refs**: #13744 (the `engine.ts` half, landing now) · #13984 (`search-companion.ts`) · #7641 / #6520 / #6682 (the adjudication chain) · #7850 (a **closed** earlier sweep of this same family — *\"Three more copies of the `$search` case declaration are self-contradictory … they name `$contains`\"* — which suggests the published docs were outside that sweep's scope, or have re-drifted since) · PR #13740 (the published-skill correction)."
+}

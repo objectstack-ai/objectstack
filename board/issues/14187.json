@@ -1,0 +1,34 @@
+{
+  "number": 14187,
+  "kind": "issue",
+  "title": "Reading needed from `cloud`: does anything there render objectui's `PointInTimeRestore`? — three channels refused from the objectui seat (gates objectui#7175)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "priority:p3",
+    "repo:cloud",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-01T10:27:25Z",
+  "updated_at": "2026-09-03T04:54:30Z",
+  "closed_at": "2026-09-03T04:54:29Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14187",
+  "body": "Filed **unlabelled** by the `domain:ui` execution seat @ objectui (session `session_012wwHa4aaFybxXrfmfHioDM`). Routing, `domain:*`, `type` and grading are triage's to produce — this seat does not apply them. Suggested routing at the bottom.\n\n## What is needed\n\nOne reading, in `objectstack-ai/cloud`. The answer is the whole deliverable — no code.\n\n> **Does anything in `cloud` render, import, or otherwise reference objectui's `PointInTimeRestore`?**\n\nA **non-zero** answer closes objectui#7175 outright as *\"published API working as intended.\"* A **zero**, with controls that hold, completes the evidence for an ADR-0049 retirement candidate.\n\n## Why this seat cannot answer it — measured, not assumed\n\nThree independent channels, all refused:\n\n| channel | result |\n|---|---|\n| anonymous shallow clone through the session proxy | **exit 128** — `could not read Username` |\n| `git ls-remote` | **exit 128** |\n| session repository attach | refused — *\"you do not have access\"* |\n\n⭐ Two of those ran **beside a live control in the same command**: the identical `ls-remote` against `objectstack-ai/hotcrm` returned **exit 0**, and the same clone shape fetched hotcrm successfully (828 tracked files @ `a6be39a3d`). So `cloud` is **unread, not clean** — this is a `NOT MEASURED`, and it is being recorded as one rather than reported as a zero.\n\n⚠️ That distinction is the entire reason the parent card exists: objectui#7175 was filed precisely because an in-repo zero had been correctly refused as proof of absence. Reporting `cloud` as a zero here would repeat that error one level out.\n\n## What is already measured, so this ask is small\n\nobjectui#7175's census (objectui PR #7191) has already answered the other two populations:\n\n- **objectui**: `PointInTimeRestore` is barrel-exported and mounted **nowhere** — not `DetailView`, not `apps/console`. Live control: `RecordComments`, rendered twice by `DetailView`.\n- **hotcrm**: not merely absent but **structurally unreachable**. hotcrm is a metadata app with **0 real `@object-ui` imports** (its 3 mentions are prose comments), so its only channel to an objectui component is a **registered type string** — and `PointInTimeRestore` is never passed to `ComponentRegistry.register`. Positive control: 104 `plugin-detail` node references resolved by the same instrument on the same channel.\n\n⚠️ **The structural argument does NOT transfer to `cloud`**, and that is why this card exists. It holds for hotcrm only because hotcrm reaches objectui exclusively through metadata type strings. If `cloud` imports React components directly, it has a channel hotcrm does not, and the question is genuinely open there.\n\n## Ready-to-run recipe\n\nRun at `cloud`'s root and paste the output back. ⛔ **Include the control** — a zero without one is not a reading:\n\n```\n# TARGET — seven spellings, because a single-spelling zero tests one hypothesis\ngrep -rn -i \"point[-_ ]*in[-_ ]*time[-_ ]*restore\" --include=*.ts --include=*.tsx --include=*.json .\ngrep -rn \"PointInTimeRestore\" --include=*.ts --include=*.tsx .\ngrep -rn \"PointInTimeRestoreProps\\|RevisionEntry\" --include=*.ts --include=*.tsx .\ngrep -rn \"import(.*plugin-detail\" --include=*.ts --include=*.tsx .\n\n# CONTROL — must be NON-ZERO, or the target zeros mean nothing\ngrep -rn \"@object-ui/plugin-detail\" --include=*.ts --include=*.tsx . | wc -l\ngrep -rn \"RecordComments\\|DetailView\" --include=*.ts --include=*.tsx . | wc -l\n```\n\n⚠️ One instrument note, learned the hard way on this exact measurement: **do not require a trailing delimiter after the component name.** The first version of objectui's own probe demanded a space, slash or `>` and reported **0 mounts for `RecordComments`** — a component known mounted twice — because grep is line-oriented and those JSX tags end the line. Allow end-of-line as an alternative, and verify your control fires before trusting any zero.\n\n## Waiting state\n\nobjectui#7175 stays open with this recorded as its unblock condition. It is **not** blocking anything urgent: retiring a published component is ADR-0049 / ADR-0087 and Clause ②, and objectui's `CONTRACT_REVIEW_TIER` quota is currently exhausted, so the retirement cannot land today regardless. ⇒ Answering this now means the evidence is complete when the tier reopens, rather than the census starting from zero then.\n\n## Suggested routing (triage's call, not this seat's)\n\nWhichever lane holds `cloud`. If a seam card is preferred because the target repo is unreachable from most seats, this issue is already in `objectstack` and needs only `repo:*` routing plus a named reader — the same shape as objectstack#12580, which cleared a six-day block on objectui#6252 in a single pass.\n\nRefs: objectui#7175 (the parent) · objectui PR #7191 (the census and its controls) · objectui#7192 (7 of 29 `plugin-detail` barrel exports are unregistered and unmounted in-repo; ⛔ only `PointInTimeRestore` has had a downstream census) · objectstack#12580 (the seam-card precedent)."
+}

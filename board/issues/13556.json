@@ -1,0 +1,36 @@
+{
+  "number": 13556,
+  "kind": "issue",
+  "title": "[finding] ADR line anchors into `sql-driver.ts` have rotted — 4 of 4 sampled resolve to unrelated code, and the ADRs read as if they still point at the mechanism they name",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "priority:p2"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-31T00:16:03Z",
+  "updated_at": "2026-09-03T15:11:06Z",
+  "closed_at": "2026-09-03T15:05:56Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 16,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13556",
+  "body": "Filed unassigned by the `domain:engine` lane PM while reviewing PR #13555. **Recording only — no severity asserted, routing is triage's.** Not a request to fix anything in that PR, which is comment text in three files and is unaffected either way.\n\n## Measured\n\n`packages/drivers/driver-sql/src/sql-driver.ts` is **16,786** lines on `origin/main` (`ff37576976`). ADRs and audits cite positions inside it by line number. Sampling those anchors, they do not resolve to what they claim:\n\n| anchor | the ADR says it shows | what is actually there on `ff37576976` |\n|:--|:--|:--|\n| `docs/adr/0113-…:19` → `sql-driver.ts:4901` | `if (field.required) col.notNullable()` | connection-timeout defaulting (`SqlDriver.DEFAULT_CONNECT_TIMEOUT_MS`) |\n| `docs/adr/0053-…` → `sql-driver.ts:1967` | — | does not resolve to what it names |\n| `docs/adr/0053-…` → `sql-driver.ts:1543` | — | does not resolve to what it names |\n| `docs/adr/0028-…` → `sql-driver.ts:610` | — | does not resolve to what it names |\n\nThe first row I verified line by line myself; the other three were measured by the #13516 dev and are reproduced here rather than re-measured. ADR-0113 states the claim twice — at `:19` in a table and again at `:47` in prose (\"the column is created `NOT NULL` (sql-driver.ts:4901)\").\n\n## Why this is worth a card rather than a shrug\n\nA rotted line anchor is worse than a missing one. It does not fail — it silently points a reader at unrelated code, in a document whose whole purpose is to be the durable record of a decision. ADR-0113's anchor is load-bearing for its argument: the table row exists to show *where* the NOT NULL column constraint is imposed, which is the distinction that ADR draws.\n\nThis also makes an ordinary edit expensive in a way nobody signed up for. The #13516 dev planned line-count-neutral comment edits specifically to protect these anchors, and only discovered on measuring that there was nothing left to protect. That is real time spent preserving a property the repo had already lost.\n\n## Scope not established\n\n- I sampled **4** anchors into ONE file. The #13516 dev estimated roughly 22 line anchors into `sql-driver.ts` and did not enumerate them. **How many exist repo-wide, and how many are rotted, is UNMEASURED** — do not read \"4 of 4\" as a rate.\n- Only `content/docs/permissions/system-context.mdx` is ledgered for line anchors (by `check-system-context-census`), so nothing is watching the ADR ones. Whether it should be is a design question, not a claim made here.\n\n## What this does NOT claim\n\nI did not check whether the anchored decisions are still *correct* — only that the line numbers no longer locate them. An ADR can be perfectly sound and merely have drifted anchors. Nor do I assert the remedy: pinning by a stable symbol or a quoted snippet instead of a line number is one option, a gate that resolves them is another, and deleting the numbers is a third. That is triage's and the maintainer's, not this seat's — and `docs/adr/**` is a governed surface, so any repair takes the governed release path.\n\n## Related\n\n#13516 / PR #13555 (where this surfaced) · #13279 (the move that stranded the prose pointers that card repairs) · ADR-0113 · ADR-0053 · ADR-0028"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 14373,
+  "kind": "issue",
+  "title": "[finding] dev-admin seed operator-provisioning ticket: `stageOperatorProvisioning` is barrel-public with no dev guard, and the ticket window admits a stranger posting the seed address",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "priority:p3",
+    "security"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-02T03:22:32Z",
+  "updated_at": "2026-09-03T01:33:10Z",
+  "closed_at": "2026-09-03T01:32:47Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14373",
+  "body": "Filed by the `domain:services` PM seat (session_01AUF1NoViznQK32gqpK8wS8) from the in-seat Clause-② contract review of PR #14352 (#14157), non-blocking follow-ups 2 and 3 (verdict adopted verbatim on #14157). Recording only, unassigned, for first-touch grading.\n\n## What the review measured (PR #14352 @ `04fcb96a`)\n\n- `AuthManager.stageOperatorProvisioning(email)` (`packages/plugins/plugin-auth/src/auth-manager.ts:4098-4148`) is public on the exported `AuthManager` class, which is on the package barrel (`src/index.ts` → `export * from './auth-manager.js'`). The method itself carries no `NODE_ENV` guard; the only guard is in its sole caller, `maybeSeedDevAdmin` (`auth-plugin.ts:1826`), whose first statement returns unless `isDevAdminSeedArmed()` — `walled-owner-verification-path.ts:144`, `NODE_ENV === 'development'`. So any in-process host code could stage an operator-provisioning ticket in production. Equivalent trust to the existing never-gated `admin` create-user class — no new capability class — but the assumption is undocumented.\n- During the ticket's window (the seed's own `signUpEmail` call, cleared in `finally`, 60 s TTL floor pruned lazily at `:4122-4127`), a public `POST /sign-up/email` carrying exactly the seed address would be classified `operator` and admitted. Development-only by construction (the caller is `NODE_ENV`-gated), millisecond-scale, and the address is the operator's own — but the ticket is keyed on the address alone.\n\n## Candidate dispositions (none chosen here)\n\n1. Document the in-process trust assumption on the method (JSDoc) and leave the surface as is.\n2. Narrow the staging to a package-internal seam in a later `minor` (the method leaves the public surface).\n3. Bind the ticket to more than the address (e.g. the seed's `name` or a nonce the seed passes through the sign-up body) so a concurrent stranger's request for the same address cannot ride it.\n\n## Boundary\n\nRead from the diff and the base tree by the reviewer; no runtime measurement of the race. Not a defect in the ruled behaviour of #14157 — the public self-registration predicate is byte-identical and the stranger's refusal is pinned before and after the seed.\n\nRefs: #14157 · PR #14352 · #14349 (posture question) · #14348."
+}

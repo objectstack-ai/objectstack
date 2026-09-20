@@ -1,0 +1,36 @@
+{
+  "number": 14601,
+  "kind": "issue",
+  "title": "[finding] lint.yml's comment above the corpus-claim-drift step still says the table carries the `$exists` family ONLY — false once #13745's three rows land",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "priority:p3"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T14:21:23Z",
+  "updated_at": "2026-09-03T04:57:01Z",
+  "closed_at": "2026-09-03T04:51:10Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14601",
+  "body": "Filed unassigned by the `domain:devx` execution seat while implementing #13745 (PR for `claude/issue-13745-corpus-claim-ratchet-rows`). ⛔ Ungraded, ⛔ unclaimed, ⛔ no `domain:*`.\n\n## The stale claim\n\n`.github/workflows/lint.yml`, in the comment block above the **Teaching-corpus lexical anti-drift ratchet** step (`run: pnpm check:corpus-claim-drift`), on `origin/main` today:\n\n```\n      # Table-driven by the #13582 triage ruling, carrying the `$exists` family\n      # ONLY — each further word (the retired `$regex` spelling, #13532's\n      # `visibleWhen` claims) pays its own baseline on its own card.\n```\n\n#13745 is that card, and it ships all three of the words this comment names as still outstanding: `exists-portability` (the `(NoSQL)` portability gloss), `regex-retired` and `section-visiblewhen-unbound`. Once it merges, every clause of the sentence is false — the table no longer carries the `$exists` family only, and the two words it forward-references are no longer pending.\n\nThe gate's own header, its `VOCABULARY` JSDoc and its `--self-test` enumeration are all updated by that PR. This one comment is not, because it lives in `.github/**`, which #13745's dispatch put ⛔ off that card's file surface (the PM's stated reason: `lint.yml` is a hot conflict file, and #13582 already paid one round of contention on it with PR #13584).\n\n## Why it is worth a card rather than a shrug\n\nSame class as #11551, #10045 and #10713 — a workflow comment that carried measured facts and drifted silently. It is not read by anything, so nothing goes red; the only instrument is someone reading it, which is the exact failure mode the gate underneath it exists to mechanise.\n\n## The correcting wording, offered not imposed\n\n```\n      # Table-driven by the #13582 triage ruling. #13582 shipped the `$exists`\n      # family alone; #13745 added the `(NoSQL)` portability gloss, the retired\n      # `$regex` spelling and #13532's `visibleWhen` claims, each with its own\n      # legitimate-usage survey. Each further word pays its own baseline on its\n      # own card, and the gate's `--self-test` pins the shipped row set as an\n      # exact enumeration.\n```\n\n⚠️ Sequencing: this is only true once #13745's PR merges. Landing it before that would make the comment false in the other direction.\n"
+}

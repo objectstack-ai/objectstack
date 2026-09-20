@@ -1,0 +1,35 @@
+{
+  "number": 14092,
+  "kind": "issue",
+  "title": "The most common action in any app — set a field on the current record — has no declarative form for a ROW action, while the BULK form is fully declarative",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p1"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T04:52:43Z",
+  "updated_at": "2026-09-03T21:21:11Z",
+  "closed_at": "2026-09-03T21:17:49Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14092",
+  "body": "Measured against `@objectstack/spec` / `@objectstack/rest` / `@objectstack/runtime` **17.2.0**, while building the completion interaction of the `duly` metadata app (objectstack-ai/duly#4): three buttons that each set one field on one record.\n\n## The asymmetry\n\n**Selection → declarative.** A list view's `bulkActionDefs` expresses it exactly:\n\n```ts\n{ name: 'duly_task_bulk_complete', operation: 'update', patch: { status: 'done' },\n  visible: P`record.status == \"open\" || record.status == \"in_progress\"` }\n```\n\nNo action, no handler, no code. The write runs on the data plane under the **caller's own** permissions, hooks and validations fire, and `patch` merges under collected params so a fixed value can be declared without exposing it in the dialog. This is the right shape and it works.\n\n**Row → nothing.** `ActionType` is `url | form | flow | script | api | modal`. There is no `update_record` type, no action `effect`, and no `patch`-shaped key on `ActionSchema`. So the identical intent, one row instead of twenty, has to be hand-written.\n\n## Why neither near-miss is the declarative form\n\n**`type: 'api'` + `method: 'PATCH'` + `bodyExtra`** is a declarative *HTTP call*, not a declarative field write. The author hand-writes the platform's own data-API path into application metadata:\n\n```ts\ntarget: '/api/v1/data/duly_task/${ctx.recordId}'\n```\n\n- Nothing binds that string to the action's `objectName`; the object name is duplicated into a path literal.\n- Nothing checks it at author time — `objectstack validate` passes on any string.\n- It pins the transport. `enableProjectScoping` + `projectResolution: 'required'` registers **only** `/api/v1/environments/:environmentId/data/:object/:id`, so an app that shipped the unscoped path is broken on that host with no diagnostic.\n- The platform cannot tell it is a record update, which is presumably why `undoable` (\"single-record update actions only — captures the record's prior field values\") has nothing to key on here.\n\nFor AI-authored metadata this is the worst available shape: it parses green and 404s at the click. (The spec's own worked example of this route is itself wrong — filed separately.)\n\n**`type: 'flow'` + a flow with an `update_record` node** is genuinely declarative, but it is one flow per button to assign one string, plus a flow-run record per tick, on the surface where `validate` currently misses bare predicates (#14089).\n\n## The cost is authorization, not the one-line write\n\nThis is the part that matters. A handler's `ctx.engine` is **system-elevated and RLS/FLS-bypassing by design** — `buildActionExecutionContext` stamps `isSystem: true` onto the caller's context, and both dispatch surfaces log the write as TRUSTED. `visible` is a UI hide, not authorization.\n\nSo every app that wants \"tick this row\" must hand-write a privileged write *and* re-establish the authorization the declarative bulk path gets for free. And the obvious guard does not work: the dispatcher loads `ctx.record` under the caller's scope, swallows a failed load to `{}`, and then stamps `record.id = recordId` on **unconditionally** — so `ctx.record.id` is present even when the caller cannot read the row. We had to key the check on a field that is `required: true` on the object instead:\n\n```ts\nconst status = text(record.status);\nif (!status) throw refuse(`Task ${id} is not available to you.`, 'DULY_TASK_NOT_AVAILABLE', 404);\n```\n\nThat is subtle, undocumented, discovered by reading the dispatcher, and every app author — human or AI — has to rediscover it or ship an authorization hole on a `private` object.\n\n## What would close it\n\nA row-action counterpart to `bulkActionDefs`' `operation: 'update'` — the platform knowing the action is a single-record field write, so it can route it through the data plane under the caller's own credentials, bind the object from `objectName`, and let `undoable` mean something. Shape is yours to pick; the requirement is that \"set `status` to `done` on this record\" stops being three files of privileged imperative code with a hand-rolled permission check.\n\n## Where this came from\n\nobjectstack-ai/duly#4. The app took the declarative route for bulk and wrote handlers for the rows; the rationale is in `src/actions/task.handlers.ts` there. Fourth platform gap from dogfooding `duly` — siblings #14087, #14088, #14089.\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 14752,
+  "kind": "issue",
+  "title": "Queue-flake anchor: test/run-dev-unbuilt-workspace.e2e.test.ts",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "type": "Bot"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T23:46:33Z",
+  "updated_at": "2026-09-03T00:53:44Z",
+  "closed_at": "2026-09-03T00:53:44Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14752",
+  "body": "`test/run-dev-unbuilt-workspace.e2e.test.ts` has ejected **16 pull requests** from the merge\nqueue within a rolling 24 hours — **10 independent hits** once\nGitHub's speculative stacking is accounted for. This issue is the single place for\nthat conversation; it is refreshed by the merge-queue-triage workflow on every\nfurther ejection.\n\n| PR | stack | queue build |\n|---|---|---|\n| #14499 | independent | [33663028874](https://github.com/objectstack-ai/objectstack/actions/runs/33663028874) |\n| #14528 | S2 · root | [33695020929](https://github.com/objectstack-ai/objectstack/actions/runs/33695020929) · [33689105623](https://github.com/objectstack-ai/objectstack/actions/runs/33689105623) · [33674211749](https://github.com/objectstack-ai/objectstack/actions/runs/33674211749) |\n| #14629 | independent | [33660420831](https://github.com/objectstack-ai/objectstack/actions/runs/33660420831) |\n| #14631 | independent | [33668324620](https://github.com/objectstack-ai/objectstack/actions/runs/33668324620) |\n| #14649 | independent | [33671786568](https://github.com/objectstack-ai/objectstack/actions/runs/33671786568) |\n| #14651 | independent | [33678366780](https://github.com/objectstack-ai/objectstack/actions/runs/33678366780) |\n| #14665 | independent | [33671791799](https://github.com/objectstack-ai/objectstack/actions/runs/33671791799) · [33669892536](https://github.com/objectstack-ai/objectstack/actions/runs/33669892536) |\n| #14675 | S2 · inherited | [33674214419](https://github.com/objectstack-ai/objectstack/actions/runs/33674214419) · [33670772221](https://github.com/objectstack-ai/objectstack/actions/runs/33670772221) |\n| #14687 | independent | [33676145614](https://github.com/objectstack-ai/objectstack/actions/runs/33676145614) |\n| #14692 | independent | [33678836122](https://github.com/objectstack-ai/objectstack/actions/runs/33678836122) |\n| #14715 | S2 · inherited | [33696599687](https://github.com/objectstack-ai/objectstack/actions/runs/33696599687) · [33695022067](https://github.com/objectstack-ai/objectstack/actions/runs/33695022067) · [33685006566](https://github.com/objectstack-ai/objectstack/actions/runs/33685006566) · [33682230163](https://github.com/objectstack-ai/objectstack/actions/runs/33682230163) |\n| #14733 | S2 · inherited | [33696601161](https://github.com/objectstack-ai/objectstack/actions/runs/33696601161) · [33695084575](https://github.com/objectstack-ai/objectstack/actions/runs/33695084575) |\n| #14735 | S2 · inherited | [33697809557](https://github.com/objectstack-ai/objectstack/actions/runs/33697809557) · [33695118192](https://github.com/objectstack-ai/objectstack/actions/runs/33695118192) |\n| #14736 | S2 · inherited | [33697811481](https://github.com/objectstack-ai/objectstack/actions/runs/33697811481) · [33696603273](https://github.com/objectstack-ai/objectstack/actions/runs/33696603273) |\n| #14739 | S2 · inherited | [33696604625](https://github.com/objectstack-ai/objectstack/actions/runs/33696604625) |\n| #14741 | independent | [33699706473](https://github.com/objectstack-ai/objectstack/actions/runs/33699706473) |\n\n⚠️ **Queue depth is not evidence.** The `stack` column is read out of the queue\nbranch names: GitHub builds each queued PR on top of the previous entry, so a\nbuild whose BASE commit IS another victim's queue HEAD contains that victim's\ntree by construction. A single deterministic break therefore ejects every PR\nbehind it, and the raw victim count climbs with QUEUE DEPTH until the owner\nlands a fix. Start with the roots above; an `inherited` row is a bystander until shown otherwise.\n\n**This issue is a NAME, not a diagnosis.** The workflow that files it reads the\nfailing test file path out of the job logs and counts PRs; it does not\nknow whether this is a flake, a load/timing cliff, a semantic conflict between\nqueued PRs, or a real regression, and it does not act on any of those. No test is\nskipped, quarantined or re-queued by it, and no PR is labelled by it — weakening\na gate stays a human act.\n\nWhat to do with it: read one victim PR's triage comment for the failure REASON\nline beside the FAIL line (a timeout and an assertion are the same FAIL line and\nopposite diagnoses), decide the cause, and close this issue with the fix or with\nthe reason it is not one.\n\nLast refreshed by queue build [33699706473](https://github.com/objectstack-ai/objectstack/actions/runs/33699706473) (PR #14741).\n\n---\n_Filed by the merge-queue-triage workflow (#4859, aggregation #10128)._\n\n<!-- queue-signature-anchor:test/run-dev-unbuilt-workspace.e2e.test.ts -->"
+}

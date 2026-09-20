@@ -1,0 +1,35 @@
+{
+  "number": 14047,
+  "kind": "issue",
+  "title": "[decision] Clause ② has at least three distinct classes and they are being judged case-by-case — rule how each is graded, or the gate is a coin-flip",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T01:03:09Z",
+  "updated_at": "2026-09-03T00:19:09Z",
+  "closed_at": "2026-09-02T23:26:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14047",
+  "body": "Filed by the `domain:cli` execution PM seat (#6024), session `session_01UngCYXF98BVpYA9hfz6NYk`, **at the maintainer's direction** — 2026-09-01, live PM chat, in answer to a question put on PR #13834's park: the ruling was *merge #13834 now, and file the class question as its own decision card*. This is that card. ⛔ It does not re-open #13834.\n\n## The problem, stated from what actually happened\n\nClause ② asks one question — *does this change contract accept/reject behaviour, or widen the public surface?* — and the seats answering it have now produced **three materially different kinds of \"yes\"** in a single day, plus disagreement about whether each was a yes at all:\n\n| class | specimen | dev declared | at-tier review ruled |\n|---|---|---|---|\n| **A — a new key on a published payload** | #12297 / PR #13741 (`conversions` on `os lint --json`) | yes | **APPROVE**, graded as an additive widening on precedent (#13347, #12125) |\n| **B — populating an already-declared field** | #13623 / PR #13811 (`userMessage` at the dispatcher's 403) | yes, \"conservatively\" | **CLAUSE ② DOES NOT APPLY** — a door not carrying a declared field was *in breach*; conformance is not widening |\n| **C — moving a command's reject set** | #13651 / PR #13834 (`os lint` exits 1 where it exited 0) | yes | **APPROVE** |\n| **D — re-selecting an input class between two published codes** | #13476 / PR #13910 (403 → 503 on an unresolvable engine) | yes, \"declared rather than talked down\" | **CLAUSE ② DOES NOT APPLY** — manual-floor coverage under an already-ruled direction (#13279) |\n\n⇒ **Two of the four conservative `yes` declarations were overturned at tier.** That is not a criticism of any seat: each declaration was made carefully, and each review was right on its own facts. It is evidence that the *criterion* is doing less work than the seats applying it.\n\n## Why this is worth a ruling rather than continued case-by-case judgement\n\n1. ⭐ **The failure mode is asymmetric and invisible.** A false `yes` costs a review cycle and is self-correcting — the reviewer says \"does not apply\" and the PR proceeds. A false `no` ships a contract change with no at-tier review at all, and nothing downstream detects it. So seats are correctly biased toward `yes`, which means the gate is increasingly triggered by *caution* rather than by *content* — and a gate that fires on caution stops carrying information.\n2. **It decides dispatch tier, not just review.** `dispatch-gates.mjs --tier` states it plainly: *\"Clause ② is NOT reachable from paths: a card that changes contract accept/reject behaviour or widens the public surface is **fable-mandatory** too, judged from the card CONTENT. This line is a FLOOR, never a clearance.\"* ⇒ Misjudging the class at **claim** time means dispatching a contract change to a below-tier dev — a gate breach committed before a line is written, and one the PM cannot detect afterwards without re-deciding the same ambiguous question.\n3. **It is already producing self-contradictory records.** This seat declared `Clause-②: no` on #13332 while writing the counter-argument for `yes` into the same comment, precisely because the criterion does not discriminate. That is an honest record of an unusable criterion, not a careful judgement.\n\n## What a useful answer looks like\n\n⛔ Not \"apply judgement\" — that is the status quo and it produced the table above. The useful shapes, in rough order of cost:\n\n- **(1) A worked rule per class**, e.g. *conformance to an already-declared surface is never clause ②* (which would settle B and D as a class rather than one PR at a time), and *any new exported symbol or payload key is always clause ②* (settling A).\n- **(2) A decision procedure** the claiming seat can run at claim time without at-tier judgement — a short ordered set of questions whose answers are checkable in the tree, not weighed.\n- **(3) Rule that the claim-time declaration is provisional by design**, and that the real gate is at PR time, where an at-tier review is cheap. This concedes that a PM cannot reliably pre-judge it and moves the cost to where the evidence exists.\n\n⚠️ **The startup-scope lens argues against over-building this.** The current arrangement does work — every one of the four PRs above got a correct outcome, and two got corrected at tier exactly as designed. The cost is review cycles and one mis-tiered dispatch, not shipped defects. So (3) may be the right answer precisely because it is the cheapest, and formalising a taxonomy nobody has to consult would be the speculative surface. ⇒ **Recommending (3) plus the narrow half of (1)** — the \"new exported symbol / new payload key is always yes\" limb, which is mechanical and needs no judgement — over a full taxonomy.\n\n## What this card does NOT touch\n\n⛔ Not re-opening #13834, #13811, #13910 or #13741 — all four are decided and three have merged or are merging. ⛔ Not a process-defect finding against any seat: every declaration above was made in good faith and the two overturned ones were overturned by the mechanism working as intended.\n\n## Refs\n\n- PR #13741 · PR #13811 · PR #13834 · PR #13910 — the four specimens, each with its at-tier review comment\n- `scripts/pm/dispatch-gates.mjs` — `CONTRACT_REVIEW_TIER`, and the `--tier` output's clause-② floor line\n- `scripts/pm/check-label-desc-cap.mjs:328` — the enqueue gate's own wording: *\"dispatched below contract-review tier — blocked until the review clears it\"*\n- `.claude/skills/pm-dispatch/SKILL.md` — the mandatory `Clause-②: yes | no` claim-comment declaration and its two accepted spellings"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 14655,
+  "kind": "issue",
+  "title": "[finding] Catalog anatomy drift: hand-authored per-topic files live under `references/` (reserved for generated pointers) in objectstack-platform and objectstack-data, unlinked or linked only by path — PLAT-G-02 / the `data-hooks.md` shape, catalog-wide",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T17:17:22Z",
+  "updated_at": "2026-09-03T09:16:06Z",
+  "closed_at": "2026-09-03T04:12:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14655",
+  "body": "Recorded by the skills lane seat (session `session_01LraLgQVGq8egUwfYZpbYt1`) from the optimization program's per-package audits (program anchor #14292): the platform audit's **PLAT-G-02** (deferred on #14299 as \"the catalog follow-up\" in the seat's ACCEPT on PR #14351) and the same shape measured on objectstack-data in the data flight (`references/data-hooks.md`, now the canonical hooks anchor after `rules/hooks.md` was deleted in PR #14427). Filed so that #14299 can close on its last in-scope item; the placement question is catalog-wide and belongs to one pass, not to a per-package flight.\n\n## What\n\n`skills/README.md` (the catalog anatomy, generator-owned) reserves `references/` for the generated `_index.md` (\"generated pointers … do not hand-edit\") and assigns hand-authored per-topic files to `rules/` (\"(optional) detailed per-topic rule files **linked from SKILL.md**\"). Two packages violate that on `origin/main` today:\n\n| package | file | measured |\n|---|---|---|\n| objectstack-platform | `references/plugin-hooks.md` | hand-authored; 2,413 tokens after PR #14351; the platform flight linked it directly from `SKILL.md` (the \"two hops\" finding), but its location still contradicts the anatomy |\n| objectstack-data | `references/data-hooks.md` | hand-authored; the canonical hooks anchor since PR #14427 deleted `rules/hooks.md`; objectstack-ui, objectstack-automation and objectstack-platform now point at it by path |\n\nBoth are load-bearing anchors that other packages cite by path (`references/data-hooks.md` from ui/automation/platform; `references/plugin-hooks.md` from data's References block), so a move is a multi-package rename with pointer updates, a `check:skill-identifier-liveness` Leg-2 binding check (bindings are keyed by file path + heading) and ceiling-row renames in `scripts/check-skills-token-ratchet.mjs` — one pass, after the in-flight splits (#14298, #14300 r2, #14297 r2) land, so the rows do not race.\n\n## Two honest resolutions, both need a lane decision, not a dev's guess\n\n1. **Move both files to `rules/`** and update every cross-package pointer in one PR (governed `skills/**`, draft, human merge) — the anatomy stays as written.\n2. **Amend the anatomy** (the generator's source for `skills/README.md`) so `references/` may also hold hand-authored reference material that is linked from `SKILL.md`, and require the link — the files stay where three packages already point.\n\nOption 2 is cheaper and matches what the flights converged on (both files are now linked directly); option 1 matches the text. Either way the generator-owned `skills/README.md` is regenerated, never hand-edited.\n\n## Not this card\n\nThe content of either file (audited and trimmed in PR #14351 / #14427); the `check-skill-examples.ts` SURFACES gap (platform fences unreachable — separate ledger item); the token re-lock pass.\n\nDedupe: the lane's 46 open `domain:skills` cards were listed by the seat at 16:4xZ — none records the placement question; PLAT-G-02 exists only as a row in #14299's audit record and a line in the seat post's ledger.\n\nRefs: #14292 · #14299 (PLAT-G-02) · #14297 (data hooks anchor) · PR #14351 · PR #14427."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 14159,
+  "kind": "issue",
+  "title": "Ruling needed: does `user:profile` get a renderer, or become explicitly not author-placeable? — the one #12183 sibling that ruling never covered (gates objectui#7135)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T09:13:00Z",
+  "updated_at": "2026-09-04T00:39:29Z",
+  "closed_at": "2026-09-04T00:38:29Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14159",
+  "body": "Filed **unlabelled** by the `domain:ui` execution seat @ objectui (session `session_012wwHa4aaFybxXrfmfHioDM`). Routing, `domain:*`, `type` and grading are triage's to produce — this seat does not apply them. Suggested routing at the bottom.\n\n## What is needed\n\nOne ruling. No code, no measurement — the measurement is already done and is reproduced below.\n\n**objectui#7135** records that `user:profile` is the one palette shell singleton with **no renderer anywhere**. Its own body ends by saying a claimant must settle this before building:\n\n> A claimant should establish which of the two answers is wanted **before** building either — ideally by asking on objectstack#12183, which is the thread that already holds the ruling for its four siblings.\n\nThis card is that ask. #12183 is closed `completed` (3/3 sub-issues), so it cannot itself carry a new ruling — hence a fresh card rather than a comment on a closed thread.\n\n## The question, precisely\n\n`objectstack#12183`'s own Ask offered **two** acceptable answers for the four members it covered. Both are still open for this fifth member:\n\n> **A.** Implement the renderer — as #6757 did for `global:search` + `global:notifications`, and #7091 for `app:launcher` + `nav:menu`.\n> **B.** Make it explicit in the spec and in `validate` that this type is **not author-placeable**, so the failure lands at author time rather than in front of a user.\n\n⇒ **For `user:profile`: A or B?**\n\nThe seat notes without arguing for it that **B may well be the right answer for a profile widget specifically** — a user-profile surface is plausibly shell chrome rather than something a page author places. But that is a product call, not a reading, and this seat will not make it.\n\n## Why this is not just \"a later phase of #12183\"\n\nThat was the implementer's hypothesis, and the seat did the lookup that settles it. **#12183 never covered `user:profile`**:\n\n- It is titled and scoped to **exactly four** members: `nav:menu` / `global:search` / `global:notifications` / `app:launcher`.\n- Its body enumerates the same four in the `ComponentPropsMap` excerpt; its reproduction table lists five instances across those four types.\n- `sub_issues_summary` reads **3 of 3 completed, 100%**.\n\n⇒ `user:profile` appears nowhere in it. The asymmetry is **unplanned**, not sequenced — which is why it needs a ruling rather than a queue position.\n\n## The measurement (already done — objectui#7117 / PR #7133)\n\nOf the 8 keys in `PALETTE_EXCLUSIONS`, exactly 3 are shell singletons:\n\n| key | renderer |\n|---|---|\n| `app:launcher` | ✅ real, `app-shell` `views/app-launcher-renderer.tsx`, eager at module load |\n| `global:notifications` | ✅ real, `app-shell` `views/global-notifications-renderer.tsx`, eager |\n| **`user:profile`** | ⛔ **none anywhere** — only the `PlaceholderRenderer` scaffold, and only under the opt-in `registerPlaceholders()` (ns `protocol-placeholder`), which just `apps/console` calls |\n\nThe repo-wide grep for a real registration returned zero **with a control in the same query shape that returned many hits**, so the zero is a reading, not an instrument failure.\n\n**User-visible consequence:** an authored page carrying `user:profile` draws `SchemaRenderer`'s red unknown-type panel in **every host except `apps/console`**, which opts into the placeholder scaffold and gets the dashed \"Component Placeholder\" box instead. That is precisely the symptom objectstack#12183 was filed about.\n\n## ⛔ What is NOT being asked\n\n- ⛔ **Not** for agreement that a renderer must be built. B is a complete answer.\n- ⛔ **Not** urgency. Nothing is broken for an app that does not author it. This is a recorded asymmetry, not an incident.\n- ⚠️ The `PALETTE_EXCLUSIONS` entry for `user:profile` is **correct either way and should not be touched** — that is a palette decision about authoring ergonomics, independent of whether a renderer exists (objectui#6071, #7092, and #7091's own docblock all settle this). A ruling of B must not be read as licence to change it.\n\n## Why this seat cannot answer it\n\nAnswer **B lands in `@objectstack/spec` and `validate`** — outside the `domain:ui` seat's dispatch scope, in this repo. So the answer decides not just *what* is built but *which lane builds it*, which is why it cannot be resolved inside objectui by picking the half that happens to be reachable.\n\n## Waiting state\n\nobjectui#7135 is being moved to `pm:blocked` with `Blocked-by:` pointing at this issue in the same write, so its queue label stops claiming it is dispatchable and the reverse index returns it automatically when this is answered.\n\n## Suggested routing (triage's call, not this seat's)\n\nIf the ruling is **A**, it is a `domain:ui` implementation card and returns to objectui. If **B**, it lands in spec + `validate` and belongs to whichever lane holds that surface. Naming that dependency is the reason this is one card and not two.\n\nRefs: objectstack#12183 (the four-member ruling, 3/3 complete) · objectui#7135 · objectui#6757 · objectui#7091 · objectui#7117 / PR #7133 (the measurement) · objectstack-ai/hotcrm#734."
+}

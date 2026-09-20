@@ -1,0 +1,36 @@
+{
+  "number": 14300,
+  "kind": "issue",
+  "title": "Skills optimization flight — skills/objectstack-pm-dispatch: RESTRUCTURE (≈ −4,255 tok, −29%) — monorepo-only lore inert in a customer project, the report JSON printed twice, and four drifts from the internal dev contract (report double-channel, `premise_still_valid`, the stash ban, the `Session:` line)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T01:40:07Z",
+  "updated_at": "2026-09-03T00:19:13Z",
+  "closed_at": "2026-09-02T23:10:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14300",
+  "body": "Member card of the skills catalog optimization program #14292 (maintainer mandate 2026-09-02, verbatim: 「审核所有的 skills，进行全面的优化。」). Filed by the skills lane seat (session `session_01LraLgQVGq8egUwfYZpbYt1`). Read-only audit at objectstack `origin/main` a59f78d. The full findings table is the audit record: the dev posts it verbatim as the first comment on this card at claim time (seat scratchpad `audit/objectstack-pm-dispatch/findings.md`).\n\n⚠️ **Fence**: this is the PUBLISHED process skill. `.claude/skills/pm-dispatch/**` and `.claude/agents/os-dev.md` are a separate corpus under audit #13597 — read them only as the comparison oracle, ⛔ never edit them in this flight, ⛔ never in the same PR.\n\n## Audit summary\n\nOne file, `SKILL.md`, 1,086 lines, **14,549 tokens**, headroom 0 — 7.7% of the bundle, the 2nd-largest published `SKILL.md`, 1.75× the other process skill. Teaches no ObjectStack surface (0 TypeScript fences). Customer decision points covered: 5 (label state machine; safe claim; dispatch with a binding template; review-against-GitHub and land; escalate vs decide) ≈ 2,900 tokens per decision. Customer-inert or duplicated text measured at **4,445 tokens (30.6%)** before any restructure. Verdict **RESTRUCTURE**: zero progressive disclosure, zero evals, two blocks duplicated inside the file (the report JSON at 869-882 / 894-908; the sanitizer trap at 346-365 / 884-888), a 2,376-token verbatim paste-block paid in every session, and a second job (upstream reporting) restating objectstack-platform `:59-70`.\n\n## Top findings\n\n| id | span | proposal | delta |\n|:--|:--|:--|--:|\n| PMD-B-01 | `SKILL.md:729-891`, `916-986` | MOVE-TO `rules/dev-template.md` (DEFERRED, #14296 items 1+4) | −3,258 from entry |\n| PMD-C-01 | `SKILL.md:916-986` vs objectstack-platform `:59-70` | DELETE the upstream-reporting job; keep ≤250-token residue pointing at objectstack-platform | −882 |\n| PMD-E-05 | `SKILL.md:987-1033` | REWRITE-AS-CONSTRUCT — shard registry conclusion is one line for a single-repo project | −580 |\n| PMD-E-02 | `SKILL.md:416-452` | RETIRE-SURFACE — \"N independent implementations\" is the platform's compiler problem, not an app's | −565 |\n| PMD-E-03 | `SKILL.md:591-618` | DELETE two non-escalation bullets (ADR-0049 \"arm\"/governance shapes) | −508 |\n| PMD-D-01 | `SKILL.md:192-217` | REWRITE-AS-CONSTRUCT — sweep rationale, cross-seat producers, anecdote | −380 |\n| PMD-D-02 | `SKILL.md:507-528` | REWRITE-AS-CONSTRUCT — the 8-card baseline printed and disclaimed | −290 |\n| PMD-D-04 | `SKILL.md:654-706` vs `826-857` | REWRITE-AS-CONSTRUCT — four-axis frame stated twice | −450 (MED) |\n| PMD-E-04 | `SKILL.md:769-786` | REWRITE-AS-CONSTRUCT — design spec of a lock script the customer does not have | −250 |\n| PMD-B-03 | `SKILL.md:346-357` | DELETE sanitizer specimens; rules at 359-365 carry the decision | −200 |\n| PMD-B-02 | `SKILL.md:894-908` | DELETE — the same report JSON printed twice | −115 |\n| PMD-D-03 | `SKILL.md:483-495` | DELETE check-in anecdote; keep the two rules at 496-506 | −170 (MED) |\n| PMD-A-01 | `SKILL.md:10-14` | DELETE the \"report a platform bug\" trigger from the description | −30 |\n| PMD-G-01 | `SKILL.md:557-559` vs `1051` | DELETE — \"the PM's own tooling PRs\" contradicts \"The PM writes no files\" | −25 |\n\n## Drift vs the internal contract (sync in this flight, paid by the deletions above)\n\n- **PMD-F-01** `:455-457` \"a lossless channel\" — the internal contract requires the report TWICE, GitHub first, in both modes, first line the literal plaintext `os-dev-report` (⛔ not an HTML comment), because a container restart killed three devs mid-final-message. Also a falsehood: `:456-457` is contradicted 17 lines later at `:474-475`.\n- **PMD-F-02** the template never asks the dev to re-check the issue's premises and the report has no `premise_still_valid`; internally a no-PR report with `premise_still_valid: false` is a first-class deliverable.\n- **PMD-F-03** `grep -c stash` = 0, yet the template ships the exact topology the trap lives in (worktree-first + \"parallel agents share ONE container\"); both repos carry the ban at Prime-Directive level.\n- **PMD-F-04/F-05** the claim shape omits the `Session:` line (branch-only identity under-determines in cloud mode); `:367-369` asserts devs push early while the template pushes fourth — the reclaim predicate can fire against a live agent. Make the template push the empty branch first.\n- Falsehood `:1036-1039` \"the template **enforces** … a container-wide verification lock\" — the template delegates the mechanism to the host project; should read `requires`.\n\n## Flight scope\n\n**IMPLEMENT** (same-file, shrink-only): all rows above except PMD-B-01 and PMD-H-01; the four drift syncs (paid by PMD-E-02 / PMD-E-04 / PMD-B-02 as the auditor sized them); PMD-C-01 as delete + ≤250-token residue pointing at objectstack-platform `SKILL.md:59-70`; the description trigger edit (regenerate `skills/README.md`).\n\n**DEFER** (pending #14296 items 1 and 4): PMD-B-01 (split the template into `rules/dev-template.md`), PMD-H-01 (evals).\n\n## Flight constraints (binding)\n\n- ONE draft PR, first line `Fixes #<this card>`; governed ⇒ stays draft; review requests are the seat's step.\n- Token ratchet: `SKILL.md` may not grow; additions paid by deletions in the same file; ⛔ re-wrap is not payment; ⛔ no ceiling raise; ⛔ no new files; ⛔ do not touch the ratchet script.\n- ⛔ Never edit another package's files; frontmatter edits ⇒ regenerate `skills/README.md` (`pnpm --filter @objectstack/spec gen:skill-docs`).\n- Gates: `node scripts/check-skills-token-ratchet.mjs`, `pnpm check:skill-compatibility`, `pnpm check:skill-identifier-liveness`, plus `node scripts/pm/dispatch-gates.mjs --commands <changed paths>`; record the head sha.\n- PR body: per-item 落点 | before | after list keyed by finding id; token delta; `Clause-②: no` (no contract surface).\n\nRefs: #14292 · #14296 · #13597 (the internal corpus, separate audit)."
+}

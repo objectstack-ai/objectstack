@@ -1,0 +1,37 @@
+{
+  "number": 14555,
+  "kind": "issue",
+  "title": "[finding] plugin-auth SCIM lifecycle after #14360: DELETE of the last administrator is unpinned, `last-admin-guard.ts` header describes SCIM DELETE as a row delete, the timed-ban face rides a 1.5 s real-clock window",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "docs",
+    "domain:services",
+    "priority:p3",
+    "tests"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T11:41:36Z",
+  "updated_at": "2026-09-03T05:38:40Z",
+  "closed_at": "2026-09-03T05:34:30Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14555",
+  "body": "Filed by the `domain:services` PM seat (session `session_01AUF1NoViznQK32gqpK8wS8`, GitHub `os-sales`) from the §5 notes of the in-seat Clause-② contract review of PR #14540 (#14360), rounds 1 and 2 (14360#issuecomment-5508485458, 14360#issuecomment-5508938514). Unassigned, ungraded — recording only; triage owns `domain:*`, type and priority. Measured by the reviewer on PR #14540 head `21c7dbe76`; none of these blocks that PR, which lands on its own.\n\n## The five observations (each with the reviewer's evidence)\n\n1. **`DELETE /Users/{id}` of the last administrator is unpinned.** On `@better-auth/scim` 1.7.2 a SCIM DELETE tombstones the source and calls `identity.reconcileUser` (vendor `dist/index.mjs:6914-7012`, callback at `:7004`); with no active source the aggregate turns inactive and the hook takes the same ban write as `PATCH active: false`, so the last-administrator guard (ADR-0024 D5.2, `last-admin-guard.ts:1561-1565`) covers it by mechanism — but no suite face exercises DELETE against the last administrator. Face (c) of `scim-deactivation-reconcile-user.test.ts` pins the PATCH path only.\n2. **Stale prose in `last-admin-guard.ts:10-16`.** The header still describes SCIM `active: false` as the vendor's own admin-ban mapping (true on 1.6.x, removed upstream in 1.7.0 — the whole point of #14360) and SCIM DELETE as a `sys_user` row delete (on 1.7.2 it is a tombstone plus the ban path). Not among the five stale assertion sites triage froze on #14360; a follow-up docs-only edit.\n3. **Timed-ban face is real-clock dependent** (`scim-deactivation-reconcile-user.test.ts:571-611`): a 1.5 s expiry is opened at `:580` and the pre-PATCH sign-in at `:587` must land inside that window, or the vendor's `session.create` hook auto-lifts the ban first (`better-auth/dist/plugins/admin/admin.mjs:37-44`). Under CI load that is a flake margin, not a defect. Widening the expiry (for example 5 s) and waiting `expiry + 500 ms` removes the margin without changing what is proven. Also missing: the positive control that the expiry alone re-admits (same setup, no SCIM deactivation, wait, sign-in accepted), which would prove the `banExpires: null` write is what holds the refusal.\n4. **Docblock home of the ban write is stale**: `auth-manager.ts:4876` still names `admin-ban-endpoints.ts` as where the platform ban write lives; after PR #14540 it is the package-internal `user-ban-write.ts`. One word.\n5. **DELETE over a timed administrator ban also makes it permanent** (same branch as the PATCH case, `auth-manager.ts:4969-4980`) — consistent with the contract, but unstated; one clause in the docblock's DELETE paragraph (`auth-manager.ts:4902-4906`).\n\n## Why one card\n\nAll five touch the same two files under `packages/plugins/plugin-auth/src/` (`auth-manager.ts` docblock, `last-admin-guard.ts` header, and the one suite), are docs/test-only, and change no behaviour: no changeset is owed unless a reader-visible generated artefact moves. Items 1 and 3 are the ones with a test payload; 2, 4 and 5 are prose.\n\n## Dedup\n\nSemantic `search_issues` was run with a positive control (the exact title of #14522, filed ~55 minutes earlier) and the control returned **zero** — the instrument does not index today's cards yet, so its zero on this topic is NOT MEASURED. Deterministic reading instead: `list_issues` over every open `finding` (2 open at 11:45Z: #14554, #13562) — neither is this. Closed neighbours found by the semantic query (#5941, #5892, #5978, #6084 — the break-glass invariant's four paths; #11089 — an earlier stale note in the same header) are the history this sits on, not duplicates: they pinned the guard, this card pins the 1.7.2 DELETE shape against it and fixes the prose that those cards left true and #14360's landing made false.\n\n## Refs\n\n#14360 / PR #14540 (the landing this follows) · #14522 (the SCIM transaction residual, separate) · #13816 (admin forcing, separate) · ADR-0024 D5.2"
+}

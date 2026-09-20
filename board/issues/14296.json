@@ -1,0 +1,34 @@
+{
+  "number": 14296,
+  "kind": "issue",
+  "title": "[Decision] Skills optimization program — batch 1 (4 items): new-file ceilings for splits · planned-eval stubs · react-blocks double rendering · published pm-dispatch scope",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T01:36:07Z",
+  "updated_at": "2026-09-03T01:00:43Z",
+  "closed_at": "2026-09-03T00:59:31Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14296",
+  "body": "Decision batch 1 of the skills catalog optimization program #14292 (maintainer mandate 2026-09-02, verbatim: 「审核所有的 skills，进行全面的优化。」). Filed by the skills lane seat (session `session_01LraLgQVGq8egUwfYZpbYt1`). Four items, each with a recommendation; a one-line reply (e.g. `1A 2A 3A 4A`) executes the whole chain. Everything NOT in this batch — same-file deletions, merges into an existing anchor, rewrites as constructs, falsehood corrections, funded additions — proceeds now under the standing value gate and lands as governed draft PRs for your review; nothing here blocks those flights.\n\nMeasured at objectstack `origin/main` a59f78d (skills/** byte-identical at d63c8a25). Published bundle: 187,854 units (`ceil(utf8/4)`), 171,406 ratcheted.\n\n---\n\n## 1. 拆分大单文件时的新文件棘轮上限\n\n**一句话问题**:两个发布包把全部内容塞在一个 `SKILL.md` 里(objectstack-ui 25,441 tokens、objectstack-pm-dispatch 14,549),客户 agent 每次触发都整文件入上下文;拆成「入口 + rules/」能让入口只装最常用的八成,但 token 棘轮规定「无上限的新文件 = 红」,新建上限需维护者裁决引用在 PR 正文。\n\n**选项 × 真实代价**\n- **A** 授权本程序内的拆分,条件三条:同一 PR 内整包 token 净减 ≥10%;新文件上限钉在落地计数;拆分 ⛔ 不得作为加字通道。代价:维护者多审 2–3 个结构性 PR(ui、pm-dispatch,可能 data)。\n- **B** 不拆,只在单文件内瘦身。代价:ui 入口仍约 19k tokens,渐进披露缺失,客户每次触发付全额。\n- **C** 逐文件逐次单独裁。代价:每包一次往返,与「不要不停弹出来确认」相悖。\n\n**业务含义**:A = 客户的 agent 建一个列表页只装列表页那一节;B = 客户每建一个视图都把仪表盘、报表、React 页面全装一遍。\n\n**四维**:① 长远合理性 —— 渐进披露是 skills 目录的既定结构(README「Skill anatomy」已定义 rules/),拆分是收敛到已定结构而不是增生;② 实际拉动 —— 实测 ui 包 `defineAction` 34 / `definePage` 29 / `defineView` 10 次真实用法分散在四个互不相关的节,单文件让每种用法都付全额;③ 防 AI 犯错 —— 入口短、按需装载,agent 更少被无关节的相似例子带偏(实测 ui 仪表盘在两处相距 640 行各写一遍,互相矛盾处已测出);④ 不扩散 —— 条件「整包净减 ≥10%」把拆分钉死为瘦身手段。\n\n**推荐 A**;回退 B;置信缺口:本分析看不见客户 agent 的实际装载策略(是否真按需读 rules/),只看见文件结构。\n\n**裁后执行**:ui 与 pm-dispatch 各在同文件瘦身 PR 之后追加一个拆分 PR,正文引用本裁决;棘轮 map 同 PR 加新文件行(钉在落地计数)。\n\n<!-- os-decision-facets -->\n① 长远:收敛到 README 已定义的 rules/ 结构,非增生 · ② 拉动:实测四类用法分散四节、每次触发付全额 · ③ 防错:入口短、相似例子少、矛盾处减少 · ④ 不扩散:条件「整包净减 ≥10%」钉死为瘦身 · 推荐 **A** · 置信缺口:客户 agent 的按需装载行为未测\n\n---\n\n## 2. 「计划中的 evals」存根\n\n**一句话问题**:5 个包的 `evals/README.md` 只是模板,列出不存在的文件(ai 315 tok · api 546 · query 558 · automation 414 · i18n 410),随包发布进每个客户会话;formula 根本没有 evals。\n\n**选项 × 真实代价**\n- **A** 删除存根(整包约 −2,200 tokens),保留真实 fixture(ui 的 analytics json、automation 的 approvals md);formula 不新建。代价:失去「占位提醒」—— 本就无人读。\n- **B** 把 evals 建实。代价:每包新 fixture = 新上限 + 客户 token,且 evals 是维护者打分工具、对客户零价值。\n- **C** 整个 `evals/` 移出发布树(不再计入客户 token;需改 skills CLI 安装边界与棘轮 population,结构变更)。\n\n**业务含义**:A = 客户不再为我们的测试计划书付费;C = 客户永远不为任何测试 fixture 付费,但要动安装边界。\n\n**四维**:① 长远 —— evals 归维护者工具链,不归客户上下文,C 是终态;但 C 改的是安装边界与棘轮 population,不是本程序的瘦身面;② 拉动 —— 零:没有客户 agent 读 evals;③ 防错 —— 存根列出不存在的文件,本身是一类假陈述;④ 不扩散 —— A 是纯删除。\n\n**推荐 A(现在做)**,C 作为后续单独议题记录在锚卡、不在本批裁;回退 B(不推荐)。置信缺口:未测 skills CLI 是否真把 evals/ 装进客户项目(README 自述「inert but harmless in consumer installs」)。\n\n**裁后执行**:各飞行内删除存根,棘轮上限随之下调;ui / automation 的真实 fixture 按各自审计意见瘦身。\n\n<!-- os-decision-facets -->\n① 长远:evals 归维护者工具链,C 是终态但不在本程序面 · ② 拉动:零客户读者 · ③ 防错:存根本身是假陈述 · ④ 不扩散:纯删除 · 推荐 **A**(C 另议)· 置信缺口:CLI 安装边界未测\n\n---\n\n## 3. `contracts/react-blocks.contract.json` 双渲染\n\n**一句话问题**:objectstack-ui 包里 `contracts/react-blocks.contract.json`(5,352 tokens)与 `references/react-blocks.md`(3,153)由同一生成器 `gen:react-blocks` 写出同一内容两遍(同 4 个 block、同 prop 数、`note` 字节相同),JSON 渲染在仓内零消费者;占发布包总量 2.8%,每个客户会话都装。\n\n**选项 × 真实代价**\n- **A** 生成器停止发出 JSON 渲染并删除该文件。落点是 `packages/spec/scripts` 的生成器(spec 席工具链)⇒ 立缝卡给 `domain:spec`。代价:若存在仓外消费者会断 —— 审计仓内零命中,仓外未测。\n- **B** 保留。代价:5,352 tokens 永久税。\n- **C** 反过来删 md 保留 json。代价:agent 读 JSON 契约比读 md 表更费、更易错。\n\n**业务含义**:A = 客户少装一份机器格式的重复表;B = 客户为同一张表付两次。\n\n**四维**:① 长远 —— 一份渲染一份真相,生成物只留 agent 可读的那份;② 拉动 —— JSON 零消费者;③ 防错 —— 两份渲染是分叉温床;④ 不扩散 —— 删除。\n\n**推荐 A**;回退 B。置信缺口:仓外消费者(objectui 或客户工具)未测,缝卡执行前先在 objectui 仓 grep。\n\n**裁后执行**:在 objectstack 立 `domain:spec` 缝卡(生成器改动 + 删除产物 + 棘轮 self-test 的排除集更新);ui 飞行 ⛔ 不碰生成物。\n\n<!-- os-decision-facets -->\n① 长远:一份渲染一份真相 · ② 拉动:JSON 零消费者 · ③ 防错:双渲染是分叉温床 · ④ 不扩散:删除 · 推荐 **A** · 置信缺口:仓外消费者未测\n\n---\n\n## 4. 发布版 `objectstack-pm-dispatch` 的范围\n\n**一句话问题**:该发布包 14,549 tokens(全目录第二大),教客户 app 项目一套 PM 循环;审计实测 30.6% 对客户惰性或重复(monorepo 专有的标签分片、验证锁设计、座位协议;报告 JSON 打印两遍;开发者模板 2,376 tokens 每会话必载),并在四处漂移于内部合同(报告双通道、`premise_still_valid`、stash 禁令、`Session:` 行)。\n\n**选项 × 真实代价**\n- **A** 保留并瘦身约 30%,模板外置到 `rules/dev-template.md`(依赖第 1 项),同步四处漂移。代价:仍是一个约 10k 的流程技能。\n- **B** 从目录移除。代价:失去对客户项目的多 agent 交付循环 —— 该包是维护者明确要「ships the developer-agent operating template」的。\n- **C** 压缩到 ≤5k 核心(五个决策点各一节,模板外置,上游报告移到 platform)。代价:一次重写、评审量大。\n\n**业务含义**:A = 客户团队用得上的交付循环、少付三成;B = 客户自己发明流程;C = 最省但要重写。\n\n**四维**:① 长远 —— 流程技能留在目录内,但只承载客户项目真会做的五个决策;② 拉动 —— 客户项目的多 agent 交付是平台卖点之一,但 monorepo 专有段落在客户项目里按定义惰性(包自己写着「标签不存在时这些析取不得跑」);③ 防错 —— 四处漂移中三处是「教旧形态」(模板不教 stash 禁令、报告单通道),修正是响亮的;④ 不扩散 —— 净减。\n\n**推荐 A,目标 ≤10k 且模板外置**;回退 C。置信缺口:未测任何客户项目实际安装并运行过这个循环。\n\n**裁后执行**:pm-dispatch 飞行先做同文件瘦身与漂移同步,拆分随第 1 项裁决追加。\n\n<!-- os-decision-facets -->\n① 长远:目录内保留、只承载五个客户决策点 · ② 拉动:交付循环是卖点,但 monorepo 段落在客户项目惰性 · ③ 防错:漂移修正响亮 · ④ 不扩散:净减 · 推荐 **A** · 置信缺口:客户实际安装运行未测\n\n---\n\nRefs: #14292 (program anchor) · #13658 (truth sweep) · #13597 (PM corpus audit)."
+}

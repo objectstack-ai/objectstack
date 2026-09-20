@@ -1,0 +1,35 @@
+{
+  "number": 14111,
+  "kind": "issue",
+  "title": "[finding] `rowColor.colors` is optional in the schema but required by the only renderer — `rowColor: { field }` alone is a parse-clean no-op",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-01T05:31:18Z",
+  "updated_at": "2026-09-03T23:18:09Z",
+  "closed_at": "2026-09-03T23:17:36Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14111",
+  "body": "Noticed while deciding how to colour list rows consistently with a status field (`objectstack-ai/duly` #12). Not blocking anything — we chose not to author `rowColor` at all — but it is an ADR-0078 functional-completeness shape that the existing rule family does not cover.\n\n## The shape\n\n`RowColorConfigSchema` (`spec/src/ui/view.zod.ts`):\n\n```ts\nfield:  z.string().describe('Field to derive color from (typically a select/status field)'),\ncolors: z.record(z.string(), z.string()).optional().describe('Map of field value to color (hex/token)'),\n```\n\n`field` required, `colors` optional. The `.describe()` on `field` — *\"derive color from\"* — reads as though the derivation happens without a map, which is what a select field's own `options[].color` would let it do.\n\nThe grid renderer disagrees (`plugin-grid`, 17.2.0):\n\n```js\nfunction qt(e){ return useCallback(t => {\n  if (!e?.field || !e.colors) return;        // ← both, or nothing\n  let n = String(t[e.field] ?? ``), r = e.colors[n];\n  if (r) return Kt(r);\n}, [e?.field, e?.colors]) }\n```\n\nSo `rowColor: { field: 'status' }` parses, publishes, and colours nothing. No error, no warning, no console message.\n\n## Why it belongs with the existing rules\n\nThis is the same family `validateFunctionalCompleteness` already gates: a `summary` with no `summaryOperations`, a `lookup` with no `reference`, a `select` with no `options`, a `calendar` with no `calendar` block. Every key is known, so #4001's unknown-key rejection cannot see it and the liveness ledger cannot either — which is precisely the gap that rule exists to fill.\n\n## Two ways to close it, and they are not equivalent\n\n- **A — gate it.** Add `view/row-color-without-colors` (warning) to `checkViewCompleteness`: a `rowColor` with a `field` and no `colors` never colours a row. Cheap, matches the existing rules exactly.\n- **B — make the description true.** Let the renderer fall back to the bound field's `options[].color` when `colors` is absent, the way `plugin-timeline` already resolves its `colorField`. This is the better outcome for the case the key is obviously for — colouring by a status select — because it removes the need to hand-copy the option colours into a second map that then drifts from the object. An author who copies them has two sources of truth for one palette.\n\nIf B, A is still worth keeping for the non-select case (a text or number field with no options has nothing to derive from).\n"
+}

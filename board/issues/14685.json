@@ -1,0 +1,35 @@
+{
+  "number": 14685,
+  "kind": "issue",
+  "title": "[Decision] Skills optimization program — batch 3 (5 items): DATA-F-07 `defineHook()` vs the platform's own examples · #13597 Phase-2 — X0 quote policy · `CLAUDE.md` excerpt form · the four-copy decision frame · cross-file line-budget moves",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T18:27:58Z",
+  "updated_at": "2026-09-03T16:37:15Z",
+  "closed_at": "2026-09-03T16:37:08Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 23,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14685",
+  "body": "Decision batch 3 of the skills catalog optimization program #14292 (maintainer mandate 2026-09-02, verbatim: 「审核所有的 skills，进行全面的优化。」). Filed by the skills lane seat (session `session_01LraLgQVGq8egUwfYZpbYt1`). Five items; a one-line reply (e.g. `1A 2C 3B 4B 5A`) executes them. What waits on this: #14297 closes on item 1; #13597 Phase 2 (the internal-corpus cuts — #14445 · #14209 · #14133 and the platform-readings intake) starts on items 2–5. Nothing else in the programme waits: the remaining flights, the stub deletions and the seam card #14559 proceed.\n\nMeasured at objectstack `origin/main` (2026-09-02 ~18:2xZ) and the #13597 Phase-1 tables (Tables 1–6, pinned at a59f78d). No file was edited.\n\n---\n\n## 1. DATA-F-07 —— 已发布 data skill 教 `defineHook()`,平台自己的两个真实 hook 却用裸字面量:改文档,还是改示例?\n\n**一句话问题**:`skills/objectstack-data` 在 14 处教 `defineHook()`(`references/data-hooks.md:68`「Author it with `defineHook()`」+ 7 个示例;第 1 轮已把重复陈述合为一处),`packages/spec/src/data/hook.zod.ts:1016` 导出它(导入期校验)。仓库里 `packages/spec`、`packages/cli` 之外 **0 个文件**调用它;两个真实 hook 都是裸字面量 —— `examples/app-crm/src/hooks/opportunity.hook.ts:9` `export const OpportunityStageHook: Hook = {`,`examples/app-todo/src/objects/task.hook.ts:50` `const taskHook: Hook = {`。审计判「处方合理,但平台自己的示例与之矛盾 —— 该维护者定,不是文档编辑」。\n\n**选项 × 真实代价**\n- **A** 处方保留;立一张 S 卡把两个示例迁到 `defineHook()`(2 文件,各包一层;归示例所在车道)。代价:一张卡、一次跨车道派发;skill 零改动。\n- **B** 删处方,改教裸字面量(与语料一致)。代价:放弃「导入期校验」这条平台能力在目录里的唯一教学点;`data-hooks.md` 净减约 20 tok。\n- **C** 两边都不动。代价:矛盾留在对外发布面上 —— 读 skill 的 agent 与读示例的 agent 学到两种写法。\n\n**业务含义**:A = 客户的 agent 写 hook 时在 import 就被 schema 拒绝,不是在运行时;B = 客户的 agent 照示例写,错误延后到运行时;C = 看谁先被读到。\n\n**四维**:① 长远合理性 —— `defineHook()` 是 spec 里活着的导出,处方指向平台已建的校验路径,把示例对齐是收敛不是增生;② 实际拉动 —— 真实 hook 文件 2 个 / 26 个对象文件,量小,但 hook 是写坏最难发现的元数据;③ 防 AI 犯错 —— 矛盾本身就是让 agent 猜的根源,A 消灭矛盾且不减校验;④ 不扩散 —— A 不加文档、只改 2 个示例文件;B 删;C 零成本零收益。\n\n**推荐 A**;回退 B。置信缺口:`defineHook()` 是否是维护者认定的正典写法(两个示例可能早于它),本席不重裁。\n\n**裁后执行**:A ⇒ 立示例迁移卡(未定级,归示例所在车道),#14297 记录后关卡;B ⇒ #14297 第三轮:删 `data-hooks.md:68` 处方、7 个示例改裸字面量,同文件付账;C ⇒ #14297 记录后直接关卡。\n\n---\n\n## 2. #13597 Phase-2 · X0 —— 内部语料逐字内联维护者裁决原话的政策\n\n**一句话问题**:`.claude/skills/pm-dispatch/**` 与 `.claude/agents/os-dev.md` 把维护者裁决**原话逐字**内联(Phase-1 各表逐文件计了 X0 行:os-dev.md 2 个引用块 / 4 行,CLAUDE.md 0,SKILL.md 与 lanes/* 以「日期 + 原话」散布数十处)。三种政策:\n\n- **A** 全部保留(现状)。代价:每次会话都装载裁决史;引用块是 DUP/DEM 之外最大的可削类别。\n- **B** 只留日期 + 指向裁决评论的指针。代价:原话离开指令面;引用本身就是操作性判据的地方(例如「re-wrap 不得用作筹行」)读者要跳出去才能判。\n- **C** 只在**引用本身就是操作性判据**处保留原话,其余改日期 + 指针(Table 1 推荐)。代价:逐处判「原话是否是判据」,Phase-2 每处砍点须写明归类。\n\n**四维**:① 长远 —— 裁决的权威源是 GitHub 评论,指令面只需可判定的规则;② 拉动 —— 内部面,拉动是每轮 token;③ 防错 —— 判据处原话保留,agent 不会把裁决改述成别的规则;④ 不扩散 —— C 是最小改法。\n\n**推荐 C**。置信缺口:「操作性判据」的边界由执行 dev 逐处判,ACCEPT 逐条核。\n\n---\n\n## 3. #13597 Phase-2 · `CLAUDE.md` 的摘录形态(86 行,天花板 86)\n\n**一句话问题**:`CLAUDE.md` 是每个座位每次会话**必被注入**的唯一指令文件(本席实测:harness 注入 CLAUDE.md、不注入 AGENTS.md),其中 78 行是四条规则的**手抄摘录**(Table 4 行 C2–C5),两条已漂移:C4 `:50` 指向「AGENTS.md §9」而 §9 是「拉 main 后刷新构建状态」(refs/remotes 规则住无编号前言 `:395–414`);C5 `:78`「~18 merges … 一个工作日」是锚点没有的统计。\n\n- **A** 保留四条摘录,只修两处漂移(+ −2 DEM):86 → ~84。代价:最贵的 78 行照付;手抄摘录会再漂。\n- **B** 每块降为「⛔ 规则一句 + 钩子/逃生开关 + 指向 AGENTS.md 锚点」:约 30 行。代价:事故叙事离开 CLAUDE.md(仍在 AGENTS.md 锚点);章程句「四条规则内联,因为漏一条就毁别人工作」改写为「四条规则各一句内联」。\n- **C** 摘录改为**机械镜像**(像 `check-published-list-mirrors` 那样由门禁比对锚点):行数不变,漂移归零。代价:新门禁 + AGENTS.md 锚点段落须可切块。\n\n**四维**:① 长远 —— B 或 C 都终结手抄漂移类;② 拉动 —— 每会话 ~50 行 × 全部座位;③ 防错 —— 规则句不动,agent 行为不变;④ 不扩散 —— B 删、C 加门禁。\n\n**推荐 B**;回退 A(两处修正无论如何做)。置信缺口:CLAUDE.md 现形态是否维护者刻意为之(章程句 `:1–6`)。\n\n---\n\n## 4. #13597 Phase-2 · 决策框架四份副本(`check:skill-frame-sync` 锁定)\n\n**一句话问题**:同一「四轴决策框架」在四处逐字同构:`.claude/skills/pm-dispatch/SKILL.md`(internal-pm)、`.claude/agents/os-dev.md`(internal-dev,Table 4 行 O56:DUP 13)、`skills/objectstack-pm-dispatch/SKILL.md` 两份(published-pm、published-dev;#14660 拆分时因门禁按路径钉住而**留在入口**)。门禁保证四份同构,也把 3 份重复锁成不可削。\n\n- **A** 保持四份(现状)。代价:内部 13 行 + 对外约 630 tok 的重复永久化;拆分后入口仍背 published-dev 块。\n- **B** 降为**两份**:internal-pm + published-pm;dev 侧改为占位/指针(`rules/dev-template.md` 已有 `{decision_frame}` 占位 —— 派发时由 PM 副本填入)。改 `scripts/check-skill-frame-sync.mjs` 的 `COPIES`(4 → 2)与 freshness 门禁的自检;反休眠指纹扫描继续禁止未申报副本。代价:一次门禁改动 + 自检更新;dev 读到的框架来自 PM 粘贴而非文件。\n- **C** 降为一份内部 + 一份对外,dev 副本改为「四轴名摘要」(不同构、门禁放行摘要)。代价:门禁要区分「摘要」与「副本」,新类别。\n\n**四维**:① 长远 —— 框架单源,门禁看两处;② 拉动 —— pm-dispatch 入口再减约 630 tok(published-dev 块),os-dev.md −13 行;③ 防错 —— dev 拿到的是 PM 派发时粘贴的同一块,不会读到过期副本;④ 不扩散 —— B 删 2 份。\n\n**推荐 B**。置信缺口:published-dev 块是否被 `{decision_frame}` 之外的读者依赖(本席扫描 `skills/**` 与 `.claude/**` 未见)。\n\n---\n\n## 5. #13597 Phase-2 · 跨文件行预算搬运\n\n**一句话问题**:行棘轮按文件、只降不升。Table 3 测出 `platform-readings.md` 应收编 3 条误置的按仓门禁事实(`lanes/cli.md:17–20`、`lanes/services.md:21–22`、`rest-channel.md:78–84`,约 +10 行),而它自身 0–14% 可削、天花板无余量;lanes/* 的 DUP 砍点有余量。现规则下这 +10 只能由维护者逐次裁提额。\n\n- **A** 允许**同一 PR 内跨文件搬运**:被搬入文件提额 ≤ 搬出文件同 PR 净减,语料总行数 ≤ 0,提额行注释引本裁决。代价:棘轮多一种合法提额路径(仍须 PR 正文列账)。\n- **B** 不允许;误置事实留在原处(或在原处砍掉)。代价:按仓事实继续散在 lanes,读者查两处。\n- **C** 逐次单独裁(现状)。代价:每次 +N 行都是一张决策卡。\n\n**四维**:① 长远 —— 事实归其单源文件;② 拉动 —— 内部面;③ 防错 —— 单源即少一处过期副本;④ 不扩散 —— A 以「语料总行数不增」为闸,不是放松。\n\n**推荐 A**。置信缺口:`check:ratchet-remedy-authority` 把「扩张性补救」标为 MAINTAINER-ONLY —— A 需在该门禁的自述里加一条「本裁决授权的跨文件搬运」例外,由 Phase-2 首个搬运 PR 携带。\n\n---\n\nRefs: #14292 (program anchor) · #14296 (batch 1, ruled `1A 2A 3A 4A`) · #14568 (batch 2, ruled A) · #14297 (item 1) · #13597 (items 2–5; Tables 1–6) · #14660 (the split that left published-dev in the entry)."
+}

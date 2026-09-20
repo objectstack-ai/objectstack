@@ -1,0 +1,36 @@
+{
+  "number": 13871,
+  "kind": "issue",
+  "title": "[finding] packages/cli generate.ts 的迁移 codegen switch 携带自己的幽灵字段类型词表——'slug'/'ip_address'/'encrypted'/'integer' 是 case 标签但均非 FieldType 成员(#13716 同类,隔一个包)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-31T15:35:21Z",
+  "updated_at": "2026-09-02T20:31:01Z",
+  "closed_at": "2026-09-02T20:21:57Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13871",
+  "body": "Found during #13716(PR #13869)收口移交;filed unassigned 供分诊(落点 `packages/cli` ⇒ 预计 domain:cli)。无严重度断言。\n\n## The shape\n\n`packages/cli/src/commands/generate.ts` 的 migration-codegen 对字段类型的 switch 里,**'slug'、'ip_address'、'encrypted'、'integer'** 作为 case 标签存在——四者均非 49 值 `FieldType` 枚举成员,与 #13716 刚从 `SEARCH_AUTO_EXCLUDED_TYPES` 删除的幽灵同类:case 分支永不可达(真实类型走不到),或更糟——若 codegen 输入不经 FieldType 门,这些标签在暗示一个不存在的接受面。\n\n## 待分诊判定\n\n同 #13716 的分诊形状:逐成员判「dead case(删)vs 改拼漏改(如 integer→number?)vs codegen 输入面本就不是 FieldType(记录语义)」——⛔ 未查史/未测输入面前不动手。\n\n## Refs\n\n- #13716 / PR #13869 — 发现现场与同类先例(四幽灵逐成员史证方法可复用)\n- 查重:semantic 检索仅命中 #4659(build-schemas 叶名匹配,不同缺陷),无重复(2026-08-31)。"
+}

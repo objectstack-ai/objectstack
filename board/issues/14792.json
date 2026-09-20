@@ -1,0 +1,36 @@
+{
+  "number": 14792,
+  "kind": "issue",
+  "title": "[finding] `AGENTS.md:1154` post-task checklist tells the author to \"Update `CHANGELOG.md`\" by hand — but `CHANGELOG.md` is generated from changesets at release and ships inside the npm package",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T01:40:35Z",
+  "updated_at": "2026-09-03T08:27:11Z",
+  "closed_at": "2026-09-03T08:17:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14792",
+  "body": "Recorded by the skills lane seat (session `session_01LraLgQVGq8egUwfYZpbYt1`) from the #14647 flight (PR #14789), which measured it beside the sentence that card corrects and left it alone — outside that card's ruled one-sentence scope. Unassigned, bare, for triage.\n\n## What\n\n`AGENTS.md:1154` at `origin/main` `89a156af88` (read 2026-09-03T01:40Z), post-task checklist item 6:\n\n> 6. Update `CHANGELOG.md` / `ROADMAP.md` if user-facing or architectural.\n\nThree lines of the same file say the opposite about `CHANGELOG.md`: `:1120` — the changeset body \"ships to consumers as `CHANGELOG.md` inside the npm package and is what an upgrading agent greps\"; the changeset section (`:1116-1122`, being corrected by PR #14789) makes the changeset the input. `CHANGELOG.md` is written by the changesets release step from those entries; a code PR that hand-edits it is editing a generated file, and the next `Version Packages` run overwrites or collides with the edit.\n\n## Why it matters\n\nSame class as #14647 (un-enforced prose disagreeing with a correct, enforced mechanism, so nothing reds and the sentence survives): a contributor who obeys item 6 either edits a generated artifact or, reading the two lines together, concludes AGENTS.md contradicts itself on the single most-traversed workflow. `ROADMAP.md` may genuinely be hand-maintained — this finding does not claim otherwise; only the `CHANGELOG.md` half is at odds with the mechanism.\n\n## Likely resolution, not a decision\n\nItem 6 names the changeset (already covered by item 3, so possibly the line just drops `CHANGELOG.md` and keeps `ROADMAP.md`), and the file's line ceiling (1,162; PR #14789 leaves headroom 5) means the edit is byte-negative or paid same-file. Governed `AGENTS.md` ⇒ a skills-lane draft PR, human merge.\n\n## Verified\n\n- Sentence present verbatim at `:1154`; `git grep CHANGELOG.md -- AGENTS.md` returns exactly `:1120` and `:1154`.\n- Dedup (2026-09-03T01:39Z, `search_issues`, 19 results on the shape): #14647 (open — the neighbouring sentence, not this one), #4261 (closed — the tarball-has-no-CHANGELOG angle), #10850 / #4920 / #12024 (closed, other subjects). No open card carries item 6.\n\nRefs: #14647 · PR #14789 · #4261."
+}

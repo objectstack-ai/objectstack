@@ -1,0 +1,36 @@
+{
+  "number": 14566,
+  "kind": "issue",
+  "title": "[finding] Nothing routes an agent authoring object/field/view labels to `objectstack-i18n` — the cross-skill routing list in `skills/README.md` has no labels-vs-bundles decision point",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T12:23:52Z",
+  "updated_at": "2026-09-03T09:16:12Z",
+  "closed_at": "2026-09-03T04:12:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14566",
+  "body": "Out-of-scope by-product of the skills optimization flight on #14315 (audit id **I18N-A-03**). That card's ruling deferred it and routed it to the flight's PR body as a follow-up, because the edit lands in `skills/README.md` — outside the flight's file surface (`skills/objectstack-i18n/SKILL.md` only, plus generator output). It is recorded in that PR body as ruled; this card exists so the follow-up has a tracked home rather than living only in prose that merges and disappears. Filed unassigned. **No edit was made.**\n\n## Measured (audit ref `a59f78d`; re-checked on `origin/main` 53d36892)\n\nThe load-failure mode is on the package's **number-one real task**. Measured usage of translated object/field labels: 3 example apps, 40 `fields:` blocks, 37 `pluralLabel:` entries, 23 select-option label maps.\n\n- `grep -rn \"objectstack-i18n|translat\" skills/*/SKILL.md`, excluding the package itself:\n  - `skills/objectstack-ui/SKILL.md` — **zero** occurrences of `translat`.\n  - `skills/objectstack-data/SKILL.md` — one passing mention.\n- `skills/README.md` \"Cross-skill routing\" lists **4** decision points; **none** is about labels vs bundles.\n\nSo an agent authoring a `*.view.ts` or `*.object.ts` and writing a `label` never learns this package exists. It writes the English label inline and stops — which is not an error any gate reports, because an untranslated label is a perfectly valid object.\n\n## Note on direction\n\nThe flight on #14315 changed the `objectstack-i18n` frontmatter description so it triggers on the tasks its body actually teaches (the `translation` metadata item, and a package shipping its own generated bundle). That helps an agent that has already decided it is doing i18n work. It does **not** help the agent that does not know the domain applies — which is what a routing bullet in the catalog README is for. The two are complements, not substitutes.\n\nSuggested shape, for triage rather than as a decision: one bullet in the cross-skill routing list, sending \"authoring a label / plural label / option label you want translated\" from the data and ui packages to `objectstack-i18n`.\n\n⚠️ Budget: the maintainer's 2026-08-21 ruling on published skills applies — 「对外发布的 skills 是整个平台的最大价值，尤其要整体考虑和评估。」「……不能为了一个小功能扩写很多。」 The audit costed this at roughly +25 tokens in a sibling file. It should stay that size."
+}

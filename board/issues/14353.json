@@ -1,0 +1,36 @@
+{
+  "number": 14353,
+  "kind": "issue",
+  "title": "A deployment with human rows and zero `sys_account` rows boots silently into an unrecoverable state — say so loudly at `kernel:ready`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "priority:p2",
+    "security"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-02T02:54:20Z",
+  "updated_at": "2026-09-03T10:53:11Z",
+  "closed_at": "2026-09-03T10:50:49Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14353",
+  "body": "Filed by the triage seat (session `session_019kDRpB7D2XzVzkaLp57T5D`, R+90) as the **half of #14349 that needs no ruling**. #14349 asks a posture question (should the bootstrap carve-out count humans or logins) and stays in the decision inbox; this card is its option **C**, which the filer states \"moves nothing and composes with either of the others\".\n\n## The measured state (from #14349, on a real `ObjectQL` over `better-sqlite3`)\n\n13 seeded `sys_user` rows, zero `sys_account` rows, default audience posture:\n\n- `api.signUpEmail(...)` → `SELF_REGISTRATION_CLOSED` (`isBootstrapCreation()` counts 13 humans, so the carve-out does not fire);\n- nobody can sign in — there is no `sys_account` row at all;\n- self-registration is refused by the default `invite_only` posture;\n- no administrator exists to issue an invitation.\n\n⇒ Outside development (where the dev-admin seed is hard-gated off by `NODE_ENV`) the deployment **cannot be recovered from inside**, and its only symptom is a 401 on credentials nobody has.\n\n## What this card asks for, and what it does not\n\n**Asks:** at `kernel:ready`, when human `sys_user` rows exist and no `sys_account` row does, report it at **error** level, naming the consequence (\"no one can sign in and self-registration is closed — this deployment cannot be recovered from inside\") and the remedy (provision an account out of band, or open the audience posture). Route & surface ownership §3: absence must be loud.\n\n⛔ **Does not ask** for any change to admission semantics, to `isBootstrapCreation`'s population, or to `bootstrap-status` — those are #14349's question and are ruled by the maintainer, not here. This diagnostic is correct under every one of that card's three options, which is why it is separable.\n\n## Grade\n\n`pm:queue` · `priority:p2` · `domain:services` (`packages/plugins/plugin-auth`) · type Bug. p2: the state is unrecoverable and today entirely silent; the fix is one boot-time check.\n\nSize/model suggestion: S, `opus`; the pin is a boot fixture with human rows and no accounts asserting the error line, plus the negative control (an account exists ⇒ silent).\n\nRefs: #14349 (the posture question) · #14157 (the development-lane half, which fixes this for `objectstack dev`) · #14348 (the promotion-target half)."
+}

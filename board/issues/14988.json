@@ -1,0 +1,33 @@
+{
+  "number": 14988,
+  "kind": "pull_request",
+  "title": "tooling(pm): take node:path as a namespace in dispatch-gates so no fixture can shadow it",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T16:32:06Z",
+  "updated_at": "2026-09-03T17:27:23Z",
+  "closed_at": "2026-09-03T17:27:21Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": "2026-09-03T17:27:21Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/14988",
+  "body": "Fixes #14688\n\n`selfTest()` binds fixture values to two names this module imports from `node:path`, so a later case reaching for either gets the fixture instead of the function and dies at run time. Parse-time checks cannot see it; the run-time message names a real binding, so it reads like a broken import rather than a shadow.\n\n## What changed\n\nThe module took five bare names from `node:path`. It now takes one namespace binding, and the 149 genuine call sites are spelled through it. **Nothing else moved** — this is a binding-name change, as the triage scope ruling requires.\n\n## The namespace is spelled `nodePath`, not `path` — measured, not stylistic\n\nThe obvious spelling is refuted by this file. Measured on the merged tree with a scope-resolving AST pass over every identifier reference (not a grep — the file is full of `resolve(`/`join(` inside fixture strings and prose):\n\n| namespace candidate | conflicts |\n| --- | --- |\n| `path` | **1** |\n| `nodePath` | 0 |\n\nThis file already binds `path` locally **16 times** — 3 block consts and 13 parameters. One of them is load-bearing:\n\n```js\nfunction readTrackedSource(path) {\n  return readFileSync(join(ROOT, path), 'utf8');\n}\n```\n\nUnder a `path` namespace that line becomes `path.join(ROOT, path)`, calling `.join` on a string parameter — re-creating the exact defect this PR closes, in the same file, on the same day. `nodePath` occurs nowhere in `scripts/`.\n\n## Why the namespace rather than renaming the two fixtures\n\nRenaming the fixtures fixes today's two instances. The namespace removes the possibility: after this change **zero** module-scope `node:path` bindings remain, so there is nothing left for a fixture to shadow. The AST pass confirms the end state — the only surviving bare references to the five names are the 3 deliberate fixture uses, each binding to its own local fixture.\n\nThere is a second, structural gain. The two shadowed names were dangerous precisely because **no existing case inside `selfTest()` called them**, so the shadow armed a trap for a future case instead of breaking a present one. `nodePath` is called ~100 times inside `selfTest()` itself, so any future binding of that name fails immediately, at the moment it is written, rather than lying in wait.\n\n## The diff is mechanically reviewable\n\nEvery changed line is a prefix insertion. Stripping the inserted prefix from the result reproduces the previous file **byte for byte except the import line**:\n\n```\n$ sed 's/nodePath\\.//g' scripts/pm/dispatch-gates.mjs  ...stripped\n$ diff previous-file stripped   ...one hunk, at line 363:\n\n  previous:  import { basename, join, dirname, relative, resolve } from 'node:path';\n  now:       import * as nodePath from 'node:path';\n```\n\nThat single hunk is the whole semantic content of a 140-line diff. No assertion, fixture value, string literal or comment moved; the file is the same 17,974 lines.\n\n## Verification\n\n**The battery is the verdict, and it is identical.** `pnpm check:pm-dispatch-gates` before and after, both under `scripts/pm/os-verify-lock.sh`:\n\n```\nbefore (base 5bc2f27):  ✓ dispatch-gates self-test: 1288 cases pass.\nafter  (head 28943b59): ✓ dispatch-gates self-test: 1288 cases pass.\n```\n\nStronger than the count: all **1,289** streamed case lines diff byte-identical between the two runs, 0 failures on each side.\n\n**Reverse verification**, both legs injected at the same program point (immediately after the fixture binding), each mutation proven on disk by occurrence count and object hash, each restored to the `HEAD` blob with `git diff HEAD` empty:\n\n| leg | tree | probe | reading |\n| --- | --- | --- | --- |\n| A | unfixed base | `relative(ROOT, ROOT)` | `TypeError: relative is not a function` |\n| B | this branch | `nodePath.relative(ROOT, ROOT)` | returned `\"\"`, and `typeof relative` is still `string` |\n\nLeg B's second reading is the point worth stating plainly: the fixture is untouched and the bare name is still a string. The defect is closed by removing the module binding that could be shadowed, not by making the bare spelling work.\n\n`node --check` passes on both trees and is **not** offered as evidence — by construction it cannot see this defect class.\n\n**Gates.** Re-derived after the final commit from the actual change set (`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack`, no paths): 20 runnable families. 19 ran green; `check-test-completeness.mjs` exits 3, which is its own NOT MEASURED code — it grades a saved `turbo run test` log and states \"⛔ It is not a red, and there is nothing here to fix.\"\n\n**ESLint** narrowed to the changed file, with the invariance evidence: eslint's own `--print-config` reports 2 active rules for this file, neither type-aware; `--format json` reports 1 file linted, 0 errors, 0 warnings. No `project`/`projectService` is configured anywhere in `eslint.config.mjs`, so this diff cannot move the verdict of any file it does not touch.\n\n## Scope\n\nBinding names only, one file. Out of scope and untouched, as the dispatch fences them: the `--tier --residue` refusal table (#14753) and the derivation coverage work (#14880) both remain open and queued behind this. #14672 stays exactly as merged — its `ROOT`-derived workaround is left in place and is still correct; only the comment above it now describes a hazard that no longer exists, which is a follow-up rather than a rider here.\n\n`skip-changeset`: `scripts/pm/**` publishes nothing from any package.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n_Generated by [Claude Code](https://claude.ai/code/session_019RfFHiRCSs3JXLK4cwcfox)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_019RfFHiRCSs3JXLK4cwcfox)_"
+}

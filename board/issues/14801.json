@@ -1,0 +1,34 @@
+{
+  "number": 14801,
+  "kind": "pull_request",
+  "title": "chore(lint): delete inert eslint-disable family comments in package sources",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T02:31:48Z",
+  "updated_at": "2026-09-03T08:42:05Z",
+  "closed_at": "2026-09-03T08:42:03Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-09-03T08:42:03Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/14801",
+  "body": "Fixes #14529\n\n## What\n\nDeletes all `eslint-disable` / `eslint-disable-next-line` / `eslint-enable` family\ncomments from non-test source files under `packages/**` (maintainer-ruled A,\nruling comment 5518653161). `package.json:32`'s only lint invocation\n(`eslint . --no-inline-config`) ignores every inline configuration comment, so\nthese are inert regardless of which rule they name; `--no-inline-config` stays\nunchanged.\n\n## Measured at branch base `89a156af8`\n\n```\neslint-disable family comments in packages/** (non-test): 58\nfiles carrying them:                                       26\n```\n\n(The card's original estimate was 134/45 at `ed44512`; re-measuring the same\npopulation definition directly against that commit — `git grep` over\n`packages/**`, excluding `dist/`, `node_modules/`, `*.test.*`, `test/`,\n`tests/`, `__tests__/` — also returns 58/26, not 134/45, so the discrepancy\npredates this branch and isn't drift from commits landing between `ed44512`\nand `89a156af8`. Reported as measured, not reconciled against the original\ncount.)\n\n## Step 1 — per-comment measurement against `eslint.config.mjs`\n\nEvery rule named by the 58 comments, checked for a `rules:` entry in\n`eslint.config.mjs`:\n\n| Rule named | Occurrences | Configured in `eslint.config.mjs`? |\n|:--|--:|:--|\n| `@typescript-eslint/no-explicit-any` | 29 | No |\n| `no-console` | 20 | No |\n| `eqeqeq` | 3 | No |\n| `@typescript-eslint/no-unused-vars` | 3 | No |\n| `no-constant-condition` | 2 | No |\n| `no-new` | 1 | No |\n| `no-control-regex` | 1 | No |\n| `@typescript-eslint/ban-ts-comment` | 1 | No |\n| `@typescript-eslint/no-implied-eval, no-new-func` | 1 (2 rules) | No |\n| bare `/* eslint-disable */` (no rule named) | 1 | N/A |\n\n**Zero of the named rules are configured.** So the deletion is doubly safe:\ninert under `--no-inline-config`, and would still be inert without that flag\n(matching the card's own example — `no-console` was never configured either).\nNo configured-rule row exists, so no follow-up card is filed for an exposed\nfinding.\n\n## Step 2 — delete\n\n58 lines deleted across 26 files, all whole-line comments (none were trailing\ncomments on a code line, verified before deleting) — pure comment removal, `git\ndiff --stat` shows only deletions in the 26 source files.\n\n## Step 3 — collateral: one line-anchored ledger needed re-syncing\n\n`check:system-context-census` pins exact line numbers in\n`content/docs/permissions/system-context.mdx` to elevation-read sites in\n`packages/rest/src/rest-server.ts`. Deleting the one `eslint-disable-next-line`\ncomment in that file (originally line 4331) shifted 5 downstream anchors by\none line, which the gate correctly flagged as line rot\n(`site-without-a-row` / `anchor-is-not-a-read-site`, 10 problems). This is the\ngate's own maintained repair path, not a new finding: `node\nscripts/check-system-context-census.mjs --fix` re-anchored the 5 references\n(`4716→4715`, `6079→6078`, `6327→6326`, `6758→6757`, `6951→6950`) with no\ncontent change beyond the line numbers, and the gate is green before and after\non the re-synced tree. One line changed in `content/docs/permissions/system-context.mdx`\n(not `content/docs/releases/**`).\n\n`pnpm lint` is green both before and after this diff (same result — the flag\nmakes the comments' removal a no-op for lint's own verdict, confirming the\npremise).\n\n## Tests\n\n- `pnpm lint` (via `scripts/pm/os-verify-lock.sh`): **green**, before deletion and\n  after, both on the pre-merge tree and again on the merged head `aca7d5cd4d`.\n- `pnpm exec turbo run build` + `pnpm exec turbo run typecheck`, scoped to the\n  17 touched packages plus their full dependency closure (turbo resolves\n  `^build`/`^typecheck`): **green** — 57/57 build tasks, 67/67 typecheck tasks.\n- `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --commands`:\n  34 local gate families named for this diff. Ran all 34:\n  - 32 green.\n  - `check:system-context-census`: 10 problems from line-number rot (see Step 3\n    above) — fixed with the gate's own `--fix`, verified green after.\n  - `check:dual-build-cjs-loads` and `check:i18n-coverage`: both exit\n    PREREQUISITE-NOT-MET / COULD-NOT-MEASURE — each needs a full-workspace\n    `pnpm build` (dozens of packages, e.g. `@objectstack/connector-mcp`,\n    `@objectstack/studio`) that this scoped verification didn't run; **NOT\n    MEASURED locally**, not a finding. CI's `Build Core` / `Type Check` jobs\n    build the full workspace and will measure these for real.\n  - `check-test-completeness.mjs`: exits 3 by design without a `turbo run test`\n    log path (CI-only invocation) — **NOT MEASURED locally**, not a finding.\n\n## Scope\n\nComment-only diff; no code, no `eslint.config.mjs`, no `package.json` lint\nflag. `skip-changeset` label applied (no public surface moves).\n\nPR session: https://claude.ai/code/session_01WLJQhde67SeTccsmnBVarV\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01WLJQhde67SeTccsmnBVarV\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WLJQhde67SeTccsmnBVarV)_"
+}

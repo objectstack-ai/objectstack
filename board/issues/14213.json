@@ -1,0 +1,34 @@
+{
+  "number": 14213,
+  "kind": "issue",
+  "title": "driver-sql: 7 unbudgeted LIVE-cell hooks outside #14100, and a measured correction — hooks inherit hookTimeout (10000ms), not testTimeout (5000ms)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:engine",
+    "priority:p3",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-01T13:03:22Z",
+  "updated_at": "2026-09-03T10:43:29Z",
+  "closed_at": "2026-09-03T09:31:07Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14213",
+  "body": "Blocked-by: #14648\nUnlock-action: re-check PR #14629\n\n> ⚠️ **State note (engine execution seat, 2026-09-02T17:55Z).** The work on this card is **complete and reviewed** — PR #14629 is open, ready, `mergeable_state: clean`, ACCEPTed. It was **ejected from the merge queue** at 17:45Z by a failure in `packages/cli/test/run-dev-unbuilt-workspace.e2e.test.ts`, a test this diff cannot reach; that flake is tracked on the queue-flake anchor **#14648** (`domain:cli`), where this seat posted the diagnosis as comment 5513952826. The two machine-readable lines above put this card in the unlock scan's path: the `Unlock-action:` line exists so that closing #14648 triggers a **re-check of the existing PR**, ⛔ never a re-dispatch — the code is already written and a second dev would redo landed work. Standing-down reasoning on the PR: comment 5513961102.\n\n---\n\nFiled while implementing #14100 (unassigned: recording only). #14100 is scoped to exactly 4 `it()` and the 2 `beforeAll` hooks in `sql-driver-backend-fault-envelope.test.ts`, and that scoping is respected — nothing here was folded into its PR (#14212), following that card's own \"separate card rather than a rider\" precedent.\n\nTwo findings, one measured and one structural. The measured one comes first because it reframes the other.\n\n## 1. A hook does NOT inherit the 5000ms default — it inherits `hookTimeout`, measured at 10000ms\n\nBoth #13902 and #14100 describe the defect class as work \"on vitest's inherited 5000ms default\". For `it()` sites that is exact. **For hooks it is wrong**, and the difference was measured in `packages/drivers/driver-sql`'s real config (which sets neither `testTimeout` nor `hookTimeout`, so both are vitest's own defaults):\n\n| Leg | Shape | Result |\n|---|---|---|\n| A1 | `it()`, 6000ms sleep, no budget | exit 1 — `Test timed out in 5000ms` (5.58s) |\n| A2 | `it()`, 6000ms sleep, `60_000` | exit 0 (6.54s) |\n| B1 | `beforeAll`, 6000ms sleep, no budget | **exit 0 — passed** (6.46s) |\n| B3 | `beforeAll`, 11000ms sleep, no budget | exit 1 — `Hook timed out in 10000ms` (10.56s) |\n| B4 | `beforeAll`, 11000ms sleep, `60_000` | exit 0 (11.52s) |\n| A3 | `it()`, 11000ms sleep, `60_000` | exit 0 (11.50s) — control |\n\nProbes were run through the shared verify lock, exit codes captured by redirect before any pipe, on-disk landing proven by marker counts, and removed by trap with absence re-proven.\n\nConsequences, none of which change #14100's fix:\n\n- An unbudgeted **hook** has twice the headroom of an unbudgeted `it()`. A hook is therefore a *less* urgent instance of this class than an `it()`, not a more urgent one — worth knowing before anyone sizes the remaining work.\n- The third argument demonstrably does lift a hook's ceiling (B4), so budgeting hooks is effective, not decorative.\n- Any prose in this class that says hooks sit at 5000ms should be corrected when touched. #14212 corrects it at the two sites it edits.\n\n## 2. Seven unbudgeted hooks whose driver argument is unconditionally live\n\nA per-site AST walk over all 159 test files in `packages/drivers/driver-sql/src` (193 driver-constructing sites total), classifying each site by **reading its `new SqlDriver(...)` argument** rather than by filename, finds these hooks with an unconditionally live cell argument and no explicit budget. None is named by #14100:\n\n| Site | Hook | Argument | What it does |\n|---|---|---|---|\n| `sql-driver-datetime-mysql-storage.test.ts` | `beforeEach` (x3, three suites) | `MYSQL_CELL.config()` | drop table, `initObjects(...)` |\n| `sql-driver-datetime-postgres-timezone.test.ts` | `beforeAll` | `PG_CELL.config()` | connect, read `current_setting('TimeZone')`, disconnect |\n| `sql-driver-datetime-postgres-timezone.test.ts` | `beforeEach` | `PG_CELL.config()` | drop table cascade, `initObjects(...)` |\n| `sql-driver-json-binding-without-ddl.test.ts` | `beforeAll` | `PG_CELL.config()` | connect, out-of-band `create table`, register metadata |\n| `sql-driver-time-live-dialects.test.ts` | `beforeEach` | `MYSQL_CELL.config()` | drop table, raw `create table` |\n\nThree of these are `beforeEach`, so the cost is paid **per test in the suite**, not once — the heaviest shape in the population and the one #14100's framing does not cover at all.\n\nWorth noting for whoever picks this up: the last row of the `json-binding-without-ddl` group sits in a file #14212 already edits (for its `it()` site). It was left alone deliberately rather than fixed in passing, because #14100's dispatch bounded the file surface to named sites and this card's lineage explicitly rules out silent package-wide creep.\n\nSeparately, a large population of `beforeAll`/`beforeEach` hooks inside `declareDialectCell(...)` callbacks take `cell.config()` and are therefore live for the pg and mysql cells but embedded for the sqlite cell. Those are **not** mechanical: budgeting them trades against keeping the sqlite path fast, which is a real judgement call rather than a missing argument. They are mentioned so the next sweep does not mistake them for the same easy shape, not proposed as work here.\n\n## The standing-gate ruling\n\nThe filing seat on #14100 ruled deliberately **not** to build a standing gate for this defect class, on the grounds that the repo already runs 197 gates and the class had exactly one measured instance (#13688) — and recorded that the ruling gets revisited if a third occurrence appears. That condition is now arguably met in population terms, though still with **one** measured timeout, not three. Recording the trigger; the decision is the maintainer's, not this card's.\n\nMethod note carried forward from #14100: use a **per-site AST walk**, not a file-level grep. #13902's original script pre-filtered out any file containing a budget line and thereby hid a true positive."
+}

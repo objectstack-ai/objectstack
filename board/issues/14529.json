@@ -1,0 +1,36 @@
+{
+  "number": 14529,
+  "kind": "issue",
+  "title": "134 `eslint-disable` comments across 45 source files are structurally inert — `pnpm lint` runs `--no-inline-config`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T10:13:11Z",
+  "updated_at": "2026-09-03T10:30:38Z",
+  "closed_at": "2026-09-03T08:42:04Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14529",
+  "body": "Split out of #14527 by triage. #14527 is a one-line `console.log` deletion in `packages/metadata`; it noticed in passing that the sibling suppression comments beside it do nothing, and correctly declined to answer the wider question. This card carries that question, because it needs a ruling and must not block a trivial deletion.\n\n## Measured at `origin/main` `ed44512`\n\n```\neslint-disable comments in package sources (non-test):  134\nfiles carrying them:                                     45\n```\n\n`package.json:32`:\n\n```\n\"lint\": \"node --stack-size=4000 node_modules/eslint/bin/eslint.js . --no-inline-config\"\n```\n\n`--no-inline-config` tells ESLint to ignore **every** inline configuration comment. So all 134 are inert under the repo's only lint invocation — not \"inert because the rule they name isn't configured\", but inert unconditionally, including the ones naming rules that *are* configured.\n\nThe concrete example that surfaced this: `packages/metadata/src/plugin.ts:627,634,642,649,653` each carry `// eslint-disable-next-line no-console`, and `no-console` has zero hits in `eslint.config.mjs`. Two independent reasons for the same nothing.\n\n## Why it is worth a card\n\nA suppression comment is a claim: *this rule fires here, and we decided to allow it.* A reader — human or AI — treats it as evidence that the line was considered and ruled on. 134 of those claims are false in this tree. The failure mode is quiet and in the wrong direction: someone deletes a disable comment expecting lint to go red, sees green, and concludes the code is clean; or adds one expecting a suppression, and gets one only by accident because nothing was firing anyway.\n\n`--no-inline-config` is itself very likely deliberate and correct — it stops code from opting out of the gate, which is the strengthening choice. The defect is not the flag; it is 134 comments that contradict it.\n\n## Options\n\n| | what it does | real cost |\n|:--|:--|:--|\n| **A** | Delete all 134 inert comments; keep `--no-inline-config` | touches 45 files; noisy diff; must confirm lint stays green after each removal, since a comment naming a *configured* rule may be masking a real finding in some other invocation |\n| **B** | Keep them, document the flag where an author would look, and add a gate refusing NEW `eslint-disable` comments | smallest diff; leaves 134 false claims in the tree |\n| **C** | Drop `--no-inline-config` so the comments mean what they say | ⛔ **gate weakening** — code regains the ability to opt out of lint, file by file, with no review of the opt-out. Human floor; listed for completeness, not recommended |\n\n## What is NOT claimed\n\n- Not measured: whether any of the 134 names a rule that *is* configured and would fire — that determines whether option A is a pure deletion or uncovers real findings, and it is the first thing an implementer should run.\n- Not measured: whether any other lint invocation in CI omits `--no-inline-config`, which would make some of them live in that context only.\n\n&lt;!-- os-decision-facets --&gt;\n\n- **① 项目长远合理性(权重 ≥50%,领起推荐)** —— 代码里有 134 处注释在声明「这里我们特意放行了某条规则」,而仓库唯一的 lint 调用从根上忽略所有这类注释。**一个说法和事实长期并存地矛盾,就是最坏的一种契约增生** —— 它不增加功能,只增加读者的错误信念。长远终态只有两种自洽形态:注释有效(选项 C)或注释不存在(选项 A)。选项 B 是把矛盾永久留在树里,只在旁边贴一张说明。①指向 A —— 因为 C 是靠放开门禁来自洽,那是往错误方向缩特例。\n- **② 实际业务拉动** —— 零客户拉动:没有任何客户会看到这 134 条注释。拉动全在开发者一侧,而且是真实发生过的形状 —— #14527 正是有人读到这些注释、以为旁边那行 `console.log` 是漏了标记,才顺手量出来的。零外部拉动 ⇒ 按分歧推荐序本该荐④不扩散,但见下:④在这里恰好也指向 A。\n- **③ 防 AI 犯错** —— 出错时谁看到什么:一个 AI 作者删掉一条 disable 注释,期待 lint 变红以确认自己改对了,结果是绿的 —— **静默的假确认**,比报错危险得多。反过来,它加一条 disable 注释来压制自己引入的告警,以为压住了,实际上从来没有告警。两个方向都是静默。删干净(A)之后,注释在与不在,含义就都是真的。\n- **④ 创业阶段不扩散** —— 每一条已存在的注释都是永久义务:每次改 lint 配置都要重新想一遍这 134 处会不会活过来。remove 优于 declare-and-maintain,而这里的 remove 恰好就是选项 A。选项 B 反而新增一道门禁去守护一堆本来就该删掉的东西 —— 用新义务保护旧包袱。\n\n**推荐:A —— 删掉全部 134 条,保留 `--no-inline-config`。** ①③④同向,②零拉动在这里不构成反对,因为 A 本身就是「移除」而不是「新增」。\n⚠️ **A 有一个必须先量的前置条件**(见上文「未测量」):这 134 条里若有指向**已配置规则**的,删掉它就可能露出真实告警。所以 A 的执行顺序是:先逐条量出哪些指向已配置规则、在别的调用下会不会触发,再删;露出的真实告警各自成卡,⛔ 不在这张卡里顺手修。\n**回退:B** —— 若维护者判定 45 个文件的改动面在当前节奏下不值得,则保留注释、把 `--no-inline-config` 写进作者会看的地方,并加一道门禁拦住**新增**的 disable 注释,防止这个数字继续长。\n**置信缺口(本分析看不见什么):** 没有量 CI 里是否存在另一条**不带** `--no-inline-config` 的 lint 调用 —— 若有,则这 134 条在那个上下文里是活的,A 就从「删死代码」变成「改变 CI 行为」,推荐要重排。这是唯一能翻掉 A 的变量,本轮没量。另外 ⛔ 本席不碰选项 C:放开 `--no-inline-config` 让代码逐文件退出 lint,是门禁弱化,恒人工。\n\nRefs: #14527 (the split parent — the `console.log` that surfaced this).\n\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

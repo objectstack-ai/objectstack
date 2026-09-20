@@ -1,0 +1,36 @@
+{
+  "number": 14176,
+  "kind": "issue",
+  "title": "perf: authed data-API throughput is pinned to the knex default pool (~10/replica) with no OS_* knob — a 3-replica cluster saturates at ~25 rps while Postgres sits at ~21/200 connections",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "performance",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-01T10:02:38Z",
+  "updated_at": "2026-09-03T08:22:32Z",
+  "closed_at": "2026-09-03T08:17:56Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14176",
+  "body": "## Summary\n\nOn a multi-replica deployment the authed, DB-touching data API saturates at a low, replica-count-bound throughput because the SQL driver never sets a connection `pool` size and no `OS_*` env exposes one for the primary datasource — so every replica runs at knex's default pool (`max: 10`), and the pool, not the database, is the ceiling.\n\n## Measured (live 3-replica EE cluster, Traefik LB, Postgres 16 `max_connections=200`)\n\nLoad ramp, 8s/step, throughput = completed req/s across the whole cluster:\n\n| path | conc=10 | conc=50 | conc=100 | conc=150 |\n|---|--:|--:|--:|--:|\n| `/api/v1/health` (no DB) | — | 1031 rps | 1051 rps | (1376 @400) |\n| `GET /data/note` (authed, org-scoped) | 19 rps, p50 513ms | 24 rps, p50 1988ms | 25 rps, p50 3738ms | **77.8% 503**, p99 12.8s |\n| `POST /data/note` | 21 rps | 23 rps | 25 rps (@80) | — |\n\n- Authed data throughput **plateaus at ~25 rps** and latency climbs linearly with concurrency (closed-system saturation: throughput flat ⇒ latency = concurrency ÷ throughput). The static front door does ~1,000–1,400 rps, so Traefik/Node/HTTP is not the constraint.\n- A 45s sustained run at conc=50 held 27 rps / 0 errors / p50 1746ms with **no drift** — stable, just capped.\n- Throughout, a 5s sampler showed Postgres holding **~9–21 of its 200 connections**; at steady state the app accounts for **~9 total across 3 replicas**. The DB has ~10× unused headroom. The bottleneck is the client pool, not the server.\n\n## Root cause\n\n`SqlDriver.withConnectBound` (`packages/drivers/driver-sql/src/sql-driver.ts:4468`) injects only `pool.createTimeoutMillis`; it sets **no `pool.min` / `pool.max`**, so knex's default (`min 2, max 10`) applies per driver instance. A repo-wide grep finds **no env read for pool sizing** (`OS_DB_POOL*` / `POOL_MAX` / `process.env.*POOL` → 0 hits). A per-datasource `pool` field does exist and pg honors it (#5714), but that is a datasource-config knob — there is no operator-facing env to size the **primary** datasource's pool (the one behind `OS_DATABASE_URL`) on a deployment.\n\nNet: 3 replicas × ~3–10 pooled connections ÷ ~350ms per org-scoped query ≈ the ~25 rps observed. Adding replicas raises the ceiling linearly; raising the per-replica pool would too, but the operator has no supported way to do the latter.\n\n## Recommendation — expose a pool knob\n\nAdd an `OS_DB_POOL_MAX` (and `OS_DB_POOL_MIN`) env, read where the primary datasource's knex config is built, and thread it into `knexConfig.pool` alongside the existing `createTimeoutMillis`:\n\n```\npool: { min: envInt('OS_DB_POOL_MIN', 2), max: envInt('OS_DB_POOL_MAX', 10), createTimeoutMillis: DEFAULT_CREATE_TIMEOUT_MS }\n```\n\nThen document it next to `max_connections` guidance in the self-hosting / cluster docs (the deploy compose already tells operators to tune Postgres `max_connections=200` for \"N replicas × pool\" — but there is currently no way to set the pool half of that product). Sizing rule of thumb: `replicas × OS_DB_POOL_MAX < max_connections`, leaving headroom for migrations/admin.\n\n## Secondary observation (resilience, relates to #13408)\n\nAt conc≥150 the data path sheds to `503` rather than queueing; with Traefik readiness-draining, a sustained concurrency spike can drain the whole fleet (the same failure shape as the stuck-datasource readiness case, #13408). A right-sized pool plus a bounded acquire-queue would let the cluster degrade in latency rather than availability.\n\nFound during a cluster load/stress pass; full numbers in the QA record objectstack-ai/objectstack#13404. Lineage: #5714 (datasource `pool` honored by pg but sqlite drops it), #3769 (pool-exhaustion symptom)."
+}

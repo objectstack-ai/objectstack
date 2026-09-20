@@ -1,0 +1,34 @@
+{
+  "number": 14587,
+  "kind": "issue",
+  "title": "platform-objects(i18n): zh-CN metadata-forms `dashboard.sections.layout` is stale against its source",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "i18n",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T13:25:00Z",
+  "updated_at": "2026-09-03T18:07:17Z",
+  "closed_at": "2026-09-03T18:06:55Z",
+  "closed_by": {
+    "login": "os-musk",
+    "id": 323835826,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14587",
+  "body": "Found while localizing the Studio dashboard property panel (objectui#7254, PR objectstack-ai/objectui#7366).\n\n`packages/platform-objects/src/apps/translations/zh-CN.metadata-forms.generated.ts` carries:\n\n```\ndashboard.sections.layout = { label: \"布局\", description: \"栅格与响应式\" }\n```\n\nThe source it translates — `packages/spec/src/ui/dashboard.form.ts` — says:\n\n```\n{ label: 'Layout', description: 'Grid sizing and refresh cadence.', ... }\n```\n\n「栅格与响应式」 (grid and responsiveness) is not what that section is about any more: it is grid sizing plus the refresh cadence. The source moved and the translation did not follow.\n\nThis is the failure mode the generated file's own header already names — merge only fills GAPS, so a present-but-stale leaf is never corrected, and nothing (`os i18n check` included) can tell a leaf a translator updated on purpose from one nobody has looked at since the source moved.\n\nTwo parts worth separating:\n1. the specific stale leaf above (and a sweep for its siblings — `dashboard.fields.header.helpText` reads 「标题、操作按钮与筛选」 against a source that says \"Dashboard header config (title, subtitle, actions)\", so it looks like the same vintage);\n2. whether the source-hash machinery already present in that directory (`zh-CN.source-hashes.generated.ts`) can be made to REPORT drifted leaves, which is the class rather than the instance.\n\nNo fix attempted from the renderer side: these strings are the platform's.\n"
+}

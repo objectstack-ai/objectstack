@@ -1,0 +1,36 @@
+{
+  "number": 14597,
+  "kind": "issue",
+  "title": "examples/app-multi-package: the module's \"no `scope` key\" property never reaches the served row — `defineStack` materialises `scope: 'project'`, so the fixture cannot separate the server `writable` verdict from the client `scope !== 'project'` heuristic it claims to",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T14:15:43Z",
+  "updated_at": "2026-09-03T04:51:36Z",
+  "closed_at": "2026-09-03T04:51:11Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14597",
+  "body": "Found during the post-landing verification of #14439 (PR #14513) on `main` `7085f9053`, booting `examples/app-multi-package` with `objectstack dev --seed-admin`. Verification-only finding — nothing fixed here.\n\n## The claim the fixture makes\n\n`examples/app-multi-package/src/packages/orders/index.ts` (and the README table) says the module package deliberately **carries no `scope` key**, and that this is load-bearing:\n\n> `ManifestSchema.scope` defaults to `'project'`, so a scope-less module is the row that separates the server's writability verdict from a client-side `scope !== 'project'` heuristic (ADR-0070 D2 / ADR-0130 Consequences row 6).\n\nobjectui#7331 (the Studio switcher fix for #14375) was motivated by the same premise: \"a `type: module` sub-package of a multi-package artifact is served with **no `scope` key**, because the schema default is applied at parse time while the artifact load path hands the raw manifest body to `registerApp`\".\n\n## What is actually served\n\nThe property holds in the **source** and nowhere after it. `defineStack` parses the manifest through `ManifestSchema`, whose `scope` is `z.enum([...]).default('project')` (`packages/spec/src/kernel/manifest.zod.ts:263`), so the default is written into the compiled artifact and into every served row:\n\n- `dist/objectstack.json` (what `os dev` booted — the boot log says so): `.packages[].manifest` → `{\"id\":\"com.example.multi.orders\",\"type\":\"module\",\"has_scope\":true,\"scope\":\"project\",…}` and `{\"id\":\"com.example.multi.core\",\"type\":\"app\",\"has_scope\":true,\"scope\":\"project\",…}`.\n- `GET /api/v1/packages` (row trimmed to the manifest):\n\n```json\n{\"manifest\":{\"id\":\"com.example.multi.orders\",\"namespace\":\"crm\",\"defaultDatasource\":\"default\",\"version\":\"1.0.0\",\"type\":\"module\",\"scope\":\"project\",\"name\":\"Multi-Package Orders\",\"description\":\"The Module half of a two-package release artifact (ADR-0130 D4)\",\"dependencies\":{\"com.example.multi.core\":\"^1.0.0\"},\"engines\":{\"protocol\":\"^17\"}},\"status\":\"installed\",\"enabled\":true,\"writable\":false}\n```\n\n- `GET /api/v1/meta/package` → same two rows, `scope: \"project\"` on both, `writable: false` on both.\n\n## Why it matters\n\nThe server verdict is right (`writable: false` on both rows — #14375/#14430 work as designed), but the fixture does **not** deliver the discriminating property it documents: with `scope: \"project\"` served, the pre-#7331 client heuristic `scope !== 'project'` also answers \"read-only\", so a console that ignores `writable` entirely renders this fixture identically to one that honours it. Measured: the vendored console at the pinned objectui `d8ec8d6d` (56 commits before objectui#7331) and objectui `main` `7dedec6f` (contains #7331) show the same two \"Read-only\" badges on this fixture — see the verification comment on #14439. A fixture that is supposed to catch a regression to the heuristic cannot catch it.\n\nThis is Prime Directive #10's \"declared ≠ delivered\" shape, one layer down: the comment documents a row shape the producer never emits.\n\n## What to decide (not deciding here)\n\n- If a genuinely scope-less served row exists on some path (an installed marketplace package whose manifest bypasses `defineStack`?), the fixture should exercise *that* path, or the claim should move to where it is true.\n- Otherwise, drop the \"no `scope` key\" claim from the fixture source + README, and let #14375's `writable` field stand on its own test (the `package-list-writable-carry` pin), so the docs stop promising a discriminator the artifact does not carry.\n\nRepro: `pnpm exec turbo run build --filter='./examples/app-multi-package...'`, then in `examples/app-multi-package`: `./node_modules/.bin/objectstack dev --seed-admin -p 4310 -d file:/tmp/mp/data.db`; sign in as `admin@objectos.ai/admin123`; `GET /api/v1/packages` and `jq '.packages[].manifest | {id, has_scope: has(\"scope\"), scope}' dist/objectstack.json`."
+}

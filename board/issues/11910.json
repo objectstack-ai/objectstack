@@ -1,0 +1,34 @@
+{
+  "number": 11910,
+  "kind": "issue",
+  "title": "[Decision] AGENTS.md is at its line ceiling with ZERO headroom, so any honest repair of the published spellings mirror crosses it — how should the 8 lines be paid?",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T00:09:29Z",
+  "updated_at": "2026-09-02T18:16:47Z",
+  "closed_at": "2026-09-02T18:16:47Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11910",
+  "body": "Filed as its own card because `scripts/pm/check-skill-line-ratchet.mjs:58` requires it: a ceiling change *\"needs its own card and a maintainer's ruling, not a CEILINGS row added in passing.\"* `:66` and `:85`–`:86` add that **raising** one requires a maintainer ruling quoted verbatim in the raising PR.\n\n- Blocks: PR **#11908** (card **#10855**), a governed draft awaiting @os-zhuang. `check:pm-skill-ratchet` is red there until this is ruled.\n- ⛔ The CEILINGS map is untouched and must stay untouched until a ruling exists.\n\n## Why a repair is owed at all\n\n`scripts/check-cross-package-test-inputs.mjs` is a source scan, so a path spelling it does not recognise produces **no flag** — a test whose reads escape its package goes undeclared silently. That is why its recognised set is published in `AGENTS.md` instead of living only in the implementation. Nothing held the two copies in step, and the copy has drifted three times (#10163, #10854, #10855). Measured on current `origin/main`:\n\n| reading | count |\n|---|---:|\n| `findUp` occurrences in the detector | **23** |\n| `findUp` mentions in `AGENTS.md` | **0** |\n| control — `__dirname` in `AGENTS.md` (a spelling that IS published) | **2** |\n\nThe control makes that zero a reading rather than a dead grep. ⭐ Twice the stale line was the stated **reason for a prohibition**, so a rotting mirror does not merely misinform — it launders an obsolete rule into a live one.\n\n## Why it cannot be paid in place\n\nThe ratchet's doctrine is to cross a ceiling by compressing in place. `AGENTS.md` sits at **961/961 — zero headroom**, and the section cannot be reflowed shorter. Raw line widths of the five paragraphs, against the 90-column target the previous raise was measured at:\n\n```\nlines  80-85:  86 75 84 90 86 82\nlines  87-90:  78 86 82 72\nlines 106-109: 86 87 90 89\nlines 111-116: 77 89 87 87 86 42\nlines 118-119: 90 75\n```\n\nLines already sitting at 72–90 against a 90-column target have no slack. The dev measured lossless rewrap headroom at **0 lines** by greedy rewrap; I re-derived the widths independently and reach the same conclusion. **Compression here means deleting content, not reflowing it.**\n\n## The +8, itemised\n\n| cost | lines |\n|---|---:|\n| block 11 → 17: the two `findUp` anchor seeds (one broken across two lines) | +3 |\n| the ⛔ manifest-name prohibition that qualifies them | +2 |\n| the `-> repo root` annotation | +1 |\n| prose 4 → 6: names the ratchet and that it can only go red | +2 |\n\n**+6 is the smallest number that leaves the block honest; +8 is the smallest that leaves it honest AND self-documenting.**\n\n## Options\n\n- **A — raise 961 → 969**, recorded in the map's comment the way the only previous raise (958 → 961) is, with the ruling quoted verbatim.\n- **B — raise to 967** and drop the two prose lines that name the ratchet. Authors then meet the gate as a CI red instead of reading about it in the file.\n- **C — compress 8 lines elsewhere in the section.** Measured headroom is 0, so this means deleting load-bearing prose.\n- **D — stop publishing the list in `AGENTS.md` and point at the tool** (net −8, and it retires the drift class outright rather than policing it).\n\n## Recommendation: **A**\n\n**C is the one I'd rule out.** It buys lines by deleting the section's own reasoning — trading a documentation defect for a worse one on the same page, and the prose it would have to cut is the prohibitions themselves.\n\n**D deserves a fairer hearing than \"it contradicts the section.\"** It is the only option that ends the class instead of policing it, and the sentence it contradicts is itself a policy choice you could revisit. What settles it against D: `AGENTS.md` *is* the instruction surface agents read, and the failure mode here is **silence** — an unrecognised spelling yields no flag, so the published list is the only thing telling an author what the scanner can see. An agent that must shell out to a tool to learn the spellings will frequently just not, and will never know it guessed wrong. The published copy earns its lines. But if the ceiling must hold at 961, **D is the honest choice, not C** — it needs the published-list paragraph deliberately rewritten, which is your call, not a line-budget tactic.\n\n**A over B** is the closer call. B's two lines are real savings and \"authors meet it as a CI red\" is a survivable cost. A wins because the gate is *new and otherwise undiscoverable* — and this whole card exists because a silent mechanism was undiscoverable. Learning about a ratchet from a red at review time is exactly the cost #10855 was filed to remove.\n\nA is also a **one-time truthful re-sync of a copy that had rotted, not a growth trend**: the mirror is mechanically enforced from now on, so every later line is priced at the moment it is incurred.\n\nThe follow-up once a ruling exists is one line — `['AGENTS.md', 961]` → `['AGENTS.md', 969]` in `scripts/pm/check-skill-line-ratchet.mjs`, with the ruling quoted beside it."
+}

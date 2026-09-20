@@ -1,0 +1,35 @@
+{
+  "number": 12911,
+  "kind": "issue",
+  "title": "pm-dispatch: the PM-side self-discipline class recurs because its remediations are RULES — #11901 chose construct-removal instead and held; four rule-shaped fixes failed again today",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-28T08:16:53Z",
+  "updated_at": "2026-09-03T10:00:47Z",
+  "closed_at": "2026-09-03T09:56:11Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12911",
+  "body": "Filed unassigned and **ungraded** by the `domain:cli` execution seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, R47. ⛔ Not graded, not routed. ⛔ **Not a third copy of #11901 / #11936** — those recorded *that* the PM under-applies its own rules; this card is about **why the remediation shape decides whether the fix holds**, with today's round as the measurement.\n\n## The class is known and was closed twice\n\n- **#11901** (closed) — *\"the PM tells every dev to read its comment body back, and never does so itself\"*\n- **#11936** (closed) — *\"the PM re-derives a card's numbers but not its scope — 4 measured instances in one round, one of which ordered work that had already landed\"*\n\n⇒ ⛔ The class did not stay fixed. Four fresh instances in one round today, listed below.\n\n## ⭐ The discriminator, measured: #11901's fix HELD, and the reason is in its own triage note\n\n#11901's skills-lane triage adopted the card's mechanical option as **primary**, and stated why in one clause:\n\n> *the PM-authored text does not use angle-bracket path placeholders; spell it in words* — **\"because it removes the construct instead of adding a check\"**; the read-back rule was recorded only as *\"the backstop\"*.\n\n**That fix held.** Verified against this seat's own output today: every dispatch order this round spells the restore instruction in words and carries no angle-bracket path placeholder. ⛔ Not because the PM remembered the rule — because **the construct it could get wrong is no longer available to type**.\n\n## ⚠️ And the fixes that were RULES did not hold — four instances today, all in one round\n\n| # | the rule that existed | what happened |\n| :-- | :--- | :--- |\n| 1 | *pull the full list; do not answer from an older snapshot* | Answered \"the queue is exhausted\" from a reading **11 hours old**; 40 commits had landed. The user had to say so twice. |\n| 2 | *every zero assertion carries a positive control* | Ran a census with a narrow anchor (**17**; the true figure was **29**) and nearly overruled a dev who was right. No control. |\n| 3 | *(same rule)* | Truncated a per-PR file list at 40 lines, against a PR that had **39** files — one line from a silent wrong fence. |\n| 4 | *the loop refills to the ceiling after review* | Twice finished a batch, wrote a summary, and left **0 of 5** dev seats filled until the user asked. |\n\n⭐ Each of these is a rule this seat had **written into a dispatch order in the same session** — it teaches them reliably and executes them unreliably.\n\n## ⭐ The one new discipline that DID hold this round is also construct-shaped\n\nMid-round this seat read the wrong ref because a background job overwrote `FETCH_HEAD` — shared state in the common git dir. The fix adopted was not \"remember that FETCH_HEAD is shared\"; it was **a different command**: fetch pull refs into a seat-owned namespace and read that. ⇒ it held for every subsequent read, ⭐ for the same reason #11901's did: **it changed what gets typed, not what has to be recalled.**\n\n## What this suggests the skill should say\n\n⛔ Not prejudged — the skills lane owns the shape. But the measurement points one way:\n\n1. **Rank remediation shapes.** When a PM-side failure is recorded, the amendment should prefer, in order: (a) remove the construct that permits the error; (b) make the correct form the only one the protocol spells; (c) add a check the PM must remember. ⭐ (c) is what has recurred; (a) is what held.\n2. **Name the four recurring PM instruments explicitly**, because they are the ones with no mechanical form today: a board/queue reading, a fence derivation, a census/grep, and the loop's refill step.\n3. ⚠️ **A candidate (a)-shaped move for instrument 1**, offered as an example rather than a recommendation: require every board/tree reading to be *stated with the timestamp it was taken at*. A reading without a timestamp then reads as malformed rather than as current — the staleness becomes visible in the artifact instead of living in the PM's memory.\n\n## ⚠️ What this card does NOT claim\n\n⛔ It does not claim (c)-shaped rules are useless — #11901 kept the read-back rule as a deliberate backstop for the cases where the construct cannot be removed, and that is right. ⛔ It does not claim today's four failures are novel; #11936 already measured the same class. ⭐ The new content is only the **discriminator**: one closed card's fix survived, three did not, and they differ by shape rather than by effort.\n\n## Re-check\n\n```\ngh issue view 11901   # the triage comment stating the construct-removal rationale\ngh issue view 11936\ngit grep -n \"绝对路径\" -- .claude/skills/pm-dispatch   # the surviving construct-removal, if it reached the skill text\n```\n\n⛔ Reverse-check any zero against a control. ⚠️ And note the newest false-zero mechanism measured this session: `git grep` reads only **tracked** files, so a newly created unstaged file returns a clean zero from a dead scan — caught by a dev only because its control also came back zero.\n\n## Duplicate check\n\nSearched this round (253 matches reviewed at the top). Nearest are **#11901** and **#11936**, both **closed** and both recording the *class*; **#12672**, **#12779**, **#12668** are open `domain:skills` cards on different pm-dispatch subjects (a stale lane row, a `Part of` wording warning, three standing rules). ⛔ No open card covers the remediation-shape question. ⚠️ Not exhaustively deduped outside `domain:skills`.\n\n## Refs\n\n- #11901 — the construct-removal precedent, and the source of the discriminator\n- #11936 — the same class, rule-shaped remediation\n- #12671 — this seat's earlier finding on filed cards' re-check greps returning uncontrolled false zeros (the dev-facing half of instrument 3)"
+}

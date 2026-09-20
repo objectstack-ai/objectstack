@@ -1,0 +1,37 @@
+{
+  "number": 15023,
+  "kind": "pull_request",
+  "title": "docs(adr): mark ADR-0126 Superseded — regimes replaced by the package install mode (ADR-0131); unreleased implementation reverted before 17.3",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset",
+    "tooling"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T17:49:02Z",
+  "updated_at": "2026-09-04T03:07:56Z",
+  "closed_at": "2026-09-04T03:07:54Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/15023",
+  "body": "## Summary\n\nMarks **ADR-0126** (packaged-metadata customization model: overlay / disable + clone / extend, one activation ledger) **Superseded**, per the maintainer's 2026-09-04 ruling, verbatim: 「ADR-0126 可以先作废」「相关开发撤回」.\n\nReplacement: the package **install mode** decided in ADR-0131 (PR #14976) — *managed* (sealed, upgradeable; the only mode on shared-DB multi-tenant) or *template* (copied once into the environment ledger, fully editable, no upgrade channel). Regime E (extend) stands because an extension is itself a package.\n\n## Why a separate, tiny PR\n\nSo the revert of the unreleased implementation can be dispatched now without waiting for the full ADR-0131 review. All of it landed **after the 17.2.0 tag** (2026-08-23) and must not ship in 17.3: #12185 (`sys_metadata_activation` object), #12190 (flow clone action), #12296 (packaged-flow disable), #12348 (packaged-action disable), #12419 (ledger convergence), the framework half of #12491 (Setup nav entry for the packaged-automation page). The revert card is filed separately and blocked only on this PR.\n\n- **Docs-only**, empty changeset (\"Releases nothing\").\n- ⛔ **Governed surface** (`docs/adr/**`) — human merge only, no auto-merge armed (Prime Directive #14).\n- `check:adr-links` green. ADR-0131 (PR #14976) carries the same status change; whichever merges second rebases trivially.\n\nRefs #13564 · #12150 · #12155 · #12156 · #12157 · #12158 · #12159 · #12160\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

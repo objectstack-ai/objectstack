@@ -1,0 +1,34 @@
+{
+  "number": 14981,
+  "kind": "pull_request",
+  "title": "docs(skills): spell Plugin.type as PluginType in objectstack-platform",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T16:24:17Z",
+  "updated_at": "2026-09-03T18:14:22Z",
+  "closed_at": "2026-09-03T18:14:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-09-03T18:14:20Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/14981",
+  "body": "Fixes #14589\n\n## What changed\n\n`skills/objectstack-platform`'s copy of the `Plugin` interface still spelled `type` as\nan open `string` with the value set carried in a trailing comment, at two sites. #13925\nnarrowed the published field on `@objectstack/core` to the closed `PluginType` (verified\non this branch: `packages/core/src/types.ts:105` `export type PluginType = 'standard' |\n(typeof CORE_PLUGIN_TYPES)[number];`, field at `:130` `type?: PluginType;`, and the type\nis publicly re-exported via `export * from './types.js';` in\n`packages/core/src/index.ts:21`). The skill was teaching a wider accept set than the\ncompiler enforces.\n\nTwo same-length, no-net-growth edits per the triage scope ruling (comment\n[5514027764](https://github.com/objectstack-ai/objectstack/issues/14589#issuecomment-5514027764)\non the card):\n\n- `skills/objectstack-platform/SKILL.md:723`\n- `skills/objectstack-platform/rules/plugin-lifecycle.md:48`\n\nBoth now read `type?: PluginType;` with a short pointer comment in place of the\nenumeration (`// closed set exported by @objectstack/core`), rather than dropping the\ncomment outright: `git grep -rn \"CORE_PLUGIN_TYPES\\|'theme'\"` etc. against\n`skills/objectstack-platform/` found no other site in the package naming the value set,\nso per the dispatch's mechanism assumption a minimal pointer stays rather than leaving the\nreader with nothing (the enumeration list itself is not restored).\n\n⛔ No sweep of `skills/**` for other stale type copies, per the triage ruling's scope\nlimit.\n\n## Line/token budget (skills token ratchet)\n\nWhole-file readings, before → after (`origin/main` `5bc2f27` → this branch):\n\n| file | lines before | lines after | tokens before | tokens after |\n|---|---:|---:|---:|---:|\n| `skills/objectstack-platform/SKILL.md` | 1223 | 1223 | 12871 | 12868 |\n| `skills/objectstack-platform/rules/plugin-lifecycle.md` | 263 | 263 | 1777 | 1775 |\n\nWhole-package totals (`skills/objectstack-platform/**`, 5 files): lines 2100 → 2100,\ntokens 20159 → 20154. Both files shrink individually (net deletions); the package total\nshrinks; no file's token ceiling rises. `node scripts/check-skills-token-ratchet.mjs`\nconfirms: `skills/objectstack-platform/SKILL.md 12868 / 12984 (-116)`,\n`skills/objectstack-platform/rules/plugin-lifecycle.md 1775 / 2408 (-633)`.\n\n## Reverse-check\n\n```\n$ git grep -n \"type?: string\" -- 'skills/**'\n(no output)\n$ git grep -n \"type?: PluginType\" -- 'skills/**'\nskills/objectstack-platform/SKILL.md:723:  type?: PluginType;          // closed set exported by @objectstack/core\nskills/objectstack-platform/rules/plugin-lifecycle.md:48:  type?: PluginType;  // closed set exported by @objectstack/core\n```\n\n## Governed surface\n\n`skills/**` is a governed surface (AGENTS.md Prime Directive #14): this PR stays **draft**\nand is merged by hand by the maintainer after the PM's in-seat review; no agent approves\nit and it does not enter the merge queue.\n\n## Gates\n\nDerived post-final-commit with `node scripts/pm/dispatch-gates.mjs --repo\nobjectstack-ai/objectstack` at `9c84135` (no paths passed): 21 command(s) apply (16 by\npath match + 5 declared whole-tree). Run under `scripts/pm/os-verify-lock.sh`, exit codes\ncaptured before any pipe:\n\n- `node scripts/check-ci-filter-parity.mjs` — OK\n- `node scripts/check-closing-keyword-parity.mjs` — OK\n- `node scripts/check-comment-mask-corpus.mjs` — OK (5824 files, 0 disagree)\n- `node scripts/check-cross-package-test-inputs.mjs` — OK\n- `node scripts/check-shard-attestation.mjs` — OK\n- `node scripts/check-skills-token-ratchet.mjs` — OK (see budget table above)\n- `node scripts/check-test-completeness.mjs` — **NOT MEASURED** (gate's own text: \"this\n  gate grades a saved `turbo run test` log, and no log was named\" — CI tees it; this card\n  touches no test files)\n- `pnpm --filter @objectstack/lint run check:doc-formula-expressions` — OK (after building\n  `@objectstack/formula` and `@objectstack/lint`'s dependency closure, which were not\n  built in the fresh worktree)\n- `pnpm --filter @objectstack/spec run check:skill-docs` — OK\n- `pnpm check:agent-test-spelling` — OK\n- `pnpm check:corpus-claim-drift` — OK\n- `pnpm check:cross-package-test-inputs` — OK\n- `pnpm check:doc-authoring` — OK\n- `pnpm check:nul-bytes` — OK\n- `pnpm check:pm-governed-merges` — OK\n- `pnpm check:refd-timer-probe` — OK\n- `pnpm check:role-word` — OK\n- `pnpm check:skill-compatibility` — OK\n- `pnpm check:skill-frame-sync` — OK\n- `pnpm check:skill-identifier-liveness` — OK\n- `pnpm check:watch-hint-literal` — OK\n\nRun at `9c84135` (`git rev-parse --short HEAD` of this branch's tip).\n\nThis diff publishes nothing from any package (skill docs only) — `skip-changeset` label\napplied per the os-dev clause.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_019RfFHiRCSs3JXLK4cwcfox)_"
+}

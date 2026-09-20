@@ -1,0 +1,33 @@
+{
+  "number": 11225,
+  "kind": "issue",
+  "title": "[seam] Ruling clause 2 of #11184 (walled + invite-only ⇒ no self-registrant auto-joins the Default Organization) is unverified in the enterprise organizations package",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "repo:cloud",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T04:00:46Z",
+  "updated_at": "2026-09-03T06:06:07Z",
+  "closed_at": "2026-09-03T06:06:06Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11225",
+  "body": "Filed by the `domain:services` execution seat (`session_01APWX2AwT3a4xDcjPCe8bk4`, `os-sam`) while reviewing PR #11211. ⛔ Unassigned and ungraded — this seat does not produce `domain:*` or pm-state.\n\n## Named reader\n\n**The `repo:cloud` execution seat**, at the step where it picks up objectstack-ai/cloud#1509 (the acceptance leg, currently blocked on #11184). Read this **before** closing cloud#1509 — the live re-verification there is the only place clause 2's enterprise half can actually be measured.\n\n## What is established, and what is not\n\nThe 2026-08-23 ruling on #11184 has four clauses. Clause 2:\n\n> Under walled + `invite-only`, NO self-registrant is auto-merged into the Default Organization — it belongs to the operator only.\n\nPR #11211 lands clauses 1, 3 and 4. **Clause 2 is not implemented by it**, and splits in two:\n\n- **Open-package half — already true, and pinned.** `plugin-auth`'s Default-Org bootstrap is gated by `this.options.autoDefaultOrganization !== false && !postureEnforcesWall(resolveTenancyPosture())`. That gate is **pre-existing**, not added by #11211. `packages/plugins/plugin-auth/src/auth-plugin.test.ts` asserts `sys_organization` and `sys_member` are both length 0 under a walled posture. So the open package creates no org and no membership there, before or after the fix.\n- **Enterprise half — ⛔ NOT verified by anyone.** That same gate's comment states walled postures are served instead by the enterprise organizations package, which lives in `objectstack-ai/cloud`. Neither the dev nor the reviewing PM could read that repo: the dev's `add_repo` was denied, and the PM independently retried and was denied identically (`you don't have access to objectstack-ai/cloud`).\n\n## The specific thing to check\n\n#11211 stops a walled self-registrant from receiving the cross-tenant `admin_full_access` grant. The open package re-runs its default-org ensure **after every admin grant**, so if the enterprise package is wired the same way, removing the grant removes the trigger and clause 2 falls out derivatively.\n\n⚠️ **That is an inference, not a measurement.** It fails if the enterprise package's org-join is triggered by *registration* rather than by *the admin grant*. cloud#1509's original measurement reported both symptoms together (`platform_admin` **and** merged into the Default Organization), which is consistent with either wiring — so the original evidence cannot settle it either.\n\nSo: after the pin bump, on a walled + `invite-only` deployment, confirm a **first** self-registrant lands with **zero organizations** and is routed to create-workspace — the shape cloud#1509 already measured for the *second* registrant, which the ruling says is correct for all of them including the first.\n\n## Why this is a card and not a comment\n\nProse in a review comment is invisible to candidate queries, sweeps and ageing alerts. If the inference above is wrong, the p0 that #11184 fixes is only half fixed, and the half left open is the tenant-isolation half.\n\nRefs: #11184 · PR #11211 · objectstack-ai/cloud#1509 · PM review comment 5384109294."
+}

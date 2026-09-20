@@ -1,0 +1,36 @@
+{
+  "number": 14099,
+  "kind": "issue",
+  "title": "A `multi: true` update applies one hook-mutated payload to every matched row, so a transition-stamping hook corrupts rows that did not transition",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "needs:contract-review",
+    "pm:blocked",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T05:03:19Z",
+  "updated_at": "2026-09-03T01:18:17Z",
+  "closed_at": "2026-09-03T01:16:56Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14099",
+  "body": "Found while building an ObjectStack application in `objectstack-ai/duly` against published `@objectstack/*` 17.2.0. Filed here because no application can fix it.\n\nBlocked-by: #14758\nUnlock-action: re-check PR #14734\n\n## The defect\n\nA `beforeUpdate` hook is documented and used as a **per-record** seam. On a `multi: true` update it is not one: `driver.updateMany` takes a single SET clause, so whatever the hook writes into the payload for *one* row is applied to **every** matched row.\n\nThe common shape this breaks is the transition stamp — the standard way to record \"when did this reach that state\":\n\n```ts\n// beforeUpdate\nif (previous.status !== 'done' && next.status === 'done') patch.completed_at = now;\n```\n\nCorrect per record. On a batch it stamps rows that never transitioned.\n\n## Measured\n\n`duly_task` has a `readonly` `completed_at` stamped by a `beforeUpdate` hook on the transition into `done`. Two rows, one open and one completed earlier, updated in a single call:\n\n```ts\nawait data.update('duly_task', { status: 'done' }, {\n  multi: true,\n  where: { id: { $in: [open, alreadyDone] } },\n});\n```\n\nThe already-done row's `completed_at` **moved** — from `…:26.560Z` to `…:26.571Z`. It did not transition. Nothing errored.\n\n## Why it is worse than a cosmetic timestamp\n\nIn the application that found it, `completed_at` is what every on-time measure reads. A task completed comfortably before its deadline, swept up in a later batch, silently acquires a completion instant that can fall past its due date — turning a compliant record into a breach in the metric, with no error, no audit entry, and nothing in the data that shows it happened. The row looks exactly like one that really was completed late.\n\nAny object with a state-entry timestamp has the same exposure: `approved_at`, `closed_at`, `shipped_at`, `first_responded_at`.\n\n## Why the application cannot fix it\n\n- There is no per-row seam on the batch path. The hook cannot decline to write for a subset of matched rows, because there is only one payload.\n- Guarding in the caller means abandoning batch writes, which is the performance reason the path exists.\n- The only remaining mitigation is a **client-side** predicate excluding non-transitioning rows from the selection — and that is a UI hide, not authorization. Any direct API caller reaches the same corruption. The application's own hook docblock already says a client hide is not the authority.\n\n## Related, and possibly the same root\n\n`objectstack-ai/duly`'s #3 measured that an **unscoped** predicate write dispatches the hook once for the whole operation with **no** pre-image, so it stamps nothing at all. Combined with this report, `beforeUpdate` has three different contracts depending on the write path — by-id (pre-image present, per record), scoped multi (one payload, many rows), unscoped predicate (no pre-image). That divergence is worth resolving as one question rather than three.\n\n## Suggested direction\n\nEither make the batch path genuinely per-record when a hook is bound to the object (splitting the SET clause, or falling back to per-row writes), or make it refuse loudly — a hook that mutates the payload on a `multi` update is a correctness hazard the engine can detect and reject at dispatch, which is far better than applying it. Silently applying one row's derived value to N rows is the one option that cannot be reasoned about from the application side.\n\nApplication-side tracking: `objectstack-ai/duly#39`, which pins the behaviour in both directions.\n\nUnassigned and untriaged, per the single-producer rule for `domain:*`."
+}

@@ -1,0 +1,32 @@
+{
+  "number": 3425,
+  "kind": "issue",
+  "title": "spec: formalize `readonly` write semantics — keep user-context strip, add design-time lint for flow writes to readonly fields (#2948 follow-up)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-23T17:38:02Z",
+  "updated_at": "2026-09-03T08:18:02Z",
+  "closed_at": "2026-07-24T16:06:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3425",
+  "body": "## Summary\n\nWrites to fields declared `readonly: true` are **silently dropped** — including writes issued by the platform's own automation engine (flow `update_record` / `create_record` nodes). The only signal is a `WARN` in the server log (`Field 'X' is read-only — ignoring incoming change (#2948)`); the flow step still reports `status: \"success\"` and the run completes \"successfully\" while the intended data change never happened.\n\n## Environment\n\n- `@objectstack/*` **16.1.0** (open edition), single-tenant, sqlite-wasm driver\n\n## Steps to reproduce\n\n1. Declare a field `readonly: true` (e.g. `crm_opportunity.approval_status`, `crm_lead.converted_account`, `crm_case.is_sla_violated`).\n2. Have a flow write it via an `update_record` node (e.g. the approval flow stamping `approval_status: 'approved'`, or a lead-conversion flow stamping `converted_account`).\n3. Run the flow and inspect the flow run + the target record.\n\n## Actual behaviour\n\n- Server logs: `WARN Field 'approval_status' is read-only — ignoring incoming change (#2948)`.\n- The flow run’s step shows `{\"nodeId\":\"mark_converted\",\"status\":\"success\"}` — no error, no partial-failure marker.\n- The field retains its old value. Downstream logic that depends on it (approval entry conditions, \"converted\" list filters, SLA violation reports) silently misbehaves.\n\n## Expected behaviour\n\nPick one and make it consistent + documented:\n- **(preferred)** `readonly` should govern the *external API / UI* surface only, and **not** block trusted server-side writers (flow engine, hooks running as system, seeds). This matches the mental model most apps have — \"users can't edit this, but automation maintains it.\"\n- OR, if `readonly` is meant to be absolute, a flow `update_record` that targets a readonly field should **fail the node** (surface an error), not silently succeed — so authors discover the mismatch at design time instead of shipping a no-op automation.\n\nEither way, a dropped write should never be reported as a successful step.\n\n## Related: flow step reports `success` on failure\n\nSeparately observed: a `create_record` node that actually failed (`crm_contact is required`) still surfaced its error object stringified as `\"[object Object]\"` in one code path, and the enclosing run summary’s per-step status wasn’t always a reliable indicator of the node outcome. Step status should be authoritative and errors should serialize to a readable message.\n\n## Impact\n\nHigh. This turns whole categories of automation (approval status tracking, lead-conversion stamping, SLA flags, campaign rollups) into silent no-ops. Because `validate`/`build` can’t see it and the run reports success, it only surfaces by manually reading server WARN logs or noticing wrong data days later.\n\n## Workaround\n\nRemove `readonly` from any field an automation writes and enforce edit-protection with a validation rule instead (`record.is_converted == true && record.x != previous.x` → error). Works, but loses the field-level UI affordance and is easy to forget.\n"
+}

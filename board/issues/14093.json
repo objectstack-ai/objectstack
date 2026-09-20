@@ -1,0 +1,36 @@
+{
+  "number": 14093,
+  "kind": "issue",
+  "title": "`ActionSchema.method`'s worked example points a `type: 'api'` PATCH at `/api/v1/sys_api_key/{id}` — the shipped data API is `/api/v1/data/:object/:id`, so copying it 404s",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T04:52:58Z",
+  "updated_at": "2026-09-03T23:07:27Z",
+  "closed_at": "2026-09-03T23:06:49Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14093",
+  "body": "`@objectstack/spec` 17.2.0, `ActionSchema.method` doc comment:\n\n> HTTP method to use when `type: 'api'`. Defaults to `POST`. Use `PATCH` to call data-API update endpoints (e.g. `/api/v1/sys_api_key/{id}` with `bodyExtra: { revoked: true }`).\n\nThe path is missing the `/data` segment the router actually mounts.\n\n## Measured\n\n`@objectstack/rest` 17.2.0 composes the CRUD routes as `getApiBasePath()` + `crud.dataPrefix` + `/:object/:id`:\n\n```js\ngetApiBasePath() { return api.apiPath ?? `${api.basePath}/${api.version}`; }   // '/api' + '/v1'\ndataPrefix: crud.dataPrefix ?? \"/data\"\nregisterCrudEndpoints(basePath) {\n  const dataPath = `${basePath}${crud.dataPrefix}`;\n  ...\n  this.routeManager.register({ method: \"PATCH\", path: `${dataPath}/:object/:id`, ... })\n}\n```\n\nSo the update endpoint is **`PATCH /api/v1/data/<object>/<id>`**. Nothing overrides `dataPrefix` on the standalone/runtime path, and `sys_api_key` has no bespoke route of its own — `plugin-auth` mounts only `/api/v1/auth/*` and `/api/v1/mcp`, and `sys_api_key` is an ordinary `platform-objects` object served by the generic data API.\n\n## Why it is worth fixing rather than leaving as prose\n\nThis is the one worked example an author copies when reaching for the only declarative-looking way to set a field from an action (see #14092). Nothing catches the mistake: `objectstack validate` does not check `target`, `type: 'api'` has no author-time route validation, and the action **renders, is clickable, and 404s at the click** — the same silent shape as an unregistered handler, arriving through a doc example instead of a missing registration.\n\n## Suggested\n\n```\n`/api/v1/data/sys_api_key/{id}` with `bodyExtra: { revoked: true }`\n```\n\nand, since `target` is interpolated by the renderer with `${param.X}` / `${ctx.X}` (this same schema's `target` doc) rather than with `{id}`, spelling the id as `${ctx.recordId}` in the example would stop the two conventions in one schema from reading as interchangeable. (`newTabUrl` is the one key that really does take a bare `{recordId}` placeholder.)\n\nFound while building objectstack-ai/duly#4.\n"
+}

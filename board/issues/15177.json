@@ -1,0 +1,35 @@
+{
+  "number": 15177,
+  "kind": "issue",
+  "title": "skills/objectstack-data/references/data-hooks.md: rewrite the reserved word \"role\" to ADR-0090 D3 vocabulary, keeping one retirement note — the residue is what PR #15073 baselines",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T04:51:53Z",
+  "updated_at": "2026-09-04T06:31:28Z",
+  "closed_at": "2026-09-04T06:22:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15177",
+  "body": "Filed by the director seat (summon 13, session_01WXyGTWPbbreqXow7Z2pZCk) on the maintainer's ruling of 2026-09-04 on decision card #15075 (option B of the director's re-evaluation; verbatim reply in chat: 「按照你的建议，跟进并处理完这两个pr。」). Routed directly to `domain:skills` under the maintainer's direct-dispatch channel; triage may confirm. Governed surface (`skills/**`): draft PR, review requested from both `os-zhuang` and `hotlong`, human merge.\n\n## Why\n\nPR #15073 widens `check:role-word` to the published catalog's `references/` pages and reds on this page: 12 occurrences of the reserved word. The decision card proposed admitting all 12 to the shrink-only baseline as \"quoted pre-rename history\". Read line by line on `origin/main`, only part of that holds:\n\n| lines | occurrences | what they are | disposition |\n| --- | --- | --- | --- |\n| 350 (table row) | 2 | the retirement note: `session.roles` retired in 17.0.0, never produced | **keep** (one retirement note is legitimate history) |\n| 574-575 (comment) | 2 | the same retirement note again, plus \"never by a role name\" | fold into one sentence without the reserved word (\"privilege is judged by the security service, never by a session claim\") |\n| 733 (example) | 1 | `where: { role: 'admin' }` querying a user field named `role` | rewrite the example to a real field or a permission-set check; no `sys_user` field is named `role` |\n| 822 (callout) | 1 | \"always hidden/masked for a role\" | D3 vocabulary: \"for a permission set or position\" |\n| 837-841 (comment) | 6 | the retirement note a third time, plus \"role name\", \"role list\", \"role-aware\", \"per-role exemption\" | keep the one useful warning (do not write `ctx.session?.roles?.includes`), spell the rest in D3 vocabulary |\n\nTarget: the page teaches permission sets / positions / business units, states the `session.roles` retirement once (the table row) and warns once against the `ctx.session?.roles` pattern; expected residue 3 to 4 occurrences, all quoted history. This page ships verbatim to third parties via `npx skills add`, which is why the reserved-word ratchet reads it at all.\n\n## Definition of done\n\n- The rewrite above, no other content change; the page's line and token ceilings under the skills ratchets respected (report the arithmetic).\n- `node scripts/check-role-word.mjs` run on the branch with PR #15073's walker change applied locally (cherry-pick or the same two-line edit in a throwaway): the page's count reported; anything left is the retirement note and the warning.\n- ⛔ Do not touch `scripts/role-word-baseline.json`; the baseline entry for the residue is PR #15073's, authorized by the maintainer on that PR.\n- Draft PR, both approver accounts requested, human merge.\n\nBlocks: #15073 (card #15061) — that PR lands after this page merges, with the baseline entry for the residue.\n\nRefs: #15061 · PR #15073 · #15075 (ruling) · ADR-0090 D3."
+}

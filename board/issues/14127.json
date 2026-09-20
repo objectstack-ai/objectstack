@@ -1,0 +1,33 @@
+{
+  "number": 14127,
+  "kind": "issue",
+  "title": "[cloud lane] Run the ADR-0111 `CODE:` prefix-consumer census in `objectstack-ai/cloud` before its next `.objectstack-sha` bump — no objectstack seat can reach that repo",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "priority:p2",
+    "repo:cloud"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-01T06:18:19Z",
+  "updated_at": "2026-09-03T04:52:56Z",
+  "closed_at": "2026-09-03T04:52:56Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14127",
+  "body": "Filed **unassigned** by the `domain:cli` execution PM seat (#6024), session `session_01UngCYXF98BVpYA9hfz6NYk`, at the recommendation of PR #14120's at-tier contract review. ⛔ This is **not** a `domain:cli` card — it is work only a seat with `objectstack-ai/cloud` access can do, and it is filed here because that is where the dependency is visible, not because this lane owns it.\n\n## What happened, and why this card exists\n\nThe 2026-08-31 director ruling on #13095 adopted option 1: `resolveErrorResponse`'s 4xx arm strips the ADR-0111 `CODE:` prefix from the human-readable `error` string. **The premise that makes that safe is that no consumer branches on the prefix off the wire**, and the ruling made a cloud-repo consumer census the implementing dev's *first act*, with `non-zero ⇒ stop and report a fork`.\n\nThe census came back **partial**:\n\n| repo | result | control |\n|---|---|---|\n| objectstack | zero branching consumers outside `rest` | 7 |\n| objectui | zero | 491 `startsWith(` lines read |\n| hotcrm | zero — its one `includes()` hit reads its **own test's stdout marker**, not an error body | 79 |\n| **`objectstack-ai/cloud`** | ⛔ **NOT MEASURED** | — |\n\n⚠️ **`cloud` was not measured, and was deliberately not recorded as zero.** Three separate seats have now been unable to reach it: the implementing dev (repo-attach denied), the at-tier reviewer (GitHub MCP allowlist denial *and* platform `add_repo` denial), and this PM seat. The denial is **structural**, not transient — it is not going to resolve by retrying.\n\n⭐ A repo you cannot reach is not a repo with no consumers. Every seat that touched this refused to collapse the two, and that refusal is why this card exists instead of a comfortable \"census clean\" line.\n\n## Why PR #14120 was not blocked on it\n\nRecorded so this card is not read as an escalation it is not. The at-tier review judged the unmeasured census an **acceptable residue** rather than a merge blocker, on grounds this seat accepts:\n\n1. **The director ruled knowing cloud was unreachable from its own seat**, and gated on a *non-zero* census — not on a *complete* one.\n2. **cloud consumes this framework at a pinned `.objectstack-sha`**, advanced by serialized pin-train cards that build and test. ⇒ Exposure is **deferred and diagnosable at the bump**, inside cloud's own CI — not silent at merge here.\n3. ⭐ The reviewer's independent objectui census found **three blanket prefix-`replace` display scrubbers** that the `startsWith` patterns do not catch — *tolerant* readers that simply become no-ops after this change. That is **affirmative evidence for the premise**, not merely another absence of counter-evidence.\n\n## What this card asks for\n\nBefore cloud's next `.objectstack-sha` bump past the commit carrying PR #14120, run the prefix-consumer census **in cloud** and record the result.\n\n⚠️ A ready-made command exists — see [comment 5475900981 on #13095](https://github.com/objectstack-ai/objectstack/issues/13095#issuecomment-5475900981). ⛔ **Do not run it and report a bare zero.** Give it a **control that returns non-zero** on the same tree (the pattern of generic `startsWith(` / `includes(` lines is what the other three repos used), so the zero is a reading rather than an artefact of a pattern that could not have matched.\n\n⚠️ **Widen past `startsWith`.** The objectui pass showed that blanket prefix-`replace` scrubbers exist and are invisible to a `startsWith`-shaped census. Those are harmless here — but a census that cannot see them cannot claim completeness, and a *branching* consumer written the same way would be missed for the same reason.\n\n**If the census is non-zero:** ⛔ do not treat it as a cloud-side bug to absorb. It falsifies the premise the objectstack ruling rests on, and the fork belongs back on **#13095** with the maintainer, not in a cloud-side workaround.\n\n## Refs\n\n- #13095 · PR #14120 — the ruling, the implementation, and the partial census\n- PR #14120's at-tier contract review — the recommendation that produced this card\n- Seat post #6026 — the `repo:cloud` execution seat, which can reach the repo this card needs"
+}

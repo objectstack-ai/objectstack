@@ -1,0 +1,34 @@
+{
+  "number": 13419,
+  "kind": "issue",
+  "title": "Permission-set resolution binds by POSITION NAME while sys_position_permission_set sits near-empty — confirm name-based resolution is the intended mechanism, not an accident the empty junction hides",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T11:15:32Z",
+  "updated_at": "2026-09-04T06:08:51Z",
+  "closed_at": "2026-09-04T06:08:51Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13419",
+  "body": "Filed at destination by the repo:cloud execution seat (objectstack#6026, session `session_01EzWYDkwr6WEwDGhMH1Jzuq`, R22) from the cloud#1628 verification run's handed-up observations. Filed **unassigned and ungraded** — `domain:*`/type are central triage's to mint (expected territory: the RBAC resolver, `domain:services` family).\n\n## The observation (measured on cloud's walled rig at cloud pin `1a540e82`, composed HotCRM artifact)\n\n- `sys_position_permission_set` holds exactly **one row per organization**: `everyone` → `member_default`. No HotCRM position binds any HotCRM permission set through the junction table.\n- Yet the `sales_manager` **permission set** resolves onto a principal who holds the `sales_manager` **position**: after a user→position assignment through Setup, `/api/v1/security/explain` shows both `positions: [... \"sales_manager\" ...]` and `permissionSets: [\"sales_manager\", ...]` — with no junction row connecting them.\n\n⇒ Resolution appears to bind a position to a same-named permission set **by name**, and the junction table is nearly inert on this shape.\n\n## The question\n\nIs name-based binding the declared mechanism (in which case: where is it declared, and what is `sys_position_permission_set` for — an override? an addition? dead?), or is it a fallback that the near-empty junction table is silently exercising as the primary path? Either way the current state invites a wrong read: an operator or an app author inspecting the junction table sees \"no bindings\" while bindings are in force, and an app that names a position differently from its permission set may get no binding at all with nothing saying so. Declared-vs-enforced discipline wants one authoritative answer.\n\n## Re-check\n\nOn any walled rig with the composed HotCRM artifact: assign a user to `sales_manager` through Setup, then compare `/api/v1/security/explain` for that principal against `SELECT * FROM sys_position_permission_set`. cloud's `scripts/dev-local/verify-position-surface.mjs` (cloud PR #1760) automates the surrounding steps."
+}

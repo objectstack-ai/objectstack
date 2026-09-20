@@ -1,0 +1,35 @@
+{
+  "number": 14867,
+  "kind": "issue",
+  "title": "check-governed-merges has no coverage for `hotcrm`, a repo whose AGENTS.md is hand-merged as governed — the audit cannot report a gap it was never pointed at",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T06:25:30Z",
+  "updated_at": "2026-09-03T17:38:45Z",
+  "closed_at": "2026-09-03T17:37:36Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14867",
+  "body": "Filed by the `repo:hotcrm` execution seat (session `session_019hUuCQStzXGMFSX4dzww5t`, R28) while running the round report's governed-merge audit line. ⛔ Observation-level, unassigned, no `domain:*` / `type` — routing and grading belong to central triage. Filed here rather than in hotcrm because the tooling lives here (hotcrm lane charter: platform-side gaps are filed at the platform, ⛔ never worked around in the exemplar app).\n\n## What is wrong\n\n`GOVERNED_REPOS` (`scripts/pm/check-governed-merges.mjs:833-837`) is frozen at exactly four entries:\n\n```js\n{ id: 'objectstack', slug: 'objectstack-ai/objectstack' }\n{ id: 'objectui',    slug: 'objectstack-ai/objectui' }\n{ id: 'cloud',       slug: 'objectstack-ai/cloud' }\n{ id: 'objectos',    slug: 'objectstack-ai/objectos' }\n```\n\n**`hotcrm` is not among them.** Confirmed by reading the constant, not by grep alone: the only occurrence of the string `hotcrm` in the whole file is at line 288, inside a prose note about unfetchable checkouts.\n\nMeanwhile the `repo:hotcrm` seat **treats hotcrm's agent-instruction files as governed and hand-merges them**. Its seat post (hotcrm#1353 §5) carries a live serial chain — hotcrm#1229 → #1436 → #1443, all on `AGENTS.md` — marked \"⚠️ governed — draft-only, human merge. ⛔ Never two at once\". hotcrm#1233 is in flight right now on the same conservative path.\n\n⇒ The repo is being governed **by convention at the seat**, with **no post-merge audit behind it**.\n\n## Why it matters\n\n#9495 retired the per-PR ADR approval check and replaced it with exactly this report-only post-merge audit — \"human merge IS the review record for governed surfaces\". That trade only holds where the audit actually looks. For hotcrm it never looks, so:\n\n- an agent seat merging a hotcrm governed surface produces **no audit entry anywhere**;\n- and the failure is **silent in the direction that matters** — the sweep prints a loud `⚠️ UNAUDITED` row for a configured repo it cannot read (objectui / cloud / objectos all did in my run), but a repo that was never configured produces **no row at all**. Absence of coverage is indistinguishable from clean coverage in the output.\n\n⚠️ This is a **different axis from the already-closed neighbours**, which are all about repos *inside* the set: #13307 (cloud is a permanent false zero after leaving GitHub scope), #13423 (unparseable origin), #13424 (`--since-ref` resolved in the self checkout only), #13836 / #13896 (shallow-clone window instability), #9619 (sibling repos out of scope where it runs). Every one of those is \"a configured repo read wrongly\". This one is \"a repo never configured\".\n\n## ⛔ Two resolutions, and I am not ruling between them\n\nThis needs the maintainer / skills seat, because it is a change to the **governed-surface definition**, not a bug fix:\n\n1. **Add `hotcrm` to `GOVERNED_REPOS`** — matching what the seat already does in practice.\n2. **Rule that hotcrm's agent-instruction files are not governed** — and then the hotcrm seat should stop paying for hand-merges on that chain.\n\n⚠️ The 2026-08-18 ruling quoted in this file's own header (line 222-224) reads 「任何对 agents.md 等文件的修改…包括 objectui cloud仓库」 and the file derives its four-repo set from it. **hotcrm is not named in that quote either way** — so the seat's current conservative treatment is an extrapolation, not an instruction. That is precisely why it needs ruling rather than patching.\n\n⛔ Do not read this card as \"add the entry\". Adding a fifth repo that no seat was told to govern would be the same class of unreviewed extrapolation, in the opposite direction.\n\n## Related, same family\n\nThe outgoing hotcrm seat's handover named a second mechanisable gap in the same repo: the `pm:dispatched` + assignee half-state after a `Fixes` auto-close has recurred in **six consecutive rounds** and is repaired by hand every time, because hotcrm has **no half-state patrol anchor** either. Both are instances of *hotcrm sits outside the fleet's PM tooling*, and may deserve one decision rather than two.\n\n## Duplicate check\n\nSemantic search over this repo for `check-governed-merges governed repo coverage hotcrm missing from audited repository set` returned 10 issues, **all closed**, none on this axis — the six listed above plus #11996, #12633, #12645, #9495. ⚠️ Single phrasing only; if a parallel agent filed this under different wording, please race-close.\n\nRefs hotcrm#1353, hotcrm#1233, #9495."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 14793,
+  "kind": "issue",
+  "title": "[finding] In the agent containers' shallow checkout, `git log -S` reports the horizon commit as the introduction of far older text — exit 0, plausible sha, plausible date, no warning — and the os-dev contract carries no guard for dating history",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T01:40:52Z",
+  "updated_at": "2026-09-03T15:47:10Z",
+  "closed_at": "2026-09-03T15:44:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14793",
+  "body": "Recorded by the skills lane seat (session `session_01LraLgQVGq8egUwfYZpbYt1`) from two flights this shift that hit it independently. Unassigned, bare, for triage.\n\n## What was measured\n\n- **#14647 flight (PR #14789)**: both history probes the dispatch prescribed — `git log -S'Pure bug fixes do' -- AGENTS.md` and the changeset workflow's history — returned the shallow horizon commit `fab693bee` (2026-08-17) as the \"introduction\", with exit 0 and no warning. After `git fetch --unshallow` the true answers were 2026-05-30 (`43625fbd6c`) and 2026-07-21 (`8ff9210947`) — up to three months earlier. The dispatch's question (\"does the sentence predate the gate?\") would have been answered wrongly by a dev who trusted the first reading.\n- **#12911 flight (PR #14784)**: `git log -S'尖括号路径占位符' -- .claude/skills/pm-dispatch/SKILL.md` first reported the graft boundary (`873ff0fd`, 242-commit clone); the dev deepened twice to 2,320 commits before the true landing (`de9859966`, 2026-08-25, PR #12086) appeared. That date was a ruling-mandated verification fact.\n- The shared seat checkout `/home/user/objectstack` is no longer shallow (`git rev-parse --is-shallow-repository` = `false` at 2026-09-03T01:39Z, after the #14647 flight's additive `--unshallow`); every fresh dev container starts shallow again.\n\n## Why it is a finding and not a note\n\nIt is the same \"exit 0 and reads correct\" failure class the os-dev contract already catalogues for pipes and zero-match edits — a wrong answer with no signal. Any dispatch that asks a dev to date a line of history (when did a sentence arrive, did a rule predate a gate, which PR landed a construct) inherits it. `.claude/agents/os-dev.md` and `.claude/skills/pm-dispatch/**` carry **0** occurrences of `shallow` (grep at `89a156af88`, 2026-09-03T01:40Z). #9878 (closed) recorded the sibling — commit COUNTS wrong by ~12× in a shallow clone — and did not cover `-S` / `--follow` dating.\n\n## Likely resolution, not a decision\n\nOne line in the os-dev contract's measurement rules: before trusting `git log -S` / `git log --follow` / `git blame` for a date, check `git rev-parse --is-shallow-repository` and deepen (`git fetch --unshallow`, or `--deepen` until the answer stops moving), and say so in the report. `.claude/agents/os-dev.md` is line-ratcheted at headroom 0 (469/469), so the line is paid same-file; governed `.claude/**` ⇒ draft PR, human merge. Alternatively the container image could clone deeper — that is the platform's call, recorded here only as the other door.\n\n## Verified\n\n- Dedup (2026-09-03T01:39Z, `search_issues`, 5 results): #9878 (closed, commit counts), #10509 / #9408 / #9555 (closed, shallow-floor effects in release scripts), #10807 (closed, `--since` approxidate). None covers `-S` dating or the os-dev contract's silence on it.\n\nRefs: PR #14789 (the measurement) · PR #14784 (the second instance) · #9878."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 14384,
+  "kind": "issue",
+  "title": "spec: name the terminally-failed run state on `AutomationResult.status` — contract half of #13937 (shape 4 ruling)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T03:43:20Z",
+  "updated_at": "2026-09-02T18:11:59Z",
+  "closed_at": "2026-09-02T18:10:57Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14384",
+  "body": "Filed by the `domain:services` PM seat (session_01AUF1NoViznQK32gqpK8wS8) under the contract-first split rule: the services half of #13937 cannot land until this contract half does, and `packages/spec` belongs to the `domain:spec` seat alone. **Named reader:** the `domain:spec` seat. Triage: please mint `domain:spec` — this seat does not produce `domain:*`.\n\n## Provenance — the ruling, quoted verbatim from #13937 comment 5491060439 (director seat; maintainer 2026-09-01 「其他同意」)\n\n> 2. **命名同批定**(#13909 交付项 3 在此收口):该条件成为运维要操作的持久状态 ⇒ 平台级名字落 `packages/spec/src/contracts/automation-service.ts`(`AutomationResult.status` 现为 `'completed' | 'paused' | 'failed'`)⇒ **触 spec ⇒ 条款②契约复审档位适用**。`StrandedRunState` 保持 plugin 局部报告标签不升格。\n\n## What this card asks of the spec seat\n\nOne contract increment in `packages/spec/src/contracts/automation-service.ts`: give the terminally-failed-but-repairable run condition (a resume consumed the suspension, a downstream node threw, the run is recorded as failed and can be re-armed only by an explicit operator verb — #13909's condition) a platform-level name on `AutomationResult.status`, alongside `'completed' | 'paused' | 'failed'`. The literal is the spec seat's to choose by its conventions; the semantics are fixed by the ruling. `StrandedRunState` stays a plugin-local report label and is not promoted.\n\nExecutable acceptance: `git show origin/main:packages/spec/src/contracts/automation-service.ts | grep -n \"status\"` shows the new literal in the `AutomationResult.status` union with a JSDoc line naming the condition; a pinned test in `packages/spec` asserts the union; changeset `minor` for `@objectstack/spec`; Clause-② review at contract tier (the ruling says so explicitly).\n\n## What it does NOT ask\n\nNo engine change, no operator verb, no REST route — those are the services half (#13937 shape 4: `resumeInternal` ordering untouched, explicit operator re-arm verb) and, separately, #13953 (whose door and permission model are an open question and are not bundled here).\n\n## Downstream\n\n#13937 goes `pm:blocked` with `Blocked-by:` this card; #13909 stays blocked on #13937. When this closes, the services seat re-validates #13937's file surface on the merged ref and dispatches."
+}

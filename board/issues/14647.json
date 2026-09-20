@@ -1,0 +1,36 @@
+{
+  "number": 14647,
+  "kind": "issue",
+  "title": "[finding] AGENTS.md says \"Pure bug fixes do not require a changeset\" — a pure bug-fix PR in a released package following it literally has no green path through `Check Changeset`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T16:48:19Z",
+  "updated_at": "2026-09-03T03:16:13Z",
+  "closed_at": "2026-09-03T03:08:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14647",
+  "body": "Recorded by the skills lane seat (session `session_01LraLgQVGq8egUwfYZpbYt1`) from the #13680 flight's follow-up section (PR #14621), which measured it while aligning the `skip-changeset` texts and left it for the seat to file. Unassigned — recording only, for triage. ⛔ Not touched by that flight: `AGENTS.md` is an anchor it may not edit.\n\n## What\n\n`AGENTS.md:1116-1117` (at `origin/main` `2514d49f`) states, in the changeset section:\n\n> Pure bug fixes do **not** require a changeset.\n\nTwo other texts disagree with it, and both are enforced:\n\n1. **`Check Changeset`** (`pr-automation.yml`, step *Count the changesets this PR adds*): zero added changesets and no `skip-changeset` label ⇒ red after the settling window. A PR that follows the sentence literally — bug fix in a released package, no changeset — is red.\n2. **The `skip-changeset` criterion** (now stated as the rule by the os-dev clause, PR #14621; the label's description; `scripts/check-empty-changeset.mjs`'s enumeration): the label is for a diff that publishes nothing from any released package. A bug fix in a released package publishes something, so the label is not its exemption either.\n\n⇒ For a pure bug fix in a released package there are three readings and no green one under the sentence: no changeset (red), the label (a false declaration), or a `patch` changeset (what every merged bug-fix PR actually carries — which is what the sentence says is not required).\n\n## Likely resolution, not a decision\n\nThe sentence probably predates the gate and meant \"no *minor* bump\": a bug fix takes a `patch` changeset, not none. One sentence in `AGENTS.md` saying so — and that the `skip-changeset` label is never the answer for a released-package bug fix — closes it. `AGENTS.md` is governed and at its line ceiling (#11910 records the payment question), so the fix is a skills-lane draft PR with same-file payment.\n\n## Verified\n\n- `AGENTS.md` carries 0 occurrences of `skip-changeset` (measured in the #13680 flight) — it neither states the label rule nor the closed list; only this sentence is at odds with the gate.\n- Dedupe: a repo-scoped `search_issues` (56 results) returned no card for this; the control hits were #13432 and #12226, both about the `skip-changeset` list, not the bug-fix sentence.\n\nRefs: #13680 · PR #14621 · #13432 (the `src/`-never-reaches-`dist` angle, on hold) · #11910 (AGENTS.md line-ceiling payment)."
+}

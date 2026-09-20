@@ -1,0 +1,35 @@
+{
+  "number": 14516,
+  "kind": "issue",
+  "title": "examples/app-crm: two comments reference a Discount Approval flow the app does not contain",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T09:49:03Z",
+  "updated_at": "2026-09-03T09:35:13Z",
+  "closed_at": "2026-09-03T09:00:50Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14516",
+  "body": "Observation-class finding, noticed while reading `examples/app-crm` on `origin/main` as source material for a blog post. Not touched by that work; filing rather than fixing in an unrelated PR.\n\n## What is stale\n\nTwo comments in the CRM example point at a \"Discount Approval\" flow:\n\n- `examples/app-crm/src/objects/opportunity.object.ts`, on the `approval_status` field:\n  > Mirror target for the Discount Approval flow's approval nodes (ADR-0019). The approval runtime writes the request status here; it is readonly to users so only the flow drives it.\n- `examples/app-crm/src/security/sales-positions.ts`, on `FinanceApproverPosition`:\n  > Referenced by the Discount Approval second step.\n\nThere is no such flow. `examples/app-crm/src/flows/` contains `convert-lead.flow.ts` only, and `flows/index.ts` states the scope explicitly:\n\n> One flow — the screen-flow wizard the smoke test drives. Automation breadth (approvals, schedules, connectors, subflows, …) is the showcase's job (examples/app-showcase/src/automation/flows/).\n\nSo the flow appears to have been deliberately moved to (or kept in) the showcase, and the two comments in the CRM were left behind. `grep -rn discount examples/app-crm` returns only these comments plus the `discount_percent` field and its translations.\n\n## Why it is worth a ticket rather than nothing\n\nThe examples are training and reference material for agents as well as humans, and both comments assert a relationship that does not exist in the tree. The `FinanceApproverPosition` case is the sharper one: the position is declared and its only stated consumer is absent, so a reader has no way to tell whether the position is live scaffolding or dead weight — which is exactly the reading an AI author will have to make when it copies this app as a pattern.\n\n## Possible resolutions, for triage\n\n1. Rewrite both comments to point at the showcase's approval flows, which is where approval breadth actually lives.\n2. Add the Discount Approval flow to the CRM, since the object already carries `discount_percent`, a readonly `approval_status` mirror target, and a `finance_approver` position described as \"authorised to approve discounts above 30%\" — every input except the flow itself.\n3. If `FinanceApproverPosition` has no remaining consumer, decide it under the enforce-or-remove discipline rather than leaving a declared-but-unreferenced position in an example.\n\nNo severity judgement offered — filing plainly for the triage round."
+}

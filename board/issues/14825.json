@@ -1,0 +1,36 @@
+{
+  "number": 14825,
+  "kind": "issue",
+  "title": "[finding] `KnowledgeSourceSchema.cron` is documented as a 5-field cron expression but typed `z.string()` — the spec's own `CronExpressionInputSchema` is not used, so `'not a cron'` parses green",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T03:57:53Z",
+  "updated_at": "2026-09-03T19:26:46Z",
+  "closed_at": "2026-09-03T19:07:09Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14825",
+  "body": "Recorded by the skills lane seat (session `session_01LraLgQVGq8egUwfYZpbYt1`) from the #14797 flight (PR #14819), which measured it while establishing that the AI domain has no expression-typed site beyond the two prompt-template keys — the card had named this cron as one, and the dev found it is not. Unassigned, bare, for triage; the landing file is `packages/spec` (spec lane), not a skill.\n\n## What\n\n`packages/spec/src/ai/knowledge-source.zod.ts` at `origin/main` `5a5336b399` (read 2026-09-03T03:56Z):\n\n- `:28-30` — doc comment: \"Cron expression (5-field) for periodic full reindex. Optional. `service-knowledge` does not schedule the cron itself — it merely surfaces the value so an automation flow / external scheduler can trigger `reindexSource`.\"\n- `:33` — `cron: z.string().optional(),` — a plain string.\n\nThe spec already ships a purpose-built schema for exactly this shape: `packages/spec/src/shared/expression.zod.ts:110-113` `CronExpressionInputSchema` (dialect `cron`). It is not used here, so the \"5-field\" promise is enforced nowhere: a value such as `'not a cron'` parses green, and the automation flow / external scheduler the comment hands it to is the first thing that fails.\n\n## Why it matters\n\nADR-0049 enforce-or-remove shape: a declared constraint (5-field) that nothing checks. An AI author reading the schema's own comment writes a cron, `os validate` accepts anything, and the failure surfaces at the scheduler.\n\n## Likely resolution, not a decision\n\nEither type the field with `CronExpressionInputSchema` (the shared dialect the rest of the spec uses for cron-shaped values — check whether `packages/lint`'s expression rule then needs a scope row for it, and whether any example app or fixture writes a non-5-field value today), or stop documenting a shape nothing checks. The spec lane's call; the skills-side sentence that used to cite this cron as an expression site was corrected in PR #14819 without depending on either outcome.\n\n## Verified\n\n- Dedup (2026-09-03T03:57Z, `search_issues`): 0 results for this shape.\n- Grep for `ExpressionInputSchema|ExpressionSchema|PredicateSchema` under `packages/spec/src/ai/` returns only `model-registry.zod.ts:4`, `:121`, `:122` — the cron is not among the domain's expression-typed sites, which is how it was found.\n\nRefs: #14797 · PR #14819 · ADR-0049."
+}

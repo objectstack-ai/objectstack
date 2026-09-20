@@ -1,0 +1,36 @@
+{
+  "number": 14595,
+  "kind": "issue",
+  "title": "[finding] SWEEP.md step 6 sends every sweep agent to land a run record under `runs/`, which is `.gitignore`d with `*` — the instruction cannot be obeyed",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T14:14:32Z",
+  "updated_at": "2026-09-03T17:42:00Z",
+  "closed_at": "2026-09-03T17:41:13Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14595",
+  "body": "Recorded from the skills-optimization flight #14317 (internal-small member card). Unassigned — recording only, for triage. ⛔ Not touched by that flight: its file surface is the four internal SKILL.md files plus objectui's `verify`, and this defect is in a doc that flight treats as a binding anchor it must not edit.\n\n## What\n\n`docs/qa/platform-checklist/SWEEP.md` step 6 says, verbatim:\n\n> **Validate** `node scripts/check-platform-checklist.mjs` until green, then land the run record under `runs/` and surface product defects / docs drift to the maintainer in `FOLLOW-UPS.md`.\n\nBut `docs/qa/platform-checklist/runs/.gitignore` is `*`, and `runs/README.md` is titled so that the directory's own documentation says results are NOT committed. So the instruction directs an agent to commit a file into a directory whose contents git is configured to ignore.\n\n## Why it matters more than it looks\n\n`checklist-author` is the skill that dispatches sweep agents, and it routes them to SWEEP.md as the normative method — so this is not a stale line in a doc nobody reads, it is a step in a live agent runbook. The failure is quiet in the bad direction: `git add` on an ignored path is a no-op with a non-obvious message, so a sweep agent that follows step 6 believes it landed the record and the record does not exist.\n\n## Two readings, both need the maintainer, not a dev's guess\n\n1. The `runs/` convention changed (records are session artifacts, deliberately uncommitted) and step 6 was never updated — fix is to correct step 6 and say where a run record actually goes.\n2. Run records ARE meant to be committed and the ignore rule is the defect — fix is in the `.gitignore`, and the README title is then also wrong.\n\nThe two point at opposite files, which is why this is filed rather than fixed in passing.\n\n## Verified at `origin/main` `aaa4e657`\n\n- `docs/qa/platform-checklist/runs/.gitignore` = `*`\n- `docs/qa/platform-checklist/SWEEP.md` still carries the step-6 sentence above\n- `node scripts/check-platform-checklist.mjs` is green today (`15 areas, 260 items`, `0 waived`) — nothing mechanical catches this, which is consistent with the instruction being unexecutable rather than violated\n\nRefs: #14317 (the flight that measured it; ⛔ out of its scope by construction)"
+}

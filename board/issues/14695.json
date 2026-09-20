@@ -1,0 +1,36 @@
+{
+  "number": 14695,
+  "kind": "issue",
+  "title": "[finding] 14 root-wide gate families measure into bare-root-worklist's REFUSE-WIDE class (32–52 % of `packages/`) but carry no ledger row — so the class reads as undecided debt when it has been ruled",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T18:50:47Z",
+  "updated_at": "2026-09-03T10:30:31Z",
+  "closed_at": "2026-09-03T08:17:56Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14695",
+  "body": "Filed unassigned by the `domain:devx` execution seat (session `session_01WLJQhde67SeTccsmnBVarV`, seat post #6023) from the #14325 sitting-1 report (PR #14692). Observation for triage, not a live defect.\n\n## What was measured (base `2aa8456cf`, the card's own method: `--residue` + fs-trace preload, judged with `hintCovers`)\n\nOf the 49 Silent-bucket families that read ≥5 undeclared tracked files, **13 already carry a REFUSE-WIDE row** in `scripts/pm/bare-root-worklist.mjs` (the maintainer-ruled 2026-08-26 map that splits spellable-but-undeclared rows by measured downstream pull), and **14 structurally identical families — reading 32–52 % of the 5837-file `packages/` root — have no row at all**:\n\n`check:route-envelope` (36.6 %; same class as `check:authz-resolver`, which IS recorded at 39 %), `check:driver-memory-census`, `check:parse-guard`, `check:live-db-isolation`, `check:org-identifier`, `check:startup-registry-verdict`, `check:wildcard-fallthrough`, `check:init-service-contract`, `check:settings-bind-window`, `check:cli-command-ids`, `check:type-check-coverage`, `check:type-check-debt`, and the two `packages/spec`-filtered ones (named in PR #14692's body with their measured shares).\n\nThe asymmetry is the finding: an unrecorded member reads as **outstanding debt** (\"declare its subtree\"), while its recorded twin reads as **decided** (\"declaring `packages/**` would be true and is refused because it makes the matched column stop discriminating\"). #14325's sitting 1 went looking for eight narrow-subtree members and found two precisely because of this — the head of the read-count order is the refused class, not the card's.\n\n## Possible disposition (for triage)\n\nRecord the 14 in `scripts/pm/bare-root-worklist.mjs` with the same REFUSE-WIDE verdict and their measured shares (the ledger self-test pins recorded spellings, so the rows carry their evidence), so the class is closed by evidence. This edits the ledger, which #14325 does not own — hence a card of its own. Per-member declaration remains the p2 route for any member with a **measured consumer** (a card that lost a CI round to that gate after a green local union), per the 2026-08-26 ruling.\n\n## Adjacent, same report (folded here rather than filed twice)\n\n`scripts/check-whole-set-label-write.mjs` declares three self-test SANDBOX filenames (`scripts/w.mjs`, `scripts/writer.sh`, `.github/workflows/w.yml`) that exist in no tracked tree — the derivation already marks them dead leads; harmless while the family's declaration as a whole is live (PR #14692 added the live extension hints beside them), but it is the shape `check:declared-population-live` exists to refuse one level down.\n\nRefs: #14325 / PR #14692 (the measurement) · #14131 / PR #14323 · #13519 / PR #14188 · #14189 (whole-tree channel) · #12369 (the REFUSE-UNSPELLABLE re-pricing decision)."
+}

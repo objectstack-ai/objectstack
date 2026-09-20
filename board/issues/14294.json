@@ -1,0 +1,37 @@
+{
+  "number": 14294,
+  "kind": "issue",
+  "title": "dispatch-gates: `--tier --commands` silently prefers `--tier` — the one two-stdout-shape blend the CLI does not refuse",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:skills",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-02T01:27:51Z",
+  "updated_at": "2026-09-03T11:00:00Z",
+  "closed_at": "2026-09-03T10:06:36Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14294",
+  "body": "Found while implementing #13774 (the `--ran` run-reconciliation mode) in `scripts/pm/dispatch-gates.mjs`. ⛔ Filed **unassigned**, out of scope for that PR, and deliberately **not** fixed there. Lane `domain:devx`.\n\n## The shape\n\nThe CLI refuses a blend of the two machine-readable stdout shapes, out loud:\n\n```js\n} else if (process.argv.includes('--commands') && process.argv.includes('--json')) {\n  console.error('dispatch-gates: --commands and --json are two spellings of stdout — pass one.');\n  process.exit(2);\n```\n\nwith the stated reason that *\"two answers to 'what shape is stdout' is no answer. Blending them — or silently preferring one — is the class of failure this whole file is about.\"*\n\n`--tier` is a third stdout shape and is **not** in that rule. At the bottom of the same block:\n\n```js\nif (process.argv.includes('--tier')) {\n  for (const line of tierLines(deriveTier(paths))) console.log(line);\n} else {\n  derive(paths, { ... , mode });\n}\n```\n\n⇒ `--tier --commands` computes `mode = 'commands'`, then discards it and prints tier PROSE on stdout. A consumer that redirected stdout because `--commands` promises *\"one runnable command per line, nothing else on stdout\"* gets the tier verdict in that file, exit 0, no word anywhere that the flag it passed was dropped. Same for `--tier --json`: the stream is not JSON and nothing says so.\n\n## Reproduce\n\n```\nnode scripts/pm/dispatch-gates.mjs --tier --commands packages/spec/src/index.ts > out.txt\necho \"EXIT=$?\"   # 0\ncat out.txt      # tier lines, not commands\n```\n\n## ⛔ Not claimed\n\n- ⛔ **No claim that anyone has hit it.** Found by reading the argv chain while adding a fourth stdout shape to it, not from an incident. Severity is on that basis alone.\n- ⛔ **No remedy recommended**, because there are two defensible ones and choosing between them is not mechanical: **refuse** the combination the way `--commands --json` is refused, or **send the tier verdict to stderr** whenever a machine-readable mode is asked for, so a caller gets both answers in the two streams that already carry them. The second is arguably better — `--tier`'s own docblock says the tier half answers a different question and needs no tree — but it changes what `--tier` means when combined, and that is a design call.\n- ⛔ **Not a `--ran` defect.** The mode added in #13774 refuses both `--ran --commands` / `--ran --json` and `--ran --tier` explicitly, so the new flag does not extend this hole. This card is about the pre-existing pair.\n\n## Refs\n\n- #13774 — the card whose implementation surfaced this; its PR touches the same argv chain and deliberately leaves this pair alone."
+}

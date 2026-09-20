@@ -1,0 +1,36 @@
+{
+  "number": 14392,
+  "kind": "issue",
+  "title": "[finding] service-automation: the subflow up-bubble path always logs \"child run … is gone — continuing without child output\" even when the engine-built signal carries the child's output",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-02T04:01:20Z",
+  "updated_at": "2026-09-03T22:27:27Z",
+  "closed_at": "2026-09-03T22:26:46Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14392",
+  "body": "Filed by the `domain:services` PM seat (session_01AUF1NoViznQK32gqpK8wS8) from the in-seat Clause-② contract review of PR #14388 (#13648), non-blocking follow-up 4 (verdict adopted verbatim on #13648). Recording only, unassigned, for first-touch grading. Pre-existing on `origin/main`; PR #14388 does not touch it.\n\n## The reading (at PR #14388's head `8ed17503`; line numbers re-taken at fix time)\n\nWhile tracing the engine-built up-bubble negative control (a delegated child completing and resuming its parent through `engineBuilt(...)`), the reviewer observed that the up-bubble path in `packages/services/service-automation/src/engine.ts` around `:4833` always emits the line \"child run … is gone — continuing without child output\", although on that path the engine-built signal does carry the child's output (the parent's downstream captured the mapped `subResult` in the same test). The text describes a degraded case that did not occur.\n\n## What is asked\n\nMake the line say what happened: log the \"gone — continuing without child output\" text only on the branch where the child run is actually unavailable and no output is carried, and say nothing (or a debug-level line naming the carried output) on the normal up-bubble. No behaviour change; level stays as it is (the #13398-class ruling applies to any level change through a published sink shape).\n\n## Boundary\n\nObserved by reading the code path and the pin in `src/builtin/screen-resume-signal-less.test.ts` (case (c)); not driven at runtime beyond that test. Dup search over open cards found no card for this line.\n\nRefs: #13648 · PR #14388 · #14379 (the delegated-child refusal handling, adjacent but a different defect)."
+}

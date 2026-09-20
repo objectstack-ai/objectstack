@@ -1,0 +1,36 @@
+{
+  "number": 13533,
+  "kind": "issue",
+  "title": "审批回写（系统身份）不触发共享规则物化，「批准后团队看不见」——平台只记一条日志、无补偿、无声明式手段",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T17:05:35Z",
+  "updated_at": "2026-09-03T11:53:13Z",
+  "closed_at": "2026-09-03T11:52:45Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 20,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13533",
+  "body": "> **来源**：宣传视频车道 #147（一句话新模块·请假管理）实拍取证时发现。**未改动任何平台代码**，本单为只读取证 + 一次真实审批流程实跑。\n> **标为 Feature + needs-user-decision（而非 bug）是刻意的**——是否算缺陷、以及该往哪个方向修，请人类负责人裁定后再排开发，不要被自动流程直接当任务处理。\n>\n> **正文订正记录**：观察时长由「3 分钟」收窄为**「2 分 47 秒」**（实际轮询跨度 16:53:52→16:56:39，命令在 3 分钟处被超时切断，最后一轮未走完），并补上关键限定「**每次均为独立的服务端查询**」——原文未写清这一点，而它才是「排除异步延迟」能成立的理由。详见评论区回查记录。\n\n## 现象\n\n一个用「审批流改状态 + 按状态共享」这个常见组合搭起来的模块：员工提交请假 → 主管在审批收件箱批准 → 记录变 `approved`。\n\n**批准之后，同团队的另一位员工看不到这条记录**；而更早的几条已批准记录却看得到。**连续观察 2 分 47 秒（每 15s 一次共 12 次，每次都是重新发起的独立服务端查询，不是盯着一个已加载的页面）状态不变——不是异步延迟。**\n\n> ⚠ 「每次都是独立查询」这个限定是必须的：该平台的列表/日历**加载时取一次、不自动刷新**，若观察方式是盯着一个已打开的页面，则「状态不变」什么也证明不了。本单的这 12 次是 `curl` 轮询（每轮一次全新的 `POST /api/v1/data/<object>/query`，带观察者自己的 cookie jar），**没有页面、没有前端缓存**，故该限定成立。\n\n对该共享规则调一次 `POST /api/v1/sharing/rules/<id>/evaluate`（**以 admin 身份**）后，**再发一次全新的查询**即恢复正常：\n\n```\n{\"matchedRecords\":4,\"expandedUsers\":2,\"grantsCreated\":2}\n```\n\n> 该 `evaluate` 与其后的复核之间**没有任何写操作**，唯一的状态变更就是那次 `evaluate`；「恢复正常」也是靠一次**全新的服务端查询**看到的，不是页面自己变或刷新所致。\n\n## 根因（代码级判定点，发行包 `@objectstack/plugin-sharing/dist/index.mjs`）\n\n平台**本来就支持逐记录实时物化**：`bindRuleHooks()` 为每个有活跃规则的对象注册 `afterInsert` / `afterUpdate` / `afterDelete`（`:5109` / `:5125`，priority 180），逐记录调用 `service.evaluateAllForRecord()`；该方法自己的注释即写着「the per-record pass the **afterInsert/afterUpdate hooks** run」（`:3859`）。\n\n但两个钩子的第一行就把系统写挡掉，**且不做任何补偿**：\n\n```js\nif (ctx?.session?.isSystem) { noteSystemWriteSkipped(objectName); return; }   // :5110-5113 / :5126-5129\n```\n\n跳过后只发一条 info 通知（`:5059`），原文逐字：\n\n```\n[sharing-rule] sharing materialisation skipped for isSystem writes; re-evaluate rules or restart to backfill\n```\n\n**而审批回写恰恰是系统写**：审批节点以平台身份写 `approvalStatusField`，且 `lockRecord: true` 决定了此时只有平台写能落地。\n\n**链条**：批准 → 系统身份写状态字段 → 共享物化被跳过 → 团队看不见 → 直到有人手动 `evaluate` 或重启服务。\n\n## ⚠ 影响面取决于观察者的角色（2026-08-31 补，见评论区）\n\n**本单现象只对「不持 `viewAllRecords`、依赖共享规则看他人已批准记录」的角色可观测。** 持 `viewAllRecords: true` 的主体——包括本例中的**审批人本人**与 admin——**不受影响**，因为他们的读路径根本不经过共享规则。\n\n**这对复现有直接影响：用审批人或管理员视角去复现，会看不到问题。** 必须用一个只能看自己、靠共享规则看他人的普通成员身份。\n\n## 为什么值得单独看，而不是「用法不对」\n\n- **不是设计上的批量物化**：平台明明注册了实时钩子，只是不认系统写；\n- **搭建方没有声明式手段规避**：`spec/security/sharing.zod.ts` 无相关字段；全包内无 `OS_SHARING*` 之类配置，也没有「让系统写参与重算」的选项；\n- **文档与测试零说明**：`content/docs/`、`docs/`、`test/` 全仓检索不到「审批后何时可见」的任何说法，也搜不到那条通知语；\n- **影响面不限于请假**：**任何「审批改状态 + 按状态共享」的组合都会中招**，而这恰是审批类模块最常见的形状。\n\n## 待裁的方向（供参考，不预设结论）\n\n1. 系统写也参与逐记录物化（可能需要考虑批量导入/回填场景的性能与放大）；\n2. 系统写跳过后入队补偿，异步补算；\n3. 保持现状但给出**声明式开关**（规则或对象上的字段），让搭建方按对象选择；\n4. 保持现状但把它写进文档，并让审批插件在这种组合下给出构建期告警。\n\n## 邻近既有单（已查，非重复）\n\n- #7497 Design: does approver routing imply record read visibility?（审批人路由与读可见性的模型问题，与本单的**物化时机**不同）\n- #8207 `grant()` skips the ADR-0111 D7 inert-grant guard for SYSTEM callers（同样是 SYSTEM 路径，但方向相反：那条是系统调用**绕过**了守卫，本条是系统写**被守卫挡掉**）\n\n## 复现最小路径\n\n1. 建一个对象，声明 `type:'approval'` 节点 + `approvalStatusField` + `lockRecord:true`；\n2. 建一条 criteria 共享规则，条件按该状态字段（如 `status == 'approved'`），收件人为某真实 position；\n3. 以普通用户提交一条记录，以审批人身份走 `POST /api/v1/approvals/requests/<id>/approve`；\n4. **以该 position 下的另一位用户**——⚠ **必须是不持 `viewAllRecords` 的普通成员**，且**每次重新发起查询**（不要盯着一个已加载的页面）——查询该对象 → 看不到刚批准的记录；\n5. 对该规则调一次 `evaluate`，**再重新查询一次** → 立即可见。\n\n---\n\nBlocked-by: #14648\nUnlock-action: re-check PR #14528\n\n**Why this card is `pm:blocked` rather than `pm:dispatched`** — added by the `domain:services` seat (session `session_01AUF1NoViznQK32gqpK8wS8`), 2026-09-03 03:34Z. The work is **done**: PR #14528 is reviewed, ACCEPTed, and `mergeable_state: clean` with all its own checks green on head `645b14e9e`. What blocks it is an external gate defect, and the state machine reserves `pm:blocked` for exactly that shape rather than a new label.\n\nMeasured before flipping, not assumed:\n- **5 merge-queue ejections**, every one on the same signature — `test/run-dev-unbuilt-workspace.e2e.test.ts`, `AssertionError: expected 'SIGKILL' to be null` (latest queue-triage comment 2026-09-03T03:33:13Z).\n- **The head never changed** across all five (`645b14e9e` throughout), so nothing about this PR is being re-tested — the same artefact is failing on someone else's defect.\n- `git merge-tree --write-tree origin/main 645b14e9e` exits **0**: no conflict with `main`.\n- The anchor is **#14648** (`domain:cli`, `p1`). Its candidate fix PR #14715 was **refuted** on 2026-09-03T02:24Z: raising the ceiling to 180000 ms still failed, with the child running 180105 ms against a 6125 ms baseline on the same runner minutes earlier — a stall, not a margin, which no constant ceiling closes.\n\n⛔ **Not re-queueing this PR on that signature.** The merge-queue-triage bot's own checklist says a failure matching a known aggregation issue is not fixed by re-queueing, and each attempt rebuilds the whole queue behind it. This card returns to the queue when #14648 is closed, via the `Unlock-action` line above.\n\n⚠️ Stated against the counter-evidence rather than around it: PR #14750 crossed this same queue on its own after 2 ejections, so the queue is **lossy, not deadlocked**. The judgement here rests on 5 ejections with an unchanged head *plus* a refuted fix direction, not on ejection count alone.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

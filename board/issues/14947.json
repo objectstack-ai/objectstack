@@ -1,0 +1,34 @@
+{
+  "number": 14947,
+  "kind": "issue",
+  "title": "test(cli): lift the #14871 quarantine — restore the never-read-reader case now that #14875 has landed",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "priority:p1",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T11:55:14Z",
+  "updated_at": "2026-09-03T11:57:48Z",
+  "closed_at": "2026-09-03T11:57:48Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14947",
+  "body": "Filed by the director seat (#12708, summon #11, session `session_01ShyhexkB2d1AeRZ85tgAAe`) as the re-enable half the quarantine PR #14871 promised in its own body: *\"if that PR must not touch this test file, the director seat lands the one-line un-skip the moment the fix merges.\"* The fix has merged — PR #14875 (`Fixes #14832`, merged 2026-09-03T11:34:02Z) — and it did not touch the test file, so this card is that un-skip. `pm:queue` · `domain:cli` · `priority:p1`: a maintainer-ruled gate weakening (ruling A on #14832, 2026-09-03, 「A，你现在就派发处理」) is not a resting state; restoring the gate is the closing act of that ruling.\n\n## What to restore, in `packages/cli/test/run-dev-unbuilt-workspace.e2e.test.ts`\n\nPR #14871 (`392f4108` on `main`) made exactly three edits; reverse all three, nothing else:\n\n1. `it.skip('gives up and exits instead of waiting forever', …)` → `it(…)`, and delete the quarantine note above it that cites ruling A.\n2. The `'never-read'` spawn in `beforeAll` (`runCliAgainstDeadReader(REAL_COMMAND, dir, …, 'never-read', UNREAD_HARD_CAP_MS)`) was commented out verbatim beside a restore note — un-comment it and delete the note.\n3. `let unread!: Lifetime` (the definite-assignment assertion added so the file stayed strict-clean while nothing assigned it) → back to the declaration form the file used before #14871.\n\n⚠️ Re-derive from `origin/main`, not from #14871's diff alone: #14863 (#14716) edited the same file after the quarantine landed (the closed-read-end case is now judged by exit status, not a wall clock). Read the file as it is; the three edits above are the only ones this card makes. ⛔ `bin/run-dev.js`, `bin/stderr-nonblocking.mjs`, `RUN_TIMEOUT_MS`, `UNREAD_HARD_CAP_MS` and every other case stay untouched. ⛔ No timeout raised, nothing skipped, nothing retried.\n\n## Executable criterion\n\nOn the restored file, the case `the mirror direction: a reader that is never coming back › gives up and exits instead of waiting forever` runs (not skipped) and passes on a **cold `tsx` cache** repeatedly — the shape that reproduced the hang 27/30 before #14875 (per its PR body): run the file's suite under repetition with a private `TMPDIR` per run and report the observed pass count; every run must end `code 2, signal null` in seconds, never at the 180 s cap. The suite's `check-test-completeness` attestation must show the case counted as run.\n\n## Landing\n\n`Fixes` this card; `Part of #14832` in the body so the thread closes the loop. Tests-only ⇒ `skip-changeset`. Draft PR through the merge queue after the director seat's review; the Clause-② reading is `no` (test file only).\n\nRefs: #14832 (the hang; ruling A recorded at 5521280392) · PR #14871 (the quarantine) · PR #14875 (the fix) · PR #14863 (#14716, the same file's later edit)."
+}

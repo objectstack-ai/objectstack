@@ -1,0 +1,36 @@
+{
+  "number": 14959,
+  "kind": "issue",
+  "title": "[Decision] May a rank-and-file member set their OWN `sys_user.locale`? Ruling B opened the COLUMN; ADR-0092 D5 still answers no to the ROUTE, so today only admins can set it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "i18n",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T13:03:19Z",
+  "updated_at": "2026-09-04T04:05:06Z",
+  "closed_at": "2026-09-04T03:43:15Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14959",
+  "body": "Filed by the `domain:services` execution seat from a **measured gap** in PR #14958 (#14787), reported by the dev rather than acted on — correctly, because closing it is a second security-boundary decision the maintainer's ruling did not take.\n\n## What is already ruled, and is not being reopened\n\nMaintainer ruling **B** on #14787 (comment 5522882528, verbatim 「同意」): the ADR-0092 D2 self-service whitelist becomes `{name, image, locale}` and the column's `readonly` goes. PR #14958 implements exactly that. ⛔ This card does not revisit it.\n\n## The gap, measured\n\nAfter that PR:\n\n- the identity write guard **admits** `locale` on a user-context update to `sys_user`;\n- **but** `member_default` still declares `allowEdit: false` on `sys_user` (`plugin-security/src/objects/default-permission-sets.ts`, via `denyWritesOnManagedObjects()`), so an ordinary member's `PATCH` to their **own** row is refused by the permission layer *before* the guard is ever consulted;\n- and better-auth's `/update-user` — what the existing `update_my_profile` action posts to — **cannot carry the field**, because `locale` is deliberately not a better-auth `additionalFields` entry (#13881 measured why: it would make `getSession` SELECT a column an environment that has not run schema-sync does not have).\n\n⇒ **Today a platform admin can set any user's locale, and a rank-and-file member cannot set their own.**\n\nADR-0092 D5 is explicit that this split is intended — the guard decides *which columns* any permitted actor may touch; permission sets decide *who*. So PR #14958 is faithful to the ruling as written. The ruling simply did not reach the route.\n\n⚠️ Why it cannot just sit: **objectui#7501** is already filed for the account-settings \"my language\" form item, and it has no route to post to. #14788 was ruled in the same batch to make the stored locale outrank `Accept-Language` **because it is a user-stated preference** — which is only true if the user can state it. Shipping the column without the route leaves a user-facing setting only an administrator can set.\n\n## Options\n\n- **A — grant it on the generic data path, in the `sys_api_key` shape.** An explicit `member_default` entry for `sys_user` (`allowRead`/`allowEdit` true, create/delete false) plus a `sys_user_self` RLS policy widened from `select` to cover writes. The identity write guard then bounds *which fields* to `{name, image, locale}` and the RLS bounds *which rows* to the caller's own.\n- **B — a dedicated endpoint** (`POST /api/v1/me/locale`, or extending the `update_my_profile` action) writing under system context after checking the caller is the subject, leaving `member_default` untouched.\n- **C — leave it admin-only for now.** Ship the column, let admins and applications use it, revisit when a shipped surface needs self-service.\n- **D — make `locale` a better-auth `additionalFields` entry** so `/update-user` carries it. ⛔ Named only to be refused: #13881 already measured that this breaks `getSession` on any environment that has not run schema-sync.\n\n## ⚠️ The cost of A, stated plainly because it is the real decision\n\nA also opens **`name`/`image` self-editing through the generic data path**, which ADR-0092 D5 currently routes through better-auth `/update-user` for its session-cache refresh. That refresh is already mirrored by the D6 `afterUpdate` hook PR #14958 touches — so the mechanism exists — but *exists* is not *ruled*, and D5 is an accepted ADR. **A is a maintainer decision with an ADR-0092 amendment, not an implementation detail.** That is why it is here.\n\n---\n\n## 四棱分析\n\n**长期健全性(权重最高)。** 只有 **A** 保住**一套契约**。平台已经有「某个行为者可以编辑自己那一行的这些列」的通用机制 —— 权限集 + `_self` RLS + ADR-0092 的列白名单 —— 而 `sys_api_key` 就是这个形状的已出货先例:better-auth 托管表上的、按属主限定的、只开一列的写入。**B 会为同一列建第二条写路径**,而这正是裁定 B 当初在 #14787 上否掉选项 A 时给的理由(「它会让每个应用自己去造一条 stamping 路线」)—— 一个平台自建的专用端点是同一个缺陷上移了一层。**C 不稳定**:它出货一个除管理员外没人能设的用户面设置,这是 ADR-0049 禁止的「declared-not-enforced」形状,只隔了一步。**D 已被测量否决。**\n\n**真实业务需求。** 是实测的,不是设想的:hotcrm 为这个列本身测出了拉力(4 个已发布语言 × 16 个 notify 节点 × 0 个可本地化);#14788 在同一批里被裁定让该列**压过** `Accept-Language`;objectui#7501 是已立的表单项卡。⚠️ **这三处读的都是「用户自己的选择」;没有任何一处描述的是管理员去设别人的语言。** 拉力指向的恰恰是自助。\n\n**AI 编写元数据的安全性。** A 是把「拒绝」留在它已经在的地方的那个选项。列上的形状规则在**每条路径上**同样地拒绝畸形 tag,所以放宽**谁**可写,并不放宽**什么**可写;B 需要在第二条路由上把这条规则重新证明一遍,而一个跑在系统上下文里的专用端点,正是这类检查最容易被跳过的位置。\n\n**创业公司范围。** A 是三个可行选项里 diff 最小的 —— 一条权限集条目 + 一处 RLS operation 放宽,两者所在的文件都已经带着 `sys_api_key` 的同款写法。不加新端点、不加新概念、不加新的待文档化面。\n\n**推荐 A**,但它带 ADR-0092 D5 修订,因此必须由维护者裁。\n\n---\n\nRefs: #14787 / PR #14958(开列的那一半)· ADR-0092 D5(路由归权限集)· #13881(为何 D 被否)· #14788(读侧优先级,同批裁定)· objectui#7501(等这条路由的表单项)· #14951(ADR-0092 D1 的 tier 表仍写着旧的两字段)"
+}

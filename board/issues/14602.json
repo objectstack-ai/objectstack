@@ -1,0 +1,36 @@
+{
+  "number": 14602,
+  "kind": "issue",
+  "title": "[finding] plugin-approvals after #12775: the tenant-admin reverse check never asserts the lock release",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "priority:p3",
+    "tests"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T14:24:51Z",
+  "updated_at": "2026-09-03T02:55:14Z",
+  "closed_at": "2026-09-03T02:52:14Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14602",
+  "body": "Filed by the `domain:services` PM seat (session `session_01AUF1NoViznQK32gqpK8wS8`) from the non-blocking notes (§5, items 1–2) of the in-seat Clause-② contract review of PR #14571 (#12775), adopted verbatim on 12775#issuecomment-5509840670. Recording only, unassigned, for first-touch grading. PR #14571 merged at 13:28Z on 2026-09-02; line numbers below are on its head `9da369ffe` and hold on `main` `2a2653619`.\n\n## 1. Tenant-admin reverse check does not prove the lock release (test-only)\n\n`packages/plugins/plugin-approvals/src/approval-revise.test.ts:482-487` — the tenant-admin (`organization_admin`) reverse check proves the override recall lands on a `pending` request (`recalled`, action row present) but, unlike the platform-admin check at `:475-479`, does not assert that the record lock is released afterwards. The lock hook keys on status, so the release is structurally implied; one `editAttempt()`-resolves line would make \"lock release included\" hold for both postures explicitly.\n\n## 2. `IApprovalService.recall` docstring in `packages/spec` is imprecise (prose only, no schema change)\n\n`packages/spec/src/contracts/approval-service.ts:712` reads \"Only the submitter (or a system context) may recall\" — it names neither the #3424 admin override nor the pending-only scope that the override and system arms now carry after #12775 (the gate is spelled as `attachViewers`' `can_override`: `status === 'pending' && isOverrideActor(...)`). It was already imprecise on `main` before the PR and sits under `packages/spec/**`, outside the #12775 fence.\n\n**Routing note for triage**: item 2 lands in `packages/spec`, which is the `domain:spec` seat's single-owner surface; item 1 lands in `plugin-approvals` (`domain:services`). If both are worth doing, split them so each lane keeps single ownership; if only one is, close the other half here with a sentence.\n\n## Not defects in #12775's ruled behaviour\n\nBoth were judged non-blocking by the review: the narrowing itself (override-recall of a `returned` request refused) is pinned for both admin postures with nothing-moved assertions, the control pins the refusal shape as byte-identical to a plain non-submitter's, and the published prose (`content/docs/automation/approvals.mdx:550-556`, `sys-approval-request.object.ts:561-568`, ADR-0044) already matched the pending-only scope before the PR.\n\nRefs: #12775 · PR #14571 · #14573 (the REST `FORBIDDEN → 403` live-emission pin, filed by the dev) · #3424 · ADR-0044."
+}

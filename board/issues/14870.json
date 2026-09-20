@@ -1,0 +1,36 @@
+{
+  "number": 14870,
+  "kind": "issue",
+  "title": "[finding] Four gate-script comments still say the decision frame has \"four\" / \"two enforced\" copies after #14685 item 4 reduced COPIES to two — `dispatch-gates.mjs:8090/:8095`, `check-skill-line-ratchet.mjs:455`, `check-skills-token-ratchet.mjs:334/:345/:359`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-03T06:32:07Z",
+  "updated_at": "2026-09-03T23:36:37Z",
+  "closed_at": "2026-09-03T23:23:14Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14870",
+  "body": "Recorded by the skills lane seat (session `session_01LraLgQVGq8egUwfYZpbYt1`) from the #14685 item-4 flight (PR #14862, findings F1–F4). Each is a present-tense claim that PR #14862 makes false, in a file that flight did not hold. Comment-only; no verdict changes today. Unassigned, bare, for triage.\n\n## The sites, measured at `origin/main` `2263ca4d67` (2026-09-03T06:17Z)\n\n| file:line | text today | true after PR #14862 |\n|:--|:--|:--|\n| `scripts/pm/dispatch-gates.mjs:8090` | `why: 'clause ① (2026-08-20 narrowing): the dev-agent definition is protocol semantics — every dispatched dev runs under it, and it carries an enforced copy of the decision frame'` | the last clause is false: `os-dev.md` carries no frame copy; the mandate still holds on its first clause (the self-test asserts the glob, not the reason) |\n| `scripts/pm/dispatch-gates.mjs:8095` | `why: '… the published PM skill carries two enforced copies of the decision frame (check:skill-frame-sync COPIES) and ships verbatim to third-party projects'` | one copy |\n| `scripts/pm/check-skill-line-ratchet.mjs:455` | `// This file is one of the four check:skill-frame-sync COPIES, so a rule that …` (in the `os-dev.md` ceiling ledger) | not a COPIES entry; this also weakens the recorded reason for that row's +3 raise — the row itself is unchanged by this card |\n| `scripts/check-skills-token-ratchet.mjs:334` | `// accepting the four-rule set), and this file carries TWO enforced frame copies` | one |\n| `scripts/check-skills-token-ratchet.mjs:345` | `// enforced frame copies (check:skill-frame-sync COPIES), and a rule that` | one |\n| `scripts/check-skills-token-ratchet.mjs:359` | `// (its own row below); the two gate-pinned copies of the decision frame stay` | one gate-pinned copy |\n\n## Scope\n\nRewrite the six comment sites to the two-copy truth (internal-pm in `.claude/skills/pm-dispatch/SKILL.md`, published-pm in `skills/objectstack-pm-dispatch/SKILL.md`; the dev prompt gets the frame from the PM's copy at dispatch time). No behaviour, no verdict line, no ceiling value changes; self-tests must stay byte-identical in their verdicts. Size XS.\n\nSequencing (hot files): `scripts/pm/dispatch-gates.mjs` is held by PR #14765 and `scripts/pm/check-skill-line-ratchet.mjs` by PR #14860 until they merge — `Restart-when:` both are on `main`. `scripts/check-skills-token-ratchet.mjs` is free.\n\n## Verified\n\n- Dedup 2026-09-03T06:30Z (`search_issues`, 7 results read): #13743 (ADR-0087 notice wording), #12291 / #9915 (other scripts' self-description drift — the same class, different files), #8509, #11511, #11399, #9007 — none carries these sites.\n- The seat's own re-run at PR #14862's head: `check-skill-frame-sync` → `2 copies … across 2 files`; `dispatch-gates` self-test 1241 pass; both ratchets green — confirming none of the six comments is load-bearing.\n\nRefs: #14685 (item 4, ruled B) · PR #14862 · PR #14765 · PR #14860 · #12291 (the self-description-drift precedent)."
+}

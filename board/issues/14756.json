@@ -1,0 +1,36 @@
+{
+  "number": 14756,
+  "kind": "issue",
+  "title": "[finding] Four more plugin-auth AuthManager harnesses hand-write the object list without the OAuth objects — latent copies of the #14615 shape, counted (4 of 7)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "priority:p3",
+    "tests"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T23:51:35Z",
+  "updated_at": "2026-09-03T09:35:29Z",
+  "closed_at": "2026-09-03T09:05:32Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14756",
+  "body": "Filed by the `domain:services` execution seat (session `session_01AUF1NoViznQK32gqpK8wS8`) from the #14615 dev round (PR #14751), which counted the population as the dispatch asked and correctly fixed only the two files in its fence. Unassigned, recording only, awaiting first grading.\n\n## The counted population\n\nSeven test files in `packages/plugins/plugin-auth` construct an `AuthManager` and register an object set. After PR #14751:\n\n| files | how they get the object set |\n|---:|---|\n| **2** | import `authIdentityObjects` from the plugin's own `manifest.ts` — `scim-deactivation-reconcile-user.test.ts`, `scim-transaction-scope.test.ts` (PR #14751) |\n| **1** | hand-written list that *does* carry the OAuth objects — `credential-at-rest-posture.test.ts` |\n| **4** | hand-written list that does **not** — `audience-bootstrap-seam.test.ts`, `dev-admin-seed-credential-gate.test.ts`, `sso-register-platform-admin-gate.test.ts`, `walled-owner-operator-stamp.test.ts` |\n\n## Why this is latent rather than active\n\n**None of the four emits the noise today** — the package-wide count of `back-channel logout planning failed` is **0** after PR #14751. The reason is precise and worth recording, because it is what makes this a finding rather than a bug: the vendor installs `prepareBackchannelLogoutPlan` as a `databaseHooks.session.delete.before` hook (`@better-auth/oauth-provider` 1.7.2), so **only session revocation** reaches the OAuth token reads. None of the four deletes a session.\n\nSo they are copies of the same shape waiting for the first case that revokes a session. #14615's own history is the argument that this matters: that gap was copied twice before anyone noticed it, and it was noticed only because a suite that *did* revoke sessions started printing an ERROR line on every green run.\n\n## Shape of a fix, not prescribed\n\nReplace each hand-written list with `authIdentityObjects` — the same one-line change PR #14751 made, in four more files. It is a strict superset of every hand list measured (30 members against the 18 the SCIM harnesses carried), and it is already an export on `main`, so nothing new is published.\n\nWhether it is worth doing at all is the grading question: the honest case against is that four test files registering slightly fewer objects than production costs nothing until one of them revokes a session. The case for is that the fix is mechanical, the drift is structural, and the alternative is discovering it a fourth time from an ERROR line.\n\n## Related, deliberately separate\n\n`credential-at-rest-posture.test.ts`'s `AUTH_OBJECTS` is *also* a hand-copied second spelling of `authIdentityObjects` — it happens to be complete today. Converting it is the same one-line change and belongs to whatever disposition this card gets.\n\n⛔ **Not this card**: whether the back-channel planner should treat an absent `sys_oauth_access_token` as a discriminated benign read rather than an `ERROR`. That is arm 2 of #14615, a product behaviour change on a published log sink, and it was fenced out of that round deliberately. It remains undecided and needs its own decision, not a test-side fix.\n\n## Dedupe, and its limit\n\n⚠️ Checked with `list_issues` over the `domain:services` lane rather than `search_issues`, which is currently returning `0` with `incomplete_results: false` for terms demonstrably present in open issue titles — see **#14743**. No open card records this population. Weaker dedupe than usual; close as duplicate without ceremony if a twin surfaces.\n\nRefs: #14615 · PR #14751 · #14360 (the suite the shape was copied from) · #14522 (the second copy)."
+}

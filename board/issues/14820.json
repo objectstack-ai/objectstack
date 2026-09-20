@@ -1,0 +1,35 @@
+{
+  "number": 14820,
+  "kind": "pull_request",
+  "title": "fix(lint): descend into conditional then/otherwise when building the _validations universe",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T03:49:47Z",
+  "updated_at": "2026-09-03T08:42:04Z",
+  "closed_at": "2026-09-03T08:42:03Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-09-03T08:42:03Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/14820",
+  "body": "Fixes #14700\n\n## What\n\n`validate-translation-references` built its `_validations` universe with a **flat** walk of `objects[].validations[]`. A `conditional` rule's `then` / `otherwise` branch is itself a full rule carrying its own `name`, and that branch name — not the wrapper's — is the address `checkConditional` delegates to and `authoredRuleMessage` keys on at runtime (`packages/objectql/src/validation/rule-validator.ts`). The flat walk never saw a branch name, so a correct bundle entry for one was reported as an orphan `translation-target-unknown`, and the finding's own advice (\"keeps its source locale in every refusal\") was the opposite of the truth for that key — acting on it (deleting the entry) reintroduces the exact defect it fixed.\n\n## Fix\n\n`buildUniverse`'s walk over `obj.validations` now calls a small recursive collector (`collectValidationRuleNames`) instead of reading `rule.name` directly:\n\n```ts\nfunction collectValidationRuleNames(rule: AnyRec, validations: Set<string>): void {\n  const ruleName = strName(rule.name);\n  if (ruleName) validations.add(ruleName);\n  if (isRec(rule.then)) collectValidationRuleNames(rule.then, validations);\n  if (isRec(rule.otherwise)) collectValidationRuleNames(rule.otherwise, validations);\n}\n```\n\nThis mirrors `evaluateRule`'s recursion (`checkConditional` dispatches the branch back through `evaluateRule`, which recurses into `checkConditional` again for a nested `conditional`) — depth is unbounded, matching the runtime.\n\n**The wrapper's own name stays in the universe, unchanged.** Its message is structurally unreachable (`checkConditional` either returns nothing, returns `unevaluableRuleError` — which builds its own sentence — or delegates to the branch), so an entry for it is inert at runtime. #14518 keeps one anyway, deliberately, so the bundle mirrors the declared rule set 1:1 rather than re-deriving objectql's dispatch — this PR does not touch that decision.\n\n`packages/objectql/**` is untouched: `checkConditional` / `authoredRuleMessage` are the addressing this mirrors, not changes.\n\n## Before / after (reproduces the card's own measurement)\n\nSame fixture as the issue — `demo_account` with one `conditional` rule (`churn_reason_consistency`) whose `then` / `otherwise` are `churn_reason_present` / `churn_reason_absent`, and a bundle with entries for all three names:\n\n| Tree | `findings.length` | Findings |\n|---|---|---|\n| `origin/main` (`e6ac0c6fd5`, pre-fix) | **2** | `translation-target-unknown` on `churn_reason_present` and `churn_reason_absent` |\n| this branch (post-fix) | **0** | — |\n\nReproduced by importing `validateTranslationReferences` directly (via `tsx`) from a comparison worktree checked out at the pre-fix commit and from this branch, against the identical fixture object — not just asserted in a test, run both ways.\n\n## Fixtures added (`validate-translation-references.test.ts`, new describe block `#14700`)\n\n| Case | Bundle names | Expected findings |\n|---|---|---|\n| Wrapper + both branches named | `churn_reason_consistency`, `churn_reason_present`, `churn_reason_absent` | 0 (was 2 before the fix) |\n| A name matching no rule at any depth | the two real branch names + `churn_reason_ghost` | 1 — `churn_reason_ghost` only (real orphans still caught) |\n| Nested-in-nested (`conditional` whose `then` is itself a `conditional`) | `innermost_rule` (2 levels deep) | 0 |\n| Unnamed branch | `gate` (wrapper only; branch has no `name`) | 0, no crash (mirrors the existing unnamed-top-level-rule behaviour, #14253) |\n\nAll 64 tests in the file pass, including the pre-existing `object-branch coverage vs the schema (#13835)` pin, which still asserts one working leg per `ObjectTranslationDataSchema` key including `_validations`.\n\n## Gates\n\n- `pnpm --filter @objectstack/lint test` — 93 test files / 2845 passed, 5 skipped (pre-existing skips, unrelated).\n- `pnpm --filter @objectstack/lint typecheck` — clean (`tsc --noEmit` + `check:test-typecheck`).\n- `eslint --no-inline-config` on both touched files — 0 errors / 0 warnings.\n- `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --ran <record>` at `413167ed8c` (post-merge-of-`main`) — **34 derived, 30 run (all green), 4 NOT-MEASURED, 0 UNRUN**:\n  - `check-test-completeness` — grades a saved `turbo run test` log; none exists locally (CI tees one).\n  - `check-half-states` (plain, live sweep) — timed out at 180s reaching GitHub through the session proxy; report-only, never fails a build (its own header says so); the `check:pm-half-states` **self-test** alias ran and passed.\n  - `check:dual-build-cjs-loads` — reads built `dist/` across ~80 workspace packages; full `pnpm build` not run in this worktree.\n  - `check:type-check-debt` — `--re-measure` refuses without the full package build closure, by design (a number measured without it would count a different world, per its own message).\n\nNone of the 4 relate to this diff's file surface (`packages/lint/src/validate-translation-references.{ts,test.ts}`); all are repo-wide gates whose local prerequisite is a full monorepo build/test run, which CI performs.\n\n## Changeset\n\n`.changeset/nested-conditional-validation-refs.md` — `@objectstack/lint` patch.\n\n---\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01WLJQhde67SeTccsmnBVarV\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WLJQhde67SeTccsmnBVarV)_"
+}

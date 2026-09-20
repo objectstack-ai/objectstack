@@ -1,0 +1,34 @@
+{
+  "number": 14983,
+  "kind": "pull_request",
+  "title": "docs(qa): step 6 of the coverage sweep no longer sends the run record to a git-ignored dir",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T16:25:49Z",
+  "updated_at": "2026-09-03T17:41:14Z",
+  "closed_at": "2026-09-03T17:41:12Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": "2026-09-03T17:41:12Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/14983",
+  "body": "Fixes #14595\n\n## What changed\n\nOne list item — step 6 of \"How to run it\" in `docs/qa/platform-checklist/SWEEP.md`. Six lines replace three; no other file is touched, and neither `runs/.gitignore` nor `runs/README.md` was edited.\n\n## The defect\n\nStep 6 told every coverage-sweep agent to \"land the run record under `runs/`\". That directory is git-ignored (`*`, minus its own README and `.gitignore`), so the instruction cannot be obeyed: `git add` on an ignored path is a near-silent no-op, and an agent that follows the step believes it filed a record that does not exist.\n\n## Why the replacement text is not the obvious one — the reviewable part\n\nThe triage ruling scoped this to \"say a run record files a `qa-run` GitHub issue per `runs/README.md` and `RUNNER.md`, not a file under `runs/`\". Writing exactly that sentence into SWEEP.md would have replaced one unexecutable instruction with another of the same class, because a coverage sweep does not produce a run record at all. Three measurements, none of them assumed:\n\n1. `README.md` lines 18-21 splits the two skills that drive this ledger: `checklist-author` **authors** items per SWEEP.md, and `checklist-test` **executes** them and emits \"a run record, per RUNNER.md\". A run record is the artifact of an execution against a build.\n2. `.claude/skills/checklist-author/SKILL.md` lines 24-29 states the sweep's deliverables in full — new or expanded `areas/*.json` items, the reconciled `coverage.json`, and the defects and docs drift appended to `FOLLOW-UPS.md`, all validated green and landed on a task branch. No run record is among them.\n3. Every one of the 20 most recently updated `qa-run` issues is an execution record whose title carries a build sha and PASS / PARTIAL / FAIL / BLOCKED / NOT-RUN counts (#13404, #10663, #9467 and so on). A coverage sweep has no per-clause verdicts, no selector scope and no build under test, so it cannot satisfy that title and body contract.\n\nSo step 6 now states the sweep's own durable output and attributes the run record to `checklist-test` — while still doing what the ruling asked of it: the corrected sentence says a run record never lands under `runs/` (git-ignored) but as one `qa-run` GitHub issue, and points at `runs/README.md` and `RUNNER.md` by the names those documents use for themselves. If the reviewer prefers the literal ruled sentence, this is the line to change.\n\n## Gates\n\nDerived after the final commit with `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` (no paths), which reported 12 families at `21ba6f28`. Exit codes captured by redirect before any pipe; each row quotes the gate's own verdict text. Run through `bash scripts/pm/os-verify-lock.sh` (shared-box seconds).\n\n| gate | exit | its own verdict line |\n|---|---|---|\n| `node scripts/check-ci-filter-parity.mjs` | 0 | `OK: all 133 declared cross-package glob(s) (93 unique) are covered by core or crosspkg` |\n| `node scripts/check-closing-keyword-parity.mjs` | 0 | `check-closing-keyword-parity: OK (3 parsers agree on all 9 keywords and both measured separators)` |\n| `node scripts/check-comment-mask-corpus.mjs` | 0 | `comment-mask corpus sweep: 5824 files, 0 disagree, 0 unparseable` |\n| `node scripts/check-cross-package-test-inputs.mjs` | 0 | `OK: 25 package(s) read outside themselves, all declared` |\n| `node scripts/check-shard-attestation.mjs` | 0 | `2 aggregate gate(s) count 3 declared leg(s) across 3 attesting job(s)` |\n| `node scripts/check-test-completeness.mjs` | 3 | **NOT MEASURED** — `PREREQUISITE NOT MET — this gate grades a saved turbo run test log, and no log was named` |\n| `pnpm --filter @objectstack/lint run check:doc-formula-expressions` | 0 | `22 record-scoped formula example(s) across 426 files / 1365 TS blocks judged clean` |\n| `pnpm check:cross-package-test-inputs` | 0 | `ok` |\n| `pnpm check:doc-authoring` | 0 | `doc authoring guard: 393 files clean — no bare metadata literals` |\n| `pnpm check:nul-bytes` | 0 | `OK (scanned 8153 text file(s); no raw ASCII control bytes)` |\n| `pnpm check:refd-timer-probe` | 0 | `the approved module may read the probe -> GREEN` |\n| `pnpm check:watch-hint-literal` | 0 | `check-watch-hint-literal self-test: 57 cases pass` |\n\nEleven green, one NOT MEASURED in the gate's own words — that gate grades a saved test log, prints \"running the family locally, record this gate as NOT MEASURED\", and says explicitly that it is not a red.\n\nTwo gates named in the dispatch as leads resolved differently, both reported rather than quietly dropped:\n\n- `node scripts/check-platform-checklist.mjs` — the file's own family, and correctly absent from the derived list: the script contains no reference to `SWEEP.md`, so it never reads the edited prose. Run anyway; it exits 1 with four UNCLASSIFIED coverage kinds. The same command on the base tree at `5bc2f272` produces byte-identical output, so it is pre-existing and unrelated to this diff. Already filed by another seat earlier today, so no new card: #14961.\n- `node scripts/check-doc-links.mjs` does not exist in this tree. The nearest gates, `check:adr-links` and `check:published-readme-links`, cover `docs/adr` and published package READMEs, not `docs/qa`. Both markdown links this edit adds are relative to the edited file's own directory and both targets exist on disk.\n\nAlso checked beyond the derived families: a control-byte self-scan over the edited file (`grep -naP` over the C0 range plus DEL) returns no matches.\n\n`skip-changeset`: this diff publishes nothing from any package — it edits one internal QA runbook.\n\n_Generated by [Claude Code](https://claude.ai/code/session_019RfFHiRCSs3JXLK4cwcfox)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_019RfFHiRCSs3JXLK4cwcfox)_"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 14880,
+  "kind": "issue",
+  "title": "[finding] dispatch-gates --commands does not derive check:optional-error-sink for a diff that adds a new logger-sink interface",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T07:16:50Z",
+  "updated_at": "2026-09-03T22:06:46Z",
+  "closed_at": "2026-09-03T22:02:54Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14880",
+  "body": "Filed by the `domain:services` execution seat (session `session_01AUF1NoViznQK32gqpK8wS8`, `os-sales`) from a measured miss on PR #14866. Unassigned and ungraded — recording only; triage owns `domain:*`, type and priority. The dev that hit it was explicitly told not to fix it, and did not.\n\n## What happened\n\nPR #14866 (card #14353) adds a new logger-sink interface, `BootDiagnosticLogger`, in `packages/plugins/plugin-auth/src/boot-sign-in-reachability.ts`. The dev derived its gate families with `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --commands`, got **62 commands**, ran them, and reported 59 green with 3 declared NOT MEASURED.\n\nCI then failed `Lint & Repo Gates` on that head. The failing gate was `pnpm check:optional-error-sink` (`scripts/check-optional-error-sink-contract.mjs`, #9754) — **the one gate in the repo whose whole subject is logger-sink interfaces** — reporting that the new sink declares both `error?` and `warn?`, so every value of the type may print nothing.\n\n## Measured, not inferred\n\nRe-derived on both heads by the dev, with the artefacts kept:\n\n1. The round-1 derived list of 62 commands contains **no** `optional-error-sink` line, and none of the 62 gate logs is that gate — so it was never run locally.\n2. Re-running `--commands` today returns 62 commands, **byte-identical** to round 1, still without it.\n3. The gate was **not** missing from the tree at the branch point: present at merge-base `5ff5f9576` as `scripts/check-optional-error-sink-contract.mjs`, wired in `package.json` line 109, invoked at `lint.yml` line 2390. This is not a \"landed after my branch point\" story.\n4. The tool **does discover** the family — it is one of 202 discovered — but places it in the residue bucket printed as `Undetermined (source names no path at all — NOT known irrelevant): 38 famil(ies)`, as `pnpm check:optional-error-sink [lint.yml]`, with no \"declared no path population\" annotation (unlike several neighbours in that bucket, which carry one). `--commands` prints only the path-and-kind answer and excludes the residue **by construction**, so a harvest of `--commands` can never contain it.\n5. The CI step is unconditional by design — `lint.yml` carries the comment *\"No `paths:` filter, for the standard reason: a filter on packages/** would go dormant on the PR that edits the baseline.\"*\n\n## The reading, stated fairly\n\nThe tool is **self-consistent and documents this gap rather than hiding it**. Its own output says `181 of the 202 are reached by NEITHER path declaration CI obeys … CI schedules those on EVERY pull request, so no path derivation can narrow them and their verdict above is about relevance, never schedule`, and `62 is what THIS CARD owes by path and kind — NOT a complete account of what CI runs on the PR`. So this is a coverage limit that the tool announces, not a silent defect.\n\nWhat makes it worth recording anyway: a dev that follows the documented workflow exactly — derive with `--commands`, run what it lists — gets a green local sweep and a red CI, and the gate it missed is the one that grades precisely the construct the PR introduced. The gap is not uniform across diffs; it bites hardest when the diff's subject *is* the residue gate's subject.\n\n## Not proposed as a fix, offered as the shape of the question\n\nWhether `--commands` should surface residue families whose *name or source* matches a construct the diff introduces, or whether the answer is a second harvest mode for \"unconditional CI gates you should run anyway\", is a `scripts/pm/**` design question for whoever owns that tool — not this seat's to settle. `scripts/pm/**` is single-writer on the objectstack side.\n\nRefs: PR #14866 (where it was measured) · #9754 (the gate) · #14353 (the card)"
+}

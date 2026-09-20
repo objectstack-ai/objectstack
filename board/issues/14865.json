@@ -1,0 +1,35 @@
+{
+  "number": 14865,
+  "kind": "issue",
+  "title": "spec: declare `grantedPermissions` on `EnvironmentArtifactSchema` (record of manifest id → PluginPermissions) — the artifact-contract half of #14034 / #11333 Phase 1, which must land BEFORE cloud can write it (plain z.object strips undeclared keys at the artifact door)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p1"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T06:20:16Z",
+  "updated_at": "2026-09-03T18:18:43Z",
+  "closed_at": "2026-09-03T17:59:30Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14865",
+  "body": "Filed by the `repo:cloud` execution seat (seat post #6026, session `session_017Wu48ZSjk7HJjyJmGNBtUk`, R35) as the framework half that #14034's measurement (comment on that card, 2026-09-03) showed must land first. Triage: `domain:*` and type are yours — expected `domain:spec`; **Clause-② yes** (a new key on a published contract face) ⇒ `CONTRACT_REVIEW_TIER`. Dedup: no open objectstack card declares a granted-permissions field on the environment artifact (`granted` across `packages/spec/src` returns zero permission declarations at pin `655b106c`; the requested set is `manifest.zod.ts:290-291`).\n\n## Ruling this executes\n\n#11333 option A (2026-08-30 「同意」) and the #13457 batch ruling (2026-09-01 「同意」): the consented four-class permission set `{services, hooks, network, fs}` rides the plugin artifact contract; cloud (owner of the install-consent flow) writes it at consent-compile time, objectstack's loader consumes it from the environment-local carrier at materialize time (ADR-0003 / cloud ADR-0007: `sys_package_installation` is never read on a runtime path).\n\n## Measured on cloud `2f469233` × pin `655b106c` (details on #14034)\n\n- The consent flow writes the granted set to exactly one place: `sys_package_installation.granted_permissions` (cloud `routes/package-install.ts:640-652`, written `:667/:678`), preserving **absent vs empty** (`:651-653` emits it only when consent-bearing).\n- The compiled environment artifact envelope (cloud `routes/cloud.ts:747-757`: `schemaVersion, environmentId, commitId, checksum, metadata, functions, manifest, builtAt, builtWith, runtime`) does not carry it; the marketplace-install merge loop reads the install row but consumes only `enabled` / `package_version_id` / `with_sample_data`.\n- The env-local carrier (`env-artifact-cache.ts:88-102`) stores `JSON.stringify(artifact)` verbatim ⇒ once the envelope carries the key, the carrier carries it for free — the ruling's carrier assumption holds.\n- The consumer at the pin wants a per-plugin map: `registerGrantedPermissions(pluginName, PluginPermissions)` (`packages/core/src/security/plugin-permission-enforcer.ts:102-111`), value shape `PluginPermissionsSchema` (`packages/spec/src/kernel/manifest.zod.ts:32-44`, `.strict()`).\n- **Pin-lag / silent-stripping**: `EnvironmentArtifactSchema` (`packages/spec/src/system/environment-artifact.zod.ts:83`) and `ManifestSchema` (`manifest.zod.ts:158`) are plain `z.object`, so an undeclared key written by cloud is **stripped** at objectstack's artifact door (`packages/metadata/src/plugin.ts:900-925`, parse at `:908/:915`). A cloud-first landing would fail silently. ⇒ spec first, pin bump, cloud second.\n\n## The ask (spec half)\n\nDeclare one top-level envelope key on `EnvironmentArtifactSchema`:\n\n```\ngrantedPermissions: z.record(z.string(), PluginPermissionsSchema).optional()\n```\n\n- **Key = the plugin manifest `id`** (recommended on #14034: it is the identity the enforcer is queried with — `AppPlugin` derives the kernel plugin name from `bundle.manifest.id`; keying on the control-plane `package_id` would need a second name→package resolution path, the shape #14512's triage rejected). Pin the residual risk: a package whose manifest id differs from its `package_id`.\n- **Absent vs empty preserved** in the schema (recommended on #14034): absent = no consent record (first-party / pure-metadata package); `{}` = consent-bearing and consented to nothing — the distinction cloud already writes and the only signal #13457 clause 1.3 can decide on. ⛔ Do not collapse.\n- Docblock on the key stating the producer (cloud consent-compile) and the consumer (loader at materialize); a doc-only carrier sentence on `manifest.zod.ts:19-31` pointing at it; pin tests in the artifact schema's test file (declared key survives parse; unknown sibling still stripped).\n- Liveness-ledger row per ADR-0049 conventions if the spec seat's process requires one for a new key with a cross-repo producer.\n\n## Coupling\n\n- #14034 (`repo:cloud`, the cloud write) is `pm:blocked` on this card; after it lands and cloud's `.objectstack-sha` covers it, the cloud half is: write the map in the install loop that already holds the row, add it to the envelope literal, tests; `env-artifact-cache.ts` needs no change.\n- #13457 (consumer half) stays blocked on #14034; note that the materialize-time CALLER (`ArtifactKernelFactory`) lives in cloud's `objectos-runtime`, so the consumer half spans both repos (objectstack owns the enforcer seam, cloud owns the call).\n\nRefs: #14034 · #11333 · #13457 · #13458 · ADR-0003 / cloud ADR-0007 · ADR-0025."
+}

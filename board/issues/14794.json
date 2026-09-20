@@ -1,0 +1,35 @@
+{
+  "number": 14794,
+  "kind": "issue",
+  "title": "skills/README.md truth + routing sweep: `OLD`/`NEW` \"evaluate to `null` since M9.5\" is anchored nowhere and contradicts the formula skill; \"AI tool params\" is not a CEL site; the cross-skill routing list lacks the upgrade-vs-platform and objectui inbound decision points",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T01:44:09Z",
+  "updated_at": "2026-09-03T09:16:08Z",
+  "closed_at": "2026-09-03T04:12:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14794",
+  "body": "Filed by the skills lane seat (session `session_01LraLgQVGq8egUwfYZpbYt1`) from the optimization programme's audit ledger (#14292: UPG-A-01, OUI-A-01, and two README truth items the per-package flights could not take because `skills/README.md` was outside every flight's file surface). Bare, unassigned; the seat dispatches it in-lane. Sibling: #14566 (I18N-A-03, the labels-vs-bundles bullet on the same list) — the same flight lands both, one PR, so the routing list is edited once.\n\n## Measured at `origin/main` `89a156af88`, 2026-09-03T01:43Z\n\n1. **`skills/README.md:87`** — \"Legacy `OLD` / `NEW` evaluate to `null` since M9.5.\" `M9.5` occurs nowhere else in `packages/` or `skills/`; `git grep -E '\\bOLD\\b|\\bNEW\\b'` over `packages/formula/src` (non-test) returns **0** — no code evaluates those spellings to `null`. The formula skill says the opposite in substance: `skills/objectstack-formula/SKILL.md:345-346` maps `OLD.x` → `previous.x` and `NEW.x` → `record.x` as legacy spellings to migrate, and `:361` states `previous` is bound only on the events listed there. Two published files disagree; the README's sentence has no anchor. Settle at source (what the CEL parser actually does with a bare `OLD`) and keep one true clause — most likely \"legacy `OLD` / `NEW` are not CEL; migrate per objectstack-formula's table\" or simply drop the clause.\n2. **`skills/README.md:105`** — the \"Any CEL expression\" bullet lists \"AI tool params\" as a CEL site. `git grep -i 'cel|formula|expression'` over `packages/spec/src/ai` finds CEL nowhere on tool params — only `{{var}}` template interpolation on model-registry prompts (`model-registry.zod.ts:121-122`). The AI domain's real CEL site, per `skills/objectstack-ai/SKILL.md:405`, is a model-registry predicate. Replace the false item with the true one (or drop it).\n3. **Cross-skill routing list (`:94-110`, four bullets)** lacks two decision points the audits measured as real load-failure modes, in the same shape #14566 records for i18n:\n   - **UPG-A-01** — upgrade vs platform: an agent moving a project across a protocol major reaches for `objectstack-platform` (kernel/plugin lifecycle) and never learns `objectstack-upgrade` (`:42` in the index) is the process skill for that; one bullet routing \"moving a metadata project across a protocol major / a breaking changeset\" to **objectstack-upgrade**.\n   - **OUI-A-01** — inbound route to objectui: the README names objectui only under \"Related repositories\" (`:114`); an agent authoring schema-driven UI for an app never learns the `objectui` skill (separate repo, `skills/objectui/`) exists; one bullet routing \"rendering / composing the UI that consumes this metadata\" to the objectui catalog.\n   - **I18N-A-03** is #14566 — the same list, landed by the same PR.\n\n## Scope and budget\n\n- One draft PR, first line `Fixes #<this>` and `Fixes #14566`. Items 1–2 are corrections (shrink or neutral). Items 3's three bullets are funded additions of roughly +25 tokens each, in the four existing bullets' shape and size — ⛔ no more than that (maintainer 2026-08-21: 「……不能为了一个小功能扩写很多。」); pay inside the file where a strict restatement exists, net as close to 0 as honesty allows, reported per item.\n- `skills/README.md` is outside the token-ratchet population (`check-skills-token-ratchet.mjs:133`); the generated region between `<!-- BEGIN/END GENERATED: skills -->` is untouched (`check:skill-docs --check` stays green). PR #14786 (at the governed terminal) holds one line of the same file (`:55`, the anatomy tree) — disjoint hunks; the later to land merges `main` in.\n- Governed `skills/**` ⇒ draft, human merge; `skip-changeset`.\n\nRefs: #14292 · #14566 · #14315 (I18N flight) · #14307 (UPG flight) · objectui#7251 (OUI flight)."
+}

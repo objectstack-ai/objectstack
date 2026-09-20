@@ -1,0 +1,36 @@
+{
+  "number": 14301,
+  "kind": "issue",
+  "title": "`objectstack build` lowers an inline hook handler that references `Intl` into the QuickJS body — `detect-free-identifiers` allowlists host globals the sandbox does not provide, so the handler passes validate/typecheck/test/build and throws ReferenceError in production",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-02T01:40:13Z",
+  "updated_at": "2026-09-02T19:59:53Z",
+  "closed_at": "2026-09-02T19:54:22Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14301",
+  "body": "Filed by the triage seat (session `session_019kDRpB7D2XzVzkaLp57T5D`, R+89) as the **defect half split out of #14168**. #14168 is a feature question (a declarative value-domain slot on a field) and sits in the decision inbox; this half does not depend on that decision and is graded directly.\n\n## What was measured\n\nBy #14168's reporter on `@objectstack/cli` / `@objectstack/runtime` 17.2.0, Node v22.22.2, and re-verified here on `origin/main` `a39b02a6` by reading the allowlist:\n\n- The QuickJS sandbox the runtime evaluates lowered hook bodies in (`quickjs-emscripten` 0.32.0, the variant `AppPlugin` wires through `QuickJSScriptRunner`) has **no `Intl`** — `typeof Intl` is `undefined` there, while `Date` and `JSON` exist. `HookBodyCapability` grants nothing that would add it.\n- `packages/cli/src/utils/detect-free-identifiers.ts`, the `GLOBALS` set starting at line 39, **allowlists `Intl`** next to `Math`, `JSON`, `Date`, `Reflect`, `Proxy`, under the comment \"Web-ish that the sandbox / Node commonly provide\". A handler body that calls `Intl.DateTimeFormat` therefore has no free identifier, `extractHookBody` lowers it, and the `hook-body-lowering` lint rule (#13651) has nothing to report — that rule fires only on a *refused* lowering.\n- Consequence, measured in a real artifact: `pnpm validate`, `typecheck`, `test` and `build` are all green (in-process tests run the raw function in Node, where `Intl` exists); in production the lowered body throws `ReferenceError: Intl is not defined`, and with the `onError: 'abort'` a validation-shaped hook must declare, **every write to that object is refused**.\n\n## Why this is a defect, not a documentation gap\n\nThe allowlist is the platform's own statement of what a lowered body may reference. Where it names a global the sandbox does not provide, the build lowers code that cannot run and every local gate agrees it is fine — the silent-until-production shape. The deprecation text on `Hook.handler` (\"prefer `body`\") steers authors into exactly this path.\n\n## Ruled direction (triage)\n\nSplit `GLOBALS` into the set the sandbox actually provides and the set only Node provides. A free reference to a Node-only global becomes a lowering **refusal with a named reason** (for example: `Intl` is not available in the hook sandbox — keep the check in a string handler ref, or move it to a validation rule), so the existing #13651 lint rule reports it and `os build`'s existing warn-and-bundle behaviour handles the rest. The membership of the sandbox set is **measured** against the shipped QuickJS build (a `typeof X` probe run inside the same sandbox the runtime uses), never written from memory, and pinned by a test that reads that probe. ⛔ Not in scope: changing whether `os build` fails on the lowering class (#13838), or giving the sandbox `Intl` (a capability expansion).\n\n**Grade:** `pm:queue` · `priority:p2` · `domain:cli` (landing file is in `packages/cli`) · type Bug. Not clause ②: the lowering already refuses handlers with free identifiers; this corrects which identifiers count as free, against the runtime's measured truth.\n\n## Re-check\n\n```\ngit grep -n \"'Intl'\" origin/main -- packages/cli/src/utils/detect-free-identifiers.ts\n```\n\nPositive control: `'JSON'` in the same list.\n\n## Dedup\n\n`search_issues` (two queries, positive controls returned #13651 / #13838): #13651 (closed — lowering failed open, made loud), #13838 (`pm:on-hold` — whether `os build` should fail by default on the lowering class), #14168 (the feature half), #1867 (closed — sandbox crashes on nested writes). None names the allowlist/sandbox mismatch.\n\nRefs: #14168 · #13651 · #13838 · objectstack-ai/duly#24 (the application that hit it)."
+}

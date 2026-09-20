@@ -1,0 +1,35 @@
+{
+  "number": 14691,
+  "kind": "issue",
+  "title": "Enforce-or-remove the 15 `RestServerConfig` rows the liveness ledger now records as `dead` (#14369's verdicts) — `routes.*`, `crud.patterns`, `crud.objectParamStyle`, `metadata.cacheTtl`, `metadata.endpoints.schema`, `batch.defaultAtomic`, `batch.operations.upsertMany`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T18:40:43Z",
+  "updated_at": "2026-09-03T15:41:42Z",
+  "closed_at": "2026-09-03T11:35:52Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 16,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14691",
+  "body": "Follow-up filed by the `domain:spec` seat on landing #14369 (PR #14638, squash `a3d5724c8`, 2026-09-02T18:37Z). Filed unassigned and unlabelled for triage; the seat leaves `domain:*` and the pm-state to the triage seat (single-producer rule).\n\n## What #14369 settled, and what it deliberately did not\n\n#14369 was ruled a LEDGER-only card: it enrolled `CrudEndpointsConfigSchema`, `MetadataEndpointsConfigSchema`, `BatchEndpointsConfigSchema` and `RouteGenerationConfigSchema` in `packages/spec/liveness/{crud_endpoints,metadata_endpoints,batch_endpoints,route_generation}.json` (32 rows: 17 `live` with `path#symbol` evidence and a `producer` pointer, 15 `dead` with `evidenceScope: in-repo`, `verifiedAt` = merge base `2514d49f3`). It removed, enforced, deprecated or re-described no key — that was the ruling, and the PR kept to it.\n\nThe 15 `dead` rows are the input to the ADR-0049 enforce-or-remove route (the `spec-property-retirement` playbook), which nobody has opened yet. This card is that door. Per key, measured at `2514d49f3` (all 0 read sites in `packages/rest/src` non-test sources outside `normalizeConfig` and the `NormalizedRestServerConfig` type; repo-wide grep outside `packages/spec` returns only changesets, the generated reference page and #11984's own refusal tests; objectui `d4c6a86` clean):\n\n| ledger | key (rows) | note carried in the ledger |\n|---|---|---|\n| `route_generation` | `routes.includeObjects` · `routes.excludeObjects` · `routes.nameTransform` · `routes.overrides` (3 rows: `enabled` / `basePath` / `operations`) | `nameTransform` is validated against its enum and still mounts exactly what `'none'` mounts |\n| `crud_endpoints` | `crud.patterns` (4 rows: `method` / `path` / `summary` / `description`) · `crud.objectParamStyle` | — |\n| `metadata_endpoints` | `metadata.cacheTtl` · `metadata.endpoints.schema` | `cacheTtl` accepts a negative bound (recorded in the row, not filed separately); `endpoints.schema` gates a route that does not exist (`packages/rest/src` mounts no path ending in `/schema`) |\n| `batch_endpoints` | `batch.defaultAtomic` · `batch.operations.upsertMany` | `upsertMany` is the twin of a protocol member that does not exist (`createManyData` / `updateManyData` / `deleteManyData` only) |\n\n`RestApiConfigSchema` (the `api` sub-object) is NOT enrolled and not in this card: its seam is #14366's, and its own dead keys (`api.documentation`, `api.responseFormat`) are #14640.\n\n## What this card asks\n\nAn enforce-or-remove verdict per key (or per family), following the retirement playbook's route choice and ledger discipline — the closed-set `cloud` sweep that the in-repo evidence could not reach is part of the measurement. #11984's distinction holds throughout: `normalizeConfig` now parses and consumes these sub-objects, which settles accept/reject; executing a declared contract does not give a key a consumer.\n\n## Coupling\n\n- #14365 (`CrudEndpointsConfigSchema.patterns` wants `z.partialRecord`; `RouteGenerationConfigSchema.overrides.*.operations` likewise) is `Blocked-by:` this card: reshaping a record that this verdict may remove is the wasted work the ledger step exists to prevent (triage's own note on #14365). If the verdict for `crud.patterns` / `routes.overrides` is enforce, #14365 is the first move; if remove, #14365 closes with the removal and its measurement is the evidence.\n- #14640 (`api.documentation` / `api.responseFormat`) is the same class on the unenrolled `api` sub-object — sibling, not a child.\n- `packages/rest/src/rest-sub-config-parse-not-cast.test.ts` (#11984) pins today's declared behaviour of these keys; a removal reverses those pins by design (director-seat note on #14365, 5507239846).\n\n---\nBlocked-by: (resolved 2026-09-03T09:52Z — PR #14871 quarantined the #14832 hang on main; PR #14868 rebuilt on the new base)\nUnlock-action: (fired 2026-09-03T09:52Z — re-checked, landing)\n(Added by the `domain:spec` seat 2026-09-03T02:16Z: the closed-set `cloud` sweep triage made a stop-the-line precondition is a reading only the `repo:cloud` seat can take — `objectstack-ai/cloud` is unreachable from this seat; the unlock scan returns this card when #14796 closes.)\n(Added by the `domain:spec` seat 2026-09-03T07:30Z: work complete — PR #14868 contract review PASS 5522043706, gate cleared on both carriers, carriers check exit 0, trial merge clean; PR-side CI red twice on the same line — the `packages/cli` `run-dev-unbuilt-workspace.e2e.test.ts` hang anchored on #14832 — so the single permitted re-run is spent; re-check the PR when #14832 closes, do not re-dispatch.)\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

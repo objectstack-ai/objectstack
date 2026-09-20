@@ -1,0 +1,36 @@
+{
+  "number": 14244,
+  "kind": "issue",
+  "title": "finding: a `flow`-type action's AutomationContext gets the same stamped `record` stub when the caller cannot read the row — and the flow face has no `recordLoadDenied`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p2",
+    "security"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-09-01T15:52:08Z",
+  "updated_at": "2026-09-04T04:36:02Z",
+  "closed_at": "2026-09-04T04:33:41Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14244",
+  "body": "Observed while implementing #14143 on `66ecc50a`. ⛔ Unclaimed. Filed rather than fixed: #14143's dispatch order binds that card to the **handler** predicate, and this is one surface over.\n\n## What #14143 fixed, and where it stops\n\n#14143 adds `ctx.recordLoadDenied` to the **script/body** action face: when the dispatcher's caller-scope load of the subject row does not deliver it, the handler is told, instead of only receiving `ctx.record = { id: recordId }` (the id being stamped on precisely because the load failed).\n\nBoth dispatch doors now route their load through one producer, `loadActionSubjectRecord` (`packages/runtime/src/action-execution.ts`). But the **flow** branch consumes the same `record` object and carries no equivalent signal:\n\n- `packages/runtime/src/action-execution.ts` — MCP `run_action`, the `action.type === 'flow'` branch passes `record` into `dispatchFlowAction`;\n- `packages/runtime/src/domains/actions.ts` — REST `/actions`, same;\n- `dispatchFlowAction` then hands it to `automation.execute(action.target, { record, ... })` as the run's `AutomationContext.record`, and seeds `params` from the same object via `seedFlowActionParams`.\n\nSo a flow started by a row-scoped action on a row its invoker cannot read receives `record = { id: <recordId> }` — shaped exactly like a legitimate record-less start, with nothing on the context distinguishing the two.\n\n## Why it is a smaller claim than #14143, not the same one\n\nA flow action is deliberately **not** system-elevated: the flow engine receives the caller's identity and honours `runAs` (ADR-0049), so a `runAs: 'user'` flow re-derives the caller's scope on its own reads and the stub simply resolves to nothing. The exposure is narrower and conditional:\n\n- an author declaring `runAs: 'system'` on the target flow gets elevation *plus* a record stub the invoker could not read, and no context key to guard on;\n- any flow node branching on `record.id` being present reads the same always-true predicate #14143 removed from the handler face.\n\n## ⛔ Not claimed\n\n- ⛔ **No exploitation claim.** No exploitability work was done. Same posture as #14143: this is a predicate/observability gap, not an incident report.\n- ⛔ **Not a claim that `runAs: 'system'` is wrong** — it is a declared, documented authoring decision.\n- ⛔ **Not a proposal to narrow the flow dispatch path.** Whether the right answer is an additive `AutomationContext` key mirroring `recordLoadDenied`, a documentation change on `runAs: 'system'`, or nothing at all is a design question for triage; #14143 ruled only the handler face and ruled the narrowing direction out of that card's scope.\n\n## Dedupe\n\nOne targeted `search_issues` (repo-scoped REST search answered 403 for this seat, so the channel switch is declared here). 11 results, positive control holds — #14143 itself and the `runAs`/automation-elevation family (#14201, #14011, #5494, #7900, #3783, #4366) came back, so the query matched semantically rather than returning a silent zero. Nearest neighbours excluded:\n\n- **#14201** (open) — `flow-update-readonly-when-field` skips `runAs: 'system'` flows in **lint**. Same `runAs` vocabulary, different site (a build-time rule, not the dispatcher's context assembly).\n- **#7900** (closed) — `/automation` run-detail returns the triggering record's fields without that record's own FLS. Adjacent in spirit; different surface (a read API over stored runs, not the record handed to a run at start).\n- **#5494 / #4366 / #3783** — attribution of what a `runAs: 'system'` run *writes*. This is about what such a run is *given*.\n\n⛔ No duplicate.\n\n## Repro sketch\n\nDeclare a `type: 'flow'` action on an object with OWD `private`, targeting a flow with `runAs: 'system'`. Invoke it as a caller who cannot read the target row, with that row's id. The run's `AutomationContext.record` should be observed as `{ id: <recordId> }` rather than absent — identical to a record-less start.\n"
+}

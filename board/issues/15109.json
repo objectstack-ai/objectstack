@@ -1,0 +1,34 @@
+{
+  "number": 15109,
+  "kind": "pull_request",
+  "title": "docs(adr): amend ADR-0092 D5 — self-service edits route through the generic data path",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T23:03:30Z",
+  "updated_at": "2026-09-04T03:21:45Z",
+  "closed_at": "2026-09-04T03:21:43Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-09-04T03:21:43Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/15109",
+  "body": "Part of #14959\n\n**Governed surface — the maintainer merges this by hand.** This PR carries the ADR amendment alone; the code that implements it is a separate PR, cross-linked below, and that one must not be armed for merge before this one lands.\n\n## What this amends\n\nADR-0092 **D5** (\"Who can edit whom: unchanged permission topology\") said, in its third bullet:\n\n> Self-service stays on better-auth `/update-user` (`update_my_profile` action) … We do not build an RLS \"self-row edit\" carve-out for CRUD — one self-service door is enough, and better-auth's is strictly better.\n\nMaintainer ruling 2026-09-03, decision batch #22, verbatim and untranslated as adopted:\n\n> 「同意」\n\nA rank-and-file member **may** edit their own `sys_user` row on the generic data path. The original text is kept verbatim and the amendment is added as a blockquote beneath it, in the house style ADR-0105 established — two of D5's three bullets still hold, and the third is only readable against what it used to say.\n\n## Why the original text stopped being true\n\nD5 rests on a premise a later ruling retired: that better-auth `/update-user` can carry everything Tier 1 holds. It could, while Tier 1 was `{name, image}`. The 2026-09-03 ruling on #14787 admitted `locale`, and `locale` is deliberately **not** a better-auth `additionalFields` entry — #13881 measured that declaring it there makes `getSession` SELECT a column an environment that has not run schema-sync does not have.\n\nSo `/update-user` cannot post the column, and with `member_default` denying `allowEdit` on `sys_user`, the generic path could not either. The column shipped reachable by platform admins alone — a *user-stated* preference (#14788 ruled the stored value outranks `Accept-Language` precisely because it is the user's own statement) that the user could not state.\n\n## What the amendment decides\n\nSelf-service edits of the D1 Tier-1 columns route through the generic data path, bounded on the two axes that already exist and in the shape `sys_api_key` has shipped since #8053:\n\n- **which rows** — `member_default` gains an explicit `sys_user` entry (`allowRead`/`allowEdit` true, create/delete false), and its `sys_user_self` policy widens from `select` to `all` so it reaches the by-id write pre-image check. `sys_user_org_members` stays `select`-only: RLS policies OR-combine, so widening the org-peer *visibility* scope would compose \"my id OR every user id in my org\" and hand every member their colleagues' profile rows. The org-admin follow-up the original D5 text names at its end is still open, and still a separate decision.\n- **which columns** — unchanged. D2's identity write guard keeps bounding a user-context update to the registered whitelist. Widening *who* does not widen *what*.\n\n`name` / `image` therefore become editable on the generic path too. That is the real cost, accepted deliberately: **D6** already mirrors better-auth's `refreshUserSessions` for exactly those columns, so the session-cache coherence the original bullet bought by routing through `/update-user` is bought here by the companion hook instead. `locale` is correctly *excluded* from that mirror — better-auth carries no such field on its user model, so there is no stale cached copy to repair.\n\nRejected in the same ruling and recorded in the amendment so they are not re-proposed: a dedicated endpoint under system context (the \"second stamping route\" #14787's own ruling rejected one level up), leaving the column admin-only, and `locale` as an `additionalFields` entry.\n\n**Not amended:** D1's tier *table* still lists two Tier-1 members while the enforced whitelist constant holds three. That reconciliation is tracked separately in #14951 and is deliberately left alone here.\n\n## Gates\n\n`docs/adr/**` is excluded from `dispatch-gates.mjs`'s derived family for `check-adr-anchors`, so it was checked explicitly. Every gate in the derived family for this diff was run at the pushed head `4807b058b1`:\n\n- green: `check:adr-anchors`, `check-adr-links` (+ self-test), `check-adr-symbol-anchors` (+ self-test), `check:doc-authoring`, `check:doc-formula-expressions`, `check:nul-bytes`, `check:pm-governed-merges`, `check:cross-package-test-inputs` (+ the direct-node spelling), `check-ci-filter-parity`, `check-closing-keyword-parity` (+ self-test), `check-comment-mask-corpus`, `check-shard-attestation`, `check:refd-timer-probe`, `check:watch-hint-literal`\n- **exit 3 = NOT MEASURED**, not a pass and not a failure: `check-test-completeness` — it grades a saved `turbo run test` log that only CI produces, and a markdown-only diff cannot move it.\n\n## Cross-links\n\n- Card: #14959 (the ruling of record is its `issuecomment-5528362189`)\n- Code PR: https://github.com/objectstack-ai/objectstack/pull/15108 — the permission-set entry, the RLS widening, the layer-attributed pins and the changeset\n- Precedent followed: #8053 (`sys_api_key`), #14787 / #14958 (the column half)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01AUF1NoViznQK32gqpK8wS8\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01AUF1NoViznQK32gqpK8wS8)_"
+}

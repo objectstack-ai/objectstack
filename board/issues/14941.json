@@ -1,0 +1,34 @@
+{
+  "number": 14941,
+  "kind": "pull_request",
+  "title": "docs(field-types): give `unique` its real scope vocabulary",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T11:22:36Z",
+  "updated_at": "2026-09-03T12:12:03Z",
+  "closed_at": "2026-09-03T12:12:01Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-09-03T12:12:01Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/14941",
+  "body": "Part of #14901 — this lands the type-vocabulary half only. The default half is deliberately not written; see \"The default cell stays `false`\" below. The card stays open to carry it.\n\n## The row\n\n`content/docs/data-modeling/field-types.mdx`, Universal Field Properties:\n\n```diff\n-| `unique` | `boolean` | `false` | Enforce uniqueness |\n+| `unique` | `boolean \\| 'global' \\| 'organization'` | `false` | Unique constraint **and its scope** (ADR-0120). ...\n```\n\nThe contract has been `boolean | 'global' | 'organization'` since ADR-0120 D1, so the table hid two of the three spellings: a reader who trusted it could not express `'global'` at all, and was contradicted by this same page's own worked example at `:50`, which passes `unique: 'organization'`.\n\nTwo things kept the edit anchored rather than invented:\n\n- **The type cell matches the generated reference spelling for spelling.** `content/docs/references/data/field.mdx:64` (generated from `FieldSchema`, carries the `AUTO-GENERATED` banner) already renders `` `boolean \\| 'global' \\| 'organization'` ``. This hand-written row now agrees with it byte for byte in that cell, so the two pages cannot drift apart on the vocabulary.\n- **The description points at the generated reference instead of restating the rule.** That is this table's own existing convention — the sibling `multiple` row ends the same way, for the same reason: a hand-written row that restates a rule which regenerates elsewhere is a second copy waiting to go stale.\n\n## The default cell stays `false` — measured, not assumed\n\nThe card asked for a type-conditional default (`false` everywhere, `'organization'` on `autonumber`) predicated on #13894. That premise does not hold on this tree, so writing it would have asserted a default the schema does not implement.\n\n`packages/spec` built at `4b8f5f39`, then `FieldSchema.safeParse` on the resolved output:\n\n```\nautonumber (unique omitted)        -> ok=true unique=false\ntext (unique omitted)              -> ok=true unique=false\nautonumber unique:false            -> ok=true unique=false\nautonumber unique:organization     -> ok=true unique=\"organization\"\nautonumber unique:global           -> ok=true unique=\"global\"\nautonumber unique:true             -> ok=true unique=true\nunique:\"tenant\" accepted? false\n```\n\nAn omitted `unique` on `autonumber` resolves to `false`, exactly as on `text`. Corroborating, in the source: `unique: UniqueScopeSchema.default(false)` is unconditional, and the only value-materializing hook on `FieldSchema` — the `.overwrite()` — deals exclusively with `deleteBehavior` and early-returns long before it could reach `unique`. `superRefine` cannot rewrite values. Independently, the generated reference page states the default as `false` with no type condition. #13894 is still open and is referenced nowhere in the tree.\n\nAll four accepted spellings parse and `'tenant'` is refused, so the row's vocabulary is stated as measured.\n\n`packages/spec/**` was not touched — the spec is the correct side of this disagreement, and the docs move to it.\n\n## Gates\n\nDerived off the real change set from this worktree, not from a supplied list:\n\n```\nnode scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack\n```\n\n34 commands, all run at `4b8f5f39` (the final commit — tree clean, nothing landed after the sweep). Every exit code captured before any pipe. **33 green, 1 NOT MEASURED**, no findings.\n\nThe one not measured is `scripts/check-test-completeness.mjs`, which exits 3 with no argument and says so itself: it reads a saved test-run log, the derived family names it with no argument, and its own output instructs recording it as NOT MEASURED locally. It is not a red and there is nothing to fix.\n\nThree gates first came back as refusals to measure rather than findings — `check:doc-formula-expressions` and `check:doc-security-posture` (exit 3, `PREREQUISITE NOT MET`: `@objectstack/formula` / `@objectstack/lint` not built) and `check:skill-examples` (exit 1, refusing to compute against a `client-react` dist with no declarations). I built those three packages and re-ran all three; each then measured green. They are counted green on the real reading, not on the refusal.\n\nSample verdict lines, quoted from the gates themselves:\n\n```\n✓ check-doc-frontmatter: 2 content root(s) verified, each against its own floor — content/docs 404, content/blog 3.\n✅ check-doc-anchors: 295 internal #fragment link(s) across 409 source file(s) all resolve to a real heading\ncheck-nul-bytes: OK (scanned 8102 text file(s) -- 8102 tracked, 0 untracked-not-ignored; skipped 7 binary; no raw ASCII control bytes).\n✓ route-spelling guard: population clean — every shape-matched literal spells its ledger row.\n```\n\n`check-doc-anchors` is the one that matters for the new link: the `/docs/references/data/field` target resolves.\n\nNo changeset: the only changed path is `content/docs/**`, consumed by `apps/docs` (`private: true`), so nothing publishes from a package. `skip-changeset` applied.\n\n## Also filed\n\n#14940 — the `autonumber` callout on this same page (`:485`, `:493`) promises \"guarantees a unique, ever-increasing business identifier\", which the measurement above shows is not what a bare autonumber gets. Not swept in: the correct wording is a consequence of how #13894 is decided, not a mechanical substitution. Filed unassigned with `Blocked-by: #13894`.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_012zGPuVVX3deAx9LdjK8jCk\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012zGPuVVX3deAx9LdjK8jCk)_"
+}

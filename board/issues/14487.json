@@ -1,0 +1,34 @@
+{
+  "number": 14487,
+  "kind": "issue",
+  "title": "docs(adr): ADR-0130 补记 —— 权限矩阵不在包边界的收益范围内（维护者 2026-09-02 决定，#14454 第 3 项取 B）；受管面，draft 交维护者合",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T09:06:35Z",
+  "updated_at": "2026-09-03T15:10:35Z",
+  "closed_at": "2026-09-03T15:05:52Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14487",
+  "body": "Part of #14122 · docs-only · `docs/adr/**` 是受管面：PR **保持 draft**，由维护者合并。\n\n## 决定（维护者 2026-09-02 在 PM 会话拍板）\n\n#14454 第 3 项取 **B**：**权限集整体留在 `type: app` 包，权限矩阵不在 ADR-0130 创造的包边界的收益范围内。** 按包组合授权（模块把自己对象的授权贡献进 app 拥有的角色）另立平台卡作为分拆第二阶段（见 #14454 的后续评论），本次发版不做。\n\n## 为什么要补记\n\nADR-0130 §1.3(a) 把 30 行 × 9 列 × 6 套的权限矩阵列为\"没有边界\"的三个可量化后果之一，并把包边界作为 Studio 一直缺的分组。hotcrm 分拆方案（objectstack-ai/hotcrm#1449，`docs/architecture/module-split-plan.md` §上游缺口 第 3 条）实测：HotCRM 6 套权限集里 4 套横跨 5–6 个模块——权限集按**角色**授权而不是按**模块**，它不能住在某个模块里，分拆后矩阵依旧是平的。ADR 的动机段因此有一句会被读者当成承诺，需要在 ADR 里写明它**不是**本 ADR 兑现的。\n\n## 要做\n\n在 `docs/adr/0130-release-artifact-as-co-ownership-boundary.md` 加一节补记（沿用该 ADR 已有的 §7 勘误/补记体例）：\n1. 引 §1.3(a) 原句，说明权限矩阵的痛点**不由**包边界消除：权限集留在 app 包，Studio Access 分区里它们只出现在 app 包下。\n2. 记录原因（跨域授权的本性 + hotcrm 实测数字）与决定日期。\n3. 指向第二阶段的平台卡（按包组合授权）作为可能的后续，不承诺。\n\n⛔ 不改 D1–D8 任何决定正文；⛔ 不碰 `content/docs/releases/`；只加补记，不改写 §1。\n\n## 验收\n\n一段补记、一个 changeset（docs-only 按仓库规矩：若 ADR 改动不需要 changeset，按 `check-empty-changeset` / 现行惯例处理）；PR draft；`Governed Surface Queue Guard` 会标记受管，维护者合。"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 14753,
+  "kind": "issue",
+  "title": "dispatch-gates: `--tier --residue` silently drops `--residue` — the neighbouring silent-flag-drop that #14294's repair does not reach",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-02T23:47:51Z",
+  "updated_at": "2026-09-03T19:42:36Z",
+  "closed_at": "2026-09-03T19:18:47Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14753",
+  "body": "Found while implementing #14294 (refuse `--tier --commands` / `--tier --json`) in `scripts/pm/dispatch-gates.mjs`. Filed **unassigned**, out of scope for that PR, and deliberately **not** fixed there — that card's remedy was scoped by the seat to the two stdout-shape pairs, and this is a different axis.\n\n## The shape\n\n`--residue` is read in exactly one place, inside the branch that runs the derivation:\n\n```js\nconst status = derive(paths, { showResidue: process.argv.includes('--residue'), mode, runRecord });\n```\n\nThe `--tier` branch beside it calls `tierLines(deriveTier(paths))` and never calls `derive`, so under `--tier` the `--residue` flag is evaluated nowhere. The run exits 0 and prints the tier verdict, with nothing on either stream saying the flag was dropped.\n\nThis is the same silent-drop shape #14294 fixes one flag over, and it is the shape the `--ran --tier` refusal already exists to prevent — that refusal's own stated reason is that \"`--tier` derives no gate family\", which is exactly why there is no residue for `--residue` to name either.\n\n## Reproduce\n\nMeasured on `origin/main` at 7a17f3bf, with a control so the no-op is not confused with \"the flag has nothing to add here\":\n\n```\n# CONTROL — --residue demonstrably changes the answer when the derivation runs\nnode scripts/pm/dispatch-gates.mjs scripts/measure-partial-retirement-annotation.mjs > plain.out\nnode scripts/pm/dispatch-gates.mjs --residue scripts/measure-partial-retirement-annotation.mjs > residue.out\n# 15007 bytes vs 66141 bytes — DIFFERENT\n\n# THE DEFECT — under --tier the same flag is a no-op, at exit 0\nnode scripts/pm/dispatch-gates.mjs --tier scripts/measure-partial-retirement-annotation.mjs > t-plain.out\nnode scripts/pm/dispatch-gates.mjs --tier --residue scripts/measure-partial-retirement-annotation.mjs > t-residue.out\n# EXIT=0 both; byte-IDENTICAL\n```\n\n## Not claimed\n\n- **No claim that anyone has hit it.** Found by reading the argv chain while repairing its neighbour, not from an incident. Severity rests on that basis alone, as #14294's did.\n- **No remedy recommended.** Two defensible ones, and choosing is not mechanical: **refuse** the pair the way `--ran --tier` and (after #14294) `--tier --commands` are refused, or **leave it** on the reading that `--residue` is a modifier rather than a stdout shape and a modifier with nothing to modify is harmless. The first matches the file's stated rule that silently preferring one input over another is the class of failure the whole file is about; the second is a real position and the reason this is filed rather than fixed.\n- **Severity is not inflated by adjacency.** `--residue` only ever ADDS accounting to a human-read stream — unlike #14294, no machine consumer redirects stdout expecting it, so a dropped `--residue` costs a reader information, never a parse.\n\n## Refs\n\n- #14294 — the card whose repair surfaced this; its PR refuses `--tier --commands` and `--tier --json` and deliberately leaves this pair alone. That PR is not addressed to this card and does not close it."
+}

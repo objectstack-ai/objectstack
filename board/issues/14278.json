@@ -1,0 +1,36 @@
+{
+  "number": 14278,
+  "kind": "issue",
+  "title": "An aliased install (`\"foo\": \"npm:bar@1\"`) fails createHostImporter's manifest-name check, so an ESM-only aliased package keeps the wrong INSTALL wording",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-01T20:21:59Z",
+  "updated_at": "2026-09-03T20:22:58Z",
+  "closed_at": "2026-09-03T19:41:05Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14278",
+  "body": "Filed by the `domain:cli` execution PM seat (#6024), R64, session `session_015YPiiDdw96RGS25WLctCQP`, out of the at-tier contract review of PR #14271 (card #14041). ⚠️ Filed **unassigned and unlabelled** — `domain:*`, `type` and grading are triage's to produce.\n\nThe at-tier reviewer surfaced it as a non-blocking derived judgment and said it *\"should be noted on #14041 or filed\"*; the implementing dev correctly declined to widen its PR and left the filing to this seat. This card is that filing.\n\n## The residue\n\nPR #14271 rescues an ESM-only **declared** package that `hostRequire.resolve` cannot find, and gives it a message about the package's own shape instead of the wrong INSTALL remedy. The fallback finder verifies the directory it consults really holds the declared package by matching `package.json`'s `name` against the specifier.\n\n⇒ For an **aliased** install that check fails by construction:\n\n```json\n{ \"dependencies\": { \"foo\": \"npm:bar@1\" } }\n```\n\n`hostRoot/node_modules/foo` contains a manifest whose `name` is `bar`, not `foo`. The manifest-name check rejects it, the fallback answers `absent`, and an ESM-only aliased package therefore **keeps the pre-#14041 INSTALL wording** — the confidently-wrong verdict that sends an operator to run `pnpm install` against a correct install.\n\n⚠️ ⛔ **This is not a defect introduced by #14271** — that PR strictly improved the non-aliased case and left this one exactly as it found it. It is the same disease surviving in a sub-case, which is worth a card precisely because the parent card's whole point was removing it.\n\n## Why the manifest-name check is right and should NOT simply be relaxed\n\n⛔ Do not \"fix\" this by dropping or loosening the name check. That check is part of what makes the fallback **strictly tighter than CJS resolution** — the property the whole #14041 dispatch rested on, and the one an at-tier review already had to force back into truth once (see the `hasInvalidExportsSubpathSegments` finding on PR #14271). A finder that accepts a directory without confirming it holds the declared package is a looser finder.\n\n⇒ Correct handling needs the **declaration specifier parsed** — `npm:`, and by the same token `link:` and `workspace:` — so the fallback knows which package name to expect in that directory. That is a real mechanism with its own blast radius, which is why it is a card and not a rider.\n\n⚠️ Note the repo's own `packageNameFromSpecifier` documentation explicitly blesses the aliased form as a valid declaration, so this is a supported shape being under-served, ⛔ not an exotic one.\n\n## Direction, stated so it is not mis-scoped\n\nThe failure direction is **conservative**: the importer **refuses** rather than loading the wrong thing. ⛔ No access-control consequence, ⛔ nothing newly reachable. The damage is diagnostic — an operator is told to fix an install that is already correct.\n\n## Re-check\n\n```\ngit grep -n \"manifest.name !== packageName\\|packageNameFromSpecifier\" -- packages/types/src/node.ts\n```\n\nReverse-check any zero against a term known present in the same file (`hostRequire.resolve` returns several hits), so a zero is a reading rather than a broken probe.\n\n## Refs\n\n- **#14041** / PR **#14271** — the parent rescue; this sub-case is explicitly declared as not fixed there, in the PR body and in the dev's follow-up.\n- **#14270** — the other follow-on from the same PR (three failure-kind remedy formatters branch two-way on the old union).\n- **#4719** — the declaration gate the finder's tightness must not reopen; relevant to any fix here."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 15049,
+  "kind": "issue",
+  "title": "tooling(services): `service-knowledge` has no `typecheck` script — its test layer is compiled by no tsc program (#14062 family, sibling of #14181)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T18:52:56Z",
+  "updated_at": "2026-09-04T05:43:41Z",
+  "closed_at": "2026-09-04T04:41:49Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15049",
+  "body": "Filed by the `domain:services` execution seat as a sibling instance of the #14062 family, after #14181 closed the same gap for `service-cluster` (PR #15032). Unassigned; `domain:*`, type and priority are triage's — this seat does not produce them.\n\n**Named reader:** whichever seat owns `packages/services/**` (`domain:services` on the current lane table).\n\n## The gap\n\n`packages/services/service-knowledge` declares **no `typecheck` script**, so `turbo run typecheck` — which selects only packages that declare the task — cannot reach it, and no tsc program compiles its test layer. Its errors are carried instead as a **DEBT entry of 10** in `scripts/check-type-check-coverage.mjs`.\n\nMeasured on `origin/main`: of **16** packages under `packages/services/`, **4** lacked a `typecheck` script. #14181 graduated one (`service-cluster`), leaving three — this is one of them.\n\n\n\n## Why this is worth a card rather than a note\n\nA live instance was measured today, on PR #14994. A new test file in `@objectstack/service-automation` carried a `… as never` cast that erased a contextual type, leaving a callback parameter implicitly `any` — a plain **TS7006**. Where it was caught:\n\n| lane | result |\n|:--|:--|\n| the author's local run | invisible — no `typecheck` script to run |\n| `Type Check · workspace` | passed |\n| `Type Check · source gates` | passed |\n| `Type Check · consumer gates` | passed |\n| `Type Check · debt ledger` | **the only lane that saw it** |\n\nAnd because the debt lane is a **shrink-only ratchet**, the author's own new error did not report as \"you wrote an untyped test\" — it reported as *\"DEBT records N raw tsc error(s), `tsc --noEmit` now reports N+1\"*, in a gate whose remedy text is largely about **not** raising the entry. ⇒ A newly written type error arrives disguised as ledger drift. That is a materially worse failure mode than a plain type error in a package `typecheck`, and every package in this family is in it.\n\n## The route, settled and demonstrated\n\n#14062's settlement is the **checked test zone**: a `tsconfig.test.json` plus a `typecheck` script. PR #15032 is the worked example for this family and should be copied from — including its two non-obvious findings:\n\n- ⚠️ **Copy the exemplar whose BUILD config does not exclude tests.** `plugin-auth` / `plugin-sharing` / `core` all exclude the test layer from `tsconfig.json`, and AGENTS.md forbids **adding** such an exclusion, so their shape does not transfer. `plugin-webhooks` was the structural match for `service-cluster`; check which one matches this package before copying.\n- ⚠️ **The package's DEBT entry must be deleted in the same PR.** `check:type-check-coverage` fails a package that declares `typecheck` while still sitting in the ledger, so the graduation is part of the change, not a follow-up.\n\n## ⛔ Constraints for whoever takes it\n\n- **Measure the error count BEFORE fixing anything, and measure it both ways** — the undivided program and the correct split. `@objectstack/core` reported **98 undivided → 4 after the split** because an import that does not resolve makes every symbol it names `any`, cascading into TS7006 everywhere; `service-cluster` by contrast read **1 both ways**. Report both numbers: the contrast is the useful result either way.\n- ⛔ **Do not grow `test-typecheck-debt.json`** — shrink-only and maintainer-only (#5286). ⛔ Do not narrow the program, `@ts-expect-error` the residue away, or loosen strictness to manufacture green. ⛔ Never skip, disable or quarantine a test.\n- If a genuine residue remains after the correct split and it is more than a handful, **stop and report the count** rather than grinding or ledgering. That is a good outcome and re-scopes the card.\n- ⚠️ `check:type-source-resolution` may go red purely because onboarding a test program moves the package's program set. PR #15032 took that gate's documented **onboarding re-baseline** limb (registry entry) rather than the `paths` its failure text names — `paths` was measured there at **0 → 435 errors**, all in other packages' source. Read #15032's ruling before choosing.\n\nRefs: #14062 (the plugins-family class card) · #14181 / PR #15032 (`service-cluster`, the worked example) · #14994 (the live incident) · #5286 (ledger is shrink-only, maintainer-only) · #4311 (the DEBT ledger)\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

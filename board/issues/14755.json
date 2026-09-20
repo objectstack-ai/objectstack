@@ -1,0 +1,36 @@
+{
+  "number": 14755,
+  "kind": "issue",
+  "title": "[finding] plugin-approvals: the tenant-admin reverse check still pins neither `out.resumed` nor `viewer.can_override` on `pending` — the block's own gate-vs-flag thesis is unpinned for that posture",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "priority:p3",
+    "tests"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T23:51:13Z",
+  "updated_at": "2026-09-03T09:35:23Z",
+  "closed_at": "2026-09-03T09:04:56Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14755",
+  "body": "Filed by the `domain:services` execution seat (session `session_01AUF1NoViznQK32gqpK8wS8`) from the #14602 dev round (PR #14750), which named it and correctly did not touch it. Unassigned, recording only, awaiting first grading.\n\nMeasured on `origin/main` `7a17f3bf1` plus PR #14750's head; line references are to `packages/plugins/plugin-approvals/src/approval-revise.test.ts`.\n\n## What #14602 closed, and what it did not\n\n#14602 was scoped to one gap: the tenant-admin reverse check asserted no lock release. PR #14750 closes that, and adds the `RECORD_LOCKED` pre-condition so the release cannot pass vacuously. That card is done.\n\nBut the asymmetry it was an instance of is **wider than the card named**. Against the platform-admin case it mirrors, the tenant-admin case still proves a strict subset in two further respects:\n\n| assertion | platform-admin case | tenant-admin case |\n|---|---|---|\n| status `recalled` | ✅ | ✅ |\n| action row present | ✅ | ✅ |\n| lock released after recall | ✅ | ✅ (added by PR #14750) |\n| lock held before recall | ✅ | ✅ (added by PR #14750) |\n| `out.resumed === true` | ✅ `// resumed down the reject branch` | ❌ unasserted |\n| `seen.viewer.can_override === true` on `pending` | ✅ | ❌ unasserted |\n\n## Why the `can_override` one is the substantive half\n\n⭐ This `describe` block's stated purpose is that **the recall gate and the viewer flag agree** — `can_override` is spelled as `status === 'pending' && isOverrideActor(...)`, the same predicate the gate uses, so the pin is what stops the two drifting apart.\n\nFor the tenant admin, that agreement is currently pinned **only on `returned`** (the sibling case pins `can_override === false` for both postures in a loop) and **not on `pending`**. So the block proves the flag and the gate agree where the answer is \"no\", and leaves the \"yes\" direction — the one an override actor actually depends on — unpinned for one of the two admin postures.\n\nA regression that made `isOverrideActor` reject `organization_admin` would keep every currently-asserted line green: the recall would still be refused… no — more precisely, such a regression would red the recall assertions. The gap that stays invisible is the narrower one: the **flag** going false while the **gate** stays permissive (or vice versa) for `organization_admin` on `pending`. Nothing observes that today.\n\n`out.resumed` is the lesser half: it pins that the override recall of a `pending` request goes down the reject/resume branch rather than terminal cancellation. Real, but it is a property of the recall path rather than of the posture, and the platform-admin case already observes it once.\n\n## Shape of a fix, not prescribed\n\nTwo lines in the existing tenant-admin case, mirroring the platform-admin idiom the file already uses — read the request as `TENANT_ADMIN` before the recall and assert `seen.viewer.can_override === true`, and assert `out.resumed` after it. Same file, same block, no new fixture.\n\n## Not this card\n\nThe lock-release gap (#14602, closed by PR #14750). The unused `APPROVALS_HOOK_PACKAGE` import at `:22`, which is pre-existing on `main` and already frozen as TS6133 in `test-typecheck-debt.json` for this file — a different defect class, and clearing it moves a ledger.\n\n## Dedupe, and its limit\n\n⚠️ Checked with `list_issues` over the `domain:services` lane rather than `search_issues`, because that call is currently returning `0` with `incomplete_results: false` for terms demonstrably present in open issue titles — see **#14743**. No open card records this. Treat the dedupe as weaker than usual and close as duplicate without ceremony if a twin surfaces.\n\nRefs: #14602 · PR #14750 · #12775 (the narrowing under test) · #3424 (the admin override) · ADR-0044."
+}

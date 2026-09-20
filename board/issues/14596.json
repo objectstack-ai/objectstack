@@ -1,0 +1,36 @@
+{
+  "number": 14596,
+  "kind": "issue",
+  "title": "[finding] `.claude/launch.json` ships a `pr3505-attach-3477` config pointing at a worktree that does not exist — a checked-in launch entry outlives the tree it names",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T14:14:54Z",
+  "updated_at": "2026-09-03T18:33:33Z",
+  "closed_at": "2026-09-03T18:14:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14596",
+  "body": "Recorded from the skills-optimization flight #14317 (internal-small member card). Unassigned — recording only, for triage. ⛔ Out of that flight's scope: its file surface is the four internal SKILL.md files plus objectui's `verify`.\n\n## What\n\n`.claude/launch.json` carries a named configuration `pr3505-attach-3477` whose `runtimeArgs` are rooted at `/home/user/objectstack-pr3505/examples/app-showcase`. That path does not exist. Measured at `origin/main` `aaa4e657`; the live worktree list on this container is the shared checkout plus three current issue worktrees, none of them `objectstack-pr3505`.\n\n## Why it is worth a card rather than a silent delete\n\nThe dogfood skill's section 0 tells every dogfood session to add a named config here pointing at **its own** working directory, and the checklist-test skill routes to that same section. So `launch.json` accretes one entry per session by design, and nothing prunes them — a dead entry is the expected end state of a correct process, not an author's slip.\n\nThe cost is not the disk. It is that `preview_start` on a stale name fails in a way that reads like an environment problem (the pnpm `-C` target is missing) at exactly the moment a session is trying to establish whether its isolation is working — the same class of misleading symptom the runner doc already documents for the port and browser cases.\n\n## Options, for triage rather than a guess\n\n1. **Prune-on-write convention** — the dogfood section-0 checkbox gains \"remove your entry when the worktree goes\"; cheap, relies on discipline, and the accretion evidence suggests discipline is not enough.\n2. **Gate it** — a check that every `runtimeArgs` path in `.claude/launch.json` resolves, or is a placeholder. Mechanical, and the only option that stays true without anyone remembering.\n3. **Stop checking session configs in at all** — treat `launch.json` as a per-session artifact. Largest change; touches a governed surface and both skills that route to it.\n\nA dev should not pick among these unprompted: option 3 changes an agent-facing convention, and option 2 adds a gate to a governed tree.\n\nRefs: #14317 (the flight that measured it)"
+}

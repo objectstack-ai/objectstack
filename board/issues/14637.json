@@ -1,0 +1,36 @@
+{
+  "number": 14637,
+  "kind": "issue",
+  "title": "[Decision] The share-link route probe re-opens the existence oracle that `share-link-service` deliberately closed — a switched-off link with a password still answers 401",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "priority:p2",
+    "security"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T16:13:35Z",
+  "updated_at": "2026-09-03T15:54:33Z",
+  "closed_at": "2026-09-03T15:51:24Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14637",
+  "body": "Filed by the `domain:services` PM seat (session `session_01AUF1NoViznQK32gqpK8wS8`) from the non-blocking notes of the in-seat Clause-② contract review of PR #14580 (#14033) — round 1 note 5, adopted verbatim on 14033#issuecomment-5511376156. Re-measured by the triage seat at `origin/main` `2aa8456`.\n\n**Item 2 of the original filing (the changeset's \"burst the log once\" wording) is split to #14668** and is dispatchable now — it is not held behind this ruling.\n\n## The defect\n\n`resolveToken` refuses a link whose object has `publicSharing.enabled` off, and the refusal is the undifferentiated `null` the #14033 ruling asked for — over HTTP a `404 INVALID_OR_EXPIRED`, byte-identical to an unknown token, pinned at `share-link-eligibility.test.ts:992-1022`.\n\nBut the route's probe runs **after** `resolveToken` returns null and answers from the row, with no knowledge of the object's block:\n\n- `packages/plugins/plugin-sharing/src/share-link-routes.ts` — `401 NEEDS_PASSWORD` / `WRONG_PASSWORD` for a row carrying `password_hash`; `401 SIGN_IN_REQUIRED` for `audience === 'signed_in'` without a signed-in viewer\n- `packages/runtime/src/domains/share-links.ts` — **a duplicated twin of the same probe**, same arms, same codes\n\nSo for those two link shapes an anonymous caller can still tell a real-but-switched-off token from an unknown one, and a correct password on such a link answers `WRONG_PASSWORD`.\n\n## ⭐ Why this is more than \"pre-existing, out of scope\"\n\nThe service layer wrote the threat model down, in the same feature, immediately above the arm that closes it:\n\n> …for a caller who may hold nothing but a token, a distinguishable \"sharing is off for this object\" is **an existence oracle**, so the answer is the one revoked / expired / unknown / ineligible already give (over HTTP the generic 404).\n\nThe route above it then re-opens exactly that oracle for two of the three shapes. This is not a gap someone forgot to close — it is a security property that is **stated in one layer and defeated in the layer above it**, which is strictly worse than never having claimed it, because the next reader believes the comment.\n\nIt is genuinely pre-existing: the same shape applied to #13857's eligibility refusals and the reviewer classed it out of that PR's scope. What is new is that #14033 made the claim explicit in prose, so the contradiction is now readable.\n\n## What is NOT in question\n\nNothing in #14033's ruled behaviour: the gate, its placement before the record probe and the usage stamp, the three governed mint paths and the `null`-shape equality are all pinned, and the delta review PASSed with zero blocking findings. This card does not reopen any of that.\n\n## The shapes\n\n- **A · gate the probe on the standing policy** — read `publicSharing.enabled` before the probe; when it is off, fall through to the generic 404 for every arm. Links on a switched-off object become uniformly indistinguishable from unknown tokens.\n- **B · leave it, and say so** — keep the 401 affordance, and add a comment at both probe sites recording that the route layer deliberately accepts the oracle, so the service's comment stops being contradicted.\n- **C · gate only the two 401 arms**, leave the `410 EXPIRED_OR_REVOKED` arm answering from the row.\n\nCommon to A and C: the fix must land at **both** sites — the plugin route and the runtime dispatcher twin — or the oracle simply moves to whichever embedding uses the other one.\n\n&lt;!-- os-decision-facets --&gt;\n\n## 四棱分析(分诊席出具,供裁决)\n\n**① 长期健全性(权重 ≥50%,主导本建议)—— 指向 A。**\n真正的缺陷不是「多答了一个 401」,而是**同一个安全属性被写在一层、又被上一层拆掉**。服务层把威胁模型逐字写下来了(「a distinguishable 'sharing is off for this object' is an existence oracle」),路由层照旧泄露。这种双层不一致不会稳定存在:下一个读到服务层注释的人会相信它,并在一个假前提上继续写代码 —— 这比从来没声明过更坏。A 把属性收回一处;B 至少让两层说同一句话;C 留下「哪几个 arm 被门住」的规则,属性仍不在一处。\n\n**② 真实业务拉力 —— 微弱,且方向偏 A。**\nB 保住的那个体验是:告诉用户「这条链接需要密码」—— 而该链接所在对象的分享开关是**关的**,即便密码正确也什么都取不到。那是在教用户开一扇已经砌死的门。没有测到任何消费者依赖这条消息;真正会遇到它的是拿着旧链接的正当用户,而他们无论如何都取不到内容,404 与 401 对他们的最终结果相同。\n\n**③ 防 AI 编码错误 —— 强烈指向 A。**\n当前形状是个陷阱:agent 读 `share-link-service.ts` 那段注释会正确地推出「存在性预言已关闭」,据此写一个断言 404 的测试 —— 在服务层过、在 HTTP 层假。两层互相矛盾正是产出「自信而错误」代码的典型形状。⚠️ 附带的第二个陷阱:探针在 `share-link-routes.ts` 与 `runtime/src/domains/share-links.ts` 各有一份**重复实现**,只改一处是可预期的失败模式,派工时必须点名两处。\n\n**④ 创业阶段不增殖 —— 指向 A,明确反对 C。**\nA 不新增概念、不新增标签、不新增配置开关,只是把一次已有的读提前。C 会造出「第三类链接应答」和一条「哪些 arm 受门禁」的规则,是本轴要避免的增殖。\n\n**建议:A** —— 探针整体门在 `publicSharing.enabled` 之后,两处同笔改。\n\n**回退:B,但不得沉默。** 若维护者判断 401 提示对支持工作是承重的,那就选 B 并在两个探针处写下「路由层明知且有意接受该预言」,同时修正服务层注释使其不再宣称已关闭。⛔ 三个选项里唯一不可接受的是**什么都不做**:留着两层互相矛盾的注释,是本卡真正要消灭的东西。\n\n**⚠️ 置信缺口(必录):** 我没有测 objectui。若 share-link 查看器依赖 `401 NEEDS_PASSWORD` 这个状态码来渲染密码输入框,那么 A 会改变一条已发布的前端路径 —— 对**关掉开关的对象**的链接而言,用户看到的将从密码框变成「链接无效」。这条我读不到(跨仓,且本席不改代码),裁决前应由 `repo:objectui` 侧确认。这是本分析里唯一没有实测支撑的环节。\n\nRe-check:`git show origin/main:packages/plugins/plugin-sharing/src/share-link-routes.ts | sed -n '238,262p'`,以及 `git show origin/main:packages/runtime/src/domains/share-links.ts | sed -n '145,163p'`\n\nRefs: #14033 · PR #14580 · #13857(同族的 eligibility 半边)· #14581 · #14582 · #14668(拆出的 changeset 措辞半边)\n\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

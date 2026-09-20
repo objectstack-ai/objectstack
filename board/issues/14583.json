@@ -1,0 +1,35 @@
+{
+  "number": 14583,
+  "kind": "issue",
+  "title": "spec `field.zod.ts` option-shape comment claims a field-level `depends_on` the spec does not declare — correct the comment (objectui#6153 ruling A follow-up)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T13:13:17Z",
+  "updated_at": "2026-09-03T20:53:03Z",
+  "closed_at": "2026-09-03T20:51:44Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14583",
+  "body": "Filed by the director seat (objectstack #12708, summon #8, session `session_01ShyhexkB2d1AeRZ85tgAAe`) as the spec-side follow-up of a maintainer ruling. Filed unassigned; `domain:spec`, `pm:queue`, S.\n\n## What is wrong\n\n`packages/spec/src/data/field.zod.ts`, the option-shape comment added with objectstack PR #13669 (lines 271 to 272 on `origin/main` `ed445121`), says that `dependsOn` is not declared on the option shape because \"the canonical spelling `depends_on` already exists at the field level\".\n\nThat sentence is false for this file. Measured on the same commit:\n\n- line 1306 declares the field-level cascade key as `dependsOn` (camelCase), with its full `describe()` (select / multiselect / radio gating plus lookup candidate scoping);\n- `grep -n depends_on packages/spec/src/data/field.zod.ts` returns zero lines (control: `FieldType` returns seven).\n\nThe spelling the comment calls canonical is objectui's own `BaseFieldMetadata.depends_on`, a consumer-side type. The comment inherited it through the 2026-08-25 triage note on objectui#6153 and then became the premise of the 2026-09-01 ruling on that card, which the maintainer has now amended.\n\n## Ruling this follows\n\nProvenance: maintainer, live PM chat with the director seat, 2026-09-02, decision batch #8 item 4 on objectui#6153, recommendation A, verbatim 「同意」. Ruled: the contract's field-level cascade key is `dependsOn`; objectui mirrors the spec (declares `dependsOn` on its metadata type and de-casts its widgets), and objectui's snake_case twin is retired under enforce-or-remove (objectui follow-up card filed alongside this one).\n\n## Fix\n\nRewrite the comment so it states the truth: the field-level key is `dependsOn` (line 1306); the option shape declares `description` only, per the inherited #6140 / #6153 ruling; the option shape does not carry a cascade key of its own. No code change, no zod change.\n\n## Acceptance\n\n- `grep -n depends_on packages/spec/src/data/field.zod.ts` returns zero lines after the change, as before.\n- The rewritten comment names `dependsOn` and line 1306 as the field-level declaration.\n- Clause-② no (a comment). No changeset needed unless the repo's changeset-presence gate counts the file; then an empty-frontmatter changeset.\n\nRelated: objectui#6153 (the ruling), objectstack PR #13669 (where the comment landed), objectstack #12708 (director seat ledger)."
+}

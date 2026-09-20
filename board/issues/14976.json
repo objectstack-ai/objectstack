@@ -1,0 +1,37 @@
+{
+  "number": 14976,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0131 — organization ownership is total: no NULL organization_id; declared metadata stays in code; rows only when an organization authored them (Refs #13564)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "skip-changeset",
+    "tooling"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T16:11:21Z",
+  "updated_at": "2026-09-04T05:37:47Z",
+  "closed_at": "2026-09-04T05:37:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-09-04T05:37:45Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/14976",
+  "body": "## Summary\n\nAdds **ADR-0131 (Proposed)**; **amends ADR-0126** (regimes stand at environment scope; reserved org column withdrawn; not superseded), **ADR-0005** (per-organization overlay axis retired), **ADR-0017** (`sys_view_definition` inert, retired) and **ADR-0105 D10** (withdrawn). **Staging (D14): before 17.3 only the activation ledger's reserved column is dropped (#15024) and #14949's NULL screen reverted (#15030); everything else is the v18 line.** Three sentences:\n\n1. **Metadata is the registry, in two provenances.** A **managed** package is code: edited in code only, changed by publishing a new version, never materialized as rows; its **definitions are sealed** while the customer's choices live beside them as environment-level state — ADR-0126's overlay (presentational types), disable + clone (behavioural types) and extend, so a standard package such as HotCRM stays customizable **and** upgradeable. Metadata authored at runtime — Studio, the cloud build agent, or a **template** package copied once into the database — is saved in the database and edited in the UI; it is the environment's, and its ledger carries **no organization column**. Template packages are **refused on shared-DB multi-tenant deployments**.\n2. **A row with an organization column exists only when an organization authored it** — assignments (this user holds this position or set), business units, sharing rules, business data — NOT NULL, referencing registry items **by name**. The catalog itself (positions, permission sets, capabilities) has one home, the environment registry: single-tenant admins author it there (the organization is the environment); shared-DB tenants assign but do not define. The four catalog tables retire (ADR-0094 completed).\n3. **A table with no organization column is deployment-level or code-level**, governed by permission, not by a wall.\n\nConsequences: NULL has nothing left to mean (D1); one predicate for Layer 0 and every driver (D8); a missing stamp is a refused write (D9); seeders, per-organization catalog machinery, the four catalog tables and the #13491 ledger retire (D13); `sys_metadata` loses its column with **no split** because no per-organization metadata remains (D6); the position→permission-set binding becomes `PositionSchema.permissionSets` (D3/D4); #13636 / PR #14923 superseded (§1.6); no platform organization and no complete seal (§5, rejected alternatives).\n\nMaintainer rulings, verbatim in the record's header — among them 「数据库中不应该有允许 org_id 为空的状况」「既然不让改，又要求每个租户 seed 一遍，好像很蠢」「我宁可先不让他编辑」「创业阶段，应该定一套最稳定可靠的方案」「代码推送过来的元数据就只能在代码中修改…studio 界面上配置的元数据…可以在界面上修改」「先完全封死。flow 也先不让改…模版形式直接进库…单库多租户禁止安装…受管软件包…不让改」.\n\n## What this PR is and is not\n\n- **Docs-only.** One ADR, three amendment notes, one empty changeset (\"Releases nothing\").\n- ⛔ **Governed surface** (`docs/adr/**`) — human merge only, no auto-merge armed (Prime Directive #14).\n- ⛔ **No implementation card is filed before this merges** (ADR-0130 precedent). The twelve-card plan is §8. The unreleased ADR-0126 flow disable/clone machinery (#12158, #12156, #12419 — landed after the 17.2.0 tag) is removed before the next release (D6).\n- `check:adr-links` and `check:adr-anchors` pass locally.\n\n## Open questions for the merge decision (§6)\n\nFour of five were accepted as proposed on 2026-09-04 (「接受你的建议」) and folded into D5/D6/D7; the position→permission-set binding was ruled a **definition** (new key `PositionSchema.permissionSets`, `sys_position_permission_set` retires; §5 records the rejected org-level reading). One remains:\n\n1. Existing customized template rows: keep as Default Organization overrides, or accept loss under the startup posture? Ruled when C4 is cut.\n\nPost-17.2 audit verdicts are recorded in §7; #15024 (activation ledger column fix) and #15030 (#14949 NULL-screen revert) are filed for landing **before 17.3**; PR #14923 closed unmerged; PR #15023 (supersede) closed — ADR-0126 is amended here instead.\n\nRefs #13564 · #13636 · #10103 · #13491 · #2734 · #12699 · #11665 · #12150 · #14484 · #14547 · cloud#1239 · cloud#1664\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n\n\n\n\n\n"
+}

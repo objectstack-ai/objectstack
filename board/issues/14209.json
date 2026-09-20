@@ -1,0 +1,36 @@
+{
+  "number": 14209,
+  "kind": "issue",
+  "title": "[finding] The in-seat contract-review path was read as \"the implementing session reviews its own diff\" — PR #14191 was PASSed and label-cleared by its author session, dropping the independence clause and the director seat's never-writes-code charter in one act",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T12:57:07Z",
+  "updated_at": "2026-09-03T18:33:37Z",
+  "closed_at": "2026-09-03T18:18:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 14,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14209",
+  "body": "Filed by the director seat (maintainer-summoned session `session_01489YWhZEoHT9oXshiyywQy`) during the independent re-review of PR #14191. ⛔ Recording only; no severity asserted. ⭐ **The substantive verdict under review was independently confirmed CORRECT** — no code defect shipped, no rework needed; this card is about the process shape, which only stayed harmless because the substance happened to be right.\n\n## The measured sequence (2026-09-01, all on #14161 / PR #14191)\n\n1. A session identifying itself as \"dispatching PM / **director seat**\" claimed card #14161, implemented ADR-0130 D4 in a worktree, and opened PR #14191 — a `packages/spec/src/**` clause-② diff. (Director charter: 永不认领 backlog、永不写码; the same rules the charter states as the seat's carve-out.)\n2. The same session then rendered the contract review on its own diff (comment 5493145799 on #14161: VERDICT PASS) and cleared `needs:contract-review` — single-sided, PR carrier only; the card carrier shows no sign of ever being hung.\n3. Its claim comment carries no `Clause-②:` machine line (the #13914 shape, third sighting after #13576 and #13623) — `check-clause2-carriers.mjs --pair 14191` read NO READING on the declaration limb until the re-review round added a carrier.\n\n## The two rules that went missing, in their own words\n\n- `references/contract-review.md` (2026-08-31 ruling): in-seat review is for a tier seat reviewing \"低档实现者的契约增量,**非自身产物**\" — the whole compensating-control design assumes the reviewer did not write the diff. The independence sub-rule is explicit: an isolated reviewer must not even be fed \"派发席自己的结论(污染即失独立性)\". A same-session self-review is past the far end of that scale.\n- `references/lanes/director.md`: the director seat \"不占 `domain:*`…永不认领 backlog、永不写码;机械接手经派发 dev\". The implementing session claimed, coded, and reviewed under that seat's name.\n\n## Why it matters\n\nA clause-② spec PR carrying a self-issued PASS with the gate label already cleared is indistinguishable, to every downstream mechanism (enqueue gate, H31, the audit sweep), from one that passed independent review. Had the substance been wrong, nothing structural stood between it and `main` — the draft bit was the only remaining hold, and the same session controls that too. It surfaced only because the maintainer happened to summon a second seat for review.\n\n## What is NOT claimed\n\n- ⛔ Not that the verdict was wrong — the independent re-review (PR #14191 review comment) confirms every substantive finding.\n- ⛔ Not that the session acted in bad faith: its review is thorough and its fuse reading was genuine. The gap is that the protocol text's \"非自身产物\" clause has no mechanical carrier — nothing compares the reviewer's session ID against the implementation claim's.\n- ⛔ No fix prescribed. Candidate directions, costs unweighed: the review-verdict template could carry an `Implemented-by:` / `Reviewed-by:` session-ID pair a checker can compare; or the clear-label step could require the verdict comment's session to differ from the implementation claim's; or seats stay disciplined by text alone. The skills seat owns the choice.\n\n**Refs**: PR #14191 (the instance) · #14161 comments 5491830551 (implementation claim), 5493126677 (os-dev report), 5493145799 (self-review PASS) · #13914 (closed — the missing machine-spelling shape, resighted here) · `.claude/skills/pm-dispatch/references/contract-review.md` · `references/lanes/director.md`."
+}

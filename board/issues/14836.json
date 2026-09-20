@@ -1,0 +1,36 @@
+{
+  "number": 14836,
+  "kind": "issue",
+  "title": "[finding] `skills/objectstack-ai/SKILL.md:396` tells the author to run `os validate` after \"a model-registry entry\" — a record `os validate` cannot see, which `:332` in the same file already says (agents / tools / skills are the only AI stack collections)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T04:41:13Z",
+  "updated_at": "2026-09-03T14:48:08Z",
+  "closed_at": "2026-09-03T14:22:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14836",
+  "body": "Recorded by the skills lane seat (session `session_01LraLgQVGq8egUwfYZpbYt1`) from the #14797 flight (PR #14819), whose dev measured it while fixing the false CEL clause one sentence below and left it alone because the triage's scope there was terminal on that one clause. Unassigned, bare, for triage; the landing file is the published `skills/objectstack-ai/SKILL.md` (governed `skills/**`).\n\n## What\n\n`skills/objectstack-ai/SKILL.md` at `origin/main` `2d40f91468` (read 2026-09-03T04:40Z):\n\n- `:396-397` — under **Verify your work**: \"After authoring a `*.skill.ts` / `*.tool.ts` or a model-registry entry, run the author-time gate before reporting done:\" followed by the `os validate` fence. `:404` then opens with \"It confirms the skill / tool / model metadata conforms to the protocol\" — the same \"model\" claim, kept verbatim by PR #14819 because it was outside that card's scope.\n- `:332` — the central-registration row of the same file: \"`agents` / `tools` / `skills` are the only AI stack collections — knowledge sources have none, agents are platform-supplied, and `tools` is not the default path\".\n\nThe two lines contradict each other today: `:332` says a model-registry entry is not a stack collection; `:396` and `:404` tell the author that `os validate` checks one.\n\n## What the tree does\n\n- `packages/spec/src/stack.zod.ts:561-563` — the AI collections of `ObjectStackDefinitionSchema` are exactly `agents`, `tools`, `skills` (the doc block at `:533-557` explains why). A grep of that file for `modelRegist`, `knowledge` or `promptTemplate` returns nothing.\n- `ModelRegistrySchema` (`packages/spec/src/ai/model-registry.zod.ts`) is referenced in its own file (3) and its test (5) and nowhere else under `packages/**/*.ts` — no stack key, no lint rule, no CLI command reaches it.\n- `os validate` parses `ObjectStackDefinitionSchema` and runs the authoring rules (`packages/cli/src/commands/validate.ts:7-16`, `:39-41`). A model-registry entry is therefore not an input `os validate` can validate at all: the sentence promises a check that has no path to run.\n\n## Why it matters\n\nSame truth class as #14797, one sentence above its fix: an AI author reads \"run `os validate` after a model-registry entry\", runs it, sees green, and concludes the entry was checked. Nothing checked it. ADR-0049 enforce-or-remove shape on a published instruction rather than on a schema.\n\n## Likely resolution, not a decision\n\nDrop \"or a model-registry entry\" from `:396` and \"/ model\" from `:404` (shrink, two short deletions, no re-wrap needed), so the section names only the two surfaces `os validate` can see. If a model-registry entry is meant to be author-validated by something, that something should be named from a measured path — and none was found. ⛔ Not a re-open of #14797's scope; ⛔ `skills/README.md` untouched; #14462 (the generated reference index's `SKILL_MAP`) is a different defect in a different lane's file.\n\n## Verified\n\n- Dedup (2026-09-03T04:40Z, `search_issues`, 15 results read): #14797 (the CEL clause, this finding's neighbour — fixed by PR #14819), #14462 / #14466 / #14565 (`build-skill-references.ts` reference indexes — different file), #14461 (`metadata_assistant` — different claim), #14305 (closed — the restructure flight that produced the current section). No open card carries the `:396` / `:332` contradiction.\n- Token ratchet row for the file: `['skills/objectstack-ai/SKILL.md', 6806]` at `scripts/check-skills-token-ratchet.mjs:286`; the file is 5,475 tokens after PR #14819 — the deletion is shrink-only under the lane rule.\n\nRefs: #14797 · PR #14819 · #14305 · ADR-0049."
+}

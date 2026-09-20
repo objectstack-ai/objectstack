@@ -1,0 +1,36 @@
+{
+  "number": 14304,
+  "kind": "issue",
+  "title": "Skills optimization flight — skills/objectstack-api: RESTRUCTURE (≈ −2,125 tok, −31%) — the leading canonical example teaches `RestApiEndpointSchema` (0 consumers repo-wide), three sections are other packages' anchors, and the description forbids the client seat that ~660 tokens of body then teach",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T01:43:38Z",
+  "updated_at": "2026-09-03T00:59:29Z",
+  "closed_at": "2026-09-02T13:17:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14304",
+  "body": "Member card of the skills catalog optimization program #14292 (maintainer mandate 2026-09-02, verbatim: 「审核所有的 skills，进行全面的优化。」). Filed by the skills lane seat (session `session_01LraLgQVGq8egUwfYZpbYt1`). Read-only audit at objectstack `origin/main` a59f78d. Full findings table = audit record: the dev posts `audit/objectstack-api/findings.md` (seat scratchpad) verbatim as the first comment at claim time.\n\n## Audit summary\n\n`SKILL.md` 6,311 tok (headroom 8) · `evals/README.md` 546 (headroom 0) · generated `_index.md` 888 — 7,745 paid per customer session; 705 lines; no `rules/`, zero eval fixtures. Real usage: 3 api-owned patterns — declarative `apis:` (2), `http.server` code mount (3), public anonymous form (2) — plus `defineDatasource` (4, belongs to data). Zero usages repo-wide: `*.endpoint.ts`, `RestApiEndpointSchema`, `apiMethods`, `ServiceInfo`, `projectResolution`, realtime authoring, `?preview=draft`/`?package=`. The ADR-0121 declarative-`apis:` block (`:149-254`) is excellent and implementation-faithful; ~2,400 tokens go to surfaces with zero real usage or to other packages' anchors. Fence audit: 8 TS fences, 6 marked, no rot; one marked block (`:532`) type-checks against a locally declared shape, not the real `PluginContext`. Verdict **RESTRUCTURE**.\n\n## Top findings\n\n| id | span | proposal | Δ |\n|:--|:--|:--|--:|\n| API-H-01 | `evals/README.md:1-49` | planned-eval stub (DEFERRED, #14296 item 2) | −400 |\n| API-C-01 | `SKILL.md:472-510` | DELETE — datasources/drivers duplicate `objectstack-data/rules/datasources.md` + `objectstack-platform/SKILL.md:353-357` (which has the Turso EE caveat api omits) | −300 |\n| API-E-01 | `SKILL.md:117-146` | DELETE — leading `os:check` example teaches `RestApiEndpointSchema`, 0 consumers; no `plugin-rest-api` package; `RestApiPluginConfig` has no `endpoints` key | −294 |\n| API-F-05 | `SKILL.md:316-344` | `ServiceInfo` is a response shape, 0 usages, not in the package's own SKILL_MAP → one row | −230 |\n| API-C-02 | `SKILL.md:513-538` | DELETE — duplicates `objectstack-platform/rules/service-registry.md` and fabricates the host shape at `:532` | −226 |\n| API-B-03 | `:65-71`,`283-313`,`559-563` | MERGE — the `apiMethods` primitives/derived rule stated 3× in-file | −180 |\n| API-A-03 | `:8-9` vs `:73-94`,`316-366` | the description forbids the client seat; 663 tok of body teach it → delete to a pointer | −150 |\n| API-C-03 | `SKILL.md:458-468` | DELETE — Security Layers table names no authorable key | −138 |\n| API-D-02 | `SKILL.md:384-396` | DELETE — Handler Status table neutralised by its own callout (\"nothing reads it at runtime\") | −130 |\n| API-B-01 | `SKILL.md:419-429` | DELETE — third rendering of \"no nested `auth` block\" | −120 |\n| API-D-01 | `SKILL.md:346-366` | REWRITE-AS-CONSTRUCT → one line (health/ready are author-free) | −120 |\n| API-D-03 | `:544-547`,`:556-558` | DELETE Best Practices 1 & 4 | −109 |\n| API-D-04 | `SKILL.md:569-576` | DELETE pitfalls 1/2/4 — \"use FLS\" has no authorable spelling; the page sizes match no platform constant | −95 |\n| API-D-05 | `SKILL.md:191-198` | DELETE carve-out why-prose, keep the rule | −90 |\n| API-B-05 | `SKILL.md:22-28` | DELETE preamble restating the frontmatter | −78 |\n\nNet −2,125 (31%) at HIGH/MED-HIGH; −2,525 (37%) incl. MED. Incidental falsehoods: **none** (spot-checks held).\n\n## Three funded additions\n\n1. `http.server` code-mount canonical example (+130, paid by API-E-01) — the only code-route pattern the repo ships (3 sites); needs the `kernel:ready` timing rule, the `readServer('http.server') ?? readServer('http-server')` dual lookup, and that `getService` is async.\n2. ADR-0112 error-code ledger construct (+120, paid by API-C-02) — two-tier vocabulary; unregistered code fails parse → fails CI; a downstream repo keeps its own ledger via `envelopeViolations(body)` + `makeApiErrorSchema(<own ledger>)` (`contract.zod.ts:146,215`).\n3. OCC contract (+40, paid by API-D-03) — `If-Match` header or `expectedVersion` body field (body wins), token typically `updated_at`, mismatch → 409 `CONCURRENT_UPDATE` (`rest-server.ts:7711-7721`).\n\n## Flight scope\n\n**IMPLEMENT** (same-file, shrink-only): every DELETE / MERGE / REWRITE row above and in the findings file at HIGH or MED; the three funded additions; API-A-02/A-03 frontmatter edits; fix or unmark the `:532` block so the gate proves something real.\n\n**ANCHOR RULINGS**: datasources → `objectstack-data/rules/datasources.md` (delete + pointer); service registry → `objectstack-platform/rules/service-registry.md` and `SKILL.md:353-357` (delete + pointer; the platform flight keeps those); request-side query syntax → objectstack-query.\n\n**DEFER**: API-H-01 (eval stub, #14296 item 2); API-F-06 (declared-but-unenforced semantics → out-of-scope card for triage, not a doc edit).\n\n## Flight constraints (binding)\n\n- ONE draft PR, first line `Fixes #<this card>`; governed ⇒ stays draft; review requests are the seat's step.\n- Token ratchet: no ratcheted file may grow; additions paid by deletions in the SAME file; ⛔ re-wrap is not payment; ⛔ no ceiling raise; ⛔ no new files; ⛔ do not touch the ratchet script.\n- ⛔ Never edit another package's files; a missing/weaker anchor goes in the PR body under \"follow-up for <package>\". Generated files untouched. Frontmatter edits: regenerate `skills/README.md` only if a drift gate requires it (report which).\n- Live surface with zero measured usage ⇒ one row pointing at its schema; retired/tombstoned ⇒ delete. A false claim matching a spec `.describe()` string ⇒ spec-side twin card.\n- Gates: `node scripts/check-skills-token-ratchet.mjs`, `pnpm --filter @objectstack/spec check:skill-examples`, `pnpm check:skill-compatibility`, `pnpm check:skill-identifier-liveness`, plus `node scripts/pm/dispatch-gates.mjs --commands <changed paths>`; record the head sha.\n- PR body: per-item 落点 | before | after keyed by finding id; per-file token delta; `needs:contract-review` on both carriers (the OCC and error-ledger additions are contract-semantics claims).\n\nRefs: #14292 · #14296 · #13658."
+}

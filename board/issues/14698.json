@@ -1,0 +1,32 @@
+{
+  "number": 14698,
+  "kind": "issue",
+  "title": "Queue-flake anchor: test/run-dev-unbuilt-workspace.e2e.test.ts",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "type": "Bot"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T19:03:10Z",
+  "updated_at": "2026-09-02T19:11:27Z",
+  "closed_at": "2026-09-02T19:11:27Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14698",
+  "body": "`test/run-dev-unbuilt-workspace.e2e.test.ts` has ejected **5 pull requests** from the merge\nqueue within a rolling 24 hours — **5 independent hits** once\nGitHub's speculative stacking is accounted for. This issue is the single place for\nthat conversation; it is refreshed by the merge-queue-triage workflow on every\nfurther ejection.\n\n| PR | stack | queue build |\n|---|---|---|\n| #14499 | independent | [33663028874](https://github.com/objectstack-ai/objectstack/actions/runs/33663028874) |\n| #14593 | independent | [33655524730](https://github.com/objectstack-ai/objectstack/actions/runs/33655524730) |\n| #14617 | independent | [33653485310](https://github.com/objectstack-ai/objectstack/actions/runs/33653485310) |\n| #14629 | independent | [33660420831](https://github.com/objectstack-ai/objectstack/actions/runs/33660420831) |\n| #14631 | independent | [33668324620](https://github.com/objectstack-ai/objectstack/actions/runs/33668324620) |\n\n**This issue is a NAME, not a diagnosis.** The workflow that files it reads the\nfailing test file path out of the job logs and counts PRs; it does not\nknow whether this is a flake, a load/timing cliff, a semantic conflict between\nqueued PRs, or a real regression, and it does not act on any of those. No test is\nskipped, quarantined or re-queued by it, and no PR is labelled by it — weakening\na gate stays a human act.\n\nWhat to do with it: read one victim PR's triage comment for the failure REASON\nline beside the FAIL line (a timeout and an assertion are the same FAIL line and\nopposite diagnoses), decide the cause, and close this issue with the fix or with\nthe reason it is not one.\n\nLast refreshed by queue build [33668324620](https://github.com/objectstack-ai/objectstack/actions/runs/33668324620) (PR #14631).\n\n---\n_Filed by the merge-queue-triage workflow (#4859, aggregation #10128)._\n\n<!-- queue-signature-anchor:test/run-dev-unbuilt-workspace.e2e.test.ts -->"
+}

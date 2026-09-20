@@ -1,0 +1,36 @@
+{
+  "number": 14222,
+  "kind": "issue",
+  "title": "`try_catch` whose `catch` region itself fails still discards the whole step record — the third returned-failure path, left unfolded by #14184",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-01T14:18:14Z",
+  "updated_at": "2026-09-03T05:38:39Z",
+  "closed_at": "2026-09-03T05:34:30Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14222",
+  "body": "Found while implementing #14184. Filed rather than fixed there: #14184 is scoped to the **no-`catch`** returned-failure path, and closing this one is not mechanical — it needs a design decision #14184 had no mandate to make. Not assigned — for triage to grade.\n\n## The gap\n\n`try_catch` has exactly **three** ways to return a failure. #14184 taught the engine's `if (!result.success)` branch to fold `result.childSteps`, and taught one of the three producers to supply them:\n\n| return site | carries `childSteps`? |\n|:---|:---|\n| no `catch` region, try region failed | **yes**, since #14184 |\n| `catch` region present and itself failed | **no** — this issue |\n| config parse refusal (`parseNodeConfig`) | n/a (nothing ran) |\n\n`packages/services/service-automation/src/builtin/try-catch-node.ts`, the `catch (catchErr)` arm inside the `catchRegion != null` block:\n\n```\n        } catch (catchErr) {\n          const catchMsg = catchErr instanceof Error ? catchErr.message : String(catchErr);\n          return { success: false, error: `try_catch '${node.id}': catch region failed — ${catchMsg}` };\n        }\n```\n\n`failedAttemptSteps` is in scope and populated at that point — every failed try attempt's steps are sitting in it — and the return drops them.\n\n## Why it is the same defect\n\nIdentical observable shape to #13803 and #14184, and dangerous in the same direction: the try region may have written rows before it failed, the `catch` handler may have written more before *it* failed, the run log keeps no step for any of them, and the #4354 summary folded over that log under-reports `acted`. An operator reads \"nothing happened, safe to re-run\" over writes that already landed.\n\nThis path is arguably the worst of the three for an operator, because two regions ran and both are missing from the record.\n\n## Measured, not read off the source\n\nPinned as current behaviour in `packages/services/service-automation/src/builtin/try-catch-returned-failure-steps.test.ts` (landed by #14184), test *\"a failing `catch` region still fails with the catch error and carries no try steps\"*:\n\n```\nexpect((record?.steps ?? []).filter(s => s.regionKind === 'try')).toHaveLength(0);\n```\n\nThat assertion passes today. It is a deliberate record of the boundary #14184 did not cross, **not** an endorsement — whoever fixes this should expect to update that pin and its comment in the same change.\n\n## Why #14184 did not just fix it\n\nAttaching `failedAttemptSteps` to that return is a one-liner, but it would only be **half** the record, and the missing half needs a decision:\n\n- The **try** region's steps are available (`failedAttemptSteps`).\n- The **catch** region's own partial steps are **not**. The catch region is run without a `partialSteps` sink — `engine.runRegion(catchRegion, variables, ctxOrEmpty, { parentNodeId, regionKind: 'catch' })` passes four arguments, no fifth — so when the handler throws, its completed steps unwind with the stack exactly as the try region's used to.\n\nSo a complete fix has to add the sink and decide the ordering/tagging of a partially-executed `catch` region in the log. That is a new seam, not a mechanical mirror of #14184's change, which is why it was filed instead of ridden along under the bounded-in-place exemption (the exemption requires the correct shape to be already pinned by existing evidence; here it is not).\n\n## Candidate shape, if graded as real\n\nPass a `partialSteps` sink to the catch region's `runRegion` call, and return `childSteps: [...failedAttemptSteps, ...catchAttemptSteps]` on the failing-catch return — the same ordering rule the successful-catch return already uses (failed attempts first, they happened first). The engine-side fold already exists after #14184, so no engine change is needed.\n\nRefs: #14184 (the no-`catch` path, fixed) · #13803 (the throw path, fixed) · #7546 (the `partialSteps` sink) · #4354 (the run summary this feeds)."
+}

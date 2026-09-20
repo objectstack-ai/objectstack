@@ -1,0 +1,35 @@
+{
+  "number": 14175,
+  "kind": "issue",
+  "title": "`ActionEngineFacade.find(object, query)` takes a bare filter while `insert`/`update`/`delete` take explicit shapes — the type says neither, and reading it wrong returns empty with no error",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-01T10:00:19Z",
+  "updated_at": "2026-09-04T02:02:23Z",
+  "closed_at": "2026-09-04T01:58:59Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14175",
+  "body": "Found by an application (`objectstack-ai/duly`) whose headline onboarding action was a silent no-op in production for its whole life, with a green test suite. Filed as a contract/typing gap rather than a runtime defect — the runtime behaves consistently; nothing declares which convention it is.\n\n## The asymmetry\n\n`buildActionEngineFacade` in `@objectstack/runtime` 17.2.0:\n\n```js\nasync update(object, id, data) {\n  await ql.update(object, data, { where: { id }, context });\n},\nasync delete(object, idOrIds) { /* ids, explicit */ },\nasync find(object, query) {\n  const where = query && Object.keys(query).length ? { where: query } : {};\n  const rows = await ql.find(object, { ...where, context });\n  return Array.isArray(rows) ? rows : rows?.value ?? [];\n}\n```\n\n`insert`, `update` and `delete` all take arguments whose shape is unambiguous from the signature. `find` takes a **bare filter** and builds the ObjectQL envelope itself — but it is the one method whose parameter is named `query`, which is exactly what the envelope is called everywhere else in the platform.\n\n`ActionEngineFacade.find` in `@objectstack/spec` types that parameter as a plain string-keyed record of `unknown` and documents nothing about it. So the runtime's implementation is the only thing that decides, and it is not visible from where a handler author is working.\n\n## Why reading it wrong is silent\n\nAn author who passes the envelope — the shape `ql.find` itself takes, and the shape every other read in their codebase uses — gets:\n\n```\n{ where: { where: { position_code: 'qa_lead', active: true } } }\n```\n\nNo row has a field called `where`. The read returns **empty, with no error**. The handler runs to completion and reports a successful run over zero rows.\n\nMeasured in the app, dispatching through `data.executeAction` against a booted kernel with one matching row, the only variable being which facade the handler receives:\n\n| facade | rows found | records created |\n|:--|--:|--:|\n| the runtime's own (wraps in `where`) | 0 | 0 |\n| a flat one (passes the filter through) | 1 | 1 |\n\nThere is a second trap inside the first: `Object.keys(query).length` is falsy for `{}`, so the wrapping is **skipped entirely** for an unfiltered read. In the app that found this, the one `find` call with no filter was the one call that worked — so the handler looked partially alive, which is worse than uniformly dead.\n\n## Why it survives testing\n\nThe app's own test double implemented `find(object, query)` reading `query.where` — honouring the handler's assumption rather than the runtime's behaviour. Every assertion passed against a query shape production cannot produce. `validate`, `typecheck`, `test` and `build` were all green.\n\nThat is not a bad test double so much as an inevitable one: a hand-written fake encodes the author's belief about the contract, and when the contract is undeclared the fake and the handler are wrong in the same direction by construction. Nothing in the toolchain compares either to the runtime.\n\n## Suggested direction\n\nAny of these closes it; the first is cheapest:\n\n1. **Type the parameter.** Give `ActionEngineFacade.find` a filter type rather than an open record, and say in the doc comment that it is a filter and not an ObjectQL envelope. A named type would have made the app's mistake a compile error.\n2. **Reject an envelope.** `find` could throw when handed an object whose only key is `where` — that shape is never a legitimate filter (no object has a field called `where`; the platform's own reserved-word linting could confirm it), and today it is the exact shape of the mistake.\n3. **Ship the facade as a test double**, so applications stop hand-writing one that encodes their assumption.\n\nThe general point is the one worth acting on: `find` is the only method on this facade whose argument shape cannot be inferred from its signature, and it is the only one where guessing wrong is silent. The other three would throw or misbehave loudly.\n\nReported app-side as objectstack-ai/duly#79."
+}

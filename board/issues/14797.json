@@ -1,0 +1,36 @@
+{
+  "number": 14797,
+  "kind": "issue",
+  "title": "[finding] `skills/objectstack-ai/SKILL.md:405-406` calls a model-registry `promptTemplate.system` / `.user` \"a CEL predicate\" — those keys are the `template` dialect (`{{var}}`), and the AI domain has no CEL site at all",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T02:11:36Z",
+  "updated_at": "2026-09-03T12:13:52Z",
+  "closed_at": "2026-09-03T11:32:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14797",
+  "body": "Recorded by the skills lane seat (session `session_01LraLgQVGq8egUwfYZpbYt1`) from the #14794 flight (PR #14795), which measured it while removing the same false claim from `skills/README.md:105` (\"AI tool params\" as a CEL site) and could not take it — no `SKILL.md` edit was in that flight's scope. Unassigned, bare, for triage.\n\n## What\n\n`skills/objectstack-ai/SKILL.md:404-407` at `origin/main` `8f9ef6f7c8` (read 2026-09-03T02:11Z), under **Verify your work**:\n\n> It confirms the skill / tool / model metadata conforms to the protocol and that any CEL predicate parses and resolves — in this domain that is a model-registry `promptTemplate.system` / `.user`; `ToolSchema` carries no expression field of any kind.\n\nThe second clause is true (`packages/spec/src/ai/tool.zod.ts` matches `cel|formula|expression` zero times). The first is false: `packages/spec/src/ai/model-registry.zod.ts:121-122` types `system` / `user` as `TemplateExpressionInputSchema`, which `packages/spec/src/shared/expression.zod.ts:117-124` defines as `{ dialect: 'template', source }` — `{{var}}` interpolation for \"notification subjects/bodies, titleFormat, prompt templates\". Not CEL, not a predicate. `predicate` occurs 0 times in `model-registry.zod.ts`.\n\nSo the sentence tells an author that `os validate` CEL-checks a prompt template. It does not; a `{{var}}` template is validated as a template. The AI domain's other real expression-typed site is the 5-field cron at `packages/spec/src/ai/knowledge-source.zod.ts:28` — also not CEL — which the sentence omits.\n\n## Why it matters\n\nPublished, customer-loaded surface; same truth class the programme has been clearing (a declared mechanism described as something it is not). An author reading it may write a CEL predicate into a prompt template expecting the gate to catch mistakes, or wonder why a template's `{{var}}` is never \"resolved\" by CEL.\n\n## Likely resolution, not a decision\n\nOne clause in place: what `os validate` checks in this domain is the metadata shape plus the `template` dialect of `promptTemplate.system` / `.user` (and the cron on knowledge sources); there is no CEL predicate in the AI domain. Shrink-or-neutral inside `skills/objectstack-ai/SKILL.md` (ceiling row 5,476 after the #14305 flight; re-measure at claim). Governed `skills/**` ⇒ draft, human merge.\n\n## Verified\n\n- Dedup (2026-09-03T02:11Z, `search_issues`, 13 results): #14462 (open, `domain:spec` — the ai reference index's `SKILL_MAP`, a different defect), #14794 (open — the README half, being fixed by PR #14795), #13821 / #13678 / #11409 (closed, other subjects). No card carries this sentence.\n\nRefs: #14794 · PR #14795 · #14305 (the ai flight) · #14462."
+}

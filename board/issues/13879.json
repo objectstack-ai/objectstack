@@ -1,0 +1,35 @@
+{
+  "number": 13879,
+  "kind": "issue",
+  "title": "`requiredWhen`(与字段级 min/max)是转换门,`validations[]` script 是真不变量 —— 边界是刻意的、已被双驱动实测,但平台没有任何一处教它",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-31T15:48:11Z",
+  "updated_at": "2026-09-03T11:11:56Z",
+  "closed_at": "2026-09-03T11:09:43Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13879",
+  "body": "按维护者指示上行立卡(2026-08-31,hotcrm#1069 决裁,逐字:「1069 如果是平台的问题就提交平台卡片。」)。\n\n## 实测事实(hotcrm#1069 + 其工具对比评论,双驱动同判,可运行复现在 hotcrm `test/quote-contact-required-when.test.ts` 与 `test/quote-discount-ceiling.test.ts`)\n\n- **`requiredWhen` 只在「谓词变为真的那次写入」或「清空字段的那次写入」校验**。规则生效前已处于门内状态的行:改任意字段、状态在门内推进(`presented → accepted`)全部放行 —— 而 `accepted` 在规则自己的条件里。对照:`draft → presented` 拒、生而 `presented` 的 INSERT 拒、清空字段拒 —— 边触发精确成立;\n- **字段级 `max`/`min` 同侧**:存量 90 的折扣在 60 上限下,改无关字段、推进状态均放行(修复性写入亦放行);\n- **`validations[]` 的 `type:'script'` 规则是真不变量**:每次写入对合并后记录重评,存量违规行在任何编辑上被拒、修复性写入放行 —— 冻结而不砖死。\n\n**两种语义都是刻意的,⛔ 本卡不要求改任何一种**:「只校验所写内容」使新增规则不砖存量(#1017 裁决要求的 no-silent-breakage);「校验合并记录」提供真不变量。缺的是**平台没有任何一处写明这条边界与工具选择** —— 「required when X」的自然读法是不变量,AI 作者会静默选错工具:hotcrm 三条散文读作不变量的规则(win/loss_reason、lead 重复回指、quote 联系人)全部用了转换门工具,零信号。\n\n## 交付物(平台侧文档/教学,statement of the boundary)\n\n1. **spec docblock**:`requiredWhen` 键与字段级 bounds 的声明处,各一段写明转换语义(以上表为例);`validations[]` script 的声明处写明不变量语义与「冻结不砖死」行为;\n2. **发布 skills(教应用作者那套)**:工具选择行 ——「要不变量(X 永不得超过 Y)⇒ `validations[]` script,代价是存量违规行冻结至修复;要转换条件(到达状态 S 时 X 须已备)⇒ `requiredWhen` / 字段 bounds,代价是先于规则的存量行放行」。受管面照旧;\n3. 可选(先估价):`evaluateValidationRules` 处的实现注记互链。\n\n⛔ 范围外:改语义;「不变量捷径」类新 affordance(有拉力另立设计卡)。\n\nRefs: hotcrm#1069(测量原卡)· hotcrm#1017(转换语义的受益方)· 今日应用仓三原则 objectstack#13848(应用不自建平台级机制,平台统一教)。"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 14724,
+  "kind": "issue",
+  "title": "fix(plugin-auth): the auth email locale, mail transport, brand and SMS bindings are gated on registerRoutes, so a routes-less embedding gets none of them",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "i18n",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T21:00:20Z",
+  "updated_at": "2026-09-03T05:33:57Z",
+  "closed_at": "2026-09-03T05:33:38Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14724",
+  "body": "## Symptom\n\n`AuthPlugin` binds four things to the live kernel on `kernel:ready`:\n\n| line (`packages/plugins/plugin-auth/src/auth-plugin.ts`) | binding |\n|---|---|\n| 739 | `authManager.setEmailService(ctx.getService('email'))` — the outbound mail transport |\n| 834 | `authManager.setDefaultEmailLocale(...)` — the #8195 / #14319 deployment locale rung |\n| 862 | `authManager.setAppName(...)` — `branding.workspace_name` |\n| 889 | `authManager.setDefaultSmsLocale(...)` — the #2815 SMS locale |\n\nAll four sit inside **one** hook, and that hook is gated on a flag about HTTP routing:\n\n```ts\n// auth-plugin.ts:727\nif (this.options.registerRoutes) {\n  ctx.hook('kernel:ready', async () => {   // 728\n    ...                                    // 734..978 — all four bindings\n  });                                      // 979\n}                                          // 980\n```\n\n`registerRoutes` answers \"should this plugin mount its own `/api/v1/auth/*` routes on the kernel's `http-server`\". It is a **transport-mounting** question. Wiring the mail service, the deployment email locale, the brand name and the SMS locale are **service-composition** questions, and they are true of an embedding regardless of who serves the routes.\n\nSo an embedding that serves auth routes itself — the whole point of `registerRoutes: false` — silently gets **none** of them. The auth manager comes up with no mail transport, no locale on either channel, and no brand binding, and nothing logs a word about it: the four `ctx.logger.info` lines that would say so are inside the same skipped block.\n\n## Who this is\n\n`objectstack-ai/cloud` is the live one. Every **tenant environment kernel** constructs `AuthPlugin` with `registerRoutes: false` (`packages/objectos-runtime/src/artifact-kernel-factory.ts:728`) because the per-env kernel has no `http-server` — the host worker's `AuthProxyPlugin` forwards `/api/v1/auth/*` to the env's better-auth handler. That is the intended, documented arrangement, and cloud has already had to re-mount one other casualty of the same gate by hand (the OAuth/OIDC discovery documents, cloud#1339).\n\nThe result on the hosted product: **the #14591 ruling — `localization.locale` outranks build-time `i18n.defaultLocale` for auth mail — cannot reach a tenant environment at all**, because the binding that carries it never runs there. That reconciliation is `objectstack-ai/cloud#1857`, and it cannot be satisfied on the cloud side without either duplicating this resolution logic (a second authority, which #14591 exists to prevent) or reaching into plugin internals.\n\n## Measured, not read\n\nAgainst this repo at `655b106c` (the SHA cloud currently pins), same harness shape as `auth-plugin.test.ts`'s existing `#14319` block, with an EXPLICIT `localization.locale = zh-CN` settings double and an `email` service present, varying only `registerRoutes`:\n\n```\nregisterRoutes=TRUE  -> {\"settingsRead\":[[\"localization\",\"locale\",{}]],\n                         \"emailLocaleCalls\":[[\"en\"],[\"zh-CN\"]],\n                         \"smsLocaleCalls\":[[\"zh-CN\"]],\n                         \"emailServiceCalls\":[[{}]],\"appNameCalls\":[[null]]}\nregisterRoutes=FALSE -> {\"settingsRead\":[],\"emailLocaleCalls\":[],\"smsLocaleCalls\":[],\n                         \"emailServiceCalls\":[],\"appNameCalls\":[]}\n```\n\nWith `registerRoutes: false` the settings namespace is not even **read**. The same structure holds in the shipped artifact, not only in source: brace-matching `dist/index.js` puts all four call sites inside the `registerRoutes` block (offsets 473307 / 475311 / 476100 / 476982 within block 472971..479750).\n\nConfirmed again on a real boot of the cloud rig at that pin — one process pair, two kernels:\n\n```\ncloud.log     (control plane, registerRoutes defaults true)\n  INFO Auth: email service wired (transactional mail enabled)\n  INFO Auth: bound auth email locale to i18n default=en\n  INFO Auth: bound appName to settings namespace=branding\n\nobjectos.log  (tenant env kernel, registerRoutes:false) — zero matches\n  ...though the same log shows the kernel DID build with auth on:\n  INFO Initializing Auth Plugin... / Auth Plugin initialized successfully\n  INFO [ArtifactKernelFactory] kernel ready {... \"authEnabled\":true}\n```\n\nCorroborating third reading: that env answers `requireEmailVerification: false` at `GET /api/v1/auth/config`, which is what `resolveRequireEmailVerification()` returns when it sees no transport — the absent `setEmailService` showing through a second surface.\n\n## Suggested shape\n\nSplit the hook: keep **route registration** under `if (this.options.registerRoutes)`, and move the four service bindings (plus `ensureAuthSettingsBound`) into their own `ctx.hook('kernel:ready', ...)` registered unconditionally — the shape the sibling hooks at auth-plugin.ts:993 / :1032 already use, and which their comments already name (\"Registered independently of `registerRoutes` so an embedding that serves no auth routes still gets the diagnosis\"). The diagnosis hook got that treatment; the wiring it diagnoses did not.\n\nThat is one edit in one file, and it is where the authority already lives — the alternative is every routes-less host re-deriving `localization.locale` precedence for itself, which is the second authority #14591 removed.\n\nWorth deciding as part of the same change: whether the \"no email service registered\" branch (auth-plugin.ts:745-758) should keep logging at `info`, given it is now reachable on hosts that never see it today.\n\n## Acceptance\n\n- A kernel with `registerRoutes: false`, a `settings` service answering an explicit `localization.locale`, and an `email` service, ends `kernel:ready` with the transport wired and both locales bound — asserted by extending the `#14319` describe block in `auth-plugin.test.ts` to cover both values of `registerRoutes` rather than only the default.\n- Route registration itself stays gated: a `registerRoutes: false` kernel still mounts no auth routes.\n\nCloud-side reconciliation this unblocks: `objectstack-ai/cloud#1857`.\n\n_Generated by [Claude Code](https://claude.ai/code)_\n"
+}

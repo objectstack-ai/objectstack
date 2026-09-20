@@ -1,0 +1,36 @@
+{
+  "number": 15024,
+  "kind": "issue",
+  "title": "fix(platform-objects,core): sys_metadata_activation ships tenant-less — drop the reserved organization_id before 17.3 is cut (ADR-0126 amended by ADR-0131 D6/D7)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "priority:p1",
+    "target:v17"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T17:49:04Z",
+  "updated_at": "2026-09-04T05:04:56Z",
+  "closed_at": "2026-09-04T05:03:47Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15024",
+  "body": "Re-scoped on the maintainer's ruling (2026-09-04, live chat: 「所以 ADR-0126 不能简单的关掉」「hotcrm 是标准的软件包，客户安装之后能根据业务需求实现具体的定制」「同意」). ADR-0126 is **amended, not superseded** (PR #14976, ADR-0131 D6): its regimes stand at environment scope and the packaged-flow / packaged-action disable + clone machinery **ships in 17.3**. What does NOT ship is a nullable tenant column on a new table. ⚠️ **Must land before the 17.3 tag.**\n\n## 业务一句话\n\nADR-0126 的活化账本 `sys_metadata_activation` 是「本环境把哪个受管流程关掉了」这种部署级状态，不属于任何组织。它今天带着一个「预留、先写 NULL」的 `organization_id` 列，正是 ADR-0131 要消灭的形状。发版前把这列去掉，让这张表以无组织列的部署级状态表出厂。\n\n## Scope\n\n1. `sys_metadata_activation` (`packages/platform-objects`, declared by #12185) declares `systemFields.tenant: false`; the store (`packages/core/src/utils/metadata-activation-store.ts`, #12419) drops its `organization_id == null` filter and the \"RESERVED, never written\" docblock — there is no column to reserve.\n2. The ADR-0126 D3 per-organization pre-chart (\"per-org disable for record-change-triggered flows only, when a customer asks\") is **not** implemented here and is recorded in ADR-0131 D6 as returning, if ever, as a separate org-owned object — never as a column on this ledger.\n3. Any migration or index that names the column on this table is removed (the table never shipped: plain removal, ADR-0087 entry noting \"unreleased\").\n4. Tests that pinned the NULL filter or the reserved column are rewritten to pin the column's absence; the operator gate under walled postures (ADR-0126 D3) and the `execute()`-time consult (#12296) are untouched and stay pinned.\n\n⛔ Do not revert #12185 / #12190 / #12296 / #12348 / #12419 / #12491 — that was this card's first scope and is withdrawn. ⛔ Do not touch `sys_metadata`, ADR-0005's overlay path or the permission-set write-through — v18, ADR-0131.\n\n## Acceptance\n\n`git grep -n organization_id -- packages/core/src/utils/metadata-activation-store.ts packages/platform-objects/src/**/sys-metadata-activation*` returns nothing; the DDL for `sys_metadata_activation` has no `organization_id`; automation / core / platform-objects suites green; disabling a packaged flow on an `isolated` rig still requires the operator capability and still refuses at `execute()`; the fix commit is confirmed NOT an ancestor of `@objectstack/account@17.2.0` (positive control: one 17.2.0 commit IS).\n\nRefs: ADR-0131 (PR #14976) D6 / D7 / D14 · ADR-0126 D2 / D3 · #12155 · #12419 · #13564."
+}

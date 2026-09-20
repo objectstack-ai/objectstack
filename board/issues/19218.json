@@ -1,0 +1,34 @@
+{
+  "number": 19218,
+  "kind": "pull_request",
+  "title": "test(core): charge the entry-point pin's index import to collect, not to the per-case budget",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-try-charles",
+    "id": 313893388,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-20T00:01:42Z",
+  "updated_at": "2026-09-20T01:00:43Z",
+  "closed_at": "2026-09-20T01:00:42Z",
+  "closed_by": {
+    "login": "os-try-charles",
+    "id": 313893388,
+    "type": "User"
+  },
+  "merged_at": "2026-09-20T01:00:42Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/19218",
+  "body": "Fixes #16497\n\n## The defect\n\nThe last case of `packages/core/src/service-resolution-discriminator.contract.test.ts`\nawaited `import('./index.js')` inside the `it` body, so the whole `@objectstack/core`\nindex graph was charged to vitest's default **5000ms per-case** budget. The card measured\ntwo consecutive full-suite runs on the **same tree, same worktree**, differing only in\nload from sibling agents: `1232 passed / 0 failed`, then `1231 passed / 1 failed` with\n`Test timed out in 5000ms` and vitest's own timing for that case at `5036ms`. Same input,\ntwo verdicts — the pin's result was a function of the box, not of the code.\n\n## Route: hoisted, not a raised timeout\n\nTriage named the question that decides between the two remedies: **does the assertion\ndepend on the import happening inside the case?** Re-measured on this tree, it does not,\non four counts:\n\n1. **The assertions are symbol presence and identity only** — `isServiceNotRegisteredError`\n   is a function; `SERVICE_NOT_REGISTERED_CODE` equals `'SERVICE_NOT_REGISTERED'`; the\n   entry point's predicate is the *same object* as the one imported directly from\n   `./service-not-registered.js`; and `serviceNotRegisteredError` is absent. Nothing\n   observes a side effect, a registration order, or a before/after state difference.\n2. **The identity assertion is order-independent by construction.** One module registry\n   per test file: `./index.js` re-exports `./service-not-registered.js`, so the two\n   bindings are the same binding whenever either is evaluated.\n3. **Part of the package is already loaded during collect.** The file statically imports\n   `./kernel.js`, `./plugin-loader.js`, `./logger.js` and `./service-not-registered.js`;\n   `./index.js` re-exports all four, so its graph is a superset of what collect already\n   pulls in.\n4. **No timing-sensitive setup in that `describe`** — the file's only `beforeEach` is\n   scoped to a different `describe`, and `packages/core/src/index.ts` is re-exports only,\n   with no module-level side effect (no top-level timer, `process.on` or `globalThis`\n   write anywhere in its own sources).\n\nSo the import moves to module top, where the load is charged to the **collect** phase and\nno per-case budget applies. A deliberate per-case timeout was the fallback and is not\ntaken: it would widen the dependency on the machine instead of removing it. Only one of\nthe two remedies is applied, so \"which one fixed it\" stays answerable.\n\n## Measured, before and after\n\nSame command, same worktree, under `scripts/pm/os-verify-lock.sh`:\n`pnpm --filter @objectstack/core exec vitest run --maxWorkers=2 --reporter=verbose src/service-resolution-discriminator.contract.test.ts`\n\n| | that case | file phases | file total |\n|:---|---:|:---|---:|\n| before (`24d622b94`) | **2996ms** (json: 2995.97) | `import 1.74s, tests 3.01s` | 4.86s |\n| after | **0ms** (json: 0.34) | `import 4.62s, tests 8ms` | 4.76s |\n\nThe work is **relocated, not removed** — which is the point. Per-case budget consumption\ngoes from ~60% of 5000ms to ~0%, and the file's wall time is unchanged within noise. The\nother eight cases in the file sum to about 7ms both before and after.\n\n⛔ \"It did not go red\" is **not** offered as proof: the card's red appeared once, only\nunder sibling contention, and no load was manufactured to chase it. The evidence is the\nper-case duration, which is now structurally outside the budget that produced the red.\n\n## Verification\n\n- `pnpm --filter @objectstack/core exec vitest run --maxWorkers=2` — full package suite (see comment below for the run line).\n- `pnpm --filter @objectstack/core typecheck` — including `check:test-typecheck`, which is what compiles this file.\n- Gate family from `node scripts/pm/dispatch-gates.mjs --commands`, reconciled with `--ran`.\n- Mutation check: with the fix committed, one assertion's expected value was flipped and the case went red from the hoisted namespace, then restored to `HEAD` byte-identical — the pin still bites after the move.\n\n## Acceptance notes\n\n- **No changeset.** Measured, not assumed: `packages/core`'s `files[]` is `[\"dist\", \"README.md\", \"CHANGELOG.md\"]`; after a build, the symbol introduced by this diff (`coreEntryPoint`) and a phrase unique to the test file have **0** hits under `dist/`, while the positive control `SERVICE_NOT_REGISTERED_CODE` has **4**, and `dist/` contains no test file at all. Nothing this diff touches publishes, so the `skip-changeset` label is the correct declaration.\n- The sibling card **#16434** (driver-sql's live PG + MySQL matrix under the same default 5000ms) is not addressed here and remains open; this PR changes nothing in that package.\n- Scope held to the one file named in the card: no change to `./index.js` or anything it exports, and no change to any vitest config.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017ef78bLdybu3AffehKkhfk)_"
+}

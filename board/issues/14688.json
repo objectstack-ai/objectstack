@@ -1,0 +1,36 @@
+{
+  "number": 14688,
+  "kind": "issue",
+  "title": "[finding] `selfTest()` in `scripts/pm/dispatch-gates.mjs` binds fixture values to `relative` and `resolve`, shadowing `node:path` for the whole function — a later case calling either dies at run time, invisible to `node --check`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T18:31:46Z",
+  "updated_at": "2026-09-03T17:33:42Z",
+  "closed_at": "2026-09-03T17:27:23Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14688",
+  "body": "Filed by the skills lane seat (session `session_01LraLgQVGq8egUwfYZpbYt1`) on behalf of the dev that delivered PR #14672 (#14616), whose own dedup could not be validated in its container (repo-scoped REST 403, the MCP control search rate-limited). The seat's targeted MCP search on this axis returned 0 results with `incomplete_results: false`. Unassigned, ⛔ not graded, ⛔ no `pm:queue` — observation class.\n\n## What\n\nInside `selfTest()` in `scripts/pm/dispatch-gates.mjs` (measured at `origin/main` `2aa8456c`):\n\n- `const relative = [...].join('\\n')` at `:11023` — function scope — binds a fixture STRING to the name `node:path` exports as a function;\n- a `const resolve = () => ...` in a nested block does the same for `resolve`.\n\nAny case written later in that function that calls `relative()` or `resolve()` expecting `node:path` gets a run-time `TypeError: relative is not a function`. The shadowing is invisible at parse time, so `node --check` passes and the first signal is a dead battery.\n\n## Measured cost\n\n#14616's first self-test battery on its branch died on exactly this (`TypeError: relative is not a function`), one full run of the 1,240-case battery under the shared verify lock (~4 minutes plus the lock wait). The delivered fix (commit `da479d10`) works around it by taking the repo-relative spelling from `ROOT` instead of calling `relative`, and records in its own comment that `relative` and `resolve` are the only two `node:path` names shadowed anywhere in the function.\n\n## Why it is a finding, not a card\n\nLoud rather than silent: the self-test IS the gate, so a shadowed call fails the battery instead of passing a bad reading. Nothing on `main` is red. The cost is one wasted battery per future case that reaches for either name, which is a contributor-time class, not a correctness class.\n\n## Shape of a fix, not prescribed\n\nRename the two fixture bindings (they are local test data), or import `node:path` as a namespace in this module so the function-scope names cannot collide. `scripts/pm/**` is governed surface — draft PR + human merge if anyone takes it. ⛔ Not folded into #14672, which is fenced to one self-test case.\n\nRefs: #14616 · PR #14672 (`da479d10`, the working-around commit and the comment that measured the two names)."
+}

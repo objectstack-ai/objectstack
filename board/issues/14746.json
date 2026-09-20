@@ -1,0 +1,34 @@
+{
+  "number": 14746,
+  "kind": "pull_request",
+  "title": "docs(security): publicSharing.enabled standing-policy paragraph (#14582)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T23:30:33Z",
+  "updated_at": "2026-09-03T01:33:56Z",
+  "closed_at": "2026-09-03T01:33:54Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-09-03T01:33:54Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/14746",
+  "body": "Fixes #14582\n\n## What changed\n\nAdds the sibling paragraph for the **parent** switch `publicSharing.enabled` (#14033) beside the existing \"When `eligibility` is enforced\" paragraph (#13608 / PR #13857) in `content/docs/protocol/objectql/security.mdx`'s \"Public Share Links\" section, plus its upgrade-note callout in the same form. Item 2 of #14582 only — item 1 (`system-context.mdx`) already landed, item 3 (`packages/spec/**`) is #14703.\n\nPlaced *after* the eligibility paragraph + callout (not before): the triage comment asked for \"the same shape one level up,\" which reads as recognition — a reader who has just understood the child predicate's paragraph should see the parent's paragraph and recognize the same shape, so the parent follows the child rather than pre-empting it.\n\n## The paragraph, verbatim\n\n> **When `publicSharing.enabled` is off** (#14033). The block's own switch is\n> the same standing-policy shape as `eligibility` above, one level up: it too\n> is held at every redemption, not only at mint. Turning it off stops every\n> existing link on the object immediately, with no revocation step to\n> remember; turning it back on restores them, with no link needing to be\n> re-minted. Turning the block off silences everything inside it —\n> `eligibility` is not evaluated, `redactFields` is not computed — so the\n> bypass some callers have at mint (a late schema scan, or a system context)\n> buys only the mint: it still succeeds while the block is off, but what it\n> mints does not resolve until the block is enabled. What an anonymous holder\n> sees is the same \"invalid or expired\" answer `eligibility` already gives;\n> the readable reason is written to the server log, never to the response.\n>\n> **Upgrade note.** (Callout) Before this, `publicSharing.enabled` gated only the mint —\n> once a link was issued it kept resolving after the object's switch was\n> turned off. Deployments upgrading across that change can feel it: links\n> that used to keep serving after `enabled` was flipped off now stop\n> immediately, and resume as soon as it is flipped back on. That is the\n> intent — the alternative was a declared switch the platform did not hold —\n> but there is no way to keep an already-minted link serving through the\n> object being switched off; the object must stay opted in for its links to\n> serve.\n\n## Behaviour verified on base, `packages/plugins/plugin-sharing/src/share-link-service.ts`\n\n- **(a) off ⇒ existing links stop resolving, held at every redemption:** `resolveToken`, `packages/plugins/plugin-sharing/src/share-link-service.ts:697` — `if (!policy.enabled) { ...; return null; }`, preceded by the `[#14033]` comment block starting at `:652` (\"`publicSharing.enabled` is a STANDING policy — held here, at every redemption, not only at mint\").\n- **(b) on ⇒ resolves again, no re-mint:** same comment block, `:663-669` (\"a block that is off stops every existing token on it — retroactively... and re-enabling the block restores them. Not a revocation: no row moves.\").\n- **(c) bypass mints but does not serve:** `createLink`'s opt-in gate, `:449` — `if (!policy.enabled && !this.permissive && !context.isSystem) { throw ...; }` — only refuses the mint when neither the `permissive` bypass nor a system context applies; the `[#14033] Mint ONLY` doc comment at `:346-355` states the corollary explicitly (\"a link minted under this bypass while the block is off does not resolve until the block is enabled\").\n\nAll three match what the PR body describes; no discrepancy found.\n\n## Scope discipline\n\n- `git diff --stat`: `content/docs/protocol/objectql/security.mdx | 25 +++++++++++++++++++++++++` — one file only.\n- `content/docs/permissions/system-context.mdx` — untouched (item 1 already landed by a different PR).\n- `packages/spec/**` — untouched (#14703's surface).\n- `content/docs/references/**` — no regeneration.\n\n## Gates\n\n`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --commands content/docs/protocol/objectql/security.mdx` derived 29 families (re-derived clean, non-stale, at merged HEAD `96574ba46`). All 29 were run (`--ran` reconciliation: 29 derived, 29 run, 0 UNRUN). 25 passed for real (`exit 0`); the remaining 4 are `NOT MEASURED` — each is a build-prerequisite gap in a fresh worktree unrelated to this docs-only diff, not a finding:\n\n- `pnpm --filter @objectstack/lint run check:doc-formula-expressions` / `check:doc-security-posture` — `@objectstack/lint`'s own build fails in this worktree on a missing `@objectstack/sdui-parser` type declaration, a pre-existing package-graph gap this diff does not touch.\n- `pnpm --filter @objectstack/spec run check:skill-examples` — corpus-wide TS type-check across all doc/skill code blocks; blocked here on `@objectstack/client-react`'s `dist` not carrying `.d.ts` in this worktree, unrelated to this prose-only change.\n- `node scripts/check-test-completeness.mjs` — requires a saved `turbo run test` log CI produces; the gate's own guidance names this NOT MEASURED (not a red) when run standalone.\n\nThe directly relevant gate, `pnpm --filter @objectstack/spec run check:docs` (renders/validates the docs tree, including this file), passed for real once `@objectstack/spec` was built (`exit 0`). CI runs the full farm and will get a real build for the other four.\n\n## Labels\n\n`skip-changeset` requested — docs-only prose change, no package publishes from this diff.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01WLJQhde67SeTccsmnBVarV\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WLJQhde67SeTccsmnBVarV)_"
+}

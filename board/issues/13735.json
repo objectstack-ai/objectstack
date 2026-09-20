@@ -1,0 +1,36 @@
+{
+  "number": 13735,
+  "kind": "issue",
+  "title": "[finding] `pnpm --filter @objectstack/client-react... build` fails in packages/runtime (TS2307: cannot find `@objectstack/rest`, dts leg) while the turbo `^build` graph of the same closure succeeds",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-31T08:56:23Z",
+  "updated_at": "2026-09-02T21:14:40Z",
+  "closed_at": "2026-09-02T21:14:40Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13735",
+  "body": "Found during #13704 (PR #13733) gate preparation — the dev needed `@objectstack/client` / `@objectstack/client-react` built for `check:skill-examples`; out of that card's scope, filed unassigned for triage. No severity asserted; this records what was driven and what came back.\n\n## The shape\n\n- `pnpm --filter @objectstack/client-react... build`(pnpm 的 `...` 依赖闭包过滤)在 `packages/runtime` 处失败:**TS2307 Cannot find module `@objectstack/rest`**,发生在 dts(声明产物)腿。\n- 同一闭包改由 **turbo 的 `^build` 图**驱动则成功,#13704 的门(`check:skill-examples`,\"260 prose examples type-check across 3 surfaces\")在其后全绿。\n\n即:pnpm 的 filter 依赖排序与 turbo 的 `^build` 拓扑对 `packages/runtime` 的输入集合意见不一致。可能是 runtime 的 package.json 少声明了一个 dep(pnpm 视角下 `@objectstack/rest` 不在 runtime 的闭包/构建序里),也可能只是仓库的构建约定本来就以 turbo 图为准、pnpm filter 直驱不受支持。\n\n## 证据\n\n- 复现命令与报错见 #13704 派发工单的 cr-build 日志(dev 报告 `out_of_scope_findings` 项);PR #13733 的门证据段记录了 turbo 路径成功。\n- 本卡未做根因判定 —— 值得一次分诊级别的看一眼(检查 `packages/runtime` 的声明依赖 vs 实际 import;或在 AGENTS.md 把「构建一律走 turbo 图」写成明规则),不预设为缺陷。\n\n## Refs\n\n- #13704 / PR #13733 — 发现现场\n- `check:skill-examples` — 受影响的门(其前置是 client/client-react 的构建产物)"
+}

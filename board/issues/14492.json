@@ -1,0 +1,36 @@
+{
+  "number": 14492,
+  "kind": "issue",
+  "title": "analytics 契约：AnalyticsResult.fields[] 增加可选 builtinAggregate 鉴别字段，服务端内置聚合默认 label（\"Count\" 等 5 处硬编码）不再以英文字面量出线（objectui#7258 裁 B 的生产者半边）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "i18n",
+    "pm:done"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T09:22:12Z",
+  "updated_at": "2026-09-03T19:40:01Z",
+  "closed_at": "2026-09-03T18:48:17Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14492",
+  "body": "## 背景（来自 objectstack-ai/objectui#7258 的诊断，维护者 2026-09-02 裁 B）\n\nAI 搭建的客户仪表盘「按状态统计客户数量」柱状图，X 轴标题在中文界面显示英文 \"Count\"。objectui 侧 dev 证实：渲染端（`packages/core/src/utils/chart-series.ts` 的 `labelOf`）把 `queryDataset()` 返回的 `fields[].label` 当作已解析的作者内容原样透传（objectui#4106 为真实自定义 measure label 钉了这一行为）；英文字面量来自 objectstack 服务端**内置聚合的硬编码默认 label**，无 i18n 钩子，共 5 处：\n\n- `packages/services/service-analytics/src/analytics-service.ts:2045` 与 `:2300`（`inferMeasure`）\n- `packages/services/service-analytics/src/cube-registry.ts:80`（`inferFromObject`）\n- `packages/spec/src/kernel/metadata-create-seeds.ts:98`\n- 镜像：`packages/qa/downstream-contract/src/additional-domains.fixtures.ts:116`\n\n## 裁决（维护者 2026-09-02，在场裁定）：**B — 契约加结构化鉴别字段**\n\n1. `packages/spec/src/contracts/analytics-service.ts` 的 `AnalyticsResult.fields[]` 增加**可选** `builtinAggregate?: 'count' | 'sum' | 'avg' | 'min' | 'max' | 'count_distinct'`（闭合枚举，与 spec 里既有的聚合枚举对齐，⛔ 不另造第二套拼写）。\n2. 只在上述服务端**内置默认**处填充它；作者显式声明了 label 的自定义 measure 一律不填（\"Tasks\" 类 label 保持原样）。`queryDataset` 的 REST 响应透传该字段。\n3. objectui 的 `buildChartSeries()/labelOf()` 在字段带 `builtinAggregate` 时优先查 locale（复用/镜像现有 `report.aggregate.*` 键，zh 已有 `计数` 等），否则回落 label —— objectui 半边由 objectui#7258 的原认领分支跟进，本卡是**生产者半边**，PR 正文写明消费侧契约。\n4. `packages/qa/downstream-contract` 的 fixture 同步。\n\n选项 A（objectui 按名字/文本猜）被否决：会误伤真的叫 `count` 的作者字段、且文本匹配一换语言就失效——正是 AGENTS.md 契约优先禁止的消费端宽容。选项 C（服务端按 userLanguage 出译文）作为回退项未采用：把前端的语言判断复制到服务端，且没有鉴别字段供 per-widget 覆盖。\n\n## 契约面\n\n触及 `packages/spec/src/**`（扩大公开面）⇒ **Clause-②: yes**，按 spec 席队列与契约复审档处理；本卡是 epic objectstack-ai/cloud#1841 的 sub-issue，落地后 objectui#7258 解除 `Blocked-by`。\n\n## 验收\n\n1. spec 类型与 zod（如有）增字段、测试；service-analytics 三处 + seeds 一处填充；fixture 更新；\n2. 一条契约测试：内置 count 度量的响应带 `builtinAggregate: 'count'`，自定义 label 度量不带；\n3. changeset（minor：新增可选字段）。\n"
+}

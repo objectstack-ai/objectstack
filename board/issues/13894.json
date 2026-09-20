@@ -1,0 +1,34 @@
+{
+  "number": 13894,
+  "kind": "issue",
+  "title": "autonumber 业务标识字段默认不唯一,可铸重号 —— 裁定:默认唯一(租户复合形状),显式退出才不唯一",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-31T16:13:39Z",
+  "updated_at": "2026-09-03T15:38:13Z",
+  "closed_at": "2026-09-03T14:48:27Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13894",
+  "body": "按维护者裁定上行立卡(2026-08-31,hotcrm#1301 决裁批 #19-hotcrm ②,批复「其他同意」采纳呈报「定性业务标识符 + 平台路线」)。\n\n## 平台级 declared ≠ enforced(实测)\n\n- **平台自己相信 autonumber = 唯一**:启动日志把自动编号标识符统称 \"unique\"(hotcrm#1292 正是被这句措辞误导 —— 以为字段声明过 `unique` 而实际从未声明);\n- **但不默认强制**:hotcrm 九个自动编号业务标识字段(合同号/报价号/客户号/产品码/工单号…)只有 `crm_case.case_number` 显式声明了 `unique: true` 并获得租户复合唯一索引(`COALESCE(organization_id,'__global__'), case_number`),其余八个可铸重号;\n- **重号路径是实测的,不是假想**:objectstack#12394 —— 烧号后 `ACC-000009` 被发出两次,受害字段正在那八个之列;相关计数器分裂另见 #8686 / #12395;\n- 逐应用逐字段补声明 + 迁移是重复付税(2026-08-31 应用仓三原则 #13848):一个「自动编号」若允许重复,它就不是标识符 —— 这该是平台默认。\n\n## 裁定方向\n\n**autonumber 字段默认 `unique`,租户复合形状照 `case_number` 既有样板;显式声明退出才不唯一。**\n\n## 设计约束(实现 + 复审判断)\n\n1. 退出通道的拼写与 docblock(何时合法退出:纯展示序号等),⛔ 不发明超出需要的配置面;\n2. **存量重号处理必须响亮**:默认翻转时,已有数据含重号的表建索引会失败 —— 迁移/启动路径要**检测并点名重号行 + 修复指引**,⛔ 不静默跳过、⛔ 不静默降级为不唯一;\n3. 与 #12394(烧号重发)/#8686(计数器分裂)的修复交互写进 PR —— 默认唯一会把那两类缺陷从「静默重号」变「响亮拒绝」,这是意图的一部分;\n4. 条款②:**YES**(路径肢 `packages/spec/src/**` 预期命中 + 内容肢:已发布 autonumber 契约行为变化),契约复审档位,changeset 标行为变化;\n5. 首个消费者/验收:hotcrm 八字段在平台默认下获得唯一性、零应用侧声明(hotcrm#1301 已改挂本卡)。\n\nRefs: hotcrm#1301(九字段测量)· hotcrm#1292(被措辞误导的前卡)· #12394 · #12395 · #8686 · #13848。"
+}

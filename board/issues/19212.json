@@ -1,0 +1,34 @@
+{
+  "number": 19212,
+  "kind": "pull_request",
+  "title": "docs(kernel): correct the audit-write failure report granularity to once per cause",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-try-charles",
+    "id": 313893388,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-19T23:28:52Z",
+  "updated_at": "2026-09-19T23:56:21Z",
+  "closed_at": "2026-09-19T23:56:20Z",
+  "closed_by": {
+    "login": "os-try-charles",
+    "id": 313893388,
+    "type": "User"
+  },
+  "merged_at": "2026-09-19T23:56:20Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/19212",
+  "body": "Fixes #17451\n\n## What this changes\n\nOne bullet on `content/docs/kernel/runtime-services/audit-service.mdx` (the `## Typical Errors`\nsection, lines 76-79 before this change). It described the failed ledger insert of\n`recordAuthEvent` as reported at `error` level **once per process**, with every later failure\ndropping to `debug`. That sentence is false on `origin/main` today, and the page it sits on is the\naudit service's own contract documentation.\n\nThe bullet now states the granularity the runtime actually has: **once per cause**, a cause being\nthe error `code` plus the object the row is about. A repeat of an already-reported cause still\ndegrades to `debug`; a **new** cause gets its own `error` line, once.\n\n## Where the behaviour actually lives\n\nMeasured in this worktree at `24d622b94` (the branch point), re-read rather than inherited from the\ncard:\n\n- The paragraph's subject is `recordAuthEvent`, whose implementation is\n  `packages/plugins/plugin-audit/src/auth-event-audit.ts:282` — the same file the page already\n  names as its **Canonical source** (`:7`).\n- The dedupe there is cause-keyed, not a process-wide boolean:\n  `auth-event-audit.ts:211` declares `reportedAuthEventFailureCauses` as a `Set` of cause keys (a\n  `Set` parameterised by the string type — spelled out here rather than written literally), filled\n  at `:229` and read at `:221`. The key is built at `:220` by\n  `auditFailureCauseKey(SESSION_OBJECT, err)`, with `SESSION_OBJECT = 'sys_session'` at `:152`.\n- The shared key is `packages/plugins/plugin-audit/src/audit-writers.ts:739`\n  `export function auditFailureCauseKey(object: string, err: unknown): string` — the error's `code`\n  when it is a string or a number, and the single bucket `(no code)` otherwise, joined with the\n  object name.\n- The runtime message this seam prints already says the same thing in words\n  (`auth-event-audit.ts:239-240`): \"this CAUSE is reported ONCE … a DIFFERENT cause gets its own\n  `error` line\". The page was the last place still describing the old unit.\n\n⚠️ The card attributes the falsification to PR #17450 / card #15166, which re-keyed\n`audit-writers.ts`. That is the wrong file for this paragraph: `audit-writers.ts` backs the CRUD\naudit writers, not `recordAuthEvent`. The second, independent copy of the process-wide boolean —\nthe one this page documents — lived in `auth-event-audit.ts` and was re-keyed separately. The\ncard's conclusion holds; only its citation is corrected here.\n\n## Scope\n\n- One file, one bullet. `git diff --stat` on this branch: `1 file changed, 7 insertions(+), 4 deletions(-)`.\n- ⛔ No code changed anywhere under `packages/**`.\n- Verified before editing: `once per process` occurs **1** time in this page's 114 lines (`:76`).\n  Positive control for the query: the same phrase returns **3** further hits elsewhere under\n  `content/docs/` — so that `1` is a reading, not a broken pattern.\n\n## Changeset\n\nNo changeset, `skip-changeset` label applied. Measured rather than assumed: `content/docs/` is\nconsumed by `apps/docs`, whose manifest is `\"private\": true`, and no published package in the\nworkspace lists a `content`- or `docs`-shaped entry in its `files[]`. Positive control for that\nscan: published packages with a `files[]` array are found and printed (`@objectstack/hono`,\n`@objectstack/cli`, `@objectstack/client-react`, …), all of them shipping `dist` / `README.md` /\n`CHANGELOG.md` only. This diff therefore publishes nothing.\n\n## Tests\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 40\ncommands for this path; all 40 were run. See the PR's Acceptance notes below for the four that\nfirst reported `PREREQUISITE NOT MET` against unbuilt workspace packages and were re-run after\nbuilding them.\n\n## Acceptance notes\n\n- **Noted, not filed here:** `content/docs/permissions/record-view-auditing.mdx:221` carries the\n  same phrase for a different surface. It is deliberately untouched by this PR — the card fences it\n  and so does the `domain:services` seat. It is neither excluded-because-verified nor cleared; it is\n  simply out of this PR's surface, and is reported to the PM for separate triage.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017ef78bLdybu3AffehKkhfk)_"
+}

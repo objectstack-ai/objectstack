@@ -1,0 +1,36 @@
+{
+  "number": 14146,
+  "kind": "issue",
+  "title": "[finding] Five semantic minors in the axis-weighting/batch-presentation encoding — caught by the at-tier review the frame-sync gate structurally cannot perform",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-01T07:51:11Z",
+  "updated_at": "2026-09-03T03:16:09Z",
+  "closed_at": "2026-09-03T02:51:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14146",
+  "body": "Filed by the skills-lane PM seat (session `session_01Msg17tAHJ3jVTYFgHydCm2`) from the fable-tier compensating review of the decision-frame rulings PR (#14142), which the maintainer approved and armed before review completion — zero blocking findings, so the merge stands and these five are one cleanup PR against the post-merge tree. Grading is triage's; the prescriptions below are the reviewer's, recorded verbatim in substance.\n\n1. **`.claude/skills/pm-dispatch/SKILL.md` L441 — stale cap-form restatement**: routes class-2/3 live presentations under 每批 ≤5 while the single home now rules 恰好 5 张; a seat following L441 can present 2-card batches and claim compliance. Pre-existing on main; the ruling-② sweep missed a same-file inline restatement. Fix: replace the inline number with a pointer to the single home (zero lines, in-place).\n2. **`references/decision-analysis.md` — no legal move for the final partial batch**: 恰好 5 + 收件箱归零才收工 forbids both presenting <5 and holding the remainder. Fix: 末批不足照呈, inside the existing byte budget.\n3. **「另三轴」hard-codes count−1 in five places** across the frame copies, and `check:skill-frame-sync`'s MENTION_PATTERNS cannot see it (verified against the script) — on the next axis-count change every weighting clause silently keeps \"three\" with the gate green, recreating the drift class the gate exists to stop. Fix: count-free wording (其余各轴 / \"the others\"), or extend MENTION_PATTERNS to capture 另N轴 and compare against count−1.\n4. **Published guard anchor dangling**: `skills/objectstack-pm-dispatch/SKILL.md` L703 cites \"axis ②'s own definition\" for the shrink-not-grow reading, but that file's axis-② definition nowhere states it (the real anchor deliberately does not ship under the route-B generalization); copy at L859 drops \"contract accretion\" — the term the zero-pull no-conflict argument turns on. Fix: reword L703 to the self-contained shape and add \"and contract accretion\" at L859.\n5. **Lead-with-long-term duty drifts conditional↔unconditional** across the five encodings (3 unconditional, 2 scoped to axis conflict). The ruling is unconditional about the analysis; no decision outcome changes, but it is presentation-duty text under a structure-only gate. Fix: align to the unconditional form, keeping conflict-scoping only for the cannot-outvote consequence.\n\nThe review's full verdict (per-question PASS record, axis-ordinal verification per copy, the weaponization sweep coming back clean) is preserved in the ACCEPT record on the family's cards. Faces: the four frame copies + decision-analysis — one PR, frame-sync moves together; items 1/2/5 are ruling-② and ruling-① text respectively, item 3 may alternatively land in `scripts/check-skill-frame-sync.mjs`."
+}

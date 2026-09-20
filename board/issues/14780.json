@@ -1,0 +1,35 @@
+{
+  "number": 14780,
+  "kind": "pull_request",
+  "title": "fix(ai): author the canonical agent id everywhere the platform teaches one (#14461)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T01:08:10Z",
+  "updated_at": "2026-09-03T10:08:08Z",
+  "closed_at": "2026-09-03T10:08:06Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-09-03T10:08:06Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/14780",
+  "body": "Closes #14461. Maintainer ruling (2026-09-03): **option A, full** — Studio re-pinned, MCP example corrected, lint value roster narrowed.\n\n## The finding, and the one thing that made it a ruling\n\n`skills/objectstack-ai` tells authors that `data_chat` and `metadata_assistant` \"are **not** vocabulary — always write `ask` / `build`\". Every live example the platform shipped taught the opposite. The card could not decide which side moves, because the deciding fact lived in the closed `cloud` repo: *does `service-ai-studio` register under the legacy id?* If it did, re-pinning would be a behaviour change in a consumer this repo cannot see.\n\n**Measured, not assumed.** At `cloud` `main@3856fbf7`:\n\n```ts\n// service-ai-studio/src/agents/metadata-assistant-agent.ts\n:12  export const BUILD_AGENT_NAME = 'build';\n:15  export const LEGACY_BUILD_AGENT_NAME = 'metadata_assistant';\n:40    name: BUILD_AGENT_NAME,        // ← the record's canonical id\n\n// service-ai-studio/src/plugin.ts\n:58  registerAgentAlias(LEGACY_BUILD_AGENT_NAME, BUILD_AGENT_NAME);\n```\n\nThe alias table is one-way, legacy→canonical, and `service-ai/src/agents/agent-aliases.ts:20-23` states it is \"resolution-only: they are NOT separate metadata records\". The canonical id **is** `build`. The reading that made this undecidable is falsified; the skill's sentence was right and the code was residue.\n\n## Three sites, one spelling\n\n**1. `studio.app.ts` — the repo's only `app.defaultAgent` usage.**\n\n```diff\n- defaultAgent: 'metadata_assistant',\n+ defaultAgent: 'build',\n```\n\nThis is not cosmetic. The alias resolves only if an in-memory `registerAgentAlias` call has actually run, and cloud carries two defensive docblocks about that registration silently no-op'ing *for real* under bundle load ordering — `service-ai-studio/src/plugin.ts:44-57` (use the string constant, never `AGENT.name`, or the guard no-ops and \"drops `build` from both the legacy alias AND the framework's `listAgents` catalog\") and `service-ai/src/agent-runtime.ts:30-41` (\"a missed alias must never hide a real platform agent like `build`\"). The canonical id never touches the alias table, so the re-pin **removes a load-order dependency from the platform's own flagship authoring surface**.\n\nNothing moves on the UI side: `objectui`'s `AGENT_ALIAS_GROUPS` is bidirectional and canonical-first (`['build','metadata_assistant']`), `surfaceAgent.ts:82` bounds the key by group membership, and `SURFACE_DEFAULT['studio-build']` was already `'build'`. Measured at `objectui` `main@e3784607f`.\n\n**2. `mcp-server-runtime.ts:1349` — a site the card's census did not reach**, and the louder one, because it is served to LLM clients at runtime:\n\n```diff\n- agentName: z.string().describe('Name of the agent to load (e.g. \"data_chat\", \"metadata_assistant\")'),\n+ agentName: z.string().describe('Name of the agent to load (e.g. \"ask\", \"build\")'),\n```\n\nTwo retired aliases, neither canonical id present. Every MCP client asking what to pass was handed the exact two spellings the catalogue forbids.\n\n**3. `validate-ai-agent-authoring` — the gate itself.** The `defaultAgent` **value** limb reused the four-name `PLATFORM_AGENT_NAMES` set, so it deliberately accepted `metadata_assistant`. The rule that exists to make authoring mistakes loud waved through the banned spelling — the silent-tolerance shape ADR-0078 exists to close, committed by the gate.\n\nThe two limbs now read different tables, because they ask different questions:\n\n| limb | question | roster | change |\n|---|---|---|---|\n| declaration | does this record **shadow** a platform record? | all four | none — declaring `metadata_assistant` shadows `build` through the alias exactly as declaring `build` does |\n| value | is this the right thing to **write**? | `ask` / `build` | a legacy alias now warns under its own rule id `default-agent-legacy-alias` (exported) |\n\nSeparate rule ids because the two defects are genuinely different: an alias **resolves** (the app gets the agent it meant — a spelling defect), an unknown name does **not** (the pin is inert). A message describing the alias as \"has no effect\" would send an author hunting a bug that is not there; there is a test pinning exactly that distinction.\n\n**#6041's ruling is intact.** Its two operative decisions were *warning tier, not error* and *no Zod enum narrowing*. Both stand. `defaultAgent: 'metadata_assistant'` still parses, still builds, still resolves — the only change is that authoring it now says so.\n\n## Two corrections to the card's suggested inputs\n\n- **No pin test guarded the value.** `defaultAgent` appears in `packages/platform-objects` only at `studio.app.ts:48,50` — the comment and the value. One-liner plus its comment; nothing to update.\n- **The retired-keys registry cannot carry this residue.** `packages/spec/src/migrations/entries/retired-keys/` (76 entries) is keyed `<domain>/<Type>:<key>` — it records retired **keys**. `metadata_assistant` is a retired **value** of a live key, which that registry has no shape for. The residue is recorded where it will actually be read instead: the pin site's comment, the rule's docblock, and the tests. A value-level ledger shape is a separate card if it is wanted.\n\n## Verification\n\n| | |\n|---|---|\n| `@objectstack/lint` | 93 files / **2845 tests** pass (incl. `reference-integrity-suite` membership) |\n| `@objectstack/mcp` | 25 files / **271 tests** pass |\n| `@objectstack/platform-objects` | 33 files / **518 tests** pass |\n| build | `turbo build` green for all three (dts emitted) |\n| gates | `check:skill-identifier-liveness`, `check:corpus-claim-drift`, `check:doc-authoring`, `check:empty-changeset`, `check:adr-0087-registration`, `check:changeset-gate-self-tests` — all EXIT=0 |\n| eslint | clean on all five changed files |\n\nNot breaking: nothing an author can write was removed, and both aliases stay resolvable for old bookmarks and persisted `agent_id`s — the only job ADR-0063 §2 ever gave them.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

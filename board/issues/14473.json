@@ -1,0 +1,35 @@
+{
+  "number": 14473,
+  "kind": "issue",
+  "title": "[finding] `MCPServerPlugin`'s own docblock still teaches the deprecated stdio trigger — `plugin.ts:112-122` disagrees with `plugin.ts:234-239` twelve lines below it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T08:28:38Z",
+  "updated_at": "2026-09-03T21:56:53Z",
+  "closed_at": "2026-09-03T20:36:29Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14473",
+  "body": "Out-of-scope by-product of the skills optimization flight on #14305. It is the **source of a defect that already shipped once**: the flight's MCP section was written from this docblock and inherited its error, caught in contract review round 1 and fixed in PR #14463 at `5dabfd2a`. Filed unassigned. A code comment disagreeing with its own code — **no spec `.describe()` twin is owed**.\n\n## The drift\n\n`packages/mcp/src/plugin.ts:112-122`, the class docblock:\n\n```\n * 2. **start** — … Starts the long-lived transport (stdio) only when\n *    `autoStart` is enabled or `OS_MCP_SERVER_ENABLED` is explicitly `true` — …\n *\n * Environment Variables:\n * - `OS_MCP_SERVER_ENABLED` — HTTP surface default-on; `false` disables it,\n *   explicit `true` additionally auto-starts the stdio transport\n```\n\n`packages/mcp/src/plugin.ts:226-239`, the code it documents:\n\n```ts\n    // ── stdio auto-start decision (opt-in, its OWN switch) ──\n    // … it stays opt-in via a SEPARATE switch\n    // (`OS_MCP_STDIO_ENABLED` / the `autoStart` option), never the HTTP var.\n    const stdio = resolveMcpStdioAutoStart();\n    const shouldStart = this.options.autoStart || stdio.enabled;\n    if (stdio.viaDeprecatedAlias && !this.options.autoStart) {\n      ctx.logger.warn(\n        '[MCP] Starting the stdio transport via OS_MCP_SERVER_ENABLED=true is DEPRECATED — …\n         Use OS_MCP_STDIO_ENABLED=true (or the plugin `autoStart` option)…',\n      );\n    }\n```\n\n`resolveMcpStdioAutoStart()` (`packages/types/src/env.ts:333-345`) reads\n`OS_MCP_STDIO_ENABLED` first and returns it clean; `OS_MCP_SERVER_ENABLED=true` falls through\nto the legacy branch and returns `viaDeprecatedAlias: true`. So the docblock names **only** the\ndeprecated trigger, never the canonical one, and presents the deprecated behaviour as the\ndesign. The `env.ts` docblock (`:307-328`) has the split right — this one was not updated with\nit.\n\n## Why it is worth a card rather than a drive-by\n\nThe blast radius is measured, not hypothetical. This docblock is what a reader (human or AI)\nlands on from `MCPServerPlugin`, and it is demonstrably what the published\n`skills/objectstack-ai` package was written from: an author following it sets\n`OS_MCP_SERVER_ENABLED=true`, gets a working transport **plus a deprecation warning at every\nboot**, and has no way from this file to learn the right spelling. One catch happened to be in\nreview; the next may not be.\n\n## Suggested fix\n\nFour lines of comment in `packages/mcp/src/plugin.ts`:\n\n- Step 2: \"…only when `autoStart` is enabled or `OS_MCP_STDIO_ENABLED` is truthy\".\n- Environment Variables: keep `OS_MCP_SERVER_ENABLED` as the HTTP-surface gate only; add\n  `OS_MCP_STDIO_ENABLED` as the stdio switch; mark the legacy `OS_MCP_SERVER_ENABLED=true`\n  stdio trigger deprecated, matching the warning string 100 lines below.\n\nWorth checking whether the same pre-split wording survives in `packages/mcp/README.md` or the\ndocs tree; this audit only measured the plugin docblock. Related, closed, not a duplicate:\n#9579 (`packages/mcp/README.md` documenting runtime methods that do not exist) is the same\ndefect class on a neighbouring file, and its close-out did not cover this span.\n\nDedupe: one targeted `search_issues` over this repo (repo-scoped REST answers 403 for this\nseat), returning a non-empty result set, so the session's search is not in the silent-zero\nmode. Nothing open covers this."
+}

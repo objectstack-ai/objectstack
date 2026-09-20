@@ -1,0 +1,36 @@
+{
+  "number": 14616,
+  "kind": "issue",
+  "title": "[finding] The one-value-site promise for CONTRACT_REVIEW_TIER (SKILL.md 「模型升级只改一行一个文件」) is held only by a manual grep — no self-test pins it, so the next model refresh can re-open the drift silently",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T15:08:06Z",
+  "updated_at": "2026-09-03T00:19:10Z",
+  "closed_at": "2026-09-02T23:25:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14616",
+  "body": "Filed unassigned by the `os-dev` flight on #14303 (session `session_01LraLgQVGq8egUwfYZpbYt1`), observation only — the fix is not in that PR by scope (the triage on #14303 queued exactly two limbs: bump the constant, make every other site name it).\n\nBlocked-by: #14303\n\n## What was measured\n\n- At `origin/main` @ `a5b95ee6`, the model id behind `CONTRACT_REVIEW_TIER` was spelled as a VALUE in **16** places across `.claude/skills/pm-dispatch/**` and `scripts/pm/**` (3 prose sites in `SKILL.md`, 3 mandate-table rows, 2 header comments, 7 self-test assertions and fixtures, plus the definition), while `SKILL.md:773` promises 「档位单源 … 模型升级只改一行一个文件」. #14303's PR takes that to **1** (the definition line).\n- Nothing mechanical holds it at 1. The acceptance test the triage wrote for #14303 is a `git grep` a human or a seat runs by hand; `check:pm-dispatch-gates` (the tool's own self-test, ~1240 cases) asserts the mandate rows and the rendering EQUAL the constant, but never that the constant's value is absent everywhere else. The 16-site drift that #14303 found is exactly what a manual promise looks like one refresh later.\n\n## Suggested shape (not a decision)\n\nOne self-test case in `scripts/pm/dispatch-gates.mjs`: read every file under `.claude/skills/pm-dispatch/**` and `scripts/pm/**`, count occurrences of `CONTRACT_REVIEW_TIER`'s own VALUE (the exact string, read from the constant — never a family/prefix pattern, and never a second literal), and assert the count is exactly 1 at the definition line. Exact-value only: a prefix scan would be the family floor the human floor has not granted, and would also be a second spelling of the model family inside the tool.\n\nTwo things the implementer has to respect, both measured before on this file:\n\n- The tool's watch-hint extraction reads module-body strings and self-test fixture strings as hints (the #8478 lineage; the file's `inherited-population` declaration and the `check:watch-hint-literal` gate guard that class). Directory names for the scan should be derived from an existing declared population or spelled in a way those guards accept, not added as fresh path literals.\n- Verbatim maintainer rulings in `SKILL.md:586` and `references/dispatch-runbook.md:17` mention the model family as prose (「Fable 5」, 「fable 5」); they are quotations, not values, and are not matched by the exact-value scan — the case must not be widened until it would touch them.\n\nRefs: #14303 (the drift, and the PR that collapses 16 → 1)."
+}

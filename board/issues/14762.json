@@ -1,0 +1,36 @@
+{
+  "number": 14762,
+  "kind": "issue",
+  "title": "plugin-auth: auth SMS (OTP / invite texts) and request-less auth mail keep the deployment locale — `sys_user.locale` exists now and is not read",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "i18n",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T00:05:17Z",
+  "updated_at": "2026-09-03T23:53:30Z",
+  "closed_at": "2026-09-03T23:52:18Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14762",
+  "body": "Blocked-by: #13881\n\n## Observation (found while implementing #13881; not fixed there — scope fence)\n\n#13881 lands `sys_user.locale` as a first-class column and moves the **notification** locale (service-messaging: email / inbox / SMS channels) to a per-recipient resolution: `sys_user.locale` → deployment default. It deliberately does NOT touch plugin-auth's own sends, which keep their existing ladders:\n\n- **Auth phone SMS** (`packages/plugins/plugin-auth/src/phone-sms-texts.ts`, `auth-manager.ts` `loadPhoneSmsTemplateBody` / `builtinPhoneSmsBody`): locale = the deployment default (`localization.locale`, bound on `kernel:ready` via `setDefaultSmsLocale`). The file's own docblock said \"when it grows one, resolution should prefer it (tracked in #2815)\" — the column has grown; #2815 is closed; this card is the tracker now.\n- **Auth mail with no request** (admin-initiated password reset, and any send where the requester is not the recipient): `AuthManager.emailLocaleArg` is request rung (`Accept-Language`, #14319) → deployment rung (`setDefaultEmailLocale`). A stored per-user column would be the natural rung between them. **Invitations are #14641's** (the invitee has no `sys_user` row until acceptance) and are not this card.\n\n## Why it is its own card\n\nThe 2026-09-01 ruling on #13881 names the messaging seam (`email-channel.ts`) as the insertion point and the triage fence says the messaging path ends with exactly one per-recipient read point. Adding rungs to plugin-auth's ladders is a second surface with its own precedence question (does the user's stored locale outrank the request's `Accept-Language` for a signed-in user's own sends?) that the ruling did not decide.\n\n## Suggested shape (for triage, not a ruling)\n\n- OTP SMS: the recipient IS the user; read `sys_user.locale` off the row `sendPhoneOtp` already has, fall to the deployment default (same normalizer as `@objectstack/service-messaging`'s `normalizeRecipientLocale` — refuse the literal `undefined` shape).\n- Request-less mail to an existing user: same rung, between request and deployment.\n- Both keep the documented `en-US` floor; nothing dead-letters.\n\nRefs: #13881 (column + messaging chain) · #14641 (invitation rung) · #14319 (request rung) · #2815 (closed; original SMS locale card)."
+}

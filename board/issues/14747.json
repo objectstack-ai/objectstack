@@ -1,0 +1,37 @@
+{
+  "number": 14747,
+  "kind": "issue",
+  "title": "[finding] `controlled_by_parent` master selection is silently decided by FIELD DECLARATION ORDER when an object declares several required lookups — reordering fields moves a security boundary with no diagnostic",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p2",
+    "security"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T23:35:18Z",
+  "updated_at": "2026-09-03T10:30:36Z",
+  "closed_at": "2026-09-03T08:38:10Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14747",
+  "body": "Measured on `@objectstack/* 17.2.0` against a real booted kernel (ObjectQL + `plugin-security` + `plugin-sharing`) driving the HotCRM app metadata. No decision requested — filing the measurement.\n\n## Summary\n\n`SecurityPlugin.resolveCbpRelation` picks the master relation with this precedence:\n\n```js\nconst found = pick((f) => f?.type === \"master_detail\" && f?.required)\n  ?? pick((f) => f?.type === \"master_detail\")\n  ?? pick((f) => f?.type === \"lookup\" && f?.required);\n```\n\n`pick` is `entries.find(...)`, so within each tier the winner is **whichever candidate appears first in the field map** — declaration order. When an object declares **two or more required lookups** (and no `master_detail`), that order is the only thing deciding which object the record-level security derives from. Nothing reports the ambiguity: not `objectstack validate`, not `objectstack lint`, not a boot warning.\n\nThe failure direction is the dangerous one. Moving a field up or down in a schema file is a review-invisible edit that reads as cosmetic, and it can silently repoint the security master.\n\n## Measurement\n\nFixture: two accounts (`acct_US`, `acct_JP`) owned by another user; a `sales_rep` who owns none of them and receives `acct_US` only through a territory sharing rule (`sys_record_share`, `access_level: edit`). Subject: HotCRM's `crm_contract`, which declares **two** required lookups — `crm_account` (declared first) and `crm_contact` — and no `master_detail`. `crm_contract` was set to `controlled_by_parent` for the measurement (an in-test stack override; nothing shipped).\n\n`crm_contact` is itself `controlled_by_parent` under `crm_account`.\n\n| `crm_contract` field order | resolved master | rep reads `crm_contract` |\n|:--|:--|:--|\n| `crm_account` first (as authored) | `crm_account` | `contract_US`, `contract_mixed` — correct, narrowed to the shared account |\n| `crm_contact` first (same fields, order swapped, nothing else changed) | `crm_contact` | `contract_JP`, `contract_US`, `contract_mixed` — **org-wide** |\n\n`contract_mixed` is the discriminator row: `crm_account: acct_US` (readable) with `crm_contact: contact_JP` (not readable). `contract_JP` appearing in the second row is the whole finding — one reordering, and a record on an account the caller cannot see becomes readable.\n\nControl, live in the same runs: `crm_opportunity_line_item` (`controlled_by_parent` under `crm_opportunity`, which stays `private`) reads `[oli_own]` in both configurations, and `oli_JP` reads 0 rows and refuses the write. So the flip tracks the resolved master, not the harness.\n\nSame-run sanity: the sibling object `crm_quote` declares only ONE required lookup (`crm_account`; its `crm_contact` is optional and conditionally required), and its reach was identical in both runs — the order swap moved only the object that actually had two candidates.\n\n## Why the second row is org-wide rather than merely \"wrong master\"\n\nOn 17.2.0 the derivation does not compose across a chain, so a `controlled_by_parent` master resolves to no restriction and the child goes org-wide. That half is objectstack#11082, fixed by merged PR objectstack#11183 — the fix is present in this repo's `main` source and absent from every published version (17.2.0, the latest published, went out 2026-08-23T07:01:00Z, about seven hours before #11082 closed).\n\n**The ambiguity survives that fix.** Once the chain composes, picking `crm_contact` instead of `crm_account` no longer leaks org-wide — it silently derives access from a different object, so `contract_mixed` would follow the primary contact's account rather than the contract's own account. Narrower, still not what the author declared, and still unreported. The two are independent defects; this one is about which master gets chosen, not what happens after it is chosen.\n\n## Prior art checked (not duplicates)\n\n- objectstack#7503 (closed) — publish-time lint for `controlled_by_parent` with **no** relation to derive from. This is the opposite case: too many candidates, not zero.\n- objectstack#9138 (closed) / objectstack#9139 (open) — force / lint `required: true` on a `master_detail` under `controlled_by_parent`. Adjacent, and #9139's v18 direction would push authors toward an explicit `master_detail`, which would cover the lookup-tier case by construction. It does not address ambiguity **within** a tier (two `master_detail` fields pick by order the same way), and it is not landed.\n- objectstack#11082 (closed) / objectstack#5386 (closed) — the composition and share-folding defects. Different question.\n\n## Suggested directions (not deciding)\n\n1. **Report the ambiguity at publish time** — if more than one candidate sits in the winning tier, name them and refuse, in the spirit of #7503. Silence is the part that makes this expensive.\n2. **Let the author name the master explicitly** — an authored key beats any precedence chain, and makes the security boundary greppable instead of positional.\n3. At minimum, document that the tie-break is declaration order, so an author reordering fields knows what they are moving.\n\nReported by a HotCRM consumer: hotcrm#549's ruled conversion turns `crm_contract` into exactly this shape, so the app would inherit an order-dependent security master the day it lands."
+}

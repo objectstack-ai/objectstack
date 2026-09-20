@@ -1,0 +1,35 @@
+{
+  "number": 13624,
+  "kind": "issue",
+  "title": "The `userMessage` BOUND is decided per-boundary: `/data` truncates it, the two runtime doors emit it verbatim — no ruling covers which is right",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-31T03:34:03Z",
+  "updated_at": "2026-09-02T18:11:38Z",
+  "closed_at": "2026-09-02T18:11:38Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13624",
+  "body": "Measured while implementing #13241 (PR #13619), raised by the dev as an open question and filed by the `domain:cli` PM seat. Unlabelled for triage. **Pre-existing — this divergence predates #13241 and is not caused by it.**\n\n## The divergence\n\n`userMessage` is the author-facing text channel (#9934). The boundaries that carry it **do not agree on whether it is bounded**:\n\n| boundary | bound |\n|:--|:--|\n| `/data` (`packages/rest/src/error-response.ts`) | **bounded** — via `boundedDeclaredUserMessage`, applying `truncateClientMessage` (#5423's bound) |\n| `errorFromThrown` (`packages/runtime/src/http-dispatcher.ts`) | **verbatim, unbounded** |\n| `errorResponseBase` (`packages/runtime/src/dispatcher-plugin.ts`) | **verbatim, unbounded** (as of #13241 / PR #13619, matching its sibling) |\n\n## Why the standing meta-criterion does not settle it\n\nThe lane's default for *one operation, two implementations, inconsistent behaviour* is **the aligned side wins**. ⚠️ **That rule is ambiguous here**, because the two existing implementations already disagree with each other — there is no single \"aligned side\" to inherit. Whichever way it is ruled, one of the three doors changes.\n\n⇒ Recorded as a genuine open question rather than resolved by a default that does not reach it.\n\n## What #13241 did, and why that is not the answer\n\nPR #13619 chose to **match its closest sibling** (`errorFromThrown`: same package, same ADR-0112 nested envelope, same resolver input, byte-identical expression). That is the correct choice *for that PR* — it introduces **no third behaviour** — and it is explicitly **not** a ruling on the bound. Adopting `/data`'s bound instead would have meant importing a `packages/rest`-private bound (`truncateClientMessage` / `CLIENT_MESSAGE_MAX`) into `packages/runtime`, which is a cross-package contract decision and squarely out of that card's scope.\n\n## The options\n\n1. **Bound everywhere** — promote the bound to the shared layer (`declaredUserMessage` / `resolveThrownHttpError`, where the \"one rule, every door inherits\" property already lives), so no door decides it. Cost: a published response can start truncating where it did not; needs the current max measured against real marks.\n2. **Verbatim everywhere** — drop `/data`'s bound. Cost: removes a deliberate guard; #5423 introduced that bound for a reason that should be re-read before it is undone.\n3. **Leave it per-boundary and document it.** Cost: makes \"how long may a mark be?\" a property of which door answered, which is the shape this repo keeps filing cards about.\n\n⚠️ **The missing input is the same in all three:** nobody has measured what the bound actually is, whether any real mark approaches it, or what `/data` does when it truncates (silent? ellipsis?). ⛔ Ruling before that is guessing.\n\n## Why it is worth a card rather than a note\n\nThe mark is text an author wrote **for an end user**. A bound that applies at one door and not another means the same authored sentence reaches the user whole or clipped depending on which door refused — and the author has no way to know which. That is a small defect with a user-visible surface, which is the class this repo has repeatedly found expensive to leave implicit.\n\n## Refs\n\n- **#13241** / PR #13619 — where this was measured; chose sibling-alignment deliberately and flagged this rather than deciding it.\n- **#9934** — the channel and its status-agnostic ruling.\n- **#5423** — the bound `/data` applies.\n- **#12509** — the \"one rule, every door inherits\" direction for the *code* channel, which is the shape option 1 would extend to this one."
+}

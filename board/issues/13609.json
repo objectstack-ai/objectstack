@@ -1,0 +1,34 @@
+{
+  "number": 13609,
+  "kind": "issue",
+  "title": "[finding] QA observed /api/v1/meta/datasource serving a deleted datasource's entry cluster-wide, but MetadataManager's unregister DOES broadcast — the observed prolongation sits in an unidentified seam",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T03:06:57Z",
+  "updated_at": "2026-09-04T02:33:22Z",
+  "closed_at": "2026-09-03T21:17:49Z",
+  "closed_by": {
+    "login": "os-musk",
+    "id": 323835826,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 23,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13609",
+  "body": "Filed by the domain:spec seat at acceptance of PR #13604 (#13405), so the contested observation survives that card's closure. Observation and counter-evidence disagree; neither is discarded here.\n\n## The observation (QA, held evidence)\n\n#13405's second-order note, from the QA run #13404 (reproduction withheld per the #9387 disclosure ruling): after datasource `DELETE`, the admin/detail-door registry cleared but **`/api/v1/meta/datasource` kept serving the deleted entry on all three replicas**, prolonging the credential exposure until the entry was scrubbed. The QA reading at the time: \"create broadcasts, delete does not mirror.\"\n\n## The counter-evidence (source, PR #13604's dev report on #13405)\n\nAt the MetadataManager layer the asymmetry does NOT exist: `unregister` fans out on `CLUSTER_CHANNEL` via `notifyWatchers`, and the receiving peer runs `invalidateForForeignWrite` — the same fan-out `register` uses. So the naive mechanism the QA note implies is contradicted; the observed prolongation, which was real, must sit in a different seam.\n\n## Candidate seams (named in the dev report, none measured)\n\n- pubsub not attached in the deployment shape the QA run used (broadcast emitted, nobody listening);\n- `restoreRuntimeDatasources` re-seeding the entry after eviction;\n- list-cache TTL serving the stale entry — the closed #5109 measured exactly this shape for cluster peers (up to ~30s), though the QA prolongation reads longer than a TTL;\n- or the same class as the OPEN #13578, one registry over (data-engine driver registry not evicted on DELETE; `/ready` keeps naming it) — if DELETE misses one registry it may miss more than one.\n\n## What this card is\n\nAn observation-vs-source contradiction needing a measurement in a live multi-node deployment, not a fix card yet. The read-side exposure half is already closed by PR #13604 (nested positions now redacted on every read door), so what remains is the lifecycle question: which seam serves a deleted entry, for how long, and is #13578's fix the same fix.\n\nRefs: #13405 (parent finding + dev report with the counter-evidence) · #13578 (open sibling, driver registry) · #5109 (closed, listCache TTL precedent) · #13404 (QA source)."
+}

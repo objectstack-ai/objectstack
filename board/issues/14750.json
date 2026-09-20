@@ -1,0 +1,34 @@
+{
+  "number": 14750,
+  "kind": "pull_request",
+  "title": "test(plugin-approvals): pin the lock release in the tenant-admin reverse check",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T23:44:15Z",
+  "updated_at": "2026-09-03T02:52:15Z",
+  "closed_at": "2026-09-03T02:52:13Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": "2026-09-03T02:52:13Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/14750",
+  "body": "Fixes #14602\n\nThe `#12775` override-narrowing block's tenant-admin reverse check — *\"the narrowing is about status, not posture\"* — proved a strict subset of the platform-admin case it mirrors: `recalled` status plus the action row, and nothing at all about the record lock. This makes the pair symmetric.\n\n## The diff — one file, two lines\n\n`packages/plugins/plugin-approvals/src/approval-revise.test.ts`, inside `reverse check (tenant admin)`:\n\n```diff\n-      const { req } = await pendingRequest();\n+      const { req, editAttempt } = await pendingRequest();\n+      await expect(editAttempt()).rejects.toThrow(/RECORD_LOCKED/);   // pending → locked\n       const out = await service.recall(req.id, { actorId: 'org_owner' }, TENANT_ADMIN);\n       expect(out.request.status).toBe('recalled');\n       expect(await actionsOf(req.id)).toContain('recall');\n+      await expect(editAttempt()).resolves.toBeUndefined();            // the #3424 release still happens\n```\n\nBoth lines were added, not just the release one. The release assertion alone would have left the case proving a strict subset of what it mirrors one level down: it passes vacuously if the lock never engages for this posture, and \"released at the end\" is a weaker claim than the `locked → released` the platform-admin case pins. The pre-condition is what makes *released* mean *released by the recall*. Both lines are byte-copies of the platform-admin case four cases above, comment column included.\n\nNo product file was touched, and nothing in #12775's ruled behaviour is reopened.\n\n## What was measured\n\n**Suite** — `pnpm --filter @objectstack/plugin-approvals test`, before and after, both `Test Files  36 passed (36)` / `Tests  662 passed (662)`. The count is identical because both assertions land inside an existing `it`, so the suite total is not evidence the case ran. The targeted run is:\n\n```\n✓ … > reverse check: the same override actor still recalls the same request while `pending`, and the flag says so 41ms\n✓ … > reverse check (tenant admin): admitted on `pending` too — the narrowing is about status, not posture 4ms\n Test Files  1 passed (1)\n      Tests  2 passed | 22 skipped (24)\n```\n\nThe after-run above is on this PR's head `423a3405d`, after `origin/main` was merged in.\n\n**Ablation — the new lines are load-bearing, not decorative.** Committed first, then the release assertion was moved to *before* the recall; the mutation was confirmed on disk (the assertion's in-case line index moved ahead of the recall's) before the run. Predicted direction: red, because the record is still locked at that point. Observed:\n\n```\nAssertionError: promise rejected \"Error: RECORD_LOCKED: record 'x1' of 'fin… { …(2) }\" instead of resolving\n Test Files  1 failed (1)\n      Tests  1 failed | 23 skipped (24)\n```\n\nRestored with `git checkout HEAD -- ABS_PATH` under an `EXIT INT TERM` trap; restoration proven by blob hash, `e0a7dc8da831ff1ff9fbe837dbd743e3ebd34913` before and after, with `git diff HEAD` empty. So the lock genuinely engages on this path and only the recall releases it.\n\n**Typecheck** — `pnpm --filter @objectstack/plugin-approvals typecheck` exit 0. The package's own `tsconfig.json` excludes `**/*.test.ts`, so that leg says nothing about the edited file; the leg that does is `check:test-typecheck` (`tsconfig.test.json`), and `tsc --listFiles -p tsconfig.test.json` was used to confirm the edited file is in that program rather than assumed to be. Gate verdict: `check:test-typecheck: OK — @objectstack/plugin-approvals's test layer compiles … 8 file(s) / 324 error(s) / 27 pinned signature(s) held in test-typecheck-debt.json (shrink-only and identity-pinned)`.\n\n**Gates** — derived from the actual change set rather than recalled, via `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --commands` re-run on the merged tree: **29 commands, 25 exit 0**. The four non-zero all refuse for an unmet local prerequisite and say so themselves — none is a finding, and none is a pass:\n\n| gate | exit | its own verdict |\n| --- | --- | --- |\n| `check-test-completeness.mjs` | 3 | \"PREREQUISITE NOT MET — this gate grades a saved `turbo run test` log, and no log was named… the local reading for this gate is NOT MEASURED\" |\n| `check:dual-build-cjs-loads` | 3 | \"PREREQUISITE NOT MET — this gate reads built output, and some package has no dist/… ⛔ This is NOT a pass: nothing was measured\" |\n| `check:i18n` | 1 | \"PREREQUISITE NOT MET — the workspace CLI is not built… Nothing was checked\" |\n| `check:type-check-debt` | 3 | \"PREREQUISITE NOT MET … ⛔ This is NOT a pass and NOT a finding: nothing was measured\" |\n\nCI runs all four against a built tree.\n\n## Clause ② — `no`, re-derived from this diff\n\n`git diff -U0 origin/main...HEAD | grep -E '^[+-].*export'` returns **no matches** (grep exit 1, 0 lines). The change set is one path, `packages/plugins/plugin-approvals/src/approval-revise.test.ts` — a test file that exports nothing to the package entry point, changes no accept/reject behaviour and widens no public surface.\n\n## Changeset — none owed; `skip-changeset` applied\n\nThe diff publishes nothing from any package: one `.test.ts`, excluded from the built output. No empty-frontmatter changeset was added to look complete — `check-empty-changeset.mjs` rejects exactly that.\n\n## Seen, deliberately not touched\n\n`src/approval-revise.test.ts:22` imports `APPROVALS_HOOK_PACKAGE` and never uses it — pre-existing on `origin/main`, and already carried as frozen debt (`test-typecheck-debt.json` holds `TS6133: 'APPROVALS_HOOK_PACKAGE' is declared but its value is never read.` at count 1 for this file). Different defect class from this card, and clearing it would move a ledger; left alone and reported instead.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01AUF1NoViznQK32gqpK8wS8\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01AUF1NoViznQK32gqpK8wS8)_"
+}

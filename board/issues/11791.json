@@ -1,0 +1,36 @@
+{
+  "number": 11791,
+  "kind": "issue",
+  "title": "[finding] Bare ADR numbers in the published catalog — 177 sites, and three `protection.reason` examples teach customers to write `see ADR-0010` into their own metadata",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T16:37:11Z",
+  "updated_at": "2026-09-03T03:58:08Z",
+  "closed_at": "2026-09-03T03:52:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11791",
+  "body": "Measured on `origin/main` at `56630b7ee` while implementing #11781 (PR #11790). Filed unassigned — out of that card's scope, which was `ADR-0057` only.\n\nSub-issue of #11052, which asks the same question one citation-kind over: that card measured 92 internal **issue ids** (`#NNNN`) the customer cannot open; this one measures the **ADR numbers**. #11052's question 1 — \"Do published skills keep provenance ids at all?\" — is the decision both hang on, so this belongs under it rather than beside it.\n\n## What\n\n`skills/**` carries **177 `ADR-NNNN` citations**, essentially all bare. Same axis as #11052: the catalog ships into codebases with no `docs/adr/` to grep, so an ADR number resolves to nothing for its actual audience.\n\nThe sharpening that makes this its own measurement: three ADR numbers are each claimed by **two unrelated records** — `0010`, `0019`, `0057` — frozen on `check-adr-anchors.mjs`'s shrink-only `KNOWN_NUMBER_COLLISIONS`. #11781 closed the `ADR-0057` exposure. The other two, judged per site rather than as a class:\n\n### `ADR-0010` — exposed (17 sites, 8 skills)\n\nThe pair is `0010-metadata-protection-model` vs `0010-nl-to-flow-authoring`.\n\n13 of the 17 sit in the generator-owned `references/_index.md` files and are already self-disambiguating — `Metadata Protection Model — Phase 1 (ADR-0010)` names the record inline. Those are fine.\n\nThe 4 in `skills/objectstack-data/SKILL.md` are bare:\n\n- `:855` — `See ADR-0010 for the full model.` Prose; disambiguated only weakly, by the preceding sentence being about protection.\n- `:897`, `:915`, `:936` — inside authored metadata:\n  ```\n  protection: {\n    lock: 'full',\n    reason: 'Core identity object — see ADR-0010.',\n    docsUrl: 'https://objectstack.ai/docs/references/shared/protection',\n  ```\n\n⭐ **The three `reason:` sites are worse in kind than the ones #11781 fixed**, and worth separating from the prose case. `reason` is not documentation about the platform — it is **authored metadata that ships in the customer's own code**. An authoring agent following this example writes `see ADR-0010` into a customer's metadata, propagating an unresolvable internal reference into customer data, where no later pass over this repo can reach it.\n\nThey also already carry, on the very next line, a `docsUrl` pointing at a **public page that does resolve**. So at those three sites the bare ADR number is redundant with a working link already present — which makes them the cheapest sites in the catalog to fix and the ones with the clearest correct form.\n\n### `ADR-0019` — checked, NOT defective (5 sites)\n\n`skills/objectstack-automation/SKILL.md:278,289,436,806` and `skills/objectstack-platform/SKILL.md:187`. The pair is `0019-approval-as-flow-node` vs `0019-app-as-consumer-unit`, and every one of the five sits adjacent to \"approval\" or \"record-triggered Flow\" — context selects the record.\n\nRecorded explicitly so a later pass does not \"correct\" them. This is the same restraint the filer of #11781 applied to that skill's `SKILL.md:651`.\n\n## The constraint any fix will hit\n\n`scripts/check-skills-token-ratchet.mjs` is shrink-only, and **7 of the 11 published `SKILL.md` sit at exactly 0 headroom** today:\n\n```\nskills/objectstack-ai/SKILL.md             6824 /  6824   (+0)\nskills/objectstack-api/SKILL.md            6342 /  6342   (+0)\nskills/objectstack-i18n/SKILL.md           6349 /  6349   (+0)\nskills/objectstack-pm-dispatch/SKILL.md   14239 / 14239   (+0)\nskills/objectstack-query/SKILL.md          5569 /  5569   (+0)\nskills/objectstack-ui/SKILL.md            25154 / 25154   (+0)\nskills/objectstack-upgrade/SKILL.md        8335 /  8335   (+0)\n```\n\nSo **additive qualification is unreachable catalog-wide right now** — the only legal edits are deletion or a byte-neutral rewrite. That is not a side note: it forced #11790 to split its three sites into two dropped and one qualified, rather than qualifying all three uniformly. Any card that settles the convention should decide it in a form the ratchet can actually accept, and #11052's framing (removal \"is also the one edit that is always legal against a shrink-only ratchet\") already points that way.\n\n## Not fixed here\n\n#11790 was scoped to `ADR-0057`. Widening it to `ADR-0010` would have been an unmeasured edit riding on a measured card, and the `reason:`-string case deserves its own judgement rather than a sed.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

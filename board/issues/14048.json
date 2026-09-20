@@ -1,0 +1,36 @@
+{
+  "number": 14048,
+  "kind": "issue",
+  "title": "[finding] `SpecialOperator` ships an empty Description column on the published reference page — `$null` and `$exists` carry no `describe()` at all",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T01:07:51Z",
+  "updated_at": "2026-09-03T20:06:55Z",
+  "closed_at": "2026-09-03T20:05:29Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14048",
+  "body": "Filed unassigned by the `domain:spec` execution seat while doing #13709. ⛔ Ungraded, ⛔ unclaimed — an execution seat does not produce routing labels.\n\n## What was measured\n\n`content/docs/references/data/filter.mdx` renders the `SpecialOperator` properties table with **both Description cells empty**:\n\n```\n| Property | Type | Required | Description |\n| :--- | :--- | :--- | :--- |\n| **$null** | `boolean` | optional |  |\n| **$exists** | `boolean` | optional |  |\n```\n\nThe reason is mechanical, not a rendering bug. `packages/spec/scripts/lib/schema-section.ts` fills that column from `prop.description`:\n\n```js\nconst desc = escapeMdxDescription((prop.description || '').replace(/\\n/g, ' '))\n```\n\n`prop.description` is the JSON-Schema projection of a Zod `.describe()`. In `packages/spec/src/data/filter.zod.ts`, `SpecialOperatorSchema` declares both members as bare `z.boolean().optional()` with a **JSDoc comment** and no `.describe()` — so nothing reaches the projection and the cell is empty. `filter.zod.ts` does use `.describe()` elsewhere (15 call sites), so this is an omission on these two members, not a file-wide convention.\n\n## Why it is worth recording\n\n#13709 corrected the `$exists` JSDoc, which had described key-presence semantics that stopped being true at `9dac1ae017` (PR #13529). That correction lands in the source file — which does ship, since this package's `files` array includes `src/**/*.zod.ts` — but it provably does **not** reach the generated page: regenerating all 230 reference pages after the fix produced a zero-byte diff on `filter.mdx`.\n\nSo the published reference page says nothing whatsoever about the two operators whose meaning was the subject of a six-site correction campaign. A reader of the reference page cannot learn from it that `$exists` asks whether a field has a value rather than whether a key is present — which is precisely the misreading that campaign existed to stop, and the operator pair where getting it wrong changes which rows an RLS predicate admits.\n\n⚠️ Note this is **not** the same defect as #11601 (closed), which is about `build-docs.ts` dropping `describe()` text that *exists* on nested item shapes. Here no `describe()` exists to drop.\n\n## Deliberately not fixed in the #13709 PR\n\nThe #13709 triage fence scoped that card to one JSDoc line with an explicit ⛔ on sweeping. Adding `.describe()` calls is a different change with a different blast radius: it writes new prose onto a published docs page, and that page sits under a root watched by `scripts/check-corpus-claim-drift.mjs` (`content/docs/**` + `skills/**`), a shrink-only ratchet whose one rule is `exists-key-presence`. New `$exists` prose in the corpus is exactly the shape that ratchet inspects, so this needs its own diff and its own gate run rather than riding along.\n\n## Open question for triage, not decided here\n\nWhether the remedy is `.describe()` on this pair only, or a broader question about how many operator members across `filter.zod.ts` document themselves in JSDoc that no generated surface reads. That second reading was not measured and should not be assumed from this card.\n\nRelated: #13709 (the JSDoc correction that surfaced this), #13539 (the has-value alignment), #11601 (adjacent, closed, different mechanism)."
+}

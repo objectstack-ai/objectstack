@@ -1,0 +1,38 @@
+{
+  "number": 14732,
+  "kind": "issue",
+  "title": "`Validate Package Dependencies` stays red after #14639 lands — 4 NEW fixable `fast-uri` advisories (3.1.5 -> 3.1.6, all 7.5 high)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p1",
+    "security",
+    "tooling"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T22:33:30Z",
+  "updated_at": "2026-09-03T10:30:43Z",
+  "closed_at": "2026-09-03T08:38:11Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14732",
+  "body": "Found while verifying #14639 on branch `claude/issue-14639-osv-xmldom-qs-fix`, by running the workflow's own scanner locally. **Not #14639's failure and not in its scope** — its triage (5513075222) ruled the scope to `@xmldom/xmldom` and `qs` and forbade other dependency moves, and these four advisories did not exist when that card was filed. Filing so the queue damage #14639 describes is actually cleared: **`Validate Package Dependencies` stays red after #14639 merges, on these four alone.**\n\n## Measured\n\nOSV-Scanner v2.3.8 (`osv-scanner --offline-vulnerabilities`, npm offline database downloaded 2026-09-02 22:27 UTC — the same scanner `.github/workflows/validate-deps.yml` pins).\n\n**Baseline, `origin/main` `4d0d9445a` lockfile** — 8 vulnerabilities, 4 packages:\n\n```\nTotal 4 packages affected by 8 known vulnerabilities (0 Critical, 4 High, 4 Medium, 0 Low, 0 Unknown)\n8 vulnerabilities can be fixed.\n```\n\nFour of those eight are #14639's (`@xmldom/xmldom` 0.8.13 / 0.9.11, `qs` 6.15.3 — all 6.3 medium). The other four are new:\n\n| OSV URL | CVSS | PACKAGE | VERSION | FIXED VERSION |\n|:--|:--|:--|:--|:--|\n| https://osv.dev/GHSA-5jgf-p345-68v8 | 7.5 | fast-uri | 3.1.5 | 3.1.6 |\n| https://osv.dev/GHSA-f65p-4m7j-42xc | 7.5 | fast-uri | 3.1.5 | 3.1.6 |\n| https://osv.dev/GHSA-fph4-wmhf-6fwf | 7.5 | fast-uri | 3.1.5 | 3.1.6 |\n| https://osv.dev/GHSA-jqff-g426-hqxp | 7.5 | fast-uri | 3.1.5 | 3.1.6 |\n\n**After #14639's fix, same scanner, same database** — the four the card names are gone and only these remain:\n\n```\nTotal 1 package affected by 4 known vulnerabilities (0 Critical, 4 High, 0 Medium, 0 Low, 0 Unknown)\n4 vulnerabilities can be fixed.\n```\n\nThese post-date the card: #14639 quotes its CI run as `Total 3 packages affected by 4 known vulnerabilities (0 Critical, 0 High, 4 Medium, 0 Low, 0 Unknown)` — no High at all. They are also **higher severity** than the four the card was graded `p1` for: 7.5 high, against 6.3 medium.\n\n## Dependents — transitive-only, nothing in the workspace declares it\n\n`pnpm why -r fast-uri`:\n\n```\nfast-uri@3.1.5\n└─┬ ajv@8.20.0\n  ├─┬ @modelcontextprotocol/sdk@1.30.0\n  │ ├── @objectstack/connector-mcp@17.2.0 (dependencies)\n  │ ├── @objectstack/example-showcase@0.3.16 (dependencies)\n  │ └── @objectstack/mcp@17.2.0 (dependencies)\n  ├── @objectstack/lint@17.2.0 (dependencies)\n  ├── @objectstack/objectql@17.2.0 (dependencies)\n  └─┬ ajv-formats@3.0.1\n    ├── @modelcontextprotocol/sdk@1.30.0 [deduped]\n    ├── @objectstack/lint@17.2.0 (dependencies)\n    └── @objectstack/objectql@17.2.0 (dependencies)\n```\n\n`ajv@8.20.0` declares `fast-uri` at `^3.0.1`, which already admits 3.1.6, so this is a dedupe onto the patched line and not a forced upgrade past what the dependent supports. No workspace manifest declares `fast-uri` (`grep` over every non-`node_modules` `package.json` = 0 hits), so there is no published declared range to keep in lockstep.\n\n## The fix shape is already decided by the file that carries the pin\n\n`pnpm-workspace.yaml` already pins `fast-uri` from the 2026-08 OSV batch (#5032), and its comment states why the bound sits where it does: the selector's exclusive upper bound is at the **4.0.0 major boundary**, \"so a future advisory lift moves only the target\". This is that lift, and the ledger entry proves the shape rather than leaving it to judgement:\n\n- move the target from `^3.1.5` to `^3.1.6` (3.1.7 is also published; either satisfies the advisories, and `^` floats to the newest 3.x either way)\n- leave the selector alone — moving it to the fixed version is the self-invalidating shape `check:override-consistency` reports on, and the entry is deliberately not in that shape today\n- regenerate `pnpm-lock.yaml` with `pnpm install --lockfile-only`; do not hand-edit it\n\n⛔ **No `osv-scanner.toml` exemption.** All four name a fixed version, so this is the take-the-fix path that file's own header describes; the ledger holds zero entries and #14639's triage ruled that it stays at zero.\n\n## Why this is a separate card and not folded into #14639\n\n#14639's fixed scope is `@xmldom/xmldom` and `qs`, with `⛔ no other dependency moves, no unrelated lockfile churn — the diff must be explainable line by line as these two packages' resolution moving`. A `fast-uri` move is a third package and a different advisory set, filed after that scope was ruled. It is also a one-line change that can land in minutes on its own.\n\n## Dedup\n\nListed the 100 newest open items (REST `repos/objectstack-ai/objectstack/issues?state=open`, covering #14573 through #14730) and matched titles and bodies against `fast-uri`: the only two hits are #14639 and #14645, and both mention the package only in the historical lineage of the 2026-08 batch. **No open card names GHSA-5jgf-p345-68v8, GHSA-f65p-4m7j-42xc, GHSA-fph4-wmhf-6fwf or GHSA-jqff-g426-hqxp.** #14645 (the weekly-scan cadence question, `needs-user-decision`) is adjacent but is a design question about the outlet, not a repair for these four — and this card is a live demonstration of exactly the gap it records: the advisories landed between Monday scans and surfaced only because someone happened to run the scanner by hand.\n\nRelated: #14639, #14645.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 15030,
+  "kind": "issue",
+  "title": "revert(plugin-sharing): drop the NULL-inclusive business-unit screen added by #14949 before 17.3 is cut; keep the strict member screen (ADR-0131 D8)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "priority:p1",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T17:55:18Z",
+  "updated_at": "2026-09-03T21:44:25Z",
+  "closed_at": "2026-09-03T21:43:41Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15030",
+  "body": "Filed on the maintainer's ruling (2026-09-04, live chat: 「接受你的建议」on the post-17.2 audit under #13564 / ADR-0131). ⚠️ **Must land before the 17.3 tag.**\n\n## 业务一句话\n\n#14949（修 #14547）把 driver 那条「本组织的行，或者没标签的行」放行规则在共享规则服务里又抄了一份（`business-unit-graph.ts` 的 `orgScope` 改成 `$or: [{organization_id: X}, {organization_id: null}]`）。这正是 ADR-0131 要退役的形状（同一谓词两处实现，#10103 的病根），而且它还没发布。发版前把这一半退回去；同一 PR 里成员表用严格等式那一半是对的，保留。\n\n## Scope\n\n1. In `packages/plugins/plugin-sharing/src/business-unit-graph.ts`, restore `orgScope` to the strict equality it had before e560b4d51 (`{ ...filter, organization_id: this.organizationId }`); delete the docblock that argues for the NULL-inclusive unit screen. **Keep** `memberScope` (strict, #14949's second half) and every test that pins it.\n2. Rewrite the `business-unit-graph.test.ts` / `recipient-width.test.ts` cases that pin the NULL-inclusive unit screen: a seeded unit with `organization_id = NULL` is **not** a usable recipient for an org-stamped rule in 17.x — the same behaviour 17.2.0 ships — and the test names #14547 as the open defect it reproduces.\n3. Changeset `patch`: \"17.3 does not ship the NULL-inclusive business-unit screen added after 17.2.0; #14547 remains as in 17.2.0 and is fixed structurally in v18 (ADR-0131 C1: the Default Organization exists before application seed datasets load, and the seed loader stamps `sys_business_unit` seeds)\".\n4. Comment on #14547 (do not reopen anything it already closed): the 17.x symptom stands; the root cause is the seed loader's `sys_` exemption + first-boot ordering, owned by ADR-0131 C1 on the v18 line.\n\n⛔ Do not add any other NULL arm, and do not touch `SqlDriver.applyTenantScope`.\n\n## Acceptance\n\n`git grep -n 'organization_id: null' -- packages/plugins/plugin-sharing/src` returns no non-test hit; `memberScope` still strict and pinned; plugin-sharing suite green; the revert commit is shown NOT to be an ancestor of `@objectstack/account@17.2.0` (positive control: one 17.2.0 commit IS).\n\nRefs: #14949 · #14547 · #10103 (cause 1) · ADR-0131 (PR #14976) D3 / D8 / D14 · #13564."
+}

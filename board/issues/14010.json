@@ -1,0 +1,35 @@
+{
+  "number": 14010,
+  "kind": "issue",
+  "title": "A hook cannot elevate, so a hook-written computed column cannot be protected by field-level `editable: false` — the guard and the writer are the same door",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p1"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T23:30:54Z",
+  "updated_at": "2026-09-03T17:23:03Z",
+  "closed_at": "2026-09-03T17:12:35Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 19,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14010",
+  "body": "Filed from a downstream app (`steedos-labs/hotcrm-heimao`), tracked there as #49. Measured on `@objectstack/*` 17.1.0, not inferred.\n\n## The shape\n\nAn app wants a column that is **computed and never hand-written** — the requirement it implements says so in as many words (\"通过界面、批量导入、数据接口任何途径都不能人工写入\"). The column is maintained by a cross-object hook.\n\nThe two halves cannot both be had today:\n\n| | result |\n| --- | --- |\n| Author `editable: false` for the persona on that column | ✅ direct `PATCH` is refused, `403 PERMISSION_DENIED` |\n| …and the hook that maintains the column | ❌ dies with `[Security] Field write denied: not permitted to edit [...]` |\n\nThe hook runs as the operator, so the field permission that blocks the operator blocks the hook. **The guard and the legitimate writer are the same door.**\n\nIn the app that hit this, the dying hook is `onError: 'abort'`, so the failure surfaces as the *approval save* being refused — the write-back is what stamps an approved grade onto the account.\n\n## Measured, on a real `RestServer` with the real handlers\n\nSeven computed columns on the app's account object, one `PATCH` per column through `registerRoutes()`-mounted handlers:\n\n- **before**: all seven `200`, values persisted — the symptom\n- **with `editable: false`**: all seven `403 PERMISSION_DENIED`; positive control — `PATCH` to an ordinary column, same persona, same handler, `200` and persisted\n- **the chain**: inserting an approved rating in the same run threw `[Security] Field write denied: not permitted to edit [current_grade, current_total_score, last_rating_date]`, account left unstamped\n\n## Why the app cannot work around it\n\n**1. A hook cannot obtain an elevated context.** Hooks ship as lowered, sandboxed bodies. In the real QuickJS sandbox:\n\n```\nObject.keys(ctx.api)        →  __txBegin,__txCommit,__txRollback,object,transaction\ntypeof ctx.api.sudo         →  'undefined'\n```\n\n`HookSchema` rejects `runAs`, `isSystem`, `elevated`, `sudo`, `context`, `session` as unrecognized keys. Passing `{ context: { isSystem: true } }` through the scoped repository's update *options* is refused — `ObjectRepository.update` spreads options and then writes `context: this.context` last, overwriting it.\n\n⚠️ **A trap worth fixing regardless of what you decide here.** The in-process `ScopedContext` *does* expose `sudo` (`typeof === 'function'`), and app hook tests commonly call `hook.handler(ctx)` natively. So an implementation written as `ctx.api.sudo()` **passes the app's test suite and is a `TypeError` in production** — where, under `onError: 'abort'`, it means \"approvals stop working\". Green tests, dead feature.\n\n**2. There is no unforgeable write-origin discriminator.** A spy hook on `beforeUpdate` recorded the context for a direct write and for a hook-nested write. Identical on every candidate key: same `ctx` keys, same session keys (`accessToken,organizationId,positions,userId`), same `userId`, `session.isSystem` **null on both**, `provenance` **null on both**, same `dispatch`. The only difference is the payload's own field names — caller-controlled, so not a security boundary.\n\nThis is the same gap #13644 reports from another angle (\"apps can only tell the engine's `set_null` cleanup write from a user edit by … sniffing write shape\"). The platform already has the idiom for solving it — `flowRunId`, which the approvals record lock uses to recognise writes made *by* a given run — but there is no hook-side equivalent.\n\n## The ask\n\n**Primary: give hooks a declared elevation knob** — `runAs` on `HookSchema`, the way `FlowSchema` already has it, and/or install `sudo` on the sandbox's `ctx.api`.\n\nThis makes \"this column is system-computed\" expressible in one place and *enforced*, which is the declared-equals-enforced rule apps are asked to build on. Today an author can declare `editable: false` and silently kill their own automation.\n\nNoted for whoever picks this up: the contract prose calls `sudo`'s absence from the hook surface a deliberate maintainer-level decision, so this is a request the platform has framed and not yet decided — which is why it wants a card rather than a workaround.\n\n**Secondary:** make `modifyAllRecords` apply at field level. Broader, and it would let an admin persona through without touching the hook surface.\n\n## Note: elevation does **not** cost the operator\n\nWorth stating because the opposite belief nearly stopped this investigation early. A write with `{ ...callerCtx, isSystem: true }` leaves `updated_by` = the caller, identical to a plain user-context write. `sys_stamp_audit_update` gates on `session?.userId` with no `isSystem` test; `plugin-audit`'s `writeAudit` reads `sess.userId ?? provenance.attributedUserId` with no `isSystem` gate; and `service-automation`'s `resolveRunDataContext` says it deliberately (#5494): *\"elevation is not anonymity … isSystem alone decides authorization, while the user drives the platform's attribution stamps.\"*\n\nSo elevating a hook would **not** trade the audit trail for the write block. A separate stale-doc issue is filed for the contract prose that says otherwise."
+}

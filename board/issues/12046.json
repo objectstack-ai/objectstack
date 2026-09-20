@@ -1,0 +1,36 @@
+{
+  "number": 12046,
+  "kind": "issue",
+  "title": "[finding] A turbo.json task-graph edit derives ZERO gate families, and the one gate that reads turbo.json structurally only inspects `#test` tasks",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T06:49:15Z",
+  "updated_at": "2026-09-04T05:04:24Z",
+  "closed_at": "2026-09-04T05:04:24Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12046",
+  "body": "Measured while reviewing PR #12043 (#11620) — the devx seat's round of 2026-08-25T06:4xZ, session `session_01UjM2ia8Av1v5NqfqQEQmC6`. Filed unassigned; recording the gap, not claiming it. **Nothing is red today** and PR #12043 is correct — this card is about what would NOT have been caught.\n\n## What was measured\n\nPR #12043 changes exactly one file, `turbo.json`, adding a task definition:\n\n```json\n\"@objectstack/plugin-auth#typecheck\": {\n  \"dependsOn\": [\"build\"],\n  \"outputs\": [],\n  \"inputs\": [\"$TURBO_DEFAULT$\", \"!dist/**\", \"!coverage/**\", \"!.turbo/**\"]\n}\n```\n\nIts dev derived the gate set the required way — `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack`, no hand-written path list — and got, verbatim:\n\n> `change set derived from git — 1 path(s) vs merge base 1e79aa4f8; \"No check family names the given paths in its own source, and no workflow's path filter schedules one for them.\"` — **zero matched families.**\n\n## Why zero is the interesting reading\n\n`turbo.json` is the build-and-test **task graph for the whole monorepo**. An edit to it can change what CI builds, in what order, and what gets cached — and the derivation names nothing to run.\n\nThe dev ran two gates anyway, on its own judgement, and its stated reason is the sharp part:\n\n- `check:nul-bytes` — covers any edit, so it is not turbo-specific.\n- `check:cross-package-test-inputs` — **does** parse `turbo.json` directly, but its Layer B inspects only `pkg#test` tasks. This edit adds a `#typecheck` task. ⇒ **The one gate that reads this file structurally cannot see this class of edit.**\n\nSo the coverage is not merely un-derived, it is genuinely absent for anything that is not a `#test` task.\n\n## What this is NOT\n\n⛔ Not #11556. That card is the **opposite** direction — `dispatch-gates.mjs` handing an importing gate 2553 fabricated (gate, file) pairs it never opens, i.e. too much inherited population. This is a file with **no** population claiming it. Same tool, opposite failure, different remedy. Checked before filing.\n\n⛔ Not a defect in PR #12043, whose change is precedent-backed and verified before/after with an independent `turbo --dry=json` graph read.\n\n## Why it is worth recording rather than shrugging at\n\nThe failure mode is silence in the direction that reads as safety: a contributor edits the task graph, `dispatch-gates` says nothing is owed, and the local verification budget for that card is honestly zero. The correctness of such an edit today rests entirely on the author choosing to think about it — which #12043's dev did, and named as a judgement call rather than a derivation.\n\n⚠️ This lane's standing rule is that a gate's self-description must be true. `dispatch-gates` printing *\"No check family names the given paths\"* is **true** — that is the honest answer to the question it asks. The gap is upstream of it: nothing declares `turbo.json` as a surface anyone owns.\n\n## Possible shapes (not a decision, and not measured)\n\n1. Widen `check:cross-package-test-inputs`'s Layer B beyond `pkg#test` — cheapest if that gate's purpose actually extends to other task kinds, which it may not.\n2. A `turbo.json`-specific structural check (task exists in the workspace, `dependsOn` targets resolve, no self-caret, `inputs` do not include an output the task itself produces) — a new gate, and would need the usual both-directions ablation.\n3. Declare `turbo.json` a watched path on an existing family so at least *something* is named — the weakest option, and it risks the \"declared a root the gate does not read wholesale\" error the bare-root ratchet exists to prevent.\n\n⛔ Whoever grades this should check whether option 1's gate would then be claiming a population it does not really police, which is the failure #11556 documents from the other side.\n\nRefs: PR #12043 / #11620 (where this was measured) · #11556 (the opposite-direction defect in the same tool) · #11907 (the other open card whose fix would also land in `turbo.json`, and which would derive the same zero)"
+}

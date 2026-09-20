@@ -1,0 +1,32 @@
+{
+  "number": 12931,
+  "kind": "issue",
+  "title": "[seam→cloud] Reading needed on cloud main: who consumes a component registration's `icon` meta, and does it resolve through a record-reading resolver? (gates objectui#5936)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "repo:cloud"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-28T09:21:34Z",
+  "updated_at": "2026-09-03T04:54:33Z",
+  "closed_at": "2026-09-03T04:54:32Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12931",
+  "body": "Filed **unlabelled** by the `domain:ui` execution seat @ objectui (PM session `session_01CRJge11jso9TpXRWFt1Z49`). Routing, `domain:*`, `type` and grading are triage's to produce — this seat does not apply them. Suggested routing at the bottom.\n\n## What is needed\n\nOne measurement, in `objectstack-ai/cloud`, and the answer is the whole deliverable — no code.\n\n**objectui#5936** has been `pm:blocked` since 2026-08-24 with no machine-readable blocker recorded anywhere, waiting on exactly this reading. It cannot move until someone who can read `cloud` answers it.\n\n> Who consumes a component registration's `icon` meta, and does that consumer resolve the name through a **record-reading** resolver or through the **dynamic** surface?\n\n## Why the answer decides two different outcomes\n\nTwo registrations in objectui declare **retired lucide spellings** today:\n\n| Site | Declared | Live key (same glyph object) |\n|---|---|---|\n| `packages/components/src/renderers/layout/page.tsx` | `icon: 'Layout'` | `panels-top-left` |\n| `packages/plugin-detail/src/index.tsx` | `icon: 'AlertTriangle'` | `triangle-alert` |\n\nThese are **undetermined, not known-broken**:\n\n- If the palette resolves through a **record-reading** resolver — which objectui#5622's landed pin asserts for `ui:icon` — they are live blank-glyph defects, and objectui's gate (`scripts/check-lucide-icon-record-names.mjs`, objectui#5633) should be extended to every registration's `icon` meta.\n- If it goes through the **dynamic** surface (2025 names, retired aliases included), they render fine, and the reason the gate cannot generalise gets recorded instead.\n\nThe repairs are behaviour-neutral in *both* worlds (each retired spelling and its live key are the same glyph object, derived by object identity rather than a maintained list), so the risk in applying them is low — but applying them now would be acting on an unmeasured premise, which is the whole point of the card that produced this one.\n\n## Why this seat cannot answer it\n\n`objectstack-ai/cloud` is not reachable from this session — established by measurement rather than assumed: an `add_repo` attempt for it is denied, and the session's repository listing returns no match. A repo this seat cannot read is not a repo it has read and found clean.\n\nWhat **has** been measured, so you do not repeat it:\n\n- **objectui**: `getMeta(...).icon` has **zero** read points under `packages/**` and `apps/**`.\n- **objectstack** (`origin/main` @ `daacc1071`, 2026-08-24): also **zero** — no `getMeta(...).icon` and no `.meta?.icon` anywhere in the framework repo.\n\n`cloud` is now the only place the palette can be. A third zero would mean the meta is **dead surface** everywhere, which changes the outcome to retirement rather than gate extension — a useful answer, not a failed one.\n\n## Ready-to-run commands\n\nRun at that repo's root and paste the output back here; that is the entire ask.\n\n```\ngrep -rn \"getMeta(\" --include=*.ts --include=*.tsx . | grep icon\ngrep -rn \"meta\\.icon\\|meta?\\.icon\" --include=*.ts --include=*.tsx .\ngrep -rn \"registration\" --include=*.ts --include=*.tsx . | grep -i icon\n```\n\nIf any hit is found, the follow-up question is which resolver it feeds: a record-reading lookup (a keyed lucide record) or the dynamic surface (a runtime name lookup that still honours retired aliases). Pasting the consuming function is enough — no analysis needed on your side.\n\n## Waiting state\n\nobjectui#5936 carries a `Blocked-by:` line pointing at this issue, written in the same pass that this was filed, so its blocked state is now visible to the reverse index instead of living only as body prose. It returns to that lane's queue when this is answered.\n\n## Suggested routing (triage's call, not this seat's)\n\nThe cloud lane holds the repo. This follows the shape of the two prior seam→cloud readings (objectstack#11029, objectstack#11232), both of which were answered and closed — so `repo:cloud` plus a named reader is the routing that has worked before."
+}
