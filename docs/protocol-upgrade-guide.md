@@ -3,116 +3,19 @@
 
 # Metadata protocol upgrade guide
 
-Current protocol: **17.0.0** · chain support floor: **protocol 10** · generated from the ADR-0087 registries (`@objectstack/spec` `conversions/` + `migrations/`).
+Current protocol: **17.0.0** · chain support floor: **protocol 16** · generated from the ADR-0087 registries (`@objectstack/spec` `conversions/` + `migrations/`).
 
-## How to upgrade — from any past major
+## How to upgrade — from protocol 16 onward
 
 ```bash
 objectstack migrate meta --from <your-major>   # replays every step below, in order
-objectstack migrate meta --from 10 --step      # checkpoint after each major (bisect a failure)
+objectstack migrate meta --from 16 --step      # checkpoint after each major (bisect a failure)
 objectstack validate && tsc --noEmit && <your tests>   # your own verify loop is the acceptance test
 ```
 
-Mechanical rewrites are applied for you and reported as a diff; **semantic TODOs** are printed with acceptance criteria and are yours to resolve — the chain never auto-applies a change that requires judgment. Arriving several majors late is the designed-for case: timeliness is never load-bearing (ADR-0087).
+Mechanical rewrites are applied for you and reported as a diff; **semantic TODOs** are printed with acceptance criteria and are yours to resolve — the chain never auto-applies a change that requires judgment.
 
-## Protocol 10 → 11
-
-Protocol 11 unified the divergent HTTP callout node types to `http`, made `html` the canonical page kind (deprecating the `jsx` alias), canonicalized the CRUD flow-node filter key, and renamed object `compactLayout` to `highlightFields` (ADR-0085). These are mechanical and replay losslessly. Two related deprecations are semantic and cannot be auto-applied: a composite `titleFormat` render template has no single canonical `nameField`, and SQL-ish RLS predicates must be rewritten to canonical CEL — both are delegated to the consumer with explicit acceptance criteria.
-
-### Mechanical (applied for you)
-
-| Conversion | Surface | Change | Load window |
-|---|---|---|---|
-| `flow-node-http-callout-rename` | `flow.node.type` | flow callout node types 'http_request' / 'http_call' / 'webhook' → 'http' | live — protocol 11 loader accepts the old shape |
-| `page-kind-jsx-to-html` | `page.kind` | page kind 'jsx' → 'html' (ADR-0080 canonical spelling) | live — protocol 11 loader accepts the old shape |
-| `flow-node-crud-filter-alias` | `flow.node.config.filter` | CRUD flow-node config key 'filters' → 'filter' | live — protocol 11 loader accepts the old shape |
-| `object-compactLayout-to-highlightFields` | `object.compactLayout` | object key 'compactLayout' → 'highlightFields' (ADR-0085 semantic roles) | retired — `migrate meta` only |
-
-### Semantic (delegated to you, with acceptance criteria)
-
-- **`object-titleFormat-to-nameField`** — `object.titleFormat` → object.nameField
-  - Why not automatic: A single-field `titleFormat` maps 1:1 to `nameField`, but a composite template (e.g. `{firstName} {lastName}`) has no lossless single-field target — it must become a formula field designated as `nameField`. The choice of formula is a judgment the transform cannot make.
-  - Done when: Each object with a `titleFormat` declares a `nameField`; a composite title is backed by a formula field. `objectstack validate` passes and record display names render identically to before.
-- **`rls-sql-predicate-to-cel`** — `security.rls.predicate` → CEL predicate
-  - Why not automatic: SQL-ish RLS predicates were deprecated in favor of canonical CEL. Translation is not a pure token rename — operators, functions, and null semantics differ — so it cannot be applied losslessly by the chain.
-  - Done when: Every RLS predicate parses as CEL and `objectstack validate` reports no expression errors; row visibility is unchanged for a representative fixture set.
-
-## Protocol 11 → 12
-
-Protocol 12 flipped the REST data-API default to authenticated (`api.requireAuth: true`, ADR-0056 D2). No metadata shape changed, so there is nothing to rewrite mechanically; a deployment that intentionally serves data anonymously must now declare that posture explicitly.
-
-### Semantic (delegated to you, with acceptance criteria)
-
-- **`rest-requireauth-default-flip`** — `api.requireAuth` → explicit `api: { requireAuth: false }` (intentionally-public deployments only)
-  - Why not automatic: The global default flipped from `false` to `true` in protocol 12: anonymous requests to the `/data/*` CRUD and batch endpoints are rejected with 401 unless the stack opts out. Whether anonymous access was intentional (demo / kiosk) or an accident is a security judgment no transform can make.
-  - Done when: A deployment that relies on anonymous data access declares `api: { requireAuth: false }` on the stack config (and accepts the boot warning); every other consumer verifies its clients authenticate. `objectstack validate` and the consumer test suite pass.
-
-## Protocol 12 → 13
-
-Protocol 13 (ADR-0090 P1) converged the permission model: Role became Position (flat; hierarchy lives on the business-unit tree), the Profile concept was removed, the OWD enum shrank to its canonical four values, and a custom object with an owner field and no `sharingModel` now defaults to `private` instead of public. Key renames replay mechanically; everything that changes *meaning* (profile → position/permission-set design, hierarchy re-homing, CEL identifier rewrites, sharing postures) is delegated with acceptance criteria.
-
-### Mechanical (applied for you)
-
-| Conversion | Surface | Change | Load window |
-|---|---|---|---|
-| `stack-roles-to-positions` | `stack.roles` | stack collection key 'roles' → 'positions' (ADR-0090 D3) | retired — `migrate meta` only |
-| `owd-legacy-read-aliases` | `object.sharingModel` | object sharingModel 'read' → 'public_read', 'read_write' → 'public_read_write' (ADR-0090 D4) | retired — `migrate meta` only |
-| `sharing-recipient-role-to-position` | `sharingRule.sharedWith.type` | sharing-rule recipient type 'role' → 'position' (ADR-0090 D3) | retired — `migrate meta` only |
-
-### Semantic (delegated to you, with acceptance criteria)
-
-- **`cel-current-user-roles-to-positions`** — `CEL/formula: current_user.roles` → current_user.positions
-  - Why not automatic: The EvalUser/CEL contract renamed `current_user.roles` to `current_user.positions`. The token lives inside free-form expression strings, where a blind textual substitution could corrupt string literals or comments — so the rewrite is delegated to the author.
-  - Done when: No expression references `current_user.roles`; formula validation and `objectstack validate` report no unknown-identifier errors; predicate behavior is unchanged for representative users.
-- **`owd-full-alias-removed`** — `object.sharingModel: 'full'` → 'public_read_write' or explicit sharing rules
-  - Why not automatic: The legacy `'full'` OWD alias implied full access (including transfer/ delete) — wider than any canonical OWD value, so it has no lossless target ('read'/'read_write' converted mechanically; this one did not). Choosing between `public_read_write` and explicit sharing rules is a security-posture decision.
-  - Done when: No object declares sharingModel 'full'; the chosen replacement posture is verified against the intended access (who can read/write/delete) for a representative fixture set.
-- **`permission-set-profile-removed`** — `permissionSet.kind / permissionSet.isProfile` → position-based assignment + permission-set grants (ADR-0090 D2)
-  - Why not automatic: The Profile concept was removed: `isProfile` is gone from `PermissionSetSchema` and the `profile` metadata kind folded into `position`. Mapping a profile onto positions and permission-set grants is an authorization-design decision, not a rename.
-  - Done when: No permission set declares `isProfile` or kind `profile`; the intended assignees hold equivalent grants via positions/permission sets. The access matrix (`os compile` access-matrix gate, where enabled) is reviewed and `objectstack validate` passes.
-- **`position-hierarchy-flattened`** — `position.parent / sharingRule recipient role_and_subordinates` → business-unit tree + `unit_and_subordinates` (ADR-0090 D3)
-  - Why not automatic: Positions are flat in v2 — `parent` was removed and the `role_and_subordinates` recipient with it; hierarchy lives on the business-unit tree, which expands a DIFFERENT structure than the retired role tree. Re-homing an org hierarchy is a judgment call.
-  - Done when: No position declares `parent`; former `role_and_subordinates` rules are re-expressed with `unit_and_subordinates` over an equivalent business-unit tree. Row visibility is unchanged for a representative fixture set.
-- **`sharing-model-secure-default`** — `object.sharingModel (absent, custom object with owner field)` → an explicit `sharingModel` declaration
-  - Why not automatic: ADR-0090 D1 secure default: a custom object with an owner field and NO `sharingModel` now resolves `private` (it used to fall through to fully public). Restoring the old exposure must be a deliberate, visible declaration — the chain must not silently re-open data.
-  - Done when: Every custom object that relied on the implicit public posture declares an explicit `sharingModel`; row visibility is verified for a representative fixture set (owners, non-owners, admins).
-
-## Protocol 13 → 14
-
-Protocol 14 renamed the book audience gated arm from `{ profile }` to `{ permissionSet }` (packages own permission sets, never positions — ADR-0090 D9). A pure key rename, preserved as a retired conversion; there is no semantic residue.
-
-### Mechanical (applied for you)
-
-| Conversion | Surface | Change | Load window |
-|---|---|---|---|
-| `book-audience-profile-to-permission-set` | `book.audience` | book audience gated arm '{ profile }' → '{ permissionSet }' (ADR-0090 D2/D9) | retired — `migrate meta` only |
-
-## Protocol 14 → 15
-
-Protocol 15 unified the conditional-visibility predicate under `visibleWhen` (ADR-0089): view-form `visibleOn` and page-component `visibility` are deprecated aliases, accepted and converted at load for this major. It also flipped `FormFieldSchema`, `FormSectionSchema`, and `PageComponentSchema` to `.strict()` — a key those schemas do not declare is now a loud parse error instead of a silent strip (ADR-0049/0078).
-
-### Mechanical (applied for you)
-
-| Conversion | Surface | Change | Load window |
-|---|---|---|---|
-| `view-visibleOn-to-visibleWhen` | `view.form.visibleOn` | view form section/field key 'visibleOn' → 'visibleWhen' (ADR-0089) | live — protocol 15 loader accepts the old shape |
-| `page-component-visibility-to-visibleWhen` | `page.component.visibility` | page component key 'visibility' → 'visibleWhen' (ADR-0089) | live — protocol 15 loader accepts the old shape |
-
-### Semantic (delegated to you, with acceptance criteria)
-
-- **`ui-schemas-strict-unknown-keys`** — `view form fields/sections · page components (undeclared keys)` → declared keys only (`visibleWhen` for visibility predicates)
-  - Why not automatic: The `.strict()` flip (ADR-0089 D3a) turns a previously silently-stripped unknown key into a parse error. There is no mapping target for an arbitrary unknown key — auto-deleting it would be exactly the silent data loss ADR-0078 bans — so each occurrence needs the author to decide: fix the typo, move it to the right layer, or delete dead metadata.
-  - Done when: `objectstack validate` passes with no unknown-key parse errors on form fields, form sections, or page components.
-
-## Protocol 15 → 16
-
-Protocol 16 flipped `DashboardWidgetSchema` to `.strict()` (framework#3251, ADR-0021 endpoint): an undeclared top-level widget key is now a loud parse error instead of a silent strip (ADR-0049 enforce-or-remove, ADR-0078 no-silently-inert). The inline analytics shape it most often catches (`object`+`categoryField`+`valueField`+`aggregate`, pivot `rowField`/`columnField`) was already removed at protocol 9, so no mechanical rewrite applies; the residue is the strictness itself, delegated to the author because an arbitrary unknown key has no lossless canonical target.
-
-### Semantic (delegated to you, with acceptance criteria)
-
-- **`dashboard-widget-strict-unknown-keys`** — `dashboard widgets (undeclared top-level keys — legacy inline analytics, objectui-internal `component`/`data`, or typos)` → declared keys only (`dataset` + `dimensions` + `values` for analytics; `options` for renderer-specific extras)
-  - Why not automatic: The `.strict()` flip turns a previously silently-stripped unknown key into a parse error. There is no mapping target for an arbitrary unknown key — auto-deleting it would be exactly the silent data loss ADR-0078 bans — so each occurrence needs the author to decide: bind a `dataset` and select `dimensions`/`values`, move a renderer setting under `options`, or delete the dead key.
-  - Done when: `objectstack validate` passes with no unknown-key parse errors on dashboard widgets.
+The chain's support floor is protocol **16** — 1 major behind the current protocol **17**, and no earlier. A consumer further behind must reach protocol 16 by another path first (an older `@objectstack/cli` still carries the retired steps) before this command will run. From protocol 16 forward, replaying every remaining hop in one command **is** the designed-for case — that part of timeliness is never load-bearing (ADR-0087); arriving from *before* the floor is not supported at all.
 
 ## Protocol 16 → 17
 
