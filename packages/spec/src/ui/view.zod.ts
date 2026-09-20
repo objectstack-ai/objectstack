@@ -5933,6 +5933,8 @@ export type CalendarConfig = z.input<typeof CalendarConfigSchema>;
 export type GanttConfig = z.input<typeof GanttConfigSchema>;
 export type GanttQuickFilter = z.input<typeof GanttQuickFilterSchema>;
 export type KanbanConfig = z.input<typeof KanbanConfigSchema>;
+/** Post-parse shape of {@link KanbanConfig} — defaults applied, transforms run (ADR-0122). */
+export type KanbanConfigParsed = z.infer<typeof KanbanConfigSchema>;
 export type ListMapConfig = z.input<typeof ListMapConfigSchema>;
 export type NavigationMode = z.input<typeof NavigationModeSchema>;
 export type TreeConfig = z.input<typeof TreeConfigSchema>;
