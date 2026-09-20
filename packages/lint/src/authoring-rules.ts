@@ -636,9 +636,10 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     //
     // ⚠️ A REFUSAL widening on a door that previously refused nothing: a
     // runtime dataset write whose measure pairs an aggregate with an
-    // incompatible field type is now 422 rather than silently stored. Measured
-    // over the shipped dataset corpus before crossing (see the PR body) —
-    // 0 findings, with a lit synthetic probe refused.
+    // incompatible field type is now 422 rather than silently stored. MEASURED
+    // over the shipped dataset corpus before crossing, at the door's own
+    // snapshot shape: 11 datasets (platform-objects 5, showcase 4, crm 1,
+    // todo 1) — 0 findings, with a lit synthetic probe refused.
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['dataset'],
     run: (stack) => validateDatasetMeasureAggregates(stack),
@@ -839,9 +840,10 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // pre-existing dangling field path is now refused (422) rather than stored
     // silently. The gate's differential keeps it honest in the one direction
     // that matters — a STORED sibling already in violation is never charged to
-    // this write (#4463 D4). Measured over the shipped dataset corpus before
-    // crossing (see the PR body): 0 findings, with a lit synthetic probe
-    // refused.
+    // this write (#4463 D4). MEASURED over the shipped dataset corpus before
+    // crossing, at the door's own snapshot shape: 11 datasets
+    // (platform-objects 5, showcase 4, crm 1, todo 1) — 0 findings, with a lit
+    // synthetic probe refused.
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['flow', 'view', 'object', 'dataset'],
     run: (stack, ctx) => validateReferenceIntegrity(stack, ctx),

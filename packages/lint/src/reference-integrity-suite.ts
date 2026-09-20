@@ -213,8 +213,13 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // missing-collection false-positive channel, and its other rungs (views,
   // pages, apps, nav) find no such collection on a dataset snapshot and
   // contribute nothing — rungs that are ABSENT, not rungs that read dead.
-  // Measured over the shipped dataset corpus before crossing (0 findings; the
-  // population and the lit probe are in the #19143 PR body).
+  // MEASURED before crossing, through the door's own shape (per-write snapshot,
+  // evaluated differentially as `runtime-gate.ts` does), over every dataset
+  // shipped in this monorepo: 11 datasets (platform-objects 5 over `sys_*`,
+  // showcase 4, crm 1, todo 1) against 52 platform objects plus each app's own
+  // — 0 findings, precision 1.0. The zero is a fact about the corpus AND the
+  // door: `rulesRun` read 2 on every one, and the same harness's synthetic
+  // probe is refused (`runtime-gate.dataset-writes.test.ts` makes it permanent).
   { name: 'validateObjectReferences', runtimeTypes: ['flow', 'dataset'], run: validateObjectReferences },
   // [#9313] `runtimeTypes` gains `view` on this member and its sort sibling:
   // both judge a LIST VIEW's field references, and a standalone list view is
