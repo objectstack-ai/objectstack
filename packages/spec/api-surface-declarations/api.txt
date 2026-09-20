@@ -8609,6 +8609,7 @@ type GetInstalledPackageRequest = z.input<typeof GetInstalledPackageRequestSchem
 // ── GetInstalledPackageRequestSchema (const) ──
 declare const GetInstalledPackageRequestSchema: z.ZodObject<{
     packageId: z.ZodString;
+    version: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>;
 
 // ── GetInstalledPackageResponse (type) ──
@@ -13866,8 +13867,9 @@ declare const ListInstalledPackagesRequestSchema: z.ZodObject<{
         uninstalling: "uninstalling";
     }>>;
     enabled: z.ZodOptional<z.ZodBoolean>;
-    limit: z.ZodDefault<z.ZodNumber>;
-    cursor: z.ZodOptional<z.ZodString>;
+    type: z.ZodOptional<z.ZodString>;
+    limit: z.ZodOptional<z.ZodNever>;
+    cursor: z.ZodOptional<z.ZodNever>;
 }, z.core.$strip>;
 
 // ── ListInstalledPackagesResponse (type) ──
@@ -27010,8 +27012,9 @@ declare const PackageApiContracts: {
                 uninstalling: "uninstalling";
             }>>;
             enabled: z.ZodOptional<z.ZodBoolean>;
-            limit: z.ZodDefault<z.ZodNumber>;
-            cursor: z.ZodOptional<z.ZodString>;
+            type: z.ZodOptional<z.ZodString>;
+            limit: z.ZodOptional<z.ZodNever>;
+            cursor: z.ZodOptional<z.ZodNever>;
         }, z.core.$strip>;
         output: z.ZodObject<{
             success: z.ZodBoolean;
@@ -27226,6 +27229,7 @@ declare const PackageApiContracts: {
         path: string;
         input: z.ZodObject<{
             packageId: z.ZodString;
+            version: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>;
         output: z.ZodObject<{
             success: z.ZodBoolean;
@@ -28384,6 +28388,7 @@ declare const PackageApiContracts: {
         path: string;
         input: z.ZodObject<{
             packageId: z.ZodString;
+            keepData: z.ZodOptional<z.ZodBoolean>;
         }, z.core.$strip>;
         output: z.ZodObject<{
             success: z.ZodBoolean;
@@ -33001,6 +33006,7 @@ type UninstallPackageApiRequest = z.input<typeof UninstallPackageApiRequestSchem
 // ── UninstallPackageApiRequestSchema (const) ──
 declare const UninstallPackageApiRequestSchema: z.ZodObject<{
     packageId: z.ZodString;
+    keepData: z.ZodOptional<z.ZodBoolean>;
 }, z.core.$strip>;
 
 // ── UninstallPackageApiResponse (type) ──
