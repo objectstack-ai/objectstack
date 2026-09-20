@@ -280,18 +280,29 @@ describe('#17502 — the served repeater row offers no column the parse door ref
         expect(overDropped).toEqual([]);
 
         // Non-vacuity: without this the two assertions above pass over a ledger
-        // that read nothing at all. `dashboard` is the type that exercises both
-        // depths — the five repeater-row columns pinned above, and three
-        // top-level tombstones — so the ledger is proven to reach a row shape
-        // and not only the surface. Sorted, so key ORDER is not what is pinned.
+        // that read nothing at all. `dashboard` is the type that exercises every
+        // depth — the five repeater-row columns pinned above, three top-level
+        // tombstones, and FIVE inside the widget's own `chartConfig` — so the
+        // ledger is proven to reach a row shape and not only the surface.
+        // Sorted, so key ORDER is not what is pinned.
         expect([...(removedByType.get('dashboard') ?? [])].sort()).toEqual([
             ...RETIRED_WIDGET_COLUMNS.map((k) => `dashboard.properties.widgets.items.properties.${k}`),
             'dashboard.properties.refreshInterval',
             'dashboard.properties.aria',
             'dashboard.properties.performance',
-            // [#17751, arrived with main] `ChartConfigSchema.aria` retired one
-            // level deeper than the widget row, inside `chartConfig`.
+            // [#17751] `ChartConfigSchema.aria` retired one level deeper than the
+            // widget row, inside `chartConfig`.
             'dashboard.properties.widgets.items.properties.chartConfig.properties.aria',
+            // [#17385] The four STRUCTURE keys, tombstoned on the widget's own
+            // `chartConfig` carrier (`DashboardWidgetChartConfigSchema`) when the
+            // ownership ruling landed: on a dataset-bound widget the dataset
+            // decides which series exist and which column each one reads
+            // (ADR-0021; 2026-09-12). Same depth as `aria` above, and the same
+            // reason for being here — a `retiredKey()` keeps the key in the
+            // walked shape, so the served payload must drop the column.
+            ...['type', 'xAxis', 'yAxis', 'series'].map(
+                (k) => `dashboard.properties.widgets.items.properties.chartConfig.properties.${k}`,
+            ),
         ].sort());
     });
 
