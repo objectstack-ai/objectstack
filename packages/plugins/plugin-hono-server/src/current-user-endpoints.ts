@@ -238,6 +238,23 @@ function allPathsMounted(rawApp: any, paths: readonly string[]): boolean {
 }
 
 /**
+ * Does the `'*'` entry carry the super-user READ bypass?
+ *
+ * ONE reading of that question for this whole file — {@link foldWildcardSuperUser}
+ * asks it to decide whose `allowRead` it pulls true, and
+ * {@link seedSuperUserRestrictedObjects} asks it to decide whom it seeds for, so
+ * the seed can never materialise an entry for a principal the fold leaves false.
+ * It is the same bypass the server itself applies: `PermissionEvaluator`'s
+ * `wildcardSuperUser()` treats `viewAllRecords` and `modifyAllRecords` alike for
+ * read (`allowRead` short-circuits on either), and only the modify bit reaches
+ * the write axis.
+ */
+function wildcardGrantsSuperRead(objects: Record<string, any>): boolean {
+    const wild = objects?.['*'];
+    return wild?.viewAllRecords === true || wild?.modifyAllRecords === true;
+}
+
+/**
  * Fold the `'*'` wildcard super-user grant into every per-object entry of a
  * `/me/permissions` `objects` map, mutating it in place.
  *
@@ -263,7 +280,7 @@ function allPathsMounted(rawApp: any, paths: readonly string[]): boolean {
 export function foldWildcardSuperUser(objects: Record<string, any>): void {
     const wild = objects?.['*'];
     if (!wild) return;
-    const superRead = wild.viewAllRecords === true || wild.modifyAllRecords === true;
+    const superRead = wildcardGrantsSuperRead(objects);
     const superWrite = wild.modifyAllRecords === true;
     if (!superRead && !superWrite) return;
     for (const [obj, acc] of Object.entries(objects) as Array<[string, any]>) {
@@ -443,7 +460,7 @@ export interface ApiExposureSchemaLike {
 }
 
 /**
- * [#3391] Seed false-initialized per-object entries for a MODIFY-ALL super-user,
+ * [#3391] Seed false-initialized per-object entries for a wildcard SUPER-USER,
  * for every registered object whose `apiMethods` whitelist tightens exposure.
  *
  * A super-user's grant is usually the `'*'` wildcard, not explicit per-object
@@ -453,11 +470,20 @@ export interface ApiExposureSchemaLike {
  * everything) and lets {@link annotateEffectiveApiOperations} attach the effective
  * set. Runs BEFORE fold.
  *
- * Guarded to `modifyAllRecords` super-users ONLY: for a viewAll-only caller,
- * materializing a `false` entry would flip the client's `check('edit')` from
- * "undefined → default-allow" to "explicit false → deny" — a scope-exceeding
- * behavior change. A modify-all caller is folded to `true` anyway, so seeding is
- * harmless there.
+ * [#18990] Admitted by {@link wildcardGrantsSuperRead} — the READ bypass, so
+ * BOTH super-user classes are seeded, and a plain wildcard grant carrying
+ * neither bypass bit still is not. This pass used to be guarded to
+ * `modifyAllRecords` alone, on the reading that materializing a `false` entry
+ * for a viewAll-only caller would flip the client's `check('edit')` from
+ * "undefined → default-allow" to "explicit false → deny". It does flip it, and
+ * that flip is the POINT: the seed only ever touches objects with no explicit
+ * entry (`objects[name]` below), and on those a viewAll-only principal really
+ * can only read — so "explicit false" for edit is what is TRUE about it, while
+ * the silence it replaces left the client rendering write and Export
+ * affordances the server answers `403`. `allowRead` is pulled true by the same
+ * fold for the same reason: `viewAllRecords` is a read bypass server-side too
+ * (`PermissionEvaluator.checkObjectPermission`), so the entry is exactly as
+ * broad as real enforcement, never broader.
  *
  * [#18931] A schema is skipped only when it needs NO annotation, which is the
  * predicate {@link annotateEffectiveApiOperations} itself applies: unrestricted
@@ -473,7 +499,7 @@ export function seedSuperUserRestrictedObjects(
     objects: Record<string, any>,
     allSchemas: readonly ApiExposureSchemaLike[],
 ): void {
-    if (objects?.['*']?.modifyAllRecords !== true) return;
+    if (!wildcardGrantsSuperRead(objects)) return;
     // [#18931] The export slot annotate will read for an entry seeded here. A
     // seeded entry carries no `allowExport` of its own and `foldWildcardSuperUser`
     // does not add one, so annotate's `acc.allowExport ?? wildExport` resolves to
@@ -1075,10 +1101,11 @@ export function registerCurrentUserEndpoints(
             // (sys_user → edit). Together these remove both the false-negative
             // (admin sees sys_user editable) and the false-positive (admin does
             // NOT see sys_member editable, matching the guard).
-            // [#3391] For a modify-all super-user, seed restricting objects
-            // absent from the merged map so fold pulls them true and annotate
-            // can attach their effective apiOperations. Guarded — a failure
-            // here must never drop the whole response.
+            // [#3391] For a wildcard super-user — [#18990] either bypass bit,
+            // not modify-all alone — seed restricting objects absent from the
+            // merged map so fold pulls what it pulls and annotate can attach
+            // their effective apiOperations. Guarded — a failure here must
+            // never drop the whole response.
             try {
                 // The contract's registry view returns `unknown[]` (schema
                 // shape is engine-local); narrow to the slice this seeding
