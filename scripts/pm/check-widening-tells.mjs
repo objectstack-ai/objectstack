@@ -1058,20 +1058,38 @@
  *     with no second `/` left on its line cannot open one; it pushes and pops
  *     nothing and the stack is as correct as it was.
  *
- * ⚠️ THE RESIDUAL, named with the rate it actually occurs at — ⛔ and this
- * sentence is the one the earlier cut of this section got wrong, by naming a
- * shape that occurs ZERO times while the shape that occurs was undisclosed.
- * The trigger that fires on this tree is an APOSTROPHE IN DOC PROSE —
- * `value's`, `can't`, `action's` — inside a hunk that begins within a JSDoc.
- * Read as code it opens a string literal that never closes on its line, which
- * makes the walk unreadable at that byte, BEFORE the terminator line the reset
- * would have used is ever reached. Measured over the 250-diff corpus: **7 of
- * 95** T1 lines. ⛔ It is not closed by widening the reset — the flag is
- * already up by then — and closing it needs a lexer that knows prose from code,
- * which is the guess this reader does not make. A real regex literal carrying a
- * bracket on a line the walk crosses is the OTHER residual, at **0 of 250**:
- * both are loud, and neither silences anything today because nothing suppresses
- * on the flag.
+ * ⚠️ THE RESIDUALS, each named with the rate it actually occurs at — ⛔ and
+ * this paragraph is the one an earlier cut of this section got wrong, by
+ * calling ONE shape "the whole residual" when the measurement behind that word
+ * counted a different population. Naming one trigger while another dominates is
+ * the failure being corrected here, so BOTH are stated, in the same population,
+ * and ⛔ neither is called the whole of anything.
+ *
+ * READING: 436 non-merge commits touching `packages/spec/src` reachable from
+ * this branch, non-test `.ts` only, 1,841 file diffs; population = the **9,482
+ * T1 rows this gate REPORTS** on them; the walk is unreadable at **3,128
+ * (33.0%)** of those rows. First trigger, and ⛔ these are occasions of
+ * judgement, not distinct lines:
+ *
+ *   • a `/` that MAY open a regex literal — **3,069 rows (32.4%)**, from just
+ *     **72** distinct lines, because this tree's machine-name pattern
+ *     (`z.string().regex(/^[a-z_][a-z0-9_]*$/)`) sits in the leading context of
+ *     an enormous number of hunks. ⚠️ Its brackets are BALANCED, so the stack
+ *     it is read across is in fact still correct — the flag is the conservative
+ *     half of the discrimination doing what it says, ⛔ not a corrupted stack.
+ *   • an APOSTROPHE IN DOC PROSE — `value's`, `Entra's`, `object's` — inside a
+ *     hunk that begins within a JSDoc: **59 rows (0.6%)**, 3 distinct lines.
+ *     Read as code it opens a string literal that never closes on its line, so
+ *     the walk is unreadable at that byte BEFORE the terminator line the reset
+ *     above would have used is ever reached. ⛔ Widening the reset does not
+ *     close it — the flag is already up — and closing it needs a lexer that
+ *     knows prose from code, which is the guess this reader does not make.
+ *
+ * ⇒ THE NUMBER THAT MATTERS TO THE NEXT AUTHOR is the 33%, not either trigger
+ * alone: a reader that DECLINES on these frames refuses on a third of the T1
+ * rows this gate reports, and must be designed knowing that before it is
+ * written. Nothing suppresses on the flag today, so nothing is silenced by
+ * either residual right now.
  *
  * ## The shape this gate keeps firing on, and what to do about it — ruling D′
  *
