@@ -12,8 +12,8 @@ description: Component protocol schemas
 ## TypeScript Usage
 
 ```typescript
-import { AIChatWindowProps, ElementButtonPropsSchema, ElementFilterPropsSchema, ElementFormPropsSchema, ElementImagePropsSchema, ElementMetadataViewerPropsSchema, ElementNumberPropsSchema, ElementRecordPickerPropsSchema, ElementTextInputPropsSchema, ElementTextPropsSchema, ObjectCalendarPropsSchema, ObjectFormPropsSchema, ObjectGanttPropsSchema, ObjectGridPropsSchema, ObjectKanbanPropsSchema, ObjectMapPropsSchema, ObjectMasterDetailFormPropsSchema, ObjectMetricPropsSchema, ObjectTreePropsSchema, PageAccordionProps, PageCardProps, PageContainerProps, PageHeaderProps, PageTabsProps, RecordActivityProps, RecordAlertActionSchema, RecordAlertProps, RecordChatterProps, RecordDetailsProps, RecordHighlightsField, RecordHighlightsProps, RecordHistoryProps, RecordPathProps, RecordQuickActionsProps, RecordReferenceRailProps, RecordRelatedListProps, ReferenceRailEntrySchema } from '@objectstack/spec/ui';
-import type { ElementNumberProps, ElementRecordPickerProps, ObjectCalendarProps, ObjectFormProps, ObjectGanttProps, ObjectGridProps, ObjectKanbanProps, ObjectMapProps, ObjectMasterDetailFormProps, ObjectMetricProps, ObjectTreeProps, PageContainerProps, RecordAlertAction, RecordAlertProps, RecordHighlightsField, RecordHistoryProps, RecordPathProps, RecordQuickActionsProps, RecordReferenceRailProps, ReferenceRailEntry } from '@objectstack/spec/ui';
+import { AIChatWindowProps, ElementButtonPropsSchema, ElementFilterPropsSchema, ElementFormPropsSchema, ElementImagePropsSchema, ElementMetadataViewerPropsSchema, ElementNumberPropsSchema, ElementRecordPickerPropsSchema, ElementTextInputPropsSchema, ElementTextPropsSchema, ObjectCalendarPropsSchema, ObjectFormPropsSchema, ObjectGanttPropsSchema, ObjectGridPropsSchema, ObjectKanbanPropsSchema, ObjectMapPropsSchema, ObjectMasterDetailFormPropsSchema, ObjectMetricPropsSchema, ObjectTimelinePropsSchema, ObjectTreePropsSchema, PageAccordionProps, PageCardProps, PageContainerProps, PageHeaderProps, PageTabsProps, RecordActivityProps, RecordAlertActionSchema, RecordAlertProps, RecordChatterProps, RecordDetailsProps, RecordHighlightsField, RecordHighlightsProps, RecordHistoryProps, RecordPathProps, RecordQuickActionsProps, RecordReferenceRailProps, RecordRelatedListProps, ReferenceRailEntrySchema } from '@objectstack/spec/ui';
+import type { ElementNumberProps, ElementRecordPickerProps, ObjectCalendarProps, ObjectFormProps, ObjectGanttProps, ObjectGridProps, ObjectKanbanProps, ObjectMapProps, ObjectMasterDetailFormProps, ObjectMetricProps, ObjectTimelineProps, ObjectTreeProps, PageContainerProps, RecordAlertAction, RecordAlertProps, RecordHighlightsField, RecordHistoryProps, RecordPathProps, RecordQuickActionsProps, RecordReferenceRailProps, ReferenceRailEntry } from '@objectstack/spec/ui';
 
 // Validate data
 const result = AIChatWindowProps.parse(data);
@@ -317,6 +317,7 @@ Sort field and direction pair
 | **staticData** | `any[]` | optional | Static inline records |
 | **locale** | `string` | optional | Locale override for the calendar chrome |
 | **loading** | `boolean` | optional | External loading state (honoured only alongside `data`) |
+| **navigation** | `{ mode: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation: boolean; openNewTab: boolean; size: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Event-click navigation config — the same block `ListViewSchema.navigation` declares (`{ mode, size, openNewTab, preventNavigation }`). The renderer's own default is `{ mode: 'drawer' }` when the key is absent; it is documented rather than declared, so a parsed calendar carries the key only when the author wrote it |
 
 ### Nested Shape: `ObjectCalendarProps.filter[number]`
 
@@ -336,6 +337,17 @@ Sort field and direction pair
 | :--- | :--- | :--- | :--- |
 | **field** | `string` | ✅ | Field name to sort by |
 | **order** | `Enum<'asc' \| 'desc'>` | ✅ | Sort direction |
+
+### Nested Shape: `ObjectCalendarProps.navigation`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **mode** | `Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>` | optional (default: `"page"`) |  |
+| **view** | `never` | optional | [REMOVED] `view.list.navigation.view` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the form view to open for a record detail, and no layer resolved a view by that name: the value was passed straight into the navigation-MODE argument of the console's `onNavigate`, where anything other than `edit` or `view` matched no branch, so the key selected nothing and could silently deaden the row click. Delete the key; to choose what opens for a record, assign a `record` page to the object and let `isDefault` pick the one that opens — page assignment is the machinery that resolves a detail layout, and a list view's navigation block only decides HOW the detail is surfaced (`mode`, `size`). |
+| **preventNavigation** | `boolean` | optional (default: `false`) | Disable standard navigation entirely |
+| **openNewTab** | `boolean` | optional (default: `false`) | Force open in new tab (applies to page mode) |
+| **size** | `Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>` | optional (default: `"auto"`) | Overlay size bucket for drawer/modal detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it. |
+| **width** | `string \| number` | optional | [DEPRECATED → size] Pixel/percent width of the drawer/modal (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket. |
 
 
 ---
@@ -615,6 +627,7 @@ Sort field and direction pair
 | **quickAdd** | `never` | optional | [REMOVED] `object-kanban` property `quickAdd` was removed in @objectstack/spec 17 (ADR-0049) — the board forwarded it, but the per-column affordance is gated on both `quickAdd` and `onQuickAdd`, and `onQuickAdd` is a host-supplied function JSON cannot carry and no producer ever put on an `object-kanban` node, so authoring it was a parse-clean no-op. Delete the key. The quick-add control is unchanged on the `kanban-ui` block, where a React host supplies the `onQuickAdd` slot the control needs. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **coverImageField** | `string` | optional | Image field rendered as the card cover |
 | **conditionalFormatting** | `any` | optional | Card conditional formatting rules |
+| **navigation** | `{ mode: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation: boolean; openNewTab: boolean; size: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Card-click navigation config — the same block `ListViewSchema.navigation` declares (`{ mode, size, openNewTab, preventNavigation }`). The renderer's own default is `{ mode: 'drawer' }` when the key is absent; it is documented rather than declared, so a parsed board carries the key only when the author wrote it |
 
 ### Nested Shape: `ObjectKanbanProps.filter[number]`
 
@@ -625,6 +638,17 @@ View filter rule
 | **field** | `string` | ✅ | Field name to filter on |
 | **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
 | **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. |
+
+### Nested Shape: `ObjectKanbanProps.navigation`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **mode** | `Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>` | optional (default: `"page"`) |  |
+| **view** | `never` | optional | [REMOVED] `view.list.navigation.view` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the form view to open for a record detail, and no layer resolved a view by that name: the value was passed straight into the navigation-MODE argument of the console's `onNavigate`, where anything other than `edit` or `view` matched no branch, so the key selected nothing and could silently deaden the row click. Delete the key; to choose what opens for a record, assign a `record` page to the object and let `isDefault` pick the one that opens — page assignment is the machinery that resolves a detail layout, and a list view's navigation block only decides HOW the detail is surfaced (`mode`, `size`). |
+| **preventNavigation** | `boolean` | optional (default: `false`) | Disable standard navigation entirely |
+| **openNewTab** | `boolean` | optional (default: `false`) | Force open in new tab (applies to page mode) |
+| **size** | `Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>` | optional (default: `"auto"`) | Overlay size bucket for drawer/modal detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it. |
+| **width** | `string \| number` | optional | [DEPRECATED → size] Pixel/percent width of the drawer/modal (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket. |
 
 
 ---
@@ -768,6 +792,72 @@ View filter rule
 | **field** | `string` | ✅ | Field name to filter on |
 | **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
 | **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. |
+
+
+---
+
+## ObjectTimelineProps
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **objectName** | `string` | optional | Object this timeline binds to. Optional because the component-level `dataSource` binding can supply the object instead — this block registers through `ElementDataSourceGate`, which lowers the binding onto this key before the renderer sees the node |
+| **timeline** | `{ startDateField: string; endDateField?: string; titleField: string; groupByField?: string; … }` | optional | Timeline configuration, the author face — the same block `ListViewSchema.timeline` declares: `{ startDateField, endDateField, titleField, groupByField, colorField, scale }`. The flat top-level spellings beside it are the runtime handoff, not a second authoring spelling |
+| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares; lowered to the wire `$filter`. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
+| **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Row order for the fetched entries — the SortItem array form `[{ field, order }, ...]`, the one sort orthography every declared `sort` door on this platform shares; lowered to the wire `$orderby`. The legacy string clause (`name desc`) is refused — see migration `object-block-sort-item-array` |
+| **limit** | `integer` | optional | Maximum number of records loaded onto the rail (row cap); lowered to the query's top-level `$top` (renderer default 100). A timeline renders one rail with no pagination control, so this is the author's window rather than a page size |
+| **data** | `any[]` | optional | Pre-fetched records — read FIRST as the rail's row source, ahead of the data-scope binding and the fetch, and composed into entries through the same `timeline` field bindings a fetched row takes; authoring it suppresses the object query entirely. Distinct from `items`, which is the already-composed entry shape and wins over this key when both are written |
+| **items** | `any[]` | optional | Static inline entries — read ahead of every record source, `data` above included, and bypasses the object query entirely (the renderer becomes a pass-through and the author owns the item shape) |
+| **variant** | `Enum<'vertical' \| 'horizontal' \| 'gantt'>` | optional | Rail layout (renderer default `vertical`). ⚠️ `gantt` needs authored `items`: the object-bound path composes flat feed entries, which the gantt branch cannot draw, and refuses that combination with a named diagnostic instead of drawing an empty chart |
+| **dateFormat** | `Enum<'short' \| 'long' \| 'iso'>` | optional | How each entry's date is rendered (renderer default `short`): `short` / `long` are locale-formatted, `iso` is the locale-free machine form |
+| **rowLabel** | `string` | optional | Header label for the gantt row column — read by the gantt branch only, which on this block needs authored `items` |
+| **minDate** | `string` | optional | Pin the gantt axis start (ISO `yyyy-mm-dd`) instead of deriving it from the rows; only a non-empty value is honoured |
+| **maxDate** | `string` | optional | Pin the gantt axis end (ISO `yyyy-mm-dd`) instead of deriving it from the rows; only a non-empty value is honoured |
+| **descriptionField** | `string` | optional | Field rendered as each entry's description (renderer default `description`). Declared FLAT because the `timeline` block has no member for it — it is the only spelling this binding has |
+| **mapping** | `any` | optional | Record-to-entry field mapping (`{ title, date, description, variant }`) — the objectui-side binding record read BETWEEN the `timeline` block and the flat fallbacks. Its `variant` member (the field whose value picks each marker colour, renderer default `variant`) is the only spelling that binding has |
+| **navigation** | `{ mode: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation: boolean; openNewTab: boolean; size: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Entry-click navigation config — the same block `ListViewSchema.navigation` declares (`{ mode, size, openNewTab, preventNavigation }`) |
+
+### Nested Shape: `ObjectTimelineProps.timeline`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **startDateField** | `string` | ✅ | Field for timeline item start date |
+| **endDateField** | `string` | optional | Field for timeline item end date |
+| **titleField** | `string` | ✅ | Field to display as timeline item title |
+| **groupByField** | `string` | optional | Field to group timeline rows. NO leading or trailing whitespace: the renderer reads this name off every row verbatim, so a padded spelling drops every row into one ungrouped band. |
+| **colorField** | `string` | optional | Field to derive each item color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the timeline default marker color |
+| **scale** | `Enum<'hour' \| 'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional (default: `"week"`) | Default timeline scale |
+
+### Nested Shape: `ObjectTimelineProps.filter[number]`
+
+View filter rule
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field name to filter on |
+| **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
+| **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. |
+
+### Nested Shape: `ObjectTimelineProps.sort[number]`
+
+Sort field and direction pair
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field name to sort by |
+| **order** | `Enum<'asc' \| 'desc'>` | ✅ | Sort direction |
+
+### Nested Shape: `ObjectTimelineProps.navigation`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **mode** | `Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>` | optional (default: `"page"`) |  |
+| **view** | `never` | optional | [REMOVED] `view.list.navigation.view` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the form view to open for a record detail, and no layer resolved a view by that name: the value was passed straight into the navigation-MODE argument of the console's `onNavigate`, where anything other than `edit` or `view` matched no branch, so the key selected nothing and could silently deaden the row click. Delete the key; to choose what opens for a record, assign a `record` page to the object and let `isDefault` pick the one that opens — page assignment is the machinery that resolves a detail layout, and a list view's navigation block only decides HOW the detail is surfaced (`mode`, `size`). |
+| **preventNavigation** | `boolean` | optional (default: `false`) | Disable standard navigation entirely |
+| **openNewTab** | `boolean` | optional (default: `false`) | Force open in new tab (applies to page mode) |
+| **size** | `Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>` | optional (default: `"auto"`) | Overlay size bucket for drawer/modal detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it. |
+| **width** | `string \| number` | optional | [DEPRECATED → size] Pixel/percent width of the drawer/modal (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket. |
 
 
 ---

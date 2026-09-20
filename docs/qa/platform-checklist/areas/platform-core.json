@@ -463,7 +463,7 @@
       "source": [
         "packages/runtime/src/route-ledger.ts (PUT /meta/:type/:name, GET /meta/_drafts, GET /meta/:type/:name/published, POST /packages/:id/publish-drafts)",
         "packages/spec/src/kernel/metadata-plugin.zod.ts#allowOrgOverride (allowOrgOverride 403 not_overridable contract; validateOnWrite; registry flags per type)",
-        "ADR-0070 via packages/qa/dogfood/test/package-first-authoring.dogfood.test.ts#writable_package_required (writable_package_required)",
+        "ADR-0070 via packages/qa/dogfood/test/package-first-authoring.dogfood.test.ts#WRITABLE_PACKAGE_REQUIRED (the runtime create into a loaded code package refused, with its writable-base control beside it — re-pointed #18104: the lower-case spelling survives here only inside a test title and comments; the code this test actually pins is the SCREAMING_SNAKE one, ADR-0112)",
         "ADR-0033 (drafts / publish)"
       ],
       "history": [
@@ -561,7 +561,7 @@
         "packages/platform-objects/src/apps/studio.app.ts#requiredPermissions (static nav; requiredPermissions studio.access)",
         "packages/platform-objects/src/apps/account.app.ts#requiresObject (no requiredPermissions; hidden from App Switcher; requiresObject/requiresService entry gates)",
         "packages/platform-objects/src/apps/setup-nav.contributions.ts#nav_organizations (nav_organizations requiresService org-scoping; nav_api_keys manage_platform_settings; no nav_jwks — removed in #7544)",
-        "packages/plugins/plugin-auth/src/auth-plugin.ts#Providers (SSO Providers nav_sso_providers contributed only when isSsoWired())",
+        "packages/plugins/plugin-auth/src/auth-plugin.ts#nav_sso_providers (SSO Providers contributed only when isSsoWired() — re-pointed #18104: the bare word Providers is carried in this file only as a substring of longer tokens and label strings; nav_sso_providers is the contributed entry id, the same anchor shape the sibling nav rows use)",
         "ADR-0048 (Setup/Studio/Account as one-app packages com.objectstack.{setup,studio,account}); ADR-0029 (nav contributions); ADR-0066 (sys_jwks private)"
       ],
       "history": [
@@ -819,7 +819,7 @@
       ],
       "traps": ["dispatcher-vs-hono-route", "stale-console-bundle"],
       "source": [
-        "packages/runtime/src/route-ledger.ts#commitId (PATCH /packages/:id/enable|disable, DELETE /packages/:id, POST /packages/:id/publish|publish-drafts, GET /packages/:id/commits, POST /packages/:id/commits/:commitId/revert, POST /packages/:id/revert)",
+        "packages/runtime/src/route-ledger.ts#ROUTE_LEDGER (PATCH /packages/:id/enable|disable, DELETE /packages/:id, POST /packages/:id/publish|publish-drafts, GET /packages/:id/commits, POST /packages/:id/commits/:commitId/revert, POST /packages/:id/revert — re-pointed #18104: commitId is a route PATH PARAMETER, carried in this file only inside a route string)",
         "platform-core.metadata-authoring-roundtrip (the writable probe package this reuses)",
         "ADR-0070 (writable vs read-only packages), ADR-0033 (drafts/publish/commits)"
       ],
@@ -913,7 +913,7 @@
         "objectui packages/app-shell/src/layout/inboxGrouping.ts (groupNotifications — (topic,title) coalescing, #2765)",
         "objectui packages/app-shell/src/layout/AppHeader.tsx (postMarkRead → POST /api/v1/notifications/read[/all]; poll GET /notifications?view=mine)",
         "packages/runtime/src/route-ledger.ts (GET /notifications, POST /notifications/read, POST /notifications/read/all)",
-        "packages/runtime/src/domains/notifications.ts#markRead (markRead upserts sys_notification_receipt; empty/mis-keyed ids → 400)",
+        "packages/runtime/src/domains/notifications.ts#handleNotificationRequest (markRead upserts sys_notification_receipt; empty/mis-keyed ids → 400 — re-pointed #18104: markRead is a PROVIDER METHOD this file only calls off the inbox capability, a member access; the POST /notifications/read branch that validates the body and issues it is in handleNotificationRequest)",
         "ADR-0030 (sys_inbox_message L5 materialization + sys_notification_receipt); ADR-0103 (receipt object api-method lockdown)"
       ],
       "history": [
@@ -1640,7 +1640,7 @@
       "traps": ["dispatcher-vs-hono-route", "cache-staleness"],
       "source": [
         "examples/app-showcase/src/data/extensions/account.extension.ts#AccountExtension (AccountExtension — the shipped fixture, priority 210)",
-        "packages/objectql/src/registry.ts#mergeObjectDefinitions (mergeObjectDefinitions — additive fields fold, the spread) + vicinity via engine: packages/objectql/src/engine.ts#objectExtensions (the objectExtensions loop registering 'extend' contributors)",
+        "packages/objectql/src/registry.ts#mergeObjectDefinitions (mergeObjectDefinitions — additive fields fold, the spread) + vicinity via engine: packages/objectql/src/engine.ts#registerApp (the objectExtensions loop registering 'extend' contributors — re-pointed #18104: objectExtensions is read off the manifest here, a member access; the loop this item means runs inside registerApp, which this file declares)",
         "packages/spec/src/data/object.zod.ts#ObjectExtensionSchema (ObjectExtensionSchema — what an extension may carry, the #4001 silently-dropped history, 'Fields to add/override', priority wins-on-conflict; defineObjectExtension)",
         "packages/metadata-protocol/src/protocol.ts#refusal (the NOT_OVERRIDABLE refusal text and escape hatch)",
         "packages/plugins/plugin-auth/src/managed-extension-fields.ts + managed-extension-fields.test.ts (the build-time collision gate — better-auth-managed objects ONLY; adopted by ADR-0126 §3 as Regime E prior art, NOT a generic gate)",
