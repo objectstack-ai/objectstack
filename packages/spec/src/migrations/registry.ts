@@ -10158,6 +10158,80 @@ const step18: MigrationStep = {
         + 'behaviour.',
     },
     {
+      id: 'packages-list-pagination-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface:
+        'api.listPackages limit and cursor — the two query parameters of '
+        + 'GET /api/v1/packages declared by ListInstalledPackagesRequestSchema. The same entry '
+        + 'covers the limit default: the request schema no longer declares default(50)',
+      replacement:
+        'the `status` and `type` filters — this route answers the whole installed set and has '
+        + 'no page 2. There is no replacement for `cursor`, deliberately: nothing ever minted '
+        + 'one, so no caller holds a value to carry over, and the response `nextCursor` it '
+        + 'would have paired with was never emitted. Callers that looped on it were re-reading '
+        + 'the first and only page. For the removed `limit` default, there is nothing to send '
+        + 'instead and nothing to restore: the server has never capped this list, so a caller '
+        + 'that omitted the key received every installed row before this change and receives '
+        + 'every installed row after it. A client that sized a buffer to the declared 50 should '
+        + 'size it to the installed set instead',
+      reason:
+        'One capability, both halves, never half-deleted (director seat, decision batch #126 '
+        + 'item 1, maintainer 「同意」 2026-09-13, route 2 of three; routes 1 — build paging — '
+        + 'and 3 — refuse unknown names — were considered and refused). `limit` and `cursor` '
+        + 'were declared on the request and honoured on neither: the serving door filters on '
+        + '`status` and `type` and then returns every remaining row, and no emit site has ever '
+        + 'written the response half `nextCursor`. `limit` is the sharper of the two because '
+        + "the repo's own ingress rule names it as the parameter whose silent drop is worst, "
+        + 'and it is the silent-WIDENING half that was live: a caller asking for one row was '
+        + 'handed the whole table alongside a `hasMore: false` that agreed with it. '
+        + 'The `.default(50)` goes with the key because the FICTION WAS THE MECHANISM, not the '
+        + 'number: nothing parses a query string through this schema, so the default has never '
+        + 'stamped anything onto anything, while a reader of the published contract was '
+        + 'entitled to believe an unparameterised list is capped. Re-spelling it as the real '
+        + 'cap was not available — there is no cap. '
+        + 'Pagination was removed rather than implemented because the installed-packages list '
+        + 'is a small bounded collection and paging is not part of its meaning: route 1 would '
+        + 'have grown a cursor protocol for a table of tens of rows, and the dispatch checked '
+        + 'first whether a platform-wide cursor convention already existed that this door could '
+        + 'have joined by reuse. It does not — no REST list door in the tree paginates, the one '
+        + 'encode/decode cursor pair in the repo belongs to the storage-adapter list contract '
+        + 'and is imported by no door, and the travel of this platform is the other way: '
+        + '`data.query.cursor` (#4286) and `api/ListNotificationsRequest:cursor` (#6361) were '
+        + 'both retired before this one, for the same reason. '
+        + 'Route 2, and the bookkeeping splits exactly as #6361 did. There IS a tombstone: the '
+        + 'schema is non-strict, so a bare deletion would have made Zod SILENTLY STRIP whatever '
+        + "a generated client kept sending — a clean parse and a parameter that never takes "
+        + "effect, which is this issue's own defect re-created one layer down (ADR-0104). So "
+        + 'both keys are `retiredKey()`, typed `never` for tsc and raising the prescription at '
+        + 'any parse, and both are registered in RETIRED_KEYS_BY_MAJOR[18]. There is NO D2 '
+        + 'conversion: a conversion rewrites an authored source or a stored `sys_metadata` row, '
+        + 'and this shape is HTTP-only — nobody authors a `ListInstalledPackagesRequest` and '
+        + 'nothing persists one. There is no `acceptRetiredDefaultResidue` stage either, for '
+        + 'the same reason one layer along: nothing ever parsed this schema, so the retired '
+        + 'default materialized into no artifact and there is no residue to accept. '
+        + 'The same card closes the divergence in the OTHER direction, which is not a migration '
+        + 'for anyone and is recorded here only so the two are not read apart: `type` (list), '
+        + '`version` (by-id) and `keepData` (uninstall) are query parameters the doors already '
+        + 'executed and no request schema declared, and they are now declared where they are '
+        + 'executed. No accept set moves — the doors served them before and serve them '
+        + 'identically now. ADR-0049 / ADR-0087, #17667.',
+      acceptanceCriteria:
+        'No caller sends `limit` or `cursor` to `GET /api/v1/packages`: writing either on a '
+        + '`ListInstalledPackagesRequest` is a `tsc` error (the input type is `never`), which '
+        + 'is the enforced channel, and any value reaching a parse raises the prescription '
+        + 'rather than a generic unrecognized-key issue. '
+        + '⚠️ Behaviour on the wire is deliberately UNCHANGED and must be verified as such: a '
+        + 'request still carrying `?limit=1&cursor=x` is IGNORED, not refused — the door reads '
+        + 'named query keys and no route validates this query against a schema, so an unknown '
+        + 'key has never produced a 400 and does not start doing so here. The declaration '
+        + 'stopped promising what the wire never did; the wire did not change. `hasMore` stays '
+        + 'the constant `false` it already was and is now true by construction rather than by '
+        + 'coincidence — with no request-side way to ask for a page there can be no next one — '
+        + 'and `nextCursor` stays absent. A caller that omitted `limit` receives every '
+        + 'installed row, exactly as it did before.',
+    },
+    {
       id: 'page-assigned-profiles-audience-to-permission-set',
       surface: '`page.assignedProfiles` — the per-page audience list (REMOVED)',
       replacement:
@@ -13183,6 +13257,60 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // seam; the semantic entry `api-error-retry-after-unit-in-key` carries the
     // prescription.
     'api/EnhancedApiError:retryAfter',
+    // #17667 — ADR-0049 enforce-or-remove (director seat, decision batch #126
+    // item 1, maintainer 「同意」 2026-09-13, route 2). The other half of the
+    // pagination capability `GET /api/v1/packages` never had; see the sibling
+    // entry `api/ListInstalledPackagesRequest:limit` for the full record. Two
+    // keys, one prescription: `PACKAGES_LIST_PAGINATION_REMOVED` in
+    // `api/package-api.zod.ts` is the single string both rejection sites raise.
+    //
+    // `cursor` was the more inert of the two and the less forgiving to keep. No
+    // emit site has ever written the response half's `nextCursor`, so a caller
+    // looping "until the cursor runs out" would have re-read the first and only
+    // page forever, with no error and no 400 — and there is no ordering key on
+    // this collection a resume could have been built from, so the key had nothing
+    // to carry even if something had read it.
+    //
+    // Same registration shape as its sibling: major 18 (the removal ships on the
+    // 17.x line; the prescription lives at the major boundary), no D2 conversion
+    // because the shape is HTTP-only, and the D3 semantic entry
+    // `packages-list-pagination-retired` carries the prescription to
+    // `spec-changes.json`, the generated upgrade guide and `os migrate meta`.
+    'api/ListInstalledPackagesRequest:cursor',
+    // #17667 — ADR-0049 enforce-or-remove (director seat, decision batch #126
+    // item 1, maintainer 「同意」 2026-09-13, route 2). One capability, both
+    // halves, never half-deleted: `limit` and `cursor` retire together and share
+    // one prescription, `PACKAGES_LIST_PAGINATION_REMOVED` in
+    // `api/package-api.zod.ts`.
+    //
+    // `GET /api/v1/packages` declared a window it has never applied. The serving
+    // door filters on `status` / `type` and returns every remaining row, so a
+    // caller asking for one row was handed the whole table together with a
+    // `hasMore: false` that agreed with it — the silent-widening half of the
+    // ingress rule that names this exact parameter as the one whose drop is worst.
+    //
+    // This key is the sharper of the two because it carried `.default(50)`: a
+    // reader of the published schema — an SDK, codegen, an AI client — was
+    // entitled to believe an unparameterised list is capped at 50 rows. Nothing
+    // parses a query string through this schema, so that default has never been
+    // materialized anywhere, which is why the retirement needs no
+    // `acceptRetiredDefaultResidue` stage: there is no residue population. The
+    // `authorable-defaults/api.json` line goes with the key rather than through
+    // DEFAULT_CHANGES_BY_MAJOR, which excludes retirements by name.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut long before this, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look (the `ui/ListView:pageName`
+    // precedent). Registered here but NOT in `src/conversions/registry.ts`, and
+    // that asymmetry is the point rather than an omission: a D2 conversion
+    // rewrites an authored source or a stored `sys_metadata` row, and this shape
+    // is HTTP-only — nobody authors a `ListInstalledPackagesRequest` and nothing
+    // persists one. The prescription reaches consumers as the D3 semantic entry
+    // `packages-list-pagination-retired` plus this tombstone, the disposition
+    // `api/ListNotificationsRequest:cursor` (#6361) already took for the same
+    // shape one route over.
+    'api/ListInstalledPackagesRequest:limit',
     // #14691 — ADR-0049 enforce-or-remove on the `RestServerConfig` sub-objects,
     // executing the #14369 liveness census (15 `dead` rows across the `crud` /
     // `metadata` / `batch` / `routes` sub-schemas; 0 read sites in `packages/rest`

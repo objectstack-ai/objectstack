@@ -43,28 +43,108 @@ describe('PackagePathParamsSchema', () => {
 // ==========================================
 
 describe('ListInstalledPackagesRequestSchema', () => {
-  it('should accept minimal request with defaults', () => {
+  // [#17667] These two cases used to pin `limit`'s `.default(50)` and a
+  // round-tripped `cursor`. They are REPLACED rather than respelled: they
+  // pinned exactly the branch route 2 deleted, so keeping them in any form
+  // would have meant re-asserting a contract that no longer exists.
+  it('accepts a minimal request and materializes no window', () => {
     const result = ListInstalledPackagesRequestSchema.parse({});
-    expect(result.limit).toBe(50);
     expect(result.status).toBeUndefined();
     expect(result.enabled).toBeUndefined();
+    expect(result.type).toBeUndefined();
+    // ⭐ There is no default to apply any more: the door has never capped this
+    // list, so an omitted request declares no window rather than a fictional
+    // 50-row one.
+    expect(result).not.toHaveProperty('limit');
   });
 
-  it('should accept full request', () => {
+  it('accepts every filter the serving door actually executes', () => {
     const result = ListInstalledPackagesRequestSchema.parse({
       status: 'installed',
       enabled: true,
-      limit: 20,
-      cursor: 'abc123',
+      type: 'app',
     });
     expect(result.status).toBe('installed');
     expect(result.enabled).toBe(true);
-    expect(result.limit).toBe(20);
-    expect(result.cursor).toBe('abc123');
+    expect(result.type).toBe('app');
   });
 
   it('should reject invalid status', () => {
     expect(() => ListInstalledPackagesRequestSchema.parse({ status: 'running' })).toThrow();
+  });
+
+  // ── #17667 retirement pins: the prescription, and the absence ────────────
+  //
+  // The NEGATIVE half. A bare `.toThrow()` would be satisfied by any refusal,
+  // including the generic unrecognized-key issue a plain deletion produces —
+  // which is exactly the silent-ish failure the tombstone exists to replace.
+  // So the assertion is the prescription text itself. The `s` flag is house
+  // style: the message is one long string and matchers span its clauses.
+  it.each(['limit', 'cursor'])('refuses a retired `%s` with the prescription, not a bare unknown key', (key) => {
+    const result = ListInstalledPackagesRequestSchema.safeParse({ [key]: key === 'limit' ? 20 : 'abc123' });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === key);
+    expect(issue, `must fault on the \`${key}\` path`).toBeDefined();
+    expect(issue!.message).toMatch(/`limit` \/ `cursor` were removed from GET \/api\/v1\/packages/s);
+    expect(issue!.message).toMatch(/removed .*in @objectstack\/spec 17\.5\.0 \(ADR-0049 enforce-or-remove\)/s);
+    // The `.default(50)` is named specifically — a reader who trusted the cap
+    // is the consumer this retirement owes an explanation to.
+    expect(issue!.message).toMatch(/`\.default\(50\)`/s);
+    expect(issue!.message).toMatch(/Delete the key\./s);
+  });
+
+  // The POSITIVE half. Absence still parses — the retirement removed a
+  // declaration, not the ability to call the route without one.
+  it('parses clean when neither retired key is sent', () => {
+    const result = ListInstalledPackagesRequestSchema.safeParse({ status: 'installed' });
+    expect(result.success).toBe(true);
+    expect(result.data).not.toHaveProperty('cursor');
+  });
+
+  // [#17667] `hasMore` is a constant `false` that is now true BY CONSTRUCTION:
+  // with no request-side way to ask for a page, there can be no next one. This
+  // pins the response half against a future author "fixing" the constant back
+  // into a computed value without restoring a way to ask.
+  it('declares a response that can honestly report one page', () => {
+    const parsed = ListInstalledPackagesResponseSchema.parse({
+      success: true,
+      data: { packages: [], total: 0, hasMore: false },
+    });
+    expect(parsed.data.hasMore).toBe(false);
+    expect(parsed.data).not.toHaveProperty('nextCursor');
+  });
+});
+
+// ==========================================
+// [#17667] Executed-but-undeclared query parameters, now declared
+// ==========================================
+
+describe('the /packages doors declare the query parameters they execute (#17667)', () => {
+  it('GET /packages/:id declares the `?version=` scope it honours', () => {
+    const parsed = GetInstalledPackageRequestSchema.parse({ packageId: 'com.acme.crm', version: '1.2.3' });
+    expect(parsed.packageId).toBe('com.acme.crm');
+    expect(parsed.version).toBe('1.2.3');
+    // `latest` is a literal the door treats as "the installed row" — it is a
+    // plain string here, deliberately NOT a dist-tag or semver-range grammar.
+    expect(GetInstalledPackageRequestSchema.parse({ packageId: 'p', version: 'latest' }).version).toBe('latest');
+    // Omitted stays omitted: the by-id read is unscoped without it.
+    expect(GetInstalledPackageRequestSchema.parse({ packageId: 'p' }).version).toBeUndefined();
+  });
+
+  it('DELETE /packages/:id declares the `?keepData=` option it honours', () => {
+    const parsed = UninstallPackageApiRequestSchema.parse({ packageId: 'com.acme.crm', keepData: true });
+    expect(parsed.packageId).toBe('com.acme.crm');
+    expect(parsed.keepData).toBe(true);
+    // Omitted is the destructive default — storage goes with the metadata.
+    expect(UninstallPackageApiRequestSchema.parse({ packageId: 'p' }).keepData).toBeUndefined();
+  });
+
+  it('binds each declaration to the door that executes it', () => {
+    // The contract map is what SDKs and codegen read; a declaration that is
+    // right in the file and unbound in the map is invisible to both.
+    expect(PackageApiContracts.listPackages.input).toBe(ListInstalledPackagesRequestSchema);
+    expect(PackageApiContracts.getPackage.input).toBe(GetInstalledPackageRequestSchema);
+    expect(PackageApiContracts.uninstallPackage.input).toBe(UninstallPackageApiRequestSchema);
   });
 });
 
