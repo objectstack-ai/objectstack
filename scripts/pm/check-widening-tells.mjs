@@ -47,7 +47,11 @@
  *       accept set gains a spelling an author may now write.
  *   T2  a new member of a closed set: `z.enum([…])`, `z.union([…])`,
  *       `z.discriminatedUnion(…)`, or a `CORE_PLUGIN_TYPES`-shaped `as const`
- *       array — the accept set gains a VALUE.
+ *       array — the accept set gains a VALUE. ⚠️ That is what the tell is a
+ *       tell OF, ⛔ never what every row SAYS: a member line carries no set, so
+ *       since #19384 the row asserts this form only when the hunk shows one of
+ *       the four above the line, and says what it did not measure when it does
+ *       not. Its section is below.
  *   T3  a new row in a published entry point's export listing
  *       (`packages/spec/api-surface/*.json` and its signatures sibling) — the
  *       PUBLIC SURFACE grows, which ADR-0059's backward-compatibility gate
@@ -99,12 +103,16 @@
  *
  * Both refinements read bytes the hunk already contains: the added line's
  * NEIGHBOURS on the new-file side, and the lines the same hunk REMOVED. ⛔
- * Neither recovers block state. This file still cannot tell an array element
- * from a call argument, still does not know whether a property sits inside
- * `z.object({`, and ⛔ still has no notion of DIRECTION — a tell, never a
- * proof, exactly as before. (#17618 later added the ONE bracket fact a hunk
- * does carry — which delimiter is innermost, over that hunk's own lines — and
- * nothing more: still no shape, still no direction. Its section is below.)
+ * Neither recovers block state. This file still does not know whether a
+ * property sits inside `z.object({`, and ⛔ still has no notion of DIRECTION —
+ * a tell, never a proof, exactly as before. (#17618 later added the ONE bracket
+ * fact a hunk does carry — which delimiter is innermost, over that hunk's own
+ * lines — and nothing more: still no shape, still no direction. Its section is
+ * below. ⭐ #19384 then read that same fact on the other side of the question,
+ * so the sentence "this file cannot tell an array element from a call argument"
+ * that stood here is now bounded rather than absolute: it CAN, exactly when the
+ * hunk shows the bracket, and where it cannot the row says so in its own words.
+ * Its section is below too.)
  *
  * **A fragment of a multi-line string concatenation is not a set member.**
  * #16822's filing left the instrument that proves the variable was accidental:
@@ -1124,10 +1132,93 @@
  *   • a closer whose type does not match the opener it popped — **0 rows**.
  *   • a `*\/` this walk cannot explain — **0 rows**.
  *
- * ⇒ Nothing is silenced by any of them today: no reader suppresses on the flag.
- * The number a future suppressing reader needs is the 0.7%, and it should be
- * re-measured on that day rather than quoted from here — on the gate's own read
- * path, with its blob resolution asserted first.
+ * ⇒ Nothing is silenced by any of them. That sentence used to read "no reader
+ * suppresses on the flag"; #19384 wrote the first one that does, and it refuses
+ * to decline while the flag is up, so the direction is unchanged — a guessed
+ * stack buys a false tell (loud) and never a swallowed one. The number a future
+ * suppressing reader needs is the 0.7%, and it should be re-measured on that
+ * day rather than quoted from here — on the gate's own read path, with its blob
+ * resolution asserted first.
+ *
+ * ## The thirteenth accidental variable #19384 removed — a member with NO SET
+ * above it
+ *
+ * T2's sentence is "a new member of a CLOSED SET", and the row rendered it over
+ * any lone quoted string on a contract-source line. `BARE_STRING_ELEMENT` is a
+ * quoted string, an optional comma and an optional trailing comment — nothing
+ * in it asks whether one of the four forms the doctrine names stands above the
+ * line. So the row asserted a fact the instrument never measured, which is NOT
+ * the "a tell, never a proof" allowance this file grants everywhere else: that
+ * allowance covers a tell that is right about its own SHAPE and silent about
+ * direction. Here the shape itself was unverified while the row stated it as
+ * read. ⭐ T1's own docblock had DECLARED the equivalent limit since #16822 and
+ * bounded it at #17618; T2 declared none.
+ *
+ * The filing measured it as three legs, one instrument, both controls lit — and
+ * they are the battery below, case for case:
+ *
+ *   A  four members added to a `new Set([`, the opener standing in the hunk as
+ *      context ⇒ 4× T2, exit 4. `new Set(` is none of the four forms and no
+ *      authored document is ever parsed against such a set.
+ *   B  the FALSIFIER: the identical four members, same construct, same file,
+ *      re-spelled on ONE line ⇒ 0 tells, exit 0.
+ *   C  the lit control: a genuine new `z.enum([` member ⇒ T2, exit 4.
+ *
+ * ⇒ A and B are the same change with the same semantics and opposite verdicts,
+ * so the rows were keyed on LINE LAYOUT. ⛔ And B is EVIDENCE, never the
+ * remedy: re-spelling source to dodge a gate corrupts every later reading the
+ * instrument takes. The live carrier was PR #19314 — seven `_zod.def.type`
+ * discriminants added to a `new Set([…])` in `stack.zod.ts`, read only by a
+ * wrapper-peeling walk — seven T2 rows against a `Clause-②: no` an at-tier
+ * review had already ruled correct.
+ *
+ * What the hunk DOES carry is the bracket fact #17618 established and #18721
+ * and #19099 made reliable: which delimiter is innermost, over the line's own
+ * hunk. Every one of the four forms puts its members inside a `[`, so
+ * {@link closedSetMembership} asks that `[`'s head which construct opened it
+ * and answers in three states — `declared` (one of the closed-set
+ * constructors), `refused` (another call's argument list) and `unread`
+ * (everything else). ⛔ Only `refused` takes a row away, and only on positive,
+ * hunk-local evidence, which is the shape of every decline in this file.
+ *
+ * ⭐ `unread` is the answer that keeps this repair honest, and it is the COMMON
+ * one. An opener above the hunk, a `CORE_PLUGIN_TYPES`-shaped `as const` array
+ * — whose `as const` sits BELOW its members where no upward reader reaches it —
+ * a property-valued array, a `(` or `{` frame, a walk that stopped being a
+ * reading: all of them keep their row. ⛔ What changes is the SENTENCE, to one
+ * that names the half that was not measured. A row that says less is not a row
+ * that fires less, and the loud direction is untouched.
+ *
+ * The price, measured over the 283 commits touching these surfaces in this
+ * tree's available history (objectstack-ai/objectstack at `c27e16059d`, 1,441
+ * commits deep, the graft-boundary commit `d83d079b` excluded for the reason
+ * #19099's section gives), 1,051 file diffs: of the 944 tell rows the previous
+ * reading raises, 12 now decline and 932 stand. All 12 are T2 and all 12 are
+ * bare elements the hunk shows inside ANOTHER call's argument list — nine in an
+ * `Object.freeze([…])` of near-miss key spellings a schema REFUSES, three in
+ * `new Set([…])` value-class ledgers — checked row by row, 0 exceptions. No T1,
+ * T3 or T4 row moves. Of the 133 T2 rows in that window, 121 stand: 104 change
+ * their sentence (10 to the measured one, 94 to the NOT-MEASURED one) and 17
+ * are OPENER rows, which carry their constructor in their own bytes and are not
+ * touched by this round at all.
+ *
+ * ⭐ And NO row anywhere in that window begins firing. The removed side is read
+ * the way #17618 reads a deleted parameter — an element the OLD side shows
+ * inside another call buys no replacement budget, so a genuine member added
+ * beside it still reports — and that leg has zero historical population here,
+ * exactly as #17955's un-retiring leg did: a sensitivity guarantee this tree
+ * has not yet had occasion to exercise, not a refusal aimed at work already
+ * done.
+ *
+ * ⚠️ The quiet direction this buys, stated rather than left to be discovered: a
+ * genuine closed set CONSTRUCTED THROUGH A CALL — `z.enum(Object.keys(X))` has
+ * no per-member line at all, but `new Set([…])` spread into an enum, or an
+ * array built inside `Object.freeze([…])` and then handed to `z.enum`, does —
+ * and its members now decline. ⛔ That is not zero risk. What still catches
+ * one: the enum's own opener line, which fires as an opener row; and
+ * `check:authorable-surface` plus `check:api-surface` on anything the resulting
+ * set publishes. Measured over the window above: 0 of the 12 declines is such a
+ * set.
  *
  * ## The shape this gate keeps firing on, and what to do about it — ruling D′
  *
@@ -1442,6 +1533,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#18702 — a declaring factory PRIVATE to one file, resolved through its own DEFINITION': 54,
   "#18721 — a hunk's LEADING CONTEXT is not a reason to abandon the parameter reading": 14,
   '#19099 — the enclosing-delimiter walk says when it STOPPED READING and started guessing': 15,
+  '#19384 — a bare element is not a member until the hunk shows one of the four forms above it': 24,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -2107,10 +2199,34 @@ const SCHEMA_PROPERTY = new RegExp(
 /** T2 — a closed set DECLARED or re-written on one line. */
 const CLOSED_SET_OPENER = /z\.(?:enum|union|discriminatedUnion|literal)\(/;
 
-/** T2 — a bare string element of a multi-line `z.enum([…])` or `as const` array. */
+/**
+ * T2 — a bare string element of a multi-line `z.enum([…])` or `as const` array.
+ *
+ * ⛔ It does NOT verify that one of the four closed-set forms stands above the
+ * line. A hunk is a fragment and block state cannot be recovered from one
+ * honestly, exactly as {@link SCHEMA_PROPERTY} says for T1 — and until #19384
+ * T2 said it nowhere, while the row it rendered asserted "a new member of a
+ * closed set" as read. The shape above matches a lone quoted string on ANY
+ * contract-source line: an element of a `new Set([…])`, of a plain `string[]`,
+ * of an argument list.
+ *
+ * What DOES bound it is the same one bracket fact T1 reads (#17618), asked of
+ * the element instead of the key: {@link closedSetMembership} in `tellsInFile`.
+ * Positive evidence in three directions and no other — the hunk shows the
+ * enclosing delimiter opening one of the four forms (the row says so), it shows
+ * the delimiter opening some OTHER call's argument list (the row DECLINES), or
+ * it shows neither and the row fires with a weaker sentence that says what was
+ * not measured.
+ */
 const BARE_STRING_ELEMENT = /^[ \t]*(?:'[^']*'|"[^"]*")[ \t]*,?[ \t]*(?:\/\/.*)?$/;
 
-/** T2 — a bare schema arm of a multi-line `z.union([…])`. */
+/**
+ * T2 — a bare schema arm of a multi-line `z.union([…])`.
+ *
+ * ⛔ Bounded exactly as {@link BARE_STRING_ELEMENT} is, and by the same reader:
+ * `ArmSchema,` on its own line is a union arm, an array element or an argument,
+ * and this shape cannot tell them apart on its own.
+ */
 const BARE_SCHEMA_ARM = /^[ \t]*[A-Za-z_$][\w$]*Schema[ \t]*,[ \t]*(?:\/\/.*)?$/;
 
 /**
@@ -2331,11 +2447,16 @@ function topLevelMembers(s, open, close) {
  *     already up. ⛔ The FIRST `*\/` on a clean walk is not a trigger at all: it
  *     says the hunk began inside a comment (see the reset below).
  *
- * ⛔ NO READER SUPPRESSES ON THIS FLAG TODAY, and saying so is the point. The
- * one that did — #19099's bag-internal decline — was dropped by ruling D′, so
- * what lands here is the READING and not a consumer of it: the obligation is
- * stated at the definition rather than left for the next author to infer.
- * ⇒ any future reader that DECLINES a tell on these frames refuses when the
+ * ⭐ EXACTLY ONE READER SUPPRESSES ON THIS FLAG — {@link closedSetMembership},
+ * #19384's member reading, which answers `'unread'` (⇒ the row fires) for every
+ * hunk this walk could not read. The obligation below was written before any
+ * reader took it and is DISCHARGED there rather than restated: it refuses on
+ * the flag, and it names every trigger above where it describes itself.
+ * ⛔ Nothing is silenced BY the flag in either reader: {@link inParameterList}
+ * ignores it because it only ever makes a tell fire, and the member reading
+ * consults it only to refuse a decline. The one reader that would have been
+ * silenced — #19099's bag-internal decline — was dropped by ruling D′.
+ * ⇒ any FURTHER reader that DECLINES a tell on these frames refuses when the
  * flag is set, and states every trigger above wherever it describes itself. A
  * disclosure naming only the division operator — which raises nothing — while
  * leaving ` *\/` unnamed is how the first cut of this flag regressed a landed
@@ -2524,6 +2645,108 @@ const PARAMETER_LIST_HEAD =
 export function inParameterList(side, index) {
   const open = enclosingDelimiter(side, index);
   return open !== null && open.opener === '(' && PARAMETER_LIST_HEAD.test(open.head);
+}
+
+/**
+ * The head of a delimiter that opens one of the CLOSED-SET CONSTRUCTORS T2's
+ * doctrine names — `z.enum(`, `z.union(`, `z.discriminatedUnion(`, `z.literal(`
+ * — with nothing but that constructor's own earlier arguments between it and
+ * the delimiter this reader is judging.
+ *
+ * `[^()[\]{}]*$` is what makes it the delimiter's OWN constructor and not one
+ * anywhere to its left: `z.discriminatedUnion('type', [` leaves only
+ * `'type', ` between the two, while `z.enum(['a']).or(fn([` leaves a bracket
+ * pair and does not match. ⛔ The same spelling as {@link CLOSED_SET_OPENER}'s
+ * constructor list, deliberately — two vocabularies of "which constructors
+ * close a set" would disagree the day one of them moved.
+ */
+const CLOSED_SET_ARGUMENT_HEAD = /z\.(?:enum|union|discriminatedUnion|literal)\([^()[\]{}]*$/;
+
+/**
+ * A `[`-frame head whose last token is a CALL — `new Set(`, `Object.freeze(`,
+ * `z.array(z.string()).default(` — so the array it opens is that call's
+ * ARGUMENT, never a set of its own.
+ *
+ * ⚠️ It is a `[`-frame reading and only that, because a frame's `head` is the
+ * text LEFT OF THE DELIMITER: an array inside a call carries the call's own
+ * open paren in its head, while a `(` frame's head stops one character short of
+ * one and can never match this. {@link closedSetMembership} therefore asks it
+ * of `[` frames alone and says so.
+ *
+ * ⛔ Deliberately not "any head ending in `(`": a grouping paren (`= (`), an
+ * array bound to a name (`export const CORE_PLUGIN_TYPES = `) and a property's
+ * array value (`kinds: `) all read as NOT-a-call here, which leaves the tell
+ * firing. That is the loud direction, and the second of them is where the
+ * fourth closed-set form lives.
+ */
+const CALL_ARGUMENT_HEAD = /(?:\bnew[ \t]+)?[A-Za-z_$][\w$]*(?:[ \t]*\.[ \t]*[A-Za-z_$][\w$]*)*[ \t]*(?:<[^<>]*>)?[ \t]*\($/;
+
+/**
+ * Is this side-line a MEMBER OF ONE OF THE FOUR CLOSED-SET FORMS? (instance 3)
+ *
+ * The third reading built on the one bracket fact a hunk carries (#17618), and
+ * the first of the three that has to answer in more than two states — because
+ * T2's row asserts a FORM and the evidence for a form comes in three strengths:
+ *
+ *   `'declared'` — the hunk shows the innermost open delimiter where the
+ *     element sits, and its head opens one of the closed-set constructors. The
+ *     doctrine's row is then true as written.
+ *   `'refused'` — the hunk shows that delimiter and it is some OTHER call's
+ *     argument list. `new Set([…])` is the measured instance (#19384): a set of
+ *     internal discriminants is not an accept set, no author's document is ever
+ *     parsed against it, and the four forms do not include it. ⇒ NO ROW.
+ *   `'unread'` — everything else, and it is the common answer: no delimiter
+ *     shown where the line sits, a walk that stopped being a reading, or a
+ *     delimiter this reader cannot classify — an array literal BOUND to a name,
+ *     which is exactly where the fourth form (`CORE_PLUGIN_TYPES`-shaped
+ *     `as const`) lives, since the `as const` sits BELOW the members and no
+ *     line-shaped reader looking upward ever reaches it. ⇒ the row still fires,
+ *     with the weaker sentence that says which half was not measured.
+ *
+ * ⭐ ONLY a `[` frame is classified, and the bound is declared rather than
+ * discovered. All four forms put their members inside a `[` — `z.enum([…])`,
+ * `z.union([…])`, `z.discriminatedUnion(d, […])`, `[…] as const` — so a `(` or
+ * `{` frame is never one of them; but a frame's head is the text LEFT of its
+ * delimiter, which means a `(` frame's head stops one character short of the
+ * callee's paren and {@link CALL_ARGUMENT_HEAD} cannot read it. ⇒ every `(` and
+ * `{` frame answers `'unread'` and keeps its row. ⚠️ The population that leaves
+ * loud, measured over `packages/spec/src/**` at objectstack c27e16059d by
+ * feeding each bare-element line back through this reader with its own 60
+ * preceding lines: of 6,338 such lines, 1,294 read `declared`, 92 `refused`,
+ * and of the 4,952 `unread` there are 442 inside a `(` — `.describe(` prose and
+ * `retiredKey(` prescriptions, no closed-set member among the heads — and 1,667
+ * inside a `{`. ⛔ Reaching them is a different reading's card: it needs the
+ * callee NAME rather than the bracket, and this file buys no silence it cannot
+ * pay for with evidence.
+ *
+ * ⭐ This reader SUPPRESSES on the frames, which {@link enclosingDelimiters}
+ * imposes two obligations for, and both are discharged here. FIRST: it refuses
+ * when the `unreadable` flag is set — a guessed stack must never buy a silence.
+ * SECOND: its triggers are stated where the reader describes itself, all of
+ * them — a `/` with another `/` left on its line (the only shape a single-line
+ * regex literal can have, which this scan does not lex; ⛔ a LONE `/` is
+ * arithmetic and raises nothing), a closer whose type does not match the opener
+ * it popped, a string literal that never closes on its line, and a `*\/` the
+ * walk cannot explain — a second one, or one after the flag is already up (⛔
+ * the FIRST `*\/` on a clean walk is not a trigger: it says the hunk began
+ * inside a comment, and the walk restarts after it).
+ *
+ * ⛔ It is NOT a shape reader and must never be grown into one. It asks which
+ * bracket is innermost and what stands immediately left of it, and nothing
+ * about what the construct IS — so, like its two siblings, it has no truncating
+ * failure: a state it cannot read is reported as one, never as "not a member".
+ *
+ * @param {{ text: string, hunk: number }[]} side — one SIDE of `patchLines`
+ * @param {number} index — the line's index into that side
+ * @returns {'declared'|'refused'|'unread'}
+ */
+export function closedSetMembership(side, index) {
+  const { frames, unreadable } = enclosingDelimiters(side, index);
+  if (unreadable || frames.length === 0) return 'unread';
+  const open = frames[frames.length - 1];
+  if (open.opener !== '[') return 'unread';
+  if (CLOSED_SET_ARGUMENT_HEAD.test(open.head)) return 'declared';
+  return CALL_ARGUMENT_HEAD.test(open.head) ? 'refused' : 'unread';
 }
 
 /** A property NAME at the head of a line, in the four spellings `SCHEMA_PROPERTY` admits. */
@@ -3794,6 +4017,11 @@ export function tellsInFile(
       // failure for a silent one on the only diff shape that re-opens an accept
       // set the tree had already closed.
       if (kind === 'T1' && declaresUnwritableKey(r.text)) continue;
+      // #19384 — read on the OLD side too, the way #16822's fragment rule and
+      // #17618's parameter are: an element the hunk shows inside some other
+      // call's argument list was never a member of a closed set, so it must not
+      // buy an added member of a real one the right to go unreported.
+      if (kind === 'T2' && closedSetMembership(oldFile, oldAt.get(i)) === 'refused') continue;
       if (kind !== null) budget.set(kind, (budget.get(kind) ?? 0) + 1);
     }
     for (const i of block) {
@@ -3935,8 +4163,43 @@ export function tellsInFile(
       CLOSED_SET_OPENER.test(text) &&
       !rewritesExistingOpener(text, removedByHunk.get(hunk)) &&
       !respellsExistingClosedSetBinding(text, removedHere);
-    if (onContractSource && (opener || kind === 'T2')) {
+    // An OPENER carries its constructor in its own bytes, so the row it
+    // renders asserts only what the line shows. It is read FIRST and unchanged
+    // by #19384, which is a repair to the MEMBER reading alone.
+    if (onContractSource && opener) {
       rows.push({ tell: 'T2', ...at, why: 'a new member of a closed set (z.enum / union / an `as const` array) — the accept set gains a value' });
+      continue;
+    }
+    // #19384 — a MEMBER line carries no set. Until this reading T2 fired on any
+    // lone quoted string (or `…Schema,` arm) on the contract source surface,
+    // with no requirement that one of the four closed-set forms stood above it,
+    // and rendered "a new member of a closed set" over an element of a
+    // `new Set([…])`, a plain `string[]` or an argument list — a fact the
+    // instrument never measured. The three verdicts, and what each one costs:
+    //
+    //   `refused`  — the hunk SHOWS the element inside another call's argument
+    //     list. Positive evidence, hunk-local, absent by default, exactly like
+    //     every other decline in this file. NO ROW.
+    //   `declared` — the hunk shows one of the closed-set constructors opening
+    //     the delimiter the element sits in. The doctrine's sentence, true as
+    //     written.
+    //   `unread`   — no evidence either way. The row STILL FIRES; only its
+    //     sentence changes, to one that names the half that was not measured.
+    //     ⛔ That is the loud direction and it is not negotiable: a member of a
+    //     `z.enum([` whose opener sits above the hunk lands here, and so does a
+    //     `CORE_PLUGIN_TYPES`-shaped `as const` array, whose `as const` is
+    //     BELOW its members where no upward reader reaches it.
+    if (onContractSource && kind === 'T2') {
+      const membership = closedSetMembership(newFile, newAt.get(i));
+      if (membership === 'refused') continue;
+      rows.push({
+        tell: 'T2',
+        ...at,
+        why:
+          membership === 'declared'
+            ? 'a new member of a closed set — this hunk shows the element inside a `z.enum` / `z.union` / `z.discriminatedUnion` list, so the accept set gains a value'
+            : 'a new bare element on the contract source surface — ⚠️ this hunk does NOT show which construct encloses it, so whether the accept set gains a value is NOT MEASURED here (an `as const` array declares itself BELOW its members)',
+      });
       continue;
     }
     if (kind === 'T3') {
@@ -4370,6 +4633,46 @@ const FILE_ENUM_MEMBER = {
   filename: 'packages/spec/src/kernel/plugin.zod.ts',
   status: 'modified',
   patch: patchOf(95, "+  'workflow',       // Business: long-running orchestration"),
+};
+// The live carrier of #19384, in the bytes PR #19314 actually pushed: seven
+// zod `_zod.def.type` discriminants added to a `new Set([…])` in
+// `stack.zod.ts`, read only by `pipeAuthorableSide` while peeling a pipe's IN
+// side. ⭐ The opener is an ADDED line of the same hunk, which is what makes
+// the evidence hunk-local — and the set is a list of internal wrapper labels,
+// never an accept set any authored document is parsed against.
+const FILE_INTERNAL_SET_MEMBERS = {
+  filename: 'packages/spec/src/stack.zod.ts',
+  status: 'modified',
+  patch: patchOf(
+    3411,
+    '+const COLLECTION_WALK_WRAPPERS: ReadonlySet<string> = new Set([',
+    "+  'optional',",
+    "+  'nullable',",
+    "+  'default',",
+    "+  'prefault',",
+    "+  'readonly',",
+    "+  'nonoptional',",
+    "+  'catch',",
+    '+]);',
+  ),
+};
+// ⛔ The control that is the whole finding: the SAME seven names, the same
+// file, the same hunk shape — under a closed-set opener instead.
+const FILE_CLOSED_SET_MEMBERS = {
+  filename: 'packages/spec/src/stack.zod.ts',
+  status: 'modified',
+  patch: patchOf(
+    3411,
+    '+export const CollectionWalkWrapperSchema = z.enum([',
+    "+  'optional',",
+    "+  'nullable',",
+    "+  'default',",
+    "+  'prefault',",
+    "+  'readonly',",
+    "+  'nonoptional',",
+    "+  'catch',",
+    '+]);',
+  ),
 };
 const FILE_API_SURFACE = {
   filename: 'packages/spec/api-surface/kernel.json',
@@ -5198,6 +5501,101 @@ export function selfTest() {
   const JSDOC_ARROW = [CTX(' * const check = ('), CTX(' */'), CTX('  extra: z.string(),')];
   t('⭐ THE RESET REACHES `inParameterList` — an arrow in an `@example` block would otherwise read as a real parameter list and SWALLOW the key line behind it; discarded frames make it fire', inParameterList(JSDOC_ARROW, 2) === false);
   t('⛔ CONTROL — the identical head on a line the walk really reads as code still declines, so the case above measures the comment and not the head', inParameterList([CTX('const check = ('), CTX('  extra: z.string(),')], 1) === true);
+
+  // -- #19384: a bare element is not a member until the hunk shows the set ----
+  //
+  // The card's three legs first, each its own diff, because they are the
+  // INSTRUMENT: A and B are the same change with the same semantics, and a
+  // matcher that answered them differently was keyed on line layout.
+  battery('#19384 — a bare element is not a member until the hunk shows one of the four forms above it');
+  const LEG_A = {
+    filename: 'packages/spec/src/probe.ts',
+    status: 'modified',
+    patch: [
+      '@@ -1,3 +1,7 @@',
+      ' const PIPE_WRAPPERS: ReadonlySet<string> = new Set([',
+      "   'optional',",
+      "+  'nullable',",
+      "+  'default',",
+      "+  'prefault',",
+      "+  'catch',",
+      ' ]);',
+    ].join('\n'),
+  };
+  const LEG_B = {
+    filename: 'packages/spec/src/probe.ts',
+    status: 'modified',
+    patch: [
+      '@@ -1,3 +1,4 @@',
+      ' const PIPE_WRAPPERS: ReadonlySet<string> = new Set([',
+      "   'optional',",
+      "+  'nullable', 'default', 'prefault', 'catch',",
+      ' ]);',
+    ].join('\n'),
+  };
+  const LEG_C = {
+    filename: 'packages/spec/src/probe.ts',
+    status: 'modified',
+    patch: [
+      '@@ -1,3 +1,4 @@',
+      ' export const ModeSchema = z.enum([',
+      "   'read',",
+      "+  'write',",
+      ' ]);',
+    ].join('\n'),
+  };
+  t('⭐ LEG A — four members added to a `new Set([`: the opener is CONTEXT the hunk shows, and `new Set(` is none of the four forms, so NO row fires', tells(LEG_A).length === 0);
+  t('⭐ LEG B — the falsifier: the IDENTICAL four members re-spelled on ONE line reads the same, so the verdict is no longer keyed on line LAYOUT', tells(LEG_B).length === tells(LEG_A).length && tells(LEG_B).length === 0);
+  t('⛔ LEG C — the lit control: a genuine new `z.enum([` member still fires, and still as T2', tells(LEG_C).length === 1 && tells(LEG_C)[0]?.tell === 'T2');
+  t('…and ONLY leg C says the set was shown — the row asserts what was measured and the legs disagree about that, which is the whole repair', says(tells(LEG_C)[0]?.why, 'this hunk shows the element inside'));
+  // -- the live carrier, and the control that is the finding ------------------
+  t('⭐ THE LIVE CARRIER — PR #19314\'s seven `_zod.def.type` discriminants added to a `new Set([…])` in `stack.zod.ts` raise NO row', tells(FILE_INTERNAL_SET_MEMBERS).length === 0);
+  t('⛔ CONTROL — the SAME seven names in the SAME file under a `z.enum([` opener raise seven, so the silence above is bought by the construct and never by the names', tells(FILE_CLOSED_SET_MEMBERS).filter((r) => r.tell === 'T2' && BARE_STRING_ELEMENT.test(`  ${r.text}`)).length === 7);
+  // -- the loud direction: what must NOT go quiet ----------------------------
+  //
+  // ⚠️ These five are the card's own prohibition — "the repair has to be
+  // written so it does not go silently quiet on real closed sets". Every one of
+  // them keeps its row; only the SENTENCE weakens, and it weakens to one that
+  // names the half that was not measured.
+  t('⛔ an element whose opener sits ABOVE its hunk STILL fires — absence of evidence is not evidence, exactly as #16822 reads a missing neighbour', tells(FILE_ENUM_MEMBER)[0]?.tell === 'T2');
+  t('…and its row says so rather than asserting a set it never saw', says(tells(FILE_ENUM_MEMBER)[0]?.why, 'NOT MEASURED'));
+  t('⛔ a `CORE_PLUGIN_TYPES`-shaped `as const` array STILL fires — its `as const` sits BELOW the members, where no upward reader reaches it', tells({ filename: 'packages/spec/src/a.zod.ts', patch: patchOf(3, '+export const CORE_PLUGIN_TYPES = [', "+  'workflow',") }).some((r) => r.line === 4 && r.tell === 'T2'));
+  t('⛔ …and so does an array literal on a PROPERTY, which this reader also cannot classify', tells({ filename: 'packages/spec/src/a.zod.ts', patch: patchOf(3, '+  kinds: [', "+    'workflow',") }).some((r) => r.line === 4 && r.tell === 'T2'));
+  t('⛔ an arm inside a `z.union([` the hunk shows fires AND reads as measured', tells({ filename: 'packages/spec/src/a.zod.ts', patch: patchOf(3, '+const U = z.union([', '+  WorkflowSchema,') }).some((r) => r.line === 4 && says(r.why, 'this hunk shows the element inside')));
+  t('⛔ …and so does one inside a `z.discriminatedUnion(\'type\', [`, whose discriminator argument stands between the constructor and the bracket', tells({ filename: 'packages/spec/src/a.zod.ts', patch: patchOf(3, "+const D = z.discriminatedUnion('type', [", '+  WorkflowSchema,') }).some((r) => r.line === 4 && says(r.why, 'this hunk shows the element inside')));
+  t('⛔ the OPENER row is untouched by this round — it carries its constructor in its own bytes, so it never needed the frames', tells({ filename: 'packages/spec/src/a.zod.ts', patch: patchOf(3, '+const U = z.union([') })[0]?.tell === 'T2');
+  // -- the vocabulary is the FOUR constructors, not "any z. call" -------------
+  t('⭐ `z.tuple([` is REFUSED — a positional tuple is not one of the four forms, and the reader asks which constructor it is rather than whether the head says `z.`', closedSetMembership([CTX('const T = z.tuple(['), CTX("  'a',")], 1) === 'refused');
+  t('⛔ …while `z.literal([` is one of the four and reads as declared', closedSetMembership([CTX('const L = z.literal(['), CTX("  'a',")], 1) === 'declared');
+  // -- the flag: a reader that SUPPRESSES must refuse a guessed stack ---------
+  const REGEX_ABOVE = [CTX('const S = new Set(['), CTX('  ...SEEDS.filter((s) => /^x/.test(s)),'), CTX("  'workflow',")];
+  t('⭐ a hunk the walk could not READ refuses the decline — `unreadable` costs a false tell (loud) and never a swallowed one', enclosingDelimiters(REGEX_ABOVE, 2).unreadable === true && closedSetMembership(REGEX_ABOVE, 2) === 'unread');
+  t('⛔ CONTROL — the identical hunk with the regex spelled away reads cleanly and DOES decline, so the case above measures the flag and not the `new Set(`', closedSetMembership([CTX('const S = new Set(['), CTX('  ...SEEDS.filter(isLive),'), CTX("  'workflow',")], 2) === 'refused');
+  // -- the removed side, read the way #17618's parameter is -------------------
+  const CROSS_PAID = {
+    filename: 'packages/spec/src/a.zod.ts',
+    status: 'modified',
+    patch: [
+      '@@ -10,4 +10,4 @@',
+      ' const INTERNAL = new Set([',
+      "-  'peeled',",
+      '   ]);',
+      ' export const ModeSchema = z.enum([',
+      "+  'write',",
+      ' ]);',
+    ].join('\n'),
+  };
+  t('⭐ a REMOVED element the old side shows inside another call buys NO budget, so a genuine member added in the same block still fires', tells(CROSS_PAID).length === 1 && tells(CROSS_PAID)[0]?.tell === 'T2');
+  t('⛔ CONTROL — a removed element of a REAL closed set still buys its unit, so the case above measures the construct and not the arithmetic', tells({ filename: 'packages/spec/src/a.zod.ts', patch: "@@ -10,3 +10,3 @@\n export const ModeSchema = z.enum([\n-  'read',\n+  'write',\n ]);" }).length === 0);
+  // -- the reading itself, in the three states it answers in -----------------
+  t('`closedSetMembership` answers `declared` on a constructor the hunk shows', closedSetMembership([CTX('export const M = z.enum(['), CTX("  'read',")], 1) === 'declared');
+  t('…`refused` on another call\'s argument list', closedSetMembership([CTX('const S = new Set(['), CTX("  'read',")], 1) === 'refused');
+  t('…and `unread` when the hunk shows no open delimiter at all', closedSetMembership([CTX("  'read',")], 0) === 'unread');
+  t('⛔ an array literal BOUND TO A NAME is `unread`, never `refused` — the fourth form lives there and must not be silenced', closedSetMembership([CTX('export const CORE_PLUGIN_TYPES = ['), CTX("  'read',")], 1) === 'unread');
+  t('⛔ …and so is EVERY `(` frame — all four forms put their members inside a `[`, and a `(` frame\'s head stops one character short of the callee\'s paren, so this reader declines to classify one', closedSetMembership([CTX('  note: z.string().describe('), CTX("    'prose',")], 1) === 'unread' && closedSetMembership([CTX('const wrapped = ('), CTX("  'read',")], 1) === 'unread');
+  t('⛔ CONTROL — the same call with an ARRAY argument DOES carry its paren in the head and is refused, so the case above measures the frame and not the callee', closedSetMembership([CTX('const F = Object.freeze(['), CTX("  'read',")], 1) === 'refused');
+  t('⛔ …and a `{` frame, which this reader classifies not at all', closedSetMembership([CTX('const shape = {'), CTX("  'read',")], 1) === 'unread');
+  t('⭐ the vocabulary is INTACT — `memberTellKind` still classifies a refused element as a member of kind T2, so both sides of the budget keep reading one question', memberTellKind("  'workflow',", { onContractSource: true }) === 'T2');
 
   // -- T3 --------------------------------------------------------------------
   battery('T3 — a new row in a published entry point');
@@ -6090,6 +6488,7 @@ export function selfTest() {
       "#18702's FILE-LOCAL declaring factory, resolved through its own definition at the head BLOB and classified by what its body returns — every factory the filing card names pinned against its own arm, the refusal arm read off a `z.never` definition rather than a name with its chained-arm control, the counterfactual bracketed by the same fixture with the resolver blind, and both boundaries (an imported factory, an unclassifiable body) pinned as a STATED silence the reader prints, " +
       "#18721's hunk LEADING CONTEXT — an underflowing closer drops and the walk goes on, so #17618's parameter decline reaches a real diff: PR #18720's own hunk silent at its reported line, bracketed by the same file's true-positive control that fires, by a new key behind the same underflowing context, by a key added after the parameter list closes, and by the removed side where a phantom budget disappearing makes a genuine key fire, " +
       "#19099's walk saying when it STOPPED READING — the whole shown stack beside a flag raised on a possible regex literal, a type-blind pop and an unterminated string, with a lone slash read as the division it is, a hunk that BEGINS inside a JSDoc read rather than guessed at, each of the reset's three guards pinned against the frames it protects, the apostrophe residual pinned in the direction it fails, and the reset reaching `inParameterList` so an `@example` arrow cannot swallow the key line behind it, " +
+      "#19384's bare element that is not a member until the hunk shows one of the four forms above it — the card's three legs, where A and B now agree because the verdict is no longer keyed on line layout and C still fires, PR #19314's own seven discriminants silent beside the control that is the finding, and the loud direction pinned five ways over: an opener above the hunk, a `CORE_PLUGIN_TYPES`-shaped `as const` array, a property-valued array, a guessed stack and a removed element that buys no budget, " +
       "#16448's four positive controls each with its file:line, its negative controls — " +
       'the same diffs with `yes`, and a removal-only diff with `no` — the local path composed end ' +
       'to end so a binary change to a tell surface cannot read as clean, #17112\'s split count with ' +
