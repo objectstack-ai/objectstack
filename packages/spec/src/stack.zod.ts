@@ -3378,6 +3378,92 @@ function warnUncomposedStackKey(key: string, rule: ComposeDisposition): void {
   );
 }
 
+/** As much of a zod node's `def` as the collection walk below reads. */
+interface CollectionWalkDef {
+  type?: string;
+  innerType?: unknown;
+  in?: unknown;
+  out?: unknown;
+  options?: unknown[];
+  getter?: () => unknown;
+}
+
+/**
+ * The `def` of a zod node, or `undefined` when the value is not one.
+ *
+ * `typeof === 'function'` is load-bearing, not padding: the canonical schemas
+ * on this shape arrive as the `lazySchema` proxy, which is CALLABLE, and an
+ * object-only guard answers "not a schema" for every one of them.
+ * @internal
+ */
+function collectionWalkDef(schema: unknown): CollectionWalkDef | undefined {
+  if (schema === null || (typeof schema !== 'object' && typeof schema !== 'function')) return undefined;
+  return (schema as { _zod?: { def?: CollectionWalkDef } })._zod?.def;
+}
+
+/**
+ * The wrappers the collection walk peels, as a set — the same labels the
+ * `switch` in {@link declaresCollection} peels by `case`. Used to look THROUGH
+ * a pipe's IN side before asking whether it is a transform stage: a transform
+ * one level down is still a transform.
+ * @internal
+ */
+const COLLECTION_WALK_WRAPPERS: ReadonlySet<string> = new Set([
+  'optional',
+  'nullable',
+  'default',
+  'prefault',
+  'readonly',
+  'nonoptional',
+  'catch',
+]);
+
+/**
+ * The side of a `pipe` node an author actually writes.
+ *
+ * Two constructs compile to the same `pipe` node and their authorable sides
+ * are OPPOSITE: `a.transform(fn)` keeps the accepted input shape in `in` and
+ * puts the transform stage in `out`, while `z.preprocess(fn, schema)` puts the
+ * TRANSFORM in `in` and the real, validated schema in `out`. Reading `in`
+ * unconditionally therefore hands back a transform node for every preprocess
+ * node, and a transform declares no shape at all — so {@link declaresCollection}
+ * falls through to `false` and a preprocess-wrapped collection key silently
+ * leaves the refusal set {@link objectCollectionKeys} derives. Silently is the
+ * whole point: that derivation exists precisely so a collection key added to
+ * the object shape tomorrow cannot fall back to the wholesale replacement
+ * `objectConflict: 'merge'` refuses.
+ *
+ * ⛔ Deliberately NOT `in || out`. For a genuine `a.transform(fn).pipe(b)` the
+ * author writes `a`; taking either side would pull a key whose AUTHORED value
+ * is a scalar into a refusal set that then names it a collection — a refusal
+ * nobody earned, printed in the vocabulary of entries that were never written.
+ * Reading OUT only when IN is a transform stage is the rule four sibling
+ * walkers already run — `pipeAuthorableSide` in `scripts/lib/zod-graph.ts`,
+ * `kernel/metadata-authoring-lint.ts`,
+ * `system/metadata-form-zod-reconciliation.test.ts` and `packages/lint`'s
+ * `validate-predicate-path-refs.ts` — so this is one rule with a fifth site,
+ * not a fifth dialect.
+ * @internal
+ */
+function pipeAuthorableSide(def: CollectionWalkDef): unknown {
+  let node = def.in;
+  for (let hops = 0; hops < 8; hops++) {
+    const inner = collectionWalkDef(node);
+    if (!inner?.type) break;
+    if (inner.type === 'transform') return def.out;
+    if (COLLECTION_WALK_WRAPPERS.has(inner.type)) {
+      node = inner.innerType;
+      continue;
+    }
+    if (inner.type === 'lazy') {
+      node = inner.getter?.();
+      continue;
+    }
+    break;
+  }
+  return def.in;
+}
+
 /**
  * Does this schema declare a COLLECTION — an array, or a record of named
  * members — once the optional/default/nullable wrappers are stripped, reading
@@ -3390,13 +3476,15 @@ function warnUncomposedStackKey(key: string, rule: ComposeDisposition): void {
  * the same. A fixed-shape config object (`enable`, `access`, `protection`, …)
  * is not a collection — its members are declared keys, not authored entries —
  * and stays on the scalar rule.
+ *
+ * A `pipe` is read on the side the AUTHOR writes, never on `in` alone — see
+ * {@link pipeAuthorableSide} for the two opposite conventions that compile to
+ * that one node.
  * @internal
  */
 function declaresCollection(schema: unknown, depth = 0): boolean {
   if (depth > 8) return false;
-  const def = (schema as {
-    _zod?: { def?: { type?: string; innerType?: unknown; in?: unknown; options?: unknown[]; getter?: () => unknown } };
-  })._zod?.def;
+  const def = collectionWalkDef(schema);
   if (!def?.type) return false;
   switch (def.type) {
     case 'array':
@@ -3413,7 +3501,7 @@ function declaresCollection(schema: unknown, depth = 0): boolean {
     case 'lazy':
       return declaresCollection(def.getter?.(), depth + 1);
     case 'pipe':
-      return declaresCollection(def.in, depth + 1);
+      return declaresCollection(pipeAuthorableSide(def), depth + 1);
     case 'union':
       return (def.options ?? []).some((option) => declaresCollection(option, depth + 1));
     default:
