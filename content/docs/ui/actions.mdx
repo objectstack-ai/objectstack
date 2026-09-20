@@ -183,10 +183,17 @@ await ctx.engine.find('todo_task', {});   // the unfiltered read
 ```
 
 The parameter is typed `EngineQueryOptions` (`ActionEngineFacade` in
-`@objectstack/spec/ui`), so a bare filter is a **compile error** at the call
-site — `{ status: 'completed' }` has nowhere to land, and so does a filter held
-in a `FilterCondition` variable. A hand-written test double must honour the
-envelope too.
+`@objectstack/spec/ui`), so if you annotate `ctx` with the published
+`ActionHandlerContext` a bare filter is a **compile error** at the call site —
+`{ status: 'completed' }` has nowhere to land, and neither does a filter held in
+a `FilterCondition` variable. A hand-written test double must honour the envelope
+too.
+
+If you do **not** annotate it — a handler in an `objectstack.config.js` /
+`.mjs`, your own copy of the context type, or `(ctx: any)` — the facade refuses
+the bare filter at **runtime** instead, naming the stray key and prescribing the
+same fix. That runtime refusal is what stops `{ deleted_at: null }` from being
+dropped unexecuted and quietly widening the read to every row.
 
 **Upgrading?** This parameter used to be the `where` half on its own, and the
 runtime wrapped it. `find(o, f)` becomes `find(o, { where: f })`; an unfiltered

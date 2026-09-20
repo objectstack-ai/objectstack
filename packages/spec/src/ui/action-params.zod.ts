@@ -321,14 +321,31 @@ export interface ActionEngineFacade {
    *
    * ## What the type refuses, measured
    *
-   * A bare filter no longer type-checks, on BOTH paths a caller can reach it
-   * by: an object literal (`{ status: 'completed' }`) fails the excess-property
-   * check, because a field name is not an envelope key; and a filter held in a
-   * variable typed `FilterCondition` fails TS2559 — `EngineQueryOptions` is a
-   * weak type, every key optional, and a filter of field names has no property
-   * in common with it. The refusal is a compile error at the call site, never a
-   * runtime surprise. The envelope's own keys are typed, so `where: 'a = b'`,
-   * `fields: 'id,subject'` and `limit: '50'` are refused too.
+   * A bare filter no longer type-checks, on BOTH paths a TYPED caller can
+   * reach it by: an object literal (`{ status: 'completed' }`) fails the
+   * excess-property check, because a field name is not an envelope key; and a
+   * filter held in a variable typed `FilterCondition` fails TS2559 —
+   * `EngineQueryOptions` is a weak type, every key optional, and a filter of
+   * field names has no property in common with it. The envelope's own keys are
+   * typed, so `where: 'a = b'`, `fields: 'id,subject'` and `limit: '50'` are
+   * refused too.
+   *
+   * ## …and what refuses it for a caller the TYPE never reached
+   *
+   * `buildActionEngineFacade` returns `any`, so a handler in a JS config, one
+   * annotated with a local copy of this context, or a `(ctx: any)` handler is
+   * bound by nothing here. For those the runtime arm refuses the withdrawn
+   * shape itself, before the engine, carrying the same prescription
+   * (`ACTION_ENGINE_FIND_ENVELOPE_PRESCRIPTION`,
+   * `packages/runtime/src/action-execution.ts`) and reading its key set off
+   * THIS schema so the two channels cannot drift apart.
+   *
+   * ⚠️ That arm is load-bearing rather than belt-and-braces, and the reason is
+   * a `null`: the engine's own unknown-option refusal (#4371) exempts a
+   * `null`-VALUED key, because on an option bag a `null` is a withdrawal. On a
+   * FILTER it is the "rows with no X" idiom — so `{ deleted_at: null }` passed
+   * straight through would be dropped unexecuted and the read would widen to
+   * EVERY row, silently, to a caller whose next line is often a delete.
    *
    * ## `context` is the caller's to pass and NOT the caller's to choose
    *

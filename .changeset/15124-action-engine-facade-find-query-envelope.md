@@ -43,16 +43,34 @@ the ambiguity at its root and reserves nothing.
 
 ### What the new declaration refuses, measured
 
-A bare filter no longer type-checks on **either** path a caller can reach it by:
+If your handler is typed with the published `ActionHandlerContext`, a bare filter
+no longer type-checks on **either** path you can reach it by:
 
 - an object literal (`{ status: 'completed' }`) fails the excess-property check —
   a field name is not an envelope key;
 - a filter held in a `FilterCondition` variable fails **TS2559** — every envelope
   key is optional, so a bag of field names has no property in common with it.
 
-So the failure is a compile error at the call site, never a runtime surprise.
 The envelope's own keys are typed too: `where: 'a = b'`, `fields: 'id,subject'`
 and `limit: '50'` are each refused.
+
+**If your handler is NOT typed with it** — a handler in an `objectstack.config.js`
+/ `.mjs`, one annotated with your own copy of the context type, or a `(ctx: any)`
+handler — nothing above reaches you, so the facade refuses the withdrawn shape at
+**runtime** instead, before the engine, with the same prescription:
+
+```
+find('task') was given a key 'status' the query envelope does not carry.
+ctx.engine.find(object, query) takes the engine QUERY ENVELOPE, not a bare
+filter — move the filter under `where`: find(object, { where: { … } }) (#15124).
+```
+
+⚠️ **That refusal matters most for a filter whose value is `null`.** The engine's
+own unknown-option check exempts a `null` value, because on an option bag a
+`null` is a withdrawal. On a filter it is the "rows with no X" idiom, so
+`{ deleted_at: null }` would have been dropped unexecuted and the read would have
+widened to **every row** — including the ones you were excluding — with no error
+at all. It is refused instead.
 
 ### What this opens
 
