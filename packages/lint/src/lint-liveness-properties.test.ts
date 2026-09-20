@@ -914,7 +914,11 @@ describe('lintLivenessProperties', () => {
     });
 
     // ⚠️ THE FIELD CASE LOST ITS SUBJECT (#19187), and unlike the fan-out
-    // (#10262) the code path went with it: `field.relatedListFilter` was the
+    // block at the bottom of this file the code path went with it (that block's
+    // own `#10262` citation is left as found; the number resolves in NEITHER
+    // objectstack nor objectui — measured, with `#7079` answering 200 on the
+    // same instrument — so this comment names the block rather than re-citing
+    // it): `field.relatedListFilter` was the
     // ONE `authorWarn` row on `field.json` at any depth, so flipping it `live`
     // empties `loadWarnMap(dir, 'field')` and `lintLivenessProperties` skips the
     // whole field loop on `if (fieldWarn.size > 0)` — the `if (!isRecord(field))
