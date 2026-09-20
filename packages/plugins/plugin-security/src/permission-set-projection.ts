@@ -1292,7 +1292,36 @@ export function createPermissionSetWriteThrough(
     // an ADR-0005 RESET — and the record re-projects to the declared body
     // instead of vanishing (a packaged definition cannot be deleted from the
     // environment).
-    let lastOutcome: any = true;
+    //
+    // The RESET is the designed outcome and stays exactly as it is. What this
+    // loop owes the CALLER is the ability to tell the two endings apart: the
+    // outcome below used to start at `true` and could only ever be assigned
+    // `true` again, so a reset answered the data door with the same
+    // `{"success":true}` a real deletion does — the difference was named only
+    // in the `logger.info` line above, which no caller can read. A machine
+    // surface that reports a refusal as a deletion is the one thing
+    // "machine-readable surfaces must not lie" forbids, and on a
+    // security-configuration write it tells an operator a permission set is
+    // gone while it is still being enforced.
+    //
+    // The outcome is therefore the COUNT of target RECORDS that actually went
+    // — the number arm of this engine method's declared result ("how many rows
+    // the delete removed"), which the data door turns into an honest
+    // `success: false` on a 200. Every target removed keeps answering `true`,
+    // the boolean arm's value for a completed by-id delete, so a real deletion
+    // is unchanged on the wire.
+    //
+    // ⛔ NOT `false` for the reset: the boolean arm's `false` is the driver
+    // contract's "no row matched", which the data door turns into a
+    // `404 RECORD_NOT_FOUND` — and the record is still right there, so that
+    // would trade this lie for a louder one and hand a UI a reason to drop the
+    // row it must keep showing.
+    //
+    // Zero also covers the two other ways a record survives this loop: a
+    // metadata delete that lands on a package-owned RECORD (left to the
+    // package door) and a retire whose `ql.delete` failed. Both leave the row
+    // in place, and neither is a deletion the caller should be told happened.
+    let removed = 0;
     for (const row of targets) {
       await protocol.deleteMetaItem({ type: 'permission', name: row.name, ...actorArg });
       const res = await projectPermissionMutation(protocol, deps, {
@@ -1301,9 +1330,11 @@ export function createPermissionSetWriteThrough(
       if (res && (res.seeded + res.updated) > 0) {
         logger?.info?.('[security] permission set reset to its declared baseline (artifact-backed; ADR-0094)', { name: row.name });
       }
-      lastOutcome = res?.deleted ? true : lastOutcome;
+      if (res?.deleted) removed += 1;
     }
-    opCtx.result = lastOutcome;
+    // `targets` is non-empty here — the early return above sends an empty
+    // target set to the driver — so this is never the vacuous `true`.
+    opCtx.result = removed === targets.length ? true : removed;
     return;
   };
 }

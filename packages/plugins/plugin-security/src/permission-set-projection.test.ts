@@ -887,6 +887,69 @@ describe('createPermissionSetWriteThrough (data door → metadata store)', () =>
     expect(ql.permRows[0].managed_by).toBe('package');
   });
 
+  it('the delete OUTCOME tells a real deletion apart from a packaged RESET', async () => {
+    // Both endings above are correct — a runtime-only set goes, a packaged one
+    // re-projects to its declaration. What the CALLER could not do was tell
+    // them apart: the outcome this middleware wrote was `true` on every path
+    // (it started there and the loop could only ever assign `true` again), so
+    // the data door answered `200 {"success":true}` for both. A UI fired a
+    // success toast on a permission set it had not deleted and showed the row
+    // again on refresh — the two legs' own assertions above stayed green
+    // throughout, because they read the STORE and never the answer.
+    //
+    // ⛔ The reset's outcome must not be `false` either: that value is the
+    // driver contract's "no row matched", which `deleteData` turns into a
+    // `404 RECORD_NOT_FOUND` — about a record this same caller can still GET.
+    // Zero rows removed is the other declared arm and the only one that says
+    // "it is still there"; `metadata-protocol`'s own
+    // `protocol.record-not-found.test.ts` pins the mapping onto `success`.
+
+    // Leg 1 — runtime-only definition: the record really goes.
+    const envQl = makeQl();
+    const envProtocol = makeProtocol(envQl);
+    registerPermissionSetProjection(envProtocol, { ql: envQl });
+    await envProtocol.saveMetaItem({ type: 'permission', name: 'organization_admin', item: envBody() });
+    const envCtx: any = {
+      object: 'sys_permission_set',
+      operation: 'delete',
+      options: { where: { id: envQl.permRows[0].id } },
+      context: userCtx,
+    };
+    await run(makeMiddleware(envQl, envProtocol), envCtx);
+    expect(envQl.permRows.length, 'control: the env-authored record really went').toBe(0);
+    expect(envCtx.result, 'a completed delete keeps answering the boolean arm').toBe(true);
+
+    // Leg 2 — artifact-backed definition: the record survives the RESET.
+    const pkgQl = makeQl();
+    const declaredBody = envBody({ name: 'crm_rep', systemPermissions: ['pkg.baseline'] });
+    (pkgQl as any).registry = { listItems: (t: string) => (t === 'permission' ? [declaredBody] : []) };
+    const pkgProtocol = makeProtocol(pkgQl, { crm_rep: declaredBody });
+    registerPermissionSetProjection(pkgProtocol, { ql: pkgQl });
+    pkgQl.permRows.push({
+      id: 'ps_pkg', name: 'crm_rep', managed_by: 'package',
+      package_id: 'com.example.crm', system_permissions: '["pkg.baseline"]',
+    });
+    seedLegacyOverlay(pkgQl, 'crm_rep', envBody({ name: 'crm_rep', systemPermissions: ['customized'] }));
+    await projectPermissionMutation(pkgProtocol, { ql: pkgQl }, { type: 'permission', name: 'crm_rep', state: 'active', organizationId: null });
+    const pkgCtx: any = {
+      object: 'sys_permission_set',
+      operation: 'delete',
+      options: { where: { id: 'ps_pkg' } },
+      context: userCtx,
+    };
+    await run(makeMiddleware(pkgQl, pkgProtocol), pkgCtx);
+    expect(pkgQl.permRows.length, 'the record survives — the designed ADR-0094 reset').toBe(1);
+    expect(
+      typeof pkgCtx.result,
+      'the COUNT arm — `false` would be read as not-found and 404 a record that is still there',
+    ).toBe('number');
+    expect(pkgCtx.result, 'zero records removed').toBe(0);
+
+    // The card's own claim, stated as an assertion: the two endings no longer
+    // hand the caller the same answer.
+    expect(pkgCtx.result).not.toEqual(envCtx.result);
+  });
+
   it('SINGLE-STORE kernel (no protocol): package rows keep the legacy two-doors refusal', async () => {
     const ql = makeQl();
     ql.permRows.push({ id: 'ps_pkg', name: 'crm_rep', managed_by: 'package', package_id: 'com.example.crm' });
