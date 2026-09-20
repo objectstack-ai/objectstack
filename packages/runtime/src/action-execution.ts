@@ -1476,9 +1476,12 @@ export function buildActionApi(_deps: ActionExecutionDeps, ql: any, ec: any): an
  * would stay green against any unnamed `Error` at all, and the pin has to
  * compare text.
  */
+// The card id stays in this comment and out of the string: a runtime message
+// reaches authors and operators who have no tracker to resolve `#NNNN` with
+// (#15124, and `check:doc-authoring` enforces it).
 export const ACTION_ENGINE_FIND_ENVELOPE_PRESCRIPTION =
     'ctx.engine.find(object, query) takes the engine QUERY ENVELOPE, not a bare filter — '
-    + 'move the filter under `where`: find(object, { where: { … } }) (#15124).';
+    + 'move the filter under `where`: find(object, { where: { … } }).';
 
 /**
  * The envelope's own key set, read off the DECLARATION rather than restated.

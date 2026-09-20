@@ -62,7 +62,9 @@ handler — nothing above reaches you, so the facade refuses the withdrawn shape
 ```
 find('task') was given a key 'status' the query envelope does not carry.
 ctx.engine.find(object, query) takes the engine QUERY ENVELOPE, not a bare
-filter — move the filter under `where`: find(object, { where: { … } }) (#15124).
+filter — move the filter under `where`: find(object, { where: { … } }).
+Envelope keys: context, cursor, distinct, expand, fields, limit, offset,
+orderBy, search, searchFields, top, where.
 ```
 
 ⚠️ **That refusal matters most for a filter whose value is `null`.** The engine's

@@ -44,7 +44,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { assertEngineDeleteDispatch } from '@objectstack/metadata-core';
 import { ObjectQL } from '@objectstack/objectql';
-import { InMemoryDriver } from '@objectstack/driver-memory';
+import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { buildActionEngineFacade, ACTION_ENGINE_FIND_ENVELOPE_PRESCRIPTION } from './action-execution.js';
 
 const deps: any = { resolveService: () => undefined, getObjectQL: async () => undefined };
@@ -185,10 +185,19 @@ const PROBE_OBJECT = {
     },
 } as any;
 
-/** A real `ObjectQL` over a real in-memory driver, seeded with three rows. */
+/**
+ * A real `ObjectQL` over a real driver, seeded with three rows.
+ *
+ * sqlite `:memory:` rather than `@objectstack/driver-memory`: #5704 migrated
+ * this project's test backends to it and froze the memory driver's consumer
+ * set, which `check:driver-memory-census` holds to a ruled ledger. A new
+ * binding there would need a maintainer ruling, and nothing about this pin
+ * needs that driver — what has to be REAL here is the ENGINE, because the
+ * null-exemption this block is about is the engine's.
+ */
 async function makeRealEngine() {
     const engine = new ObjectQL();
-    engine.registerDriver(new InMemoryDriver({}) as any, true);
+    engine.registerDriver(new SqliteWasmDriver({ filename: ':memory:' }) as any, true);
     await engine.init();
     engine.registry.registerObject(PROBE_OBJECT, 'test');
     await engine.syncSchemas?.();
