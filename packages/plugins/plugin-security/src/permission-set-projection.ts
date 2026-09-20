@@ -124,6 +124,33 @@ export async function tryFind(ql: any, object: string, where: any, limit = 100, 
     return Array.isArray(rows) ? rows : [];
   } catch { return []; }
 }
+
+/**
+ * Is this record still on the table? THREE outcomes, not two.
+ *
+ * {@link tryFind} deliberately collapses a failed read into `[]` — right for
+ * every caller that wants "the rows I could see", wrong for anyone who has to
+ * decide whether a row is GONE. `[]` from that helper means "no row matched OR
+ * the read blew up", and a caller reading it as "gone" reports a deletion that
+ * an outage invented. `listSeedOrganizationIds` in `per-organization-catalog.ts`
+ * states the same rule for the same shape: zero organizations is "nothing to
+ * seed", an unreadable table is "we do not know".
+ *
+ * So `unknown` is its own answer and the caller must decide what it means —
+ * ⛔ never folded into `gone` here. The context and the read are otherwise
+ * IDENTICAL to `tryFind`'s (no `transaction` key, so an ambient handle still
+ * carries it), because the difference under test is the catch and nothing else.
+ */
+async function probeRecordSurvival(
+  ql: any,
+  object: string,
+  id: unknown,
+): Promise<'gone' | 'present' | 'unknown'> {
+  try {
+    const rows = await ql.find(object, { where: { id }, limit: 1 }, { context: seedCtx() });
+    return (Array.isArray(rows) ? rows : [])[0] ? 'present' : 'gone';
+  } catch { return 'unknown'; }
+}
 /**
  * ⛔ The `catch` RECORDS the refusal before it answers, when the caller passed
  * a log to record into.
@@ -1292,7 +1319,47 @@ export function createPermissionSetWriteThrough(
     // an ADR-0005 RESET — and the record re-projects to the declared body
     // instead of vanishing (a packaged definition cannot be deleted from the
     // environment).
-    let lastOutcome: any = true;
+    //
+    // The RESET is the designed outcome and stays exactly as it is. What this
+    // loop owes the CALLER is the ability to tell the two endings apart: the
+    // outcome below used to start at `true` and could only ever be assigned
+    // `true` again, so a reset answered the data door with the same
+    // `{"success":true}` a real deletion does — the difference was named only
+    // in the `logger.info` line above, which no caller can read. A machine
+    // surface that reports a refusal as a deletion is the one thing
+    // "machine-readable surfaces must not lie" forbids, and on a
+    // security-configuration write it tells an operator a permission set is
+    // gone while it is still being enforced.
+    //
+    // The outcome is therefore the COUNT of target RECORDS that actually went
+    // — the number arm of this engine method's declared result ("how many rows
+    // the delete removed"), which the data door turns into an honest
+    // `success: false` on a 200. Every target removed keeps answering `true`,
+    // the boolean arm's value for a completed by-id delete, so a real deletion
+    // is unchanged on the wire.
+    //
+    // ⛔ NOT `false` for the reset: the boolean arm's `false` is the driver
+    // contract's "no row matched", which the data door turns into a
+    // `404 RECORD_NOT_FOUND` — and the record is still right there, so that
+    // would trade this lie for a louder one and hand a UI a reason to drop the
+    // row it must keep showing.
+    //
+    // Zero also covers every other way a record survives this loop: a metadata
+    // delete that lands on a package-owned RECORD (left to the package door),
+    // a retire whose `ql.delete` failed, and a read-back that could not answer
+    // at all. All three leave the row in place — or leave us unable to say it
+    // does not — and none is a deletion the caller should be told happened.
+    //
+    // ⛔ The outcome is read off the RECORD, never off the re-projection's own
+    // `deleted` counter. On a kernel wired to the ADR-0094 AWAITED projector —
+    // the production shape — `deleteMetaItem` has already retired the record
+    // by the time control returns here, so the idempotent re-projection below
+    // finds no row and legitimately reports `deleted: 0` for a delete that
+    // really happened. Reading that counter would have answered
+    // `success: false` for EVERY delete, which is the same defect with its
+    // sign flipped: honest about the packaged set and a fresh lie about the
+    // ordinary one. `permission-set-projection.test.ts` holds both legs.
+    let removed = 0;
     for (const row of targets) {
       await protocol.deleteMetaItem({ type: 'permission', name: row.name, ...actorArg });
       const res = await projectPermissionMutation(protocol, deps, {
@@ -1301,9 +1368,37 @@ export function createPermissionSetWriteThrough(
       if (res && (res.seeded + res.updated) > 0) {
         logger?.info?.('[security] permission set reset to its declared baseline (artifact-backed; ADR-0094)', { name: row.name });
       }
-      lastOutcome = res?.deleted ? true : lastOutcome;
+      // The caller addressed a RECORD by id, so that is the question this
+      // answers: is it still there? A row re-projected under the same id is
+      // the reset; a row that is gone is the deletion.
+      //
+      // ⛔ The probe has THREE outcomes and this loop counts only ONE of them.
+      // Probing through `tryFind` — whose catch returns `[]` — would have made
+      // a FAILED read indistinguishable from "the row is gone", and answered
+      // `success: true` with the record sitting exactly where it was: this
+      // card's own lie with a different trigger (an outage instead of a
+      // packaged set). `unknown` is therefore counted as a SURVIVOR, the
+      // fail-closed direction: a caller told "not deleted" re-reads the record
+      // and finds out, a caller told "deleted" has no reason to look again.
+      // It is also the only direction that cannot be produced by a broken
+      // read — `gone` now requires a read that actually ANSWERED.
+      const survival = await probeRecordSurvival(ql, 'sys_permission_set', row.id);
+      if (survival === 'unknown') {
+        // Durability channel: the write half of this delete already ran, so
+        // the row's fate is decided and only our READING of it failed. Say so
+        // once, naming what the caller was told and how to settle it.
+        logger?.warn?.(
+          '[security] could not read the sys_permission_set record back after its metadata delete, so the ' +
+          'data-door answer reports it as NOT deleted (fail-closed). The delete itself already ran; re-read the ' +
+          'record to see whether it was removed or reset to its declared baseline.',
+          { name: row.name, id: row.id },
+        );
+      }
+      if (survival === 'gone') removed += 1;
     }
-    opCtx.result = lastOutcome;
+    // `targets` is non-empty here — the early return above sends an empty
+    // target set to the driver — so this is never the vacuous `true`.
+    opCtx.result = removed === targets.length ? true : removed;
     return;
   };
 }

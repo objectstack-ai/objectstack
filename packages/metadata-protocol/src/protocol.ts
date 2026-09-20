@@ -11436,10 +11436,33 @@ export class ObjectStackProtocolImplementation implements
         // POSITIVE not-found signal, and inventing a 404 out of it would break
         // deletes against third-party drivers rather than report honestly.
         if (deleted === false) throw recordNotFoundError(request.object, request.id);
+        // The same measurement, one outcome over: `success` was still a
+        // LITERAL for every answer that was not the contract's `false`, so a
+        // row that MATCHED and was deliberately NOT removed reported a
+        // deletion. `sys_permission_set` is the shipped case — a
+        // package-declared set's delete is an ADR-0005 RESET, the record
+        // re-projects to the declared body instead of vanishing — and the
+        // envelope was byte-identical to a real delete, so a UI fired a
+        // success toast and showed the row again on refresh.
+        //
+        // `success` is declared "Whether deletion succeeded", and this is the
+        // only key on `DeleteDataResponseSchema` that can carry the
+        // difference; zero rows removed is a deletion that did not succeed.
+        // The engine's delete result declares two arms — the driver's boolean
+        // for a by-id write, a COUNT of rows removed otherwise — so a numeric
+        // zero is the one answer that positively means "the row is still
+        // there", and it is what the middleware that performs a reset now
+        // returns. It cannot say so with `false`: that value is spoken for by
+        // the not-found 404 above, which would be a second lie about a record
+        // this caller can still GET.
+        //
+        // Everything else keeps its #4435 reading, including an off-contract
+        // `undefined` from a third-party driver: only a POSITIVE zero is read
+        // as "not removed".
         return {
             object: request.object,
             id: request.id,
-            success: true
+            success: deleted !== 0
         };
     }
 
