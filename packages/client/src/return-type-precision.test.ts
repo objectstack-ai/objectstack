@@ -720,9 +720,14 @@ export function installedPackageEitherStagePins17536(): void {
     // union, so it is refused by the declaration. This is the line that reddens
     // (TS2578, unused suppression) if these members are ever widened to `any`,
     // `unknown`, or an open shape.
-    // @ts-expect-error neither manifest stage admits a string; the union is over two closed stages
+    //
+    // ⚠️ The suppression sits on the PROPERTY, not on the `const`. Measured: tsc
+    // reports this mismatch at the offending member of the object literal, so a
+    // directive on the declaration line covers the wrong line and goes unused —
+    // TS2578, a red gate that says nothing about the union.
     const neitherStage: Awaited<ReturnType<typeof client.packages.get>> = {
         ...authoringRow,
+        // @ts-expect-error neither manifest stage admits a string; the union is over two closed stages
         manifest: 'com.acme.crm@1.0.0',
     };
 
