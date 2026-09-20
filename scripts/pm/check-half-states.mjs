@@ -1874,6 +1874,19 @@ function stripMatchingDecoration(value, opener) {
 }
 
 /**
+ * What may sit BETWEEN two directives on one line: decoration, spaces and a
+ * list separator, nothing else. That class is the whole guard — a key after a
+ * WORD stays the mid-sentence mention the anchoring above protects (「seats
+ * park the `Blocked-by: #1` line in comments」), a key after 「` · `」 is the
+ * second directive of a list a seat really wrote.
+ */
+const DIRECTIVE_SEPARATOR = String.raw`[ \t]*(?:${DIRECTIVE_MARKER}[ \t]*)*[·•|,;、]+[ \t]*`;
+
+/** A FURTHER directive on the same line, its own opening decoration captured. */
+const nextDirectiveOnLine = (key) =>
+  new RegExp(`${DIRECTIVE_SEPARATOR}((?:${DIRECTIVE_MARKER}[ \\t]*)*)${directiveKey(key)}[ \\t]*`);
+
+/**
  * Every value carried by a `<key>:` directive line in this text, decoration
  * removed, empties dropped — the one reader H9 and the `Blocked-by:` index
  * share, so a decoration tolerated for one is tolerated for both.
@@ -1883,16 +1896,37 @@ function stripMatchingDecoration(value, opener) {
  * silently kept its trailing backtick is exactly the regression this shares a
  * cause with.
  *
+ * ## EVERY directive on the line, never the first one alone
+ *
+ * A seat fits as many directives on a line as it likes — nine `·`-separated
+ * backticked ones is a MEASURED live shape — and this used to hand back ONE
+ * value per line: the first key, then the rest of the line as its value. Every
+ * family therefore read the others as that value's prose, which for the
+ * `Blocked-by:` index meant eight blockers dropped in silence and a block that
+ * reads as EXPIRED (「1 of 1」 on a card stating nine). So the line splits at
+ * every FURTHER key after a separator run; ⛔ a key after a WORD is prose.
+ *
  * @param {string} text
  * @param {'Blocked-by'|'Restart-when'|'Maintainer-action'|'Unlock-action'} key
  * @returns {string[]}
  */
 export function directiveValues(text, key) {
   const re = new RegExp(`^${DIRECTIVE_PREFIX}${directiveKey(key)}[ \\t]*(\\S.*)$`, 'gm');
+  const next = nextDirectiveOnLine(key);
   const out = [];
-  for (const m of String(text ?? '').matchAll(re)) {
-    const value = stripMatchingDecoration(m[2], m[1]);
+  const take = (raw, opener) => {
+    const value = stripMatchingDecoration(raw, opener);
     if (value) out.push(value);
+  };
+  for (const m of String(text ?? '').matchAll(re)) {
+    let opener = m[1];
+    let rest = m[2];
+    for (let split = next.exec(rest); split; split = next.exec(rest)) {
+      take(rest.slice(0, split.index), opener);
+      opener = split[1];
+      rest = rest.slice(split.index + split[0].length);
+    }
+    take(rest, opener);
   }
   return out;
 }
@@ -3671,13 +3705,21 @@ export function h13DomainWithoutPmState(issue, nowMs = Date.now()) {
  *    line because it sits in code, this one reads a line whose code markers
  *    are the author formatting a directive. Both serve the same test — would
  *    the unlock sweep's grep act on this line — and its answer here is yes.
- * 2. **Only the LEADING ref run is taken.** Real lines carry trailing prose —
- *    「Blocked-by: #9689 (the relocation it needs is the same edit)」 — and
- *    prose can name a second card that is context, not a blocker. Scanning
- *    the whole value would manufacture a dependent for it, and the cost lands
- *    on a THIRD card (a phantom "missing cache" row against someone who did
- *    nothing wrong). So the scan walks refs and separators from the start of
- *    the value and stops at the first token that is neither.
+ * 2. **EVERY ref in a directive's value is a target**, never the leading run
+ *    alone. That run was taken to keep a `#N` in trailing prose out of the
+ *    index (a phantom "missing cache" row against a third card), and it does
+ *    not buy that: a value whose FIRST ref is prose — the measured
+ *    「Blocked-by: objectui#7434's PR #8090 … and whatever PR repairs
+ *    objectui#8065」 — indexed the possessive, a card that was never a
+ *    blocker, and dropped both real blockers. So the run files a phantom too;
+ *    what it ADDS is substitution, and a block whose real blockers are
+ *    invisible reads as expired. Reading every ref can only ADD a target, and
+ *    an extra target can only WITHHOLD a discharge (H19 counts it open and
+ *    names it on the row) — ⛔ never found a release: this file's standing
+ *    posture on an ambiguity (#4690), applied to the value rather than to the
+ *    resolution. The context ref that rides along is the price, it is named
+ *    on the row, and unlike the comment archive the line carrying it is
+ *    rewritable by the seat that wrote it.
  *
  * The key is matched case-sensitively and line-anchored, byte-stable like H4
  * and H9: a lowercase or mid-sentence spelling is a line the real scan cannot
@@ -3686,18 +3728,18 @@ export function h13DomainWithoutPmState(issue, nowMs = Date.now()) {
  * @param {string} body
  * @returns {{ repo: string|null, number: number }[]}
  */
+const BLOCKED_BY_REF = /(?<![A-Za-z0-9._\/-])([A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)?)?#(\d+)/gu;
+
 export function blockedByTargets(body) {
   const out = [];
-  // The shared decorated-directive reader: the value arrives trimmed and with
-  // a matching trailing marker already removed, so the ref walk below sees
-  // 「#9823」 whether the author wrote it bare, bulleted, bolded or in code.
+  // The shared decorated-directive reader: ONE value per directive, trimmed
+  // and with a matching trailing marker already removed, so the scan below
+  // sees 「#9823」 whether the author wrote it bare, bulleted, bolded or in
+  // code. A qualifier must TOUCH its `#` and no match may START inside a
+  // path-like token, so a URL fragment in a value names no target.
   for (const value of directiveValues(body, 'Blocked-by')) {
-    let rest = value;
-    for (;;) {
-      const ref = /^[\s,;+、]*(?:and[ \t]+)?([A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)?)?#(\d+)/u.exec(rest);
-      if (!ref) break;
+    for (const ref of value.matchAll(BLOCKED_BY_REF)) {
       out.push({ repo: ref[1] ?? null, number: Number(ref[2]) });
-      rest = rest.slice(ref[0].length);
     }
   }
   return out;
@@ -26713,13 +26755,13 @@ async function selfTest() {
     numbersOf(blockedByTargets('Blocked-by: #9689 (the relocation it needs is the same edit; doing them in the other order means touching the line twice).')),
     '9689',
   );
-  // The reason only the LEADING run is taken: a `#N` inside the trailing prose
-  // is context, not a blocker, and indexing it would file a phantom
-  // missing-cache row against a third card that did nothing wrong.
+  // ⭐ The leading run is GONE: a `#N` in the trailing prose is now a target
+  // too. It can only WITHHOLD a discharge, while the run it replaces
+  // SUBSTITUTED a false blocker for two real ones (the #8093 shape below).
   t(
-    'blockedByTargets: a ref inside the trailing prose is NOT a blocker',
+    'blockedByTargets: a ref inside the trailing prose is a target too, and can only withhold',
     numbersOf(blockedByTargets('Blocked-by: #123 (see #456 for the background)')),
-    '123',
+    '123,456',
   );
   t('blockedByTargets: a comma-separated run is all blockers', numbersOf(blockedByTargets('Blocked-by: #6234, #6245')), '6234,6245');
   t('blockedByTargets: the `and` connector is a separator', numbersOf(blockedByTargets('Blocked-by: #1 and #2')), '1,2');
@@ -26747,6 +26789,34 @@ async function selfTest() {
   // (the unlock scan greps the literal), so a fenced line really does fire the
   // live machinery and must be reported as part of the index it feeds.
   t('blockedByTargets: a fenced line still counts (this reader greps, it does not read prose)', numbersOf(blockedByTargets('```\nBlocked-by: #42\n```')), '42');
+
+  // -- Multiplicity and substitution, both MEASURED on live bodies ----------
+  // objectui#8347: NINE `·`-separated backticked directives on ONE line. The
+  // reader took the first and H19 printed 「1 of 1 … CLOSED」 — the row the
+  // unlock scan releases from — while three of the nine were open.
+  const nineOnOneLine =
+    '`Blocked-by: #8345` · `Blocked-by: #8648` · `Blocked-by: #8649` · `Blocked-by: #8650` · ' +
+    '`Blocked-by: #8651` · `Blocked-by: #8652` · `Blocked-by: #8653` · `Blocked-by: #8654` · `Blocked-by: #8655`';
+  t('blockedByTargets: the #8347 shape — nine directives on one line are NINE targets', numbersOf(blockedByTargets(nineOnOneLine)), '8345,8648,8649,8650,8651,8652,8653,8654,8655');
+  t('directiveValues: …and each directive is its own CLEAN value, decoration stripped per directive', directiveValues(nineOnOneLine, 'Blocked-by').join('|'), '#8345|#8648|#8649|#8650|#8651|#8652|#8653|#8654|#8655');
+  // objectui#8093: ONE directive whose remainder is prose naming three
+  // numbers. The leading run returned the POSSESSIVE — never a blocker — and
+  // dropped both real ones: a substituted target answers the liveness
+  // question about the wrong card, which is the worse of the two failures.
+  const proseRemainder =
+    "`Blocked-by:` objectui#7434's PR #8090 (the `AGENTS.md` half, draft, awaiting human merge) " +
+    'and whatever PR repairs objectui#8065 (the `skills/objectui` half).';
+  t('blockedByTargets: the #8093 shape — both REAL blockers are read, not dropped', blockedByTargets(proseRemainder).map((r) => `${r.repo ?? ''}#${r.number}`).join(','), 'objectui#7434,#8090,objectui#8065');
+  // The dark controls: one directive is one target, and prose OUTSIDE a
+  // directive is not a directive however many numbers it names.
+  t('blockedByTargets: ONE directive still yields exactly one target', numbersOf(blockedByTargets('`Blocked-by: #4242`')), '4242');
+  t('blockedByTargets: prose naming `#n` OUTSIDE any directive invents nothing', numbersOf(blockedByTargets('We will wait for #9 and #10 before starting.')), '');
+  t('blockedByTargets: a URL fragment inside a value is not a target', numbersOf(blockedByTargets('Blocked-by: #12 (trail: https://example.test/issues/8347#40)')), '12');
+  // The whole directive family reads through `directiveValues`, so all of it
+  // gains the multiplicity — pinned on a NON-`Blocked-by:` key, beside the pin
+  // that a key after a WORD is still prose and invents nothing.
+  t('directiveValues: a second directive on one line is read for EVERY family', directiveValues('`Restart-when: closed acme/w#9` · `Restart-when: manual — x`', 'Restart-when').join('|'), 'closed acme/w#9|manual — x');
+  t('directiveValues: …and a key after a WORD is still prose, not a second directive', directiveValues('Restart-when: closed acme/w#9 — seats park the `Restart-when: manual` line in comments', 'Restart-when').length, 1);
 
   // The index.
   const idx = (issues) => buildBlockingIndex(issues, { repo: 'objectstack-ai/objectstack' });
@@ -27142,6 +27212,15 @@ async function selfTest() {
   t('H19: …names the target that is still open', partialRow.includes('`#3`'), true);
   t('H19: …and does not decide the card is unblocked', partialRow.includes('it does not decide it'), true);
   t('H19: two closed of two reads as 2 of 2', h19row(blockedCard(1), [target(2, 'closed'), target(3, 'closed')]).includes('2 of 2'), true);
+  // ⭐ End to end from the BODY, because the COUNT is what a reader trusts: two
+  // directives on ONE line, one closed and one open, must read 「1 of 2」 — the
+  // 「1 of 1」 it used to print is a FULL discharge on a card with an open
+  // blocker, which is the row the unlock scan releases from.
+  const twoOnOneLine = blockedCard(1, '`Blocked-by: #2` · `Blocked-by: #3`');
+  const twoResolved = blockerTargetsFor(twoOnOneLine, null, REPO_OS).map((tg, i) => ({ ...tg, state: i === 0 ? 'closed' : 'open', closedAt: null, detail: null }));
+  t('H19: a two-directive line resolves TWO targets', twoResolved.map((tg) => tg.number).join(','), '2,3');
+  t('H19: …so the row reads 1 of 2, never 1 of 1', h19row(twoOnOneLine, twoResolved, REPO_OS).includes('1 of 2 `Blocked-by:` target(s)'), true);
+  t('H19: …and calls it a PARTIAL discharge rather than a full one', h19row(twoOnOneLine, twoResolved, REPO_OS).includes('Every target it names is closed'), false);
 
   // UNRESOLVED — never reads as clean, and never reads as closed either.
   const unresolvedOnly = h19BlockOutlivedBlocker(blockedCard(1), [foreign('objectstack-ai/cloud', 88, 'unresolved', { detail: 'HTTP 404' })]);
