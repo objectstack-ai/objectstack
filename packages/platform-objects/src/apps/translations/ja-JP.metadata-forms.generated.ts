@@ -1475,54 +1475,54 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     }
   },
   dataset: {
-    label: "Dataset",
-    description: "Analytics semantic layer — dimensions & measures",
+    label: "データセット",
+    description: "分析セマンティックレイヤー — ディメンションとメジャー",
     sections: {
       basics: {
-        label: "Basics",
-        description: "Dataset identity."
+        label: "基本",
+        description: "データセットの識別情報。"
       },
       source: {
-        label: "Source",
-        description: "The base object, the relationships to join, and the dataset’s intrinsic scope. Joins are derived from the object graph — pick relationship (lookup / master_detail) names, never write an ON clause."
+        label: "ソース",
+        description: "ベースオブジェクト、結合する関係、そしてデータセット固有のスコープ。結合はオブジェクトグラフから導出されます — 関係（lookup / master_detail）の名前を選択し、ON 句は記述しません。"
       },
       dimensions: {
-        label: "Dimensions",
-        description: "Groupable axes. Use a base field, or `relationship.field` (e.g. account.region) for a relationship included above."
+        label: "ディメンション",
+        description: "グループ化できる軸。ベースオブジェクトのフィールド、または上で含めた関係に対しては `relationship.field`（例: account.region）を使用します。"
       },
       measures: {
-        label: "Measures",
-        description: "Aggregatable values defined once and referenced by name. A measure is sum/avg/count/… of a field; a derived measure combines other measures (ratio/sum/difference/product). Measure-scoped filters and derived ops are edited per-row in the dataset designer."
+        label: "メジャー",
+        description: "一度定義すれば名前で参照できる集計可能な値。メジャーはフィールドの sum/avg/count/… であり、派生メジャーは他のメジャーを組み合わせます（ratio/sum/difference/product）。メジャー単位のフィルターと派生演算はデータセットデザイナーで行ごとに編集します。"
       }
     },
     fields: {
       name: {
-        label: "Name",
-        helpText: "snake_case unique identifier"
+        label: "名前",
+        helpText: "snake_case の一意識別子"
       },
       label: {
-        label: "Label",
-        helpText: "Display name"
+        label: "表示名",
+        helpText: "表示名"
       },
       description: {
-        label: "Description",
-        helpText: "What this dataset measures"
+        label: "説明",
+        helpText: "このデータセットが測定する内容"
       },
       object: {
-        label: "Object",
-        helpText: "Base object — the FROM"
+        label: "オブジェクト",
+        helpText: "ベースオブジェクト — FROM に相当"
       },
       include: {
-        label: "Include",
-        helpText: "Relationship (lookup / master_detail) field names to join — enables `relationship.field` dimensions/measures (e.g. include \"account\" → group by account.region)"
+        label: "含める関係",
+        helpText: "結合する関係（lookup / master_detail）のフィールド名 — `relationship.field` のディメンション/メジャーを有効にします（例: include \"account\" → account.region でグループ化）"
       },
       filter: {
-        label: "Filter",
-        helpText: "Intrinsic scope filter (e.g. exclude soft-deleted records), ANDed into every query"
+        label: "フィルター",
+        helpText: "固有スコープのフィルター（例: 論理削除済みレコードを除外）。すべてのクエリに AND で結合されます"
       },
       dimensions: {
-        label: "Dimensions",
-        helpText: "Each: name (referenced by presentations), field, type, and — for dates — a default bucketing granularity"
+        label: "ディメンション",
+        helpText: "各ディメンション：名前（プレゼンテーションから参照）、フィールド、型、日付の場合は既定のバケット粒度"
       },
       "dimensions.name": {
         label: "名前"
