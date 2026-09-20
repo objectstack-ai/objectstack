@@ -3097,7 +3097,74 @@ declare const ComponentPropsMap: {
         objectName: z.ZodString;
         relationshipField: z.ZodString;
         relationshipValueField: z.ZodDefault<z.ZodString>;
-        columns: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        columns: z.ZodOptional<z.ZodUnion<readonly [z.ZodArray<z.ZodString>, z.ZodArray<z.ZodObject<{
+            field: z.ZodString;
+            label: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
+                key?: never;
+                defaultValue?: never;
+            }, Record<string, string> & {
+                key?: never;
+                defaultValue?: never;
+            }, z.core.$ZodTypeInternals<Record<string, string> & {
+                key?: never;
+                defaultValue?: never;
+            }, Record<string, string> & {
+                key?: never;
+                defaultValue?: never;
+            }>>]>>;
+            width: z.ZodOptional<z.ZodNumber>;
+            align: z.ZodOptional<z.ZodEnum<{
+                left: "left";
+                right: "right";
+                center: "center";
+            }>>;
+            hidden: z.ZodOptional<z.ZodBoolean>;
+            sortable: z.ZodOptional<z.ZodBoolean>;
+            resizable: z.ZodOptional<z.ZodBoolean>;
+            wrap: z.ZodOptional<z.ZodBoolean>;
+            type: z.ZodOptional<z.ZodString>;
+            pinned: z.ZodOptional<z.ZodEnum<{
+                left: "left";
+                right: "right";
+            }>>;
+            summary: z.ZodOptional<z.ZodUnion<readonly [z.ZodEnum<{
+                count: "count";
+                none: "none";
+                min: "min";
+                max: "max";
+                sum: "sum";
+                avg: "avg";
+                count_empty: "count_empty";
+                count_filled: "count_filled";
+                count_unique: "count_unique";
+                percent_empty: "percent_empty";
+                percent_filled: "percent_filled";
+            }>, z.ZodObject<{
+                type: z.ZodEnum<{
+                    count: "count";
+                    none: "none";
+                    min: "min";
+                    max: "max";
+                    sum: "sum";
+                    avg: "avg";
+                    count_empty: "count_empty";
+                    count_filled: "count_filled";
+                    count_unique: "count_unique";
+                    percent_empty: "percent_empty";
+                    percent_filled: "percent_filled";
+                }>;
+                field: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>]>>;
+            prefix: z.ZodOptional<z.ZodObject<{
+                field: z.ZodString;
+                type: z.ZodDefault<z.ZodEnum<{
+                    text: "text";
+                    badge: "badge";
+                }>>;
+            }, z.core.$strict>>;
+            link: z.ZodOptional<z.ZodBoolean>;
+            action: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>>]>>;
         sort: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodArray<z.ZodObject<{
             field: z.ZodString;
             order: z.ZodEnum<{
@@ -19236,7 +19303,74 @@ declare const RecordRelatedListProps: z.ZodObject<{
     objectName: z.ZodString;
     relationshipField: z.ZodString;
     relationshipValueField: z.ZodDefault<z.ZodString>;
-    columns: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    columns: z.ZodOptional<z.ZodUnion<readonly [z.ZodArray<z.ZodString>, z.ZodArray<z.ZodObject<{
+        field: z.ZodString;
+        label: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
+            key?: never;
+            defaultValue?: never;
+        }, Record<string, string> & {
+            key?: never;
+            defaultValue?: never;
+        }, z.core.$ZodTypeInternals<Record<string, string> & {
+            key?: never;
+            defaultValue?: never;
+        }, Record<string, string> & {
+            key?: never;
+            defaultValue?: never;
+        }>>]>>;
+        width: z.ZodOptional<z.ZodNumber>;
+        align: z.ZodOptional<z.ZodEnum<{
+            left: "left";
+            right: "right";
+            center: "center";
+        }>>;
+        hidden: z.ZodOptional<z.ZodBoolean>;
+        sortable: z.ZodOptional<z.ZodBoolean>;
+        resizable: z.ZodOptional<z.ZodBoolean>;
+        wrap: z.ZodOptional<z.ZodBoolean>;
+        type: z.ZodOptional<z.ZodString>;
+        pinned: z.ZodOptional<z.ZodEnum<{
+            left: "left";
+            right: "right";
+        }>>;
+        summary: z.ZodOptional<z.ZodUnion<readonly [z.ZodEnum<{
+            count: "count";
+            none: "none";
+            min: "min";
+            max: "max";
+            sum: "sum";
+            avg: "avg";
+            count_empty: "count_empty";
+            count_filled: "count_filled";
+            count_unique: "count_unique";
+            percent_empty: "percent_empty";
+            percent_filled: "percent_filled";
+        }>, z.ZodObject<{
+            type: z.ZodEnum<{
+                count: "count";
+                none: "none";
+                min: "min";
+                max: "max";
+                sum: "sum";
+                avg: "avg";
+                count_empty: "count_empty";
+                count_filled: "count_filled";
+                count_unique: "count_unique";
+                percent_empty: "percent_empty";
+                percent_filled: "percent_filled";
+            }>;
+            field: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>]>>;
+        prefix: z.ZodOptional<z.ZodObject<{
+            field: z.ZodString;
+            type: z.ZodDefault<z.ZodEnum<{
+                text: "text";
+                badge: "badge";
+            }>>;
+        }, z.core.$strict>>;
+        link: z.ZodOptional<z.ZodBoolean>;
+        action: z.ZodOptional<z.ZodString>;
+    }, z.core.$strict>>]>>;
     sort: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodArray<z.ZodObject<{
         field: z.ZodString;
         order: z.ZodEnum<{

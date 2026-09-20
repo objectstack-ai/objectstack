@@ -1454,8 +1454,19 @@ export const FieldSchema = lazySchema(() => {
    * Deliberately narrower than `inlineColumns`: the related list is not an
    * editable grid, and per-column display overrides are not part of its
    * measured renderer contract (objectui RelatedList hydrates string entries
-   * fully; the page-block sibling `record:related_list.columns` is the same
-   * strings-only shape). Column OBJECTS are refused with a prescription.
+   * fully). Column OBJECTS are refused with a prescription.
+   *
+   * ⚠️ AND deliberately narrower than the PAGE-BLOCK sibling, which is no
+   * longer the same shape (#18639). `record:related_list.columns`
+   * (`ui/component.zod.ts`) now declares the SAME union as the saved-view key
+   * `listViews[].columns` — field-name strings OR `ListColumnSchema` entries —
+   * because objectui composes a saved view's `columns` onto that block
+   * VERBATIM, so a decorated list arrives there already in the `ListColumn`
+   * spelling. THIS key stays strings-only BY RULING: objectui#9593 ruling A
+   * widened that one and fenced this one in the same breath, and the
+   * `field-column-lists-canonicalized` conversion still folds an object entry
+   * here down to its identity string. The two keys diverge ON PURPOSE —
+   * ⛔ do not "align" them.
    */
   relatedListColumns: z.array(z.string({
     error: (issue) => issue.code === 'invalid_type'
