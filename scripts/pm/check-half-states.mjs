@@ -961,8 +961,10 @@
  * ## Exit codes
  *
  *   0  the sweep completed — 0 or 40 findings alike (report-only, see above).
- *   3  PREREQUISITE NOT MET — a classified transport failure. Nothing was swept,
- *      and the report says so instead of implying a clean board.
+ *   3  PREREQUISITE NOT MET — a classified transport failure, or a
+ *      `PM_SWEEP_CHECKOUT` naming a checkout that does not serve the swept
+ *      board. Nothing was swept, and the report says so instead of implying a
+ *      clean board.
  *   2  the sweep could not run for a reason this file cannot classify. The
  *      pre-existing catch-all, kept so an unfamiliar failure stays loud (#4690).
  *
@@ -1046,6 +1048,50 @@ export function resolveSweepRepo(env = {}) {
     return { repo: value, source, valid: SWEEP_REPO_SHAPE.test(value) };
   }
   return { repo: DEFAULT_SWEEP_REPO, source: 'default', valid: true };
+}
+
+/**
+ * WHICH checkout serves that board — the half `PM_SWEEP_REPO` never answered. The three local git
+ * reads below feed H17's oracle and H57's workflow files, and each inherited whatever tree the shell
+ * stood in: measured 2026-09-19 (#19191), a sweep of objectui validated its H17 trigger-file index
+ * against OBJECTSTACK's 8888 tracked files (objectui has 7945) and H57 refused for the whole run,
+ * hiding a lane dead through five scheduled fires — internally consistent and externally wrong, the
+ * #11217 disease one layer down. Set: the three reads take it as `cwd`, and a checkout whose `origin`
+ * is not the swept board REFUSES (exit 3) rather than reading a second repo's tree. Unset: today's
+ * behaviour exactly, plus the H17 footer NAMING the tree it read. Returns `{ path, source, set }`.
+ */
+export function resolveSweepCheckout(env = {}) {
+  const value = String(env?.PM_SWEEP_CHECKOUT ?? '').trim();
+  return value ? { path: value, source: 'PM_SWEEP_CHECKOUT', set: true } : { path: null, source: 'cwd', set: false };
+}
+
+// The ONE local git read in this file, so the knob above answers for every reader at once. ⛔ A
+// fourth reader spelled with its own `execFileSync` keeps the defect — the self-test pins the count.
+function gitRead(args, extra = {}) {
+  const cwd = resolveSweepCheckout(process.env).path ?? undefined;
+  return execFileSync('git', args, { encoding: 'utf8', cwd, ...extra });
+}
+
+/**
+ * The knob's refusal, in the shape `reportPrerequisiteNotMet` prints (exit 3). `null` when the knob is
+ * unset — today's behaviour is not a prerequisite — or when the named checkout really serves the board.
+ * Otherwise a NAMED failure: ⛔ never a silent fall back to `cwd`, because a report built from another
+ * repo's tree reads exactly like a report about this one. `originUrl` is read IN that tree.
+ */
+export function checkoutPrerequisite(sweepRepo, env = {}, originUrl = null) {
+  const checkout = resolveSweepCheckout(env);
+  if (!checkout.set) return null;
+  const serves = localCheckoutServes(sweepRepo, env, originUrl);
+  if (serves.serves) return null;
+  return {
+    kind: 'checkout-does-not-serve',
+    headline: `PM_SWEEP_CHECKOUT=${JSON.stringify(checkout.path)} does not serve \`${sweepRepo}\``,
+    detail: [`${serves.reason}.`, '',
+      'H17 validates every on-hold trigger path against that checkout and H57 classifies its workflow',
+      'files there, so a foreign tree renders an index whose paths were checked against another repo.'],
+    fix: ['point PM_SWEEP_CHECKOUT at the checkout whose `origin` IS the swept board,',
+      'or unset it and run the sweep from inside that checkout.'],
+  };
 }
 
 const SWEEP_REPO = resolveSweepRepo(process.env);
@@ -4563,10 +4609,7 @@ export function decisionDependentIndex(issues, index) {
  */
 function readTrackedFiles() {
   try {
-    const out = execFileSync('git', ['ls-files', '-z'], {
-      encoding: 'utf8',
-      maxBuffer: 64 * 1024 * 1024,
-    });
+    const out = gitRead(['ls-files', '-z'], { maxBuffer: 64 * 1024 * 1024 });
     const set = new Set(out.split('\0').filter(Boolean));
     return set.size > 0 ? set : null;
   } catch {
@@ -13709,6 +13752,7 @@ export function h57ScheduledWorkflowRed(entry, nowMs = Date.now()) {
  * runs would classify by one repo and alarm about another, with no symptom at
  * all. So the answer is two definite readings and a refusal, never a guess:
  *
+ *   the knob leg     `PM_SWEEP_CHECKOUT` names the tree — the `origin` below is read IN it (#19191).
  *   the runner leg   `GITHUB_REPOSITORY` names the repo a runner checks out, so
  *                    when it equals the swept repo the disk is that repo. This
  *                    is the leg that answers on every real patrol run.
@@ -13722,7 +13766,8 @@ export function h57ScheduledWorkflowRed(entry, nowMs = Date.now()) {
  */
 export function localCheckoutServes(sweepRepo, env = {}, originUrl = null) {
   const want = String(sweepRepo ?? '').trim();
-  const fromEnv = String(env?.GITHUB_REPOSITORY ?? '').trim();
+  // The knob outranks the runner leg: `GITHUB_REPOSITORY` names the tree the RUNNER checked out.
+  const fromEnv = resolveSweepCheckout(env).set ? '' : String(env?.GITHUB_REPOSITORY ?? '').trim();
   if (fromEnv) {
     return fromEnv === want
       ? { serves: true, source: 'GITHUB_REPOSITORY', reason: null }
@@ -18674,8 +18719,8 @@ export function summaryClause(summary, key) {
  *   - read, nothing found → says the holds were READ and name no tracked file
  *   - read, rows          → the index
  *
- * @param {{ rows: Array<{issue: object, files: string[]}>, candidates?: number,
- *   probed?: number, tracked?: number|null }} [index]
+ * @param {{ rows: Array<{issue: object, files: string[]}>, candidates?: number, probed?: number,
+ *   tracked?: number|null, checkoutRoot?: string|null, checkoutOrigin?: string|null }} [index]
  * @param {{ markdown?: boolean }} [options]
  */
 export function renderTriggerIndex(index, { markdown = false } = {}) {
@@ -18684,6 +18729,10 @@ export function renderTriggerIndex(index, { markdown = false } = {}) {
   const probed = index.probed ?? 0;
   const candidates = index.candidates ?? 0;
   const read = `read on ${probed} of ${candidates} open \`pm:on-hold\` card(s)`;
+  // WHICH tree the oracle was read in (#19191) — printed knob or no knob, because a wrong-tree read
+  // is internally consistent and the tree it names is the only thing that distinguishes it.
+  const where = ` Read in ${index.checkoutRoot ? `\`${index.checkoutRoot}\`` : 'an unnamed tree'}` +
+    ` (\`origin\` ${index.checkoutOrigin ? `\`${index.checkoutOrigin}\`` : 'unresolved'}).`;
   const head = markdown
     ? ['### On-hold trigger-file index (H17)', '']
     : ['', 'On-hold trigger-file index (H17)'];
@@ -18692,7 +18741,7 @@ export function renderTriggerIndex(index, { markdown = false } = {}) {
     head.push(
       `⚠️ The tracked-file oracle (\`git ls-files\`) could not be read, so NO candidate path was ` +
         `validated and this index is EMPTY BY FAILURE, not by finding. Run the patrol from inside a ` +
-        `checkout. (${read}.)`,
+        `checkout. (${read}.)${where}`,
     );
     return head;
   }
@@ -18704,7 +18753,7 @@ export function renderTriggerIndex(index, { markdown = false } = {}) {
     `measured at 0-for-19 while it lived only as a remembered protocol step (#10034). Report-only: ` +
     `a card here is a hold in good standing, never a finding. Extraction is deterministic — every ` +
     `path shown is a tracked file; anything unverifiable was dropped rather than guessed, so this ` +
-    `list under-reports and never invents. (${read}; ${index.tracked} tracked file(s) in the oracle.)`;
+    `list under-reports and never invents. (${read}; ${index.tracked} tracked file(s) in the oracle.)${where}`;
   head.push(intro, '');
 
   if (rows.length === 0) {
@@ -20740,6 +20789,10 @@ async function listIssues(label, stats = {}) {
 }
 
 async function sweep(options = {}) {
+  // WHICH tree serves this board (#19191), BEFORE the probe: a foreign checkout reads nothing.
+  const originUrl = readOriginUrl();
+  const foreignTree = checkoutPrerequisite(OWNER_REPO, process.env, originUrl);
+  if (foreignTree) reportPrerequisiteNotMet(foreignTree);
   // Answered once, before any listing — so an unusable transport costs ONE
   // classified verdict instead of a raw HTTP status from whichever label page
   // happened to go first (`pm:dispatched`, in the failure #7412 recorded).
@@ -20936,6 +20989,8 @@ async function sweep(options = {}) {
     candidates: hold.candidates,
     probed: hold.probed,
     tracked: tracked ? tracked.size : null,
+    checkoutRoot: readRepoRoot(),
+    checkoutOrigin: originUrl,
   };
   // Instruction ④'s NOT-MEASURED population: H4's OWN rows, counted rather than
   // re-derived (one computation, two readers). It has to be read HERE because
@@ -22398,7 +22453,7 @@ export const SEEN_LABEL_PAGES = Object.freeze([
  */
 function readRepoRoot() {
   try {
-    return execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim() || null;
+    return gitRead(['rev-parse', '--show-toplevel']).trim() || null;
   } catch {
     return null;
   }
@@ -22406,7 +22461,7 @@ function readRepoRoot() {
 
 function readOriginUrl() {
   try {
-    return execFileSync('git', ['remote', 'get-url', 'origin'], { encoding: 'utf8' }).trim() || null;
+    return gitRead(['remote', 'get-url', 'origin']).trim() || null;
   } catch {
     return null;
   }
@@ -29099,6 +29154,12 @@ async function selfTest() {
   const noOracle = renderMarkdown([], counts, { triggerIndex: { rows: idxRows, candidates: 79, probed: 79, tracked: null } });
   t('H17 no-oracle: says the index is empty BY FAILURE', noOracle.includes('EMPTY BY FAILURE, not by finding'), true);
   t('H17 no-oracle: …and renders no row, so nothing unvalidated leaks out', noOracle.includes('#8331'), false);
+  // The tree the oracle was read in (#19191) — named in BOTH oracle states, knob set or not.
+  const tree19191 = (over) => renderTriggerIndex({ ...triggerIdx, ...over }).join('\n');
+  t('#19191 footer: the H17 footer NAMES the tree the oracle was read in', renderMarkdown([], counts, { triggerIndex: { ...triggerIdx, checkoutRoot: '/home/user/objectui', checkoutOrigin: 'https://github.com/objectstack-ai/objectui' } }).includes('Read in `/home/user/objectui` (`origin` `https://github.com/objectstack-ai/objectui`)'), true);
+  t('#19191 footer: …beside the oracle size, so the two are read together', tree19191({ checkoutRoot: '/r', checkoutOrigin: 'o' }).includes('6360 tracked file(s) in the oracle.) Read in `/r`'), true);
+  t('#19191 footer: an unnamed tree says so rather than reading as this one', tree19191({}).includes('Read in an unnamed tree (`origin` unresolved).'), true);
+  t('#19191 footer: …and the EMPTY-BY-FAILURE branch names its tree too', tree19191({ tracked: null, checkoutRoot: '/r', checkoutOrigin: 'o' }).includes('EMPTY BY FAILURE, not by finding. Run the patrol from inside a checkout. (read on 79 of 79 open `pm:on-hold` card(s).) Read in `/r`'), true);
   // The partial-read gap is stated, never implied.
   t('H17 partial: a partial hold read says so', renderMarkdown([], counts, { triggerIndex: { rows: [], candidates: 79, probed: 12, tracked: 10 } }).includes('read on 12 of 79'), true);
   // Budget: the index is RESERVED, so a board noisy enough to truncate the
@@ -34144,6 +34205,23 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('H57 checkout: a DIFFERENT origin refuses and names both repos', localCheckoutServes('o/r', {}, 'https://github.com/o/other').reason.includes('o/other'), true);
   t('H57 checkout: no origin at all refuses', localCheckoutServes('o/r', {}, null).serves, false);
 
+  // The checkout knob (#19191) — WHICH tree the three local git reads take.
+  const SELF19191 = readFileSync(SELF_PATH, 'utf8');
+  t('#19191 knob: ONE git read site in the file, so a fourth reader cannot skip the cwd', SELF19191.split(['execFileSync', "('git'"].join('')).length - 1, 1);
+  t('#19191 knob: …and no `spawnSync` git read beside it', SELF19191.split(['spawnSync', "('git'"].join('')).length - 1, 0);
+  t('#19191 knob: unset is the inherited cwd — no path is handed to git', resolveSweepCheckout({}).path, null);
+  t('#19191 knob: whitespace is unset too', resolveSweepCheckout({ PM_SWEEP_CHECKOUT: '  ' }).set, false);
+  t('#19191 knob: a path becomes the cwd every local git read takes', resolveSweepCheckout({ PM_SWEEP_CHECKOUT: '/home/user/objectui' }).path, '/home/user/objectui');
+  t('#19191 knob: the knob outranks GITHUB_REPOSITORY, which names the RUNNER\'s tree', localCheckoutServes('o/r', { PM_SWEEP_CHECKOUT: '/t', GITHUB_REPOSITORY: 'o/r' }, 'https://github.com/o/other').serves, false);
+  t('#19191 knob: …so a knob tree whose `origin` IS the board serves, whatever the runner says', localCheckoutServes('o/r', { PM_SWEEP_CHECKOUT: '/t', GITHUB_REPOSITORY: 'o/other' }, 'https://github.com/o/r').serves, true);
+  t('#19191 refusal: unset is no prerequisite at all — today\'s behaviour, unchanged', checkoutPrerequisite('o/r', {}, 'https://github.com/o/other'), null);
+  t('#19191 refusal: knob + matching origin passes, and the sweep runs', checkoutPrerequisite('o/r', { PM_SWEEP_CHECKOUT: '/t' }, 'https://github.com/o/r'), null);
+  const FOREIGN19191 = checkoutPrerequisite('o/r', { PM_SWEEP_CHECKOUT: '/t' }, 'https://github.com/o/other') ?? { headline: '', detail: [], fix: [] };
+  t('#19191 refusal: knob + mismatching origin REFUSES, naming the checkout it was given', String(FOREIGN19191.headline).includes('"/t"'), true);
+  t('#19191 refusal: …and names the repo that tree actually is', FOREIGN19191.detail.join(' ').includes('o/other'), true);
+  t('#19191 refusal: …and carries a fix, ⛔ never a fall back to cwd', String(FOREIGN19191.fix[1]).includes('unset it'), true);
+  t('#19191 refusal: a knob path with no `origin` at all refuses too', checkoutPrerequisite('o/r', { PM_SWEEP_CHECKOUT: '/nope' }, null)?.kind, 'checkout-does-not-serve');
+
   // Census and forwarding.
   t('H57 census: every count key rides the enumerated forwarding contract', ['scheduledDeclared', 'scheduledJudged', 'scheduledUnreadRuns', 'scheduledGating', 'scheduledInactive', 'scheduledInactiveNames', 'scheduledUnreadable', 'scheduledRequests', 'scheduledListingShort', 'scheduledUnresolved'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
   const SUM57 = saidBy('h57Scheduled', summaryLine({ scheduledDeclared: 22, scheduledJudged: 7, scheduledUnreadRuns: 0, scheduledGating: 15, scheduledInactive: 0, scheduledUnreadable: 0, scheduledRequests: 8 }, 0));
@@ -36031,6 +36109,7 @@ export const USAGE = [
   '',
   'the board is named by the ENVIRONMENT — there is no --repo and no positional argument:',
   '  PM_SWEEP_REPO         `owner/name` to sweep; else GITHUB_REPOSITORY, else the built-in default',
+  '  PM_SWEEP_CHECKOUT     the checkout SERVING that board — `cwd` for the three local git reads; a foreign `origin` refuses (exit 3)',
   '  PM_SWEEP_CLOSED_FLOOR YYYY-MM-DD floor for the closed-card pass',
   '  GITHUB_TOKEN/GH_TOKEN the credential the sweep reads with',
   '  NODE_OPTIONS=--use-env-proxy   node reads its proxy flag at process START, so it goes there or',
