@@ -182,7 +182,7 @@ followed by your normal build.
 ### One command covers every major you skipped
 
 ```bash
-os migrate meta --from 15     # the major your metadata was authored against
+os migrate meta --from 16     # the major your metadata was authored against
 ```
 
 `--from` is the major **you** wrote against, not the one you are going to. The
@@ -193,14 +193,21 @@ them by hand:
 
 | You ran | Steps it replays |
 | :--- | :--- |
-| `os migrate meta --from 16` | 17 |
-| `os migrate meta --from 15` | 16, 17 |
-| `os migrate meta --from 14` | 15, 16, 17 |
-| `os migrate meta --from 12` | 13, 14, 15, 16, 17 |
+| `os migrate meta --from 16` | 17, then every later major this build carries a step for |
 
-The chain reaches back to **protocol 10** — that floor is a release-policy
+The chain reaches back to **protocol 16** — that floor is a release-policy
 decision, not an accident of what still exists. Below it the command refuses
 with a message naming the floor rather than half-migrating you.
+
+<Callout type="warn">
+  **The floor was raised from 10 to 16.** Earlier releases replayed the chain
+  from protocol 10, so `--from 10` through `--from 15` used to work and now
+  answer `Cannot migrate from protocol N: the chain's support floor is 16`.
+  Nothing half-migrates: the command refuses before it rewrites anything. If
+  your metadata is still authored against protocol 10–15, reach protocol 16 by
+  another path first — an older `@objectstack/cli` still carries those steps —
+  and then run the command above.
+</Callout>
 
 Useful flags:
 
@@ -265,7 +272,7 @@ has already done.
 ### The loop
 
 ```bash
-os migrate meta --from 15     # 1. read the mechanical change list and the to-dos
+os migrate meta --from 16     # 1. read the mechanical change list and the to-dos
                               # 2. apply the edits by hand; resolve the to-dos
                               #    and the checklist items below
 os validate                   # 3. the gate — schema, CEL predicates, widget bindings
