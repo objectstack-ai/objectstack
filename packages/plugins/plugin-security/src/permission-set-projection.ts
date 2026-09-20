@@ -124,6 +124,33 @@ export async function tryFind(ql: any, object: string, where: any, limit = 100, 
     return Array.isArray(rows) ? rows : [];
   } catch { return []; }
 }
+
+/**
+ * Is this record still on the table? THREE outcomes, not two.
+ *
+ * {@link tryFind} deliberately collapses a failed read into `[]` — right for
+ * every caller that wants "the rows I could see", wrong for anyone who has to
+ * decide whether a row is GONE. `[]` from that helper means "no row matched OR
+ * the read blew up", and a caller reading it as "gone" reports a deletion that
+ * an outage invented. `listSeedOrganizationIds` in `per-organization-catalog.ts`
+ * states the same rule for the same shape: zero organizations is "nothing to
+ * seed", an unreadable table is "we do not know".
+ *
+ * So `unknown` is its own answer and the caller must decide what it means —
+ * ⛔ never folded into `gone` here. The context and the read are otherwise
+ * IDENTICAL to `tryFind`'s (no `transaction` key, so an ambient handle still
+ * carries it), because the difference under test is the catch and nothing else.
+ */
+async function probeRecordSurvival(
+  ql: any,
+  object: string,
+  id: unknown,
+): Promise<'gone' | 'present' | 'unknown'> {
+  try {
+    const rows = await ql.find(object, { where: { id }, limit: 1 }, { context: seedCtx() });
+    return (Array.isArray(rows) ? rows : [])[0] ? 'present' : 'gone';
+  } catch { return 'unknown'; }
+}
 /**
  * ⛔ The `catch` RECORDS the refusal before it answers, when the caller passed
  * a log to record into.
@@ -1318,9 +1345,10 @@ export function createPermissionSetWriteThrough(
     // row it must keep showing.
     //
     // Zero also covers every other way a record survives this loop: a metadata
-    // delete that lands on a package-owned RECORD (left to the package door)
-    // and a retire whose `ql.delete` failed. Both leave the row in place, and
-    // neither is a deletion the caller should be told happened.
+    // delete that lands on a package-owned RECORD (left to the package door),
+    // a retire whose `ql.delete` failed, and a read-back that could not answer
+    // at all. All three leave the row in place — or leave us unable to say it
+    // does not — and none is a deletion the caller should be told happened.
     //
     // ⛔ The outcome is read off the RECORD, never off the re-projection's own
     // `deleted` counter. On a kernel wired to the ADR-0094 AWAITED projector —
@@ -1343,8 +1371,30 @@ export function createPermissionSetWriteThrough(
       // The caller addressed a RECORD by id, so that is the question this
       // answers: is it still there? A row re-projected under the same id is
       // the reset; a row that is gone is the deletion.
-      const survivor = (await tryFind(ql, 'sys_permission_set', { id: row.id }, 1))[0];
-      if (!survivor) removed += 1;
+      //
+      // ⛔ The probe has THREE outcomes and this loop counts only ONE of them.
+      // Probing through `tryFind` — whose catch returns `[]` — would have made
+      // a FAILED read indistinguishable from "the row is gone", and answered
+      // `success: true` with the record sitting exactly where it was: this
+      // card's own lie with a different trigger (an outage instead of a
+      // packaged set). `unknown` is therefore counted as a SURVIVOR, the
+      // fail-closed direction: a caller told "not deleted" re-reads the record
+      // and finds out, a caller told "deleted" has no reason to look again.
+      // It is also the only direction that cannot be produced by a broken
+      // read — `gone` now requires a read that actually ANSWERED.
+      const survival = await probeRecordSurvival(ql, 'sys_permission_set', row.id);
+      if (survival === 'unknown') {
+        // Durability channel: the write half of this delete already ran, so
+        // the row's fate is decided and only our READING of it failed. Say so
+        // once, naming what the caller was told and how to settle it.
+        logger?.warn?.(
+          '[security] could not read the sys_permission_set record back after its metadata delete, so the ' +
+          'data-door answer reports it as NOT deleted (fail-closed). The delete itself already ran; re-read the ' +
+          'record to see whether it was removed or reset to its declared baseline.',
+          { name: row.name, id: row.id },
+        );
+      }
+      if (survival === 'gone') removed += 1;
     }
     // `targets` is non-empty here — the early return above sends an empty
     // target set to the driver — so this is never the vacuous `true`.

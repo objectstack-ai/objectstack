@@ -950,6 +950,70 @@ describe('createPermissionSetWriteThrough (data door → metadata store)', () =>
     expect(pkgCtx.result).not.toEqual(envCtx.result);
   });
 
+  it('a read-back that cannot ANSWER reports the record as NOT deleted (fail-closed)', async () => {
+    // The outcome above is read off the record, which puts the whole answer at
+    // the mercy of ONE read — and the obvious helper for it, `tryFind`, ends in
+    // `catch { return []; }`. Probing through that helper makes a FAILED read
+    // byte-identical to "the row is gone", so the door answers
+    // `200 {"success":true}` with the record sitting exactly where it was:
+    // this card's own lie, re-triggered by an outage instead of by a packaged
+    // set. Nothing else in this file would have said a word about it.
+    //
+    // `unknown` is therefore counted as a survivor. A caller told "not
+    // deleted" re-reads the record and learns the truth; a caller told
+    // "deleted" has no reason to look again.
+    const ql = makeQl();
+    const declaredBody = envBody({ name: 'crm_rep', systemPermissions: ['pkg.baseline'] });
+    (ql as any).registry = { listItems: (t: string) => (t === 'permission' ? [declaredBody] : []) };
+    const protocol = makeProtocol(ql, { crm_rep: declaredBody });
+    registerPermissionSetProjection(protocol, { ql });
+    ql.permRows.push({
+      id: 'ps_pkg', name: 'crm_rep', managed_by: 'package',
+      package_id: 'com.example.crm', system_permissions: '["pkg.baseline"]',
+    });
+
+    // Fail ONLY the read-back. Target resolution and the probe both read
+    // `sys_permission_set` by id, so they are told apart by ORDER: the first
+    // is the middleware resolving what the caller addressed, the second is the
+    // read-back under test. `byIdReads` is asserted below so that a change in
+    // that shape turns this test RED rather than leaving it vacuously green
+    // with an injection that never fired.
+    const realFind = ql.find.bind(ql);
+    let byIdReads = 0;
+    (ql as any).find = async (object: string, q: any) => {
+      if (object === 'sys_permission_set' && q?.where?.id !== undefined) {
+        byIdReads += 1;
+        if (byIdReads >= 2) throw new Error('db unavailable');
+      }
+      return realFind(object, q);
+    };
+
+    const warnings: { m: string; meta?: any }[] = [];
+    const mw = createPermissionSetWriteThrough({
+      ql, getProtocol: () => protocol,
+      logger: { info: () => {}, warn: (m: string, meta?: any) => warnings.push({ m, meta }) },
+    });
+    const opCtx: any = {
+      object: 'sys_permission_set',
+      operation: 'delete',
+      options: { where: { id: 'ps_pkg' } },
+      context: userCtx,
+    };
+    await run(mw, opCtx);
+
+    expect(byIdReads, 'the read-back really ran — otherwise this test proves nothing').toBeGreaterThanOrEqual(2);
+    expect(ql.permRows.length, 'the record is still right there').toBe(1);
+    expect(
+      opCtx.result,
+      '⛔ never `true`: that is the deletion claim this card exists to remove, and a failed read must not manufacture it',
+    ).not.toBe(true);
+    expect(opCtx.result, 'counted as a survivor').toBe(0);
+    expect(
+      warnings.some((w) => String(w.m).includes('could not read the sys_permission_set record back')),
+      'the degradation is reported, not swallowed',
+    ).toBe(true);
+  });
+
   it('SINGLE-STORE kernel (no protocol): package rows keep the legacy two-doors refusal', async () => {
     const ql = makeQl();
     ql.permRows.push({ id: 'ps_pkg', name: 'crm_rep', managed_by: 'package', package_id: 'com.example.crm' });
