@@ -1233,24 +1233,27 @@
  * second round therefore measures THREE populations, and the containing one is
  * synthetic by construction:
  *
- *   ① the same commit window, both instruments — 349 commits, 3,850 file diffs,
- *     774 rows each side, 0 declined, 0 begun, 0 row changing CLASS, 166
- *     changing only their sentence's wording. The repair moves no historical
- *     verdict, which is the same fact as "this census cannot contain it".
+ *   ① the same commit window, both instruments — every commit reachable from
+ *     `origin/main` at `57ceb9d6d2` touching `packages/spec` less the graft
+ *     boundary, 349 commits, 3,850 file diffs, `git show --unified=3` split per
+ *     file: 774 rows on EACH side, 0 declined, 0 begun, 0 row changing CLASS,
+ *     166 changing only their sentence's wording. The repair moves no
+ *     historical verdict, which is the same fact as "this census cannot contain
+ *     it" said from the other end.
  *   ② the tree, both instruments — identical, for the same reason.
  *   ③ ⭐ THE CONTAINING ONE. Every bare element the reader calls a member today
- *     (1,354 in `packages/spec/src/**`, each rebuilt as a one-member addition
- *     with a 40-line context window), with its constructor RE-SPELLED the way a
- *     formatter or an author may spell it. Per spelling, on the first cut:
- *     1,179 of 1,354 went SILENT and not one read as measured. On this reading:
- *     1,354 rows, 1,223 measured, 0 silent — the same answer as the un-re-spelled
- *     control, for chain-wrapped, generic (`<Mode>`) and aliased (`zod.`) alike.
- *     A sub-enum (`Full.extract([`) fires all 1,354, all as NOT MEASURED, which
- *     is the honest verdict for a form the doctrine does not name. ⛔ And the
- *     lit controls that make the census a reading rather than a hope: re-spelt
- *     to `z.tuple([` or `new Set([`, the same 1,179 stay silent on BOTH
- *     instruments — the silence is bought by the construct, never by the
- *     harness.
+ *     (1,354 in `packages/spec/src/**` at `57ceb9d6d2`, each rebuilt as a
+ *     one-member addition with a 40-line context window), with its constructor
+ *     RE-SPELLED the way a formatter or an author may spell it. Per spelling,
+ *     on the first cut: 1,179 of 1,354 went SILENT and not one read as measured.
+ *     On this reading: 1,354 rows, 1,223 measured, 0 silent — the same answer as
+ *     the un-re-spelled control, for chain-wrapped, generic (`<Mode>`) and
+ *     aliased (`zod.`) alike. A sub-enum (`Full.extract([`) fires all 1,354, all
+ *     as NOT MEASURED, which is the honest verdict for a form the doctrine does
+ *     not name. ⛔ And the lit controls that make the census a reading rather
+ *     than a hope: re-spelt to `z.tuple([` or `new Set([`, the same 1,179 stay
+ *     silent on BOTH instruments — the silence is bought by the construct, never
+ *     by the harness.
  *
  * ⚠️ The quiet direction this buys, stated rather than left to be discovered: a
  * genuine closed set CONSTRUCTED THROUGH A CALL. `z.enum(Object.keys(X))` has
@@ -2834,8 +2837,11 @@ export function calleeOfFrameHead(head) {
  * and keeps its row.
  *
  * ⚠️ The population that leaves loud, measured over `packages/spec/src/**` at
- * objectstack `c27e16059d` by feeding each bare-element line back through this
- * reader with its own 60 preceding lines: of 6,553 such lines, 1,354 read
+ * `objectstack-ai/objectstack` `57ceb9d6d2` (= `origin/main`; this branch's diff
+ * does not touch that tree, and the reading is byte-identical to the one taken
+ * at the branch base `c27e16059d`) by feeding each bare-element line back
+ * through this reader with its own 60 preceding lines: of 6,553 lines over
+ * 1,014 files, 1,354 read
  * `declared`, 92 `refused` (`Object.freeze` 65, `new Set` 20, `.default` 7),
  * and of the 5,107 `unread` there are 442 inside a `(` — `.describe(` prose and
  * `retiredKey(` prescriptions, no closed-set member among the heads — and 1,791
