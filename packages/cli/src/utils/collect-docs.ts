@@ -324,14 +324,17 @@ export interface PackageDocSet {
  * The artifact's `packages[]`, reduced to what a `src/<dir>/docs/` directory can
  * be matched against.
  *
- * Three spellings, and no more: the package's full `id`, the LAST dot-separated
- * segment of that id, and its `name`. The middle one is the load-bearing case —
+ * Two spellings, and no more: the package's full `id`, and the LAST
+ * dot-separated segment of that id. The second one is the load-bearing case —
  * `examples/app-multi-package` declares `id: 'com.example.multi.core'` with
  * `name: 'Multi-Package Core'`, so a `src/core/` directory can only be resolved
- * through the id's tail. ⛔ `namespace` is deliberately NOT a spelling: ADR-0130
- * D1 exists so that N packages of one artifact can SHARE one namespace, so
- * matching on it would be ambiguous exactly where multi-package layouts are
- * most common.
+ * through the id's tail. ⛔ `name` is NOT a spelling: it is the package's
+ * DISPLAY name, free to be re-worded at any time, and a directory binding that
+ * a later re-wording BREAKS — reported by the warning below, but broken — is
+ * worse than one that never existed. ⛔ `namespace` is deliberately NOT a
+ * spelling either: ADR-0130 D1 exists so that N packages of one artifact can
+ * SHARE one namespace, so matching on it would be ambiguous exactly where
+ * multi-package layouts are most common.
  *
  * A directory that matches none, or more than one, is not attributed — it is
  * reported, by {@link sweepPackageDocsDirectories}.
@@ -345,7 +348,6 @@ export function docsPackageRefs(packages: unknown): DocsPackageRef[] {
       const tail = body.id.split('.').pop();
       if (tail) directoryNames.add(tail);
     }
-    if (typeof body.name === 'string' && body.name !== '') directoryNames.add(body.name);
     return {
       index,
       id,
@@ -418,8 +420,8 @@ function sweepPackageDocsDirectories(
       severity: 'warning',
       rule: 'docs/uncollected-directory',
       message: owners.length === 0
-        ? `${rel}/ holds ${files.length} Markdown file(s) that were NOT collected: "${entry.name}" names none of this artifact's packages, so there is no package body to attach them to (ADR-0130 D4). A per-package docs directory is matched against a package's \`id\`, the last dot-separated segment of that \`id\`, or its \`name\` — rename the directory to one of those, declare the docs inline as \`defineStack({ docs })\` on the package that owns them, or move them into src/docs/. Declared packages: ${declared}. Found: ${files.join(', ')}`
-        : `${rel}/ holds ${files.length} Markdown file(s) that were NOT collected: "${entry.name}" names ${owners.length} of this artifact's packages (${owners.map((o) => o.id).join(', ')}), so which package body owns these docs is ambiguous and ⛔ this collector will not guess (ADR-0130 D4). Give those packages distinct \`id\`/\`name\` spellings, or declare the docs inline as \`defineStack({ docs })\` on the one that owns them. Found: ${files.join(', ')}`,
+        ? `${rel}/ holds ${files.length} Markdown file(s) that were NOT collected: "${entry.name}" names none of this artifact's packages, so there is no package body to attach them to (ADR-0130 D4). A per-package docs directory is matched against a package's \`id\` or the last dot-separated segment of that \`id\` — rename the directory to one of those two, declare the docs inline as \`defineStack({ docs })\` on the package that owns them, or move them into src/docs/. Declared packages: ${declared}. Found: ${files.join(', ')}`
+        : `${rel}/ holds ${files.length} Markdown file(s) that were NOT collected: "${entry.name}" names ${owners.length} of this artifact's packages (${owners.map((o) => o.id).join(', ')}), so which package body owns these docs is ambiguous and ⛔ this collector will not guess (ADR-0130 D4). Give those packages distinct \`id\` spellings — their last dot-separated segments must differ too — or declare the docs inline as \`defineStack({ docs })\` on the one that owns them. Found: ${files.join(', ')}`,
       path: rel,
     });
   }

@@ -145,8 +145,8 @@ describe('collectDocsFromSrc reads src/<pkg>/docs/ for a resolvable package', ()
     expect(set.docs[0].label).toBe('sales_playbook'); // the first `#` heading
   });
 
-  it('resolves a directory named by the package `name`, and one named by the full `id`', () => {
-    writePackageDoc('orders', 'sales_a', 'MARKER-a'); // ORDERS.name === 'orders'
+  it('resolves a directory named by the id TAIL, and one named by the full `id`', () => {
+    writePackageDoc('orders', 'sales_a', 'MARKER-a'); // the last segment of ORDERS.id
     writePackageDoc('com.example.multi.core', 'crm_b', 'MARKER-b'); // the full id
 
     const { packageDocs } = collectDocsFromSrc(configPath, stack().packages);
@@ -154,6 +154,25 @@ describe('collectDocsFromSrc reads src/<pkg>/docs/ for a resolvable package', ()
       ['src/com.example.multi.core/docs', 'com.example.multi.core', ['crm_b']],
       ['src/orders/docs', 'com.example.multi.orders', ['sales_a']],
     ]);
+  });
+
+  it('⛔ the package `name` is not a resolution spelling — a display name is not a directory key', () => {
+    // `CORE.name` is 'Multi-Package Core', which is neither its `id` nor that
+    // id's last segment, so it is the ONE spelling this card's ruling removed.
+    // ⚠️ The two directories the sibling cases use cannot prove this: ORDERS
+    // spells its `name` 'orders', which is ALSO the tail of its `id`, so a
+    // directory named `orders` resolves either way — that is why the removal
+    // needs a package whose display name stands alone.
+    writePackageDoc('Multi-Package Core', 'crm_display', 'MARKER-display-name');
+
+    const { docs, packageDocs, issues } = collectDocsFromSrc(configPath, stack().packages);
+    expect(docs).toEqual([]);
+    expect(packageDocs).toEqual([]);
+    expect(issues.map((i) => [i.rule, i.severity])).toEqual([['docs/uncollected-directory', 'warning']]);
+    expect(issues[0].path).toBe('src/Multi-Package Core/docs');
+    expect(issues[0].message).toContain('"Multi-Package Core" names none of this artifact\'s packages');
+    // ...and the remedy it prints no longer advertises the spelling it refused.
+    expect(issues[0].message).not.toContain('or its `name`');
   });
 
   it('keeps reading the flat src/docs/ alongside the per-package ones', () => {
@@ -562,13 +581,13 @@ describe('a stack with no packages[] is on the path it was always on', () => {
 
 // ── docsPackageRefs + attachPackageDocs ────────────────────────────────────
 describe('docsPackageRefs', () => {
-  it('derives exactly three directory spellings per package, and no namespace', () => {
+  it('derives exactly two directory spellings per package — ⛔ neither `name` nor `namespace`', () => {
     expect(docsPackageRefs(stack().packages)).toEqual([
       {
         index: 0,
         id: 'com.example.multi.core',
         namespace: 'crm',
-        directoryNames: ['com.example.multi.core', 'core', 'Multi-Package Core'],
+        directoryNames: ['com.example.multi.core', 'core'],
       },
       {
         index: 1,

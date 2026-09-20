@@ -124,8 +124,9 @@ beforeAll(() => {
   mkdirSync(join(dirs.multi, 'src', 'orders', 'docs'), { recursive: true });
   mkdirSync(join(dirs.multi, 'src', 'docs'), { recursive: true });
   writeFileSync(join(dirs.multi, 'objectstack.config.ts'), CONFIG_MULTI);
-  // Owned by `com.example.pkgdocs.orders` — directory name === manifest `name`,
-  // and its own namespace `ord` is what the name must be prefixed with.
+  // Owned by `com.example.pkgdocs.orders` — directory name === the last
+  // dot-separated segment of that `id`, and its own namespace `ord` is what
+  // the doc name must be prefixed with.
   writeFileSync(
     join(dirs.multi, 'src', 'orders', 'docs', 'ord_playbook.md'),
     `# Orders Playbook\n\n${MARKER_PKG}\n`,
