@@ -641,6 +641,21 @@ jobs:
           node scripts/check-comment-mask-adoption.mjs --self-test
           node scripts/check-comment-mask-adoption.mjs
 
+      # The declaration-emission completeness guard (#19402). Its PRODUCTION run
+      # is a step of `packages/spec`'s own build, in another job, for the reason
+      # #11907 recorded: turbo caches only SUCCESSFUL tasks, so the verdict has
+      # to land inside the build or a partial emission is cached under the
+      # ordinary hash and replayed. What runs HERE is the `--self-test`, and it
+      # is the only instrument on this gate's rule: a healthy tree is green by
+      # construction, so the production run cannot tell a working walk from a
+      # dead one. The self-test supplies the partial emission a real tree does
+      # not contain — every declared entry present, a chunk gone, which is the
+      # tree both neighbouring guards acquit.
+      # Hermetic: real fixture files in a temp dir, no network, no node_modules
+      # beyond `typescript`; ~1s.
+      - name: Declaration references resolve (#19402) — self-test
+        run: node scripts/check-dts-references.mjs --self-test
+
       # A package's published `src/**` may only import workspace packages its own
       # manifest DECLARES (#10062). The class was filed with one member and a
       # mitigation — "type-only, so nothing lands in the emitted JavaScript" —
