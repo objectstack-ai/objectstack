@@ -149,8 +149,16 @@ runs:
           exit 1
         fi
 
+        # ⚠️ The message below names the secret in WORDS on purpose. A composite
+        # action's `run:` body is template-expanded before it is a script, and a
+        # composite action may not read `secrets` at all, so spelling the
+        # expression form here — even inside a string, even backslash-escaped —
+        # is a LOAD-TIME `Unrecognized named-value: 'secrets'` that fails the
+        # whole action before its first line runs. Measured on this repo's
+        # runner (2026-09-20, run 35481043482), where it took the patrol down
+        # while the caller's other steps went on running.
         if [ -z "$GH_TOKEN_IN" ]; then
-          echo "::error::The 'github-token' input is empty. Pass the calling workflow's own \${{ secrets.GITHUB_TOKEN }}; an unauthenticated sweep cannot read the board and must not be reported as a clean one."
+          echo "::error::The 'github-token' input is empty. Pass the calling workflow's own secrets.GITHUB_TOKEN through this input; an unauthenticated sweep cannot read the board and must not be reported as a clean one."
           exit 1
         fi
 
