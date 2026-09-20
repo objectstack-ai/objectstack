@@ -1137,8 +1137,11 @@ describe('validateRecord — signature/qrcode maxLength binds at the write seam 
  * fails this block as loudly as the pre-ruling branch does.
  */
 describe('validateRecord — a fraction-stored percent derives `scale + 2` (#19320)', () => {
+  // Typed off `validateRecord` itself rather than re-spelled: the declaration
+  // shape is the validator's, so a field key this block gets wrong is a type
+  // error here instead of a runtime no-op that quietly validates nothing.
   const fieldsOf = (
-    schema: { fields: Record<string, unknown> },
+    schema: Parameters<typeof validateRecord>[0],
     data: Record<string, unknown>,
     mode: 'insert' | 'update' = 'insert',
     options = {},
@@ -1179,7 +1182,7 @@ describe('validateRecord — a fraction-stored percent derives `scale + 2` (#193
     // written. Naming the raw declaration here would render "at most 2
     // decimal places (got 5)" on a field that accepts 4.
     const errs = fieldsOf(fraction, { rate: 0.12345 });
-    expect(errs?.[0]).toMatchObject({ code: 'max_scale', constraint: { scale: 4, actual: 5 } });
+    expect(errs?.[0]).toMatchObject({ field: 'rate', code: 'max_scale', constraint: { scale: 4, actual: 5 } });
     expect(errs?.[0].message).toBe('Rate must have at most 4 decimal places (got 5)');
   });
 
