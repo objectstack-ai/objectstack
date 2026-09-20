@@ -161,6 +161,11 @@ on:
       # as the row above, one file along: a step whose script can change without
       # this trigger firing is a step whose PR-time proof is a coincidence.
       - 'scripts/pm/sweep-closed-cards.mjs'
+      # The citation census this workflow also calls (#18224). Same reasoning as
+      # the two rows above, one file along: a step whose script can change
+      # without this trigger firing is a step whose PR-time proof is a
+      # coincidence.
+      - 'scripts/check-issue-citations.mjs'
       # The patrol's body. A glob, not the one file: anything added to that
       # directory is part of what runs here.
       - '.github/actions/half-state-patrol/**'
@@ -170,9 +175,21 @@ on:
 # plus the labels and comment the closed-card sweep is ruled to write. `issues:
 # write` is the narrowest scope GitHub offers for either edit; the sweeper the
 # patrol calls is read-only against the API by construction.
+#
+# `pull-requests: read` is READ-ONLY and buys one thing, for the citation
+# census step only — MEASURED on run 35495222460, this workflow's own
+# pull_request run WITHOUT this row: the census reported 3,628 unresolvable
+# citation sites where a full-scope read of the same tree reported 2,168, and
+# the difference is 1,460 — EXACTLY the `resolves-as-pull-request` tally.
+# `GET /repos/{owner}/{repo}/issues` answers with the pull requests omitted
+# unless this scope is held, so every citation naming a PR number was reported
+# as a number the board never had. A report-only reading that is wrong by 67%
+# is still a machine-readable surface telling a lie. ⛔ Do not drop this row
+# as tidying, and ⛔ do not widen it to `write`: nothing here writes a PR.
 permissions:
   contents: read
   issues: write
+  pull-requests: read
 
 # One patrol at a time. A scheduled run overlapping a manual dispatch would have
 # two runs racing to rewrite the same body, and the loser's findings would vanish
@@ -350,4 +367,122 @@ jobs:
             echo "::error::closed-card sweep exited 3 — it could NOT read the board, so it says nothing about whether residue is accumulating. See this run's summary."
           elif [ "$code" != "0" ]; then
             echo "::warning::closed-card sweep exited $code — at least one card was left UNJUDGED. An unjudged card is not a clean card; see this run's summary."
+          fi
+
+      - name: Census the repo's issue citations
+        # #17512's gate, wired here by #18224 — the REPORT-ONLY half, and the
+        # posture is a ruling, not a preference. `--census` judges every
+        # citation in the gate's declared surfaces (the published release pages
+        # and package source docblocks), which is ~2,785 unresolvable sites on a
+        # tree nobody touched, and its verdict is NOT a function of this tree:
+        # #16783, #16786 and #16787 were measured RESOLVING on 2026-09-10 and
+        # 404 on 2026-09-14 with no change to this repository. That is exactly
+        # the shape this workflow exists for — a fact about a live shared board,
+        # not about whichever change happens to run CI next — so it belongs on
+        # the patrol lane and ⛔ NEVER on a blocking one. The DIFF-scoped half of
+        # the same gate is the blocking one and lives in `lint.yml`; the two
+        # postures are opposite on purpose and ⛔ neither moves to the other's
+        # lane.
+        #
+        # ⛔ NOT in the composite action this job `uses:` above — it is a step of
+        # the CALLER, for the same reason the closed-card sweep one step up
+        # states, plus two that are specific to a census of a TREE. All three
+        # are measurable on this repo rather than argued:
+        #
+        #   - It is not repo-agnostic. `scripts/check-issue-citations.mjs` is
+        #     objectstack-only, so the action's own "Locate the patrol sources"
+        #     step would have to either name it — and then REFUSE to run in
+        #     every sibling that adopted the action, which is the one thing that
+        #     action exists to make possible — or not name it, and leave a step
+        #     inside the action failing on a missing file in that sibling. The
+        #     repo-name gate below is what answers both, and it belongs where
+        #     the repository is the caller's own.
+        #   - The action runs its scripts from `steps.sources.outputs.root`, the
+        #     tree the ACTION ships from, while the board's checkout is
+        #     `github.workspace`; that split is deliberate and the action's own
+        #     comments carry it. This census's subject is the WORKSPACE tree's
+        #     declared surfaces, so from inside the action a sibling's run would
+        #     census objectstack's own release pages and report the count under
+        #     the sibling's name — a machine-readable surface telling a lie, the
+        #     failure this step's `permissions:` note above is about. In the
+        #     caller the two directories are the same one, on every install.
+        #   - `pull-requests: read` is granted by the `permissions:` block of
+        #     this file. A composite action declares no permissions and the
+        #     action's input documentation names only `issues: write` and
+        #     `contents: read`, so a census inside it would silently depend on a
+        #     scope no adopting caller was told to grant — measured above as a
+        #     reading wrong by 67%. A scope and its one consumer stay in one
+        #     file.
+        #
+        # WHERE THE REPORT GOES: this run's step summary and job log, plus one
+        # `::warning::` carrying the site count. ⛔ NOT the anchor issue — that
+        # body is owned end-to-end by `check-half-states.mjs`'s generator, and a
+        # second writer is how half of a generated body goes stale.
+        # HOW OFTEN: on this workflow's schedule — four times a day, six hours
+        # apart — plus any `workflow_dispatch`, plus the `pull_request` runs the
+        # paths filter above admits.
+        # WHAT IT COSTS AND WHO PAYS: the census enumerates the whole board once
+        # (159 requests on this repo at the time of writing, cursor-paginated —
+        # the alternative is one request per distinct number). It is paid by
+        # THIS repository's own `secrets.GITHUB_TOKEN` core quota, the same
+        # 5,000/hour this job already draws the live sweep from: ~636
+        # requests/day at four runs, under half a percent of a single hour's
+        # allowance. ⛔ No PAT, no cross-repo credential — the file's own rule.
+        #
+        # ⛔ Gated on the repository NAME, for the reason the closed-card sweep
+        # above states: this script is objectstack-only until a sibling has a
+        # copy, and a verbatim copy of this workflow elsewhere must SKIP rather
+        # than fail on a missing file.
+        #
+        # ⛔ `!cancelled()` rather than an implicit `success()`, and this
+        # placement has to SPELL that rather than inherit it. While the patrol's
+        # steps were written inline in this file, this step sat ABOVE the one
+        # step that fails the job, so it ran whatever the sweep returned. The
+        # patrol is now a single `uses:` step that goes red itself when the
+        # sweep could not read the board, so a default `success()` here would
+        # skip the census on exactly the runs where the patrol is down. This
+        # step reads neither the sweep's exit code nor its files: a patrol that
+        # could not reach the board says nothing about whether the citations in
+        # this tree resolve.
+        #
+        # ⛔ This step never fails the job, whatever the census returns —
+        # findings are not a failure condition here, and neither is a census
+        # that could not read the board: that is an alarm (`::error::`), not a
+        # gate. LAST on purpose, after the patrol's own anchor write and after
+        # the closed-card sweep: the anchor is this patrol's product, this job
+        # has a 15-minute timeout, and a report-only reading must never be able
+        # to starve the thing the workflow exists to deliver.
+        if: ${{ !cancelled() && github.repository == 'objectstack-ai/objectstack' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          node scripts/check-issue-citations.mjs --census \
+            > "$RUNNER_TEMP/issue-citations.md" 2> "$RUNNER_TEMP/issue-citations.err"
+          code=$?
+          set -e
+          # Captured with NO pipe in between, for the reason the two steps above
+          # state at length: piped, `$?` is the pipe's status and a red run and a
+          # green one read the same.
+          {
+            echo "### Issue-citation census — exit $code (report-only)"
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/issue-citations.md" 2>/dev/null || echo '(no report produced)'
+            echo '```'
+            echo
+            echo '<details><summary>stderr</summary>'
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/issue-citations.err" 2>/dev/null || true
+            echo '```'
+            echo
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat "$RUNNER_TEMP/issue-citations.err" >&2 || true
+          if [ "$code" != "0" ]; then
+            echo "::error::issue-citation census exited $code — the board was NOT read, so this run says nothing about whether unresolvable citations are accumulating. A census that could not run is not a clean census. See this run's summary."
+          else
+            sites=$(sed -n 's/^.*census: \([0-9][0-9]*\) unresolvable citation site(s).*$/\1/p' "$RUNNER_TEMP/issue-citations.md" | tail -1)
+            echo "::warning::issue-citation census: ${sites:-unknown} unresolvable citation site(s) in the declared surfaces. Report-only — the blocking half judges only what a change ADDS."
           fi
