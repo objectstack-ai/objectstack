@@ -188,8 +188,22 @@ function makeCountingDriver() {
     async connect() {}, async disconnect() {}, async checkHealth() { return true; },
     async execute() { return null; },
     async find(object: string, ast: any) {
-      reads.findOn[object] = (reads.findOn[object] ?? 0) + 1;
-      return Array.from(storeFor(object).values()).filter((r) => matches(r, ast?.where)).map(copy);
+      // The counter is read by TYPE rather than with `?? 0`. This double is
+      // lifted and driven by `check:objectql-double-limit`, which stubs every
+      // non-function declaration it cannot supply — `reads` among them — and
+      // arithmetic on that stub throws before the body can be judged at all,
+      // which files the double as UNJUDGED rather than as conforming.
+      const prior = reads.findOn[object];
+      reads.findOn[object] = (typeof prior === 'number' ? prior : 0) + 1;
+      const matched = Array.from(storeFor(object).values())
+        .filter((r) => matches(r, ast?.where));
+      // The caller's bound: applied by PRESENCE (so `limit: 0` returns nothing),
+      // AFTER the filter, and BEFORE the rows are copied — so no row outside the
+      // bound is ever touched. `resolveLookupTitles` passes `limit: ids.length`,
+      // and a limit-blind double would answer a bounded query with an unbounded
+      // page while the read counts here still looked right.
+      const page = typeof ast?.limit === 'number' ? matched.slice(0, ast.limit) : matched;
+      return page.map(copy);
     },
     async findOne(object: string, ast: any) {
       reads.findOneOn[object] = (reads.findOneOn[object] ?? 0) + 1;
