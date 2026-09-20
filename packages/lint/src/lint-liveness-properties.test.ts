@@ -727,15 +727,28 @@ describe('lintLivenessProperties', () => {
 
     // Anti-vacuity guard for both silence pins above — the shape the dashboard
     // and navigation blocks use, and the reason those pins are worth keeping at
-    // all. `lintLivenessProperties` returns [] when it cannot resolve the
-    // shipped ledgers, so "no field findings" is also what a lint that had
-    // stopped reading ledgers returns; and with `relatedListFilter` live the
-    // FIELD ledger has no warned row left, so nothing inside the field walk can
-    // tell a working lint from one that never loaded. This authors the flipped
-    // key and a property that IS still `authorWarn` — `object.externalSharingModel`,
-    // on the very object carrying the fields — in the SAME call: same process,
-    // same ledger load, one warning and not two.
-    it('the related-list silence is a real verdict, not a lint that stopped loading ledgers', () => {
+    // all. It answers ONE question, and the test name is narrowed to exactly
+    // that question: could this file's silence be coming from a lint that never
+    // resolved the ledger DIRECTORY? `lintLivenessProperties` returns [] outright
+    // when `resolveLivenessDir()` finds nothing, so "no field findings" is also
+    // what a lint holding no ledgers at all returns; and with `relatedListFilter`
+    // live the FIELD ledger has no warned row left, so nothing inside the field
+    // walk can tell those two apart on its own. This authors the flipped key and
+    // a property that IS still `authorWarn` — `object.externalSharingModel`, on
+    // the very object carrying the fields — in the SAME call: one warning and
+    // not two, out of a directory that demonstrably resolved.
+    //
+    // ⚠️ What it does NOT cover, measured rather than assumed: a missing or
+    // unparseable `field.json` ALONE. `loadWarnMap` returns an empty map
+    // SILENTLY for both — `lint-liveness-properties.ts:77` for the absent file,
+    // `:81-83` for the parse failure — and `object` and `field` are two separate
+    // loads (`:485-486`), so the second warning below still arrives from
+    // `object.json` and this test stays green. With the row live, a lost
+    // `field.json` is observationally identical to the flip from inside
+    // `lintLivenessProperties`. That blind spot belongs to `loadWarnMap`'s silent
+    // returns, is shared by the #6774 and #10068 blocks this one is modelled on,
+    // and is left to its own card rather than patched in behind a test name.
+    it('the related-list silence is a real verdict, not a lint that never resolved the ledger directory', () => {
       const findings = lintLivenessProperties({
         objects: [{
           name: 'account',
