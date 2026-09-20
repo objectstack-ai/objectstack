@@ -687,6 +687,15 @@ declare const assembledRow: AssembledInstalledPackage;
  * to neither is refused by both branches. That suppression is what reddens if
  * anyone ever "widens" these members to `any` / `unknown` / an open shape to
  * make a payload fit.
+ *
+ * ## Ablation, measured rather than asserted
+ *
+ * Restore `packages/client/src/index.ts` to `origin/main` (`adf4b18777`), keep
+ * this file, run `tsc --noEmit -p tsconfig.test.json`: exit 2, **nine** errors —
+ * the five `toEqualTypeOf` pins that name the union (TS2344, here and in the
+ * three blocks above) and the four direction-1 assignments below (TS2322). Both
+ * `@ts-expect-error` lines stay USED in that run, which is what makes them
+ * controls rather than evidence: they are labelled GREEN IN BOTH STATES below.
  */
 export function installedPackageEitherStagePins17536(): void {
     // ── direction 1: the assembled stage is ADMITTED, on all four read members ─
@@ -707,17 +716,21 @@ export function installedPackageEitherStagePins17536(): void {
     const getStillAdmitsAuthoring: Awaited<ReturnType<typeof client.packages.get>> = authoringRow;
 
     // ── the control: the WRITE members did not move ──────────────────────────
-    // `POST /packages` declares `manifest: ManifestSchema` on its REQUEST
-    // contract, so the row it answers is the authoring stage and stays declared
-    // as one. This suppression is also the lit control for direction 1 above: it
-    // is the same assignment, and it is USED precisely because an assembled row
-    // is refused by an `InstalledPackage` annotation.
+    // GREEN IN BOTH STATES — a control, not red-before evidence, and that is
+    // exactly its job. `POST /packages` declares `manifest: ManifestSchema` on
+    // its REQUEST contract, so the row it answers is the authoring stage and
+    // stays declared as one. This suppression is the same assignment direction 1
+    // makes, against the member that did NOT move: it is USED precisely because
+    // an assembled row is refused by an `InstalledPackage` annotation, so if the
+    // two were assignable after all it would go unused (TS2578) and direction 1
+    // would be shown to have been passing vacuously.
     // @ts-expect-error the install door answers the AUTHORING stage; an assembled row is not one
     const installRefusesAssembled: Awaited<ReturnType<typeof client.packages.install>> = assembledRow;
 
     // ── direction 2: two closed stages, not a tolerant shape ─────────────────
-    // A `manifest` belonging to NEITHER stage is refused by both branches of the
-    // union, so it is refused by the declaration. This is the line that reddens
+    // GREEN IN BOTH STATES — the second control. A `manifest` belonging to
+    // NEITHER stage is refused by both branches of the union, so it is refused by
+    // the declaration. This is the line that reddens
     // (TS2578, unused suppression) if these members are ever widened to `any`,
     // `unknown`, or an open shape.
     //
