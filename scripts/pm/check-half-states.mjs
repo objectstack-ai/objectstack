@@ -15272,6 +15272,72 @@ export function h63StaleFindingBesideGrade(issue) {
 }
 
 // ---------------------------------------------------------------------------
+// H68 (#18901) — a class-(b) card with no `Seam:` line
+//
+// The three-class filing rule (os-dev.md 六条基本规则 3) makes a class-(b)
+// finding — 违背已声明契约 — carry ONE machine-readable line naming both ends
+// of its seam, `Seam: spec:KEY → runtime:CALL_SITE | renderer:COMPONENT`
+// (`consumer: none` when no consumer was measured), which the routing half
+// reads; a (b) card without it names its seam in prose no router can read.
+// The signal, MEASURED (2026-09-20T11:12Z, 537 open cards): 20 bodies say
+// `class (b)` / `判据 (b)`, 16 DECLARE it (a heading naming the class or a
+// line opening with it; one a `pm:seat` post), 4 mention it mid-sentence (one
+// a card ABOUT the rule); comments name the class on 0 of 20 `finding` cards
+// and on 8 of the 20 body hits, comment-only 0. So the body DECLARATION is
+// the reader — it dominates the comment signal, it is what the rule asks the
+// dev to write, and it costs no request; a mid-sentence mention is not a
+// declaration. `Seam:` lines at line start on that board: 0.
+// Population: the UNSCOPED listing (H63's channel) — declared before any
+// grade. ⛔ Report-only, never a verdict by itself. ⛔ The VALUE after `Seam:`
+// is not judged: presence at line start is the filed contract, the value the
+// routing half's reading; the reader is the one `Blocked-by:` shares.
+// ---------------------------------------------------------------------------
+
+/** A heading naming the class, or a line opening with it (decoration and a leading `Finding` tolerated) — the measured shapes. */
+export const CLASS_B_HEADING_RE = /^#{1,6}[ \t]+[^\n]*?(?:[Cc]lass|判据)[ \t]*[(（]b[)）]/m;
+export const CLASS_B_LINE_RE = /^[ \t]*(?:[-*>⇒·][ \t]*)*(?:\*\*|`|_)*(?:Finding[ \t]+)?(?:[Cc]lass|判据)[ \t]*[(（]b[)）]/m;
+export const H68_QUOTE_LIMIT = 160;
+/** Spelled without angle brackets: the anchor body is a GitHub body. */
+export const SEAM_LINE_SHAPE = '`Seam: spec:KEY → runtime:CALL_SITE | renderer:COMPONENT`';
+
+/** The class-(b) DECLARATION line in this body, trimmed, or null. */
+export function classBDeclaration(body) {
+  const text = String(body ?? '');
+  const m = CLASS_B_HEADING_RE.exec(text) ?? CLASS_B_LINE_RE.exec(text);
+  if (!m) return null;
+  const end = text.indexOf('\n', m.index);
+  return text.slice(m.index, end === -1 ? text.length : end).trim();
+}
+
+/** A `Seam:` line at line start — the shared directive reader, a same-line value required. */
+export function hasSeamLine(text) {
+  return directiveValues(text, 'Seam').length > 0;
+}
+
+/** H68 — null when out of scope, undeclared, or already carrying the line; else the finding sentence quoting the declaration. */
+export function h68ClassBWithoutSeamLine(issue) {
+  if (!issue || issue.pull_request || issue.state !== 'open') return null;
+  if (NEVER_SWEPT_LABELS.some((label) => labelNames(issue).includes(label))) return null;
+  const body = String(issue.body ?? '');
+  const declared = classBDeclaration(body);
+  if (declared === null || hasSeamLine(body)) return null;
+  const quoted = declared.length > H68_QUOTE_LIMIT ? `${declared.slice(0, H68_QUOTE_LIMIT)}…` : declared;
+  return (
+    `open and DECLARED class (b) — 「${quoted}」 — with no \`Seam:\` line at line start: the three-class filing ` +
+    'rule (os-dev.md 六条基本规则 3) makes a 违背已声明契约 finding carry ONE machine-readable line naming both ' +
+    `ends of the seam, ${SEAM_LINE_SHAPE}, \`consumer: none\` when the filer measured no consumer — and the ` +
+    'routing half reads that line (a seam whose producer is `packages/spec` is dispatched vertically; one whose ' +
+    'consumer is in objectui is split into parent + sub-issues), so a card without it names its seam in prose ' +
+    'that no router can read. Remedy — WHO and HOW: the filer, or the seat that next writes on this card, adds ' +
+    'the line to the BODY (bare, or decorated the way `Blocked-by:` may be) with its value on the same line; ' +
+    'the value itself is the routing half\'s to judge, not this row\'s. ⛔ Report-only: no label is written ' +
+    'from this script and no card is graded from here. Boundaries: a mid-sentence mention of the class is not a ' +
+    'declaration and is not listed (restate it at a heading or line start); a `pm:seat` post is never judged; ' +
+    'a closed card is archive; the ungraded marker beside a grade is H63\'s, which this row does not duplicate.'
+  );
+}
+
+// ---------------------------------------------------------------------------
 // H64 (#18069, re-keyed by #18237) — a seat- or dev-signed artefact that names
 // no session.
 //
@@ -19356,6 +19422,17 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   // RELEASE RECORD on the newest comment, this one reads the DELIVERY on the
   // timeline.
   H67: 'state',
+
+  // H68 is a `state` (#18901), the three refusals on the refused band's OWN
+  // criterion. ⛔ NOT `gate`: nothing here decides a landing; the absent LINE
+  // reads as nothing — a router that cannot place the card, not a green light.
+  // ⛔ NOT `stall`: whether a line-less (b) card routes slower is UNMEASURED,
+  // and the grading seat reads the seam out of the prose by hand — the cost,
+  // not a halt. ⛔ NOT `inventory`: one card; the population reading lives in
+  // the docblock. Left is `state` exactly: a LIVE card's face half-written
+  // against a shape it owes — class declared, seam unnamed — repaired in one
+  // body edit; H63's and H65's band, the rows it sits beside.
+  H68: 'state',
 
   // H57 is a `stall` (#17132), and the three refusals are each taken on the
   // refused band's own criterion rather than on this subject's vocabulary —
@@ -23568,6 +23645,11 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     // population IS the sweep's target set rather than an approximation of it.
     const staleFinding = h63StaleFindingBesideGrade(issue);
     if (staleFinding) findings.push([issue, 'H63', staleFinding]);
+    // H68 (#18901) — the class-(b) declaration with no `Seam:` line, on this
+    // listing for H63's reason: the class is declared in the BODY before any
+    // grade. Two body reads on a row already held — no request, no thread.
+    const seamless = h68ClassBWithoutSeamLine(issue);
+    if (seamless) findings.push([issue, 'H68', seamless]);
   }
 
   // H35 (#11881) — the EVENT behind the state H31 compares. One repo-wide
@@ -24776,10 +24858,13 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // because a number with no provenance is what got re-derived from memory the
   // first time.
   'ISSUE_BODY_LIMIT measured cap': 52,
+  // Registered with the class-(b) seam-line row (#18901), pin just under the
+  // count: a READER pinned on MEASURED live shapes, its firing controls inside.
+  'H68 class-(b) seam line': 24,
 });
 
 /** The floor on the ROSTER itself — how many batteries must be declared at all. */
-export const SELF_TEST_BATTERY_FLOOR = 6;
+export const SELF_TEST_BATTERY_FLOOR = 7;
 
 async function selfTest() {
   const cases = [];
@@ -27909,6 +27994,41 @@ async function selfTest() {
   t('H63 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
   t('H63 band: …and none is registered that the sweep never pushes', familyRegistryCoverage().extra.length, 0);
 
+  // -- H68 (#18901): a class-(b) card with no `Seam:` line — the reader pinned
+  //    on the shapes MEASURED on the live board, a lit control under every
+  //    silence, the floor pins at the foot ------------------------------------
+  const BATTERY18901 = 'H68 class-(b) seam line';
+  const SEAM_LIVE = 'Seam: spec:field.relatedListFilter → consumer: none';
+  const B19160 = '## What is wrong\n\nprose.\n\n## Class (b) — it violates a contract this repository publishes\n\nAGENTS.md PD#14 says …';
+  const bCard = (body, labels = ['pm:queue', 'domain:skills', 'priority:p2'], over = {}) => ({ number: 19160, state: 'open', body, labels: labels.map((name) => ({ name })), ...over });
+  const row68 = (...args) => String(h68ClassBWithoutSeamLine(...args) ?? '');
+  b(BATTERY18901, 'H68: the live #19160 specimen — a `## Class (b) — …` heading, no `Seam:` line -> finding', typeof h68ClassBWithoutSeamLine(bCard(B19160)), 'string');
+  b(BATTERY18901, 'H68: …and the row QUOTES the declaration it found, so the reader knows which line put the card in the set', row68(bCard(B19160)).includes('「## Class (b) — it violates a contract this repository publishes」'), true);
+  b(BATTERY18901, 'H68: every measured heading spelling fires — `Why it is class (b)`, `Why this is class (b), …`, `The defect — class (b), …`, `判据 (b):…`, a bare `### Class (b)`', ['## Why it is class (b)', '## Why this is class (b), violating a declared contract', '## The defect — class (b), declared ≠ enforced, on a published API contract', '## 判据 (b):一条声明过的规则,在一个它够不到的地方被违反着', '### Class (b)'].every((h) => typeof h68ClassBWithoutSeamLine(bCard(`intro\n\n${h}\n\nbody`)) === 'string'), true);
+  b(BATTERY18901, 'H68: every measured line-opening spelling fires — bare, bold, `⇒`, `Finding class (b)`, a bullet, `判据 (b)`', ['Class (b): the same declared invariant, violated the same way, in a different package.', '**Class (b)** — a prohibition without a permitted action.', '⇒ class (b): violates an already-declared contract, with the contract text cited.', 'Finding class (b), surfaced by the maintainer\'s first sweep batch', '- Class (b), violating a declared contract: check (c)\'s own documented contract', '判据 (b):声明了却没人读'].every((l) => typeof h68ClassBWithoutSeamLine(bCard(`intro\n\n${l}\n\nbody`)) === 'string'), true);
+  b(BATTERY18901, 'H68: an UNGRADED `finding` carrier fires too — the class is declared before any grade, which is why the row reads the unscoped listing', typeof h68ClassBWithoutSeamLine(bCard(B19160, ['finding'])), 'string');
+  b(BATTERY18901, '⭐ H68: the same body with a bare `Seam:` line is clean', h68ClassBWithoutSeamLine(bCard(`${B19160}\n\n${SEAM_LIVE}`)), null);
+  b(BATTERY18901, 'H68: …decorated — bulleted, bold, backticked, nested — is the same line (shared reader)', [`- ${SEAM_LIVE}`, `**${SEAM_LIVE}**`, `\`${SEAM_LIVE}\``, `- **\`${SEAM_LIVE}\`**`].every((l) => h68ClassBWithoutSeamLine(bCard(`${B19160}\n\n${l}`)) === null), true);
+  b(BATTERY18901, 'H68: …and the renderer-shaped and runtime-shaped values are lines too — the VALUE is not judged here', ['Seam: spec:view.columns[].width → renderer:ObjectGrid', 'Seam: spec:object.validations → runtime:packages/objectql/src/validate.ts'].every((l) => h68ClassBWithoutSeamLine(bCard(`${B19160}\n${l}`)) === null), true);
+  b(BATTERY18901, '⛔ H68: a `Seam:` with NOTHING after it is no line, and a mid-sentence `Seam:` is no line — the card still fires', [typeof h68ClassBWithoutSeamLine(bCard(`${B19160}\n\nSeam:`)), typeof h68ClassBWithoutSeamLine(bCard(`${B19160}\n\nthe dev writes a Seam: line here`))].join(), 'string,string');
+  b(BATTERY18901, 'H68 control: …and the byte-identical body with the value on the line is clean', h68ClassBWithoutSeamLine(bCard(`${B19160}\n\n${SEAM_LIVE}`)), null);
+  b(BATTERY18901, '⛔ H68: a MID-SENTENCE mention is not a declaration — the measured false positive is a card ABOUT the rule', h68ClassBWithoutSeamLine(bCard('one report-only row — an OPEN card graded class (b) (a `finding` whose triage comment names 判据 (b)) with no `Seam:` line')), null);
+  b(BATTERY18901, 'H68 control: …and the same words at line start fire', typeof h68ClassBWithoutSeamLine(bCard('Class (b) (a `finding` whose triage comment names 判据 (b)) with no `Seam:` line')), 'string');
+  b(BATTERY18901, '⛔ H68: `class-(b)` hyphenated in prose, `(b)` alone, and the class (a) / (c) headings are not this class', ['a class-(b) finding carries one line', '## (b) the second option', '## Class (a) — a reproducible defect', '## Class (c) — a metadata trap'].every((l) => h68ClassBWithoutSeamLine(bCard(`intro\n\n${l}`)) === null), true);
+  b(BATTERY18901, '⛔ H68: a `pm:seat` post is NEVER judged — the measured `### 判据 (b) 九车道全量读数` heading is a reading, not a card', h68ClassBWithoutSeamLine(bCard('### 判据 (b) 九车道全量读数(2026-09-13 R+219)', ['pm:seat'])), null);
+  b(BATTERY18901, 'H68 control: …and the identical body without `pm:seat` fires', typeof h68ClassBWithoutSeamLine(bCard('### 判据 (b) 九车道全量读数(2026-09-13 R+219)', ['domain:skills'])), 'string');
+  b(BATTERY18901, '⛔ H68: a CLOSED card is archive, a PULL REQUEST row is not a card, a body-less card has no declaration, a missing row does not crash', [h68ClassBWithoutSeamLine(bCard(B19160, undefined, { state: 'closed' })), h68ClassBWithoutSeamLine(bCard(B19160, undefined, { pull_request: {} })), h68ClassBWithoutSeamLine(bCard(null)), h68ClassBWithoutSeamLine(undefined)].every((v) => v === null), true);
+  b(BATTERY18901, 'H68 text: the remedy names the line\'s shape with both ends and the `consumer: none` arm, spelled WITHOUT angle brackets (the anchor body is a GitHub body)', [row68(bCard(B19160)).includes('Seam: spec:KEY → runtime:CALL_SITE | renderer:COMPONENT'), row68(bCard(B19160)).includes('`consumer: none`'), /<[a-z ]+>/.test(row68(bCard(B19160)))].join(), 'true,true,false');
+  b(BATTERY18901, 'H68 text: ⛔ report-only — no label written, no card graded — and the value is declared the routing half\'s to judge', ['no label is written from this script', 'no card is graded from here', 'not this row\'s'].every((s) => row68(bCard(B19160)).includes(s)), true);
+  b(BATTERY18901, 'H68 text: the boundaries are on the row — mid-sentence mention, seat post, closed card, H63', ['not a declaration', 'never judged', 'archive', 'H63'].every((s) => row68(bCard(B19160)).includes(s)), true);
+  b(BATTERY18901, 'H68 text: a long declaration is quoted to the cap and marked cut', row68(bCard(`## Class (b) — ${'x'.repeat(300)}`)).includes('…」'), true);
+  b(BATTERY18901, 'H68: not a loud finding — it never escalates a sweep', isLoudFinding(h68ClassBWithoutSeamLine(bCard(B19160))), false);
+  b(BATTERY18901, 'H68 band: registered as `state` — a live card, the repair one body edit', familyBand('H68'), 'state');
+  b(BATTERY18901, 'H68 band: …and the sweep really pushes it, so the registry sees it', familyRegistryCoverage().emitted.includes('H68'), true);
+  b(BATTERY18901, 'H68 band: no code is left unregistered and none registered that the sweep never pushes', familyRegistryCoverage().missing.length + familyRegistryCoverage().extra.length, 0);
+  b(BATTERY18901, 'floor: this battery is DECLARED on the roster, with a positive pin', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY18901) && SELF_TEST_BATTERIES[BATTERY18901] > 0, true);
+  b(BATTERY18901, 'floor: the roster now declares SEVEN batteries, and the floor rose with it', SELF_TEST_BATTERY_FLOOR === 7 && Object.keys(SELF_TEST_BATTERIES).length >= SELF_TEST_BATTERY_FLOOR, true);
+
   // -- H64 — a seat- or dev-signed artefact that names no session (#18069,
   //    re-keyed by #18237) ---------------------------------------------------
   //
@@ -29046,7 +29166,7 @@ async function selfTest() {
   b(BATTERY18664, '#18664 floor: this battery is DECLARED on the roster', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY18664), true);
   b(BATTERY18664, '#18664 floor: …with a positive pin, so an empty battery cannot satisfy it', SELF_TEST_BATTERIES[BATTERY18664] > 0, true);
   b(BATTERY18664, '#18664 floor: the roster is frozen', Object.isFrozen(SELF_TEST_BATTERIES), true);
-  b(BATTERY18664, '#18664 floor: the roster now declares SIX batteries, and the floor rose with it', SELF_TEST_BATTERY_FLOOR, 6);
+  b(BATTERY18664, '#18664 floor: the roster now declares SEVEN batteries, and the floor rose with it', SELF_TEST_BATTERY_FLOOR, 7);
   b(BATTERY18664, '#18664 floor: …including the five this battery landed BESIDE, so neither side of the base merge silently dropped one', ['H66 released queue card', 'H19 judged-set founding', 'H65 tier declaration spelling', 'H67 queued merged-delivery reading', 'H2/H47/H66 decorated ownership marker'].every((name) => Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, name)), true);
   b(BATTERY18664, '#18664 floor: …and the roster really carries at least that many', Object.keys(SELF_TEST_BATTERIES).length >= SELF_TEST_BATTERY_FLOOR, true);
 
@@ -35443,7 +35563,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   // THE ROSTER — a floor that cannot be satisfied by a zero.
   b(BATTERY67, 'H67 floor: this battery is DECLARED on the roster', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY67), true);
   b(BATTERY67, 'H67 floor: …with a positive pin, so an empty battery cannot satisfy it', SELF_TEST_BATTERIES[BATTERY67] > 0, true);
-  b(BATTERY67, 'H67 floor: the roster grew again with #18664\'s battery, and the floor rose with it', SELF_TEST_BATTERY_FLOOR, 6);
+  b(BATTERY67, 'H67 floor: the roster grew again with #18901\'s battery, and the floor rose with it', SELF_TEST_BATTERY_FLOOR, 7);
   b(BATTERY67, 'H67 floor: …including the two batteries this row landed BESIDE, so neither side of the base merge silently dropped one', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, 'H65 tier declaration spelling') && Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, 'H19 judged-set founding'), true);
   b(BATTERY67, 'H67 floor: …and the roster really carries at least that many', Object.keys(SELF_TEST_BATTERIES).length >= SELF_TEST_BATTERY_FLOOR, true);
 
@@ -35786,7 +35906,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   // FLOOR — this battery is declared, pinned, and the roster grew with it.
   b(BATTERY68, 'floor: this battery is DECLARED on the roster', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY68), true);
   b(BATTERY68, 'floor: …with a positive pin, so an empty battery cannot satisfy it', SELF_TEST_BATTERIES[BATTERY68] > 0, true);
-  b(BATTERY68, 'floor: the roster now declares SIX batteries, and the floor rose with it', SELF_TEST_BATTERY_FLOOR, 6);
+  b(BATTERY68, 'floor: the roster now declares SEVEN batteries, and the floor rose with it', SELF_TEST_BATTERY_FLOOR, 7);
   b(BATTERY68, 'floor: …including the four this battery landed BESIDE and the one that landed after it, so neither side of the base merge silently dropped one', ['H66 released queue card', 'H19 judged-set founding', 'H65 tier declaration spelling', 'H67 queued merged-delivery reading', 'ISSUE_BODY_LIMIT measured cap'].every((name) => Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, name)), true);
   b(BATTERY68, 'floor: …and the roster really carries at least that many', Object.keys(SELF_TEST_BATTERIES).length >= SELF_TEST_BATTERY_FLOOR, true);
 
