@@ -108,9 +108,9 @@ Inline aggregation for an object-bound chart
 | **title** | `string \| Record<string, string>` | optional | Chart title |
 | **subtitle** | `string \| Record<string, string>` | optional | Chart subtitle |
 | **description** | `string \| Record<string, string>` | optional | Accessibility description — announced to screen readers as the chart’s label |
-| **xAxis** | `{ field: string; title?: string \| Record<string, string>; format?: string; min?: number; … }` | optional | X-Axis configuration |
-| **yAxis** | `{ field: string; title?: string \| Record<string, string>; format?: string; min?: number; … }[]` | optional | Y-Axis configuration (support dual axis) |
-| **series** | `{ name: string; label?: string \| Record<string, string>; type?: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| …>; color?: string; … }[]` | optional | Defined series configuration |
+| **xAxis** | `{ field: string; title?: string \| Record<string, string>; format?: string; min?: number; … }` | optional | X-Axis configuration. Structure, not appearance: on a dataset-bound dashboard widget the dataset decides this and the key is refused by name (ADR-0021) — select `dimensions` / `values` on the widget instead. It stays authorable on an inline-data react `<ObjectChart>`. |
+| **yAxis** | `{ field: string; title?: string \| Record<string, string>; format?: string; min?: number; … }[]` | optional | Y-Axis configuration (support dual axis). Structure, not appearance: on a dataset-bound dashboard widget the dataset decides this and the key is refused by name (ADR-0021) — select `dimensions` / `values` on the widget instead. It stays authorable on an inline-data react `<ObjectChart>`. |
+| **series** | `{ name: string; label?: string \| Record<string, string>; type?: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| …>; color?: string; … }[]` | optional | Defined series configuration. Structure, not appearance: on a dataset-bound dashboard widget the dataset decides this and the key is refused by name (ADR-0021) — select `dimensions` / `values` on the widget instead. It stays authorable on an inline-data react `<ObjectChart>`. |
 | **colors** | `string[] \| Record<string, string>` | optional | Color palette (string[]) or value→color map (`{ value: color }`) |
 | **height** | `number` | optional | Fixed plot height in pixels (overrides the container default) |
 | **showLegend** | `boolean` | optional (default: `true`) | Display legend |

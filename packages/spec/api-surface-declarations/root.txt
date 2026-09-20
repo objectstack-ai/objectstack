@@ -19276,28 +19276,6 @@ declare const ObjectStackDefinitionSchema: z.ZodObject<{
                 pivot: "pivot";
             }>>;
             chartConfig: z.ZodOptional<z.ZodObject<{
-                type: z.ZodEnum<{
-                    column: "column";
-                    metric: "metric";
-                    table: "table";
-                    kpi: "kpi";
-                    line: "line";
-                    bar: "bar";
-                    "horizontal-bar": "horizontal-bar";
-                    area: "area";
-                    pie: "pie";
-                    donut: "donut";
-                    funnel: "funnel";
-                    scatter: "scatter";
-                    treemap: "treemap";
-                    sankey: "sankey";
-                    combo: "combo";
-                    gauge: "gauge";
-                    "solid-gauge": "solid-gauge";
-                    bullet: "bullet";
-                    radar: "radar";
-                    pivot: "pivot";
-                }>;
                 title: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
                     key?: never;
                     defaultValue?: never;
@@ -19337,112 +19315,6 @@ declare const ObjectStackDefinitionSchema: z.ZodObject<{
                     key?: never;
                     defaultValue?: never;
                 }>>]>>;
-                xAxis: z.ZodOptional<z.ZodObject<{
-                    field: z.ZodString;
-                    title: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
-                        key?: never;
-                        defaultValue?: never;
-                    }, Record<string, string> & {
-                        key?: never;
-                        defaultValue?: never;
-                    }, z.core.$ZodTypeInternals<Record<string, string> & {
-                        key?: never;
-                        defaultValue?: never;
-                    }, Record<string, string> & {
-                        key?: never;
-                        defaultValue?: never;
-                    }>>]>>;
-                    format: z.ZodOptional<z.ZodString>;
-                    min: z.ZodOptional<z.ZodNumber>;
-                    max: z.ZodOptional<z.ZodNumber>;
-                    stepSize: z.ZodOptional<z.ZodNumber>;
-                    showGridLines: z.ZodDefault<z.ZodBoolean>;
-                    position: z.ZodOptional<z.ZodEnum<{
-                        top: "top";
-                        left: "left";
-                        right: "right";
-                        bottom: "bottom";
-                    }>>;
-                    logarithmic: z.ZodDefault<z.ZodBoolean>;
-                }, z.core.$strict>>;
-                yAxis: z.ZodOptional<z.ZodArray<z.ZodObject<{
-                    field: z.ZodString;
-                    title: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
-                        key?: never;
-                        defaultValue?: never;
-                    }, Record<string, string> & {
-                        key?: never;
-                        defaultValue?: never;
-                    }, z.core.$ZodTypeInternals<Record<string, string> & {
-                        key?: never;
-                        defaultValue?: never;
-                    }, Record<string, string> & {
-                        key?: never;
-                        defaultValue?: never;
-                    }>>]>>;
-                    format: z.ZodOptional<z.ZodString>;
-                    min: z.ZodOptional<z.ZodNumber>;
-                    max: z.ZodOptional<z.ZodNumber>;
-                    stepSize: z.ZodOptional<z.ZodNumber>;
-                    showGridLines: z.ZodDefault<z.ZodBoolean>;
-                    position: z.ZodOptional<z.ZodEnum<{
-                        top: "top";
-                        left: "left";
-                        right: "right";
-                        bottom: "bottom";
-                    }>>;
-                    logarithmic: z.ZodDefault<z.ZodBoolean>;
-                }, z.core.$strict>>>;
-                series: z.ZodOptional<z.ZodArray<z.ZodObject<{
-                    name: z.ZodString;
-                    label: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
-                        key?: never;
-                        defaultValue?: never;
-                    }, Record<string, string> & {
-                        key?: never;
-                        defaultValue?: never;
-                    }, z.core.$ZodTypeInternals<Record<string, string> & {
-                        key?: never;
-                        defaultValue?: never;
-                    }, Record<string, string> & {
-                        key?: never;
-                        defaultValue?: never;
-                    }>>]>>;
-                    type: z.ZodOptional<z.ZodEnum<{
-                        column: "column";
-                        metric: "metric";
-                        table: "table";
-                        kpi: "kpi";
-                        line: "line";
-                        bar: "bar";
-                        "horizontal-bar": "horizontal-bar";
-                        area: "area";
-                        pie: "pie";
-                        donut: "donut";
-                        funnel: "funnel";
-                        scatter: "scatter";
-                        treemap: "treemap";
-                        sankey: "sankey";
-                        combo: "combo";
-                        gauge: "gauge";
-                        "solid-gauge": "solid-gauge";
-                        bullet: "bullet";
-                        radar: "radar";
-                        pivot: "pivot";
-                    }>>;
-                    color: z.ZodOptional<z.ZodString>;
-                    stack: z.ZodOptional<z.ZodString>;
-                    yAxis: z.ZodDefault<z.ZodEnum<{
-                        left: "left";
-                        right: "right";
-                    }>>;
-                    variant: z.ZodOptional<z.ZodDefault<z.ZodEnum<{
-                        primary: "primary";
-                        comparison: "comparison";
-                    }>>>;
-                    dashArray: z.ZodOptional<z.ZodString>;
-                    opacity: z.ZodOptional<z.ZodNumber>;
-                }, z.core.$strict>>>;
                 colors: z.ZodOptional<z.ZodUnion<readonly [z.ZodArray<z.ZodString>, z.ZodRecord<z.ZodString, z.ZodString>]>>;
                 height: z.ZodOptional<z.ZodNumber>;
                 showLegend: z.ZodDefault<z.ZodBoolean>;
@@ -19483,6 +19355,10 @@ declare const ObjectStackDefinitionSchema: z.ZodObject<{
                     brush: z.ZodDefault<z.ZodBoolean>;
                 }, z.core.$strict>>;
                 aria: z.ZodOptional<z.ZodNever>;
+                type: z.ZodOptional<z.ZodNever>;
+                xAxis: z.ZodOptional<z.ZodNever>;
+                yAxis: z.ZodOptional<z.ZodNever>;
+                series: z.ZodOptional<z.ZodNever>;
             }, z.core.$strict>>;
             colorVariant: z.ZodOptional<z.ZodEnum<{
                 success: "success";
@@ -41153,28 +41029,6 @@ declare const ObjectStackSchema: z.ZodObject<{
                 pivot: "pivot";
             }>>;
             chartConfig: z.ZodOptional<z.ZodObject<{
-                type: z.ZodEnum<{
-                    column: "column";
-                    metric: "metric";
-                    table: "table";
-                    kpi: "kpi";
-                    line: "line";
-                    bar: "bar";
-                    "horizontal-bar": "horizontal-bar";
-                    area: "area";
-                    pie: "pie";
-                    donut: "donut";
-                    funnel: "funnel";
-                    scatter: "scatter";
-                    treemap: "treemap";
-                    sankey: "sankey";
-                    combo: "combo";
-                    gauge: "gauge";
-                    "solid-gauge": "solid-gauge";
-                    bullet: "bullet";
-                    radar: "radar";
-                    pivot: "pivot";
-                }>;
                 title: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
                     key?: never;
                     defaultValue?: never;
@@ -41214,112 +41068,6 @@ declare const ObjectStackSchema: z.ZodObject<{
                     key?: never;
                     defaultValue?: never;
                 }>>]>>;
-                xAxis: z.ZodOptional<z.ZodObject<{
-                    field: z.ZodString;
-                    title: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
-                        key?: never;
-                        defaultValue?: never;
-                    }, Record<string, string> & {
-                        key?: never;
-                        defaultValue?: never;
-                    }, z.core.$ZodTypeInternals<Record<string, string> & {
-                        key?: never;
-                        defaultValue?: never;
-                    }, Record<string, string> & {
-                        key?: never;
-                        defaultValue?: never;
-                    }>>]>>;
-                    format: z.ZodOptional<z.ZodString>;
-                    min: z.ZodOptional<z.ZodNumber>;
-                    max: z.ZodOptional<z.ZodNumber>;
-                    stepSize: z.ZodOptional<z.ZodNumber>;
-                    showGridLines: z.ZodDefault<z.ZodBoolean>;
-                    position: z.ZodOptional<z.ZodEnum<{
-                        top: "top";
-                        left: "left";
-                        right: "right";
-                        bottom: "bottom";
-                    }>>;
-                    logarithmic: z.ZodDefault<z.ZodBoolean>;
-                }, z.core.$strict>>;
-                yAxis: z.ZodOptional<z.ZodArray<z.ZodObject<{
-                    field: z.ZodString;
-                    title: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
-                        key?: never;
-                        defaultValue?: never;
-                    }, Record<string, string> & {
-                        key?: never;
-                        defaultValue?: never;
-                    }, z.core.$ZodTypeInternals<Record<string, string> & {
-                        key?: never;
-                        defaultValue?: never;
-                    }, Record<string, string> & {
-                        key?: never;
-                        defaultValue?: never;
-                    }>>]>>;
-                    format: z.ZodOptional<z.ZodString>;
-                    min: z.ZodOptional<z.ZodNumber>;
-                    max: z.ZodOptional<z.ZodNumber>;
-                    stepSize: z.ZodOptional<z.ZodNumber>;
-                    showGridLines: z.ZodDefault<z.ZodBoolean>;
-                    position: z.ZodOptional<z.ZodEnum<{
-                        top: "top";
-                        left: "left";
-                        right: "right";
-                        bottom: "bottom";
-                    }>>;
-                    logarithmic: z.ZodDefault<z.ZodBoolean>;
-                }, z.core.$strict>>>;
-                series: z.ZodOptional<z.ZodArray<z.ZodObject<{
-                    name: z.ZodString;
-                    label: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
-                        key?: never;
-                        defaultValue?: never;
-                    }, Record<string, string> & {
-                        key?: never;
-                        defaultValue?: never;
-                    }, z.core.$ZodTypeInternals<Record<string, string> & {
-                        key?: never;
-                        defaultValue?: never;
-                    }, Record<string, string> & {
-                        key?: never;
-                        defaultValue?: never;
-                    }>>]>>;
-                    type: z.ZodOptional<z.ZodEnum<{
-                        column: "column";
-                        metric: "metric";
-                        table: "table";
-                        kpi: "kpi";
-                        line: "line";
-                        bar: "bar";
-                        "horizontal-bar": "horizontal-bar";
-                        area: "area";
-                        pie: "pie";
-                        donut: "donut";
-                        funnel: "funnel";
-                        scatter: "scatter";
-                        treemap: "treemap";
-                        sankey: "sankey";
-                        combo: "combo";
-                        gauge: "gauge";
-                        "solid-gauge": "solid-gauge";
-                        bullet: "bullet";
-                        radar: "radar";
-                        pivot: "pivot";
-                    }>>;
-                    color: z.ZodOptional<z.ZodString>;
-                    stack: z.ZodOptional<z.ZodString>;
-                    yAxis: z.ZodDefault<z.ZodEnum<{
-                        left: "left";
-                        right: "right";
-                    }>>;
-                    variant: z.ZodOptional<z.ZodDefault<z.ZodEnum<{
-                        primary: "primary";
-                        comparison: "comparison";
-                    }>>>;
-                    dashArray: z.ZodOptional<z.ZodString>;
-                    opacity: z.ZodOptional<z.ZodNumber>;
-                }, z.core.$strict>>>;
                 colors: z.ZodOptional<z.ZodUnion<readonly [z.ZodArray<z.ZodString>, z.ZodRecord<z.ZodString, z.ZodString>]>>;
                 height: z.ZodOptional<z.ZodNumber>;
                 showLegend: z.ZodDefault<z.ZodBoolean>;
@@ -41360,6 +41108,10 @@ declare const ObjectStackSchema: z.ZodObject<{
                     brush: z.ZodDefault<z.ZodBoolean>;
                 }, z.core.$strict>>;
                 aria: z.ZodOptional<z.ZodNever>;
+                type: z.ZodOptional<z.ZodNever>;
+                xAxis: z.ZodOptional<z.ZodNever>;
+                yAxis: z.ZodOptional<z.ZodNever>;
+                series: z.ZodOptional<z.ZodNever>;
             }, z.core.$strict>>;
             colorVariant: z.ZodOptional<z.ZodEnum<{
                 success: "success";

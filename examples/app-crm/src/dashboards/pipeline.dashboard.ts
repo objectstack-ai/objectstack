@@ -98,13 +98,6 @@ export const PipelineDashboard: Dashboard = {
       values: ['opp_count'],
       // Axis fields name the dataset's dimension/measure (NOT base columns) —
       // post-cutover query rows are keyed by measure name (issue #1721).
-      chartConfig: {
-        type: 'line',
-        xAxis: { field: 'close_date', showGridLines: true, logarithmic: false },
-        yAxis: [{ field: 'opp_count', showGridLines: true, logarithmic: false }],
-        showLegend: true,
-        showDataLabels: false,
-      },
       layout: { x: 0, y: 2, w: 8, h: 4 },
     },
     {
@@ -122,13 +115,6 @@ export const PipelineDashboard: Dashboard = {
       dataset: 'opportunity_metrics',
       dimensions: ['stage'],
       values: ['opp_count'],
-      chartConfig: {
-        type: 'bar',
-        xAxis: { field: 'stage', showGridLines: true, logarithmic: false },
-        yAxis: [{ field: 'opp_count', showGridLines: true, logarithmic: false }],
-        showLegend: true,
-        showDataLabels: false,
-      },
       layout: { x: 8, y: 2, w: 4, h: 4 },
     },
 
@@ -142,13 +128,6 @@ export const PipelineDashboard: Dashboard = {
       dataset: 'opportunity_metrics',
       dimensions: ['stage'],
       values: ['total_amount'],
-      chartConfig: {
-        type: 'pie',
-        xAxis: { field: 'stage', showGridLines: true, logarithmic: false },
-        yAxis: [{ field: 'total_amount', showGridLines: true, logarithmic: false }],
-        showLegend: true,
-        showDataLabels: false,
-      },
       layout: { x: 0, y: 6, w: 6, h: 4 },
     },
   ],

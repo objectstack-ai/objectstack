@@ -22,8 +22,30 @@ import { strictObject } from '../shared/strict-object';
 //      `ChartConfigSchema.extend(...)`). `dashboard` and `report` are both
 //      registered metadata types.
 //   2. GRAPH — a BFS from all 24 metadata-type roots plus `ObjectStackSchema`
-//      (the `build-schemas.ts` / #4650 closure) reaches all five as
-//      `root-graph`. Controls in the same run: `PageSchema` /
+//      (the `build-schemas.ts` / #4650 closure) reached all five as
+//      `root-graph`.
+//
+//      ⚠️ RE-MEASURED 2026-09-20, and two of the five verdicts MOVED when the
+//      chart-structure ownership ruling landed (ADR-0021; maintainer ruling
+//      2026-09-12). Amended rather than left standing, because "all five" is
+//      now false and a later sweep would read the stale sentence as a
+//      measurement. `ChartConfigSchema` is `derived-clone`: no root reaches
+//      this base shape itself any more, because the dashboard widget reaches
+//      `DashboardWidgetChartConfigSchema` and the report reaches
+//      `ReportChartSchema`, both `.extend()` clones that carry this shape's
+//      strictness and error map. `ChartAxisSchema` is `unreachable`, which is a
+//      change of fact rather than of route: the dashboard clone tombstones
+//      `xAxis`/`yAxis` and `ReportChartSchema` re-declares both as dataset-name
+//      STRINGS, so no authoring path from a metadata root parses an axis object
+//      at all. The axis shape's remaining carrier is the react tier's published
+//      `<ObjectChart>` dataProps — a DECLARATION, not a parse — so whether its
+//      `.strict()` still gates anything is the #4583 question, genuinely open
+//      for this one shape and recorded on #17385. `ChartSeriesSchema`,
+//      `ChartAnnotationSchema` and `ChartInteractionSchema` are still `direct`.
+//      Every verdict here is pinned in `chart.test.ts`, so none of this can go
+//      stale silently a second time.
+//
+//      Controls in the same run: `PageSchema` /
 //      `DashboardSchema` / `ReportSchema` / `WebhookSchema` /
 //      `StateMachineSchema` resolve; 批 13's measured no-door shapes
 //      (`TouchTargetConfigSchema`, `GestureConfigSchema`) did not. (Those two
@@ -539,9 +561,8 @@ export const ChartDrillDownSchema = lazySchema(() => strictObject(
  * only from the schema docblock above it.
  */
 const STRUCTURE_KEY_NOTE =
-  ' Structure, not appearance: on a dataset-bound dashboard widget the dataset decides this and'
-  + ' the key is refused by name (ADR-0021) — select `dimensions` / `values` on the widget'
-  + ' instead. It stays authorable on an inline-data react `<ObjectChart>`.';
+  ' Structure, not appearance — authorable where the chart has inline data; refused by name on a'
+  + ' dataset-bound dashboard widget, where the dataset decides it (ADR-0021).';
 
 /**
  * Chart Configuration Base

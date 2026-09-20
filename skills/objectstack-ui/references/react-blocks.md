@@ -93,9 +93,9 @@ Chart over an object’s aggregated data. Bind objectName + aggregate; the axes 
 | `subtitle` | `string \| object` | data |  | Chart subtitle |
 | `description` | `string \| object` | data |  | Accessibility description — announced to screen readers as the chart’s label |
 | `height` | `number` | data |  | Fixed plot height in pixels (overrides the container default) |
-| `xAxis` | `object` | data |  | X-Axis configuration |
-| `yAxis` | `object[]` | data |  | Y-Axis configuration (support dual axis) |
-| `series` | `object[]` | data |  | Defined series configuration |
+| `xAxis` | `object` | data |  | X-Axis configuration. Structure, not appearance: on a dataset-bound dashboard widget the dataset decides this and the key is refused by name (ADR-0021) — selec… |
+| `yAxis` | `object[]` | data |  | Y-Axis configuration (support dual axis). Structure, not appearance: on a dataset-bound dashboard widget the dataset decides this and the key is refused by nam… |
+| `series` | `object[]` | data |  | Defined series configuration. Structure, not appearance: on a dataset-bound dashboard widget the dataset decides this and the key is refused by name (ADR-0021)… |
 | `colors` | `string[] \| object` | data |  | Color palette (string[]) or value→color map ({ value: color }) |
 | `showLegend` | `boolean` | data |  | Display legend |
 | `showDataLabels` | `boolean` | data |  | Display data labels |
