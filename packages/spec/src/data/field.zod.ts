@@ -335,8 +335,8 @@ export const SelectOptionSchema = lazySchema(() => strictObject({
   // no existing pointer is shadowed (`alias-integrity.test.ts`, #7889).
   guidanceSets: [SELECT_OPTION_EDITABILITY_GUIDANCE],
 }, {
-  label: z.string().describe('Display label (human-readable, any case allowed)'),
-  value: SystemIdentifierSchema.describe('Stored value (lowercase machine identifier)'),
+  label: z.string().describe('Display label (human-readable, any case allowed)').meta({ title: 'Label' }),
+  value: SystemIdentifierSchema.describe('Stored value (lowercase machine identifier)').meta({ title: 'Value' }),
   /**
    * Optional secondary text for the option (objectui#6153, inheriting the
    * objectui#6140 ruling frame — maintainer 2026-08-25: a key that is
@@ -356,9 +356,9 @@ export const SelectOptionSchema = lazySchema(() => strictObject({
    * spelling on its own metadata type (maintainer ruling 2026-09-02 on
    * objectui#6153).
    */
-  description: z.string().optional().describe('Optional secondary/help text for this option. Lookup option search matches it in addition to the label; renderers may show it as supporting text.'),
-  color: z.string().optional().describe('Color code for badges/charts'),
-  default: z.boolean().optional().describe('Is default option'),
+  description: z.string().optional().describe('Optional secondary/help text for this option. Lookup option search matches it in addition to the label; renderers may show it as supporting text.').meta({ title: 'Description' }),
+  color: z.string().optional().describe('Color code for badges/charts').meta({ title: 'Color' }),
+  default: z.boolean().optional().describe('Is default option').meta({ title: 'Default' }),
   /**
    * Per-option visibility predicate (CEL) — the option is offered only when this
    * evaluates TRUE. Omit = always available. Evaluated against the live `record`
@@ -384,7 +384,7 @@ export const SelectOptionSchema = lazySchema(() => strictObject({
    * rule-validator evaluates the picked value's `visibleWhen`) — hiding it in the
    * dropdown alone is bypassable.
    */
-  visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Env: the live `record` plus the host predicate scope, which binds `current_user`. The one VISIBILITY predicate the SERVER also enforces — the rule validator refuses a write of a value whose predicate is false — so a user-gated CHOICE belongs here. e.g. P`record.country == 'cn'` or P`'admin' in current_user.positions`"),
+  visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Env: the live `record` plus the host predicate scope, which binds `current_user`. The one VISIBILITY predicate the SERVER also enforces — the rule validator refuses a write of a value whose predicate is false — so a user-gated CHOICE belongs here. e.g. P`record.country == 'cn'` or P`'admin' in current_user.positions`").meta({ title: 'Visible When' }),
 }));
 
 /**

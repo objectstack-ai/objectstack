@@ -84,19 +84,19 @@ const FORMS: ReadonlyArray<readonly [string, unknown]> = [
  * Carriers still owed titles, as measured on `origin/main` at
  * e758131b3900eb13260f03643e295ca6d625c42b. SHRINK-ONLY — see the header.
  *
- * The remaining `view.*` / `field.*` entries were fenced out of #17232's
- * round by in-flight PRs on their carrier files (#17360 `view.zod.ts`,
- * #17477 `field.zod.ts` — `field.options` and `object.fields.options` are
- * the same `SelectOptionSchema`). This pin OBSERVES them without editing
- * them, which is why the set below is the rest of the class and not the
- * slice one PR could reach.
+ * The remaining `view.*` entries were fenced out of #17232's round by an
+ * in-flight PR on their carrier file (#17360 `view.zod.ts`). This pin
+ * OBSERVES them without editing them, which is why the set below is the rest
+ * of the class and not the slice one PR could reach.
  *
- * `dashboard:widgets` and `dashboard:globalFilters` were paid by #17505 and
- * DELETED from this set — a paid debt leaves no entry behind.
+ * `dashboard:widgets` and `dashboard:globalFilters` were paid by #17505,
+ * `field:options` and `object:fields.options` by #17506 — one edit for both,
+ * because the two carriers resolve to the SAME `SelectOptionSchema` object
+ * (`FieldSchema.options` is `z.array(SelectOptionSchema)` and `object.fields`
+ * is a record of that same `FieldSchema`). All four are DELETED from this set
+ * — a paid debt leaves no entry behind.
  */
 const LEDGER: ReadonlySet<string> = new Set([
-  'field:options',
-  'object:fields.options',
   'view:columns',
   'view:sort',
   'view:tabs',
