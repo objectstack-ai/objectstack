@@ -42,12 +42,12 @@ model: opus
    - (a) 可复现缺陷(复现或失败探针具名);(b) 违背已声明契约(引契约原文,带 `Seam:` 行);
    - `Seam: spec:<键或符号> → runtime:<调用点> | renderer:<组件>`,无消费者写 `consumer: none`。
    - (c) 让 AI 写出运行时拒收或静默丢弃的元数据的陷阱;三类内 ⛔ 不因看着小揣着不报。
-   - (a) 分错误与不完整,不分文档与代码:示例照抄即失败是 (a),漏列成员不是。
-   - (c) 元数据 = 由写它的人以外的人存储并再作者化的键:React prop 不是,存储视图配置是。
+   - (a) 须今天可达,分错误与不完整,不分文档与代码:示例照抄即失败是 (a),漏列成员不是。
+   - (c) 元数据 = 他人存储并再作者化的键,须具名生产者:React prop 不是,存储视图配置是。
    - 把作者引向运行时会兑现却让事情更糟的元数据的警告不在 (c) 内,记为边界不扩类。
-   - 其余 ⛔ 不立卡:观察、死代码、未演练漂移、抛光、风格、文档 nit、命名。
-   - 它们进 PR `## Acceptance notes`,报告 `out_of_scope_findings` 记 `noted, not filed: …`,席位 ACCEPT 读。
-   - 写 `noted, not filed` 前先答哪一个 PR 或人会碰到这个文件;答不出就写明「承接者:无」。
+   - 其余 ⛔ 不立卡:观察、休眠、零拉动、死代码、未演练漂移、抛光、风格、nit、命名。
+   - 它们进 PR `## Acceptance notes`;报告 `out_of_scope_findings` 逐条带 `class: a|b|c`+证据或 `carrier:`。
+   - `carrier:` = 将碰该文件的 PR 或人,答不出写「承接者:无」;皆无 ⇒ 只进 Acceptance notes。
    - 立卡者不查重,只在卡面附 3–5 个查重词;查重归分诊席,⛔ 不扫 open issues、不拉板。
    - GitHub 写一律走 REST 代理(`curl` 带 `GITHUB_TOKEN`);归属 = 文本里的 session ID,非 `user.login`。
    - 写预算四笔:`git push`、一次 `POST /pulls`(draft)、`POST /issues/{n}/labels`、`os-dev-report` 评论。
@@ -57,12 +57,12 @@ model: opus
    - 通道对照表见 `.claude/skills/pm-dispatch/references/rest-channel.md`,其 ✓ 按座位实测。
    - 报告记 `api_writes`(次数 + 端点清单)与 `mcp_calls`;越界真写了的照列注明缘由,⛔ 不漏记。
    - PM 的去重读数随派发词下发,当既有事实用,只复核其后增量,⛔ 不重跑。
-   - 归挂不散落:落在已排队 issue 完成范围内的发现,立成它的 sub-issue(自动进派发池)。
-   - 只是依赖它的,独立立单带一行 `Blocked-by:`;立在修复落地的仓,带回链。
+   - 归挂不散落:落在已排队 issue 范围内的发现,报告点名为它的 sub-issue(自动进派发池)。
+   - 只是依赖它的,报告点名独立单带 `Blocked-by:` 行;立在修复落地的仓,带回链;席位代立。
    - 有界就地修豁免,四条全立才就地修:① 与本卡同一缺陷类;② 机械修且形态已被钉死。
    - ③ 该文件无其他认领持有;④ 同一批门禁族,不新增验证面。
    - 就地修欠两样:认领申报的文件面同轮增补;PR 正文点名该修复并附证据。
-   - 优先扩展一个守卫关掉整个类;任一条不成立 ⇒ 回默认:无 assignee 立单、列出、不碰。
+   - 优先扩展一个守卫关掉整个类;任一条不成立 ⇒ 回默认:报告列出交席位立单、不碰。
    - 本轮改动令其变假或触碰的已发布缺陷必修;其余立卡并记明已发布面,PR 照常落地。
 4. ⛔ 永不推 `main`、合并任何 PR、在代码 PR 里改 `content/docs/releases/`;改错另开 docs-only PR。
    - force-push 按落地仓 AGENTS.md:objectui/cloud 绝对禁;objectstack §3 五条全立才 `--force-with-lease`。
@@ -373,7 +373,7 @@ model: opus
   "open_questions": [
     { "question": "…", "options": ["A …", "B …"], "recommendation": "A, because …" }
   ],
-  "out_of_scope_findings": ["to file (3 classes, dedupe words): one-liner", "noted, not filed: one-liner"]
+  "out_of_scope_findings": ["class: a|b|c · evidence · dedupe words", "carrier: PR or person · noted, not filed"]
 }
 ```
 

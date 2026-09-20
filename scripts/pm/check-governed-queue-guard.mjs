@@ -407,7 +407,13 @@
  * landed predicate says a human MERGE — 「人工审核」 landed as the same terminal
  * a governed diff has (ACCEPT on the card, `needs-user-decision` on the PR, a
  * final 维护者速读, review requested from `GOVERNED_APPROVERS`) and the
- * maintainer's own click (人工直合). An authorized APPROVED review lifts a
+ * maintainer's own click (人工直合). ⭐ #19344 — THAT CLICK IS ONE BUTTON
+ * OPTION and this text now names it: `main` mandates the queue and requires
+ * this check, so the only Merge that is not an enqueue is the Merge button's
+ * BYPASS-RULES option, offered only while the ruleset configures a bypass
+ * actor. While none was, the remedy named a terminal nobody could reach and
+ * PR #19024 was enqueued and refused three times. That it IS offered is a
+ * ruleset fact the pin reads. An authorized APPROVED review lifts a
  * Tier H path because the 2026-08-27 ruling said so of PATHS; nothing has
  * said it of the NUMBER, and widening a governance gate past its own ruling is
  * how gates acquire policy nobody agreed to. Widening it is a one-line
@@ -547,11 +553,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ #18020 → #19133 Tier S: a review of record, not an approval': 43,
   '⭐ #18701: the record lives on the PR or its card, and BOTH are read': 14,
   '⛔ #19036: the SIZE line at the queue — imported, per queued PR, fail-closed': 30,
+  '⭐ #19344: the remedy names a path the ruleset actually offers': 5,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 22;
+const SELF_TEST_BATTERY_FLOOR = 23;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1376,8 +1383,9 @@ export function renderGuardVerdict(verdict) {
         `      ✅ What a seat DOES do once an account in GOVERNED_APPROVERS (${GOVERNED_APPROVERS.join(', ')}) has APPROVED it,`,
         '         on ANY commit: the CLAIMING SEAT lands it — ruling C (#17971, maintainer 2026-09-13, verbatim',
         '         「C. approve 后不管后续改动都由席位落地:」), 「席位落地 = 过落地前检、清标、ready、',
-        '         auto-merge,踢出/变基同法。」 Unapproved, the maintainer\'s own direct merge (人工直合) is',
-        '         the only landing this pull request has.',
+        '         auto-merge,踢出/变基同法。」 Unapproved, the maintainer\'s own direct merge (人工直合) is the',
+        '         only landing this pull request has, and it IS the Merge button\'s bypass-rules option —',
+        '         offered only while ruleset `main` configures a bypass actor (#19344).',
       );
     }
     if (tierS.length > 0) {
@@ -1469,7 +1477,8 @@ export function renderGuardVerdict(verdict) {
     '           要卡最新的提交。」); the authorized set is still the 2026-08-27 one (「os-zhuang hotlong 批准',
     '           算数」). ⛔ An agent seat never submits that approval, under any account — the post-merge audit',
     '           reads the approver too. ⛔ Unapproved, the maintainer\'s own direct merge (人工直合) is the only',
-    '           landing this pull request has.',
+    '           landing this pull request has, and it IS the Merge button\'s bypass-rules option — offered only',
+    '           while ruleset `main` configures a bypass actor (#19344); the audit log records it.',
   );
   if (verdict.entries.some((e) => e.record !== undefined)) {
     lines.push(
@@ -1925,6 +1934,32 @@ export async function runSizeGuard({ event, rows, namedPull = null, fetchPull })
   return sizeGuardVerdict({ event, pulls, readings, apiCalls });
 }
 
+// ── #19344: the remedy's terminal is a RULESET fact, so it is READ ─────────
+//
+// GitHub offers it only to an account ruleset `main` lists as a bypass actor,
+// and `bypass_actors` is withheld below `administration`, so a read answers
+// three ways and only ONE is a refusal. ⛔ Never assert a path from a field that
+// was not read (a permission difference must not red CI), ⛔ never pass mute.
+export const BYPASS_OPTION_PHRASE = "Merge button's bypass-rules option";
+
+/** `offered` | `not-offered` | `unreadable`, with the words a log should carry. */
+export function bypassActorReading(ruleset) {
+  const read = ruleset && typeof ruleset === 'object' ? ruleset : {};
+  if (!Object.prototype.hasOwnProperty.call(read, 'bypass_actors')) {
+    return { reading: 'unreadable', detail: `bypass_actors: unreadable with this token (the key is absent); current_user_can_bypass: ${JSON.stringify(read.current_user_can_bypass ?? null)}` };
+  }
+  const actors = read.bypass_actors;
+  if (Array.isArray(actors) && actors.length > 0) return { reading: 'offered', detail: `bypass_actors: ${actors.length} configured` };
+  return { reading: 'not-offered', detail: `bypass_actors: ${JSON.stringify(actors)} — nobody is offered the bypass-rules option` };
+}
+
+/** Two ways to red: the remedy stops naming a path (#19344's defect), or the ruleset is READ to offer none. */
+export function remedyPathVerdict({ remedy, ruleset }) {
+  const names = remedy.includes(BYPASS_OPTION_PHRASE);
+  const { reading, detail } = bypassActorReading(ruleset);
+  return { ok: names && reading !== 'not-offered', names, reading, detail };
+}
+
 /**
  * The words a reader acts on for this leg. Returns '' on the `pull_request`
  * leg. Every entry prints WHAT WAS READ — the two numbers, their sum and the
@@ -2003,7 +2038,11 @@ export function renderSizeVerdict(verdict) {
     '           alone does NOT dequeue it) and park it there — parked outside the queue is the SAFE state.',
     '        2. Then a HUMAN MERGE — the same terminal a governed diff has: ACCEPT on the card,',
     '           `needs-user-decision` on the PR, a final 维护者速读, review requested from GOVERNED_APPROVERS',
-    `           (${GOVERNED_APPROVERS.join(', ')}); the maintainer's own click lands it (人工直合).`,
+    `           (${GOVERNED_APPROVERS.join(', ')}); the maintainer's own click lands it (人工直合) — and that`,
+    '           click is the Merge button\'s bypass-rules option, offered only while ruleset `main` configures a',
+    '           bypass actor — ⛔ NOT a second Merge button: `main` mandates the queue and requires this check, so',
+    '           with none configured every re-enqueue comes back here (#19344). The audit log records the bypass',
+    '           and `check-governed-merges` lists such a landing on size.',
     '           ⛔ An authorized APPROVED review does NOT lift this limb the way it lifts a Tier H path, and no',
     '           review of record does either: the landed predicate says a human MERGE, and widening it is the',
     '           maintainer\'s one-line decision in the sibling, not this file\'s.',
@@ -3851,6 +3890,25 @@ export async function selfTest() {
     assert('the-workflow-is-readable-for-the-size-scope-pin', false, String(error?.message ?? error).split('\n')[0]);
   }
 
+  // ── ⭐ #19344: the remedy names a path the RULESET actually offers ────────
+  //
+  // RECORDED, not live: this self-test is the required guard job's FIRST step,
+  // declared offline, and a live read answers `unreadable` from every token CI
+  // can hold — a network dependency asserting nothing. ⛔ And a pinned phrase
+  // split across two wrapped array entries can never match: keep it on ONE.
+  battery('⭐ #19344: the remedy names a path the ruleset actually offers');
+  // GET /repos/objectstack-ai/objectstack/rulesets/12119582, read 2026-09-20 by
+  // an ordinary seat token: HTTP 200, and NO `bypass_actors` key at all.
+  const RULESET_19344 = Object.freeze({ id: 12119582, name: 'main', enforcement: 'active', current_user_can_bypass: 'never' });
+  const judgeRemedy = (remedy, over = {}) => remedyPathVerdict({ remedy, ruleset: { ...RULESET_19344, ...over } });
+  const sizeRemedy = renderSizeVerdict(overOne);
+  const recorded = judgeRemedy(sizeRemedy);
+  console.log(`  ℹ #19344 ruleset reading — ${recorded.detail}`);
+  assert('⭐ all-four-remedies-NAME-the-bypass-rules-option-and-keep-人工直合-as-the-name-of-the-act', recorded.names && judgeRemedy(refusalText).names && judgeRemedy(warnText).names && sizeRemedy.includes('人工直合') && /BYPASS-RULES option/.test(sizeOwnSource), sizeRemedy);
+  assert('⛔ a-field-this-token-cannot-see-is-UNREADABLE-and-PASSES-asserting-no-path-it-did-not-read', recorded.reading === 'unreadable' && recorded.ok === true && /unreadable with this token/.test(recorded.detail), recorded.detail);
+  assert('⛔ bypass_actors-PRESENT-and-EMPTY-REDS-the-remedy-names-a-path-the-ruleset-does-not-offer', judgeRemedy(sizeRemedy, { bypass_actors: [] }).ok === false && judgeRemedy(sizeRemedy, { bypass_actors: null }).reading === 'not-offered');
+  assert('⭐ one-configured-bypass-actor-makes-the-named-path-REACHABLE-and-the-pin-clears', judgeRemedy(sizeRemedy, { bypass_actors: [{ actor_type: 'RepositoryRole', bypass_mode: 'pull_request' }] }).ok === true);
+  assert('⛔ and-a-remedy-drifting-back-to-a-bare-maintainer-click-REDS-even-where-the-path-IS-offered', judgeRemedy("the maintainer's own click lands it (人工直合).", { bypass_actors: [{ actor_id: 5 }] }).ok === false);
 
   // ── the WIRING pin: the workflow still spells this context name ──────────
   //
@@ -4443,7 +4501,9 @@ export async function selfTest() {
       'on the governed code; an authorized approval lifting nothing from the size; a certified regeneration lifting ' +
       'nothing from it either; an unreadable size or a pull object without the pair FAIL-CLOSED on exit 9; the ' +
       'pull_request leg silent and read-free; and the three-leg exit precedence (governed, size, carrier) pinned on ' +
-      'every combination.',
+      'every combination — and the #19344 remedy pin: every limb names the Merge button\'s bypass-rules option, ' +
+      'judged against the recorded ruleset reading, red on a present-and-empty `bypass_actors` and on a remedy ' +
+      'drifting back to a bare click, and passing with the reading PRINTED when the field is unreadable.',
   );
 
   selfTestReachedVerdict = true;
