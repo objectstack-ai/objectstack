@@ -781,8 +781,8 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         description: "ページ領域とそこに配置するコンポーネント。"
       },
       interface: {
-        label: "Interface (list pages)",
-        description: "Interface mode (Airtable parity): the page defines its own data surface directly — columns, filters, visualizations and toolbar — no inheriting from a separate view."
+        label: "Interface（リストページ）",
+        description: "Interface モード（Airtable 互換）：ページが自身のデータサーフェスを直接定義します——列、フィルター、可視化、ツールバー——独立したビューを継承しません。"
       },
       advanced: {
         label: "詳細",
@@ -852,24 +852,24 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "コンポーネント"
       },
       interfaceConfig: {
-        label: "Interface Config",
-        helpText: "The page IS the view: source picks the object, columns/filterBy are defined directly here; appearance.allowedVisualizations whitelists renderers (one entry = locked); userActions toggles the toolbar."
+        label: "Interface 設定",
+        helpText: "ページ自体がビューです：source でオブジェクトを選び、columns/filterBy はここで直接定義します。appearance.allowedVisualizations が使用可能なレンダラーを限定し（1 件のみならロック）、userActions がツールバーを切り替えます。"
       },
       "interfaceConfig.source": {
-        label: "Source",
-        helpText: "Object this page reads from"
+        label: "ソース",
+        helpText: "このページがデータを読み取るオブジェクト"
       },
       "interfaceConfig.columns": {
-        label: "Columns",
-        helpText: "Columns to show — defined directly on the page (blank = all object fields)"
+        label: "列",
+        helpText: "表示する列——ページ上で直接定義します（空欄はオブジェクトの全フィールド）"
       },
       "interfaceConfig.filterBy": {
-        label: "Filter By",
-        helpText: "Always-on base filter for the page — same visual builder as the list toolbar."
+        label: "フィルター条件",
+        helpText: "ページに常時適用される基本フィルター——リストツールバーと同じビジュアルビルダー。"
       },
       "interfaceConfig.sort": {
-        label: "Sort",
-        helpText: "Default sort order for the page, defined directly on the page."
+        label: "並び替え",
+        helpText: "ページの既定の並び順。ページ上で直接定義します。"
       },
       "interfaceConfig.sort.field": {
         label: "フィールド"
@@ -878,40 +878,40 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "並び方向"
       },
       "interfaceConfig.levels": {
-        label: "Levels",
-        helpText: "Hierarchy levels to display (tree-like sources)"
+        label: "階層レベル",
+        helpText: "表示する階層レベル（ツリー状のソース）"
       },
       "interfaceConfig.appearance": {
-        label: "Appearance",
-        helpText: "Allowed visualizations (Grid / Kanban / Calendar / …) and description visibility"
+        label: "外観",
+        helpText: "使用可能な可視化（Grid / Kanban / Calendar / …）と説明の表示可否"
       },
       "interfaceConfig.userFilters": {
-        label: "User Filters",
-        helpText: "End-user filter bar: None (no bar) / Tabs (named presets) / Dropdown (per-field). None removes the config."
+        label: "ユーザーフィルター",
+        helpText: "エンドユーザー用フィルターバー：None（バーなし）/ Tabs（名前付きプリセット）/ Dropdown（フィールド単位）。None は設定を削除します。"
       },
       "interfaceConfig.userActions": {
-        label: "User Actions",
-        helpText: "Toolbar toggles (search, sort, filter, row height)"
+        label: "ユーザーアクション",
+        helpText: "ツールバーの切り替え（検索、並べ替え、フィルター、行の高さ）"
       },
       "interfaceConfig.addRecord": {
-        label: "Add Record",
-        helpText: "Add-record entry point"
+        label: "レコードを追加",
+        helpText: "レコード追加の入口"
       },
       "interfaceConfig.buttons": {
-        label: "Buttons",
-        helpText: "Toolbar buttons — pick from this object's actions"
+        label: "ボタン",
+        helpText: "ツールバーのボタン——このオブジェクトのアクションから選択します"
       },
       "interfaceConfig.recordAction": {
-        label: "Record Action",
-        helpText: "How clicking a record opens its detail"
+        label: "レコードアクション",
+        helpText: "レコードをクリックしたときに詳細をどう開くか"
       },
       "interfaceConfig.showRecordCount": {
-        label: "Show Record Count",
-        helpText: "Show the record count bar"
+        label: "レコード数を表示",
+        helpText: "レコード数バーを表示します"
       },
       "interfaceConfig.allowPrinting": {
-        label: "Allow Printing",
-        helpText: "Allow users to print this page"
+        label: "印刷を許可",
+        helpText: "ユーザーがこのページを印刷できるようにします"
       },
       isDefault: {
         label: "既定",
