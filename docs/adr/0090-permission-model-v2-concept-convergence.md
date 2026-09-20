@@ -417,9 +417,19 @@ alias tax on every API.
 > different path — `packages/core/src/security/api-key.ts#resolveApiKeyAdmission` into
 > `packages/core/src/security/resolve-authz-context.ts#resolveAuthzContext` — which resolves the
 > key's OWNER and nothing else. The assembled principal is therefore `human`, carries neither
-> `onBehalfOf` nor `performedBy`, and its `sys_audit_log` row is the owner's own. The REST door,
-> which is where keys are honoured, hands the assembler no OAuth provenance at all, so an agent
-> principal is not representable there by construction.
+> `onBehalfOf` nor `performedBy`, and its `sys_audit_log` row is the owner's own. A key is honoured
+> on **every** door that runs
+> `packages/core/src/security/resolve-authz-context.ts#resolveAuthzContext` — REST, the runtime /
+> MCP **HTTP** dispatcher, and the MCP **stdio** transport — and none of the three turns one into
+> an agent, by two different mechanisms. REST and stdio hand the assembler
+> `oauth: undefined` **by construction** (`packages/rest/src/rest-server.ts`,
+> `packages/mcp/src/plugin.ts#resolveStdioExecutionContext`), so agent provenance is not
+> representable on either. On the HTTP dispatcher — the one door that does mint agent principals —
+> it is a **guard** rather than a structural impossibility:
+> `packages/runtime/src/security/resolve-execution-context.ts#extractJwtBearer` refuses an
+> `osk_`-prefixed bearer and anything that is not a three-segment JWS, so no OAuth provenance is
+> ever derived from a key. ⚠️ That guard IS this decision's enforcement on that door: loosening it
+> would make an API key an agent principal without anyone editing this record.
 >
 > **What this changes.** Nothing in the runtime — the behaviour above IS the decided behaviour.
 > What changes is the DECLARATION: rule 4's 「every write」 is narrowed to agent principals in the
