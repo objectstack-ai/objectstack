@@ -579,9 +579,19 @@ describe('HttpDispatcher extracted domains (PR-5: packages)', () => {
     it('POST /packages rejects a duplicate id with 409 unless ?overwrite=true (data-loss footgun guard)', async () => {
         const objectql = qlWithRegistry({ getPackage: vi.fn().mockReturnValue({ id: 'pkg-a' }) });
         const dispatcher = withPkgCaller(makeDispatcher({ objectql }));
-        const dup = await dispatcher.dispatch('POST', '/packages', { id: 'pkg-a', name: 'A' }, {}, {} as any);
+        // [#19120] `version` added to a fixture that never carried one. The
+        // subject here is the duplicate-id guard and its `?overwrite=true`
+        // bypass, ⛔ not manifest completeness — but `ManifestSchema` has always
+        // declared `version` required, so this body was never a legal input to
+        // the door it drives. Since the install door started parsing that leg,
+        // the fixture's own defect is what the case would report.
+        // ⚠️ The repair is owed whatever order the new gate sits in: the
+        // `forced` limb asserts `201`, which an under-specified manifest must
+        // never reach — so no placement of that gate leaves this fixture valid.
+        const manifest = { id: 'pkg-a', name: 'A', version: '1.0.0' };
+        const dup = await dispatcher.dispatch('POST', '/packages', manifest, {}, {} as any);
         expect(dup.response?.status).toBe(409);
-        const forced = await dispatcher.dispatch('POST', '/packages', { id: 'pkg-a', name: 'A' }, { overwrite: 'true' }, {} as any);
+        const forced = await dispatcher.dispatch('POST', '/packages', manifest, { overwrite: 'true' }, {} as any);
         expect(forced.response?.status).toBe(201);
     });
 

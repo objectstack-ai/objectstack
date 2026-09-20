@@ -150,7 +150,7 @@ const result = ApiMethod.parse(data);
 | **systemFields** | `false \| { tenant?: boolean; audit?: boolean }` | optional | Opt out of, or selectively disable, registry-level system-field auto-injection. |
 | **datasource** | `string` | optional (default: `"default"`) | Target Datasource ID. "default" is the primary DB. |
 | **external** | `{ remoteName?: string; remoteSchema?: string; writable?: boolean; columnMap?: Record<string, string>; … }` | optional | Remote table binding for federated (external) objects. |
-| **fields** | `Record<string, { name?: string; label?: string; type: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>; description?: string; … }>` | ✅ | Field definitions map. Keys must be snake_case identifiers. |
+| **fields** | `Record<string, { name?: string; label?: string; type: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>; description?: string; … }>` | ✅ | Field definitions map. Keys must be snake_case identifiers; "__proto__", "constructor" and "prototype" are refused. |
 | **indexes** | `{ name?: string; fields: string[]; unique?: boolean \| 'global' \| 'organization' }[]` | optional | Database performance indexes |
 | **fieldGroups** | `{ key: string; label: string; icon?: string; description?: string; … }[]` | optional | Ordered list of field groups (array order = display order). See ObjectFieldGroupSchema. |
 | **tenancy** | `{ enabled: boolean; tenantField?: string; organizationField?: string }` | optional | Multi-tenancy configuration for SaaS applications |
@@ -461,7 +461,7 @@ const result = ApiMethod.parse(data);
 | **successMessage** | `string \| Record<string, string>` | optional | Success message to show after execution |
 | **errorMessage** | `string \| Record<string, string>` | optional | Error message to show when the action fails (overrides the raw error). |
 | **refreshAfter** | `boolean` | optional (default: `false`) | Refresh view after execution |
-| **undoable** | `boolean` | optional | Offer an Undo affordance after this single-record update action succeeds. `operation: 'update'` is the declared form of that action — its `patch` names exactly the fields whose prior values are captured. |
+| **undoable** | `boolean` | optional | Offer an Undo affordance after this single-record update action succeeds. `operation: 'update'` is the one declared operation and the declared form of that action: what the undo captures is the prior value of EVERY field the action writes — the merged write bag, `patch` UNDER the collected `params`, not `patch` alone. An action with no `operation` declares no write set, so nothing anchors the capture there. |
 | **resultDialog** | `{ title?: string \| Record<string, string>; description?: string \| Record<string, string>; acknowledge?: string \| Record<string, string>; format?: Enum<'qrcode' \| 'code-list' \| 'secret' \| 'text' \| 'json'>; … }` | optional | Render API response in a one-shot reveal dialog (suppresses successMessage when set). |
 | **visible** | `boolean \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate — `true`/`false` literal, CEL string, or `{dialect, source}` envelope. The action is offered when it evaluates TRUE. Omit = always visible. |
 | **requiresFeature** | `Enum<'twoFactor' \| 'organization' \| 'multiOrgEnabled' \| 'degradedTenancy' \| …>` | optional | Public auth feature flag gating this action; lowered into `visible` at parse time. |

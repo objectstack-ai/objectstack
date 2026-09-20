@@ -218,6 +218,17 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         confirmText: "¿Iniciar una sesión de suplantación para este usuario? Úsela solo para casos legítimos de soporte; las acciones se registrarán.",
         successMessage: "Ahora está suplantando al usuario"
       },
+      set_user_manager: {
+        label: "Establecer gerente",
+        description: "Establece el gerente de este usuario. La cadena de reporte determina el enrutamiento de aprobaciones y el alcance de registros own_and_reports.",
+        successMessage: "Gerente actualizado",
+        params: {
+          managerId: {
+            label: "Gerente",
+            helpText: "La persona a la que reporta este usuario. El servidor rechaza un gerente de otra organización, la autoasignación y un vínculo que cerraría un ciclo o superaría la profundidad máxima de la cadena de reporte."
+          }
+        }
+      },
       update_my_profile: {
         label: "Actualizar perfil",
         successMessage: "Perfil actualizado"

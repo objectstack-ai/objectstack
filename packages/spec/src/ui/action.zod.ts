@@ -1307,10 +1307,17 @@ const actionObject = () => strictObject({
   // Single-record update actions only. When true, the runtime captures the
   // record's prior field values and offers an "Undo" affordance on the success
   // toast (backed by the client UndoManager) to restore them. `operation:
-  // 'update'` is the DECLARED form of such an action (#14092): its `patch`
-  // names exactly the fields written, so the capture is exact rather than
-  // inferred from a handler's side effects — the anchor this flag lacked.
-  undoable: z.boolean().optional().describe("Offer an Undo affordance after this single-record update action succeeds. `operation: 'update'` is the declared form of that action — its `patch` names exactly the fields whose prior values are captured."),
+  // 'update'` is the DECLARED form of such an action (#14092), and it is the
+  // ONE member the operation enum carries — so there is one capture rule, not
+  // one per operation. The set is the write bag `{ ...patch, ...params }`
+  // (contract point 4, `patch` UNDER `params`), which is what the executor
+  // reads back: `executeDeclarativeUpdateAction` keys `undoData` off
+  // `Object.keys(data)`, `data` being that merged bag — NOT `patch` alone.
+  // Naming `patch` alone here is what let a consumer build a half-restore and
+  // report it as a full undo. Without `operation` nothing declares a write
+  // set, so the capture is inferred from a handler's side effects — the
+  // un-anchored case this flag started in.
+  undoable: z.boolean().optional().describe("Offer an Undo affordance after this single-record update action succeeds. `operation: 'update'` is the one declared operation and the declared form of that action: what the undo captures is the prior value of EVERY field the action writes — the merged write bag, `patch` UNDER the collected `params`, not `patch` alone. An action with no `operation` declares no write set, so nothing anchors the capture there."),
 
   /**
    * Result Dialog — describe how to render the API response on success.
