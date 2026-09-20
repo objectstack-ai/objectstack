@@ -12566,8 +12566,66 @@ export class ObjectStackProtocolImplementation implements
                         // spurious 404.
                         const deleted = await this.engine.delete(object, { where: { id: record.id }, ...ctxOpt } as any);
                         if (deleted === false) throw recordNotFoundError(object, record.id);
-                        results.push({ id: record.id, success: true, index });
-                        succeeded++;
+                        // [#19433] The SECOND half of this site, and the THIRD and
+                        // last of the by-id delete doors to learn it — the
+                        // single-record face (#19306) and `deleteManyData` (#19412)
+                        // both already read the engine's answer. The paragraph
+                        // above fixed "no match"; this is "matched, and
+                        // deliberately NOT removed", where `success` was still a
+                        // LITERAL for every result that was not the contract's
+                        // `false`, so that row was reported as a deletion too.
+                        //
+                        // `sys_permission_set` is the shipped shape of it: deleting
+                        // a package-declared set is an ADR-0005 RESET — the overlay
+                        // tombstones and the record re-projects to the declared body
+                        // instead of vanishing — so the row MATCHED, the write ran,
+                        // and the record is still there. On a security-configuration
+                        // write this envelope told an operator a permission set was
+                        // gone while it was still being enforced.
+                        //
+                        // The defect rests on the CONTRACT, not on any shipped
+                        // handler: `IDataEngine.delete` declares
+                        // `Promise<boolean | number>` — the driver's boolean for a
+                        // by-id write, a COUNT of rows removed otherwise — and
+                        // `isDeleteResultShape` admits the number arm at the
+                        // ADR-0112 hook gate, so an `afterDelete` handler or a
+                        // non-ObjectQL engine may legally answer `0` today.
+                        //
+                        // ⛔ Not the `false` arm: that is spoken for by the 404
+                        // above, about a record this caller can still GET, and
+                        // answering it here would trade one wrong answer for a
+                        // louder one. Everything else keeps its #4435 reading, an
+                        // off-contract `undefined` from a third-party driver
+                        // included: only a POSITIVE zero is read as "not removed".
+                        //
+                        // ⛔ And the row gets NO `errors[]` entry. A surviving
+                        // record is an OUTCOME, not a fault — the single-record door
+                        // answers the same case with a bare `success: false` on a
+                        // 200 — and the two per-row codes this envelope owns
+                        // (`ROLLED_BACK`, `NOT_ATTEMPTED`) both describe a row that
+                        // never ran. Minting one for this ending is an
+                        // ERROR_CODE_LEDGER widening in `packages/spec`, and belongs
+                        // to the spec lane.
+                        //
+                        // This envelope's own consequences, measured here rather
+                        // than inherited from `deleteManyData`: the row is counted
+                        // in `failed` because `succeeded` and `failed` PARTITION
+                        // `results` (#7539, `reconcileStoppedBatch`, shared by all
+                        // three bulk faces), which makes the request-level `success`
+                        // false and, on the `atomic` arm, aborts the batch through
+                        // `runAtomicBatch`'s `failed > 0` — so an atomic batch
+                        // holding a package-declared set now rolls back instead of
+                        // committing under a response that called every row deleted.
+                        // It does NOT stop a non-atomic run: the `continueOnError`
+                        // stop belongs to the catch below and nothing was thrown, so
+                        // every remaining record is still attempted. `returnRecords:
+                        // false` keeps `success`, so the honest value survives that
+                        // projection too. Only this `case` is touched — the sibling
+                        // arms of this shared loop keep their own counters.
+                        const removed = deleted !== 0;
+                        results.push({ id: record.id, success: removed, index });
+                        if (removed) succeeded++;
+                        else failed++;
                         break;
                     }
                     default:
