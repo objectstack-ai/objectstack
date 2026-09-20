@@ -25,9 +25,14 @@
  *      parse clean and render every computed cell '—'. The refusal is the
  *      producer-side guard for that renderer fact.
  *   4. `relatedListColumns`: child field-name STRINGS only, matching every
- *      in-repo usage and the strings-only page-block sibling
- *      (`record:related_list.columns`, ui/component.zod.ts). A column OBJECT
- *      is refused with the derivation prescription.
+ *      in-repo usage. A column OBJECT is refused with the derivation
+ *      prescription. ⚠️ Since #18639 this is NO LONGER the same shape as the
+ *      page-block sibling: `record:related_list.columns`
+ *      (ui/component.zod.ts) declares the saved-view `ListColumnSchema` union,
+ *      because a saved view's columns are composed onto that block verbatim.
+ *      THIS key stays strings-only by ruling — objectui#9593 ruling A widened
+ *      that one and fenced this one — so the divergence is DELIBERATE, and
+ *      every pin below is unchanged by it.
  *   5. The showcase invoice fixture form — identity-only `{ name }` entries —
  *      parses, so the one authored in-repo usage stays green in the spelling
  *      the renderer actually reads.
