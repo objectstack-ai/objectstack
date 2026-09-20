@@ -1,0 +1,33 @@
+{
+  "number": 15691,
+  "kind": "issue",
+  "title": "measure: `/meta/diagnostics`' untyped sweep stays environment-wide on a justification that PR #14767 may have retired",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T03:09:04Z",
+  "updated_at": "2026-09-05T04:10:27Z",
+  "closed_at": "2026-09-05T04:10:27Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15691",
+  "body": "**Filed so the gap survives #13753's retirement.** PR #15689 carries `Fixes #13753`, and that card's body is currently the only place this gap is written down as a decision. This card is its new home.\n\n## The gap\n\n`GET /api/v1/meta/diagnostics` has two arms. The **typed** arm (`?type=`) was repaired: it resolves the exec ctx and passes `organizationIdForMetaRead(canonicalMetaUrlType(diagnosticsType), ctx?.tenantId)`, so Studio's per-type directory drill-down states the caller's organization. The **untyped** sweep — the whole-registry pass behind the governance dashboard — is deliberately left **environment-wide**.\n\n## Why the justification needs re-measuring rather than re-reading\n\nThe reasoning recorded beside it is, in substance:\n\n> `targetTypes` is then the whole registry while the request carries ONE `organizationId`, and `getMetaItems` **unions** env-wide rows with the named org's rows — so naming a tenant would read a non-overridable type's org-scoped rows (the pre-#6190 phantoms boot hydration walks past) back into a governance report.\n\n⚠️ That leans on the same premise **PR #14767 retired**. Since `96326040f` (merged 2026-09-03T02:51:39Z, *\"apply the allowOrgOverride read gate inside `getMetaItems`, so multi-type sweeps are scoped per type\"*), `getMetaItems` computes `organizationIdForMetaRead(request.type, request.organizationId)` on **its own** type — so a whole-registry sweep carrying one organization would gate **per type**, and a non-overridable type's phantom org rows would be dropped rather than unioned in. That is exactly the hazard the paragraph above exists to prevent.\n\n⇒ The justification may now be describing a mechanism that no longer behaves that way. ⛔ **This card does not assert the sweep should change** — it asserts the reason on file is unverified against today's code, and a governance dashboard is a poor place to leave that.\n\n⭐ Precedent, and the reason this is filed rather than assumed: the identical stale premise was carried for over a day on #13753 and produced a re-triage that refuted a correct fix and escalated it to the maintainer's inbox. See #13753 comments 5541727271 (the refutation) and 5548741000 (its retirement).\n\n## Scope — measurement first, decision second\n\n1. **Measure**, on a real boot with a walled posture: does the untyped sweep, given a caller's organization, return a non-overridable type's org-scoped rows (the phantom hazard), or does the per-type gate drop them? Drive both — plant a pre-#6190 phantom on a non-overridable type **and** an org-authored row on an overridable one — and read what the sweep returns for each. A control that cannot distinguish the two has measured nothing.\n2. Then decide, and **record the reason beside the code either way**: keep the sweep env-wide (with a justification that matches today's behaviour), or state the caller's organization the way the typed arm does.\n3. ⛔ Do **not** build a new predicate, parameter or contract surface. ADR-0131 D6/D7 retires this partition in v18 (#15206, C5), so anything new here has one major to live. If the answer requires new surface, stop and report — that is a decision, not an implementation.\n\n## Not this card\n\n⛔ `/meta/:type/:name/references` — repaired by PR #15689. ⛔ The `501` envelope and message divergence on the references route — filed separately as #15685.\n\nRefs: #13753 (this gap's former home, and its stale-premise history) · PR #15689 · PR #14767 / `96326040f` · #6190 · #15206 (ADR-0131 C5).\n"
+}

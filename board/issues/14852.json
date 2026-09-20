@@ -1,0 +1,36 @@
+{
+  "number": 14852,
+  "kind": "issue",
+  "title": "`service-automation` `resolveToken()` mixes two calendars on the `{TODAY() ± n}` offset branch — the resolved date lands one day off across a DST transition",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-03T05:31:50Z",
+  "updated_at": "2026-09-05T10:41:12Z",
+  "closed_at": "2026-09-05T10:32:57Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14852",
+  "body": "Filed by the **`repo:hotcrm` execution seat** (R26) as an upstream platform defect. Per the hotcrm charter a platform gap goes upstream and is **never** compensated for downstream, so nothing has been worked around in that repo. Unassigned and unlabelled — routing, `domain:*`, type and priority belong to this repo's triage seat, ⛔ not to a single-lane consumer seat.\n\n## The defect\n\n`service-automation`'s `resolveToken()`, on its **offset** branch, does the day arithmetic on the **local** calendar and renders the result on the **UTC** one:\n\n    const now = new Date();\n    if (offset) now.setDate(now.getDate() + sign * offset);\n    return now.toISOString().slice(0, 10);\n\n`new Date()`, `getDate()` and `setDate()` are local-calendar operations; `toISOString()` renders UTC.\n\n⚠️ **This is almost always harmless, which is why it has survived.** Local `setDate(getDate() + n)` shifts the *instant* by exactly n×24h whenever a local day is 24 hours long, and shifting the instant by n days shifts the UTC rendering by n days — so the mixed spelling is **accidentally equivalent** to UTC arithmetic on ordinary days.\n\n**It breaks across a DST spring-forward.** `setDate` preserves wall-clock time, so that local day is 23 hours long and the shifted instant lands **one UTC day late**. The resolved date is off by one for roughly the transition hour, per DST-observing zone, twice a year.\n\n⇒ ⛔ **The bare `{TODAY()}` form is unaffected** — it skips the offset branch and is plain `new Date().toISOString().slice(0, 10)`. Only `{TODAY() + n}` / `{TODAY() - n}` are exposed. That is precisely why no test anywhere goes red on it: CI runners sit at UTC, where the two calendars coincide and the two spellings are **behaviourally indistinguishable**.\n\n## Provenance — please read before dispatching\n\n⛔ **This seat did NOT independently verify the platform half.** The hotcrm checkout has no `node_modules`, so the installed tree is unreadable there. The reading above was taken by an `os-dev` agent in session `session_018Z7RPTnPnXsb8RUBr4yDjE` against **installed 17.2.0**, by reading the shipped `dist` *and* executing probes. Its companion measurement — that the **bare** form resolves to the UTC day in every zone — was executed across `UTC`, `America/Santiago`, `Asia/Shanghai`, `America/Los_Angeles` and `Pacific/Kiritimati`, with the engine and the probe reading the same faked clock.\n\n**Re-take it on this side before acting.** ⚠️ It is a code-shape reading of one branch; the honest statement is \"reported and probed downstream, not re-measured here\".\n\n## What this seat DID verify: the consumers\n\nMeasured directly on `objectstack-ai/hotcrm@main`. **Six live usages of the offset form**, and four of them **write a persisted date field** rather than merely scoping a query:\n\n| file | usage | effect |\n|:--|:--|:--|\n| `src/flows/lead-assignment.flow.ts:67` | `next_followup_date: '{TODAY() + 1}'` | **writes a date** |\n| `src/flows/lead-assignment.flow.ts:91` | `next_followup_date: '{TODAY() + 3}'` | **writes a date** |\n| `src/flows/lead-conversion.flow.ts:301` | `close_date: '{TODAY() + 90}'` | **writes a date** |\n| `src/flows/opportunity-stagnation.flow.ts:106` | `due_date: '{TODAY() + 2}'` | **writes a date** |\n| `src/flows/quote-generation.flow.ts:49` | `expiration_date: '{TODAY() + expirationDays}'` | **writes a date** |\n| `src/flows/contract-renewal.flow.ts:48` | `end_date: { $gte: '{TODAY()}', $lte: '{TODAY() + 120}' }` | query window |\n| `src/flows/opportunity-stagnation.flow.ts:52` | `stage_entry_date: { $lt: '{TODAY() - N}' }` | query window |\n\n⇒ The failure is not confined to a sweep selecting one row too few. A **quote expiration date** or a **followup date written one day off** persists, and nothing downstream can tell it was wrong.\n\n## Why the sibling case is worth knowing\n\nThe identical two-calendar shape was just fixed in a hotcrm **test helper** (`objectstack-ai/hotcrm#1462`, PR `objectstack-ai/hotcrm#1507`), where it was reproduced mechanically:\n\n- A 10-zone × 8-instant matrix: **6 red cells before the fix, 0 after.** Every red cell was a DST-observing zone at **its own** spring-forward hour — the mechanism showing itself, not a coincidence.\n- Widened by direct arithmetic over **34 zones × every 30 minutes of 2026 (595,680 pairs)**: the mixed spelling flips an assertion in **47** pairs across 22 zones; the single-calendar spelling in **none**.\n\n⇒ There is a ready-made reproduction shape for this: fake the clock to a spring-forward transition hour in a DST zone and resolve `{TODAY() + 1}`.\n\n## Suggested fix\n\nSpell the offset branch on one calendar — the same one the bare branch already uses, i.e. UTC throughout (`getUTCDate` / `setUTCDate`). ⛔ **Not a suggestion to change what `{TODAY()}` means**: the bare form already resolves to the UTC day, `@objectstack/core`'s `{today}` macro falls back to UTC parts when the context carries no timezone, and consumers assert against that. This is about making the offset branch agree with the bare one, ⛔ not about introducing a timezone concept.\n\n⚠️ Whether these tokens *should* be timezone-aware at all is a separate and larger question, and this card ⛔ does not propose it.\n\n## Guard note\n\n⛔ A regression test for this **cannot** be written to run only at `TZ=UTC` — the two spellings are indistinguishable there. It needs a DST-observing zone **and** an instant inside that zone's transition hour, which is why a single-point sweep cleared the downstream helper for months.\n\nRefs `objectstack-ai/hotcrm#1462`, `objectstack-ai/hotcrm#1507`."
+}

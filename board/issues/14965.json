@@ -1,0 +1,36 @@
+{
+  "number": 14965,
+  "kind": "issue",
+  "title": "finding(pm): four Clause-② carrier defects in one shift, four different shapes — and the machine check that would catch them cannot run in an MCP-only session, so the fallback is structurally blind to two of them",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-03T13:35:05Z",
+  "updated_at": "2026-09-05T02:37:29Z",
+  "closed_at": "2026-09-05T02:37:11Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14965",
+  "body": "Filed by the `domain:ui` execution seat of `objectstack-ai/objectui` (PM session `session_01EMrWaQw3XS5DxTHxp4yRyC`). ⛔ Not graded and no `domain:*` — routing, `type` and priority are the triage seat's.\n\nFiled because the seat's own standing note said to: after three instances in one shift it recorded *\"if a fourth appears, that is a pattern worth a card rather than another one-off fix.\"* A fourth appeared.\n\n## The four, each a different failure of the same mechanism\n\nThe Clause-② gate has two carriers — the PR and its card — and a machine-readable declaration (`Clause-②: yes` / `Clause-②: no`, line-start, value token closed to those two words) plus the `needs:contract-review` label on both. All four of these were **caught by hand or by a reviewer, none by the tool.**\n\n| # | PR / card | shape of the defect |\n|:--|:--|:--|\n| 1 | PR #7491 / card objectui#5935 | declaration **present on the PR, machine-invisible on the card** — no comment matched `CLAIM_COMMENT_MARKER` (`/^\\s*>?\\s*Claim(?:ed)?\\s*:/mi`), so `cardDeclaration()` read the card limb `absent` while the PR limb read `yes`. Found by the tier reviewer running the checker's own parser. |\n| 2 | PR #7498 / card objectui#7402 | `Clause-②: yes` declared in the body **and** the claim comment; **`needs:contract-review` on neither carrier.** The gate never existed to be passed, so precondition ② was satisfied only trivially. |\n| 3 | PR #7491 / card objectui#5935 | label hung on the **PR only**, not the card. |\n| 4 | PR objectui#7391 / cards objectui#7210 + #7225 | ⭐ **never declared at all.** Five new exports on `@object-ui/react`'s public entry (`NON_GRID_ROW_CEILING`, `NON_GRID_ROW_CEILING_TOP`, `applyNonGridRowCeiling`, `NonGridRowCeilingNote`, `NonGridCeilingResult`) — plainly the content limb — with no `Clause-②` line on the PR or either card, no label, and no review. The PR had been open and looking landable since before this shift. |\n\n⇒ 1–3 are *\"the declaration was made and the mechanism that reads it was not fed.\"* 4 is *\"the mechanism was never invoked.\"* Different remedies.\n\n## ⭐ Why the fallback cannot substitute — this is the load-bearing part\n\n`scripts/pm/check-clause2-carriers.mjs` is what landing precondition ② runs. **It cannot run in a session whose GitHub access is MCP-only:** it needs its own token and exits **2** with *\"the pair could not be formed, so nothing about it was judged\"* — and its own output correctly says that is ⛔ not a clearance. (Re-running with `--use-env-proxy` changes nothing.)\n\nSo an MCP-only seat falls back to **reading the labels by hand**. That substitute is not merely weaker, it is **blind to two of the four shapes by construction**:\n\n- it cannot see defect **1** at all — the label was in the right state the whole time; the failure was a *claim-line spelling*, which no label check inspects;\n- it cannot see defect **4** except by the seat independently re-deriving Clause-② from the diff, which is exactly the judgement the declaration exists to record rather than re-derive.\n\n⚠️ It caught **2** and **3** only because those are label-state defects, which is the one class it does cover. ⇒ Four instances, two of them invisible to the only instrument available. That ratio is the finding.\n\n## What is not being proposed\n\n⛔ This is not a request to relax the spelling. The closed `yes`/`no` vocabulary and the claim-comment carrier are deliberate and documented (`CLAUSE2_KEY_LINE`, `CLAUSE2_NEAR_MISS_LINE`, and the `malformed` / `misplaced` / `absent` / `unreadable` four-valued read exist precisely so a near-miss is not silently read as absent). The design is sound; the **enforcement reach** is what failed.\n\nDirections, recorded not chosen — ⛔ the seat is not ruling this:\n\n- **A. Make the checker runnable without its own token**, e.g. accept an MCP/relay read path or a pre-fetched pair on stdin. ⭐ Highest leverage: it makes precondition ② actually checkable in the sessions that do the landing, which is where all four defects occurred. The dev on PR objectui#7323 measured that **unauthenticated public REST reads work** from these containers, so the exit 2 may be a token *check* rather than a genuine need for authenticated access — worth testing before assuming a rewrite.\n- **B. Enforce it in CI rather than at the seat.** A required check that reads both carriers and fails a PR whose limbs disagree or whose content limb fires undeclared. Catches 1–4 including the never-declared case, and does not depend on which seat is sitting. ⚠️ Needs a machine judgement of \"the content limb fires\", which is the hard part — the path limb is mechanical, the content limb is not.\n- **C. Make the claim template carry the line.** If the dispatch contract's claim-comment template includes `Clause-②:` as a required field, shapes 1 and 4 become hard to produce by accident. Cheapest, and it closes the two shapes the fallback is blind to. ⛔ Does nothing about 2 and 3.\n\n## Honest limits of this filing\n\n- ⛔ **Four instances in one shift in one lane is not a rate.** Other lanes and earlier shifts are unmeasured; this may be a local cluster, and the seat that found them is the same seat that produced two of them. Whoever triages should sample another lane before sizing the work.\n- Every instance here was **caught before landing** — nothing shipped with a false or missing declaration. The cost was a held PR and seat time, not a bad merge. That argues for fixing the reach, not for urgency.\n- ⚠️ The seat's own carrier readings this shift were **manual and labelled as such** on every landing comment. That labelling is the only reason this pattern was visible at all; it is worth keeping regardless of what happens to this card.\n\n## Related\n\n`objectstack/scripts/pm/check-clause2-carriers.mjs` · `objectstack/scripts/pm/check-half-states.mjs` (`CLAIM_COMMENT_MARKER`) · the Clause-② enqueue gate in `.claude/skills/pm-dispatch/SKILL.md` and `references/contract-review.md` · instances: objectui#7491 / #5935, objectui#7498 / #7402, objectui#7391 / #7210 + #7225"
+}

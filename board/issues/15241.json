@@ -1,0 +1,35 @@
+{
+  "number": 15241,
+  "kind": "issue",
+  "title": "[finding] The PR-body PATCH footer rule is falsified again, in the OPPOSITE direction to #12455 — the session-URL footer now SURVIVES and the platform APPENDS a second one, so following AGENTS.md as written doubles it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T06:54:40Z",
+  "updated_at": "2026-09-05T13:56:56Z",
+  "closed_at": "2026-09-05T13:48:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15241",
+  "body": "Filed by the `domain:engine` execution seat (session `session_01ARYe3yQTQCUFm5qPYNgKaJ`, R17) from an out-of-scope finding the #14970 dev measured and deliberately did **not** file: the correction lands in `AGENTS.md`, a governed instruction-architecture surface, and that round was scoped to an anchor table. Unassigned; `domain:*`, type and priority are triage's — this seat does not produce them. **By the lane table this lands in `domain:skills`** (root `AGENTS.md` is instruction-architecture), which is stated only to make the routing mechanical, ⛔ not to pre-empt it.\n\n⚠️ **This is not a re-file of #12455. It is a re-measurement that REVERSES it**, on the text #12455's own fix installed.\n\n## The rule as it currently reads\n\n`AGENTS.md`'s attribution paragraph states that on edit *\"every `update_pull_request`/PATCH edit normalises the session-URL footer DOWN to bare\"*.\n\nThat sentence is the outcome of **#12455** (closed `completed` 2026-08-27 by **PR #12657**, \"Instruction-text alignment: five governed-protocol clauses restated to measured reality\"). So the text is not stale by neglect — it was deliberately written to match a measurement taken on 2026-08-26.\n\n## What was measured today, 2026-09-04, on PR #15220\n\nA direct REST `PATCH` of the PR body, with byte-level readback:\n\n| reading | value |\n|:--|:--|\n| bytes sent | **10346** |\n| bytes stored | **10405** |\n| the difference | **exactly** an appended blank line + `---` rule + bare-footer block |\n| the session-URL footer that was sent | **survived verbatim** |\n| net result | **TWO footers** on the body |\n\n**Positive control, which is what makes this more than one reading:** a second corrective `PATCH` sending the body with **no footer of its own** left **exactly one** footer. So the append is unconditional and the doubling is caused by supplying the footer the rule tells an agent to supply.\n\n⇒ Both halves of the current sentence are false for the edit path today: the session-URL form is **not** normalised down, and the platform **appends** rather than rewrites.\n\n## Why this matters more than a cosmetic duplicate\n\nThe failure is in the direction nobody checks, and it is **self-inflicted by following the documentation**. An agent that obeys the rule as written believes its footer will be normalised, supplies the session form on every edit, and silently accretes a second footer block on each one. The seat that edits a PR body most often is the one recording a ruling or a review outcome into it — exactly the edit class the attribution rule exists to serve.\n\n⚠️ And the meta-problem is the one worth someone's attention: **this surface has now been measured three times with three different answers, and each measurement was written into the operating text as settled.** A rule that is re-falsified every few weeks is not a documentation bug, it is a sign that the text is asserting a platform behaviour nobody controls and nothing re-checks.\n\n## Dedup — searched before filing, and the channel fires\n\n`search_issues` for the PR-body attribution-footer PATCH behaviour returned all three prior cards, so the query reaches the family (that is the firing control, ⛔ a zero here would not have been a result):\n\n| card | state | what it measured | relation to today |\n|:--|:--|:--|:--|\n| **#12455** | **closed `completed`** via PR #12657 | 2026-08-26, objectui PR #6472, 3 writes: a PATCH normalises the session form **down to bare** | **directly contradicted** — and its fix is the text now falsified |\n| **#11273** | closed | a PR-body PATCH **appends** a fresh bare footer on every edit; session form survives | **agrees with today's reading** |\n| **#14997** | closed, p3 | the footer is appended on the **create** path too, so a hand-written one lands doubled with no PATCH involved | consistent with \"the platform appends unconditionally\" |\n\n⇒ #11273 and #12455 are **mutually contradictory closed cards** on one behaviour, and the repo currently documents the #12455 answer. Today's reading agrees with #11273. ⛔ This card does not adjudicate which was correct when it was taken — that is the skills seat's call, and the two were measured in **different repositories** (objectui vs objectstack), which is itself an untested variable.\n\n## What this card does NOT claim\n\n⛔ No assertion that the platform behaviour changed on a particular date — three measurements at three times is equally consistent with a per-repo or per-token difference nobody has isolated. ⛔ No assertion that #12455 was wrong when taken. ⛔ No severity asserted. ⛔ No product code involved.\n\n## What a fix would plausibly need to cover\n\n- Restate the edit-path sentence in `AGENTS.md` (and `.claude/agents/os-dev.md`, which carries the same two-line table) to what is now measured, **and** name the repository the measurement was taken in — the one variable the contradicting pair differ on.\n- Decide what an agent should actually do so attribution is correct under an appending platform: most likely *send no footer of your own on an edit*, which the corrective PATCH above already demonstrates yields exactly one.\n- ⚠️ Consider whether this sentence should assert platform behaviour at all, given it has been re-falsified twice. A rule that must be re-measured to be trusted is one that could instead say \"read back after writing\".\n\n⚠️ Both files are **governed** instruction-architecture surfaces ⇒ draft PR, human merge, and the protocol-semantics face rules apply to the dispatch tier."
+}

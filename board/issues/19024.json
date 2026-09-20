@@ -2,7 +2,7 @@
   "number": 19024,
   "kind": "pull_request",
   "title": "revert(spec): take back the declaration-text snapshot, restore the 27 signature hashes",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -15,7 +15,6 @@
     "dependencies",
     "documentation",
     "domain:spec",
-    "needs:contract-review",
     "priority:p1",
     "size/xl",
     "skip-changeset",
@@ -25,11 +24,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-18T12:14:07Z",
-  "updated_at": "2026-09-18T14:06:54Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 3,
+  "updated_at": "2026-09-20T12:53:31Z",
+  "closed_at": "2026-09-20T12:52:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-09-20T12:52:34Z",
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/19024",
   "body": "Fixes #19011\n\nReverts PR #18971 (squash commit `d8b12fca9`) under the maintainer's ruling **C**, recorded verbatim on the card: the 12 MiB declaration-text snapshot comes out, and consumer compilation against `spec@main` becomes the shape gate instead. ⛔ The direction is not re-argued here.\n\nThe branch was produced by the dispatched `domain:spec` seat (claim comment on #19011, `session_01JbZnqu8bt6YqfJsr9vaFb3`); this PR only opens it for review.\n\n## What lands\n\n`git revert d8b12fca9`, 31 files, **+119 / −238,361**:\n\n- deletes `packages/spec/api-surface-declarations/` (17 shards, 237,706 lines) and its generator `packages/spec/scripts/build-api-surface-declarations.ts`;\n- restores `packages/spec/api-surface-signatures.json` (the 27 hashes) as the interim shape pin;\n- takes back the rows #18971 added to `scripts/regen-artifacts.mjs`, `scripts/pm/check-widening-tells.mjs`, `scripts/pm/dispatch-gates.mjs` (`CLASS_EIGHTH`), `scripts/check-published-files.mjs`, `.github/workflows/lint.yml`, `.gitattributes`, `docs/spec-generated-artifact-sharding.md`, `packages/spec/package.json` (`files[]`);\n- drops the unreleased changeset `.changeset/16045-spec-declaration-text-snapshots.md`.\n\n## Faithfulness, measured rather than asserted\n\nOf the **31** files #18971 touched, **30** are restored **byte-for-byte** to the reverted commit's parent `a48496640` — compared by blob sha, not by eye.\n\nThe one path that is deliberately **not** restored is `.github/workflows/lint.yml`, which keeps the later, unrelated `check:release-spec-changes` self-test step (#18889, landed after #18971). Reverting that step is not this revert's business; the diff against the parent blob is exactly those 12 lines and nothing else.\n\nMerges cleanly into `origin/main` at `9ee8e3510` (`git merge-tree --write-tree`, no conflict).\n\n## Why no changeset\n\n`skip-changeset`: #18971 was never released — its own changeset was still pending on `main`. Reverting the code **and** its pending changeset leaves the next release byte-identical to what it would have been before #18971 landed, so this PR releases nothing. An empty-frontmatter changeset is not a route (#5471).\n\n## Landing\n\n⛔ **Not a seat's landing.** Under the maintainer's second ruling of the same exchange (「修改代码量超过某个行数(比如5000)就应该人工审核」), a 238,480-line PR is maintainer-landed. Opened as a draft; review requested from `GOVERNED_APPROVERS`.\n\n## Not in this card\n\nThe consumer-compile gate that replaces the snapshot — objectui's half is filed on objectui; cloud's half is outside this session's write scope and was named to the maintainer in chat.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"

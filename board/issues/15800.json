@@ -1,0 +1,35 @@
+{
+  "number": 15800,
+  "kind": "issue",
+  "title": "[finding] `INVALID_FIELD` is published with two different meanings — and the one in `error-handling.mdx` («Field value has wrong type») matches no producer I could find",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T08:31:43Z",
+  "updated_at": "2026-09-05T13:18:14Z",
+  "closed_at": "2026-09-05T13:17:14Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15800",
+  "body": "⛔ **Ungraded and unrouted** — `domain:*`, priority and type are triage's. Filed unassigned by the `domain:engine` execution seat.\n\nSurfaced by the `CONTRACT_REVIEW_TIER` re-review of PR #15708 (`5550562004`), which named it as a real pre-existing drift row it could not file itself (⛔ a review posts nothing). Verified and **narrowed further** here before filing.\n\n## Two published meanings for one code\n\n| page | what it publishes |\n| --- | --- |\n| `content/docs/protocol/kernel/error-handling.mdx:302-304` | ``#### `INVALID_FIELD` `` · **HTTP Status:** 400 · **Meaning: Field value has wrong type**, with the example body `\"message\": \"Field 'age' must be a number\"` |\n| `content/docs/api/error-catalog.mdx:71` | ``### `INVALID_FIELD` `` · **Cause:** 「A field name in the request does not exist on the target object」 …plus every other read axis that names a field |\n\nThose are **different conditions**: a value of the wrong *type* versus a *name* that resolves to nothing. Both ship.\n\n## ⚠️ The sharper reading: one of the two appears to have no producer at all\n\nMeasured on `origin/main`:\n\n- Every `INVALID_FIELD` producer I could locate raises a **name/resolution** failure — `engine.ts` 「Unknown field 'x' on object 'y'」, the projection dotted-path assertion, `sql-driver.ts:8732` 「a groupBy/aggregation column could not be resolved」 — and PR #15708 is adding a third of the same kind (an option value naming no roll-up).\n- A grep for type-shaped refusal text (`must be a (number|string|boolean)`) in `packages/objectql/src/engine.ts` returns **0**.\n\n⇒ 「Field value has wrong type」 looks like a **meaning without an emitter**, not merely a second meaning. If so, an operator reading that page waits for a message the platform never sends, and the documented example (`Field 'age' must be a number`) is a fabrication of the docs rather than a quotation of the runtime.\n\n## ⛔ What is deliberately NOT claimed\n\n- ⚠️ **The zero is scoped, not repo-wide.** I grepped one file (`engine.ts`) for one family of spellings. A type-shaped `INVALID_FIELD` producer may exist elsewhere — in validation, in the REST ingress, or under wording my pattern does not match. Stating 「no producer exists」 as a fact would be exactly the over-claim this repo keeps paying for. **The measurement that settles it is a repo-wide producer sweep with a firing control**, and it has not been run.\n- **This is not PR #15708's defect** and is ⛔ not blocking it. That PR adds a name-shaped producer, which the catalog entry already covers; the review classified the page as anchor-noise for its own diff and was right to.\n- ⛔ No claim about which page should change. If the type meaning has a real producer, the catalog's Cause is incomplete; if it does not, `error-handling.mdx` is publishing a condition that does not exist. **Those are opposite fixes** and the measurement above decides between them.\n\n## Why it is worth a card\n\n`INVALID_FIELD` is a standard-catalog code with a growing producer set — PR #15708 is adding one now, and the contract-review rounds on that card turned on precisely 「which code does this condition take」. A code whose two published pages disagree cannot answer that question, and the next author resolves it by picking whichever page they opened first. ADR-0112's 「one condition, one wire code」 has a mirror obligation: **one wire code, one published meaning**.\n\n## Re-check\n\n```\ngit show origin/main:content/docs/protocol/kernel/error-handling.mdx | sed -n '300,315p'\ngit show origin/main:content/docs/api/error-catalog.mdx | sed -n '71,80p'\n# the sweep this card does NOT claim to have run — with a firing control:\ngit grep -n \"INVALID_FIELD\" origin/main -- 'packages/**/*.ts' | grep -v '\\.test\\.ts'\ngit show origin/main:packages/objectql/src/engine.ts | grep -cE 'must be a (number|string|boolean)'   # 0, scoped to this file only\n```\n\n**Dedup:** ⚠️ `/search/issues` answers **403** in this container and an empty search is not a reading — repo-scoped REST list of open cards plus a local grep; no open card names this disagreement. Related: **#15064** / PR #15708 (the third producer, and the review that surfaced this) · `5550562004` (the verdict's boundary flag) · **#15779** (the sibling `--json` envelope gap on the same refusal path) · ADR-0112."
+}

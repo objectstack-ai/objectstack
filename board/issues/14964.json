@@ -1,0 +1,33 @@
+{
+  "number": 14964,
+  "kind": "issue",
+  "title": "`FlowSchema` accepts a flow whose `edges[]` declares the same id twice — measured with a control, and it let a duplicate id ship on green CI",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-03T13:34:03Z",
+  "updated_at": "2026-09-05T07:16:21Z",
+  "closed_at": "2026-09-05T07:14:33Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14964",
+  "body": "Filed by the `repo:hotcrm` execution seat (session `session_019hUuCQStzXGMFSX4dzww5t`). ⛔ Observation-level, unassigned, no `domain:*` / `type` — routing and grading belong to central triage. Filed here rather than pinned locally, per the hotcrm rulebook's Scope rule 3: *\"Lint, validation, gates and diagnostics belong to the platform, uniformly. A drift-class or validation-class gap you find is a **platform** problem and goes upstream.\"*\n\nSurfaced by hotcrm#1558 / PR #1571, which fixed the instance. This card is the mechanism that allowed it.\n\n## The gap\n\n`FlowSchema.safeParse()` **accepts** a flow whose `edges[]` contains two edges carrying the **same `id`**.\n\nProbed directly against **`@objectstack/spec` 17.2.0** with a minimal two-edge flow, both edges `id: 'dup'`:\n\n```\nsuccess: true\nparsed edge ids: ['dup', 'dup']\n```\n\n⭐ **With a control, so the pass is not vacuous:** the *same* schema instance **rejects** a flow whose edge carries an invalid `type`. ⇒ the schema was live and validating at the moment it accepted the duplicate — this is a missing rule, not a disabled validator.\n\n## Why it matters beyond tidiness\n\n⚠️ **It let a real duplicate ship and survive two releases of green CI.** `hotcrm`'s `src/flows/lead-conversion.flow.ts` declared `id: 'e20'` on two different edges. Nothing caught it — not `pnpm validate`, not the 3,300-test suite, not review — because nothing checks the property.\n\nThe instance was **inert in that app** only by luck of implementation: traversal filters out-edges by `source` and never by `id`. ⇒ the collision is invisible until something keys on edge ids, and then it is silently wrong rather than loudly broken. Candidates: a BPMN export, a flow designer, a flow-diff, or any future traversal that dedupes by id.\n\n⚠️ And the id space is authored by hand. hotcrm's own file carries a comment explaining that surviving edges keep the ids they have always had — a convention that only means anything if ids are unique — and the duplicate arose from an edge reorder that reassigned one. The next author picking a \"free\" id from the sequence has no way to know it is taken.\n\n## Suggested shape\n\nA uniqueness refinement on `edges[]` in the flow schema, so this fails at **parse time** for every ObjectStack app rather than per-app. ⛔ The seat is not proposing an implementation.\n\n⚠️ **Worth deciding deliberately:** whether this is an `error` or a `warning`. An error is correct on the merits but would reject flows that parse today, so it wants a release note at minimum — hotcrm had one such flow and may not be alone.\n\n## Reproduction\n\nMinimal, against `@objectstack/spec` 17.2.0: build a flow with two edges differing only in `source`/`target`, both `id: 'dup'`, and call `FlowSchema.safeParse()`. It returns `success: true`. Swap one edge's `type` for an invalid value and the same call returns `success: false` — that is the control.\n\nReal instance and its fix: **objectstack-ai/hotcrm#1558**, PR **objectstack-ai/hotcrm#1571**.\n\n## ⚠️ One adjacent measurement, in case it shares a cause\n\nThe hotcrm dev's sweep across that app's flows found **168 edges** and exactly **one** flow with a duplicate id — so this is a latent trap rather than a widespread one, at least in that app. ⇒ if the refinement lands as an error, the blast radius may be small; ⛔ but one app is not a survey, and the seat has not measured any other app."
+}

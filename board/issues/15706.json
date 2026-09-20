@@ -1,0 +1,34 @@
+{
+  "number": 15706,
+  "kind": "issue",
+  "title": "The bulk-event producer re-derives the tenant wall and can only see one of its three clauses — a deployment `platformGlobalObjects` exemption is invisible to the engine, so the p0 fix can MISLABEL a cross-org batch",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:engine",
+    "priority:p0",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T03:38:10Z",
+  "updated_at": "2026-09-05T07:02:29Z",
+  "closed_at": "2026-09-05T05:14:16Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15706",
+  "body": "**⛔ Ungraded and unrouted** — `domain:*`, priority and type are triage's; this needs a **maintainer ruling on shape**, not a queue position. Filed by the `domain:engine` execution seat, unassigned.\n\n⚠️ **This blocks a `priority:p0` `security` card.** #15225 is the bulk producer half of the #13566 cross-tenant webhook leak. Its delivery (PR #15687) is otherwise sound and its contract review at `CONTRACT_REVIEW_TIER` **FAILED** on exactly this gap (verdict `5549091499`), with the reviewer's own words: 「this PR does not merge while the carve-out population can be mislabelled」.\n\n## The gap, measured\n\n`publishBulkDataEvent` must stamp `BulkDataEventSchema.organizationId` only when the Layer 0 tenant wall named exactly one organization. To decide that, the engine re-derives the wall's own input. But `plugin-security` folds **three** clauses into that input (`security-plugin.ts`, `getObjectSecurityMeta`):\n\n```ts\ntenancyDisabled:\n  (obj as any)?.tenancy?.enabled === false ||\n  (obj as any)?.systemFields?.tenant === false ||\n  (this.orgScopingEnabled &&\n    this.deploymentOrgScopingEntitlement().platformGlobalObjects.has(object)),\n```\n\nand its own docblock states the consequence: 「a deployment-exempted object behaves **exactly as if it had declared `tenancy: { enabled: false }` itself**, on every one of those paths at once」.\n\n**The third clause is declared by the deployment, not by the object** — so the engine cannot see it at any price. Measured on `origin/main`:\n\n| reading | value |\n| --- | --- |\n| `packages/objectql/src/engine.ts` mentions `platformGlobalObjects` | **0** |\n| …mentions `deploymentOrgScopingEntitlement` | **0** |\n| firing control — same file, `tenancy` | **20** |\n| the pinned consequence (`deployment-platform-global-exemption.test.ts`) | exempted object, `isolated`, `MEMBER` ⇒ `getReadFilter` returns `undefined` — **no wall** |\n\n⇒ On such an object the producer stamps the caller's active organization while Layer 0 constrained nothing, so the batch can span several organizations. The reviewer measured the sibling case end to end (`systemFields:{tenant:false}` + a declared `organization_id`, `isolated`, `MEMBER`, rows across `org_acme` / `org_globex` / org-less): **`organizationId: 'org_acme'`, `matched: 3`**, while `computeTenantLayer0Filter` returns `null` for the same input.\n\n## Why a mislabel is the bad direction here, and why this cannot be patched in the engine\n\nAn **absent** key under-delivers: a tenant-scoped consumer declines to fan out — the safe failure, and today's behaviour. A **wrong** key asserts 「every affected record belongs to exactly this organization」 falsely, and the consumer then delivers a cross-organization batch **inside the wrong wall** — the #13566 leak, reappearing through the PR that closes its bulk half.\n\nThe schema-level clause (`systemFields.tenant === false`) is fixable inside the engine and is item 1 of that PR's patch round. **The deployment clause is not**: nothing in the object's schema carries it. Any engine-side fix would be a third copy of a predicate that already exists in `plugin-security`, and the mirroring is what produced this defect.\n\n## The decision\n\nTwo shapes, both from the contract review's escalation; ⛔ the seat does not choose between them.\n\n- **(i) `plugin-security` records its Layer 0 verdict on the operation, and the publish site reads it.** Collapses the mirrored derivation entirely — the engine stops re-deriving the wall and reads what the wall decided. Closes the schema clause, the deployment clause, and both 「conservative absent」 populations (a carried `PLATFORM_ADMIN` rung on a public tenant object; a non-system context carrying no rung, whose exemption is decided by a permission-set probe the engine cannot see) in one move. Cost: a new member on the operation context — an additive widening of a published surface ⇒ at least `minor` on its declaring package, and its own contract review.\n- **(ii) A per-object 「is this object walled here?」 provider**, injected beside the existing `setTenancyPostureProvider`. Smaller and symmetric with what already exists; closes the deployment clause but leaves the two rung-shaped populations answered by conservatism.\n\n⚠️ Both are **cross-lane**: the producer is `domain:engine`, `plugin-security` is `domain:services` (`references/lanes/services.md:11`). That is why this is a ruling rather than a dispatch.\n\n## Sequencing, so the p0 is not silently parked\n\nPR #15687's patch round for the other six items is dispatched and proceeds in parallel; it does **not** wait on this. What waits on this is the **merge**: while the carve-out population can be mislabelled, the PR stays draft with `needs:contract-review` hung on both carriers. If this becomes its own card, #15225 takes `Blocked-by` it.\n\n⚠️ Note what is *not* being claimed: the leak's single-record half (#14970, landed) is unaffected, and the bulk path today emits **no** key at all, so nothing regresses while this is decided — the risk is only in landing the fix as written.\n\n## Re-check\n\n```\ngit show origin/main:packages/plugins/plugin-security/src/security-plugin.ts | grep -n -A5 'tenancyDisabled:'\ngit show origin/main:packages/objectql/src/engine.ts | grep -c platformGlobalObjects        # expect 0\ngit show origin/main:packages/objectql/src/engine.ts | grep -c tenancy                      # positive control\n```\n\n**Dedup:** ⚠️ `/search/issues` answers 403 in this container and an empty search is not a reading — repo-scoped REST list of open cards plus a local grep; no card carries `platformGlobalObjects` with the producer/seam shape. Related: #13566 (p0 parent) · #15225 (this producer half) · #14970 (single-record half, landed) · #12699 (the deployment carve-out) · PR #15687 · contract review `5549091499`.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

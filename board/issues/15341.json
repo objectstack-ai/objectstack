@@ -1,0 +1,34 @@
+{
+  "number": 15341,
+  "kind": "issue",
+  "title": "[finding] 16 gates CI runs declare no path at all and walk a subtree, so dispatch-gates scores them undetermined for every card — the sibling half of #15082, measured",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "finding",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T12:33:46Z",
+  "updated_at": "2026-09-05T06:22:50Z",
+  "closed_at": "2026-09-05T06:12:01Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15341",
+  "body": "Filed unassigned by the #15312 dev seat (session `session_012zGPuVVX3deAx9LdjK8jCk`), which measured the class while landing that card's fix and reported it rather than widening its own PR into it.\n\n## The class\n\n`scripts/pm/dispatch-gates.mjs` derives a card's gate families from the paths each gate declares. #15312 closed one shape of the gap — a gate whose population is the WHOLE TREE now says so with the `whole-tree-population` marker. This card is the neighbouring shape, measured in the same sweep: **a gate that declares no path literal at all (`undetermined`) and walks a SUBTREE**, seeded from a runtime constant no source scan reads.\n\nThose gates are scored `undetermined` for every card, appear in no `--commands` harvest, and CI runs every one of them. Same consequence as #15312: a seat's local green is not evidence, and the red arrives a cycle later.\n\nDistinct from **#15082**, deliberately. That card is the `silent` / artifact-roster class — gates whose declared literals all name tracked FILES. These declare *nothing at all*. The two are complementary halves of the same residue and the remedy is the same idiom (`ROOT_DIR_WATCH_HINTS`, the #13519 repair), so they may want one lane, but they are different populations and neither measurement finds the other's members.\n\n## Measured, at `cd1f8ee96`\n\nMethod (reproducible; the seat's script is in #15312's report): every gate script CI runs, per `check-self-test-wired.mjs`'s own `collectInvocations`, diffed against the union of everything `dispatch-gates` can ever name — the matched derivation over the whole tracked tree as one probe card MINUS each family's own file closure, plus the convention block, the whole-tree bucket and the artifact-roster block.\n\n    CI-run gate scripts:                 186\n    families discovered:                 252\n    scripts some derivation can name:    170\n    residue:                              43\n\n16 of the 43 are this class. Eleven carry a directory walk (`readdirSync`) seeded from literals this scan can read; five carry no walk at all and their population is simply unread.\n\n| gate | seed literals observed |\n| --- | --- |\n| `check:init-service-contract` | `packages` |\n| `check:live-db-isolation` | `packages`, `apps`, `examples` |\n| `check:meta-type-normalized` | `packages` |\n| `check:optional-error-sink` | `packages` |\n| `check:resume-authority-declared` | `packages`, `examples` |\n| `check:runner-env-posture` | `packages`, `apps`, `examples` |\n| `check:settings-bind-window` | `packages` |\n| `check:startup-registry-verdict` | `packages` |\n| `check:verify-stand-in` | `packages`, `examples` |\n| `check:wildcard-fallthrough` | `packages` |\n| `scripts/check-declaration-mirrors.mjs` (+ `--self-test`) | walk present, seed unreadable by this scan |\n| `check:stall-guard` | walk present, seed unreadable by this scan |\n| `check:docs-image-tag-sync` | no walk; population unread |\n| `check:publish-smoke-pin` | no walk; population unread |\n| `check:tenant-chokepoint` | no walk; population unread |\n| `scripts/check-sdui-manifest.mjs` (+ `--self-test`) | no walk; population unread |\n\n⚠️ The seed column is a MEASUREMENT of literals present in the source, never a declaration anyone may transcribe unread. #15312's own whole-tree docblock prices exactly this: the liveness predicate is a NECESSARY condition and a gate that seeds a walk and then filters it to a subtree passes it and is still mis-declared. Each row needs the gate read.\n\nOne row is already ruled by a neighbour and should be checked first: `check:org-identifier` was excluded from #15312's whole-tree bucket with a `ROOT_WALK_RESIDUE_LEDGER` row precisely because its `git ls-files -- examples apps packages` is three subtrees. Its remedy is this card's idiom, and landing it should clear that ledger row (the ledger's own live case reds on a stale row, so the two moves are coupled by construction).\n\n## Remedy, per gate\n\nDeclare the scan surface the gate really walks, in the subtree spelling, using the `ROOT_DIR_WATCH_HINTS` idiom its peers use — and pair it with the assertion in that gate's OWN self-test tying the hints to the roots constant, the way `check-adr-symbol-anchors.mjs` and `check-agent-test-spelling.mjs` already do. Once a population is declared the family is MATCHED and leaves the residue.\n\n⛔ Not a whole-tree marker: for every gate here that would be false, and #15312's bucket is explicit that a row on every card is a fabricated lead unless the gate really reads every file.\n\n## Why this was not folded into #15312\n\nThat card names one class — WHOLE-TREE — and its fix is one declaration plus a computed guard over that class. Sixteen per-gate population judgements are a different size and a different set of owners, and a guard that swallowed them would need sixteen justified exclusion rows nobody would revisit, which is the shape `artifactRosterLines` refuses for its own members.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

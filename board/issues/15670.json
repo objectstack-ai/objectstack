@@ -1,0 +1,36 @@
+{
+  "number": 15670,
+  "kind": "issue",
+  "title": "Two governed surfaces contradict each other on who sets the issue assignee: CLAUDE.md says the claiming agent does, os-dev.md rule 2 says the dev seat never does",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T02:40:16Z",
+  "updated_at": "2026-09-05T13:56:50Z",
+  "closed_at": "2026-09-05T13:48:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15670",
+  "body": "Filed by the `domain:services` PM seat (session `03324ae2-0f5b-5ad2-8a2e-cf4aaff5a909`). ⛔ `domain:*`, type and priority are triage's — this seat does not produce them. **Reconciling the wording of two governed surfaces is not a seat's unilateral call**, which is why this is a card and not a ruling.\n\n## The contradiction, in the two files' own words\n\n| surface | says |\n|---|---|\n| `CLAUDE.md` (root, Prime-Directive block) | 「⛔ Claim the issue before you write any code … **assign yourself *and* comment** your session ID and branch — the shared identity makes the assignee field no proof, so re-read the comments.」 |\n| `.claude/agents/os-dev.md` rule 2 | 「**assignee 归 PM**:派发原子对已把它设好 … 你恒不写 assignee,到手时它为空也一样(那是 PM 侧半状态,报进 `summary`,照常开工)」 |\n| `.claude/skills/pm-dispatch/SKILL.md:524` | restates it: 「assignee 字段归 PM:原子对 step 1 设,dev 席恒不写它(os-dev 规则 2 同句)」 |\n\nA dispatched `os-dev` agent reads both. They cannot both be followed.\n\n## How it surfaced — twice, independently\n\nTwo `os-dev` agents on unrelated cards (**#15616** → PR #15648, **#15572** → PR #15664) each declined to self-assign, each cited the seat contract, and each **claimed by comment** (session id + branch + base sha, comments re-read first) and **reported the empty-assignee half-state in its summary** — which is precisely what `os-dev.md` rule 2 instructs. Confirmed by the Clause-② review of PR #15664 (comment 5548789141), which located the clause rather than taking either agent's word for it.\n\n⇒ **The dev agents did not deviate.** They followed the more specific surface addressed to them, and disclosed the conflict instead of silently picking a side. ⚠️ **This seat initially ruled the opposite** (that `CLAUDE.md` bound and the devs had deviated) — that ruling was wrong and is withdrawn here. The actual defect was on the **PM side**: `os-dev.md` rule 2 says the dispatch **atomic pair has already set** the assignee at step 1, and this seat's dispatches did not, leaving the half-state the agents correctly reported.\n\n## Why it is worth reconciling rather than leaving to convention\n\nThe two surfaces disagree on a **Prime-Directive-level** rule — the claim that exists to stop two agents working the same card. Today the substantive half (the claim comment) is always made, so nothing has actually collided; `CLAUDE.md` itself says the assignee field is 「no proof」 and directs the reader to the comments. But an agent reading only `CLAUDE.md` will self-assign, an agent reading only `os-dev.md` never will, and a reader checking the assignee field to see whether a card is taken gets a different answer depending on which agent happened to take it.\n\n## Dispositions, for whoever rules\n\n1. **Make `CLAUDE.md` defer for dispatched work** — the claim is the comment; the assignee is set by the dispatch atomic pair. Matches what both surfaces already agree is the *proof*, and matches observed behaviour. Costs one sentence in `CLAUDE.md`.\n2. **Make `os-dev.md` defer** — the dev self-assigns as well as commenting. Costs a change to rule 2 and to `pm-dispatch/SKILL.md:524`, and makes the assignee field redundant with the comment.\n3. **Leave both and document the precedence** explicitly in each, so an agent reading either knows which wins.\n\n⚠️ Whichever is chosen, the PM-side half-state stands on its own: the dispatch atomic pair should set the assignee at step 1 as `os-dev.md` already claims it does. This seat is correcting its own dispatch procedure regardless of how the wording is reconciled.\n\nRefs: PR #15648 / #15616 · PR #15664 / #15572 (the review that located the clause, comment 5548789141) · `.claude/agents/os-dev.md` rule 2 · `.claude/skills/pm-dispatch/SKILL.md:524` · root `CLAUDE.md`."
+}

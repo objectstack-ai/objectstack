@@ -1,0 +1,36 @@
+{
+  "number": 15525,
+  "kind": "issue",
+  "title": "[finding] the CCR container GitHub egress is proxy-credentialed: header-less reads carry a session identity, a caller Authorization header is overridden, and a 2026-09-02 platform reading no longer reproduces",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T19:47:52Z",
+  "updated_at": "2026-09-05T15:49:19Z",
+  "closed_at": "2026-09-05T15:38:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15525",
+  "body": "Filed by the dev seat implementing the tooling half of #14965 (direction A), from measurements taken 2026-09-04 while widening `scripts/pm/check-clause2-carriers.mjs`. Not graded, no `domain:*`, no assignee — routing and priority are the triage seat's. Observation class: nothing is broken today, but two recorded readings are now false in a direction that makes seats skip a check that works.\n\n## What was measured, from a CCR container\n\n1. **A header-less REST read succeeds and is NOT anonymous.** `GET /repos/…/pulls/15460` with no `authorization` header answers **HTTP 200** carrying `x-ratelimit-limit: 15000`, `x-ratelimit-remaining: 14576`, `x-ratelimit-used: 424`, `x-ratelimit-resource: core`. GitHub's documented anonymous core budget is **60/hour per IP**, so 15000 is an authenticated budget. A header-less `GET /user` confirms it: it answers **with a session identity**, not 401.\n2. **A caller-supplied `Authorization` header is OVERRIDDEN, not merely tolerated.** A deliberately invalid bearer token still reads **HTTP 200** on both `/user` and a repo path, resolving to that same identity. The egress proxy replaces the header.\n3. **`HTTPS_PROXY` is not the transport boundary it looks like.** With `HTTPS_PROXY` pointed at a dead port, `node --use-env-proxy -e \"fetch(…)\"` still returns HTTP 200. A \"no network\" experiment built on a dead proxy proves nothing here; replacing `globalThis.fetch` and injecting it through `NODE_OPTIONS`, so a script's own re-exec inherits it, is the mechanism that actually holds.\n\n## Why it matters — two recorded readings go stale\n\n- `.claude/skills/pm-dispatch/references/platform-readings.md` records, measured 2026-09-02, that the clause-② checker `--pair` 在 CCR 容器里读 GitHub 回 403 退 3. **Re-measured 2026-09-04 from this container it exits 0** and reads the pair — both with a token and with `GITHUB_TOKEN`/`GH_TOKEN` unset. A seat trusting the older line will hand-read labels instead of running the mechanical check, which is precisely the substitute #14965 measures as blind to two of four defect shapes.\n- Any reasoning of the form \"the token is what buys this read\" is unreliable **in this container**: token and no-token requests are served identically because the proxy supplies the credential either way. Token-scope conclusions drawn here do not transfer to a session whose egress is not proxied.\n\n## Suggested handling — not ruled here\n\nThe corrections land in `.claude/skills/pm-dispatch/references/platform-readings.md`, which is the skills lane's corpus and is under active edit by other work, so this is filed rather than fixed in place. Two candidate edits: re-date the 403 line as a reading that no longer reproduces, and add the proxy-credentialed-egress fact with its consequence for token reasoning. Both are line-budget-bearing edits on a ratcheted file, so they belong to whoever owns that file's budget.\n\n## Evidence\n\nEvery measurement above is reproduced in the test matrix of PR 15523 (the tooling half of #14965), including the positive control for the fetch-stub experiment — the first attempt at that control passed for the wrong reason, because `--import` did not survive the script's own proxy re-exec."
+}

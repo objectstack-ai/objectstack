@@ -1,0 +1,26 @@
+{
+  "number": 19342,
+  "kind": "pull_request",
+  "title": "feat(auth): allow explicit intranet HTTP OAuth",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "jinyitao123",
+    "id": 260412432,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-20T12:28:45Z",
+  "updated_at": "2026-09-20T12:28:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/19342",
+  "body": "Non-loopback HTTP deployments currently keep the MCP OAuth surface disabled even when an operator has explicitly chosen an isolated intranet deployment. This adds a default-off escape hatch: only `OS_ALLOW_INSECURE_OAUTH_HTTP=true` enables MCP OAuth for those origins; HTTPS and loopback behavior is unchanged, and malformed values remain denied.\n\nThe auth-manager coverage verifies the URL boundary and metadata advertisement, the mount warning names the opt-in, and the package receives a patch changeset.\n\nValidation:\n\n- `git diff --check`\n- `vitest run src/auth-manager.mcp-oauth.test.ts` — 42 tests passed against the 17.4.0 published workspace dependencies in a sparse checkout\n\nThe draft remains open for the repository CI and full workspace typecheck/build before merge.\n"
+}

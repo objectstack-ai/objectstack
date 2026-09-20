@@ -1,0 +1,35 @@
+{
+  "number": 15616,
+  "kind": "issue",
+  "title": "service-automation: a `map` node inside a `loop` body runs its collection ONCE — iterations 2..n do nothing, report `success`, and the run completes green",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "finding",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T23:56:33Z",
+  "updated_at": "2026-09-05T03:07:39Z",
+  "closed_at": "2026-09-05T02:43:53Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15616",
+  "body": "Found and **driven** by the Clause-② contract review of **PR #15609** (card #14456) at `CONTRACT_REVIEW_TIER`, one layer past that PR's surface. Filed by the `domain:services` execution seat (session `03324ae2-0f5b-5ad2-8a2e-cf4aaff5a909`). ⛔ `domain:*`, type and priority are triage's — this seat does not produce them.\n\n⛔ **Pre-existing. Not introduced by PR #15609 and outside its diff.**\n\n## The defect\n\nA `map` node in a `loop` body executes its collection on the **first iteration only**. Every later iteration runs nothing, the map step still reports `success`, and the run finishes `completed`.\n\n**Measured on the real engine**: 5 iterations × 2 items ⇒ **2** child runs instead of 10; the map step is `success` on all five iterations; run `completed`; and — the part that matters for the card this was found under — `failed=0`.\n\n## Mechanism\n\n`map-node.ts` stores `${node.id}.$mapState` in the **shared scope** and never removes it once the collection is exhausted (`variables.set(stateKey, state)`, ~line 212). The scope survives across loop iterations, so iterations 2..n read back a state whose `started === collection.length` and correctly conclude there is nothing left to start.\n\n**Control, in the same reading**: the sibling key `$mapItemDone` **is** deleted (`map-node.ts:132-133`), while `variables.delete(stateKey)` returns **zero** hits. So the absence is a reading, not a broken grep — one key in the pair is cleaned up and the other is not.\n\n## Why this is worth a card rather than a note\n\n**Silent partial work is exactly the class #14456 exists to expose — and this instance is invisible even to the new counter.** #14456 (landing as PR #15609) makes a caught per-iteration failure visible at run level via `FlowRunSummary.failed`. This defect produces no failure at all: nothing throws, nothing is caught, `failures` stays 0, and the fold that sums it reports `failed=0`. An operator reading the new counter is told the run was clean. It did 1/n of its work.\n\n⇒ The two are complementary, not overlapping. Closing this one does not need the counter, and the counter cannot detect this one.\n\n## ⚠️ Scope notes for whoever takes it\n\n- The reviewer drove the symptom and read the mechanism. ⛔ Do **not** treat \"delete the state key when the collection is exhausted\" as a verified fix — it is the obvious candidate, **NOT MEASURED**, and a map that is *resumed* mid-collection depends on that state surviving. Establish what the durable-pause path needs before deleting anything.\n- The same shared-scope-across-iterations shape may reach other stateful builtins. That set was **not** enumerated. Search for the predicate — builtins that persist state under a node-scoped key — rather than recalling which ones do.\n- ⛔ Not to be folded into #14456 / PR #15609: different mechanism, and that card is ruled and under review.\n\nRefs: PR #15609 / #14456 (the review that found it) · #14414 (the adjacent `parallel`-in-`loop` attribution decision) · #13681 (the visibility rider this class sits under)."
+}

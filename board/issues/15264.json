@@ -1,0 +1,36 @@
+{
+  "number": 15264,
+  "kind": "issue",
+  "title": "[finding] `SKILL_MAP` census residue: `objectstack-api` advertises `api/rest-server.zod.ts` its SKILL.md never mentions, and `objectstack-platform`'s index omits `stack.zod.ts`, the shape its body spends the most words on",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T07:43:42Z",
+  "updated_at": "2026-09-05T04:11:53Z",
+  "closed_at": "2026-09-05T04:05:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15264",
+  "body": "Residue of the census run for #14462. That card carries the census across all nine `SKILL_MAP` entries and applies one uniform ruling; the family PR acted on the four rows its members adjudicated (`objectstack-ai`, `objectstack-automation`, `objectstack-formula`, `objectstack-i18n`). These two rows came out of the same sweep with the same shape and **no card has adjudicated them**, so the PR recorded them and edited nothing. Filed unassigned.\n\n## Measured at `origin/main` `9c1bcda3`\n\n### Direction 1 — advertised, never taught\n\n| package | pointer | evidence |\n|:--|:--|:--|\n| `objectstack-api` | `api/rest-server.zod.ts` | zero mentions in `skills/objectstack-api/SKILL.md` of the file, of `RestApiConfig` / `CrudEndpointsConfig` / `MetadataEndpointsConfig` / `BatchEndpointsConfig` / `RouteGenerationConfig` / `RestServerConfig`, or of the words \"rest server\". Swept over the skill's whole authored markdown, not the SKILL.md alone. |\n\nEvery other core entry in that list is reachable from the body by at least the schema's own exported names.\n\n### Direction 2 — taught, never advertised\n\n| package | schema | evidence |\n|:--|:--|:--|\n| `objectstack-platform` | `stack.zod.ts` | the SKILL.md's subject is `defineStack`, and it names `ObjectStackDefinitionSchema`, `ObjectStackDefinition`, `ObjectStackDefinitionInput` and `ObjectStack` in its own prose. The file is in no package's core list and in no index's closure. |\n\nSame shape as the `ai/solution-blueprint.zod.ts` half of #14462: the body names the schema, the catalog has no pointer to it.\n\n## One row deliberately NOT filed here\n\n`kernel/plugin-capability.zod.ts` in the `objectstack-platform` list scored as advertised-not-taught on a mechanical sweep, and a hand read overturns it: the SKILL.md teaches `requires:` and capability resolution at length. It routes readers to `kernel/platform-capabilities.ts` for the token list rather than to this file's `PluginCapabilityManifestSchema`, so the pointer is thin rather than wrong. Recorded so the next census does not re-raise it.\n\n## Why this is a separate card\n\nThe uniform ruling on #14462 is \"narrow the map to what the body teaches\", and applying it here is defensible — but the four adjudicated rows each came with a measured consumer census or an explicit ADR retirement, and these two have only the sweep. Deleting a published pointer, or adding one, on a governed customer surface is worth its own decision rather than a rider on a PR whose reviewer is checking four other things.\n\nRefs: #14462 · #14466 · #14562 · #14565\n\nDedupe: one targeted `search_issues` over this repo (repo-scoped REST is 403 for this seat), validated in-session by a control query that returned its four known hits. Nothing open covers either row."
+}

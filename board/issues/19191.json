@@ -2,8 +2,8 @@
   "number": 19191,
   "kind": "issue",
   "title": "finding(scripts/pm): `check-half-states` reads the LOCAL checkout with no `cwd`, so a cross-repo sweep validates H17's trigger-file index against the wrong repo's `git ls-files` and H57 never runs at all",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-tesla",
@@ -13,18 +13,21 @@
   "labels": [
     "bug",
     "domain:skills",
-    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-19T09:44:52Z",
-  "updated_at": "2026-09-20T05:16:21Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-20T10:46:29Z",
+  "closed_at": "2026-09-20T10:38:41Z",
+  "closed_by": {
+    "login": "os-tesla",
+    "id": 327383522,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19191",
   "body": "Path: none | instrument (`scripts/pm/check-half-states.mjs` readers without `cwd`; H17 / H57) | 北极星「优先级」2\n\n`check-half-states.mjs` takes three readings off the LOCAL checkout with plain `execFileSync('git', …)`\nand no `cwd`, so each inherits `process.cwd()`. The sweep's subject is named by `PM_SWEEP_REPO`, and\nthe tool lives in this repo — so the ordinary cross-repo invocation reads **objectstack's** working\ntree while reporting on **objectui's** board. Two rows consume those readings, and one of them\nvalidates other people's card contents against the wrong repo's file list.\n\nFiled from the `domain:ui#2` execution seat at objectstack-ai/objectui\n(`session_018HrVaotisyhgmot9o2MLRq`). `scripts/pm/**` is this repo's surface, so the card lands here.\nAll readings taken 2026-09-19T09:44Z on `origin/main`.\n\n## The proof, in one number\n\nThe objectui sweep's own H17 footer prints its oracle size:\n\n> `(read on 72 of 72 open pm:on-hold card(s); **8888** tracked file(s) in the oracle.)`\n\n| `git ls-files \\| wc -l` | value |\n|:--|--:|\n| `/home/user/objectstack` | **8888** |\n| `/home/user/objectui` | **7945** |\n\n⇒ the sweep of `objectstack-ai/objectui` validated its candidate paths against **objectstack's**\n8888 tracked files. ⭐ The two counts differ by 943, so this is a match on the wrong repo rather\nthan a coincidence — and the `objectui` number is the one that never appeared.\n\n## The three readers, and what consumes them\n\nAll three are the same shape — `execFileSync('git', […], { encoding: 'utf8' })` with **no `cwd`**:\n\n| reader | line | consumer |\n|:--|:--|:--|\n| `readTrackedFiles()` — `git ls-files -z` | `:4327` | **H17**, the on-hold trigger-file index |\n| `readRepoRoot()` — `git rev-parse --show-toplevel` | `:22038` | **H57**, where it reads workflow files |\n| `readOriginUrl()` — `git remote get-url origin` | `:22046` | **H57**, via `localCheckoutServes` |\n\n### H17 — a false clean, and it is load-bearing\n\nH17's own footer states its contract:\n\n> Extraction is deterministic — every path shown is a tracked file; anything unverifiable was\n> dropped rather than guessed, so this list under-reports and never invents.\n\nTrue — of the wrong tree. A `Restart-touch:` path that exists in objectui and not in objectstack is\n**silently dropped** from the index. And the index is not decoration: the same footer tells a\ndispatching seat to\n\n> Before dispatching, intersect your dispatch's file surface against this list and NAME any card it\n> hits in the dispatch brief.\n\n⇒ a hold whose trigger file is objectui-only becomes invisible to exactly the check that exists to\ncatch it. ⚠️ On the run measured here nothing was actually lost — both surviving rows name\n`pnpm-lock.yaml`, which exists in both repos — but that is luck, not the mechanism.\n\n### H57 — never runs at all, cross-repo\n\n`localCheckoutServes` (`:13486`) resolves in order: `GITHUB_REPOSITORY`, then the checkout's `origin`,\nelse `unresolved` and the row reads nothing. Run from this repo's checkout against objectui it takes\nthe second branch and refuses, exactly as the footer says:\n\n> **Scheduled non-blocking workflows (H57): UNRESOLVED** — this checkout's `origin` is\n> `objectstack-ai/objectstack` while the sweep reads `objectstack-ai/objectui`, so this row read\n> NOTHING this sweep.\n\n⭐ The tool is HONEST about this one — it names the silence and spends no request. That is why H57 is\nthe smaller half. H17 is the one that presents a wrong-tree reading as a clean one.\n\n## ⭐ It is a `cwd`, not a design limit — which is what makes it mechanizable\n\nMeasured: `git remote get-url origin` from `/home/user/objectui` returns\n`https://github.com/objectstack-ai/objectui`, and `git rev-parse --show-toplevel` returns\n`/home/user/objectui`. So running the same command with that working directory makes all three\nreaders correct and H57 resolve. ⛔ Nothing about the sweep requires the wrong tree; it just inherits\nwhatever shell launched it.\n\n## Two directions, ⛔ neither chosen here\n\n1. **Resolve the checkout from `PM_SWEEP_REPO` instead of inheriting `cwd`.** The tool already knows\n   its subject; a local reader scoped to that subject should not depend on where a seat happened to\n   stand. Needs a way to find the swept repo's checkout (a `PM_SWEEP_CHECKOUT` env, a conventional\n   sibling path, or an explicit flag) and a loud refusal when it cannot be found — ⛔ never a silent\n   fall back to `cwd`, which is the present defect.\n2. **Keep `cwd` as the contract and make the mismatch a REFUSAL, not a silent substitution.**\n   `localCheckoutServes` already computes exactly this verdict for H57; H17 could consult the same\n   verdict and print `UNRESOLVED` rather than an oracle built from another repo. Cheaper, smaller,\n   and it removes the false clean without needing to locate a second checkout.\n\n⚠️ ⛔ Do not resolve it by documenting \"run it from the right directory\" alone: the runbook fix leaves\nH17 silently wrong for anyone who forgets, which is the failure mode that produced this card.\n\n## Seat-side, already done\n\nThis seat has run this sweep three times today from the wrong directory, so **H57 read nothing in\nall three and H17's oracle was objectstack's each time**. A re-run from the objectui checkout is\nunder way and its oracle count will be appended here.\n\nDedupe words: `check-half-states cwd tracked oracle` · `H17 trigger file index wrong repo` ·\n`readTrackedFiles execFileSync no cwd` · `localCheckoutServes origin mismatch` ·\n`PM_SWEEP_REPO local checkout scope`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

@@ -1,0 +1,33 @@
+{
+  "number": 14324,
+  "kind": "issue",
+  "title": "[Decision] Publish `@objectstack/spec` newer than 17.2.0 — four objectui contract cards are release-gated on it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-02T02:09:57Z",
+  "updated_at": "2026-09-05T10:42:46Z",
+  "closed_at": "2026-09-05T10:42:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14324",
+  "body": "Filed by the spec@objectui PM seat (session `session_01V3hPr7riucnMfhcHY86Msd`, 2026-09-02) on the maintainer's instruction that questions go to decision cards, not to chat (verbatim, 2026-09-02: 「有问题统一转到决策卡吧，不要单独问我」). Releases are a human act (维护者 2026-08-27: 「要发版本我会自己点。除非重要修复要发版本你可以提醒我。」); this card is that reminder, in card form.\n\n## 一句话问题\n\nobjectui 消费的是**发布包** `@objectstack/spec@17.2.0`(2026-08-23 发布,npm latest 至今仍是它),而四张 objectui 契约卡等的修复在 08-23~25 已合进 objectstack `main`,却进不了 objectui 的安装面;不发版这四张卡永远解不开。\n\n## 前提(每条带 re-check 命令)\n\n- npm latest 仍是 17.2.0:`npm view @objectstack/spec version` → `17.2.0`(2026-09-02 探针)。\n- objectui pin:`git -C objectui show origin/main:pnpm-lock.yaml | grep -m1 \"@objectstack/spec@\"` → `17.2.0`。\n- 已合并、未发布的契约变更(objectstack `main`,`git log --oneline origin/main -- packages/spec/src | head`):\n  - PR #11458(关 #11195)—— `UserActionsConfigSchema` 接受 `group` / `hideFields` / `rowColor`;\n  - PR #11695(关 #11284)—— `ReactInteractionProp.deprecated { replacedBy, note }` + ListView react 层词汇收敛(`objectName`/`viewType` → `data`/`type`,deprecate-first);\n  - PR #12120(#12039 key 1)—— `object-grid.data` 收敛到 `ViewDataSchema`。\n- 被卡的 objectui 卡(全部 `pm:on-hold`/`pm:blocked`,`Restart-when:` 指向**安装面**探针):objectui#5435 · objectui#2890(+ objectui#2231 跟随)· objectui#6207 · objectui#6206(其 key 2 仍在 #12039 队列,发版前后各半)。\n\n## 选项 × 真实代价\n\n| | 做什么 | 客户可感知代价 |\n|---|---|---|\n| A | 现在发一版 spec(按 pending changesets 定 minor/patch),objectui 随后立 pin bump 卡 | 四张卡当轮解锁;objectui#5435 修的是「视图保存门拒收 fold 自身输出」—— 用户在 objectui 保存列表视图时被自己的规范化结果拒收,这是今天就能撞上的缺陷 |\n| B | 等 #12039 key 2 也合并再发 | 多等一张 spec 卡(已回队、未认领);四张卡继续 hold,#5435 的用户可见缺陷继续存在 |\n| C | 暂不发,不再提醒 | 四张卡长期 hold;objectui 与 spec 的契约漂移窗口继续拉长 |\n\n业务上:A = 把已合并的修复交到用户手里;B = 攒一批;C = 现状。\n\n&lt;!-- os-decision-facets --&gt;\n- ① 项目长远合理性(≥50%):**A**。契约修复合进 main 却不发版,等于 declared(main)≠ enforced(安装面)在仓间复制;发版节奏短是 contract-first 的一部分,不是扩张。\n- ② 实际业务拉动:**A**。objectui#5435 是用户今天可撞的保存失败;其余三张是词汇收敛与 kind 对齐,拉动来自 objectui 现行 pin 测试对新形状的断言。\n- ③ 防 AI 犯错:**A**。objectui 侧四张卡的 pin 已预写为「安装面探针」,发版后机械放行;不发版则 AI 在 objectui 继续按 17.2.0 的旧形状写代码。\n- ④ 创业阶段不扩散:A 不新增任何面,只是把已裁、已合的变更发出去;B/C 都不减少任何义务。\n- 推荐 **A**;回退 **B**。\n- 本分析看不见:pending changesets 的合计 bump 级别与是否有尚未合并的 breaking 项要一起发(以 objectstack 的 Version Packages PR 为准)。\n\n## 裁后执行(你不用管)\n\nA ⇒ 你点发版;本席在 objectui 立 `@objectstack/spec` pin bump 卡(S,机械,sonnet)并派发,解锁扫描按各卡 `Restart-when:` 的安装面探针放行四张卡。B ⇒ 本卡挂 `pm:blocked` + `Blocked-by: #12039`。C ⇒ 本卡关闭 not planned,四张 objectui 卡照旧 hold,本席不再提醒。\n\nDedup: `search_issues` in this repo for a spec-release / objectui-pin-bump decision card → 0 results (2026-09-02)."
+}

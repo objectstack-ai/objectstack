@@ -1,0 +1,34 @@
+{
+  "number": 14659,
+  "kind": "issue",
+  "title": "finding: the role-word baseline is keyed by file path, so a pure file SPLIT trips the maintainer-only `--update` even when the occurrence count is unchanged",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-02T17:38:42Z",
+  "updated_at": "2026-09-05T15:48:13Z",
+  "closed_at": "2026-09-05T15:47:00Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14659",
+  "body": "Observation from the objectstack-ui entry split (PR #14658). Not a defect in the gate's verdict — it reported correctly and its remedy worked — but a friction the next split in the same programme will hit identically, so it is worth recording once rather than rediscovering.\n\n## What happened\n\n`scripts/role-word-baseline.json` maps **file path → occurrence count**. `skills/objectstack-ui/SKILL.md` carried `2`, for two long-baselined lines:\n\n- \"the tab-bar role, so a `tabs` user-filter would render a second, colliding\"\n- \"Write fields + semantic roles; the renderer decides the pixels. Reach for\"\n\nThe split moved those two lines, byte-identical, into `rules/list-views.md` and `rules/navigation.md`. Because the ledger is path-keyed, `check:role-word` then reported three problems at once:\n\n- two **\"NEW use of the reserved word\"** errors, one per new file;\n- one **ratchet-DOWN** on the old path (\"baselined file is clean/gone (was 2)\").\n\nThe total occurrence count never moved: 2 before, 1 + 1 after. Nothing was added, nothing newly admitted.\n\n## Why it is worth a card\n\nThe only remedy the gate offers for the two \"NEW use\" rows is `node scripts/check-role-word.mjs --update`, which the message marks **⛔ MAINTAINER-ONLY** and warns \"rewrites the whole baseline from the current tree … do not take this path to get CI green\". That framing is right for a genuine new boundary and wrong for this case, where the same occurrences simply changed address. An author doing a pure relocation has to take the loudest, most-gated path in the gate's vocabulary, and the reviewer has to re-derive by hand that the total did not move.\n\nIt is not hypothetical for the next flight: #14296 item 1 authorizes the same entry-plus-`rules/` split for `objectstack-pm-dispatch` (#14300), and any baselined file that gets split will reproduce this exactly.\n\n## What was done this time, for the record\n\n`--update` was run and its diff audited to be exactly three lines, in its own commit:\n\n```\n-  \"skills/objectstack-ui/SKILL.md\": 2\n+  \"skills/objectstack-ui/rules/list-views.md\": 1\n+  \"skills/objectstack-ui/rules/navigation.md\": 1\n```\n\nNo other file was re-baselined, so the shrink-only ratchet was not weakened. That audit is the thing a mechanism could do instead of a human.\n\n## Possible directions, not a recommendation\n\n1. Teach the gate a **relocation** verdict: when a run's NEW-use rows and ratchet-DOWN rows net to zero across the tree, say so and let the author take the ratchet-DOWN remedy that is already theirs, rather than routing them through the maintainer-only path.\n2. Leave the behaviour and only amend the message: name the split/relocation case and what evidence makes it safe (unchanged total, audited three-line diff), so the author and reviewer are not inventing that argument each time.\n3. Do nothing — the friction is one extra round per split, and splits are rare.\n\nFiled unassigned by the skills-lane dev seat while landing PR #14658; not addressed there, and #14658 does not depend on it."
+}

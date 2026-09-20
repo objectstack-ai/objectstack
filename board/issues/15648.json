@@ -1,0 +1,35 @@
+{
+  "number": 15648,
+  "kind": "pull_request",
+  "title": "fix(service-automation): scope a `map` node's progress state to one execution of its collection",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T01:39:54Z",
+  "updated_at": "2026-09-05T02:43:54Z",
+  "closed_at": "2026-09-05T02:43:52Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": "2026-09-05T02:43:52Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/15648",
+  "body": "Fixes #15616\n\nA `map` node inside a `loop` body ran its collection on the first iteration only. Iterations 2..n ran nothing, the map step reported `success` on every one of them, and the run finished `completed`.\n\n## Mechanism\n\n`map` tracks its progress through the collection in the flow variable `nodeId.$mapState`, and wrote it into the flow's **shared** variable scope without ever removing it. A `loop` body region runs in that same scope by construction — `runRegion` is handed the caller's `Map` deliberately, because the iterator variable and the body's mutations have to stay visible to the rest of the flow. So the state written by iteration 1 was still there when iteration 2 entered the map: it read back `started === collection.length`, correctly concluded there was nothing left to start, and returned.\n\nThe lifetime was the defect, not the key. `$mapState` was scoped to the run; it should be scoped to one execution of the collection.\n\n## The fix\n\nOne line of behaviour: the terminal path now `delete`s the state key instead of re-`set`ting it.\n\n**The durable-pause path is deliberately untouched, and that is the load-bearing half of this PR.** The card's own scope note warned that \"delete the state key when the collection is exhausted\" was the obvious candidate and was NOT MEASURED, because a map resumed mid-collection depends on that state surviving. That is established here rather than assumed:\n\n- `map` writes `$mapState` in **two** places — the suspend arm (`map-node.ts`, before returning `suspend: true`) and the terminal arm. Only the terminal one changes.\n- On suspend the engine snapshots the whole scope (`Object.fromEntries(variables)`) into the `SuspendedRun`. On resume, `resumeInternal` rebuilds the scope with `new Map(Object.entries(run.variables))` — a **fresh** map from that snapshot. So the suspend-time write is the **only** write to this key a resume can ever read, and no terminal-path change can reach it.\n- The one reader outside `map-node.ts` (`resume-authority-gate.test.ts`) reads the key off a **suspended** run's snapshot, so it is on the same side of that line.\n\nA pausing `map` is in any case unreachable from inside a `loop` body: `runRegion` converts a durable pause inside a structured region into an error. The resume path is live for a top-level map, which is what the new resume pin exercises.\n\n## Tests\n\nNew file `map-in-loop-iteration-state.test.ts` — four pins on the real `AutomationEngine`, no mock of the mechanism:\n\n1. the card's measurement — 5 iterations x 2 items produces **10** child runs (it produced 2);\n2. the run is `completed` with `summary.failed === 0` **and** the work happened — pinning why `failed` could never have been the instrument that caught this;\n3. each iteration collects a fresh result set, and `nodeId.$mapState` is **absent** from the scope after the map completes (the mechanism asserted directly, not inferred from the child-run count);\n4. the resume half: `$mapState` is present in the suspend snapshot with `started: 1`, and driving the pauses through runs every item exactly once.\n\n**Both pins were mutated to confirm they discriminate**, restoring from `HEAD` each time and verifying the restore by `git diff HEAD` plus a blob-hash comparison:\n\n| mutation | result |\n| --- | --- |\n| terminal `delete` reverted to `set` (the pre-fix spelling) | all 4 pins red |\n| **unconditional delete** — the suspend arm deletes too, i.e. the naive fix the card warned about | the three loop pins stay **green**; **only** the resume pin fails |\n\nThat second row is the point. The obvious fix makes the reported symptom go away and silently breaks resume, and the resume pin is the only thing standing between the two.\n\n## Census — the second deliverable\n\nSearched for the predicate (executors that persist state under a node-scoped key in the shared scope) rather than recalling which ones do. Every `variables.set` / `variables.delete` in every builtin, every key expression derived from `node.id`, module-scope mutable state, writes into the shared context, and every `registerNodeExecutor` in the repo — including the two in `plugin-approvals`, which are outside this package.\n\n**`map` is the only one.** Every other scope write is an author-named output variable (`crud`, `screen`, `subflow`, `logic`, `try_catch`'s `errorVariable`) or a loop's iterator/index binding — written each time, never read back as progress. `wait` and the approval nodes only read the scope; `parallel` never touches it. The zero has a firing control: the same patterns hit `map`'s seven writes, including the defective one, and hit `wait`'s and the approval nodes' reads.\n\n⇒ No second instance of the identical mechanism, so nothing beyond `map` is changed here.\n\n## Found and NOT fixed\n\n- **#15646** — the same key reached through the **other** arm. When a pausing `map` sits inside a contained region, the suspend write lands but the pause is refused by `runRegion`, leaving residue no terminal path can clear. Measured: 3 iterations x 2 items, 0 items ever completed, only 2 of 3 iterations reached the catch, and iteration 3 returned `success` having run nothing. Closing it needs a ruling on which layer owns cleanup when a suspend is refused, so it is filed rather than guessed.\n- #15617 is not addressed here; that run's `summary.failed = 0` over two contained failures is recorded on #15646 as a data point for it.\n\n## Gates\n\n`pnpm lint` (full repo) exit 0; package `test` 108 files / 1294 tests and `typecheck` both exit 0, re-run at the final commit `ac3079c43`. ADR-0087 via the real invocation `node scripts/check-adr-0087-registration.mjs --base origin/main --head ac3079c43` exit 0 (`1 non-breaking changeset(s) seen`), plus its `--self-test`. The gate set was re-derived from the actual changed files with `scripts/pm/dispatch-gates.mjs`; the derived families were run and each zero was read off the gate's own verdict line with the exit code captured by redirect, never through a pipe.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01XpTx2tbq3pZRYAdoGt6E6Y\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01XpTx2tbq3pZRYAdoGt6E6Y)_"
+}

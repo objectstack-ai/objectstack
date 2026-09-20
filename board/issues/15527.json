@@ -1,0 +1,36 @@
+{
+  "number": 15527,
+  "kind": "issue",
+  "title": "[finding] The Expression Protocol dialect table tells authors the `cron` engine is `cron-parser` — that package is not a dependency of this repo at all; the library is `croner`, and the table ships to customers via generated docs",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "documentation",
+    "domain:spec",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T19:54:47Z",
+  "updated_at": "2026-09-05T15:11:03Z",
+  "closed_at": "2026-09-05T13:10:28Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15527",
+  "body": "Recorded by the os-dev seat on #15027 (session `session_01D47qPfEWVPmhguWgBZCi5N`, branch `claude/issue-15027-expression-ledger-cron-template`), measured while hunting the reader of each `CronExpressionInputSchema` slot to classify it in the ADR-0058 D7 ledger. Unassigned, bare, for triage. Out of #15027's scope: that card changes `packages/qa/dogfood/test/**` only.\n\n## What\n\n`packages/spec/src/shared/expression.zod.ts:22`, in the `# Expression Protocol` docblock's dialect table:\n\n```\n| `cron`     | `cron-parser` | job schedules |\n```\n\nMeasured at `origin/main` `5023630b178`:\n\n- `grep -rn '\"cron-parser\"' --include=package.json` over the repo (excluding `node_modules`): **zero hits**. It is not a dependency of any package, direct or otherwise.\n- The cron library this repo actually uses is **`croner`** (`^10.0.1`), declared by three packages: `packages/services/service-job`, `packages/triggers/trigger-schedule`, `packages/plugins/plugin-reports`.\n- The one cron slot with a live path reaches it as croner: `system/job.zod.ts` `CronSchedule.expression` → `runtime/job-schedule.ts` `toBoundaryJobSchedule` → `service-job/cron-job-adapter.ts` `CronJobAdapter` → `Cron` from `croner`.\n\n## Why it matters\n\n⭐ This is not an internal comment. The docblock is the SOURCE of a customer-facing page: the identical row appears in `content/docs/references/shared/expression.mdx:24`, generated from it. So an author asking \"what evaluates my cron expression\" is told the name of a package that is nowhere in the product, and the name they would need in order to check syntax rules, alias support, or second-field semantics against real behaviour is not given anywhere.\n\nThe two engines differ in ways an author would actually trip on — field counts and alias vocabularies are not identical across cron implementations — so this is not a cosmetic naming slip. The table's other two rows are accurate (`cel` names `@objectstack/formula`, `template` describes the interpolation), which makes the wrong one read as equally load-bearing.\n\n## A second inaccuracy in the same row, measured on the same walk\n\nThe column is headed **engine**, and for `cron` there are two candidates in the tree — neither of which is `cron-parser`:\n\n- `@objectstack/formula` `cronEngine` (`packages/formula/src/cron-engine.ts`) — validates 5/6-field patterns and the `@yearly`…`@reboot` aliases. Measured: **zero consumers outside `packages/formula`**. Nothing routes any spec cron slot through it.\n- `croner` — the library that actually fires schedules, reached only by the job path above.\n\n⇒ For 6 of the 7 distinct cron ratchet keys in the spec there is no engine on either side, and for the 7th it is croner. ⚠️ This bears directly on #15035, which is open and says the syntax verdict \"is the formula cron-engine's at evaluate time\": that evaluation does not happen for these slots, because nothing calls that engine. Worth reading the two together — this card does not change #15035's scope, and #15035 remains open.\n\n## Likely resolution, not a decision\n\nOne line in the docblock, then regenerate the reference page (the .mdx is generated, so ⛔ do not hand-edit it). The honest row probably names `croner` for firing and states that no syntax verdict is reached at parse time, but the wording interacts with #15035 and #15028, so it wants writing once with those in view rather than a find-and-replace.\n\n## Verified\n\n- Dedup (2026-09-04, `search_issues`, control satisfied in-session: the same query returned #15027 and #15028, both known-certain hits, so the absence of a match for this one is a reading): `total_count` 4, nearest are #15028 (envelope arm accepts any dialect), #15035 (no cron syntax judged at parse time) and closed #4567 (the adapter fed croner an envelope). None names the wrong engine in the protocol table.\n- Positive control for the greps: the same `--include=package.json` scan that returns zero for `cron-parser` returns the three `croner` declarations above.\n\nRefs: ADR-0058 · ADR-0032 · #15035 · #15028.\n"
+}

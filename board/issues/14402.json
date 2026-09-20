@@ -1,0 +1,34 @@
+{
+  "number": 14402,
+  "kind": "issue",
+  "title": "Record that author-written validation-rule messages are translatable again (`objects.OBJECT._validations.RULE.message`) — ADR status line or short ADR",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T04:20:43Z",
+  "updated_at": "2026-09-05T03:58:29Z",
+  "closed_at": "2026-09-05T03:56:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14402",
+  "body": "Governance follow-up promised on PR #14381 before it merged, filed so the trail is queued rather than remembered.\n\n## Why a record is owed\n\n#14381 surface 2 gives an author-written validation rule's `message` a bundle key (`objects.OBJECT._validations.RULE.message`) and a reader on the write path (`authoredRuleMessage` in `packages/objectql/src/validation/rule-validator.ts`, over the existing `ValidationMessageContext.translate` hook from #3957).\n\n17.0.0 retired the old `validationMessages` group (#4667, ADR-0049) with the recorded sentence *\"Validation messages are not translated through a translation group.\"* #14381 makes that sentence false. Prime Directive #13 says reversing a recorded decision is itself a decision — and today the only place this one is recorded is a retired-key tombstone and a changeset, which is precisely the shape #13 warns is easy to miss.\n\n## The ruling to record (made on #14381, not reopened here)\n\nThis is **ADR-0049 being enforced, not reversed**:\n\n- the policy is *enforce-or-remove*; `validationMessages` was removed because **nothing read it**;\n- the new key ships **with its reader in the same change** — the other half of the same policy;\n- it is not the same key: the old group was top-level-keyed and could not tell two objects' rules apart; the new one is object-scoped beside `_views` / `_actions` / `_tabs`;\n- the ADR-0087 conversion that strips the old key from stored bundles is untouched.\n\n## What this card delivers\n\nWhichever is the house shape for this — an amended status line on ADR-0049 (or the 17.0.0 retirement record), or a short standalone ADR — stating: author-written rule messages are translatable via the object-scoped key as of the version #14381 ships in; the 17.0.0 retirement stands; the two are not the same route. One governed-surface PR, human-merge; the code is independent and does not wait on it.\n\nNot a request to hold #14381.\n\n---\n\n## Triage (R+99) — graded, and the `Blocked-by` line removed\n\nThe body opened with `**Blocked-by: #14381.**` That one line was wrong three ways, so it is gone rather than corrected:\n\n1. **It pointed at a PR.** The `Blocked-by:` canon points at an **issue**, never a pull request — an issue closes and clears the block; a PR number has no such lifecycle in the index.\n2. **It was already exhausted.** PR #14381 **merged** at 2026-09-02T05:28:42Z (`merged_by: os-warren`, head `7b1c387bb`). The thing this card was waiting for has happened — the key and its reader are on `main`.\n3. **It could not have parsed anyway.** The marker is read line-anchored and undecorated; `**Blocked-by: #14381.**` is bolded, ends in a full stop, and sits inside a sentence. Even while #14381 was open, nothing mechanical would have seen this card as blocked.\n\n⇒ `pm:queue`. **This card is ready now.** Its premise is not \"wait for the code\" — the code has landed, which is exactly what makes the missing governance record live rather than anticipatory. Prime Directive #13's concern is at its sharpest today: `main` contains a change that falsifies a recorded 17.0.0 sentence, and the only trace is a tombstone and a changeset.\n\n## Scope ruled\n\nExactly what the card asks and nothing more: one governed-surface PR recording that author-written rule messages are translatable via the object-scoped key as of the version #14381 shipped in, that the 17.0.0 retirement stands, and that the two are not the same route. The card's four-bullet \"enforce, not reverse\" reasoning is the content — it was settled on #14381 and ⛔ is not reopened here.\n\n⚠️ **`docs/adr/**` is a governed surface (Prime Directive #14): no agent seat marks this PR ready, queues it, or arms auto-merge.** A human merges it. Say so in the PR body.\n\nChoosing between an amended ADR-0049 status line and a short standalone ADR is the `domain:spec` seat's call by house convention — it is a form question, not a direction question, so it does not need the maintainer.\n\n## Routing\n\n`domain:spec` — ADR-0049 is the enforce-or-remove policy governing `packages/spec` properties, and the record lands on that ADR or beside it. `documentation`. `priority:p3`: no code waits on it, nothing is broken, and the change it records has already shipped — it is owed as a trail, and the cost of it going missing is paid by whoever next reads the 17.0.0 retirement and believes it.\n\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

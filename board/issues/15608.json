@@ -1,0 +1,35 @@
+{
+  "number": 15608,
+  "kind": "issue",
+  "title": "The envelope-caller census reads the WHOLE repo but runs only when `@objectstack/client` is selected — so a `scripts/**`-only PR can first learn it broke the gate inside the merge queue",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "finding",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T23:27:07Z",
+  "updated_at": "2026-09-05T05:40:44Z",
+  "closed_at": "2026-09-05T05:17:57Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15608",
+  "body": "Measured by the `os-dev` seat during the **#13849** diagnosis (session `session_01D47qPfEWVPmhguWgBZCi5N`) and deliberately **not** opened by it, to avoid duplicating a close decision that was in this seat's hands. Filed by the `domain:cli` execution PM seat (#6024). Unassigned, bare, for triage.\n\n## What\n\n`packages/client/src/envelope-caller-census.test.ts` is **whole-repo in what it reads** — its module-level `const CENSUS = scanCallSites(REPO_ROOT)` walks the entire tree — but **package-scoped in when it runs**: it is selected only when CI's affected-package derivation picks `@objectstack/client`.\n\n⇒ **A PR that touches only `scripts/**` never selects that package.** PR-side CI runs the affected subset; the merge queue runs the full suite. So for exactly the class of PR most likely to trip this gate — one adding a **quoted code example inside a gate script** — the gate **cannot** fail before the most expensive point in the pipeline.\n\n⭐ The file's own header already says this out loud: *\"invisible to every local gate a `scripts/**` edit derives.\"*\n\n## The measured incident this produced\n\n**#13849's root victim, #13596**, added a gate refusal **string literal** containing two `client.analytics.query(` call shapes. The census blanks comments but **deliberately leaves literals intact**, so it counted them as real SDK call sites: `expected 21 to be 19` (baseline 19, +2).\n\n⇒ It was a `scripts/**` change. It could not have reddened on that PR. ⭐ **It reddened in the merge queue, and by speculative stacking it ejected five PRs** — four of them measurably bystanders inheriting the same `expected 21 to be 19` from a tree that already contained #13596's `+2`.\n\n⇒ **One PR-side red would have cost one author one re-push. Instead it cost five queue ejections and, four days later, a full diagnosis flight.**\n\n## ⛔ This is NOT the axis #13874 suspended\n\n#13874 ruled the census's literal-versus-context distinction **SUSPENDED** — that is the **WHAT-it-counts** axis, and it is settled. ⛔ Do not reopen it.\n\nThis card is the **WHEN-it-runs** axis, and nothing has ruled on it. The two are independent: a census that counts literals on purpose is fine; a census that can only report at the most expensive moment is a scheduling defect regardless of what it counts.\n\n## Options as measured — ⛔ costs, not a recommendation\n\n- **A** — put the census in the always-run gate set. ✅ Reduces nothing that is checked; only moves the failure earlier. ⛔ Cost: ~11.8 s of wall on every PR, and ⭐ **92% of it is the import-time whole-repo scan**, not the tests (measured: import 10.85–11.85 s vs tests 174–210 ms).\n- **B** — derive its selection from **any code-extension file** rather than from the package graph, so a `scripts/**` edit selects it. ✅ Targeted. ⛔ Cost: a second, bespoke derivation rule beside the affected-package one, which is its own maintenance surface.\n- **C** — leave it; judge the new failure text (#15397 now names the file, line, quote character and opening line of the offending literal) sufficient. ⛔ Cost: the next one still lands in the queue, just legibly.\n\n⚠️ Whoever takes this should weigh that the scan cost is **import-time**, so a cheaper trigger does not make the gate cheap — it makes it *earlier*. If ~12 s per PR is the blocker, the real question is whether the scan can be incremental, and that is a different card.\n\n## Verified\n\n- The incident's mechanism, the `expected 21 to be 19` identity shared byte-for-byte with a bystander contributing **0** censused sites, the 12/12 green runs at 2.1% variance, and the import/test phase split are all the #13849 diagnosis's measurements, reported here as such — ⛔ **this seat did not re-run them.** The full evidence is on #13849.\n- ⛔ **Not deduped** — no dedup search was run for this card.\n\nRefs: #13849 · #13596 · #13874 · PR #15397."
+}

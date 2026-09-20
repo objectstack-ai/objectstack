@@ -1,0 +1,36 @@
+{
+  "number": 15662,
+  "kind": "issue",
+  "title": "service-automation: `evaluateCondition` answers a silent `false` for a non-string predicate, and a non-string `config.condition` registers clean",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T02:07:48Z",
+  "updated_at": "2026-09-05T09:42:55Z",
+  "closed_at": "2026-09-05T09:42:21Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15662",
+  "body": "Found while implementing #15572 (the envelope in a `z.string()` predicate slot), outside that card's surface and deliberately not fixed there. Filed by the `os-dev` execution seat, session `01XpTx2tbq3pZRYAdoGt6E6Y`. ⛔ `domain:*`, type and priority are triage's — this seat does not produce them.\n\n## The gap\n\n#15572 is about the ledger-declared predicate slots (`decision.conditions[].expression`, `screen.fields[].visibleWhen`). This is the **structural** predicate surface next to it — `config.condition` on any node and `edge.condition` — which is walked by a different arm of the same validator and is **not** covered by that fix.\n\n`evaluateCondition` derives its source as `typeof expression === 'string' ? expression : (expression?.source ?? '')`. For a non-string that is not envelope-shaped the read yields `undefined`, the `??` supplies `''`, and the empty-source arm returns `false` — the documented \"an unauthored branch must not open\" rule, applied to a value that was very much authored.\n\n## Measured, driven (worktree at `origin/main` d30ccb9bd + the #15572 branch; `AutomationEngine` constructed directly and through `LiteKernel`)\n\n`engine.evaluateCondition(<value>, new Map())`:\n\n| value | result |\n|---|---|\n| `42` | **`false`** — silent |\n| `true` | **`false`** — silent |\n| `['a']` | **`false`** — silent |\n| `{ source: 1 }` | throws `TypeError: exprStr.trim is not a function` |\n\nAnd through `registerFlow`, a decision node carrying `config: { condition: 42 }`:\n\n- `registerFlow` → **REGISTERED**\n- `execute` → `success: true`, no error, nothing said anywhere\n\n`edge.condition: 42` is refused (the edge schema is typed), so the reachable half is the node-level `config.condition` — the same key the **start node's trigger gate** is read from, which is a gate that decides whether a flow runs at all.\n\n## Why this is its own card\n\n- #15572 (this seat's, in flight) closes the **ledger-declared** predicate slots by refusing a non-string at `registerFlow` and at `objectstack validate`. `config.condition` is deliberately NOT a ledger entry — it is a structural surface both validators already walk through a separate arm — so that refusal does not reach it.\n- #15430 is `ExpressionSchema` accepting a `source`-or-`ast` envelope. This is a value that is not an envelope at all.\n- #4336 (closed) is the ancestor: a bare STRING condition string-compared instead of evaluated. Fixed. This is the non-string case that fix did not consider.\n\n⛔ Not a defect, stated so nobody \"fixes\" it: a whitespace-only **string** condition returning `false` is consistent on both sides and is ruled correct.\n\n## Suggested shape (not a decision — triage's)\n\nThe refusal already exists and is exported: `predicateSlotRefusal` / `PREDICATE_SLOT_STRING_REFUSAL` in `@objectstack/spec/automation`, landed for #15572. The structural arm (`check(...)` in `AutomationEngine.validateFlowExpressions`, and the matching one in `@objectstack/lint`'s `validateStackExpressions`) could apply the same refusal to `cfg.condition` / `edge.condition`, which would make one notion cover both arms. ⚠️ Blast radius unmeasured: `config.condition` is parsed into an ExpressionInput envelope on some paths (`graftConditionEnvelopes`), so an envelope there is legitimate and the refusal would have to admit it — NOT the same rule as the ledger slots, where the declaration is `z.string()`."
+}

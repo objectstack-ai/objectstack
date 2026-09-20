@@ -1,0 +1,35 @@
+{
+  "number": 14882,
+  "kind": "issue",
+  "title": "i18n: metadata label lookup falls through to the `en` bundle on a zh-CN workspace — `localeChain` defaults `fallbackChain` to ['en'] and ignores `i18n.fallbackLocale`, so an authored Chinese label loses to a courtesy English bundle",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "i18n",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T07:23:58Z",
+  "updated_at": "2026-09-05T08:06:25Z",
+  "closed_at": "2026-09-05T08:05:44Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 13,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14882",
+  "body": "## Summary\n\nFor an app whose metadata labels are authored in the workspace default locale (`zh-CN`, inline `label: '填报单'`) and which ships **only** an `en` translation bundle as a courtesy for English users, the metadata API serves the **English** bundle labels to a `zh-CN` request. The authored Chinese label never wins because the label lookup's fallback chain is hard-wired to `['en']`, independent of the stack's `i18n.fallbackLocale`.\n\nThe effect on screen: object title `Entry Sheet`, columns `Sheet / Plan / Subject / Status / Final Score`, app name `KPI Assessment` — sitting next to fields that have no `en` entry and therefore correctly show `主体类型 / 填报说明`, and next to platform chrome that is fully Chinese. A zh-CN deployment cannot ship an `en` bundle without breaking its own default language.\n\n## Minimal reproduction\n\nPlatform 17.2.0, `objectstack dev`, SQLite, single tenancy, fresh DB.\n\n`objectstack.config.ts`:\n\n```ts\ni18n: { defaultLocale: 'zh-CN', supportedLocales: ['zh-CN', 'en'], fallbackLocale: 'zh-CN' },\ntranslations: [defineTranslationBundle({\n  en: { objects: { kpi_entry_sheet: { label: 'Entry Sheet', pluralLabel: 'Entry Sheets',\n        fields: { name: { label: 'Sheet' }, status: { label: 'Status' }, total_score: { label: 'Final Score' } } } } },\n})],\n```\n\n`kpi_entry_sheet` object: `label: '填报单'`, fields `name: Field.text({ label: '填报单名称' })`, `status: Field.select({ label: '状态' })`, `total_score: Field.number({ label: '最终得分' })`, `subject_type: Field.select({ label: '主体类型' })` (no `en` entry for `subject_type`).\n\n```\nGET /api/v1/i18n/locales\n→ {\"locales\":[{\"code\":\"zh-CN\",\"isDefault\":true},{\"code\":\"en\",\"isDefault\":false}]}\n\nGET /api/v1/meta/object/kpi_entry_sheet   (Accept-Language: zh-CN, signed in as admin)\n→ item.label        = \"Entry Sheet\"     ← expected 填报单\n  item.pluralLabel  = \"Entry Sheets\"\n  fields.name       = \"Sheet\"           ← expected 填报单名称\n  fields.status     = \"Status\"          ← expected 状态\n  fields.total_score= \"Final Score\"     ← expected 最终得分\n  fields.subject_type = \"主体类型\"       (no en entry → authored label survives)\n  fields.created_at = \"创建时间\"         (platform zh-CN pack → correct)\n\nGET /api/v1/meta/object/kpi_entry_sheet   (Accept-Language: en)\n→ identical for the app fields; created_at = \"Created At\"\n\nGET /api/v1/meta/app/kpi_app               (Accept-Language: zh-CN)\n→ label = \"KPI Assessment\"                ← authored label is 'KPI 考核管理'\n```\n\nSame request with **no** `Accept-Language` header: same English result (the workspace default is zh-CN).\n\nControl: remove the `en` bundle → every label is Chinese. So the presence of a bundle for a *non-requested* locale changes what the requested locale sees.\n\n## Where\n\n`@objectstack/spec` `system` — the label resolvers (`lookupObjectField`, `lookupObjectFieldAttr`, `lookupAppAttr`, `resolveViewLabel`, `lookupTabLabel`, …) all iterate `localeChain(opts)`:\n\n```js\nfunction localeChain(opts) {\n  const locale = opts?.locale ?? \"en\";\n  const fallbacks = opts?.fallbackChain ?? [\"en\"];   // ← hard-wired\n  ...\n  for (const code of [locale, ...fallbacks]) ...\n}\n```\n\nand return the first bundle hit before the caller falls back to the authored label. The server-side caller does not pass a `fallbackChain`, so `i18n.fallbackLocale: 'zh-CN'` has no effect on the chain: `zh-CN → en → authored`. For any object the zh-CN bundle does not mention (i.e. every object whose labels are authored in Chinese), the `en` bundle is consulted **before** the authored label.\n\n## Expected\n\nOne of (in order of preference):\n\n1. The chain honours the stack's `i18n.fallbackLocale` / `defaultLocale` instead of a literal `['en']`, so a zh-CN workspace resolves `zh-CN → (fallbackLocale) → authored label`, and `en` is only consulted when `en` is requested.\n2. When the requested locale **is** the workspace default locale, the authored label wins over any other locale's bundle (the authored label *is* the default-locale text — that is what `defaultLocale` declares).\n3. Failing both, the metadata API should at least not report `locale: zh-CN` while serving `en` strings; the i18n coverage tooling should flag \"label served from a locale other than the requested/default one\".\n\n## Side effects seen in the app (for triage, same root cause)\n\n- Related lists show what looks like a duplicate column pair `指标` / `Indicator`: `indicator` (lookup, no `en` entry → authored `指标`) next to `indicator_name` (has `en` entry → `Indicator`). With the fix both read Chinese (`指标` / `指标名称`).\n- Record page title suffix (`客户满意度 Indicator`), breadcrumb (`Indicator`, `Assessment Plan`), related-list section headings (`Entry Line 0`, `Indicator 0`) all flip to English on a zh-CN page.\n\n## Environment\n\n`@objectstack/*` 17.2.0 (runtime, spec, cli, console 17.2.0) · Node 22 · better-sqlite3 · single tenancy · `objectstack dev`. App: objectstack-ai/kpi (private) — the config above is a faithful excerpt.\n"
+}

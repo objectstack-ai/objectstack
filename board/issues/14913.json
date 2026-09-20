@@ -1,0 +1,36 @@
+{
+  "number": 14913,
+  "kind": "issue",
+  "title": "[finding] After ruling B (#14859), `AGENTS.md:12-13` and the `scripts/pm/check-skill-id-lint.mjs` header still describe the pm-dispatch provenance form as \"date + verbatim quote\" — the two off-surface sentences PR #14911 could not touch",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-03T10:07:19Z",
+  "updated_at": "2026-09-05T13:56:53Z",
+  "closed_at": "2026-09-05T13:48:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14913",
+  "body": "Recorded by the skills lane seat (session `session_01LraLgQVGq8egUwfYZpbYt1`) from the #14685 item-2 r2 flight (PR #14911, report comment 5524030178, finding 1). Unassigned, bare, for triage; landing surface governed (`AGENTS.md` and `scripts/pm/**`: draft PR, human merge). `Restart-when:` PR #14911 is on `main`, so the description follows the executed form rather than preceding it.\n\n## What\n\nRuling B on #14859 (director seat record 5523304679, 2026-09-03T09:04Z, maintainer 「其他同意」) executes #14685 item 2 in the form the gated surface admits: inside `.claude/skills/pm-dispatch/**` and `.claude/agents/os-dev.md` a maintainer ruling keeps its **date**, and its verbatim words only where the words are themselves the operative criterion. PR #14911 lands that form at 44 ruled sites plus stage 2 over `references/**`, and aligns the surface's own meta-rule sentences (`SKILL.md:25`, `os-dev.md:23`, `dispatch-runbook.md:3` and `:123`, `seat-post-protocol.md:38`) in the same PR.\n\nTwo sentences describing the same convention live **outside** ruling C's surface and were correctly left alone by that flight:\n\n| site | text today | why it is now half-true |\n|:--|:--|:--|\n| `AGENTS.md:12-13` | \"maintainer rulings keep their date and verbatim quote\" | states the pm-dispatch convention for the whole lint scan surface; on the converted surface the verbatim half now holds only for operative-criterion sites |\n| `scripts/pm/check-skill-id-lint.mjs:13-18` (header) | quotes the 2026-08-12 ruling and draws \"Maintainer-ruling provenance keeps DATE + VERBATIM QUOTE — numbers go\" | the gate's behaviour (`ID_PATTERN`, scan roots) is unchanged and still right; its stated rationale now over-claims the verbatim half |\n\nPlus one on-surface site the flight had to defer: `references/rest-channel.md:90` 「我觉得够了」 (2026-08-24, given only as 当日) — the last pointer-eligible site in the surface, SKIPPED-HOTFILE because its hunk would share context lines with the range PR #14860 holds (`:77-84`). It converts to the ruled form once PR #14860 is on `main`.\n\n## Scope (XS, mechanical)\n\n- Reword both sentences to the ruled form: date always; the verbatim quote only where the quoted words are the operative criterion. Cite the ruling by date in the text (no issue number, no comment id — the lint keeps enforcing that).\n- Convert `references/rest-channel.md:90` to `（2026-08-24 裁定）` after PR #14860 has landed, re-verifying that the surrounding text states the rule; if it does not, KEEP and say so.\n- ⛔ Not in scope: `AGENTS.md`'s own quoted rulings (Prime Directive 14 and others) — `AGENTS.md` is outside ruling C's surface and keeps its verbatim quotes unless the maintainer extends B to it; say so in the PR body. ⛔ No change to the lint's pattern, roots or verdicts; the self-test stays byte-identical in its verdicts. ⛔ `references/lanes/director.md:4` 「引文逐字不译」 stays — it governs the KEEP quotes and is not contradicted.\n- Line ratchet: `AGENTS.md` is at 1157 of its 1162 ceiling; a reword that grows a line must pay by deletion or stay within the existing line; ⛔ no ceiling raise, ⛔ no re-wrap funding.\n\n## Verified\n\n- Dedup 2026-09-03T10:08Z (`search_issues` in objectstack, 6 results read): #14792, #14067, #12896, #9717, #14509 (other `AGENTS.md` sentences) and #14859 (the ruling itself) — none carries these sentences.\n- Sites are the flight's measurement at `e556641d39` / `5b72f66fce` plus the seat's own read of the lint header; re-measure at claim.\n\nRefs: #14859 (ruling B) · #14685 (item 2) · PR #14911 · PR #14860 (the hot-file hold) · `scripts/pm/check-skill-id-lint.mjs:13-18` · `AGENTS.md:10-14`."
+}

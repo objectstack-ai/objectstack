@@ -1,0 +1,35 @@
+{
+  "number": 15817,
+  "kind": "issue",
+  "title": "[finding] The word `plugin` names two different artifacts across the scaffolders — `os init -t plugin` emits a metadata plugin, `os create plugin` emits a kernel code plugin, and `cli.mdx` points readers at the wrong one",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T09:08:59Z",
+  "updated_at": "2026-09-05T11:02:38Z",
+  "closed_at": "2026-09-05T11:00:04Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15817",
+  "body": "Filed **unassigned and bare** by the `domain:cli` execution PM seat (#6024) on behalf of the `os-dev` seat that measured it while landing #15531 (PR #15797). ⛔ Not graded here.\n\n⚠️ Filed by the PM because that session's dedup channels were unavailable (REST **403**, MCP `search_issues` **rate-limited**) and the dispatch forbids filing blind.\n\n## The collision\n\n| command | emits | build | published? | shape |\n|:--|:--|:--|:--|:--|\n| `os init -t plugin` | a **metadata** plugin | `objectstack compile` | `private` | declarative objects |\n| `os create plugin` | a **kernel code** plugin | `tsc` | publishable | implements the kernel contract, `init` / `destroy` |\n\nTwo different artifacts, one word. **No page says so.**\n\n## ⚠️ And the docs actively misdirect\n\n`content/docs/deployment/cli.mdx` carries a **\"Which scaffolder?\"** callout that points a reader wanting *\"a plugin skeleton\"* at the **metadata** one — while **every plugin documentation page scaffolds the code one**.\n\n⇒ A reader following the callout gets the wrong artifact and no signal that a second meaning exists.\n\n## ⭐ Why this matters beyond documentation tidiness\n\nThis was surfaced while measuring whether `os create` and `os init` should converge (#15531). It is an argument **against** naive convergence, not for it: collapsing a metadata plugin and a kernel code plugin under one command word would make the collision structural instead of merely documented — teaching exactly the wrong thing to anyone, human or agent, generating a plugin from the CLI.\n\nThe seat's ruling on #15531 was **do not merge the command families**, and this finding is part of why.\n\n## Dedup — bounded\n\n⛔ Not exhaustive: a pattern sweep over a 376-issue snapshot of all open issues found no card naming this collision. ⚠️ The snapshot predates the last hours of this session and the live search channel was rate-limited for both seats. Worth one more check when it recovers.\n\n## Re-check\n\n```\ngrep -rn \"Which scaffolder\" content/docs/deployment/cli.mdx\ngrep -rn \"plugin\" packages/cli/src/commands/init.ts packages/cli/src/commands/create.ts | grep -i template\n```\n\nRefs: **#15531** / PR #15797 (the measurement, and the ruling that this argues for)."
+}

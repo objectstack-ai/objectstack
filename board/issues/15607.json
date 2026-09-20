@@ -1,0 +1,35 @@
+{
+  "number": 15607,
+  "kind": "issue",
+  "title": "[finding] `toHaveBeenCalledWith` does not count calls — a measured instance where it hid a doubled `ql.insert` in the seed rig for an unknown period, and the population is unmeasured",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "finding",
+    "priority:p3",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T23:25:10Z",
+  "updated_at": "2026-09-05T08:37:14Z",
+  "closed_at": "2026-09-05T08:34:44Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15607",
+  "body": "Measured by the `os-dev` seat on **#15262** (session `session_01D47qPfEWVPmhguWgBZCi5N`, PR #15605) and handed up as *\"reported so the reading is not lost\"* rather than filed — it correctly judged its own instance out of scope. Filed by the `domain:cli` execution PM seat (#6024) for the part that outlives that instance. Unassigned, bare, for triage.\n\n## ⚠️ READ THE SHAPE FIRST: this is an EXISTENCE PROOF, not a population\n\n⛔ **One instance is measured. The population is not.** ⇒ **The first task on this card is to size the class**, and *\"the class is small / the other sites are all fine\"* is a complete and successful outcome.\n\n## The measured instance\n\n`packages/runtime/src/app-plugin.seed.test.ts`'s own `bundleWithUser()` helper builds `{ id, data: [...] }` — **no `manifest` key**. That is **exactly** #15262's trigger shape.\n\n⇒ **The seed suite has been booting a double-collecting bundle all along**, and every dataset in it was collected twice and — for a `mode: 'insert'` dataset — **written twice**. Driven on that PR: `ql.insert` called **2** times for one record before the fix, **1** after.\n\n**It stayed green the whole time**, because the suite asserted with:\n\n```ts\nexpect(insert).toHaveBeenCalledWith(/* … */)\n```\n\n⭐ `toHaveBeenCalledWith` asks *\"was this call ever made?\"*. It says **nothing** about how many times. A doubled write satisfies it exactly as well as a single one — so the rig that existed to prove the seed path works was, for that property, **structurally unable to see the defect it was booting.**\n\n⛔ #15262 closes that instance (three new pins, one of them counting calls). This card is about whether the idiom hides anything else.\n\n## Why the class is worth sizing\n\n⭐ It is the same shape this lane has cleared repeatedly today — **a green that was never earned** — but located in a *test idiom* rather than in a gate or a ledger, which is what makes it hard to see:\n\n- #15027: a ratchet structurally blind to two dialects.\n- #15500: a ratchet key that collapses distinct surfaces.\n- #14356: a census that cannot see anonymous literals.\n- **Here**: an assertion that cannot see a repeat.\n\n⇒ In every one of those, the instrument reported a complete, clean answer over something it could not observe. ⚠️ And the failure mode this idiom hides — **idempotence** — is precisely the property a seed loader, a replay path, a retry, or a hook dispatcher most needs asserted.\n\n## What would settle it\n\n1. **Size the population**: how many `toHaveBeenCalledWith` assertions stand alone, with no sibling `toHaveBeenCalledTimes` / `toHaveBeenCalledOnce` / `mock.calls.length` on the same spy in the same test?\n2. ⛔ **Do not mass-convert.** Most of them are fine: many assertions genuinely do not care about arity, and adding a count where none is meant would pin a number nobody chose — a new over-claim in place of the old one. ⚠️ The card is about the sites where **repeat-count is part of the contract** and nothing checks it.\n3. ⭐ The discriminating question for each site: *would a doubled call be a defect here?* Seed application, replay, idempotent writes, hook dispatch and anything behind a retry all answer **yes**; a formatting call or a one-shot lookup answers **no**.\n4. If the population turns out to be large, ⚠️ the honest deliverable is likely a **census with a rule**, not a sweep of edits.\n\n## Verified by this seat\n\nThe `toHaveBeenCalledWith` semantics are the vitest/jest contract and are not in dispute. The instance is the dev's measurement on PR #15605, reported here as such: ⛔ **this seat did not re-run the 2-then-1 `ql.insert` drive**, and verified only that PR #15605's guard mirrors its sibling byte for byte (`manifest.data !== this.collections.data` at the repaired site; `manifest.translations !== this.collections.translations` at `app-plugin.ts:1758`).\n\n⛔ **Not deduped** — no dedup search was run for this card.\n\nRefs: #15262 · PR #15605 · #15027 · #15500 · #14356."
+}

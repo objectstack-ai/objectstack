@@ -1,0 +1,35 @@
+{
+  "number": 15373,
+  "kind": "issue",
+  "title": "no gate reads the CLI transcripts embedded in content/docs — a number quoted from a live registry drifts silently, and four published pages carried a stale one",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T13:18:18Z",
+  "updated_at": "2026-09-05T03:04:30Z",
+  "closed_at": "2026-09-05T03:03:26Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15373",
+  "body": "Filed by the PM on a pass-2 seat's finding (#15322 / PR #15369), which was reserved to me rather than filed there. Unassigned, no claim.\n\n## The measured defect\n\n`content/docs` embeds CLI transcripts as teaching material. Several of them quote a number that the CLI derives from a **live registry at runtime**:\n\n```text\n  → Running author-time rules (41)...\n```\n\n`AUTHORING_RULES` in `packages/lint/src/authoring-rules.ts` holds **42** entries — 39 declaring `ALL` and 3 declaring `['validate', 'build']`, and `authoringRulesFor` filters by `commands.includes(command)`, so `authoringRulesFor('validate').length` is 42. That is also what the CLI printed on a real 17.3.0 run.\n\n**Four published pages carried `41`:**\n\n- `content/docs/deployment/cli.mdx`\n- `content/docs/deployment/validating-metadata.mdx`\n- `content/docs/ui/react-pages.mdx`\n- `content/docs/getting-started/build-with-claude-code.mdx`\n\nPR #15369 corrects the four numbers. **It does not fix the mechanism**, deliberately — that is this card.\n\n## Why nothing caught it\n\nConfirmed by grep: **no script under `scripts/` mentions `author-time rules`.** The number is derived from a registry at runtime and asserted in the docs as a literal, and nothing connects the two. So it drifts on every rule added, silently, and the only thing that surfaced it was a customer-simulation upgrade run noticing the CLI printed a different number than the page did (hotcrm#1576 / hotcrm#1577, documentation defect 8).\n\n⚠️ **The shape, not the number, is the finding.** `author-time rules (N)` is one instance; any transcript quoting a count, a version, a plugin total or a rule name from a live registry has the same exposure. The four pages above are what one grep found for one phrase.\n\n## Why it is worth a gate rather than \"we fixed it\"\n\nThe number is **derived data asserted as a literal** — the same class the repo already treats mechanically elsewhere:\n\n- `check:docs-image-tag` keeps the docs image tag true, stamped by `scripts/` at version time (`e569cac32`).\n- #15332 is the same class recurring a third time on `releases/index.mdx`, where the sentence names the current series and nothing derives it. That card's ruling was to **stamp it**, on this precedent.\n\nTwo stale-literal classes in `content/docs` in one week, both found by accident rather than by a gate, is a mechanism gap.\n\n## Directions worth weighing (⛔ not adjudicated here)\n\n1. **A transcript-drift gate** that pins the numbers CLI transcripts print in `content/docs` against the live registries that produce them. Straightforward for a count exported from a module; the design question is how a transcript declares *which* registry a number came from without turning every code block into an annotated fixture.\n2. **Fold it into `check:corpus-claim-drift`**, which already does lexical anti-drift over the teaching corpus. ⚠️ Worth evaluating rather than assuming: that gate is a co-occurrence ratchet over claim *phrasing*, so a numeric assertion pinned to a registry export may or may not fit its model. The seat that found this flagged the same doubt.\n\nBoth directions have to answer the same question — how a transcript block says what it is a transcript *of* — so that is probably where the card starts.\n\n## Provenance\n\nEvery reading above is from PR #15369 (pass 2 of #15322), which verified the 41 → 42 claim **against the registry** rather than copying it from the drill that reported it, and measured the four occurrences by grep count (stale text at 0 after the edit, new text at 4). The upstream sighting is hotcrm#1577's documentation-defect list. Related mechanism cards: #15332 (`releases/index.mdx` stale current-series, third recurrence), #15357 (a rule's \"0 findings over the corpus\" claim measured against a corpus that is not the app it names)."
+}

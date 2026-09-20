@@ -1,0 +1,35 @@
+{
+  "number": 15409,
+  "kind": "issue",
+  "title": "[decision · p0] a SESSION whose `activeOrganizationId` points at a left organization reads AND writes that organization — measured through better-auth's own remove-member endpoint",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p0",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T14:39:25Z",
+  "updated_at": "2026-09-05T09:26:35Z",
+  "closed_at": "2026-09-05T09:25:23Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15409",
+  "body": "**Measured on a real cloud rig. The hypothesis that would have made this a non-defect was driven on better-auth's own endpoint and returned a served ex-member.** Full reading: #15396 comment 5541998221.\n\n## What was measured\n\nA real `objectstack serve` boot of cloud's `apps/objectos-ee` — 44 plugins, **the real cloud-private `Organizations`**, `Tenancy: isolated`, `SqlDriver(better-sqlite3)` on a **file** database. A session cookie whose `activeOrganizationId` points at an organization the user has **left** still:\n\n- **reads** that organization's rows — `GET 200`, and\n- **writes** into it — `POST 201`, with the row read back **out of the sqlite file, server stopped**, carrying `organization_id: org_alpha` and `created_by:` the ex-member.\n\n**Both removal paths, not just the synthetic one:**\n\n| removal path | result |\n|---|---|\n| direct `sys_member` DELETE, session alive, no sign-out | served: GET 200 total=3 all `@org_alpha`; POST 201 |\n| **better-auth's own `/organization/remove-member`**, driven by the org owner (returned 200, row really gone) | served: GET 200 total=4 all `@org_alpha`; POST 201 |\n\n⭐ **The sharpest line, one principal, one run**: `get-session` returned positions `[\"user\",\"org_member\"]` while the membership was intact and `[\"user\"]` on the **very next request** after removal — while still serving `org_alpha`'s rows. The resolver **had the ended-membership fact in hand and did not act on it**, because the only code that acts on it is API-key-gated.\n\n**Controls, four directions, before and after both removals**: an intact member still read and wrote (the rig serves somebody); signed-out and a bogus cookie both 401 (it does not serve everybody); an `org_beta` member saw exactly the two beta rows and never an alpha row (the wall does work when the stored claim matches a held membership). An earlier run lost two principals to better-auth's per-IP sign-in cap, making two controls vacuous; the probe was corrected to abort rather than run short, and only the complete run is reported.\n\n## Why it happens — one line, verified by this seat on today's `origin/main`\n\n`packages/core/src/security/resolve-authz-context.ts` sets the session's tenant from a stored claim (`tenantId = tenantId ?? sessionData?.session?.activeOrganizationId`), and the guard that compares a tenant claim against real membership opens:\n\n```\nif (postureEnforcesWall(posture) && !grants.accessible_org_ids.includes(keyPrincipal.tenantId))\n```\n\n**Exhaustiveness measured, not assumed**: a grep for a membership comparison over `accessible_org_ids` across all non-test, non-dist framework sources returns **exactly one line** — that one — against 59 files that merely mention the key. So it is the framework's only tenant-claim-vs-membership test, and it is `keyPrincipal`-gated.\n\n**better-auth does not vet it at the source** (1.7.2, read at the rig's pin): `setActiveOrganization` writes only through the session's *own* token, and `removeMember` requires `session.user.id === toBeRemovedMember.userId` — so **an admin removing someone else clears nothing**. `plugin-auth`'s `defaultActiveOrg` composes into `session.create.before` — create-time only. cloud's `packages/organizations` never reads `activeOrganizationId` or the session at all.\n\n## Scope\n\nEnterprise surface, like #15256: the wall needs `org-scoping`, whose only registrar is cloud-private. ⚠️ The rig ran at cloud's current pin `8a96e666`, which does **not** contain #15365 — but that fix is irrelevant here: it supplies the posture, and this guard never runs for a session whether or not a posture is present. Verified on today's framework `origin/main` that the gating is unchanged. **Still unmeasured**: the wiring where `kernel` is bound (`OS_MULTI_TENANT`) — it refuses to boot (`[driver-memory] Refusing to start … posture isolated`), identical to cloud#1982's carried-forward paragraph. ⛔ Unknown, not safe.\n\n## The fork (stated as facts about the code, per the measuring seat)\n\nLine 410's guard already computes everything a session needs: `grants.accessible_org_ids` is resolved for every principal, and `ctx.tenantId` is already set from the session claim. It is one condition away from covering sessions.\n\n- **A — refuse the principal outright**, as the API-key arm does (empty context, `authRefusal: organization_membership_ended`). For a browser session that means being bounced to re-authenticate.\n- **B — do not refuse the principal; drop the unbacked claim**, so the session resolves with **no** active organization rather than one it cannot justify.\n- **C — refuse at the session layer**: revoke or re-point sessions when a membership ends. ⚠️ The code's own comment at that guard already argues against this shape: it must catch *every* removal path or it silently misses one.\n\n## 四棱（业务立场；① 权重 ≥50%）\n\n**① 项目长远合理性 —— 指向 B，其次 A。** 根因和 #15256 是同一个：**墙比对的是一份没人核验的自述**。ADR-0131 D8 要的是「一道谓词、算一次」，而这里连「这个组织你还在不在」都不是这一层的输入。B 把没有依据的那格**去掉**，让墙回到它本来的语义（没有活动组织 ⇒ 什么都不给）；A 是把 API key 那条臂原样复制过来。两者都消灭自述，B 概念更少——它不新增拒绝，只是不再相信一个立不住的值。⛔ C 被代码自己的注释否掉：漏掉任何一条移除路径就静默失效。\n\n**② 实际业务拉动 —— 比 #15256 大一个量级。** #15256 要一把长期存活的 API key；这一条只要**一个还没过期的浏览器会话**。而且实测证明**走正规离职流程也不生效**：管理员用 better-auth 自己的「移除成员」按钮把人踢掉，返回 200、行真的删了，被踢的人继续读写那个组织。这是每一个上墙部署的日常操作。\n\n**③ 防 AI 写元数据犯错 —— 中性。** 与元数据无关。但 B 有一个副作用值得记：会话解析出「无活动组织」时 Layer 0 已经是 fail-closed（`!organizationId ⇒ RLS_DENY_FILTER`，代码原样如此），所以 B 不需要新的拒绝机制就能关门。\n\n**④ 创业阶段不扩散 —— 支持 B。** B 改一处条件、复用既有的 fail-closed 分支，不新增导出面、不新增拒绝类型、不碰会话生命周期。A 次之（同样一处条件，但把「踢出登录」这个产品行为引进来）。C 最贵且最脆。\n\n## PM 建议：**B**，理由是它在同样 fail-closed 的前提下概念最少\n\n选 B 的额外理由是产品语义：API key **就是**它那条组织绑定，所以拒绝整个凭据是对的；而会话是**一个人**，他可能同时属于别的组织——A 会把一个在别处完全合法的用户整个踢下线。B 让他留在登录态、只是没有一个立不住的活动组织，再自己切到真属于他的组织。\n\n⛔ 但这是对 #15256 那次裁决的延伸，是您的决定，不是我的。测量已经settle 的一点是：**这不是「修不修」的选择，而是修成什么形状**——能让它不算缺陷的那个假设（better-auth 在源头核验）已经用它自己的接口驱动过，返回的是一个被服务的前成员。\n\nRefs: #15396（测量全文）· #15256 / PR #15365（API key 那条臂及其裁决）· cloud#1982 · cloud#1987（pin bump，在飞）· ADR-0105 D2/D3 · ADR-0131 D8.\n"
+}

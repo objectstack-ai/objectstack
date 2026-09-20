@@ -1,0 +1,35 @@
+{
+  "number": 15042,
+  "kind": "issue",
+  "title": "[finding] `@objectstack/service-cluster`'s `dist/*.d.ts` vanished AFTER its own build reported `3/3 declared declaration file(s) present` — a downstream typecheck then failed TS7016 against a package that had built green",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T18:21:54Z",
+  "updated_at": "2026-09-05T09:19:37Z",
+  "closed_at": "2026-09-05T09:18:07Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15042",
+  "body": "Observed while building the workspace closure for the option-B acceptance pin (#15004, PR #15039). Filed unassigned and label `finding`: the consequence class is severe and the observation is exact, but the CAUSE is not established and I could not reproduce it on demand. Triage owns the severity.\n\n## What was measured\n\n`pnpm --workspace-concurrency=2 --filter '@objectstack/cli^...' build` on `origin/main` `33681eaef`, in a fresh worktree with a fresh `pnpm install`. The build ran the package's own script — `rm -rf dist && tsup && node ../../../scripts/check-dts-emitted.mjs` — and its last three lines for this package were:\n\n```\npackages/services/service-cluster build: DTS dist/index.d.cts 35.03 KB\npackages/services/service-cluster build: DTS dist/index.d.ts   35.03 KB\npackages/services/service-cluster build: DTS dist/testing.d.ts 794.00 B\npackages/services/service-cluster build: check-dts-emitted: @objectstack/service-cluster - 3/3 declared declaration file(s) present.\npackages/services/service-cluster build: Done\n```\n\nThe whole closure exited 0.\n\nSome time later in the same session — after a repo-wide `pnpm lint`, several `check:*` gate runs and two `vitest run` invocations, with **no further build and no `rm`** — `ls packages/services/service-cluster/dist/` held:\n\n```\nindex.cjs  index.cjs.map  index.js  index.js.map  testing.js  testing.js.map\n```\n\nEvery `.d.ts` / `.d.cts` gone. `dist/testing.cjs` gone too. The `.js` / `.cjs` outputs and their maps survived.\n\n## Why that is worse than a build failure\n\n`@objectstack/service-cluster` is a `dependencies` entry of `@objectstack/runtime`, and `packages/runtime/src/runtime.ts` imports it. Any tsc program that reaches runtime's source then reports:\n\n```\n../runtime/src/runtime.ts(9,8): error TS7016: Could not find a declaration file for module '@objectstack/service-cluster'.\n  '/…/packages/services/service-cluster/dist/index.js' implicitly has an 'any' type.\n```\n\nThat is the LOUD half. The quiet half is the one this repo already has scar tissue about (#7668, #12078, `scripts/check-test-source-alias.mjs`'s header): a package whose declarations are ABSENT makes an importing symbol `any`, and a suite that reads that symbol can run green against a type it is no longer checking, with nothing in the output saying so. Here it was loud only because `noImplicitAny` caught the direct import; a consumer reaching it through a re-export would not have been.\n\nRecovered with `pnpm --filter @objectstack/service-cluster build`, after which the same typecheck reported the expected pre-existing numbers exactly.\n\n## What is NOT established, stated so nobody re-derives it as fact\n\n- **What deleted them.** Nothing between the two observations runs `rm`, and no second build ran. I did not instrument the window, so I cannot name a writer.\n- **Whether it is the known tsup array-config race.** It looks like that class and probably is not: `packages/services/service-cluster/tsup.config.ts` carries a long #13013 note about exactly this hazard and sets `clean: false` in BOTH halves precisely to stop one half racing the other's writes, with the single `rm -rf dist` hoisted into the package script. So the documented guard was in place.\n- **Whether it is specific to this package.** A sweep of every `packages/**/dist` in the same tree found no other package with `index.js` present and `index.d.ts` absent. `packages/create-objectstack` matched that shape and is a false positive — its `exports` map declares only `./created-summary`, so it has no `index.d.ts` to emit.\n- **Whether `check-dts-emitted` could have caught it.** It cannot, and that is not a defect in it: #12078 wired it to run immediately after `tsup`, which is exactly when it ran and exactly when the files were there. Nothing re-checks afterwards.\n\n## Why it is worth a card even unreproduced\n\nThe failure mode is \"a package's declarations are absent from a tree that built green\". Every downstream type verdict taken in that window is a verdict about a `.d.ts` that is not there — and the direction that does NOT throw is a suite passing against `any`. If this is a real race rather than a one-off, it makes any local `typecheck` reading in this repo conditional on something nobody currently observes.\n\nA cheap first step, if triage wants one: have `check-dts-emitted` (or a sibling) re-run over the whole closure once at the END of a `--filter '<pkg>^...' build`, rather than only per-package immediately after that package's `tsup`. That would convert a silent window into a named failure without needing the cause first."
+}

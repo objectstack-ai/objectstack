@@ -1,0 +1,34 @@
+{
+  "number": 14079,
+  "kind": "issue",
+  "title": "driver-memory's reference matcher answers `$notContains` NO for every valued NON-STRING row — the live mingo path answers YES",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T03:22:28Z",
+  "updated_at": "2026-09-05T06:44:36Z",
+  "closed_at": "2026-09-05T05:02:16Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 16,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14079",
+  "body": "Filed unassigned by the #13553 dev while sweeping all 18 declared operators across a NUMERIC fixture. Recording only — no severity asserted, routing is triage's.\n\nDifferent operator family from #13553 (which is the four ordering arms), and not repaired there.\n\n## Measured\n\nExecuted on `8b04c75d7d` and again on `43b799bc66`, on both faces of `packages/drivers/driver-memory`, identical in both runs and unmoved by #13553's repair. Fixture:\n\n```\n{id:'1', n:5}   {id:'2', n:0}   {id:'3', n:null}   {id:'4'}   (key ABSENT)\n```\n\n| filter | live mingo path | reference matcher | |\n|:--|:--|:--|:--|\n| `{n: {$notContains: '0'}}` | `['1','2','3','4']` | `['3','4']` | DISAGREE |\n| `{n: {$notContains: '5'}}` | `['1','2','3','4']` | `['3','4']` | DISAGREE |\n| `{n: {$contains: '5'}}` | `[]` | `[]` | agree |\n\nThe two VALUED rows are the disagreement. Rows 3 and 4 (no value) already match on both faces since #13166.\n\n## Cause\n\n`packages/drivers/driver-memory/src/memory-matcher.ts`, the `$notContains` arm, after its no-value branch:\n\n```ts\nif (typeof value !== 'string' || value.includes(target)) return false;\n```\n\nThe `typeof` test is a TYPE test standing in for the predicate. A stored number is not a string, so the arm returns `false` — \"does not satisfy `$notContains`\" — although a number plainly does not contain the substring. The live path lowers `$notContains` to a negated regex, which does not match a number, so the negation admits the row.\n\nThe direction matters: on this face the matcher is the NARROWER one, so the failure mode is silently dropped rows rather than surplus.\n\n## Why the positive twins agree and this one does not\n\n`$contains` / `$startsWith` / `$endsWith` / `$icontains` / `$like` / `$ilike` are all guarded by the same `typeof value !== 'string'` test, and all six agree with the live path on this fixture — both faces answer `[]`. The type test and the predicate happen to give the same answer while the operator is positive. Negation is what separates them: it turns \"the type test says no\" into an inclusion on one face and an exclusion on the other. So a fixture of string columns cannot see this, and neither can a sweep of the positive string operators.\n\n## Note for triage\n\nThe docblock over the arm already records that \"a present, non-string value keeps the answer it had\" — deliberately, when #13166 moved the no-value cells. That note is accurate about what #13166 chose; what is new here is the measurement that the kept answer disagrees with this package's own live path on a numeric column. Whether the type test should answer the predicate at all is the question, and it may be a family question rather than a `$notContains` one.\n\n## Related\n\n#13553 (the ordering arms on the same fixture, repaired in PR #14077) · #13166 (the no-value cells of this same arm) · #5374 (`$contains`, the last time this face and the live one answered one filter two ways)"
+}

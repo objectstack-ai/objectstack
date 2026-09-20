@@ -2,8 +2,8 @@
   "number": 16593,
   "kind": "issue",
   "title": "spec's declared test-input radius omits `packages/**/*.tsx` while its tree-walking tests read `.tsx` — and the glob that would cover it is forbidden by a dispatch-gates self-test pin",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "claude[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:devx",
-    "needs-user-decision",
     "priority:p3",
     "tests",
     "tooling"
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-09-07T11:44:04Z",
-  "updated_at": "2026-09-19T19:45:17Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-20T09:32:46Z",
+  "closed_at": "2026-09-20T09:32:46Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/16593",
   "body": "`CROSS_PACKAGE_TEST_INPUTS['@objectstack/spec']` declares the `packages/` radius **per extension**:\n`*.ts`, `*.mts`, `*.cts`, `*.js`, `*.mjs`, `*.cjs`, `*.json`, `*.md`, `*.mdx`, `*.yaml`, `*.yml`.\n`packages/**/*.tsx` is **not** among them, and a `*.ts` glob does not match a `.tsx` path.\n\nTwo tests in that package walk the whole `packages/` tree and do read `.tsx`:\n\n- `src/system/compliance-families-retirement.test.ts` (the #15513 absence pin), and\n- `src/api/error-catalog-docs.test.ts` (the ADR-0112 D7 catalog guard) as of PR #15750, which now\n  derives its wire face through `scripts/check-error-status-conformance.mjs`. That module's `walk()`\n  takes `/\\.tsx?$/` minus test/spec/d files, so `.tsx` is in its corpus.\n\nFive files are in scope today, all in `packages/client-react`: `realtime-hooks.tsx`, `context.tsx`,\n`metadata-hooks.tsx`, `data-hooks.tsx`, `index.tsx`.\n\n## Why the gate does not catch it\n\n`check:cross-package-test-inputs` is green, and correctly so. Both walks descend with\n`readdirSync(dir)` on a **loop variable**, so the escape verdict resolves while no path NAME does —\nthe trade `pathExpression` documents. The roster therefore gains no entry for the walked files, and a\nglob that no roster path holds is judged only by its `heldBy` witness, not by extension coverage.\nThis is an instance of the class #15565 already describes (the gate cannot red an undeclared\ntree-scoped walk inside an already-declared package); this card is the concrete instance, filed\nseparately because its remedy is blocked in a way #15565 does not cover.\n\n## Why it is not simply fixable by widening\n\nThe declaration's own comment forbids the obvious glob, with a measurement behind it:\n\n> ⛔ Per EXTENSION under `packages/`, never `packages/**`: the dispatch-gates self-test pins that no\n> cross-package hint reaches `packages/client-react`'s `realtime-hooks.test.tsx`, and a bare\n> `packages/**` was the one entry that covered a `.tsx` file\n\n`packages/**/*.tsx` matches `realtime-hooks.test.tsx`, so adding it would turn that pin red. Whatever\nthe fix is, it has to reconcile the pin with a walk radius that genuinely includes `.tsx`.\n\n## Consequence, stated at its real size\n\nSmall but structurally real. A change confined to a `.tsx` file under `packages/` does not put\n`@objectstack/spec` into `turbo ls --affected`, and does not move the `test` task's cache key, so\nneither spec test re-runs for it. For the D7 guard the input that could actually move is a door\ntranslation arm (`error?.code === 'X'` with a `{ status, body: { code: 'Y' } }` terminal) or an error\nclass appearing in a `.tsx` file. None exists today, and `check:error-status-conformance` in\n`Lint & Repo Gates` reads the same corpus on a whole-tree population on every PR, so the derivation\nitself stays covered there. What is not covered is the D7 guard's own assertion, which the\nconformance gate does not make.\n\nFiled unassigned by the seat that widened the second walk (PR #15750, card #15631). Not fixed there:\nthe remedy touches a declaration held by another pin, which is a different card's decision.\n\n---\n\n## 决策箱卡面块(`domain:devx` 派发席补,2026-09-19 · ⛔ 不改上方立卡席原文)\n\n**维护者速读**:窄修法(给 spec 的测试输入半径补 `packages/**/*.tsx`)**声明侧整半边已实测健全**,唯一阻塞是 `scripts/pm/dispatch-gates.mjs:20653` 那条自检 ——「没有任何 cross-package watch hint 够到 `realtime-hooks.test.tsx`」—— 而 hint 提取器**整块继承**被跟随模块的字面量,于是覆盖源 `.tsx` 的任何通配也必然覆盖同目录的测试 `.tsx`。⇒ 要么先裁 watch-hint 继承语义(选 **A**),要么退成精确路径快照(**B**,会**隐形地**复活本卡记录的缺陷),要么按卡面自陈的「今日无损害」收摊(**C**)。**建议 A**;三条路线的实测代价见最新评论。\n\n<!-- os-decision-facets -->\nos-decision-facets\n① 项目长远合理性:A 让「声明从 walk 推导」这条正确方向可走(walk 是地面真相,声明只是描述),并一并解开 #16555 那一族;B 把声明变成**快照**,下一个在 `packages/**` 下新增 `.tsx` 源文件的人会再次静默失声,而**没有任何门禁能把它判红**(#15565 记的正是这一类)。\n② 实际业务拉动:今天为零,卡面自己算过 —— 能移动 D7 守卫的输入(门翻译臂、或出现在 `.tsx` 里的错误类)**一个都不存在**,且 `check:error-status-conformance` 在每个 PR 上对全树读同一份语料。没被覆盖的只是 D7 守卫**自己那条断言**。\n③ 防 AI 犯错:这一棱最重,而且已被实测钉住 —— `packages/**/!(*.test).tsx` 覆盖**零个**文件却让所有门禁保持绿,「读起来和正确修法一模一样」;`!packages/**/*.test.tsx` 被当作普通字面量、减不掉任何覆盖。⇒ 不给出裁决,下一个人极可能落一个**静默失效的声明**。A 关掉这条路;B 不关(精确路径同样把「描述」退化成「快照」);C 把缺陷留在卡上可读,反而比 B 诚实。\n④ 创业阶段不扩散:这一棱**反对 A** —— 它要求先在 `dispatch-gates.mjs` 里裁一条 hint 继承语义,那是本仓最常被跟随的门禁之一。A 的补偿是:裁完之后的落地半边**只有 3 行、跨 2 个文件**,且三个声明侧门禁已实测全绿。\nPrior rulings read: packages,spec,declared,test-input,radius,omits,tree-walking,tests,read,glob,cover,forbidden (+2 more) → 147 hits; ADR-0057 D1 / ADR-0068 D3 / ADR-0076 D9 / ADR-0076 D12 / ADR-0090 D1 / ADR-0130 D4 / ADR-0131 D3 —— 逐条读过标题,分别裁的是授权 scope-depth、角色定义权归属、ObjectQL 分层与 ISP、OWD 默认、发布物 schema、组织所有权,**⛔ 无一裁的是 watch-hint 继承或测试输入声明**;发火对照:ADR 语料 139 个文件里,`watch.hint` 命中 **0**、hint 继承类措辞 **0**、`cross.package.test.input` **0**,而那 147 命中赖以成立的通用词 `packages` 命中 **114/139**、`declared` **85/139** ⇒ 读者活着,重叠是词面的;thread: none\n\n**推荐 A**。自检行:只看①选 A;②③④ 是否翻转:否(④ 单棱反向,但 A 的落地半边只有 3 行且已实测全绿,而③的代价是一个**看不出来**的空声明)。回退项 **C**,⛔ 不是 B —— B 满足验收的字面却隐形复活本卡存在要记录的那个缺陷。置信缺口:⛔ 未测「裁定 hint 继承语义」本身要动多少代码,那在 `dispatch-gates.mjs` 内部,本席未读到那一层。\n\nGoverning text: `scripts/pm/dispatch-gates.mjs:20645-20653`(`TSX_TEST` 与 `nor a .tsx test file inside it`)· `scripts/cross-package-test-inputs.mjs` 的 `'@objectstack/spec'` 条目 · `turbo.json` 的 `@objectstack/spec#test:repo` inputs\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

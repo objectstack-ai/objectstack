@@ -1,0 +1,36 @@
+{
+  "number": 15121,
+  "kind": "issue",
+  "title": "finding(pm-tooling): `list_issues` `labels` is a UNION, not an intersection — every multi-label board reading is wrong, and wrong in the direction that looks right",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T00:52:35Z",
+  "updated_at": "2026-09-05T15:49:17Z",
+  "closed_at": "2026-09-05T15:38:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15121",
+  "body": "Filed unassigned by the triage seat (session `session_019kDRpB7D2XzVzkaLp57T5D`, R+131). Grading and any `pm:*` are the `domain:skills` seat's — that lane self-triages its own findings, so this card is deliberately left ungraded.\n\nMeasured 2026-09-04T00:52Z against `objectstack-ai/objectui`.\n\n## The defect\n\n`mcp__github__list_issues` takes `labels` as an array. It reads as a conjunction — \"issues carrying all of these\" — and this seat has been reading it that way. **It is a disjunction.** The returned `totalCount` is the size of the union.\n\n## How it surfaced\n\nCounting the objectui straggler class (cards carrying `finding` **and** a `pm:*` state):\n\n| query | returned | whole `finding` box |\n|:--|--:|--:|\n| `[\"finding\",\"pm:queue\"]` | 117 | 77 |\n| `[\"finding\",\"pm:blocked\"]` | 120 | 77 |\n| `[\"finding\",\"needs-user-decision\"]` | 92 | 77 |\n| `[\"finding\",\"pm:dispatched\"]` | 83 | 77 |\n\n⇒ Every \"intersection\" outnumbered its own superset, and three of the four returned the **same** first issue. A subset cannot exceed its superset; that is what made it visible at all.\n\n## The decisive control\n\nInclusion–exclusion fits, but a fit is not a proof — so: `pm:dispatched` and `needs-user-decision` are both members of the six-state `pm:*` ONE-OF, so their true intersection is ~0 **by design**. The two hypotheses therefore predict opposite answers:\n\n- AND ⇒ ~0\n- OR ⇒ 6 + 18 − 0 = **24**\n\nMeasured: **24**. ⇒ Union, settled.\n\n## Consistency across all six pairs\n\nWith the union model, `|A ∪ B| = |A| + |B| − |A ∩ B|` recovers a small non-negative integer every time — six for six, which an incorrect model would not do:\n\n| pair | union | singles | implied ∩ |\n|:--|--:|--:|--:|\n| finding, pm:queue | 117 | 77 + 40 | 0 |\n| finding, pm:blocked | 120 | 77 + 45 | 2 |\n| finding, needs-user-decision | 92 | 77 + 18 | 3 |\n| finding, pm:dispatched | 83 | 77 + 6 | 0 |\n| finding, pm:on-hold | 143 | 77 + 66 | 0 |\n| finding, pm:retriage | 78 | 77 + 1 | 0 |\n\n**Independent corroboration:** those implied intersections total **5**, and R+123 measured the same straggler class at **5** by a completely different route (enumerating cards). Two instruments, one answer.\n\n## Why this one is dangerous rather than merely wrong\n\nA union is **always ≥ each single**, so a wrong answer here never looks absurd — it looks like a bigger, healthier-seeming board. It fails loudly only in the rare case that caught it: querying an intersection against a label whose own box you already know. Every other multi-label reading returns a plausible number that no sanity check rejects.\n\nThis is the same family as the `search_issues` readings in #15012 — an instrument that answers a **different question** than the one asked, with no error surface. ⛔ It is not a flake and ⛔ not intermittent: it reproduced on all seven calls.\n\n## Suggested shape\n\n1. Record it in `.claude/skills/pm-dispatch/references/platform-readings.md` — `labels` is a union; ⛔ never read a multi-label `totalCount` as an intersection.\n2. Canonical workaround, which this card demonstrates: measure each label singly, then derive the intersection by inclusion–exclusion. It costs one extra call per pair and its output is checkable (a negative or implausible result means the model broke).\n3. ⚠️ Worth a sweep of whether any **other** seat's standing readings rest on a multi-label `list_issues`. This seat cannot see other lanes' scratch work, so the blast radius is NOT MEASURED here.\n\n⛔ **Not measured:** whether `list_issues` intends this (it may be GitHub's documented `labels` semantics surfacing unchanged), and whether the same holds for the `labels` filter on any other MCP tool. This card records the behaviour, not its cause."
+}

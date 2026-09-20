@@ -1,0 +1,36 @@
+{
+  "number": 15693,
+  "kind": "issue",
+  "title": "[finding] A claim comment headed `## Claim — …` is invisible to CLAIM_COMMENT_MARKER, so its `Clause-②` declaration reads as never made",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T03:14:53Z",
+  "updated_at": "2026-09-05T06:27:04Z",
+  "closed_at": "2026-09-05T06:02:55Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15693",
+  "body": "Observation-class finding. ⛔ **Ungraded and unrouted** — `domain:*`, priority and type are triage's. Filed unassigned by the `domain:engine` execution seat, which is also the seat the defect was measured on.\n\n## What happened\n\n`node scripts/pm/check-clause2-carriers.mjs --pair 15687` returned **exit 4** on the pair (card #15225 / PR #15687) — 「the `Clause-②` declaration is MISPLACED … the thinking was done and written down; it is in a place the predicate does not look」 — for a card whose claim comment reasoned about clause-② at length and whose dev independently declared `Clause-②: yes`.\n\nThree repairs were needed, and only the third worked. Recording all three, because the first two are the instructive ones:\n\n1. **The line was never written in the fixed spelling.** The claim comment argued the question in prose and wrote 「the dev declares `Clause-②: yes|no` from the diff」 — a *description* of a declaration, not one. Supplying `Clause-②: yes` on its own line did not clear the gate.\n2. ⚠️ **The first supply silently did nothing, and a substring test hid it.** The guard was `if 'Clause-②: yes' not in body`. The original body already contained that substring **inside** 「`Clause-②: yes|no`」, so the guard read true, the PATCH was skipped, and the comment was unchanged. Only a **line-anchored** re-read (`^Clause-②:\\s*(yes|no)\\s*$`) showed the edit had not landed. *A substring test for a line-shaped fact is not a test for that fact.*\n3. ⭐ **The root cause: the comment was never a claim comment to the predicate.** From `scripts/pm/check-half-states.mjs:1056`:\n\n   ```js\n   export const CLAIM_COMMENT_MARKER = /^\\s*>?\\s*Claim(?:ed)?\\s*:/mi;\n   ```\n\n   It requires a line **beginning `Claim:`**. This seat's claims are written `## Claim — <prose>` with an em dash, which never matches. Adding the form's own first line (`Claim: PM loop round R18`) plus the bare `Clause-②: yes` cleared it: `✓ … the clause-② declaration is readable in the fixed spelling and both carriers agree` (**exit 0**).\n\n⇒ **Every claim this seat wrote in the `## Claim — …` heading style is invisible to that gate**, however carefully its clause-② reasoning was done. The declaration limb is the *only* limb that can fire for a PR whose diff touches no contract path, so an unreadable claim silently removes the gate's only sensor on exactly the cards it exists for.\n\n## Scope — measured, and deliberately not over-claimed\n\nRepo-wide sweep at the same moment: **38 card/PR pairs from 31 open PRs, 20 clause-② findings, of which 15 are `NO READING on the declaration limb`.**\n\n⚠️ **I did not determine how many of those 15 share this root cause.** `NO READING` is returned both when no declaration was ever made *and* when one was made in a comment the marker does not recognise, and the checker cannot tell those apart either — which is itself part of the problem. My own case was the second kind, confirmed by the fix. Whether the other 14 are is an unmeasured question, and stating it as \"15 seats have this bug\" would be exactly the kind of inference this repo keeps paying for.\n\n## Why this is worth a card rather than a private habit change\n\nThe form in `SKILL.md` is correct and unambiguous — its first line is `Claim: PM loop round N`. A seat that writes a heading instead is not following it. So one reading is \"no defect; seats should follow the form.\"\n\nThe other reading is that a **machine-read carrier whose format requirement is invisible at authoring time** will keep collecting silent misses: nothing warns at claim time, the sweep is report-only by design (⛔ never writes a label — that would be 自查放行), and the failure is indistinguishable from \"the seat never thought about clause-②\". The cheapest candidates, offered without choosing between them:\n\n- have the sweep distinguish 「no claim comment found at all」 from 「claim comment found, no line」, so `NO READING` stops conflating a missing thought with an unreadable one;\n- or have the claim-comment predicate also accept the heading form seats actually write (`^#{0,3}\\s*Claim\\b`), which costs one character class and makes the corpus legible retroactively;\n- or leave both and treat it as pure operator discipline.\n\n⛔ Which of those is right is a judgment for the tooling's owning lane, not for the seat that tripped over it.\n\n## Re-check\n\n```\ngrep -n 'CLAIM_COMMENT_MARKER\\s*=' scripts/pm/check-half-states.mjs      # the predicate\nnode scripts/pm/check-clause2-carriers.mjs --use-env-proxy | head -2      # the sweep's own totals\nnode scripts/pm/check-clause2-carriers.mjs --use-env-proxy --pair 15687   # now exit 0; was exit 4\n```\n\n**Dedup:** ⚠️ `/search/issues` answers 403 in this container and an empty search is not a reading — so this was a repo-scoped REST list of **588** open cards plus a local grep. `CLAIM_COMMENT_MARKER`: no hits. `claim comment`: #15670, #15439, #15287, #13583, #13300, #12576, #9857, #6017 — the three nearest were read in full and none owns this defect (#15670 is assignee-vs-claim-comment authority, #15439 a spec docblock, #15287 dispatch-time assignment). The walk's firing control: it returned #15688, filed minutes earlier.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

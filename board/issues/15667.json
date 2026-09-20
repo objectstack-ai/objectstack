@@ -1,0 +1,36 @@
+{
+  "number": 15667,
+  "kind": "issue",
+  "title": "check-half-states: two report-only rows — `pm:epic` with `pm:queue` (reserved and handed over at once) and a PR whose `Fixes` target is still `pm:queue` or carries no `Claim:` matching its branch (implemented without a claim)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T02:29:10Z",
+  "updated_at": "2026-09-05T04:39:34Z",
+  "closed_at": "2026-09-05T04:26:35Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15667",
+  "body": "Filed by the `domain:skills` seat (session `session_019RfFHiRCSs3JXLK4cwcfox`, os-steve) on the maintainer's「ok」of 2026-09-05 to the seat's proposal; the rulings are quoted verbatim on the sibling card #15666. Self-triaged: `priority:p2`, `tooling`, pure code (`scripts/pm/**`), dispatched by the seat in the same act.\n\n## The two rows\n\n**H45 — reserved and handed over at once.** An open card carrying both `pm:epic` and `pm:queue`. The same shape as H3 (`pm:queue` + `pm:dispatched`): a pure label intersection, no threshold, no timestamp. Second half, only if it costs at most one read per `pm:epic` card: a `pm:epic` card whose parent's labels lack `pm:epic` (a child marked reserved under a parent that is not delegated) — otherwise leave that half out and file it as its own finding with the cost measured.\n\n**H46 — implemented without a claim.** An OPEN pull request (drafts included — the point is to see it before merge) whose body binds a closing keyword to an open card that (a) still carries `pm:queue`, or (b) has no comment whose first line starts with `Claim:` and whose `Branch:` line names the PR's head branch. Reuse the closing-keyword parser H7 and H21 already use and the `Claim:` / `Branch:` predicates `scripts/pm/check-clause2-carriers.mjs` reads; ⛔ no new spelling of either marker.\n\n## Contract\n\nReport-only, like every H row. Both rows join the `state` class in the class map. Self-test cases for each row in both directions: `pm:epic` alone (no finding); `pm:epic` + `pm:dispatched` (no finding); `pm:epic` + `pm:queue` (finding); a PR whose card is `pm:dispatched` with a `Claim:` naming the PR's branch (no finding); a PR whose card is `pm:queue` (finding); a PR whose card's only `Claim:` names a different branch (finding); a PR with `Part of` only (no finding — no closing keyword). Live run over both repos in the PR body with the counts per row. Budget: no new fetch class beyond what the sweep already reads for PRs and cards; if H45's second half needs the sub-issues API, measure and say.\n\n## Why\n\nAn epic session in the cloud repo implemented a card it had put into `pm:queue`, 29 minutes after a patrol lane had claimed it; nothing mechanical showed either the contradictory reservation or the claim-less implementation before the duplicate landed. The rule half is #15666; these rows make both shapes visible at the next patrol fire.\n\n## Serial and landing\n\n`scripts/pm/check-half-states.mjs` has no in-flight PR (seat reading 2026-09-05T02:28Z; PR #15577 landed 22:41Z yesterday). Pure code ⇒ in-seat contract-tier review, ready, auto-merge when every check is green. The PR carries `Fixes` for this card."
+}

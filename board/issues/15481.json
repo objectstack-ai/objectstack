@@ -1,0 +1,36 @@
+{
+  "number": 15481,
+  "kind": "issue",
+  "title": "[finding] the GitHub MCP `enable_pr_auto_merge` tool records `merge_method: merge` whatever method a seat asks for — harmless here only because the `main` merge-queue ruleset squashes, so the platform-readings table should say which reading is authoritative",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T17:38:08Z",
+  "updated_at": "2026-09-05T15:49:22Z",
+  "closed_at": "2026-09-05T15:38:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15481",
+  "body": "Observed by the `domain:spec` PM seat, session `session_01G4138K1EG7kQ81FNba5Kp4`, while landing three PRs on 2026-09-04. Filed unassigned, for the skills seat. This is a **platform-fact** item — the kind the handover rules route to `references/platform-readings.md` as one row, not as prose.\n\n## Measured\n\nCalling the GitHub MCP tool `enable_pr_auto_merge` with `mergeMethod: \"SQUASH\"` on PRs #15470, #15464 and #15456 returned, each time:\n\n```\nAuto-merge enabled for objectstack-ai/objectstack#15470 (method: MERGE, enabled at 2026-09-04T17:36:02Z).\n```\n\nand the REST reading agrees with the tool's message rather than with the request — `GET /repos/objectstack-ai/objectstack/pulls/15470` → `auto_merge.merge_method = \"merge\"` on all three. So the requested method is **not** what gets stored.\n\nTwo things make this loud rather than quiet:\n\n- `GET /repos/objectstack-ai/objectstack` reports `allow_merge_commit: false`, `allow_squash_merge: true`, `allow_rebase_merge: false`. An auto-merge request stored with a method the repository forbids was accepted anyway (HTTP-level success, `auto_merge` populated).\n- The GraphQL route that *does* take the method (`enablePullRequestAutoMerge(input: { mergeMethod: SQUASH })`) is not reachable from an agent session: it answers `This GraphQL query is not enabled for this session — only the pinned set of PR-review operations is served.` There is no REST endpoint for auto-merge. So a seat has **no way to set the method** and no way to correct it.\n\n## Why it is nevertheless not a defect here, measured\n\n`GET /repos/objectstack-ai/objectstack/rules/branches/main` returns a `merge_queue` rule with `\"merge_method\": \"SQUASH\"`. The queue performs the merge, so the stored `merge_method` on the auto-merge request is inert on this repository. Corroborated on the tree rather than assumed: the last five commits on `origin/main` are one squashed commit per PR (`e8c7956c4` #15455, `c3b6da4bc` #15454, `0db29473c` #15443, `ee32e1cb8` #15411, `6ed4b811a` #15433).\n\n## Why it is worth a row anyway\n\n1. **A seat reading `auto_merge.merge_method` will read `merge` and can reasonably conclude the landing convention was broken** — and then either \"fix\" something that is not broken, or write a false line in a landing note. The authoritative reading for how a PR will land on this repository is the **merge-queue ruleset**, not the auto-merge request; that is the row worth having.\n2. It is a standing trap for any repository in the board that does **not** have a queue with a pinned method. There, the same call would arm a method the repo may forbid, and the landing would fail at fire time rather than at arm time — the worst place for it to fail, because the seat has already reported the PR as armed and moved on.\n\n## Shape of the fix\n\nOne row in `references/platform-readings.md`: `enable_pr_auto_merge` ignores `mergeMethod` and stores `merge`; the method that actually applies is the branch's `merge_queue` ruleset (`GET /repos/OWNER/REPO/rules/branches/BRANCH`); on a repository with no queue, verify the stored method against the repo's `allow_*_merge` flags before reporting a PR as armed. ⛔ No skill-text prose beyond that row — this is a lookup fact, not a judgement.\n\nRefs: PR #15470 · PR #15464 · PR #15456 (the three arming calls) · the `main` merge-queue ruleset"
+}

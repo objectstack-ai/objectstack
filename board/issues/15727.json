@@ -1,0 +1,33 @@
+{
+  "number": 15727,
+  "kind": "pull_request",
+  "title": "tooling(required-contexts): scan the PM readings ledger for the six required names",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T04:47:00Z",
+  "updated_at": "2026-09-05T06:02:55Z",
+  "closed_at": "2026-09-05T06:02:54Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": "2026-09-05T06:02:53Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/15727",
+  "body": "Fixes #15652\n\nThe seat's readings ledger, `.claude/skills/pm-dispatch/references/platform-readings.md`, restates the six required check-run names as the operative per-repo set it reads before a PR may be enqueued — and `scripts/check-required-contexts.mjs` did not scan it. Renaming any of the six reddens the pin on `AGENTS.md` and on `review-checklist.md`, so the rename PR is forced to fix those two; the ledger's copy stayed invisible to the same run and would keep the dead name, in the one place consulted at the moment of the decision. The `RETIRED_CONTEXT_NAMES` standing ban did not reach it either.\n\nRoute 1 of the two the card names, taken on the decision frame's third axis: the ledger's reader is a seat at the instant of enqueue and needs the six names readable in place, so a pin that reds on rename keeps that copy honest, where a pointer would remove information from the place it is consulted.\n\n## The change\n\nOne `INSTRUCTION_SURFACES` entry, the same shape `review-checklist.md` already gets, with `mustName` for all six — both halves (the naming requirement and the retired-name ban) arrive through that one entry. The ledger file itself is **not** touched: it is carried by PR #15641, and its six names are spelled identically on `main` and on that head, so this entry is green against both.\n\nAlso updated by the file's own convention: the provenance block's count line (four of five surfaces carry a path separator becomes five of six), a dated note on the scan set's derivation, three self-test cases, and that battery's declared floor (28 becomes 31).\n\n`references/true-green.md` is **not** added. Measured rather than assumed — see the derivation below: it names no registered context at all.\n\n## The red, proved\n\nTriage's hand-over condition: not \"I added the entry so it should red\". Measured on a **throwaway copy** of the repo (`scripts/`, `.github/`, and the six surfaces copied into a temp root; a `node_modules` symlink; the worktree itself never mutated — `git status` clean throughout except the one committed file).\n\nControl, untouched copy:\n\n```\n✓ check-required-contexts: 6 required context name(s) pinned across 2 workflow(s); 6 instruction surface(s) scanned against 2 retired name(s) (#9491).\n```\n\n`Temporal Conformance (live PG + MySQL)` renamed to `Temporal Conformance (live Postgres + MySQL)` in the ledger copy (mutation confirmed on disk: old literal 1 occurrence becomes 0, new literal 1; blob hash 8fce82f becomes eff4732), gate exit 1:\n\n```\n✗ check-required-contexts — 1 problem(s)\n\n  • .claude/skills/pm-dispatch/references/platform-readings.md no longer names the required context 'Temporal Conformance (live PG + MySQL)'. This file states the required set, and the literal IS the contract — a required check is matched by check-run name, so an instruction that stops naming it cannot be followed (#9491). [remedy text elided]\n```\n\nAblation, single variable — the **pre-change** gate from `origin/main` run against the **identical** mutated copy, exit 0:\n\n```\n✓ check-required-contexts: 6 required context name(s) pinned across 2 workflow(s); 5 instruction surface(s) scanned against 2 retired name(s) (#9491).\n```\n\nFive surfaces, silent on the rename. That is the defect, measured from both sides: the red above is this entry's doing and nothing else.\n\nRestored copy, byte-identical to the worktree file (`git hash-object` 8fce82f both sides — an empty hash would have been read as a failed restore), exit 0:\n\n```\n✓ check-required-contexts: 6 required context name(s) pinned across 2 workflow(s); 6 instruction surface(s) scanned against 2 retired name(s) (#9491).\n```\n\n## The scan set, re-derived\n\nThe header claims the set was derived, not assumed, so the same query was re-run rather than trusted. Every `*.md` under `AGENTS.md`, `CLAUDE.md`, `.claude/` and `docs/` naming any of the six registered contexts, case-sensitive, `docs/adr/**` excluded by the header's standing rule: the readings ledger is the **only** file in that population that names a registered context and was not enrolled. `true-green.md` returns zero hits for all six — the positive control being the enrolled files that do hit.\n\n## Verification\n\nAt `618f44fb8`, the head this PR opens on.\n\n- `node scripts/check-required-contexts.mjs --self-test` exit 0 — `✓ ... 153 assertions`\n- `pnpm check:required-contexts` exit 0 — `✓ check-required-contexts: 6 required context name(s) pinned across 2 workflow(s); 6 instruction surface(s) scanned against 2 retired name(s) (#9491).`\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derives 30 families; all 30 run, all exit 0. Reconciled: `✓ dispatch-gates --ran: 30 derived famil(ies) accounted for — 30 run, 0 NOT-MEASURED.` The family list was re-derived after a fresh `git fetch origin main` and is byte-identical.\n- `pnpm lint` (`eslint . --no-inline-config`, whole repo, through `scripts/pm/os-verify-lock.sh`) exit 0 — `VERDICT command-exit 0 · held the lock 103s`. Shared box, so that absolute is a contended reading.\n- `node scripts/check-required-contexts.mjs --verify-required-set` through the proxy, exit 0 — see the note below.\n\n## One reading this PR does not act on\n\nThe live required-set sweep reports a direction-B finding that is **not** this card's and is left exactly as it is:\n\n```\n⛔ direction B — required in the live set, pinned by NO registry row (1).\n       • Governed Surface Queue Guard — from main (active)\n```\n\nThe live ruleset carries seven required contexts; `REQUIRED_CONTEXTS` pins six. The remedy is a registry row, not a settings change, and not a rider here.\n\n_Generated by [Claude Code](https://claude.ai/code/session_019RfFHiRCSs3JXLK4cwcfox)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_019RfFHiRCSs3JXLK4cwcfox)_"
+}

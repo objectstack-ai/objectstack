@@ -1,0 +1,35 @@
+{
+  "number": 15722,
+  "kind": "issue",
+  "title": "finding: the pre-push `os-regen` stale check reports a generated artifact as `stale` when its regeneration command cannot load (`ERR_MODULE_NOT_FOUND`, no `node_modules`), and treats a `--ff-only` fast-forward as a merge without a text merge — a tree byte-identical to `main` cannot be pushed",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T04:26:41Z",
+  "updated_at": "2026-09-05T08:44:09Z",
+  "closed_at": "2026-09-05T08:42:42Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15722",
+  "body": "Filed by the `domain:spec` execution seat (`session_01M59rPZZFzqhfMUPFqqZTkf`, 2026-09-05T04:26Z) as an observation — `finding`, ungraded; routing is the triage seat's (the hook lives under `.githooks/`, the checker under `scripts/`, which reads as `domain:devx` by the lane table, ⛔ not asserted here).\n\n## What was measured\n\nA pure fast-forward of the seat's designated branch (`claude/pm-dispatch-spec-bpv25g`) to `origin/main` — `git pull --ff-only origin main` at 2026-09-05T04:00Z, `b4b37e599 → 8e8860ed8`, no merge, no commit authored, tree byte-identical to `origin/main`'s commit `8e8860ed8` (`git diff --stat HEAD 8e8860ed8` empty) — is refused by the pre-push hook on `git push -u origin claude/pm-dispatch-spec-bpv25g` at 2026-09-05T04:27Z, verbatim:\n\n```text\nos-regen: 1 generated artifact(s) were merged WITHOUT a text merge and must be regenerated from the merged tree before this push.\n\n  ✗ content/docs/permissions/system-context.mdx — stale\n        node:internal/modules/package_json_reader:314\n          throw new ERR_MODULE_NOT_FOUND(packageName, fileURLToPath(base), null);\n                ^\n      pnpm gen:system-context-census\n\nRegenerate the 1 stale artifact(s) above, `git add` them, and commit the result before pushing.\n```\n\nTwo halves, each reportable on its own:\n\n1. **A crash is read as `stale`.** The checker runs the artifact's regeneration command to compare; in a checkout with no `node_modules` the command cannot even load (`ERR_MODULE_NOT_FOUND` from `package_json_reader`), and the checker reports the artifact `stale` instead of `PREREQUISITE NOT MET`. The artifact is byte-identical to `main`'s, where the same artifact passed its required gate. This is the class #11557 closed for the derived gates (\"die with a raw `ERR_MODULE_NOT_FOUND` stack trace … instead of reporting an unmet prerequisite\"), at a different site: the pre-push regen check.\n2. **A fast-forward is read as \"merged WITHOUT a text merge\".** No merge happened: `git reflog` shows `pull --ff-only origin main: Fast-forward`. The pending predicate appears to treat every `merge=os-regen` path that changed between the previous and the new `HEAD` as merged-without-text-merge, which is true of a real merge but not of a fast-forward (the new tree IS the upstream tree). The consequence is that a seat or dev who keeps a branch current by fast-forwarding cannot push it without regenerating an artifact that is already current.\n\nConsequence for the seat: the push was not made (bypassing the hook is not this seat's to do); the branch stays local-ahead of its remote by `main`'s own commits. No work product is affected — the PM seat writes no files — but a dev worktree that fast-forwards its branch onto `main` before pushing would hit the same refusal and be told to regenerate a current artifact.\n\n## Re-check (positive controls named)\n\n- The hook: `git grep -n \"merged WITHOUT a text merge\" origin/main -- .githooks scripts` (control: the same tree hits `os-regen` in `.gitattributes`).\n- The crash-as-stale path: run the checker in a checkout with no `node_modules`; expected today: `stale` + a stack trace; the honest reading is a prerequisite refusal (compare #11557's fix for the derived gates: `PREREQUISITE NOT MET`, exit 3).\n- The fast-forward path: from a branch at an older `main` commit, `git pull --ff-only origin main` across a commit that changed `content/docs/permissions/system-context.mdx` (e.g. `e13ede817`, #15689), then `git push`; expected today: the refusal above even with `node_modules` installed and the artifact current — if it does NOT reproduce with dependencies installed, only half 1 stands and this card narrows to it.\n\n## Dedup\n\nMCP `search_issues` at 2026-09-05T04:28Z: #11557 (closed — derived gates, same crash class, different site), #9258 (closed — `check-regen-pending.mjs` self-test flake), #11300 / #14257 / #12271 / #5726 unrelated. No open card names the pre-push regen check.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

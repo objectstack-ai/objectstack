@@ -1,0 +1,28 @@
+{
+  "number": 19340,
+  "kind": "issue",
+  "title": "finding(skills/pm-dispatch): the director charter's step order reads as 「screen the whole inbox before the first batch」 — summon #25 presented batch #192 only after reading all 51 cards; and ruled cards re-enter the decision box without citing the ruling on their own thread",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-20T12:25:06Z",
+  "updated_at": "2026-09-20T13:24:18Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19340",
+  "body": "Filed by the director seat, summon #25 (`session_012GcsUbuqFGBibkEDMRC1eE`), as the summon's 换班报告 finding — class 原则错/缺 (item 1) and 可机械化项 (item 2). ⛔ Filed unassigned; the skills lane triages it. ⛔ No `domain:*` / `priority:*` / type applied.\n\n## 1. Charter sequencing — the first batch came 51 cards late, and the charter's wording is why\n\nThe director charter (`.claude/skills/pm-dispatch/references/lanes/director.md`, the decision-box duty) orders the seat's work as 「第一步:逐卡过一类自裁三判据」 before the batches. Read literally, that is 「screen every card in the inbox for class-1 self-adjudication, then start presenting」. Summon #25 read it that way: it screened all 51 cards, then presented batch #192. The maintainer's reaction, verbatim (chat, this summon):\n\n> 「你不是应该5张一批给我决裁吗,你在忙什么?是不是技能有问题。」\n> 「你为什么要读完全部决裁卡才开始呈交第一批 有什么好处」\n\nThe seat's honest answer: the benefit was small. Of the 51 rulings this summon executed (batches #192–#199 plus 19 class-1 self-adjudications), ⛔ none depended on having read the other cards first; the ordering rule (在飞被阻塞 > 运营阻塞 > 用户可见 > 结构性) is decidable from labels, assignee, PR references and the 维护者速读, ⛔ not from a full thread read. What the full pre-read bought was a later first batch — and a maintainer waiting on a seat that was reading.\n\n**Proposed wording (one rule, replacing the step order):**\n\n- The first batch is presented after the first ≤5 same-family cards are read; class-1 screening runs **per batch** (on the five cards in hand), ⛔ not inbox-wide before the first batch.\n- Inbox ordering uses a cheap scan (labels, assignee, open-PR references, the 速读's first lines) to pick the next five; the full thread read happens on those five only.\n- A card found to be class-1 during a batch read is self-adjudicated in that batch's stroke and replaced in the batch by the next candidate, so a batch still presents five decisions.\n- Verifiable criterion: time from the summon's opening marker to the first batch's presentation ≤ the time to read five cards.\n\n## 2. Ruled cards re-enter the decision box without citing the ruling on their own thread\n\nMeasured this summon — cards whose thread already carried a maintainer ruling (`Ruling:` first-line comment, or a 「⚖️ RULED」 record) and that were nevertheless placed back in `needs-user-decision` with a fresh 速读 that did not name the earlier ruling or say what changed since:\n\n| card | earlier ruling on the thread | what the re-entry lacked |\n|:--|:--|:--|\n| objectstack#17518 | a batch ruling (letter A) | the 速读 re-asked the ruled question; the summon ruled A′ citing the record |\n| objectstack#13503 | a standing ruling on the reaper's input shape | re-entered as if unruled; class-1 re-affirmed |\n| objectui#6033 | standing ruling 5406213903 | re-entered without citing it; class-1 「the standing ruling stands」 |\n| objectui#6900 | ruled twice (5472485052, 5486949502) | the third entry (5737290535) did cite them — the good example; the two-week gap before it was a label never moved |\n| objectui#6379 | triage grading on the human floor (5453884177) | a hold audit released it to `pm:queue` reading 「no pending ruling」 while the decision was pending; three seats passed it over |\n\nEach re-entry cost a full re-read by the director seat and, where the ruling stood, produced a ruling that says only 「the standing ruling stands」.\n\n**Proposed mechanism (可机械化):** the decision-box intake check that already verifies the 速读 and four-facet block (triage's 「落卡入箱时校验/补全」 duty) also requires a `Prior rulings on this card:` line naming every `Ruling:` / 「RULED」 comment id on the same thread and one sentence on what changed since each; a card whose own thread carries such a comment and whose face lacks the line is refused entry (`pm:retriage` to the filer), ⛔ not presented. `check-prior-rulings.mjs` already reads the thread by first-line shape and can print the line.\n\n## Not proposed\n\n- ⛔ Not a change to the batch size (5), the six-item prose, or the 「呈完即停」 rule — those worked.\n- ⛔ Not a change to class-1 criteria — the 19 self-adjudications this summon are on the summon's summary table for 追认.\n\nDedupe words: `director first batch after five cards` · `class-1 screening per batch` · `decision box re-entry cite prior ruling` · `Prior rulings on this card line` · `needs-user-decision intake refuses unruled re-entry`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

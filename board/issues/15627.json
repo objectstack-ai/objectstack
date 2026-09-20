@@ -1,0 +1,34 @@
+{
+  "number": 15627,
+  "kind": "issue",
+  "title": "check-adr-0087-registration: a `type-surface-only` reference is a bare identifier resolved to the FIRST same-named definition in the file, so a nested SDK member with a common name (`oauth.applications.get`) cannot be named — PR #15445 had to leave its fourth narrowed member out of its marker",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "enhancement",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T00:45:40Z",
+  "updated_at": "2026-09-05T11:22:27Z",
+  "closed_at": "2026-09-05T10:53:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15627",
+  "body": "Found during the contract re-review of PR #15445 (card #14312). Filed bare for triage: no label, no assignee, no type, no severity asserted. The changeset marker on that PR says the ambiguity \"is filed as its own card\"; no such card was found by three semantic searches, by title among the 40 most recent issues (created 2026-09-04T21:16Z to 2026-09-05T00:22Z), or by number in the commit message, the changeset, the PR body, or any #14312 comment — so this is that card. If one exists, close this as its duplicate.\n\n## The limitation, measured at `747b9e670c6bda153e0b12fb814f4d4eecd8b1fa`\n\nTwo readers in `scripts/check-adr-0087-registration.mjs` compose into it:\n\n1. `parseSymbolRef(ref)` accepts only `<path>#<IDENT>` where `IDENT_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/`. A dotted member path is rejected outright:\n   ```\n   parseSymbolRef(\"packages/client/src/index.ts#get\")                    -> { path, symbol: \"get\" }\n   parseSymbolRef(\"packages/client/src/index.ts#oauth.applications.get\") -> null\n   parseSymbolRef(\"packages/client/src/index.ts#applications.get\")       -> null\n   ```\n2. `memberReturnAnnotation(text, symbol)` iterates every `<symbol>(...)` match in file order and returns on the **first** definition it finds (annotated or not). It has no notion of the object-literal nesting a member sits in.\n\nReplayed with the gate's own regex over `maskComments(text)`, `packages/client/src/index.ts` at HEAD declares **14** definitions named `get`, in file order:\n\n```\n1928:UNANNOTATED  2268:UNANNOTATED  2601:UNANNOTATED  2817:UNANNOTATED  3184:annotated\n4072:annotated    4196:annotated    4897:annotated    4990:annotated    5243:annotated\n5372:annotated    5585:annotated    6357:annotated    6517:annotated\n```\n\nand the gate's shipping reader answers for the first one:\n\n```\nmemberReturnAnnotation(HEAD, \"get\")                              -> { annotation: null }\nmemberReturnAnnotation(text truncated just after line 1928, \"get\") -> { annotation: null }\nmemberReturnAnnotation(text truncated BEFORE line 1928, \"get\")     -> null\n```\n\nSo a marker naming `packages/client/src/index.ts#get` would be refused by predicate 4 with *\"is false at HEAD: `get` … is still UNANNOTATED\"* — a verdict about a member (line 1928, unannotated at both revs) that the PR never touched — while the member actually narrowed (`oauth.applications.get`, line 3184, unannotated at base → `Promise< OAuthApplication >` at HEAD) is unaddressable by the reference grammar.\n\n## Consequence on PR #15445, and why it recurs\n\nThat PR's `type-surface-only` marker names `register`, `getPublic` and `consent` (each unique in the file, each verified by the gate) and discloses `oauth.applications.get` in prose only. ADR-0087 D8 says the gate judges the claim that was made and not its completeness — but here the incompleteness is **forced by the grammar**, not chosen, and the fourth member's predicate-4 reading exists only as a human assertion.\n\nIt will recur immediately: the two sibling cards on the same hot file — #14313 (`auth.*`, 14 methods) and #14314 (`organizations.*`, 19 methods) — bind members named `get`, `list`, `delete`, `update`, `create`, and the like, most of which are declared many times in `packages/client/src/index.ts`. Their markers will be able to name only the members whose name happens to be unique in the file.\n\n## Shape of a fix (not applied, not decided here)\n\nEither accept a qualified reference (a dotted member path resolved through the object-literal nesting the member sits in), or an explicit disambiguator that is not a line number (line numbers rot within the day on this file). Whichever is chosen: ADR-0087's marker grammar and the gate's accepted grammar are pinned to each other (`documentedCategories` reads the ADR's own examples), so the ADR example line and the `--self-test` fixtures move with it. The decision belongs to the gate's owner.\n\nRelated, not the same defect: #15489 (`readDeclaredTypeSurface` `.type` misreads for interface/class/enum and multi-line aliases) and #14502.\n\n## Re-check\n\n```\nnode --input-type=module -e 'import {parseSymbolRef} from \"./scripts/check-adr-0087-registration.mjs\"; console.log(parseSymbolRef(\"packages/client/src/index.ts#oauth.applications.get\"))'   # null today\ngrep -n -E \"^\\s*get: (async )?(<[^>]*> ?)?\\(\" packages/client/src/index.ts | wc -l   # 14 at 747b9e6; re-locate by content, never by line\n```\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01D47qPfEWVPmhguWgBZCi5N)_"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 15431,
+  "kind": "pull_request",
+  "title": "docs(audits): split hotcrm's 69,419 hand-written test lines three ways, and measure what os verify should have derived",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T15:31:12Z",
+  "updated_at": "2026-09-05T02:41:34Z",
+  "closed_at": "2026-09-05T02:41:32Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-09-05T02:41:32Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/15431",
+  "body": "Part of #15418\n\nAn audit, not a code change: `docs/audits/2026-09-hotcrm-handwritten-test-split.md`.\nNo hotcrm file was touched, no test deleted or rewritten, no derivation built.\n\n`Part of` rather than `Fixes` deliberately — the card's deliverable is the\nmeasurement plus a record comment on the card, and the roadmap this produces\nstill has to be costed and dispatched. The maintainer closes it, not this merge.\n\n## The numbers\n\nAll 169 files under hotcrm `test/` at `71a3452` were read and classified. Nothing\nwas classified by filename.\n\n| bucket | lines | share | ~tokens |\n|:--|--:|--:|--:|\n| (1) platform should derive it, hand-written today | 20,505 | 29.5% | 129,752 |\n| (2) genuinely the app's own business judgement | 28,242 | 40.7% | 208,252 |\n| (3) grey zone — platform behaviour, app carries the cost | 15,265 | 22.0% | 97,972 |\n| (4) undecided | 5,407 | 7.8% | 30,610 |\n| total | 69,419 | 100% | 466,587 |\n\n**The subtraction the card asks for comes out at zero.** `os verify` derives two\napp-agnostic families — CRUD round-trip type fidelity (`derive.ts` + `verify.ts`)\nand the RLS cross-owner invariant (`rls.ts`) — and neither corresponds to any\nhotcrm bucket-(1) test. hotcrm also does not depend on `@objectstack/verify` at\nall: it is absent from `package.json`, and `deriveCrudCases` / `runCrudVerification`\n/ `runRlsProofs` return zero hits across the repository. The remainder is the\nwhole of bucket (1).\n\n## Three findings worth the reviewer's attention\n\n1. **`hooks-runtime-service.test.ts` (1,503 lines) is (2), not (3).** The card's\n   reason — \"asserts what a hook does inside the platform's own sandbox\" —\n   describes `action-sandbox.test.ts`. This file imports the hand-written\n   `helpers/hook-harness`, calls `hook.handler(ctx)` with the closure intact,\n   and boots no sandbox and no engine. It is the app's own policy.\n2. **`sharing-coverage.test.ts` (1,309 lines) is 90% a docs test.** Five of its\n   eight describes check that the admin docs' OWD, sharing-rules and related-list\n   tables match the app in every locale. The name reads as authorization.\n3. **Bucket (1) is 4.5x the card's at-a-glance guess** (20,505 vs 4,558), and its\n   two heaviest families — docs-to-metadata consistency at 9,851 lines and\n   predicate totality at 3,415 — appear nowhere in the starting set.\n\n## Measurement basis\n\nToken figures use hotcrm's **own** ratchet rule\n(`scripts/check-source-token-ratchet.mjs` `stripComments`, blank-stripped,\n`chars / 4`). Running that script unmodified reproduces its published\n`authored total ~135,830` for `src`, which is the check that the same rule is\nbeing applied. `test/` is 466,587 tokens by that rule — 3.4x the authored `src`\nsurface the \"under 150k tokens\" claim is measured on.\n\nThe honest reading requested by item 4 of the card: `src` plus the tests a\nmetadata app cannot avoid is **~344,000 tokens** (135,830 + bucket 2), and that\nfloor already assumes the platform absorbs every line of bucket (3). It is 2.3x\nthe claim and does not fit one context window.\n\nOf the 69,419 raw lines, 22,953 are comment and 5,947 blank — 40,519 execute.\n\n## Verification\n\n`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` derived 16\nrunnable families for this diff; all 16 run green on the final commit `74c774f06`,\nthrough `scripts/pm/os-verify-lock.sh`.\n\n`check:doc-formula-expressions` first exited **3 — its own \"PREREQUISITE NOT MET,\nnothing was measured\"** because `@objectstack/formula` and `@objectstack/lint`\nwere unbuilt in a fresh worktree. Both were built and it then reported its own\nverdict lines rather than a skip: *\"self-test: 58 cases passed\"*, *\"22\nrecord-scoped formula example(s) across 427 files / 1371 TS blocks judged clean\"*,\n*\"9 @example(s) judged clean across 1159 packages/spec/src files\"*, *\"14\npredicate(s) ... judged clean; 6 skipped as undeterminable\"*.\n\nNo changeset: this publishes nothing from any released package. `docs/audits/`-only\nPRs carry none by precedent (`76b6dd07e`, `37ba31a4b`, `1b51c683d` — all\naudit-only, all zero changeset files), so the `skip-changeset` label is applied.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01UHvF5hyiZjnCyExFnfQB8m\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01UHvF5hyiZjnCyExFnfQB8m)_"
+}

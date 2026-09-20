@@ -1,0 +1,33 @@
+{
+  "number": 15674,
+  "kind": "issue",
+  "title": "ADR-0087 `type-surface-only` describes \"the only thing that moved is a type annotation\", so it has no word for a narrowing whose diff ALSO changes the body — which is the only way some erased returns can be bound at all",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T02:45:40Z",
+  "updated_at": "2026-09-05T10:06:00Z",
+  "closed_at": "2026-09-05T04:11:19Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15674",
+  "body": "⛔ Recorded for triage; no severity asserted, no `domain:*`, no type — routing and grading are triage's. Found while binding `oauth.applications.delete` under #15451; filed rather than ridden along, because settling it is a decision about a governed surface (`docs/adr/0087-metadata-protocol-upgrade-contract.md` and the gate that enforces its vocabulary).\n\n## The shape\n\nADR-0087's sixth category, added 2026-08-30 under #13080, is described in the ADR and in the gate header as\n\n> a published SDK method whose declared return moves off `any` onto **the contract it always answered**\n\nand D8 justifies the exemption with *\"the only thing that moved is a type annotation\"*.\n\nThat description fits a narrowing where the body is untouched. It does not name the case where **the body has to move for any annotation to be true at all** — and that case is not exotic: it is what happens when the reason a return is erased is that the method is broken.\n\nWorked example, measured end to end on #15451. `ObjectStackClient.oauth.applications.delete` ended `return res.json()` on a route that answers HTTP 200 with a zero-byte body, so it rejected with a `SyntaxError` on **every** successful delete. Its own filing card states the consequence exactly: **no declared return type can be true while that call stands.** `void` becomes the wire fact only after the body changes. So binding it is:\n\n1. a type-surface narrowing off an erased `any` — predicates 1 through 4 of `type-surface-only` all hold on the real diff; **and**\n2. a runtime behaviour change from always-rejecting to resolving.\n\nBoth halves are BREAKING, and both reach the same audience through the same two channels — the compiler and the caller's own runtime. **Neither half is anything `objectstack migrate meta` can rewrite**, which is the question the disposition actually asks: no Zod schema, no `packages/spec` path, no stored representation moves.\n\n## Why this is not already covered\n\n- **#13080 / the sixth category** — created for the type-only shape, and its own text excludes this one.\n- **#14502** (`needs-user-decision`) — the mirror case: **concrete** at base plus a shipped prescription. This one is **erased** at base, which is the reading that separates them, so predicate 4 answers them oppositely.\n- **#15627** — the *mechanical* half of the same wall: a reference is a bare identifier, so a nested SDK member with a common name cannot be addressed at all. That one blocks the claim before this one is even reached. **Fixing #15627 does not answer this card**: it would make the claim spellable, and then the author has to decide whether a category whose text says *\"the only thing that moved is a type annotation\"* may be asserted over a diff that also moved the body.\n\n## Why it matters rather than being a wording nit\n\nThe erosion #13080 was filed about is a class of genuinely breaking change being nudged away from the `**BREAKING**` token because the token routes it into a ledger it does not belong in. This is the same pressure one notch further along, and the exits are the ones that ADR already closed:\n\n- dropping the token — ⛔ closed in as many words by the 2026-08-30 addendum for this class;\n- riding `no-migration-prescription` — mechanically accepted here, and it is exactly the detector **miss** D7 records against #8277 and names as the pattern the sixth category exists to stop;\n- asserting `type-surface-only` anyway — an exemption whose written description does not describe the diff.\n\n⇒ Three exits, each closed by something already written down. That is the finding.\n\n## Options a decision could take (not a recommendation to any of them)\n\n- **A. Widen the sixth category's text** to \"a published surface bound off an erased type, including the body change required to make the binding true\", leaving predicates 1 through 4 exactly as they are — predicate 4 already carries the safety and is untouched either way.\n- **B. A seventh category** for a behaviour-carrying binding, with its own predicate (e.g. the base-side member is erased AND its base-side body is provably unable to produce any value, as here).\n- **C. Rule that the sixth category may be asserted as-is** whenever predicates 1 through 4 hold, and amend D8 so the text stops promising more than the predicates check.\n\n⚠️ Any of these edits `docs/adr/**`, a governed surface — maintainer's, by hand.\n\n## Reproduce\n\n```\ngh pr diff <the #15451 PR>            # the diff both halves are read off\nnode scripts/check-adr-0087-registration.mjs --base origin/main\nsed -n '/D8 — the affected party/,/^####/p' docs/adr/0087-metadata-protocol-upgrade-contract.md\n```\n\nRefs: #15451 (where it was measured) · #13080 (the sixth category) · #14502 (the mirror shape) · #15627 (the mechanical half) · PR #15445.\n"
+}

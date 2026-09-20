@@ -1,0 +1,36 @@
+{
+  "number": 15702,
+  "kind": "issue",
+  "title": "check-half-states: H45's second half — a `pm:epic` card whose parent lacks `pm:epic` — needs a new fetch class (the sub-issues parent read) and a `pm:epic` population kept out of `seen`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T03:34:09Z",
+  "updated_at": "2026-09-05T07:11:18Z",
+  "closed_at": "2026-09-05T07:00:33Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15702",
+  "body": "Filed by the `domain:skills` seat (session `session_019RfFHiRCSs3JXLK4cwcfox`, os-steve) from the #15667 dev's measured out-of-scope finding (report 5548948273), per that card's disposition for the half it left out. Self-triaged `priority:p3`, `pm:queue`, pure code.\n\n## What was measured (2026-09-05, live API)\n\n- `GET /repos/{owner}/{repo}/issues/{n}/parent` returns the parent issue with its full `labels` (verified: #13890 → parent #13658 carrying `pm:epic`); a parentless card answers a documented 404 `No parent issue found`. So the consistency half — a `pm:epic` child under a parent that is not delegated — is exactly one read per `pm:epic` card, which meets #15667's numeric condition.\n- It was still left out, on #15667's own rulings: (a) the sub-issues endpoint family is called nowhere in `scripts/pm/check-half-states.mjs`, so it is a new fetch class; (b) `pm:epic` is not among the seven label pages the sweep fetches, so the population does not exist yet, and folding a `pm:epic` page into `seen` would widen the input of H1 / H2 / H4 / H9 / H11 / H24 / H25 / H29 / H30 — a change to what existing rows report.\n- Population today: 5 open `pm:epic` cards in objectstack, 0 in objectui.\n\n## What this card decides and does\n\nTwo questions the sweep's contract must answer before the row exists, then the row:\n1. May the sweep take the sub-issues parent read as a fetch class? (Report-only, one call per `pm:epic` card, bounded by the `pm:epic` index size.)\n2. The `pm:epic` enumeration is a separate population — read it, keep it OUT of `seen`, and judge only the new row over it, so no existing row's input moves.\n\nIf both hold, add the row (H45's second half, same class, same report-only contract) with self-test cases in both directions and a live run over both repos in the PR body. ⛔ No existing row's predicate or wording changes; ⛔ no other new fetch class.\n\nRelated: #15667 (H45/H46, PR #15690) · #15666 (the `pm:epic`-on-children rule this row will police)."
+}

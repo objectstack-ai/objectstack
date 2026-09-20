@@ -1,0 +1,34 @@
+{
+  "number": 15784,
+  "kind": "issue",
+  "title": "revoke a session whose membership ended, so \"Remove member\" actually signs the person out — the courtesy half of #15409, ⛔ never the enforcement",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "priority:p2",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T07:51:58Z",
+  "updated_at": "2026-09-05T14:04:49Z",
+  "closed_at": "2026-09-05T14:02:56Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15784",
+  "body": "The courtesy half of the ruling on #15409 (maintainer, 2026-09-05, verbatim 「同意」 adopting *\"B as the boundary, C later as the courtesy\"*). ⛔ **This is never the enforcement.** #15409 closes the hole per-request; this card only makes the product behave the way an admin expects. (The former `Blocked-by: #15409` line was removed after #15409 closed `completed` via PR #15794.)\n\n## What an admin expects, and does not get\n\nWhen someone clicks **Remove member**, they expect that person to be signed out. Today the membership row is deleted and the session lives on — up to **7 days** by default (`auth-manager.ts:1626`, `expiresIn` default `60*60*24*7`). After #15409 lands, the removed member can no longer read or write that organization's data; they are simply still signed in, with no active organization. That is safe, and it is still not what the admin was told happened.\n\n## Why the machinery is already there\n\n`sys_session.revoked_at` / `revoke_reason` are declared and system-managed. Revoking expires the session **in place** (`expires_at` set to the past plus the reason stamped), so better-auth returns no session on the next request and the Console's existing 401 → login redirect handles it — **no client change**. `engine.ts:8041` already writes `revoked_at`.\n\n⚠️ **What is new here, and why it is filed separately rather than folded into #15409**: every existing reason is a **timer** — the field's own description enumerates `idle_timeout`, `absolute_max`, `concurrent_cap`, …. **None is event-driven.** \"Membership ended\" would be the first authorization-event trigger on this mechanism, and an event trigger covers exactly the paths someone remembered to wire: better-auth's `/organization/remove-member`, a direct `sys_member` delete, a seed replay, a bulk operation, an admin tool, a control-plane operation. **A missed path fails open, silently.**\n\n⇒ That is precisely why it is not the wall. #15409's per-request check covers every removal path by construction. This card is layered on top of a hole that is already closed, so a missed trigger costs a stale login session — not access.\n\n## Scope\n\n1. Enumerate the removal paths **by measurement, not by memory** — every writer that can delete or invalidate a `sys_member` row, in this repo and in cloud's `packages/organizations`. Attach the census with its firing control.\n2. Revoke the affected user's sessions **for that organization's claim** when a membership ends, through the existing mechanism, with a new `revoke_reason` naming the cause.\n3. ⛔ Do **not** weaken, bypass or \"optimise away\" #15409's per-request check on the strength of this trigger existing. If a future reader is tempted, the comment beside the check should say why: a trigger can be missed, an evaluation cannot.\n4. Decide and record what happens to a user who holds **other** memberships: revoking every session logs them out of organizations they are still legitimately in. Re-pointing `activeOrganizationId` instead may be kinder — that is a product call and belongs on this card before implementation.\n\n## Acceptance\n\nAn admin removes a member through better-auth's own endpoint while that member has a live session; their next request is unauthenticated and the Console redirects to login. Controls: a member of a **different** organization is unaffected; an intact member's session is untouched; and the #15409 pins still hold — ⛔ the per-request check must not have been removed in the process.\n\nRefs: #15409 (the boundary, and the ruling) · #15256 (the API-key arm) · cloud#1982 / #15396 (the measurements) · `sys-session.object.ts` (the existing mechanism)."
+}

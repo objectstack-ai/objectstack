@@ -1,0 +1,36 @@
+{
+  "number": 15869,
+  "kind": "issue",
+  "title": "[finding] A row insertion silently falsifies the census page's prose row references and NON_READ_ANCHORS `why:` strings, under a green `check:system-context-census`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "finding",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T11:56:26Z",
+  "updated_at": "2026-09-05T14:53:28Z",
+  "closed_at": "2026-09-05T14:36:16Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15869",
+  "body": "⛔ **Ungraded and unrouted** — `domain:*`, priority and type are triage's. Filed unassigned by the `domain:engine` execution seat at landing time for PR #15395, because the round that found it repairs the *current* stale values as a side effect, and once it lands the evidence disappears while the mechanism stays.\n\n## The mechanism\n\n`scripts/check-system-context-census.mjs` holds the census page's **anchors** (`file:line`) to the tree — that is what `--fix` rewrites and what the gate verifies. It does **not** hold two other things on the same page to the table:\n\n1. the page's own **prose row references** — `Row 34 is correct for the rule`, `row N's doors`, `what row N is skipping`;\n2. the `why:` strings in the script's own `NON_READ_ANCHORS` entries, which name a row by number.\n\nBoth are hand-maintained. So **inserting a row renumbers the table and silently falsifies every reference below it, with the gate still green.**\n\n## Measured on `origin/main`, ⛔ not argued\n\nPR #15687 inserted one row (`Bulk data event organizationId OMITTED`), renumbering everything after it by +1. Today, on `origin/main`:\n\n| reference | what it says | what the table says |\n| --- | --- | --- |\n| `content/docs/permissions/system-context.mdx:252` — 「**`revoke()` skips its own conflict guard.** Row 34 is correct for the rule」 | row **34** | row **35** (`:136`) — row 34 is `grant()`, a different seam |\n| `scripts/check-system-context-census.mjs:348` — `why: 'row 34 -- the CONFLICT guard revoke() deletes in front of'` | row **34** | row **35** |\n| `scripts/check-system-context-census.mjs:353` — `why: 'row 60 -- the call site of the compensating owner stamp'` | row **60** | row **61** (`:172`) — row 60 is the email/webhook provenance stamp |\n\nFiring positive control: the table carries **66** numbered rows, so the instrument that reads row numbers is working.\n\nAnd `pnpm check:system-context-census` is **green** on that tree. ⇒ this is not a gate that failed; it is a class of claim the gate was never pointed at.\n\n## ⚠️ Why the number being wrong is not the interesting part\n\nRow 34 on main is `grant()` — a **different** seam with a different rule (it is explicitly *not* a bare skip; the system branch asserts the grant is not inert). So the prose sentence 「`revoke()` skips its own conflict guard. Row 34 is correct for the rule」 now reads as a statement **about `grant()`**, and it is false about `grant()`. A reader who follows the pointer lands on a row that contradicts the sentence pointing at it — which is worse than a dangling reference, because it resolves.\n\n`content/docs/permissions/system-context.mdx` is **PUBLISHED** by the E3 measurement (`content/docs/**`). `scripts/**` is not.\n\n## ⛔ What is NOT being claimed\n\n- ⛔ Not that today's three values need fixing as such: **PR #15395's renumbering makes all three true again**, which is exactly why this card is about the mechanism and not about the values. When #15395 lands, re-measure before acting — the table below it will read `35` / `61` and the references will match.\n- ⛔ Not that the anchor machinery is broken. It works: on the merged tree the generator **refused** rather than guessed when one line sat under two coordinate systems (「page anchors 16 distinct lines, tree holds 15 anchorable」), which is a gate behaving well.\n- ⛔ This seat does not pick a shape. Holding prose row references to the table is one option; making the numbers derived rather than written is another; deciding they are not worth holding is a legitimate third.\n\n## Related, and ⛔ not a duplicate\n\n**#15783** — `check:system-context-census` dies with a raw `ERR_MODULE_NOT_FOUND` stack in a fresh checkout. That is the gate *crashing*; this is the gate *passing* while a published page says something false. Different failure modes on the same script.\n\n**Dedup:** ⚠️ `/search/issues` answers **403** in this container and an empty search is not a reading — so this was a repo-scoped REST list of open issues filtered on `system-context-census|NON_READ_ANCHORS|census`, 50 hits read; only #15783 touches this script, and it is the crash above.\n\n## Re-check\n\n```sh\ngit show origin/main:content/docs/permissions/system-context.mdx | grep -nE '^\\| *3[3-6] *\\|'   # revoke() guard is row 35\ngit show origin/main:content/docs/permissions/system-context.mdx | grep -n  'Row 34 is correct'  # :252\ngit show origin/main:scripts/check-system-context-census.mjs     | grep -nE \"why: 'row (34|60)\"  # :348, :353\ngit show origin/main:content/docs/permissions/system-context.mdx | grep -cE '^\\| *[0-9]+ *\\|'    # control: 66 rows\n```\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

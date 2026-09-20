@@ -1,0 +1,33 @@
+{
+  "number": 13753,
+  "kind": "issue",
+  "title": "rest/meta: two more read doors (`/meta/diagnostics`, `/meta/:type/:name/references`) never forward the caller's organization — the \"Used by\" graph tells an operator an org-referenced item is safe to delete",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-31T09:49:13Z",
+  "updated_at": "2026-09-05T04:03:30Z",
+  "closed_at": "2026-09-05T04:02:39Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 16,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13753",
+  "body": "Found by the mandatory door-by-door enumeration #13406 asked for (compare every meta read door in `packages/rest/src/rest-server.ts` against `/audit`'s parameter passing). #13406 is scoped to `/history`, `/diff` and the single-item overlay read; these two doors carry the **same omission** and are outside that scope, so they are recorded here rather than fixed there.\n\n## The omission\n\nBoth protocol implementations **declare and genuinely read** `organizationId`, and both forward it into `getMetaItems`. Neither REST door supplies one, so both resolve at env scope only.\n\n| Door | Implementation | What it does with the org | REST door supplies it? |\n|---|---|---|---|\n| `GET /api/v1/meta/diagnostics` | `getMetaDiagnostics` | `organizationId?: string`, passed straight into `getMetaItems({ type, organizationId, packageId })` | **no** |\n| `GET /api/v1/meta/:type/:name/references` | `findReferencesToMeta` | `organizationId?: string`, spread into `getMetaItems({ ...(request.organizationId ? { organizationId: request.organizationId } : {}) })` | **no** |\n\nLocate by symbol — line numbers in `rest-server.ts` rot within the day.\n\nDirection is **fail-closed**, same as #13406: the caller's own org data is under-served and there is no cross-org read. Not a security card.\n\n## Why the `references` door is the sharper half\n\n`findReferencesToMeta` backs the admin \"Used by\" panel, and that panel renders its empty case as **\"Nothing in the metadata graph points at this item. Safe to delete.\"** — shown to an operator who is about to delete something.\n\nAn org-scoped `view` that references a packaged `dashboard` lives in the org partition. The reference sweep reads the env partition only, finds nothing, and the panel advises deletion of an item the caller's own organization is actively using. That is the same false-negative-on-a-consequential-surface class the 501 refusal in this very door was added to prevent (see the ADR-0110 D3 note at the top of that handler, from #9326): the handler already refuses to report \"the question was never asked\" as \"nothing depends on this item\", and then answers exactly that when the org is unstated.\n\n`/meta/diagnostics` is the milder half: an org's own overlays are simply absent from the Studio diagnostics sweep, so a directory page reports clean tiles over a partition it never read.\n\n## Fix direction (not applied here)\n\nCall-side only, mirroring the repair landing for #13406: resolve the memoised `resolveExecCtx` and pass `organizationIdForMetaRead(canonicalMetaUrlType(...), ctx?.tenantId)`.\n\n⚠️ Use the **registry-gated** predicate, not a raw `ctx?.tenantId`. `organizationIdForMetaWrite` deliberately lands `allowOrgOverride: false` types env-wide under the #6190 ruling, so naming the tenant unconditionally would hide those types' rows from an org session — the same defect one type family over. Both of these doors are type-agnostic sweeps, so `/meta/diagnostics` in particular needs a decision the two doors above did not: it sweeps **many** types in one request, so the scope is per-type rather than per-request. That is a genuine design question and the reason this is a separate card rather than a rider.\n\n⛔ Do not change `getMetaDiagnostics` or `findReferencesToMeta` in `protocol.ts` — both already read the member correctly; the gap is entirely at the REST call site.\n\n## Prior art in this family (all landed)\n\n`/audit` #8747 · the single-item and list read doors, plus `/layers` #9727 · the metadata write doors #8805 · the registry-gated predicate #6190 · the URL fold #10340.\n\nEnumeration state as measured on `origin/main` at the time of writing — every other meta read door in `rest-server.ts` either forwards the org (`/meta/:type` list, `/meta/:type/:name`, `/layers`, `/audit`, `/published`, `/_drafts`) or is correctly env-wide because its types declare `allowOrgOverride: false` (`/meta/book/:name/tree` over `book`/`doc`, `/meta/object/:name/state/:field` over `object`) or reads no metadata document at all (`/meta/types`).\n"
+}

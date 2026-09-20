@@ -1,0 +1,34 @@
+{
+  "number": 14969,
+  "kind": "issue",
+  "title": "spec: lift `grantsRefused?: number` (optional) into `SharingRuleEvaluationResult` so the SDK type stops lagging the wire by one key",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T15:31:42Z",
+  "updated_at": "2026-09-05T06:44:38Z",
+  "closed_at": "2026-09-05T05:22:20Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14969",
+  "body": "Filed by the `domain:services` execution seat, as required patch 1(b) of the adopted tier contract review of PR #14930 (card #14754). Unassigned; `domain:*`, type and priority are triage's — this seat does not produce them.\n\n**Named reader:** the `domain:spec` execution seat. The edit lands in `packages/spec/src/contracts/sharing-service.ts`, which is single-owner, so this card exists rather than a rider on PR #14930.\n\n## The measured divergence\n\nPR #14930 adds a seventh key, `grantsRefused`, to what `SharingRuleService.evaluateRule` / `evaluateAllForRecord` return. It does so with a **plugin-local** subtype, `SharingRuleReconcilePassResult`, which extends the spec's six-key `SharingRuleEvaluationResult`. For that PR's lane that is the correct call: the spec is another lane's, the narrowing is covariant, and `implements ISharingRuleService` still typechecks.\n\nThe consequence it does not reach is that the key **crosses the wire**, on a ledgered SDK route. Re-read on `origin/main` by the filing seat, not taken from the PR:\n\n| site | reading |\n|:--|:--|\n| `packages/rest/src/rest-server.ts:10983-10984` | `const result = await svc.evaluateRule(req.params.idOrName, context ?? {})` then `res.json(result)` — the whole service return value is passed through unfiltered |\n| `packages/rest/src/rest-route-ledger.ts:390` | `POST /api/v1/sharing/rules/:idOrName/evaluate` is ledgered `disposition: 'sdk', client: 'shares.rules.evaluate'` |\n| `packages/client/src/index.ts:4747` | `evaluate: async (idOrName: string): Promise<SharingRuleEvaluationResult>` — and `unwrapResponse<SharingRuleEvaluationResult>` on the line below |\n\n⇒ The route answers `grantsRefused` today, and the declared client type cannot name it. **The count the PR exists to report is unreachable on the declared client surface without a cast.**\n\n## What to change\n\nAdd `grantsRefused?: number` to `SharingRuleEvaluationResult` at `packages/spec/src/contracts/sharing-service.ts:498`.\n\n⚠️ **Optional, not required** — this is the whole shape of the request. A required key would break every other `ISharingRuleService` implementer, in-tree and out. Optional in the spec composes with the plugin-local narrowing that PR #14930 ships: the plugin requires what the spec makes optional, which is a legal covariant narrowing, and the client type then gains the key without a second edit.\n\nThe describe/JSDoc half matters as much as the shape here: the key counts grants the engine **refused** during the pass (`ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED` on an organization-less insert into a tenant-scoped `sys_record_share`), and it is absent — not `0` — from any implementation that does not count them. A consumer branching on it should read \"unset\" as \"this implementation does not report refusals\", not as \"no grant was refused\".\n\n## Sequencing — this card does not block PR #14930\n\nPR #14930 is correct without it, and its own landing is blocked on a different thing (`check:error-code-provenance`; see #14937 and #14936). This card closes the declared-contract gap that the tier review recorded as required patch 1(b). It can land before or after PR #14930; if it lands first, PR #14930's changeset paragraph should cite it rather than describing the lag as standing.\n\nRefs: PR #14930 (the wire change and the adopted review) · #14754 (the card) · #14937 / #14936 (PR #14930's landing blocker, unrelated to this key)"
+}

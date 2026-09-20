@@ -1,0 +1,37 @@
+{
+  "number": 15916,
+  "kind": "issue",
+  "title": "[finding] plugin-auth: 5 more first-sibling-pays dynamic imports charged to a case's own testTimeout — census attached, same shape as the durability-swallow-repair flake",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "finding",
+    "priority:p3",
+    "tests"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T14:17:24Z",
+  "updated_at": "2026-09-05T15:03:45Z",
+  "closed_at": "2026-09-05T15:03:45Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15916",
+  "body": "Filed by the `os-dev` seat while implementing #14998, session `session_01XpTx2tbq3pZRYAdoGt6E6Y`. Filed bare — type, priority and lane are triage's. **Recording only, no severity asserted.**\n\n#14998 explicitly asks the implementer to check \"whether the other two `describe` blocks in the same file have the same first-sibling-pays shape, and whether other `plugin-auth` test files do\", and to file the rest as one card rather than widening that PR. This is that card. PR #15914 fixes the sites in `durability-swallow-repair.test.ts` only.\n\n## The shape\n\nAn `await import('...')` written inside an `it()` body charges that module graph's cold transform-and-import to the **case's own** `testTimeout`. vitest wraps test bodies in `withTimeout(...)` and offers exactly three timeout knobs (`testTimeout`, `hookTimeout`, `teardownTimeout`), none of which covers module loading — so of N structurally identical siblings only the FIRST pays it and the rest hit the warm module cache. Only the first can flake, and it flakes on load rather than on behaviour, which is why re-running turns it green with no code change.\n\nMeasured cost of one such load in this package (PR #15914, on a shared box under the repo verify lock): `./admin-import-users.js` cold **3299.6 ms** versus **0.014 ms** warm, against a 10 000 ms `testTimeout`. On CI shards whose vitest `import` phase reads 338–500 s, that single load has exceeded 10 s on its own at least six times across three separate cards (#14998, #15603, #15852).\n\nThe convention this violates is already stated repo-wide in AGENTS.md, section Build and Test: *\"Clocked windows measure behaviour, never loading — a test that boots a real plugin chain pays its first load at module top.\"* `scripts/check-test-source-alias.mjs` enforces it, but only for specifiers that resolve through `dist/`; every row below is either a relative in-package specifier or a `node_modules` package, so all of them sit just outside that gate's population.\n\n## Census\n\nAnchor: an `await import('...')` whose nearest enclosing construct is an `it()`/`test()` body, brace-tracked, over all 97 `plugin-auth` test files. Measured at `6b3c135fe` **after** PR #15914's fix, so `durability-swallow-repair.test.ts` no longer appears (it was 7 of the 22 sites; 15 remain).\n\n**Control that fires** — the scanner detects an explicit per-case timeout when there is one, so a `NONE` reading is a measurement rather than a blind spot:\n\n| file | specifier | first payer | explicit timeout |\n|---|---|---|---|\n| `credential-at-rest-posture.test.ts` | `@better-auth/scim` | `it@336` | **`60_000`** |\n\nThree further sites are correctly classified as already compliant (module-scope loads, not in a clocked window): `auth-email-locale.test.ts:89`, `verification-email-failure-propagation.test.ts:54`, and `rate-limit-storage-isolation.test.ts:128`.\n\n**The finding set** — first payer is an `it()` with no explicit per-case timeout:\n\n| file | specifier | first payer | import line | siblings sharing the specifier |\n|---|---|---|---|---|\n| `admin-user-endpoints.test.ts` | `./admin-user-endpoints.js` | `it@74` | `:75` | 3 |\n| `auth-manager.test.ts` | `better-auth/api` | `it@2209` | `:2215` | 4 |\n| `auth-manager.test.ts` | `./rate-limit-storage.js` | `it@2358` | `:2359` | 2 |\n| `admin-impersonate-endpoint.test.ts` | `better-auth` | `it@358` | `:363` | 1 |\n| `managed-extension-fields.test.ts` | `better-auth/plugins` | `it@1046` | `:1059` | 1 |\n\nThe two `auth-manager.test.ts` rows are the ones worth grading first: 4 and 2 siblings respectively, and `better-auth/api` is a `node_modules` graph comparable in weight to the one that has already flaked six times.\n\nCosts are **not** measured per row — only the shape is. A row with one site has no warm sibling to contrast against, so it is the shape without the observed signature; whether it is worth touching is triage's call.\n\n**Disclosed scanner limitation:** the scanner does not mask comment text, so a literal `await import('x')` appearing in prose is picked up. Exactly one such artifact exists here — specifier `x` at `rate-limit-storage-isolation.test.ts:128`, inside a comment documenting a regex. It lands in the module-scope bucket and is not in the finding set above. Nothing else in the 15 is a comment.\n\n## Suggested direction, not prescribed\n\nPR #15914 hoisted its loads to **module top** rather than to a `beforeAll`, because `beforeAll` is itself clocked by `hookTimeout` (also 10 000 ms here) — it stops the load being shared with assertions but keeps it inside a clock. Module top has no clock at all: `collectTests()` awaits `runner.importFile(filepath, 'collect')` bare and only records the duration for reporters. Whether each row above wants that, an explicit per-case timeout like `credential-at-rest-posture.test.ts` already carries, or nothing at all, is a judgement per row.\n\n⛔ Skipping, disabling or quarantining any of these is not a remedy, per the standing fence on this family.\n\n## Dedup\n\nOne targeted `search_issues` call: \"plugin-auth test cases pay a cold dynamic import inside the per-test timeout so the first sibling flakes\" returned 12 results. The control fires — it returned the entire known defect family, both the three open cards for the `durability-swallow-repair.test.ts:673` site (#14998, #15603, #15852) and the closed precedents (#5421, #4186, #13645, #10115, #9311, #13560). **None** of the 12 is about the remaining first-sibling-pays sites in other `plugin-auth` test files, which is what makes this card's absence from that result meaningful rather than merely a zero hit.\n\nReproduce the census: the scanner is in PR #15914's session scratchpad, but the shape is greppable directly with `git grep -n \"await import(\" -- 'packages/plugins/plugin-auth/**/*.test.ts'` plus a check of whether each hit sits inside an `it()` body."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 14956,
+  "kind": "issue",
+  "title": "The node comparison in `InMemorySuspendedRunStore.claimSuspension` is unpinned — deleting it alone leaves 61/61 green, and the pin file's comment claims the opposite (#14333 post-merge audit)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "priority:p2",
+    "tests"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T12:39:07Z",
+  "updated_at": "2026-09-05T14:06:41Z",
+  "closed_at": "2026-09-05T13:43:19Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14956",
+  "body": "Filed by the `domain:services` execution seat from a **post-merge** tier audit of PR #14712 (#14333, merged `436841131` at 2026-09-03T01:16:55Z). Unassigned; `domain:*`, type and priority are triage's.\n\nLands in `packages/services/service-automation` — this lane. A follow-up PR against `main`; ⛔ #14712 is merged and must not be reopened or reused.\n\n## The measurement\n\nIn a detached worktree at `feb213d42` (the merged head), deleting **only** this line from `InMemorySuspendedRunStore.claimSuspension` (around `:147`):\n\n```ts\nif (run.nodeId !== parkedAt.nodeId) return 'lost';\n```\n\nleaves the three-file population at **`61 passed (61)`**. Blob `0ad54b28…` → `862753d5…`, restore proven equal to `HEAD`.\n\nFor contrast, from the same bench: deleting **both** comparisons → 2 red; deleting the **correlation** comparison alone → 1 red; deleting the **node** comparison alone → **0 red**.\n\n## The pin file says the opposite\n\n`concurrent-replica-resume-race.test.ts`, the CONDITION block's lead comment, states the guarantee as *\"one per comparison, so a mutation that deletes only one of them still reddens.\"*\n\nThat is **false for the node half**, and the reason is specific: both CONDITION cases re-park with a **new correlation** (`req_lv1`→`req_lv2`, `map:item_1`→`map:item_2`), so the correlation comparison rejects the stale claim first and masks the node comparison entirely. A comment describing a red that does not exist is worse than no comment — the next reader trusts it and will not re-derive it.\n\n## Why the gap is load-bearing, not theoretical\n\nThe maintainer's ruling is literally *\"delete only if still parked at node N\"*, and `SuspendedRunStore.claimSuspension`'s docblock explicitly allows a correlation-less parking:\n\n> a row persisted with no correlation has nothing to compare, and the node condition still holds\n\n**On that shape the node comparison is the only guard there is.** Unpinned, a future refactor can delete it and every test stays green — on the exact code path whose whole purpose is stopping two replicas from resuming one run twice.\n\n## The pin already exists — the auditor wrote and verified it\n\nA pausing executor that mints **no correlation**, with replica B's claim held until replica A has advanced and re-parked at the next node. It passes at HEAD and goes red under the node-only mutation (`expected true to be false` — B's stale claim granted, the action fires twice). Written in the PR's own harness idiom.\n\n**Suggested shape** (for triage and whoever takes it, not a ruling):\n\n1. Add that pin.\n2. Rewrite the \"one per comparison\" sentence to the measured truth: both-deleted → 2 red; correlation-only → 1 red; node-only → 0 red **until this pin exists**.\n\n⚠️ The **ObjectStore** side does not need it — dropping `node_id` from its `where` is caught by that suite's exact-shape assertions (measured: 6 red). This gap is specific to the in-memory store.\n\n## Also owed, and NOT VERIFIED as filed\n\nThe audit could not find the grouped follow-up this seat promised for the prior review's §5 notes 1 (the loser's hot-cache entry is not evicted on `'lost'`) and 5 (the non-count `'unsupported'` branch re-deletes). A search found nothing. Whoever takes this card should check whether that finding exists and file it if not, rather than assuming either way.\n\nRefs: PR #14712 / #14333 (merged; the audit's verdict comment carries the full bench) · the auditor's worktree convention `scratchpad/review-14712-r2`"
+}

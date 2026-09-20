@@ -1,0 +1,35 @@
+{
+  "number": 14972,
+  "kind": "issue",
+  "title": "finding(spec/objectql): injected system-column labels are hard-coded English, so every non-English tenant sees \"Organization\" / \"Created By\" on every business object",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "i18n",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-03T16:01:44Z",
+  "updated_at": "2026-09-05T08:50:04Z",
+  "closed_at": "2026-09-05T08:49:29Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14972",
+  "body": "Seam card filed from cloud#1904 (`repo:cloud` lane). That card fixed the *consumer* half — the AI-Studio build linter no longer reports these labels to the user, because the user cannot act on them. This card is the producer half: the labels really are unlocalised, measured on the tree, and only this repo can fix it.\n\n## Measured\n\n`packages/spec/src/data/injected-system-column-provenance.ts` hard-codes an English `label` on every injected column, with no locale plumbing of any kind:\n\n- `AUDIT_FIELD_DEFS` — `Created At`, `Created By`, `Last Modified At`, `Last Modified By`\n- `TENANT_SCOPE_FIELD_DEF` — `Organization`\n- `OWNER_FIELD_DEF` — `Owner`\n- `OWNING_BUSINESS_UNIT_FIELD_DEF` — same shape (currently `hidden: true`, so not user-visible yet)\n\n`applySystemFields` (`packages/objectql/src/registry.ts`) spreads those definitions verbatim onto every eligible object, and the `/meta` read exits merge them in via `applyInjectedSystemColumns`. So a tenant whose app is authored entirely in zh-CN gets a field list that reads 名称 / 阶段 / 金额 / **Organization** / **Created By** / **Owner** on every business object — in list views, detail layouts, filter pickers and lookup chips.\n\n## Observed downstream (cloud#1904)\n\nOn the 2026-09-03 zh-CN rig this was visible enough that the AI build agent surfaced it to the end user every single round, asking them to decide whether to translate fields they had never declared. The cloud side is fixed; the English labels themselves are still shipped.\n\n## Why this is not a one-line `label` swap — the constraint that makes it a spec decision\n\n`applySystemFields`' own comment blocks the obvious fix:\n\n> the definitions must stay byte-identical to the shipped tables, because the #7859 Layer-0 guard and the #4326 round-trip strip both read them by exact identity. Do not add keys here; consumers ask the API.\n\nSo localisation cannot be done by mutating the definitions in place, and it cannot be done by adding a key to them either. It needs a deliberate answer to \"where does a system column's *display* name come from, and who resolves it against the tenant locale\" — a presentation-layer resolution at the read exit, an i18n key alongside the identity-stable definition, or an explicit ruling that these stay English. That is a `packages/spec` seat call, which is why this is filed rather than fixed.\n\n## Dedupe\n\nSearched before filing. The nearby i18n cards do **not** cover the injected column definitions, and all are closed:\n\n- #14319 — auth *email* template selection by user language\n- #3370 — declared action/UI labels leaking English\n- #8094, #5083, #5419 — console/objectui-side untranslated strings and locale seeding\n- #7634 — `GET /i18n/locales` `label` semantics\n\nRelated epic: cloud#1841 (its objectstack sub-cards are tracked as links, hence a standalone card here rather than a sub-issue).\n\nFiled unassigned, no priority label — grading is the triage seat's call."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 11810,
+  "kind": "issue",
+  "title": "guard-main-checkout.sh never sees a NotebookEdit's path — it reads only `file_path`, but NotebookEdit sends `notebook_path`, so every notebook edit is judged by $CLAUDE_PROJECT_DIR",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T17:36:49Z",
+  "updated_at": "2026-09-05T04:11:49Z",
+  "closed_at": "2026-09-05T04:01:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11810",
+  "body": "Found while authoring the self-test matrix for `guard-main-checkout.sh` (#11800). Filing rather than fixing: #11800 is scoped to coverage and rules out editing the hook.\n\n## The hole\n\n`.claude/settings.json` routes three tools to the guard:\n\n```json\n{ \"matcher\": \"Edit|Write|NotebookEdit\",\n  \"hooks\": [{ \"type\": \"command\", \"command\": \"\\\"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-main-checkout.sh\\\"\" }] }\n```\n\nThe hook reads exactly one key:\n\n```sh\nfile=\"$(printf '%s' \"$input\" | jq -r '.tool_input.file_path // empty' 2>/dev/null || true)\"\n```\n\n`NotebookEdit` does not send `file_path`. Its tool input schema names the path **`notebook_path`** (required, absolute) — there is no `file_path` key anywhere in the payload. The grep fallback searches for the literal `\"file_path\"` and so misses it too:\n\n```\n$ jq -nc '{tool_name:\"NotebookEdit\",tool_input:{notebook_path:\"/repo/pkg/x.ipynb\",new_source:\"x\",edit_mode:\"replace\"}}' \\\n    | grep -o '\"file_path\"[[:space:]]*:[[:space:]]*\"[^\"]*\"'\n  (no match — no file_path key present in a NotebookEdit payload)\n```\n\nSo for **every** `NotebookEdit` call the extraction yields empty and the hook takes its no-path branch, judging the session's project dir instead of the edited file:\n\n```sh\nif [ -n \"$file\" ]; then d=\"$(dirname \"$file\")\"; else d=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; fi\n```\n\nThe verdict for a notebook edit is therefore a **constant per session** — it does not depend on which file is being edited, and it fails in **both** directions depending on where the session is rooted.\n\n## Measured\n\nFixture: `$MAIN` a primary checkout, `$WT` a linked worktree of it, `$PLAIN` a directory in no repo. Payloads are the real `NotebookEdit` shape; the `Edit` rows are the control.\n\n| payload | `CLAUDE_PROJECT_DIR` | correct | actual |\n| --- | --- | --- | --- |\n| NotebookEdit `$MAIN/pkg/x.ipynb` | `$MAIN` | block | BLOCK (rc=2) — right answer, wrong reason |\n| NotebookEdit `$WT/pkg/x.ipynb` | `$MAIN` | allow | **BLOCK (rc=2)** — the mandated location is refused |\n| NotebookEdit `$PLAIN/x.ipynb` | `$MAIN` | allow | **BLOCK (rc=2)** — a file in no repo at all is refused |\n| NotebookEdit `$MAIN/pkg/x.ipynb` | `$WT` | block | **ALLOW (rc=0)** — unguarded edit into the shared checkout |\n| NotebookEdit `$WT/pkg/x.ipynb` | `$WT` | allow | ALLOW (rc=0) — right answer, wrong reason |\n| NotebookEdit `$MAIN/pkg/x.ipynb` | `$PLAIN` | block | **ALLOW (rc=0)** — unguarded edit into the shared checkout |\n| Edit `$MAIN/pkg/x.ipynb` (control) | `$WT` | block | BLOCK (rc=2) |\n| Edit `$WT/pkg/x.ipynb` (control) | `$MAIN` | allow | ALLOW (rc=0) |\n| Edit `$PLAIN/x.ipynb` (control) | `$MAIN` | allow | ALLOW (rc=0) |\n\nThe control rows are the same three files through the `Edit` payload shape: the hook gets all three right, and gets all three wrong for `NotebookEdit`.\n\n## Both failure directions are live\n\n- **Fail closed** (project dir is the shared primary checkout — the normal session shape in this container, since `settings.json` itself resolves `$CLAUDE_PROJECT_DIR/.claude/hooks/...` there): every notebook edit is blocked, *including notebook edits inside a correctly-created worktree*, and the refusal message names the project dir's repo and branch rather than the file's. The worktree-first workflow the guard exists to enforce is the thing it makes impossible for `.ipynb` files.\n- **Fail open** (project dir is a worktree, or is outside any repo): every notebook edit is allowed, including into the shared primary checkout. This is the silent clobbering direction the #11800 card names — no error anywhere, and the symptom lands on another agent.\n\nWhich direction a given session gets is decided by where it happens to be rooted, not by anything about the edit.\n\n## What it falsifies\n\nThe hook's own header, hardening claim 2:\n\n```\n#   2. Checks the EDITED FILE's repo — not just $CLAUDE_PROJECT_DIR — so sibling repos\n#      edited from this session are guarded too.\n```\n\nThat claim holds for `Edit` and `Write` and is false for `NotebookEdit`, one of the three tools the matcher routes to it. This is not the documented \"cannot parse with confidence\" posture: nothing is ambiguous in the payload — the path is present, absolute, and unread.\n\n## Fix shape (not applied here)\n\nRead both keys, preferring whichever is present:\n\n```sh\nfile=\"$(printf '%s' \"$input\" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty' 2>/dev/null || true)\"\n```\n\nand widen the grep fallback's key alternation to match. Worth considering at the same time whether the no-path branch should judge `$CLAUDE_PROJECT_DIR` at all, since a payload whose path key is simply unrecognised is exactly the case that should be reported rather than guessed — the current branch turns an unknown key into a confident verdict in whichever direction the session is rooted.\n\n`guard-main-checkout-bash.sh` is unaffected: it parses `.tool_input.command` and never sees notebook payloads.\n\n`objectui` carries a byte-identical `guard-main-checkout.sh` (sha256 `217a8b1c2d9ff9009e2db0f54d0380c1202f16f7fb99698f419ce46d19a7d2b3`) with the same matcher, so a fix here must be mirrored there.\n\nThe self-test matrix landing for #11800 pins today's behaviour in a section explicitly labelled a known hole pointing at this issue, so CI stays green and the fix flips those cases mechanically.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

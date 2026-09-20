@@ -1,0 +1,34 @@
+{
+  "number": 15572,
+  "kind": "issue",
+  "title": "service-automation: a `decision` condition accepts a CEL envelope that neither validator can see — a malformed one evaluates to `false` SILENTLY at run time and takes the wrong branch",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T21:53:30Z",
+  "updated_at": "2026-09-05T03:38:39Z",
+  "closed_at": "2026-09-05T03:36:14Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15572",
+  "body": "Found by the Clause-② contract review of **PR #15432** (card #15137) at `CONTRACT_REVIEW_TIER`, hunting past the four items it was sent to check. Filed by the `domain:services` execution seat (session `03324ae2-0f5b-5ad2-8a2e-cf4aaff5a909`). ⛔ `domain:*`, type and priority are triage's — this seat does not produce them.\n\n⛔ **Pre-existing; not introduced by PR #15432 and outside its surface.** That PR bound the `value` role on `assignment`. This is the `predicate` role on `decision`, which nothing in that PR touches.\n\n## The gap\n\nFour declarations that are individually reasonable and jointly leave a hole:\n\n| | |\n|---|---|\n| `DecisionConditionSchema.expression` | `z.string()` — `schemaless-node-config.zod.ts:381` |\n| the parse-time schema walk | **exempts `decision`** — `engine.ts:6907` |\n| the ledger's predicate arm | emits **strings only** — `flow-node-expression-paths.ts:304` |\n| `evaluateCondition` at run time | **accepts** `{ dialect, source, ast }` — `engine.ts:8079` |\n\n⇒ An authored `decision` condition written as an envelope is invisible to **both** validators and is nevertheless executed.\n\n## Measured, driven through the real doors\n\n- `resolveFlowNodeExpressions('decision', …envelope…)` → `[]`\n- `registerFlow` → **REGISTERED**, for `source: '   '` and for the un-parseable `'rows.map(r,'`\n- lint → **0 issues** for both\n- at run time: the whitespace envelope returns **`false` silently** (`engine.ts:8090`); the bad-CEL envelope throws\n\n**The silent `false` is the serious half.** A decision node whose condition quietly evaluates false takes the *other* branch, with no error anywhere — the flow runs to completion down the wrong path. The throwing case at least announces itself.\n\n## ⚠️ One measurement in the above is weaker than it looks — the reviewer said so itself\n\nThe two \"lint → 0 issues\" readings were taken with **another envelope as the control**, i.e. a control that could plausibly be the answer, which makes it not a control. Those zeros are explained by *reading* `flow-node-expression-paths.ts:304` (the arm emits strings only) and by the existing string-form tests at `validate-expressions.test.ts:678` — not by a control that could have failed. ⇒ Whoever takes this should re-establish the lint half with a control that can go red. The `registerFlow` and run-time readings were driven and do not depend on it.\n\n⭐ Worth keeping: the reviewer noticed and reported this about its own evidence rather than shipping the zero unqualified.\n\n## Not a defect, stated so nobody \"fixes\" it\n\nA whitespace-only **string** predicate behaves consistently on both sides — no seam there. The hole is specifically the envelope shape reaching a slot declared as `z.string()`.\n\n## The shape this belongs to\n\nThree cards now describe one family — *a declaration that two layers disagree about, where the disagreement surfaces only at run time*:\n\n- **#15430** — `ExpressionSchema` accepts a `source`-or-`ast` envelope that both validators pass and no engine can run (the whitespace-only `source` was folded in as a second spelling, comment 5543587545).\n- **this card** — a slot declared `z.string()` that the evaluator nonetheless accepts as an envelope.\n- and, adjacently, **#15555** / **#15556** on the resume path.\n\nWhoever triages may want to decide whether the first two are one card. ⚠️ Do not assume they are: #15430 is a shape both validators *see and accept*; this one is a shape both validators *cannot see at all*. Different mechanism, possibly one fix.\n\nRefs: PR #15432 / #15137 (the review that found it) · #14149 (the maintainer ruling behind the `value` role) · #15430."
+}

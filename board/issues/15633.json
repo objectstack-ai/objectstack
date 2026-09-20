@@ -1,0 +1,36 @@
+{
+  "number": 15633,
+  "kind": "issue",
+  "title": "`check:error-status-conformance` cannot derive the `UNIQUE_VIOLATION` producer — R5b's body group forbids nested braces, so documenting the code's real 409 fails the gate",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "finding",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T00:54:18Z",
+  "updated_at": "2026-09-05T03:12:06Z",
+  "closed_at": "2026-09-05T03:10:28Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15633",
+  "body": "Found while implementing #15362 (docs: the 409 unique-constraint refusal is `UNIQUE_VIOLATION` on the wire). It blocks that card.\n\n## Repro\n\nOn a branch whose only change is renaming `#### DUPLICATE_RECORD` to `#### UNIQUE_VIOLATION` (keeping `**HTTP Status:** 409`) in `content/docs/protocol/kernel/error-handling.mdx`:\n\n```\npnpm check:error-status-conformance    # exit 1\n```\n\n```\nscope: 52 code(s) reconciled = 50 StandardErrorCode member(s) + 2 ledger code(s) a doc page\n  publishes a status for (INVALID_REQUEST, UNIQUE_VIOLATION)\nunpinned: 33 documented code(s) with no derivable producer (baselined: 32).\n\n  UNIQUE_VIOLATION: documented with an HTTP status, but no producer declares one - nothing\n  pins the doc's claim on either side, so it can drift with no test to update.\n```\n\nThe gate's own `--self-test` passes (40 cases), so this is a derivation gap, not a broken gate.\n\n## Why the deriver misses it — two independent blind spots\n\n**R5b** (`scripts/check-error-status-conformance.mjs`, the `{ status, body }` mapper terminal) matches with a body group that forbids nested braces — the pattern is `status`, colon, three digits, comma, `body`, colon, then a brace group whose contents are spelled as a negated character class excluding both brace characters.\n\nThe real terminal — `packages/rest/src/error-response.ts:992`, `structuredCodeAnswer`'s `DuplicateRecordError` arm — builds its body with conditional spreads, so nested braces sit between `status: 409` and `code: 'UNIQUE_VIOLATION'`:\n\n```ts\nreturn {\n    status: 409,\n    body: {\n        error: field\n            ? `A record with this ${field} already exists`\n            : 'A record with this value already exists',\n        code: 'UNIQUE_VIOLATION',\n        ...(typeof error?.message === 'string' && error.message.length > 0\n            ? { developerMessage: error.message }\n            : {}),\n        ...(field ? { field } : {}),\n        ...(refused ? { object: refused } : {}),\n    },\n};\n```\n\nR5b skips it. The second real producer is missed for a different reason — `driver-memory` declares the pair by ASSIGNMENT, which no rule matches:\n\n```ts\n// packages/drivers/driver-memory/src/memory-unique-constraint.ts:504-505\nerr.code = UNIQUE_VIOLATION_CODE;      // = 'UNIQUE_VIOLATION'\nerr.status = UNIQUE_VIOLATION_STATUS;  // = 409\n```\n\nThe `409 UNIQUE_VIOLATION` answer itself is pinned by tests — `packages/rest/src/rest-duplicate-record-arm.test.ts` section 1 asserts `status` 409 and `body.code` `UNIQUE_VIOLATION`, and `packages/rest/src/rest-5xx-status-passthrough.test.ts:379` asserts the same through another door. So the code IS emitted; only the deriver is blind.\n\n## Why neither remedy the gate offers is right as it stands\n\nIts failure text names two: wire a producer that declares `status`/`statusCode`, or admit the code to `scripts/error-status-unpinned-baseline.json`. The first describes a producer that already exists. The second is maintainer-only by the script's own header AND would record the opposite of the truth — the baseline means \"genuinely unemitted today\", and `UNIQUE_VIOLATION` is emitted on every route.\n\nThe gate's header states the invariant this violates: \"The runtime side is DERIVED, never listed ... Where an identifier cannot be resolved the declaration is REPORTED as unresolved, never silently dropped — a deriver that goes quietly blind is the same failure one layer down.\" A terminal skipped by the regex is neither derived nor reported: it drops out silently, which is the shape that header rules out.\n\n## Suggested disposition\n\nExtend the deriver so both shapes are seen, with a `--self-test` case per shape (the script's header requires the self-test case in the same edit):\n\n- R5b: allow one level of nesting inside the `body` group, or locate `code` within a brace-balanced span rather than a brace-free one.\n- A new rule for the assignment form (`err.code = X;` followed by `err.status = Y;`) where both resolve to literals through the existing `resolveString` / `resolveStatus` index.\n\nConsider also whether a terminal carrying a `status` whose `code` cannot be located should land in the `unresolved` report rather than being skipped — that is what would have surfaced this without a docs change to trip it.\n\nUntil this lands, the #15362 docs fix cannot go green."
+}

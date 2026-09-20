@@ -1,0 +1,36 @@
+{
+  "number": 15357,
+  "kind": "issue",
+  "title": "finding — a gating lint rule shipped claiming \"0 findings over the corpus\" and names an object that fires it; the corpus copy is not the real app",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T12:43:46Z",
+  "updated_at": "2026-09-05T13:56:57Z",
+  "closed_at": "2026-09-05T13:48:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15357",
+  "body": "Recording only — unassigned, no claim. Found while running `objectstack-ai/hotcrm` through 17.2.0 → 17.3.0 as a customer-documentation trial (hotcrm#1576, PR hotcrm#1577). Not folded into that card: it is about **how a rule's blast radius is measured**, not about the rule.\n\n## The measurement\n\n`@objectstack/lint` 17.3.0 ships a new **gating** author-time rule for #14747, `security-controlled-by-parent-ambiguous-relation` (author-time rules 41 → 42). Its changelog entry states the rule was measured over the shipped corpus at **\"0 findings before and 0 after\"**, and names `crm_opportunity_line_item` as one of three `controlled_by_parent` objects checked, asserting each \"declares exactly one required `master_detail`\".\n\nThe real `crm_opportunity_line_item` in `objectstack-ai/hotcrm` — the repository this project publishes as its reference app — declares **two required lookups and no `master_detail`**, and fires the rule:\n\n```\n✗ Author-time rules failed (2 issues)\n• object \"crm_opportunity_line_item\": declares sharingModel 'controlled_by_parent' and 2 of its\n  fields tie for the master relation: \"crm_opportunity\" (lookup -> \"crm_opportunity\"),\n  \"crm_product\" (lookup -> \"crm_product\"). … which object this one derives its access from is\n  decided by FIELD DECLARATION ORDER … and the runtime reports nothing when it does.\n  rule: security-controlled-by-parent-ambiguous-relation  at objects[13].fields\n```\n\n`os validate` exits 1, and so does `os build`. Two objects, not one.\n\n## What this is and is not\n\n⛔ **This is not a complaint about the rule.** The rule is right and its diagnostic is the single best artefact in that whole upgrade run — it names the rule, the ADR, both candidate fields, which one wins today, and both ways out. The finding was real: the security boundary on those objects was decided by field declaration order, and the runtime reported nothing when it did. It was fixed in hotcrm#1577 by promoting the intended master into the required-`master_detail` tier, which is the rule's own first remedy.\n\n**The finding is that the corpus the blast radius was measured against is not the application it names.** A \"0 findings\" reading is exactly the reading that says a gating rule is safe to ship without a migration note. Here it was wrong for the repo the entry names, so a gating rule reached a released minor with no upgrade guidance, and the first person to discover the two findings was an upgrader whose `os build` had already stopped working.\n\n## Why it is worth a card rather than a shrug\n\nThree things compound:\n\n1. **\"Measured over the corpus\" is load-bearing in this repo's review culture** — it is what distinguishes an assessed change from an asserted one. If the corpus can be a stale or divergent copy, the phrase stops carrying that weight everywhere it appears, not only here.\n2. **A number nobody can re-derive is not a measurement.** The entry gives a count but not the corpus's identity — no ref, no sha, no path — so a reviewer cannot tell which tree it was taken against, and neither can the next person to change the rule.\n3. **The direction of the error is the dangerous one.** 0 findings understates blast radius, which is the reading that skips the migration note.\n\n## Suggested shape (not adjudicated — this is a record)\n\n- A corpus reading cited in a changelog or PR body **names the tree it was taken against** (repo + sha), so it is re-derivable. Which is the same discipline this repo already applies to `git diff` anchors — a moving ref is not an anchor.\n- If the corpus is a **vendored copy** of an external app, the gap between it and that app's `main` is itself a measurement worth having, and staleness in it should be visible rather than silent.\n- ⚠️ Worth checking whether other rules landed on the same reading. This one was caught only because someone upgraded a real deployment; a rule with the same stale-corpus assurance and no upgrader would still be sitting there.\n\n## Provenance\n\nEvery reading above is from the 17.3.0 upgrade run in hotcrm#1577 (final commit `64f03c79`), whose `pnpm verify` is otherwise green: 160 test files, 3401 tests, `author-time rules (42)`. Related from the same run: #15337 (the dev-admin lockout that blocked its browser leg), #15325 (`@objectstack/cli` sealed its subpaths), and #15322 (the documentation defects)."
+}

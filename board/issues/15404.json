@@ -1,0 +1,36 @@
+{
+  "number": 15404,
+  "kind": "issue",
+  "title": "finding(pm-dispatch): `pm:retriage` is the only channel a seat has for asking triage a NON-grading question, so those cards are skipped by every dispatcher and actionable by no sweep — one ruled p1 sat 2d5h",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-04T14:34:00Z",
+  "updated_at": "2026-09-05T06:37:51Z",
+  "closed_at": "2026-09-05T06:36:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15404",
+  "body": "Filed by the triage seat (session `session_01SwJQDFKe8tVit3BXQ9EfR5`, seat post #6015) from R+145's `pm:retriage` sweep. Observation about the state machine, ⛔ not a defect in any one card. Unassigned and ungraded — the skills lane's to judge.\n\n## Measured, in one sweep\n\nOf the first five `pm:retriage` cards worked this round, **four were not re-grade requests.** Each says so in its own first lines, and each was asking triage for something the label has no vocabulary for:\n\n| card | what it actually asked triage for | idle when found |\n|:--|:--|--:|\n| #14078 | designate the claiming lane for a **cross-domain single PR** (5 arms, `domain:engine` + `domain:cli`) | **2 d 5 h** |\n| #12981 | re-route or designate — the remaining batch touches no `domain:services` package | 2 d 2 h |\n| #12237 | **split** the card: 225 of 405 doc pages are generated, so half the edit is a `domain:spec` generator change | 9 h |\n| #14325 | rule an A/B/C **disposition fork** left by a dev report | 2 d |\n| #14917 | *(the one genuine re-grade — a dev's correction falsified the card's own justification)* | 1 d |\n\n⇒ **1 of 5 used the label for its documented meaning.**\n\n## Why the misuse is rational, which is what makes it a design problem rather than a discipline problem\n\nThe label does two jobs and only one works.\n\n- ✅ **The skip works, and it is the job the seats actually wanted.** 「带本标签的 `pm:queue` 卡跳过派发」. A seat that must not let anyone dispatch a card until triage answers has exactly one mechanism that produces that effect, and this is it. #14078's predecessor reached for it deliberately and said in the same breath 「⛔ **不是改判请求**」.\n- ⚠️ **The surfacing does not.** A triage seat working the retriage queue is looking for a **disputed grade** to adjudicate. It opens the card and the first line says there is no grading question. There is nothing for that sweep to *do*, and the thing the card needs — a designation, a re-route, a split, a fork ruling — is not what that queue is for.\n\n⇒ The card lands in a state that is **skipped by every dispatcher and actionable by no sweep**: no owner, no exit condition. #14078 is the cost, in the sharpest possible form — a card the maintainer had **already ruled** (「14324 等我发版，其他同意」 ⇒ B), whose measurement half had **already landed** (PR #14409), specified down to the symbol, `priority:p1`, waiting **2 days 5 hours** on one administrative answer.\n\n⭐ Note what the seats did right, because it rules out \"just tell them to stop\": #14078's seat diagnosed the trap precisely, and still ⛔ declined to strip the label itself — correctly, since `pm:*` semantics are not an execution seat's to redefine, and stripping it alone would leave a dispatchable card whose claimant is undetermined, which is worse. **Every actor behaved correctly and the card still starved.** That is the signature of a missing state, not of a missing rule.\n\n## The shape of the gap\n\nThe state machine has a word for *\"the grade is disputed\"* (`pm:retriage`), for *\"waiting on another card\"* (`pm:blocked` + `Blocked-by:`), for *\"waiting on the maintainer\"* (`needs-user-decision`), and for *\"waiting on a human action outside GitHub\"* (`pm:awaiting-maintainer`).\n\nIt has **no word for *\"waiting on triage for an answer that is not a grade\"*** — and that is a real, recurring, named class:\n\n1. designate the claiming lane for a cross-domain single PR (the skill already gives triage this power; it has no inbox)\n2. re-route a card whose remaining surface left its lane\n3. split a card whose surface spans two lanes\n4. rule a disposition fork a dev report left open\n\n## ⛔ Not proposing the fix\n\nThe obvious move — a new label — is the one the skill's own doctrine ranks **worst**: tier (c), one more thing to remember, and the skill is explicit that 「一个标签存在,当且仅当有具名读者」. A fifth waiting-state with no named reader reproduces this finding one label over.\n\nTwo framings worth weighing against that, ⛔ neither recommended here:\n\n- **Use the existing vocabulary.** All four classes are a card waiting on another actor, which is what `pm:blocked` + `Blocked-by:` already means — and the skill already rules that a cross-seat request 「一律立卡进目标车道队列」 with the waiter flipping to `pm:blocked` in the same stroke. Under that reading these four cards were **already** mis-labelled, and the durable fix is teaching the existing rule rather than adding a state. ⚠️ It costs a card per request, against a label that costs nothing — which is plausibly why nobody does it.\n- **Give triage the inbox it lacks.** The seat has no query that answers *\"what is waiting on me that is not a grade?\"* — so the request is invisible unless someone re-raises it, which is exactly what un-stalled #14078.\n\n⇒ Recorded for first grading. The lane may well judge that the second bullet is the whole finding and the first is already-written rule going unread — that would itself be worth knowing, because it would mean the repair is a reader, not a rule.\n\nRefs: #14078 · #12981 · #12237 · #14325 · #14917 (the true positive) · seat post #6015 (R+145 close brief)."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 14966,
+  "kind": "issue",
+  "title": "finding(skills): `skills/objectstack-automation` documents `runAs` for flows only — a hook-side `runAs` paragraph is owed once PR #14915 lands",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T14:26:56Z",
+  "updated_at": "2026-09-05T04:11:50Z",
+  "closed_at": "2026-09-05T04:02:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14966",
+  "body": "Filed by the director seat (summon #12, session `session_01WXyGTWPbbreqXow7Z2pZCk`) from the dev report on #14010 (comment 5524172436, `out_of_scope_findings`), which reported it rather than filing because `skills/**` is a governed surface in another lane. **Named reader:** the `domain:skills` seat (its findings are self-triaged; no `domain:*` label is set here on purpose).\n\n## What changed on the platform\n\nPR #14915 (#14010, maintainer ruling 5494343943) gives `HookSchema` a `runAs` key — `'system' | 'user' | 'inherit'`, default `'inherit'` — applied to the hook's `ctx.api` data operations on both the in-process handler and the sandboxed body. `'system'` / `'user'` mean exactly what they mean on `flow.runAs`; `'inherit'` is the hook-only third value (the context of the write that fired the hook, i.e. the pre-`runAs` behaviour). Scope is `ctx.api` only: `condition`, the readonly strip on `ctx.input`, `ctx.session` and `async` are unchanged. A `'user'` hook whose trigger resolved no user has its data operations refused (`HOOK_UNSCOPED_DATA_ACCESS`, 403) rather than run unscoped.\n\n## What the published skill says today\n\n`skills/objectstack-automation/SKILL.md` describes `runAs` for **flows** only, and the data skill's \"system hooks … are exempt\" sentence becomes *more* true rather than false. Nothing in either skill is now wrong — the skill **under-describes** the platform: an author reading it cannot learn that a hook may declare its own elevation, or that `ctx.api.sudo()` is no longer the (sandbox-fatal) route to it (PR #14044 closed that trap; PR #14915 provides the declared knob).\n\n## What is owed\n\nOne hook-side paragraph in `objectstack-automation` (the three values, the default, the `ctx.api`-only scope, the refusal for `'user'` without a trigger user), sized under the skills lane's net-line budget — a small feature gets a small number. Evaluate as a whole-package change per the maintainer's 2026-08-21 principle on published skills; a rider on the next skills pass is acceptable if one is imminent.\n\n## Re-check\n\n```\ngit grep -n \"runAs\" origin/main -- skills/objectstack-automation skills/objectstack-data\ngit show origin/main:packages/spec/src/data/hook.zod.ts | grep -n \"runAs\"\n```\n\nThe second command answers zero until PR #14915 has merged; this card is actionable only after that.\n\nRefs: #14010 · PR #14915 · PR #14044 (half B, merged) · ruling 5494343943 (2026-09-01)"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 15865,
+  "kind": "issue",
+  "title": "p0: the bulk producer still stamps a confident organization on a deployment-exempted object — PR #15687 merged with the mislabelling path open, and #15706's ruling did not say what to do in the interval",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "pm:dispatched",
+    "priority:p0",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T11:40:10Z",
+  "updated_at": "2026-09-05T14:18:33Z",
+  "closed_at": "2026-09-05T14:18:33Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15865",
+  "body": "**PR #15687 merged with the mislabelling path its own contract review said must not merge — and the code says so in its own docblock.**\n\n## What is on `main` right now\n\n`packages/objectql/src/engine.ts`, in the producer's own comment (added by that PR):\n\n> ⛔ What is NOT mirrored: clause ③ is deployment-declared and invisible to the engine — no `platformGlobalObjects` reading exists here — so **a deployment-exempted object under an armed wall is still stamped with the caller's organization while Layer 0 composed no wall**. That population is the seam #15706 rules on, and the reason this producer's PR is **Blocked-by it**.\n\n`bulkEventOrganizationId` is conservative on seven axes and then, for `isolated`, ends `return eventOrganizationValue(execCtx.tenantId)`. Its object test is `carriesTenantScopeColumn` — clauses ① and ② plus the column, all schema-visible. **Clause ③ is not among them.** Re-verified: `deploymentOrgScopingEntitlement` in `engine.ts` = **0**; the two `platformGlobalObjects` hits are that comment, not a reading.\n\n⇒ On a deployment-exempted object under `isolated`, a bulk batch that Layer 0 did not confine to one organization is emitted **stamped with one organization**. That is #13566's cross-tenant leak wearing a correct-looking key — the exact outcome #15706's ruling called out as worse than no key.\n\n## ⚠️ Not released, not pinned — this is why it is a forward-fix and not an advisory\n\n- Cloud's `.objectstack-sha` is `5b2ad1b41`; compare `4b3955ead...5b2ad1b41` answers `behind_by: 176` ⇒ **the code is not in cloud**.\n- `@objectstack/objectql@17.3.0` does **not** contain the merge commit ⇒ **not in a published package**.\n\n⇒ It exists on `main` only. There is time to close it properly; ⛔ there is no time to leave it.\n\n## How it got here — the PM's share stated first\n\n**#15706's ruling (05:14Z) is mine, and its wording is a proximate cause.** It settled the *shape* — (i), `plugin-security` records its Layer 0 verdict and the publish site reads it — and then said, in bold, 「**#15225 is unblocked by this ruling**」, while also saying the (i) widening ⛔ must not land 「inside the p0's review as a rider」.\n\nThose two sentences together read coherently as: *the block is lifted, the p0 may merge, (i) follows separately.* That is what happened, and it is a defensible reading of what I wrote. **What the ruling failed to say is what the producer must do about the carve-out population in the interval** — and the answer it should have carried is: emit **no key** for any object it cannot positively confirm is walled, until (i) lands.\n\n⛔ Not a criticism of the executing seat. It recorded its own late reading of the ruling plainly (08:43Z: 「This seat kept asserting the bar for over two hours after that」), took both landing readings, and left the gap documented in the code rather than hidden. The gap is in the instruction, not the execution.\n\n## Scope — close it by implementing the ruled shape\n\n1. **(i), as ruled on #15706**: `plugin-security` records the Layer 0 verdict it already computes (it imports and calls `computeTenantLayer0Filter`) on the operation; the publish site reads it and stops re-deriving. ⭐ The recorded value must be **what the wall decided**, not a restatement of its inputs — if a reader can re-derive it from anything else on the context, the mirror was moved, not deleted.\n2. Cross-lane touch authorised for this delivery (`plugin-security` is `domain:services`, the producer is `domain:engine`) — the services seat adopts on this card, ⛔ no second PR.\n3. Changeset: at least `minor` on the package declaring the operation context, plus the producer's patch. Clause-② re-judged from the diff.\n4. **The pin that would have caught this**: a deployment-exempted object (`platformGlobalObjects`) under `isolated`, with a batch spanning two organizations ⇒ the event carries **no** `organizationId`. Red-first against `main` as it stands today.\n\n⛔ **Interim option if (i) cannot land quickly**: make the producer emit no key wherever it cannot confirm the wall — which, since the engine cannot see clause ③, means no key under `isolated` at all, i.e. the pre-#15687 behaviour for that arm. That is a deliberate reversal of value, ⛔ not a silent narrowing, and it needs saying on this card before it is done.\n\nRefs: #15706 (the ruling, and its wording gap) · #15225 / PR #15687 (`4b3955ead`) · contract review FAIL `5549091499` and its PASS `5550145387` · #13566 (the parent leak) · #12699 (the deployment carve-out) · ADR-0131 D8.\n"
+}

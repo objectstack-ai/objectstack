@@ -1,0 +1,36 @@
+{
+  "number": 14509,
+  "kind": "issue",
+  "title": "AGENTS.md: record the ADR-registry rule — a decision lives where the code it governs lives; cloud records are cited as `cloud ADR-NNNN`, never bare; a cloud decision whose mechanism half governs open code gets a local ADR with Provenance (the 0079 shape)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T09:39:49Z",
+  "updated_at": "2026-09-05T13:56:54Z",
+  "closed_at": "2026-09-05T13:48:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14509",
+  "body": "Part of #14496 (maintainer ruling 2026-09-02, 「ok」 to option 2). Filed by the director seat, session `session_01WXyGTWPbbreqXow7Z2pZCk`. `AGENTS.md` is a governed surface and the agent-instruction face ⇒ **skills lane, draft PR, human merge**; Clause ① applies to the dispatch tier per the pm-dispatch skill (agent-instruction file). Clause-②: no.\n\n## The rule to land (one paragraph, in the ADR / governed-territory section — today's anchors are the `docs/adr/`-governed guidance around AGENTS.md line ~275 and the governed-surface definition around line ~291; place it where the ADR-citation reader looks, ⛔ no new section header if an existing one fits)\n\nVerbatim from the ruling on #14496 (translate for the English file, keep the Chinese quote as the provenance line):\n\n> 决策住在它治理的代码所在的仓。划开闭源边界与商业的决策住 cloud,本仓引用一律 `cloud ADR-NNNN`(⛔ 永不裸号);凡 cloud 决策的机制半边治理本仓开源代码的,本仓自有 ADR(自有编号 + `Provenance` 段指回 cloud 记录与日期,商业半边留 cloud),cloud 记录加一行指针;⛔ 不搬文件、不重编号。\n\nEnglish rendering to land: **An ADR lives in the repository whose code it governs.** Decisions that draw the open/closed or commercial boundary live in `objectstack-ai/cloud` and are cited from this repo as `cloud ADR-NNNN` — never as a bare number, which `scripts/check-adr-anchors.mjs` resolves against *this* registry (the two registries number independently, so a bare id silently lands on an unrelated local record: 0071 / 0024 / 0081 today). When a cloud decision's **mechanism half** governs open code in this repo, this repo carries its own ADR — own number, a `## Provenance` section naming the cloud record and its date, the commercial half left in cloud — and the cloud record gains a one-line pointer. Files are never moved between registries and numbers are never reassigned.\n\n## Why here and not only in the gate\n\nThe gate already accepts the qualifier structurally (`CROSS_REPO_QUALIFIERS`); what it cannot know is which bare number *meant* the other registry. The rule is what an author reads before writing the citation; the precedent it names (ADR-0079's Provenance section) is what they copy.\n\n## Constraints\n\n- Line budget: net +6 to +10 lines in AGENTS.md; ⛔ no restatement elsewhere (`CLAUDE.md` stays as is).\n- ⛔ Do not edit `scripts/check-adr-anchors.mjs` in this PR (a topic-consistency criterion for the gate was deliberately **not ordered** on #14361).\n\nRefs: #14496 (ruling) · #14361 (the re-pointing pass) · the three mirror-ADR sub-issues of #14496 · ADR-0079."
+}

@@ -1,0 +1,33 @@
+{
+  "number": 15934,
+  "kind": "pull_request",
+  "title": "tooling(pm): re-decide the declaration-mirrors row from REFUSE-UNSPELLABLE to DECLARED-NARROWER",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T15:01:14Z",
+  "updated_at": "2026-09-05T15:52:18Z",
+  "closed_at": "2026-09-05T15:52:16Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-09-05T15:52:16Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/15934",
+  "body": "Fixes #15602\n\nThe row for `check-declaration-mirrors` in `scripts/pm/bare-root-worklist.mjs` recorded `REFUSE-UNSPELLABLE` on a ground the tree has withdrawn. It named the EXTENSION filter as the thing no spelling of the idiom describes; that rested on the collapse #12300 retired for this shape, and the gate had already acted on it — PR #15601 put `['scripts/**/*.d.mts', 'scripts/**/*.mjs']` beside `SCRIPTS_DIR` under the `ROOT_DIR_WATCH_HINTS` idiom. The record therefore asserted that nothing honest was declarable while its own gate declared.\n\n## The verdict was decided, not inherited\n\n⛔ The card's direction was not taken on trust. All four values were read off this map's own vocabulary against the tree at `e581457b`:\n\n| verdict | why it is not this row |\n|:--|:--|\n| `REFUSE-UNSPELLABLE` | asserts NO spelling of the idiom describes the population — the gate spells one in its own source, so the refusal is false at the one place it is checkable |\n| `SPELLABLE-UNDECLARED` | is defined as the row whose gate declares NOTHING for the population; nothing here is deferred |\n| `REFUSE-WIDE` | needs the population to BE the root; it is 223 of 336 |\n| **`DECLARED-NARROWER`** | the gate took the escape at a strictly narrower subtree, and the bare root is still not covered — which is what this verdict says |\n\n⛔ The gate is NOT edited: it is correct, and the MAP is what went stale.\n\n## Every term re-measured together, at one commit\n\nThe file's own rule is that refreshing one term mints a ratio nothing ever measured. All quantities below came from ONE invocation at `e581457b`, and the sha is recorded in the `why`:\n\n| quantity | row (old) | filing card (`ab5c01379`) | triage (`5315098`) | **here (`e581457b`)** |\n|:--|--:|--:|--:|--:|\n| mirror files the walk admits | 2 | 4 | 4 | **5** |\n| tracked files under `scripts/` | 261 | 331 | 333 | **336** |\n| `scripts/**/*.mjs` reach | — | 214 | 216 | **218** |\n\nA FIFTH mirror pair has landed since triage. ⛔ None of the three earlier readings is carried forward; the previous `2 of 261` is superseded whole. The spread across three trees inside two days is the argument for taking the terms together, not a discrepancy.\n\nWhat the row now records, measured: the walk discovers 5 declaration files by extension and the pair check imports the 5 modules beside them, so the gate opens 10 of the 336 tracked files under the bare root (3.0%). The mirror-side hint reaches 5 and the gate reads all 5 (100% precise); the module-side hint reaches 218 and the gate reads 5 (2.3%).\n\n## The 2.3% half, faced rather than assumed\n\nBoth the card and triage flagged this as something a fixer must decide head-on. It is recorded, not refused, and the reason is that it is **not what the PRECISION pin measures**: that pin asks whether the recorded claim and `hintCovers` admit the same files. They do — 0 over-named, 0 missed, 223 of 336 covered — so the union is LIVE, PRECISE, COMPLETE and a real narrowing. The declaration's imprecision against the WALK is the direction the `driver package files` entry already records for its subtree (\"it names 30 files the gate neither opens nor stats\"), and the gate's own docblock prices it at ~1.6 s of fleet compute per 36 cards and takes the trade deliberately.\n\nThe recorded set is SET-EQUAL in both directions to the array the gate declares at this root, so no hint is passed over and the row carries no `omits`.\n\n## Verification\n\nThe map is shrink-only and did not grow: 46 recorded verdicts before and after. What moved is exactly what should:\n\n```\nbefore: 21 record(s) carry a spelling … 15 distinct spelling(s) … 10 DECLARED-NARROWER record(s) held SET-EQUAL\nafter:  22 record(s) carry a spelling … 16 distinct spelling(s) … 11 DECLARED-NARROWER record(s) held SET-EQUAL\n```\n\n`node scripts/pm/bare-root-worklist.mjs --self-test` — exit 0.\n\n**Ablation** (predicted RED, observed RED). Dropping the `.mjs` member from the recorded spelling, with the mutation proven on disk (anchor grep 1 → 0, blob hash `37f80f57` → `140c1291`) and the restore proven byte-identical (`git diff HEAD` empty, hash back to `37f80f57`):\n\n```\nMUTATED EXIT=1\n  x self-test: …and every hint that gate declares at scripts is either recorded by\n    \"scripts declaration mirrors and their modules\" or named in the row's `omits` —\n    DRIFT: declared and not recorded [scripts/**/*.mjs], named as omitted [none].\nRESTORED EXIT=0\n```\n\nThere is no build/`dist` leg: node executes this source file directly, with no package build and no `exports` resolution between the pin and the file under test.\n\n**Gates.** All 30 commands from `dispatch-gates.mjs --changed --commands --repo objectstack-ai/objectstack`, re-derived on the final file list, ran green — 17 direct-node, 13 `pnpm check:*`. `check-governed-merges.mjs --test` on the final list: NOT governed, ordinary queue landing applies.\n\n## Scope\n\nOne file. `skip-changeset`: the diff publishes nothing from any released package (AGENTS.md — that label is for exactly that case), and repo tooling under `scripts/` is the standing example.\n\n⛔ Filed rather than fixed here — #15926: the declaration is read back out of a gate's source only for `DECLARED-NARROWER` rows and `contradicted` fires only on a REACHABLE row, so a REFUSE-* row whose gate declares a genuinely narrower hint is checked by nothing. That is the mechanism that should have caught this row. It is not a pin to bolt on: measured at `e581457b`, the naive form reds `check-driver-conformance CASE_SETS_DIR packages` too, and that row is correct — hints are declared per FILE and its sibling constant owns the declaration.\n\n---\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016vtdMao3dQS9EfQfpyWixd\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016vtdMao3dQS9EfQfpyWixd)_"
+}

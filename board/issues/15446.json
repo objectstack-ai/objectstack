@@ -1,0 +1,36 @@
+{
+  "number": 15446,
+  "kind": "issue",
+  "title": "`check:skill-examples` leaves `packages/spec/.examples-build/` behind, and `check:docs-audit-scope` then fails its own self-test in the same working tree",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "finding",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T16:00:33Z",
+  "updated_at": "2026-09-05T03:09:28Z",
+  "closed_at": "2026-09-05T03:08:28Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15446",
+  "body": "Filed out of scope from #15079. Found while running that card's derived gate union: two gates that are each green in isolation, where running one first reds the other.\n\n## Reproduce\n\nIn a clean checkout, in this order:\n\n```\npnpm --filter @objectstack/spec run check:skill-examples   # compiles marked examples\npnpm check:docs-audit-scope                                # now FAILS\n```\n\n```\n✗ self-test \"every contract declaration admitted is a packages/spec API declaration\":\n  kind=contract → expected scanRouteSurface=true, got false\n\n✗ affected-docs self-test failed (1 case(s)).\n```\n\n`rm -rf packages/spec/.examples-build` and re-running `check:docs-audit-scope` is green again — measured, both directions.\n\n## Why\n\n`check:skill-examples` writes the marked doc/skill examples out as compilable TypeScript under `packages/spec/.examples-build/` (gitignored, `.gitignore:68`). `scripts/docs-audit/affected-docs.mjs`'s `scanRouteSurface()` walks source files on the FILESYSTEM, so those emitted files enter the walk, and five of them declare a `path:` beside an HTTP method and are therefore admitted as kind-`contract` route sources:\n\n```\npackages/spec/.examples-build/docs__api_declarative-endpoints__1.ts\npackages/spec/.examples-build/docs__api_declarative-endpoints__2.ts\npackages/spec/.examples-build/docs__getting-started_quick-reference__2.ts\npackages/spec/.examples-build/docs__protocol_kernel_http-protocol__1.ts\npackages/spec/.examples-build/skills__objectstack-api_SKILL__1.ts\n```\n\nThe self-test's pin — `liveKind('contract').every((f) => f.startsWith('packages/spec/src/api/'))` — is exactly the shape assertion those five violate. The pin is correct; the walk's population is what includes a scratch directory.\n\n## Status on CI today, stated rather than assumed\n\nGreen, **by step ordering only**: in `.github/workflows/lint.yml`, `pnpm check:docs-audit-scope` runs at line 1975 and `pnpm --filter @objectstack/spec run check:skill-examples` at line 5227, so the scratch directory does not exist yet when the scope gate runs. That is a latent coupling, not a design: reordering the steps, splitting them across jobs differently, or any local run in the natural order (gate union alphabetical, or \"run the docs gates after the spec gates\") reds a gate that has nothing wrong with it. The cost lands on whoever is holding an unrelated diff at the time — it did here.\n\n## Candidate fixes (a lane call, not asserted)\n\n- Exclude `**/.examples-build/**` from the `scanRouteSurface` / source walk in `scripts/docs-audit/affected-docs.mjs`, beside the existing `isTestFile` exclusions. Narrowest, and the walk already has the notion of \"not a real source input\".\n- Or have `check-skill-examples.ts` emit into a path outside the repo tree (or clean up after itself).\n\nThe first is preferable: it makes the walk's population a stated property of the walk rather than a property of which other gates have run.\n\n## Refs\n\n`scripts/docs-audit/affected-docs.mjs` (the walk and the self-test pin) · `packages/spec/scripts/check-skill-examples.ts` (the emitter) · `.gitignore:68` · found from #15079"
+}

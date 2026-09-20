@@ -1,0 +1,36 @@
+{
+  "number": 15813,
+  "kind": "issue",
+  "title": "Implement the ruled seam (i): `plugin-security` records its Layer 0 verdict on the operation, and the bulk-event publish site reads it instead of re-deriving the wall",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T08:53:10Z",
+  "updated_at": "2026-09-05T13:33:43Z",
+  "closed_at": "2026-09-05T12:10:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15813",
+  "body": "⛔ **Ungraded and unrouted** — `domain:*`, priority and type are triage's. Filed unassigned by the `domain:engine` execution seat as the **implementation carrier** for a ruling that already exists.\n\n⚠️ **Filed because the ruling's stated carrier is about to disappear.** #15706 was ruled and closed at 2026-09-05T05:14:13Z with 「Closing this card as completed by ruling; **the work lives on #15225**」 — but PR #15687 carries `Closes #15225` and is **in the merge queue now**. When it lands, #15225 closes and the ruled-but-unimplemented seam would have no carrier. This is the same shape as #15710 (filed so `Closes #14025` could not close the only record of a reserved question), and it is caught here for the same reason.\n\n## The ruling — ⛔ already made, ⛔ not reopened here\n\nFrom `5549576962` on #15706 (PM seat under the maintainer's direct-dispatch channel, 「这个你也接手」; ⚠️ reversible on one word from the maintainer):\n\n> **Ruled: (i) — `plugin-security` records its Layer 0 verdict on the operation; the publish site reads it.** ⛔ Not (ii)\n\n**Why (i), in the ruling's own terms:** `plugin-security` **already computes the verdict** — it imports and calls `computeTenantLayer0Filter` (`security-plugin.ts:68`), used by both the engine middleware and the public `getReadFilter`. So (i) *records a value that already exists at the moment the wall is applied*; (ii) asks the engine to ask a **second** question that re-derives a slice of that same value. ADR-0131 **D8** — 「一道谓词,算一次」 — exists to abolish exactly the mirror this card removes, and ADR-0131 **C8** would later delete the provider (ii) would add.\n\n⭐ **The binding note for whoever implements it**, quoted because it is the difference between fixing this and appearing to:\n\n> the verdict recorded must be **what the wall decided**, not a re-statement of its inputs. If the recorded value can be derived by the reader from anything else on the context, **the mirror has not been deleted — it has been moved**.\n\n## What it closes, and the window it is closing\n\nThe bulk producer (`publishBulkDataEvent`, `engine.ts`) stamps `BulkDataEventSchema.organizationId` only when the Layer 0 wall named exactly one organization — and to decide that it re-derives the wall's input. `getObjectSecurityMeta` folds **three** clauses into `tenancyDisabled`; the third, `orgScopingEnabled && platformGlobalObjects.has(object)` (#12699), is declared by the **deployment** and is invisible to the engine at any price.\n\nPR #15687 closed the **schema** half (`carriesTenantScopeColumn` composes clauses ① ② plus the column). ⚠️ **It did not close the deployment half, and it is landing now** — so from its merge until this seam lands, a deployment-exempted object under an armed wall can receive a **wrong** `organizationId` on a bulk event: 「every affected record belongs to exactly this organization」 asserted falsely, which is the **#13566 leak shape** reappearing through the PR that closed its bulk half.\n\n⚠️ Two things that bound it, stated so nobody reads this as an active bleed: the population needs a deployment to have configured the #12699 carve-out **and** an armed wall **and** a non-admin bulk write — and **whether any deployment has that configured is not measured here**. The larger, schema-declared population is already closed.\n\n## Execution terms, from the ruling — ⛔ not this seat's to vary\n\n- **Cross-lane touch authorised for this delivery only** (#14937 precedent): the producer is `domain:engine`, `plugin-security` is `domain:services`. The `domain:services` seat **adopts on the card**; ⛔ **no second PR**.\n- ⛔ **Not a rider on the p0's review.** 「do not land it inside the p0's review as a rider」 — it is a separate delivery with **its own contract review**.\n- The changeset **re-prices to at least `minor`** on the package declaring the operation context: adding a member there is an additive widening of a published surface.\n- ⛔ This ruling does not re-open anything else in PR #15687; its seven contract-review items were discharged and the PR passed at `CONTRACT_REVIEW_TIER` (`5550145387`).\n\n## What (i) also closes that (ii) would have left open\n\nThe ruling notes (i) collapses **both** 「conservative absent」 populations the engine answers by under-delivering today — a carried `PLATFORM_ADMIN` rung on a public tenant object, and a non-system context carrying no rung whose exemption is decided by a permission-set probe the engine cannot see. (ii) would have narrowed the mislabel population without closing it, and left both of these to conservatism.\n\n## Re-check\n\n```\ngit show origin/main:packages/plugins/plugin-security/src/security-plugin.ts | grep -n 'computeTenantLayer0Filter'\n# the mirror, as it stands today — comment lines stripped BEFORE numbering:\ngit show origin/main:packages/objectql/src/engine.ts \\\n  | grep -v '^\\s*\\*' | grep -cE '(deploymentOrgScopingEntitlement|platformGlobalObjects)[^*]*\\.(has|get)\\('   # 0\ngit show origin/main:packages/plugins/plugin-security/src/security-plugin.ts \\\n  | grep -v '^\\s*\\*' | grep -cE '(deploymentOrgScopingEntitlement|platformGlobalObjects)[^*]*\\.(has|get)\\('   # 1 — firing control\n```\n\n⚠️ Note on that instrument: a **bare count** of `platformGlobalObjects` in `engine.ts` returns **2** and is no longer a control — those two are JSDoc lines that *state* the gap. The filter must run **before** `grep -n`, or the line number defeats it. Both halves of that lesson were learned on #15706 itself.\n\n**Dedup:** ⚠️ `/search/issues` answers **403** in this container and an empty search is not a reading — repo-scoped REST list of open cards plus a local grep; the ruled seam has no open implementation carrier (#15706 is closed as ruled). Related: **#15706** (the ruling) · **#15225** / PR #15687 (the p0 whose merge opens the window) · **#13566** (the parent leak) · **#12699** (the deployment carve-out) · **#14970** (the single-record half, landed) · ADR-0131 D8 / C8 · contract reviews `5549091499` (FAIL, which found it) and `5550145387` (PASS)."
+}

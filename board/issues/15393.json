@@ -1,0 +1,34 @@
+{
+  "number": 15393,
+  "kind": "issue",
+  "title": "[finding] The `os package publish` example set is maintained twice — CLI `examples` and `content/docs/deployment/cli.mdx` — with no parity gate, and they had drifted",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T14:06:30Z",
+  "updated_at": "2026-09-05T05:40:49Z",
+  "closed_at": "2026-09-05T05:27:40Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15393",
+  "body": "Found while fixing the last remaining site on #14806 (dev seat, session `session_01D47qPfEWVPmhguWgBZCi5N`, branch `claude/issue-14806-publish-help-example-app-path`, PR #15390). Filed unassigned for triage. Deliberately NOT fixed there — that delivery was ruled to exactly one line.\n\n⚠️ **This is an observation about a drift risk, not a live defect.** After PR #15390 the two copies agree in substance. The finding is that nothing holds them together, and that they demonstrably came apart once.\n\n## The pair\n\nThe same five-example set for `os package publish` is written out independently in two places:\n\n**`packages/cli/src/commands/package/publish.ts`** — `static override examples`, printed verbatim by oclif under `EXAMPLES`:\n\n```\n$ os package publish\n$ os package publish --manifest-id com.acme.crm --version 1.2.0\n$ os package publish --env env_abc123 --install\n$ os package publish dist/objectstack.json --visibility org --note \"first cut\"\n$ OS_CLOUD_URL=http://localhost:4000 os package publish    # local dev\n```\n\n**`content/docs/deployment/cli.mdx:1610`** — the `#### os package publish` block:\n\n```\nos package publish                                        # dist/objectstack.json - your org\nos package publish --manifest-id com.acme.crm --version 1.2.0\nos package publish dist/objectstack.json --visibility org --note \"first cut\"\nos package publish --env env_abc123 --install             # publish, then install into an environment\nOS_CLOUD_URL=http://localhost:4000 os package publish     # against a local control plane\n```\n\nSame five invocations, same order of ideas, two hand-maintained copies.\n\n## The evidence that they drift\n\nThey did. The CLI line carried `# local dev (apps/cloud)` — pointing at a directory deleted from this repo — while the docs line, for the same example, said `# against a local control plane` and named no directory. The docs copy was correct the whole time the shipped `--help` output was wrong, and nothing noticed, because nothing compares them.\n\nThat is the same shape #15297 records for a comment pair (`objectql/src/plugin.ts:142` and `serve.ts:4549` — \"written as a pair and since drifted apart\"), one layer up: here the drifting pair is *published CLI output* against *published documentation*.\n\n## Why it is worth a look rather than a shrug\n\nThis repo gates pairs like this routinely, and the CLI surface specifically is already covered by two halves that were deliberately designed not to overlap:\n\n- `packages/cli/src/commands/environments/environments.test.ts` (the `#10967` pin) checks that every `examples` entry inside `packages/cli` resolves to a **registered command id**.\n- `scripts/check-cli-command-ids.mjs` checks the same property for command-id literals **outside** `packages/cli` — its header states \"every oclif package is excluded from its own scan -- so the two never touch the same line\", and it does cover `content/docs/deployment/cli.mdx`.\n\nSo both copies are already checked for *\"does this name a real command\"*. Neither is checked for *\"do these two copies still say the same thing\"*, which is the property that actually failed.\n\n## Not a recommendation, just the options a triager will want\n\n- **Gate it** — assert the docs block and the `examples` array carry the same invocations. Cheap, but it fixes the comment wording in place, and the two comments legitimately differ in voice (help text is terse, docs prose can be longer).\n- **Generate it** — derive the docs block from `examples` at build time, so there is one source.\n- **Do nothing, deliberately** — decide that two audiences justify two copies, and record that so the next person who notices does not re-file this.\n\n⛔ Whatever the disposition, do not sweep the bare tokens `objectos` or `cloud` while acting on it — grep the **paths** `apps/cloud` / `apps/objectos` only. `objectos.ai`, `cloud.objectos.ai`, `DEFAULT_CLOUD_URL` and several literal plugin ids are all correct, and a token sweep breaks working code. That trap is documented on #14806 and it is real.\n\n## Re-checkable\n\n```\ngit grep -n \"os package publish\" -- packages/cli/src/commands/package/publish.ts content/docs/deployment/cli.mdx\n```\n\nRefs: #14806 (the card whose last site surfaced this), #15390 (the PR that made the two agree again)."
+}

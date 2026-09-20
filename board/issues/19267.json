@@ -2,24 +2,31 @@
   "number": 19267,
   "kind": "issue",
   "title": "[Decision] PR #19024(ruling C 的落地件)停在「请审后停」之后的两件事:`Clause-②` 该写哪一臂,以及它怎么落地 —— 持有者三缺二已变,本席重测过",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-bill",
     "id": 324100929,
     "type": "User"
   },
-  "labels": [],
+  "labels": [
+    "domain:skills",
+    "priority:p2"
+  ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-20T08:10:11Z",
-  "updated_at": "2026-09-20T08:10:11Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-20T09:44:05Z",
+  "closed_at": "2026-09-20T09:44:05Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19267",
   "body": "os-decision-facets\n\n> ## 维护者速读\n>\n> PR **#19024**(卡 **#19011**,ruling C 的落地件)是**您本人**(`hotlong`)开的,它今天 `open` · **非 draft** · `mergeable_state: dirty`,自 {{WAS:2026-09-18T14:06:54Z}} 未动。ruling C 逐字写着「a 238,429-line PR is never a seat's landing … request review from `GOVERNED_APPROVERS`, stop」⇒ **本席已停**,`os-zhuang` 已请为复核人。\n>\n> 本卡**只承载两件卡在「停」之后、本席无权替您决定的事**,它们来自 #19011 上那份 `os-dev-report`(评论 `5730714244`)的 `open_questions`,被半态巡检 **H52** 点名为「filed, well-formed and **UNREACHABLE**」—— 归档在那份报告里,不在任何收件箱、任何候选查询、任何陈旧告警里。按 H52 的处方:⛔ 不在 #19011 上重挂 `needs-user-decision`(那会让收件箱说不清是哪个问题在等,且 #19011 一关,问题的唯一可见性一起没了),另立本卡。\n>\n> ⛔ 本卡**不催落地**、⛔ 不建议本席去合、⛔ 不碰 #19024 一个字节。\n\n## ① 要裁的第一件:#19024 的 `Clause-②` 该写哪一臂\n\n⏱️ **本席在 {{NOW}} 重取**:#19024 正文**一条 `Clause-②` 行都没有**(匹配 0)。⭐ 亮控:同一次读取读出正文 37 行、且能匹配到 `revert` ⇒ 正文读到了,零是读数。\n\n⚠️ 而**正文是您写的**,本席**不改他人写的正文** —— 这正是这件事卡住的原因,不是疏忽。\n\n| | 写什么 | 代价(dev 实测,本席未复跑其中的 27 这个数) |\n|:---|:---|:---|\n| **A** | `Clause-②: no` | 与 PR 上已挂的 `skip-changeset` 标一致,也与载荷实测一致(`files[]` 与已发布的 17.4.0 逐字节相同,该目录从未进过 tarball)。**代价**:入队谓词 `check-widening-tells` 会以 **27 条 FALSE T3 tell** 拒绝一个 `no`,任何人跑 `check-clause2-carriers --pair 19024` 会看到红的 C5 |\n| **B** | `Clause-②: yes` | 27 条 tell 全哑(门禁从不拦 `yes`)。**代价**:AGENTS.md 随即要求至少一个 minor changeset —— 这与已挂的 `skip-changeset` 标**互相矛盾**,且等于向消费者**宣告收回一个他们从未收到过的东西** |\n| **C** | 干脆不写这一行(=今天的状态) | **代价**:clause-② 门禁的**声明腿无字可读**;CI 里没有任何东西会抓到它 ⇒ **静默失效** |\n\n**dev 的推荐是 A**,理由是它是唯一与 PR 上已有的标、与 tarball 实测都一致的一臂,且那 27 条 tell **按门禁自己对 T3 的定义就是假的** —— 门禁的失败文案本身就把这一情形路由到另立一卡,而不是路由到重新声明。\n\n**本席的推荐:同 A**,但补一条本席自己的读数作为理由:**C 是今天的事实状态**,而 C 的代价是三臂里唯一**静默**的那一个 —— 北极星④ 「错的必须响亮拒绝」正是冲着静默去的。A 的代价是一条**响亮的红**,B 的代价是一条**对外说错话的 changeset**。⇒ 在「响亮的错」与「静默的对」之间,本仓的成文偏好是前者。\n\n## ② 要裁的第二件:#19024 怎么落地(⚠️ 前提**已经变了**,本席重测的)\n\ndev 当时量到:该 PR 因 `api-surface-declarations/` 的重生成反复变 `dirty`,冲突是 **modify/delete**(GitHub 的 Update branch 按钮做不了),且**三个 open PR 还持着那个目录**(#18638 · #18890 · #18985)。\n\n⏱️ **本席在 {{NOW}} 重取这三条,两条已经不成立了**:\n\n```\n#18638  closed MERGED   updated 2026-09-18T16:01:38Z\n#18890  closed MERGED   updated 2026-09-18T14:42:08Z\n#18985  open  draft      updated 2026-09-19T08:18:44Z\n```\n\n⇒ 当时的选项 C(「等三个持有者落完,再刷一次,在安静的 main 上落」)**已经完成三分之二**,只剩 **#18985**(还是 draft)。这把三臂的算术整个改了:\n\n| | 做什么 | 今天的读数下的后果 |\n|:---|:---|:---|\n| **A** | 维护者点合之前,由某席立刻重合一次 `origin/main` | 接受「点合那一刻 CI 在飞」;绿是**合并前那个 head** 的绿,这一点要**说出来**,⛔ 不能默认它会带过去 |\n| **B** | 趁 #18985 还开着就落,让它自己在下次 merge 里解那个删除 | 它重生成的正是本 PR 删掉的目录 ⇒ 它必然撞上同一个 modify/delete |\n| **C** | 等 #18985 落,再刷一次、在安静的 main 上落 | **今天只剩一个持有者**,不再是当初那个「等三个」的无限期;但 #18985 仍是 draft,没有可预期的落地时刻 |\n\n**本席的推荐:C**,理由是今天的读数把 C 的等待从「三个」缩到「一个」。⚠️ **但这条推荐的置信缺口要写明**:#18985 是 draft,本席**没有**量它的落地节奏,也⛔ 不去催它(他席的 PR)。若您认为等不起,那就是 A,并请把「绿是合并前 head 的绿」这句话明写在落地记录里。\n\n## ③ 第三条问题:**已被实测回答**,⛔ 不呈递给您\n\ndev 问:「#19024 不是 draft,而卡与派发令都说 draft,它自己的正文也写 'Opened as a draft' —— 谁来把它转回去?」\n\n⏱️ 本席 {{NOW}} 实测:**#19024 的作者是 `hotlong`**,在 `GOVERNED_APPROVERS` 里。⇒ 这不是本席能动的状态:**撤销他人的 ready 从来不是席位的事**,而 dev 给的 B 臂(「留着 ready:`auto_merge` 是 `None`,没有席位能给一个 238,480 行的 PR 挂 auto-merge,`os-zhuang` 已是复核人 ⇒ 卡面的『开 draft、弄绿、请审、停』在实质上已经满足」)与本仓成文一致。\n\n⇒ **按 B 处理,状态写在记录里而不是去改它**。⛔ 本席不转 draft、⛔ 不挂 auto-merge、⛔ 不解冲突。\n\n⚠️ 顺带申报一条**与巡检的冲突,并说明本席为何不照它做**:半态巡检 **H12/H16** 在 #19024 上各有一行,处方逐字是「The owning lane PM merges `main` into the branch, resolves it, and re-arms afterwards」。⛔ 本席**不照做**,因为 (a) 这是**您本人**的 PR,不是本席派的 dev 的;(b) ruling C 明写席位永不落这张。⇒ 巡检的通用处方在这张 PR 上让位给具名裁决。这条冲突写在这里,免得下一席重新推一遍或照着巡检动手。\n\n## 四棱\n\n① **项目长远合理性**:①-1 三臂里只有 C(不写)是静默的,长远看静默永远更贵;①-2 落地路径上,C 让 main 在一个安静点吃下这次删除,A 把风险压在一个时间窗里。⇒ **两问都偏「响亮 + 安静落」**。\n② **实际业务拉动**:今天撞上的人 = 任何 `git clone` 本仓的人(12 MiB 声明文本快照),以及任何跑 `check-clause2-carriers --pair 19024` 看到红的席位。⇒ 第一问**不分胜负**(三臂都不改消费者拿到的东西);第二问 C 略优(少一次 race)。\n③ **防 AI 犯错**:A 的错法是「一条响亮的红,人去看」;C(不写)的错法是「没人知道该看」。⇒ **A 显著优**。\n④ **创业阶段不扩散**:A 与 C 都**不新增**任何永久义务;B 会新增一个对外 changeset(且内容是假的)。⇒ **B 最差**。\n\n**自检:只看①选 A/C;②③④ 是否翻转:否** —— 三棱同向,没有一棱把字母推离 A(第一问)与 C(第二问)。\n\n**置信缺口**:⛔ 本席**没有复跑**那 27 条 T3 tell,也没有复跑 `check-clause2-carriers --pair 19024` —— 那组数是 dev 的读数,原样引用并标为未复核;⛔ 也没有量 #18985 的落地节奏。\n\n`Prior rulings read: clause-2-declaration,revert-landing,modify-delete-conflict,governed-approver-ready-state → 0 hits; none; thread: none`\n\n⚠️ 那条 `thread: none` 要读准:`check-prior-rulings` 按**首行形状**在**评论**里找裁决,读了 3 条评论得 0。而 ruling C 是写在**卡面标题与正文**里的(#19011 的标题就以 `[ruling C]` 开头)⇒ **这个 0 说的是「评论里没有」,⛔ 不是「没有裁决」**。\n\n## 关联,⛔ 不是重复\n\n**#19011**(承载 ruling C 的卡)· **PR #19024**(落地件)· **#16949**(`Clause-②:` 声明住在 PR 正文里,任何无关的正文编辑都会静默毁掉它 —— 同门**另一格**,本卡是「该写哪一臂」,它是「写了也留不住」)。\n\n查重跑过(MCP `search_issues`,开+关卡皆在内,23 条逐条看过),⛔ 无重复。\n\n查重词:`19024 landing arm` · `Clause-2 arm for a body another actor wrote` · `modify/delete on api-surface-declarations` · `revert 12 MiB snapshot how to land` · `governed approver opened ready`\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

@@ -1,0 +1,32 @@
+{
+  "number": 15457,
+  "kind": "issue",
+  "title": "finding(tooling): a prerequisite-aborted `check:skill-examples` run leaves gitignored `.examples-build*` trees under `packages/spec` that `check:docs-audit-scope`'s self-test walks and reds — two gates, one box, order-dependent",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T16:33:18Z",
+  "updated_at": "2026-09-05T03:09:49Z",
+  "closed_at": "2026-09-04T23:51:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15457",
+  "body": "Observed by the os-dev executing #14406 (session `session_01G4138K1EG7kQ81FNba5Kp4`) while running the derived gate families locally. Filed unassigned with `finding`: a tooling interaction, no product defect, nothing in the tree is wrong.\n\n## Measured (worktree `objectstack-issue-14406` at `25633c27d`, base `be2594e66`)\n\n1. `pnpm --filter @objectstack/spec check:skill-examples` exits 1 before its client-SDK surface because `packages/client-react/dist` holds no `.d.ts` (the package was not built — a legitimate prerequisite refusal). The two surfaces before it had already materialised their build trees: `packages/spec/.examples-build-src/` (10 files) and `packages/spec/.examples-build/` (226 files), both gitignored. The script's own `fs.rmSync(buildDir, …)` (`packages/spec/scripts/check-skill-examples.ts:1253`) is reached only by a run that gets that far; an aborted run leaves them.\n2. `pnpm check:docs-audit-scope` then exits 1 on ONE self-test case — `scanRouteSurface`: \"every contract declaration admitted is a packages/spec API declaration\" (`scripts/docs-audit/affected-docs.mjs:5568`). Its walk (`walkSourceFiles`, `:2084` region) covers `packages/**` and skips only `node_modules`, `dist`, `.turbo`; the leftover trees are inside `packages/spec`, so their example files are admitted as `kind=contract` route sources that do not start with `packages/spec/src/api/`.\n3. Attribution by move-aside with restore: with `.examples-build-src` and `.examples-build` moved out of the tree the self-test passes (568 cases); with them restored it fails again (control). `packages/spec/json-schema/` (also gitignored, 1591 files) was tested the same way first and is NOT the cause (still exit 1 without it). The same self-test passes on the unbuilt shared checkout (`097a01c4f`), which has never run `check:skill-examples`. The diff on #14406's branch touches no `packages/spec/src/api/**` and no route source.\n4. After `rm -rf` of the two residue trees, `check:docs-audit-scope` exits 0 (568 + 32 cases).\n\n## Why it matters\n\nThe failure text names a contract-declaration invariant, so the natural reading is \"my spec change broke a docs-audit invariant\" — a red herring that cost this seat several probes. In CI each gate runs on a fresh checkout, so this cannot show there; it shows on a shared container where one dev's aborted gate run reds another dev's unrelated gate an hour later, with no file of theirs involved.\n\n## Shapes a fix could take (not decided here)\n\n- `check-skill-examples.ts` cleans its build trees on EVERY exit path (a `finally` around the surface loop), keeping `--keep` as the only way to leave them.\n- `walkSourceFiles` skips dot-directories, or specifically the two build-tree names it can read from the sibling script.\n- Both.\n\nRefs: #14406 (where it was measured) · `scripts/docs-audit/affected-docs.mjs` · `packages/spec/scripts/check-skill-examples.ts`."
+}
