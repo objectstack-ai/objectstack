@@ -771,30 +771,56 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             } else {
                 pkg = registry.installPackage(manifest, body.settings);
             }
-            // [#18058] HONOUR `enableOnInstall`, which this door declared and
-            // ignored. `PackageInstallRequestSchema` has carried
-            // `enableOnInstall: z.boolean().default(true)` since it was written,
-            // the first-party SDK SENDS it (`client.packages.install(m, {
-            // enableOnInstall: false })`, pinned in `client.test.ts`), and NO
-            // server-side handler read the key — an author switched it off and
-            // the runtime installed the package enabled anyway, silently. That
-            // is «declared ≠ enforced» on a published option, the exact shape
-            // Prime Directive #10 refuses.
+            // [#18058 → #18877] HONOUR `enableOnInstall`, which this door declared
+            // and ignored. `PackageInstallRequestSchema` has carried
+            // `enableOnInstall` since it was written, the first-party SDK SENDS
+            // it (`client.packages.install(m, { enableOnInstall: false })`,
+            // pinned in `client.test.ts`), and NO server-side handler read the
+            // key — an author switched it off and the runtime installed the
+            // package enabled anyway, silently. That is «declared ≠ enforced» on
+            // a published option, the exact shape Prime Directive #10 refuses.
             //
-            // Only `false` moves the REGISTRY: the declared default is `true`
-            // and `installPackage` already lands a package enabled, so the true
-            // case needs no flip. The disable goes through the SAME call
-            // `PATCH /packages/:id/disable` uses.
+            // ⭐ [#18877] 「缺省 = 保持，有旗 = 设置」 — the install contract, ruled
+            // in maintainer batch #157 item 5 letter C. BOTH arms of the flag
+            // now move the registry, through the SAME calls
+            // `PATCH /packages/:id/enable` and `PATCH /packages/:id/disable`
+            // use, and an ABSENT flag makes NO lifecycle call at all:
+            //
+            //   true    ⇒ enablePackage    (the flag is the author's request,
+            //                               and on an existing row nothing else
+            //                               will enable it any more —
+            //                               `installPackage` preserves the row's
+            //                               state since #18877)
+            //   false   ⇒ disablePackage
+            //   absent  ⇒ nothing; the row the registry returned stands
+            //
+            // ⚠️ The `true` arm is not decoration. Before #18877 it needed no
+            // flip because `installPackage` restamped every row `enabled` on
+            // overwrite; now that the row's own lifecycle state is carried over,
+            // dropping this arm would silently stop honouring `true` on exactly
+            // the path an upgrade takes — the same «declared ≠ enforced» defect
+            // #18058 closed, pointing the other way.
             //
             // ⚠️ Read from the WRAPPED body alone. `manifest !== body` is this
             // handler's own test for which of the two declared body forms
             // arrived (`PackageInstallBodySchema`); in the BARE form the key
             // would be a manifest key, which `ManifestSchema`'s strict close
             // refuses by name — honouring it there would enforce something no
-            // schema declares. So a bare body always installs at the default.
+            // schema declares. So a bare body is always 「缺省」: it preserves.
+            //
+            // ⚠️ `=== true` / `=== false`, never a truthiness test and never a
+            // `??` default: the THREE states of this key are the contract, and
+            // collapsing absent into either one is the defect this card fixed.
+            // The declaration's own `.default(true)` never reaches here — this
+            // handler reads the raw body and nothing parses the install request
+            // through `PackageInstallRequestSchema` on the serving path — so
+            // absence arrives intact and is read as absence.
             const wrapped = manifest !== body;
-            const installDisabled = wrapped && body?.enableOnInstall === false;
-            if (installDisabled) {
+            const requestedEnabled = wrapped ? body?.enableOnInstall : undefined;
+            if (requestedEnabled === true) {
+                const enabled = registry.enablePackage(pkgId);
+                if (enabled) pkg = enabled;
+            } else if (requestedEnabled === false) {
                 const disabled = registry.disablePackage(pkgId);
                 if (disabled) pkg = disabled;
             }
@@ -811,31 +837,29 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             //
             //   ① answered `enabled: true`, disk still says disabled. `POST
             //     /packages` is a CREATE an already-installed id reaches
-            //     through `overwrite`, and `DELETE /packages/:id` never clears
-            //     this record either, so the id may already be listed from an
+            //     through `overwrite`, so the id may already be listed from an
             //     earlier install. The next boot re-installs it DISABLED.
-            //   ② answered `enabled: false`, disk cleared. `installPackage`
-            //     lands an id that is in the boot-seeded
-            //     `initialDisabledPackageIds` DISABLED WHATEVER THE REQUEST
-            //     SAYS, so a flag-absent install of a package an operator
-            //     disabled before a restart returns `enabled: false` while the
-            //     request's own intent (`true`, the declared default) erases
-            //     the disable from disk. The next boot brings it back ENABLED.
+            //     (`DELETE /packages/:id` did not clear this record either,
+            //     until #18877's item 3 below made the delete arm do it.)
+            //   ② answered `enabled: false`, disk cleared. A flag-absent install
+            //     of a package an operator disabled before a restart returned
+            //     `enabled: false` while the request's presumed intent erased
+            //     the disable from disk. The next boot brought it back ENABLED.
             //
             // `pkg.enabled` is the one value that cannot be out of step with
             // either, because it IS the row being served. It is read AFTER the
-            // flip above, and on both install arms it is the registry's own
+            // flag arms above, and on both install arms it is the registry's own
             // `InstalledPackage` (the protocol service returns `{ package }`
             // straight out of `registry.installPackage`), so `=== false` is
             // `!pkg.enabled` on every reachable row — the spelling only keeps a
             // degenerate rowless return from writing a disable nobody asked for.
             //
-            // ⛔ Deliberately NOT "enable first, so the declared default wins":
-            // that would make a flag-absent install RE-ENABLE a package an
-            // operator disabled in an earlier boot, which is a new behaviour no
-            // ruling authorises. What a seeded id does with `enableOnInstall:
-            // true` is therefore unchanged; what is fixed is that memory and
-            // disk no longer disagree about it.
+            // ⭐ [#18877] This is also why the 「缺省 = 保持」 rule needs no second
+            // durable rule. The row now carries the preserved state, and the
+            // disk follows the row, so 「保持」 reaches disk for free — a
+            // flag-absent overwrite re-writes the same value the operator's last
+            // explicit action left there. #18058's «每一次 install 都持久化它返回
+            // 的状态» is unchanged; what changed is which state that is.
             //
             // Same best-effort try/catch as `PATCH /packages/:id/enable` below:
             // the in-memory install already succeeded, so a state-file failure
@@ -1503,6 +1527,31 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // the next restart.
             const readOnly = requireWritablePackage(deps, qlService, id, 'delete'); if (readOnly) return readOnly;
             const registryRemoved = registry.uninstallPackage(id);
+
+            // ⭐ [#18877 ruling item 3] A package that no longer exists has no
+            // lifecycle state — so the DURABLE disable record goes with the row,
+            // and the next install of this id is a FRESH install that lands at
+            // the declared default. The registry half of the same sentence is
+            // inside `uninstallPackage`, which forgets the id from the boot seed
+            // set; this is the half that outlives the process.
+            //
+            // Without it the record was immortal: `DELETE` removed the row and
+            // left the id listed on disk, the next boot seeded it back, and a
+            // reinstalled package came up disabled with nothing anywhere saying
+            // why — a disable the operator could no longer even see to undo,
+            // since the package it named was gone. Written only when the
+            // registry really removed the row, so a 404 changes no state.
+            //
+            // Same best-effort try/catch as the install and PATCH arms above:
+            // the uninstall itself already happened, so a state-file failure
+            // must not turn it into a 500.
+            if (registryRemoved) {
+                try {
+                    setPackageDisabled(_context?.environmentId, id, false);
+                } catch (err) {
+                    console.warn('[handlePackages] failed to clear persisted disable state on delete', { id, error: (err as Error)?.message });
+                }
+            }
 
             // Persisted removal (AI/runtime packages live in sys_metadata, not
             // just the in-memory registry — the registry uninstall alone would
