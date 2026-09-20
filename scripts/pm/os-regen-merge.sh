@@ -627,11 +627,10 @@ rr_write_record() {
 # which routes to `plain` — today's behaviour — and never to a repair on a base
 # this script cannot prove.
 
-# Is HEAD the very merge this record was written for? ⚠️ Containment is NOT that
-# question, and asking it for the rerun was the measured defect: every later branch
-# commit contains the recorded pre-merge tip too, so a run made after the operator
-# finished step 3 BY HAND re-entered `rerun`, took main's side back over their own
-# regeneration commit, and step 3 COMMITTED it. Both parents answer equality.
+# Is HEAD the very merge this record was written for? ⚠️ Containment is NOT that question, and
+# asking it for the rerun was the measured defect: every later branch commit contains the recorded
+# pre-merge tip too, so a run made after the operator finished step 3 BY HAND re-entered `rerun`,
+# took main's side back over their own regeneration commit, and step 3 COMMITTED it.
 rr_head_is_recorded_merge() {
   [ "$(git rev-parse --verify --quiet 'HEAD^1' || true)" = "$rr_rec_branch_tip" ] &&
     [ "$(git rev-parse --verify --quiet 'HEAD^2' || true)" = "$rr_rec_main_tip" ]
@@ -700,11 +699,11 @@ rr_refuse_advanced() {
   echo "  commits PAST that merge — refusing to redo step 2 over them." >&2
   rr_print_record
   echo "  \`pending\` means no run ever marked step 2 discharged, and the later commits mean" >&2
-  echo "  somebody did. Redoing it now pins the base to the PRE-MERGE shas above, takes main's" >&2
-  echo "  side of every generated path both sides moved — discarding those commits' bytes — and" >&2
-  echo "  step 3 COMMITS that, exit 0: ⛔ a revert wearing a repair's message. Finished step 3 BY" >&2
-  echo "  HAND, as its refusal says to? Then step 2 IS discharged: \`rm -f $rr_record\` and resume" >&2
-  echo "  at STEP 4. If it is NOT, do step 2 by hand against the RECORDED base, commit, then go:" >&2
+  echo "  somebody did. Redoing it now pins the base to the PRE-MERGE shas above, takes main's side" >&2
+  echo "  of every generated path both sides moved — discarding those commits' bytes — and step 3" >&2
+  echo "  COMMITS that, exit 0: ⛔ a revert wearing a repair's message. Finished step 3 BY HAND, as" >&2
+  echo "  its refusal says to? Then step 2 IS discharged: \`rm -f $rr_record\` and resume at STEP 4." >&2
+  echo "  If NOT, do step 2 by hand against the RECORDED base, commit, and continue with step 4:" >&2
   echo "    git diff --name-only $rr_rec_base $rr_rec_main_tip -- <the merge=os-regen patterns>" >&2
   echo "    git diff --name-only $rr_rec_base $rr_rec_branch_tip -- <the same patterns>" >&2
   echo "    git restore --source=$rr_rec_main_tip -- <every path in BOTH lists>   # tree only" >&2
@@ -1192,9 +1191,12 @@ mode_run() {
   fi
 
   # Hand-off assertion: step 4 regenerates on top of this tree and commits the
-  # result, so anything uncommitted here rides into that commit unread.
+  # result, so anything uncommitted here rides into that commit unread. ⛔ This exit marks
+  # the record too: step 2 is COMMITTED by now, and a record left `pending` would send the
+  # next run back through step 2 over it.
   handoff="$(git status --porcelain -- "${regen_paths[@]}")"
   if [ -n "$handoff" ]; then
+    rr_write_record handoff "$merge_base" "$branch_tip" "$main_side" "$rr_rec_conflicted"
     echo "✗ refusing to hand off to step 4 — generated paths are not committed:" >&2
     printf '%s\n' "$handoff" >&2
     echo "  A regen path whose INDEX and WORKTREE disagree (porcelain \`MM\`) is the trap:" >&2
@@ -2147,10 +2149,10 @@ mode_self_test() {
     "$(git show HEAD:gen/deferred.txt | grep -c 'deferred v1-MAIN' || true)" 0
   cd "$here"
 
-  # --- 11. REPRO 1 (this card): step 3's commit REFUSED hands the commit to the
-  #         operator, and until the record said so the NEXT run re-entered `rerun`, redid
-  #         step 2 against the pre-merge base and COMMITTED a revert of the operator's own
-  #         regeneration — exit 0, nothing refused. `FLOWX` stands in for it.
+  # --- 11. REPRO 1 (this card): step 3's commit REFUSED hands the commit to the operator, and
+  #         until the record said so the NEXT run re-entered `rerun`, redid step 2 against the
+  #         pre-merge base and COMMITTED a revert of that operator's own regeneration (`FLOWX`
+  #         below) — exit 0, nothing refused.
   st_fixture_rerun "$tmp/m"
   bash "$SELF" >/dev/null 2>&1 || true            # run 1 stops on the MIXED conflict
   st_resolve_and_commit && st_record="$(rr_record_path)"   # the merge, committed by hand
@@ -2158,15 +2160,13 @@ mode_self_test() {
   out="$(bash "$SELF" 2>&1)" && rc=0 || rc=$?     # run 2: the rerun, step 3 refused
   st_case 'r1: the refused step-3 commit fails, MARKS handoff, warns against rerunning' \
     "$rc/$(rr_field phase "$st_record")/$(printf '%s' "$out" | grep -c 'Do NOT rerun this script' || true)" '1/handoff/1'
-  # Then do EXACTLY what it says: clear the hook, regenerate, `git add -A && commit`.
-  rm -f .git/hooks/pre-commit && printf 'deferred v1-MAIN\nFLOWX\n' > gen/deferred.txt
+  rm -f .git/hooks/pre-commit && printf 'deferred v1-MAIN\nFLOWX\n' > gen/deferred.txt  # as told
   git add -A && git commit -qm 'step 4 by hand: regenerate (FLOWX)'
   cp -a "$tmp/m" "$tmp/m-mut"                     # 11b replays run 3 from right here
   out="$(bash "$SELF" 2>&1)" && rc=0 || rc=$?     # run 3: the card's own run
   st_case 'r1: run 3 exits 0 discharged — no rerun, no side taken, and FLOWX SURVIVES (the card read 0)' \
     "$rc/$(printf '%s' "$out" | grep -c '^→ RERUN:' || true)/$(printf '%s' "$out" | grep -c 'already discharged' || true)/$(printf '%s' "$out" | grep -c "TAKING main.s side" || true)/$(git show HEAD:gen/deferred.txt | grep -c FLOWX || true)" '0/0/1/0/1'
-  # The safety net for a record nothing ever marked (a run killed after step 1, or one
-  # written before the marking existed): refused, ⛔ never silently redone.
+  # The safety net for a record nothing ever marked: refused, ⛔ never silently redone.
   sed 's/^phase=.*/phase=pending/' "$st_record" > "$st_record.t" && mv "$st_record.t" "$st_record"
   out="$(bash "$SELF" 2>&1)" && rc=0 || rc=$?
   st_case 'r1: a pending record past its own merge is REFUSED with the by-hand step 2' \
@@ -2174,8 +2174,8 @@ mode_self_test() {
   cd "$here"
 
   # --- 11b. THE DISCRIMINATING MUTATION for case 11: put the containment gate back —
-  #          the ONE line — and the card reproduces on demand, in the tree case 11 copied
-  #          aside one commit earlier. Same perl/\Q..\E replacement 6b, 8b, 9b, 10b use.
+  #          the ONE line — and the card reproduces on demand, in the tree case 11 copied aside
+  #          one commit earlier. Same perl/\Q..\E replacement 6b, 8b, 9b and 10b use.
   mutated_reentry="$tmp/mutated-reentry-os-regen-merge.sh"
   MUT_ANCHOR='  if [ "$rr_rec_phase" != done ] && rr_head_is_recorded_merge; then' \
   MUT_INSERT='  if [ "$rr_rec_phase" != done ]; then' \
