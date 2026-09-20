@@ -69,13 +69,50 @@
 #
 # Every `run:` below executes with the working directory at
 # `github.workspace` -- the CALLER's checkout, never this action's copy of
-# objectstack. That is load-bearing twice over: the sweeper's H57 pass reads the
-# swept repo's own `.github/workflows/` from the local checkout and refuses
-# unless `git remote get-url origin` agrees with the board being swept, and its
-# tracked-file oracle shells out to `git ls-files`. Both must answer about the
-# caller's repository. The SCRIPT comes from this action's tree; the SUBJECT
-# comes from the workspace, and the two are never the same file set in a
-# sibling.
+# objectstack -- with ONE deliberate exception, `Run the live sweep`, which
+# stands in this action's own root and NAMES the caller's tree instead (next
+# section). Either way the split is the same: the SCRIPT comes from this
+# action's tree; the SUBJECT comes from the workspace, and the two are never
+# the same file set in a sibling.
+#
+# The subject half is load-bearing. The sweeper's H57 pass reads the swept
+# repo's own `.github/workflows/` from the local checkout and refuses unless
+# `git remote get-url origin` agrees with the board being swept, and its
+# tracked-file oracle shells out to `git ls-files`. All three of those reads go
+# through the sweeper's ONE git reader, whose cwd is `PM_SWEEP_CHECKOUT` when
+# that is set and the process cwd when it is not -- so a step standing anywhere
+# but the workspace MUST pass it, and the sweep step does.
+#
+# ## Why the sweep step stands in this action's root (#18471)
+#
+# The invocation has to be READABLE -- by a person, and by
+# `scripts/pm/dispatch-gates.mjs`, which derives the gate families a dispatch
+# prompt names. That derivation follows a `uses: ./.github/actions/NAME` into
+# this file and reads the script path out of the `run:` text, so a step here
+# reads exactly like an inline one -- but only for a path written LITERALLY.
+# Measured on this tree: `node "$SWEEPER"`, with the path carried in a step
+# `env:` value, derives ZERO families, and so does every spelling that keeps
+# the root in a variable (`node "$ROOT/scripts/pm/check-half-states.mjs"` and
+# its unquoted and split-quote variants). A patrol that appears in no gate list
+# is the invisible-instrument failure one layer up from the stale copy this
+# action deleted.
+#
+# So the sweep step stands in `steps.sources.outputs.root` -- the repository
+# the runner placed for this action, at the pinned sha -- and spells the
+# sweeper `node scripts/pm/check-half-states.mjs`, relative to THAT root.
+# ⛔ Never relative to the workspace: a bare relative path resolved in the
+# caller's checkout runs the CALLER's copy of the sweeper, which is the drift
+# this whole action exists to remove, and it would look identical in the diff.
+#
+# ⚠️ One behaviour moves with it, in the loud direction. Because the sweep now
+# NAMES the checkout it sweeps, a workspace that cannot be shown to serve the
+# swept board refuses (exit 3) instead of running with H57 unresolved and the
+# tracked-file oracle unreadable; the remedy is the one the workspace check
+# below already prints. ⛔ And the knob is not optional here: with this step's
+# cwd off the workspace, leaving it unset would point those three reads at
+# THIS action's objectstack tree while the report named the CALLER's board --
+# internally consistent, externally wrong, which is the failure
+# `PM_SWEEP_CHECKOUT` exists to remove.
 #
 # `PM_SWEEP_REPO` is `github.repository`, which inside an action invoked from
 # another repo is the CALLING repository. It is not an input on purpose: a
@@ -182,11 +219,13 @@ runs:
         echo "root=$root" >> "$GITHUB_OUTPUT"
 
     # H57 classifies the swept board's scheduled workflows from the LOCAL
-    # checkout, and the tracked-file oracle shells out to `git ls-files`. With
-    # no checkout in the workspace both degrade -- the sweep still runs and the
-    # rendered body still says `unresolved` in that row, so this is a warning
-    # rather than a refusal, but an adopter reading an `unresolved` row deserves
-    # to be told the remedy in the job that produced it.
+    # checkout, and the tracked-file oracle shells out to `git ls-files`. Since
+    # #18471 the sweep step NAMES that checkout (`PM_SWEEP_CHECKOUT`) instead of
+    # inheriting it as cwd, so a missing checkout is no longer two degraded rows
+    # -- it is a refusal from the sweeper itself. This step still runs first and
+    # still only warns, because its job is to name the REMEDY in the job that
+    # produced the failure; the refusal it predicts arrives one step later,
+    # where the reading it invalidates would actually have been taken.
     - name: Check the workspace serves the swept board
       shell: bash
       working-directory: ${{ github.workspace }}
@@ -196,7 +235,7 @@ runs:
         set -uo pipefail
         origin="$(git remote get-url origin 2>/dev/null || true)"
         if [ -z "$origin" ]; then
-          echo "::warning::No git checkout in the workspace, so the passes that read the swept repo's own files (H57's scheduled-workflow classification, the tracked-file oracle) will report unresolved rather than findings. Add an actions/checkout step to the calling workflow before this action."
+          echo "::warning::No git checkout in the workspace, so the sweep step will REFUSE (exit 3): it names this directory as the checkout serving the swept board, and a directory with no origin remote cannot be shown to serve it. The passes that read the swept repo's own files are H57's scheduled-workflow classification and the tracked-file oracle. Add an actions/checkout step to the calling workflow before this action."
         else
           echo "workspace origin: $origin (sweeping $SWEPT_REPO)"
         fi
@@ -204,7 +243,13 @@ runs:
     - name: Run the live sweep
       id: sweep
       shell: bash
-      working-directory: ${{ github.workspace }}
+      # This ACTION's own checkout, at the pinned sha, and load-bearing twice:
+      # it is what makes the literal `node scripts/pm/check-half-states.mjs`
+      # below resolve to the sweeper that shipped WITH this action, and what
+      # makes that path visible to the gate-family derivation. The header
+      # section "Why the sweep step stands in this action's root" is the
+      # authority; `PM_SWEEP_CHECKOUT` below is the other half of it.
+      working-directory: ${{ steps.sources.outputs.root }}
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
         # WHICH board this run reads: the repository the calling workflow lives
@@ -215,13 +260,23 @@ runs:
         # was fetched from.
         PM_SWEEP_REPO: ${{ github.repository }}
         PM_SWEEP_CLOSED_FLOOR: ${{ inputs.closed-floor }}
-        SWEEPER: ${{ steps.sources.outputs.root }}/scripts/pm/check-half-states.mjs
+        # WHICH checkout SERVES that board -- passed because this step's cwd is
+        # this action's tree and not the caller's. The sweeper's three local git
+        # reads (H17's tracked-file oracle, H57's `on:`-block classification,
+        # and the repo-root resolution under it) take this path as their cwd,
+        # and a tree whose `origin` is not the swept board REFUSES rather than
+        # rendering another repository's files as this board's.
+        PM_SWEEP_CHECKOUT: ${{ github.workspace }}
         PROVENANCE: >-
           run [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
           · commit `${{ github.sha }}` · trigger `${{ github.event_name }}`
       run: |
         set +e
-        node "$SWEEPER" \
+        # Spelled LITERALLY, resolved against this step's working directory --
+        # this action's own root. ⛔ Not `node "$SWEEPER"` with the path in an
+        # `env:` value: that runs the identical file and is named by no gate
+        # list, inline or through an action. Measured, see the header.
+        node scripts/pm/check-half-states.mjs \
           --format=markdown \
           --provenance="$PROVENANCE" \
           > "$RUNNER_TEMP/report.md" 2> "$RUNNER_TEMP/report.err"
