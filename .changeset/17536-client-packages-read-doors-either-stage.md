@@ -12,11 +12,31 @@ Clause-②: yes
 
 `packages/spec` is the one contract between producers and consumers, and `packages/client` is a consumer of it, so the consumer's declaration is what moves. All four now declare `InstalledPackageAtEitherStage` from `@objectstack/spec/api`.
 
-**What the union is, and what it is not.** It is a union of two whole, closed stages — `InstalledPackageSchema` and `AssembledInstalledPackageSchema` — that differ in exactly one key, `manifest`. Every other member of the row (`id`, `name`, `version`, `status`, `enabled`, `installedAt`, …) is common to both branches and reads exactly as it did. A row belonging to neither stage is refused by both branches and therefore by the declaration; ⛔ this is not a tolerant shape and must never be relaxed into one.
+**What the union is.** It is a union over the two manifest stages — `InstalledPackageSchema` and `AssembledInstalledPackageSchema` — which differ in exactly one key, `manifest`. Every other member of the row (`id`, `name`, `version`, `status`, `enabled`, `installedAt`, …) is common to both branches and reads exactly as it did, so code that reads only those members needs no change at all.
 
-**What a consumer does.** Code that reads only the common members needs no change at all. Code that reaches INTO `manifest` separates the two stages first, because the authoring stage's `objects` are GLOB STRINGS while the assembled stage's are object DEFINITIONS — the compiler now says so at the call site instead of letting a glob-shaped read compile against a row that carries definitions. In this repository the whole consumer cost is zero sites outside `packages/client` itself: no other workspace package calls either read member.
+**Where the RUNTIME and the TYPE disagree, measured at this head.** The runtime schema is the strict half: `InstalledPackageAtEitherStageSchema.safeParse(row)` answers `success: false` for a row whose `manifest` belongs to neither stage — measured on a `{ bogus: 1, objects: 'not-even-an-array' }` manifest and on an empty `{}` one. The published TYPE is NOT that strict: on the assembled branch `manifest` is declared `Record<string, unknown>`, so both of those same rows COMPILE against the declared return type. ⛔ Do not read this widening as a type-level guarantee about `manifest` — the guarantee is the parse's. The type-level tolerance is a known gap, tracked as **#19324**; its root cause is the deliberate `z.ZodType<Record<string, unknown>, …>` annotation at `packages/spec/src/stack.zod.ts:1283` (#14513 — TS7056 and a declaration-chunk ceiling), and it is ⛔ not this change's to fix. It is recorded as a pin in `packages/client/src/return-type-precision.test.ts`, which reddens the day the gap closes.
 
-**The three WRITE members did not move** and stay declared at the authoring stage. `install` / `enable` / `disable` answer the row their own request contract produced — `PackageInstallRequestSchema` declares `manifest: ManifestSchema` — and PR #17517 moved the read doors alone. That asymmetry is the measurement, not an oversight, and it is pinned.
+**What a consumer does, concretely.** A member read off `manifest` on the union arrives as `unknown` (measured: `pkg.manifest.objects` is `unknown`). ⇒ a caller that reaches INTO `manifest` narrows by PARSING the row with a `packages/spec` schema and reading the parse's output:
+
+```ts
+import { AssembledInstalledPackageSchema } from '@objectstack/spec/api';
+import { InstalledPackageSchema } from '@objectstack/spec/kernel';
+
+const row = await client.packages.get(id);
+const parsed = AssembledInstalledPackageSchema.safeParse(row);
+if (parsed.success) {
+  // parsed.data.manifest — the ASSEMBLED stage, object definitions
+} else {
+  const authoring = InstalledPackageSchema.parse(row);
+  // authoring.manifest.objects — the AUTHORING stage, glob strings
+}
+```
+
+⛔ Do NOT narrow with `Array.isArray(pkg.manifest.objects)`, or with any other structural guess. It separates the stages on NEITHER level: at the type level `pkg.manifest` is the same union inside both branches of that `if`, and at runtime BOTH stages' `objects` are arrays — `z.array(z.string())` at the authoring stage against `z.array(ObjectSchema)` at the assembled one. (Measured: a row carrying no `objects` at all parses as either stage, which is the right answer for it — the key such a guess would read is not there.)
+
+In this repository the whole consumer cost is zero sites outside `packages/client` itself: no other workspace package calls either read member.
+
+**The WRITE members did not move** and stay declared at the authoring stage — all four of them: `install`, `enable`, `disable`, `update` still answer `Promise<InstalledPackage>`. `install` answers the row its own request contract produced (`PackageInstallRequestSchema` declares `manifest: ManifestSchema`), and PR #17517 moved the read doors alone. That asymmetry is the measurement, not an oversight, and it is pinned.
 
 The type is reached the same way `InstalledPackage` always was, from `@objectstack/spec` rather than re-exported here: this SDK has never re-exported the package row, and this change does not start.
 

@@ -127,12 +127,15 @@ import {
   // `ListInstalledPackagesResponseSchema.packages` is
   // `z.array(InstalledPackageAtEitherStageSchema)` and
   // `GetInstalledPackageResponseSchema.data` is that same schema
-  // (`spec/src/api/package-api.zod.ts`) — a union of the two CLOSED manifest
-  // stages, authoring (`InstalledPackageSchema`) and assembled
-  // (`AssembledInstalledPackageSchema`), never a tolerant shape. The client is a
-  // CONSUMER of that contract, so the widest value those doors are declared to
-  // answer is what they are declared to return here. The WRITE methods on the
-  // same object keep `InstalledPackage`: PR #17517 moved the read doors alone.
+  // (`spec/src/api/package-api.zod.ts`) — a union over the two manifest stages,
+  // authoring (`InstalledPackageSchema`) and assembled
+  // (`AssembledInstalledPackageSchema`), each a closed RUNTIME declaration. The
+  // client is a CONSUMER of that contract, so the widest value those doors are
+  // declared to answer is what they are declared to return here. ⚠️ What the
+  // published TYPE admits is wider than what the runtime parse accepts — the
+  // measurement, and what a caller does about it, are on `packages.list` below
+  // (#19324). The WRITE methods on the same object keep `InstalledPackage`:
+  // PR #17517 moved the read doors alone.
   InstalledPackageAtEitherStage,
 } from '@objectstack/spec/api';
 import type {
@@ -2477,13 +2480,46 @@ export class ObjectStackClient {
      * (Prime Directive #12), so the consumer's declaration is what moves.
      *
      * ⚠️ Clause-② widening, and what it costs a caller: the element is a union
-     * of two whole stages that differ in ONE key, `manifest`. Every other member
-     * of the row — `id`, `name`, `version`, `status`, `enabled`, … — is common
-     * to both branches and reads exactly as before. A caller that reaches INTO
-     * `manifest` separates the stages first (`Array.isArray(pkg.manifest.objects)
-     * ? … : …`, or a `packages/spec` parse), because the authoring stage's
-     * `objects` are GLOB STRINGS and the assembled stage's are object
-     * DEFINITIONS. No runtime behaviour changes; the values were always these.
+     * of two stages that differ in ONE key, `manifest`. Every other member of
+     * the row — `id`, `name`, `version`, `status`, `enabled`, … — is common to
+     * both branches and reads exactly as before, so a caller that reads only
+     * those members needs no change at all. No runtime behaviour changes; the
+     * values were always these.
+     *
+     * ⚠️ Reaching INTO `manifest` is where the cost is, and the TYPE will not
+     * do the narrowing for you. On the assembled branch `manifest` is declared
+     * `Record<string, unknown>`, so a member read off the union —
+     * `pkg.manifest.objects` — is `unknown` (measured with `tsc` against the
+     * published declarations, not inferred from the schemas). Narrow by PARSING
+     * the row with a `packages/spec` schema and reading the parse's output:
+     *
+     * ```ts
+     * const parsed = AssembledInstalledPackageSchema.safeParse(pkg); // spec/api
+     * if (parsed.success) {
+     *   // parsed.data.manifest — the ASSEMBLED stage, object definitions
+     * } else {
+     *   const authoring = InstalledPackageSchema.parse(pkg);         // spec/kernel
+     *   // authoring.manifest.objects — the AUTHORING stage, glob strings
+     * }
+     * ```
+     *
+     * ⛔ Do NOT narrow with `Array.isArray(pkg.manifest.objects)`, or with any
+     * other structural guess. It separates the stages on NEITHER level: at the
+     * type level `pkg.manifest` is the same union inside both branches of that
+     * `if`, and at runtime BOTH stages' `objects` are arrays —
+     * `z.array(z.string())` at the authoring stage against `z.array(ObjectSchema)`
+     * at the assembled one. (Measured: a row carrying no `objects` at all parses
+     * as either stage, which is the right answer for it — the key such a guess
+     * would read is not there.)
+     *
+     * ⚠️ The RUNTIME half is the strict one, and the asymmetry is a KNOWN GAP
+     * rather than a design: `InstalledPackageAtEitherStageSchema.safeParse()`
+     * refuses a `manifest` belonging to neither stage, while that same row
+     * COMPILES against this declaration. Tracked as #19324, whose root cause is
+     * the deliberate `z.ZodType<Record<string, unknown>, …>` annotation at
+     * `packages/spec/src/stack.zod.ts:1283` (#14513 — TS7056 and a
+     * declaration-chunk ceiling); ⛔ not something this declaration can fix, and
+     * ⛔ not a licence to relax either runtime branch to match the type.
      */
     list: async (filters?: { status?: string; type?: string; enabled?: boolean }): Promise<{ packages: InstalledPackageAtEitherStage[]; total: number }> => {
         const route = this.getRoute('packages');

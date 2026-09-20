@@ -591,13 +591,15 @@ export async function returnTypePrecisionPins12034(): Promise<void> {
     // `withWritableVerdict(qlService, toPackageResponse(pkg))`, so this pin and
     // the element type on `list` are two readings of one producer.
     //
-    // ⚠️ [#17536] Which is why these two READ members moved and the three WRITE
-    // members above did not. One producer expression serves `list` and `get`, and
-    // PR #17517 declared what it serves — `InstalledPackageAtEitherStageSchema`
-    // — on both read doors. The install / enable / disable members answer the row
-    // their own request contract produced (`PackageInstallRequestSchema` declares
-    // `manifest: ManifestSchema`, the AUTHORING stage), so their declaration is
-    // unchanged and this asymmetry is the measurement, not an oversight.
+    // ⚠️ [#17536] Which is why these two READ members moved and the WRITE
+    // members above did not — all four of them (`install`, `enable`, `disable`,
+    // `update`) still answer `Promise<InstalledPackage>`. One producer expression
+    // serves `list` and `get`, and PR #17517 declared what it serves —
+    // `InstalledPackageAtEitherStageSchema` — on both read doors. The install
+    // member answers the row its own request contract produced
+    // (`PackageInstallRequestSchema` declares `manifest: ManifestSchema`, the
+    // AUTHORING stage), so its declaration is unchanged and this asymmetry is the
+    // measurement, not an oversight.
     expectTypeOf(await client.packages.get('com.acme.crm'))
         .toEqualTypeOf<InstalledPackageAtEitherStage>();
     expectTypeOf(await scoped.packages.get('com.acme.crm'))
@@ -676,17 +678,28 @@ declare const assembledRow: AssembledInstalledPackage;
  *
  * Direction 1 asserts the declared return now ADMITS an assembled-stage row.
  * That assertion is only evidence if an assembled row was REFUSED before, so the
- * refusal is pinned in the same breath: the three WRITE members did not move,
+ * refusal is pinned in the same breath: the four WRITE members did not move,
  * and the `@ts-expect-error` on `install` below is exactly the assignment
  * direction 1 makes. If `AssembledInstalledPackage` were assignable to
  * `InstalledPackage` after all, that suppression would go UNUSED and tsc would
  * report TS2578 — so the pair fails loudly instead of passing vacuously.
  *
- * Direction 2 asserts what the widening did NOT buy. The door's element is a
- * union of two CLOSED stages, never a tolerant shape, and a `manifest` belonging
- * to neither is refused by both branches. That suppression is what reddens if
- * anyone ever "widens" these members to `any` / `unknown` / an open shape to
- * make a payload fit.
+ * Direction 2 asserts what the widening did NOT buy, and it is narrower than it
+ * looks: the suppressed assignment gives `manifest` a STRING PRIMITIVE, which
+ * both branches of the union refuse, so the suppression is USED. That is the
+ * line that reddens (TS2578, unused directive) if these members are ever
+ * "widened" to `any` / `unknown` to make a payload fit.
+ *
+ * ⛔ It does NOT measure object-shaped tolerance, and at this head there is
+ * some: on the assembled branch `manifest` is declared `Record<string, unknown>`
+ * (the deliberate annotation at `packages/spec/src/stack.zod.ts:1283`, #14513),
+ * so an object `manifest` belonging to NEITHER stage compiles against these
+ * members. The runtime is the half that is correct —
+ * `InstalledPackageAtEitherStageSchema.safeParse()` refuses that same row, and
+ * that refusal is pinned beside its producer in
+ * `packages/runtime/src/domains/packages-read-delete-response-conformance.test.ts`.
+ * The type-level gap is #19324's to close; the third pin below records it as the
+ * behaviour it is, so the day it closes this file says so.
  *
  * ## Ablation, measured rather than asserted
  *
@@ -727,12 +740,13 @@ export function installedPackageEitherStagePins17536(): void {
     // @ts-expect-error the install door answers the AUTHORING stage; an assembled row is not one
     const installRefusesAssembled: Awaited<ReturnType<typeof client.packages.install>> = assembledRow;
 
-    // ── direction 2: two closed stages, not a tolerant shape ─────────────────
-    // GREEN IN BOTH STATES — the second control. A `manifest` belonging to
-    // NEITHER stage is refused by both branches of the union, so it is refused by
-    // the declaration. This is the line that reddens
-    // (TS2578, unused suppression) if these members are ever widened to `any`,
-    // `unknown`, or an open shape.
+    // ── direction 2: a manifest that is not an OBJECT AT ALL is refused ─────
+    // GREEN IN BOTH STATES — the second control, and this is the whole of what
+    // it measures: a STRING PRIMITIVE is refused by both branches of the union,
+    // so the suppression is USED. It reddens (TS2578, unused suppression) if
+    // these members are ever widened to `any` or `unknown`. ⛔ It says nothing
+    // about an object-shaped `manifest` belonging to neither stage — that one
+    // compiles today, and is pinned as such directly below.
     //
     // ⚠️ The suppression sits on the PROPERTY, not on the `const`. Measured: tsc
     // reports this mismatch at the offending member of the object literal, so a
@@ -740,8 +754,32 @@ export function installedPackageEitherStagePins17536(): void {
     // TS2578, a red gate that says nothing about the union.
     const neitherStage: Awaited<ReturnType<typeof client.packages.get>> = {
         ...authoringRow,
-        // @ts-expect-error neither manifest stage admits a string; the union is over two closed stages
+        // @ts-expect-error a manifest must at least be an object; neither branch of the union admits a string
         manifest: 'com.acme.crm@1.0.0',
+    };
+
+    // ── the KNOWN GAP, pinned as the behaviour it IS (#19324) ─────────────
+    // ⛔ NOT a guarantee — a measurement, written down so it cannot change in
+    // silence. `AssembledInstalledPackage['manifest']` is
+    // `Record<string, unknown>` (from the deliberate
+    // `z.ZodType<Record<string, unknown>, …>` annotation at
+    // `packages/spec/src/stack.zod.ts:1283`, #14513 — TS7056 and a
+    // declaration-chunk ceiling), so the assembled branch admits ANY object and
+    // the assignment below COMPILES at this head. Measured with `tsc` against the
+    // published declarations; the runtime disagrees and is the correct half:
+    // `InstalledPackageAtEitherStageSchema.safeParse()` answers `success: false`
+    // for this very row.
+    //
+    // ⚠️ There is deliberately no `@ts-expect-error` here. The day #19324 types
+    // the assembled body, tsc reds on THIS line — and that red is the
+    // notification this pin exists to deliver: read it as "the gap closed", then
+    // delete this block and tighten the `manifest` guidance on
+    // `ObjectStackClient.packages.list` in `index.ts`, which sends callers
+    // through a `packages/spec` parse precisely because the type cannot carry
+    // the narrowing today.
+    const objectToleranceGap19324: Awaited<ReturnType<typeof client.packages.get>> = {
+        ...authoringRow,
+        manifest: { bogus: 1, objects: 'not-even-an-array' },
     };
 
     void getAdmitsAssembled;
@@ -751,6 +789,7 @@ export function installedPackageEitherStagePins17536(): void {
     void getStillAdmitsAuthoring;
     void installRefusesAssembled;
     void neitherStage;
+    void objectToleranceGap19324;
 }
 
 /**
