@@ -16,6 +16,9 @@
  */
 
 import { validateActionParams, type ActionSession, type ResolvedActionParam } from '@objectstack/spec/ui';
+// [#15124] The facade's `find` judges its own parameter against the SAME
+// declaration its type names, so the refusal and the type cannot drift apart.
+import { EngineQueryOptionsSchema } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { IObjectQLEngine, ServiceSlotContract, ServiceSlotContracts } from '@objectstack/spec/contracts';
 // [#15942 / #16293] The confirmation member's SPELLING is the contract, so it
@@ -1466,6 +1469,88 @@ export function buildActionApi(_deps: ActionExecutionDeps, ql: any, ec: any): an
 }
 
 /**
+ * The sentence a caller still on the WITHDRAWN bare-filter shape must read
+ * (#15124). Exported because the wording IS the contract here: this refusal is
+ * a plain `Error` carrying no ADR-0112 `code`/`status` — the same shape its
+ * sibling {@link ENGINE_DELETE_REJECT_MESSAGE} has — so a bare `toThrow()`
+ * would stay green against any unnamed `Error` at all, and the pin has to
+ * compare text.
+ */
+// The card id stays in this comment and out of the string: a runtime message
+// reaches authors and operators who have no tracker to resolve `#NNNN` with
+// (#15124, and `check:doc-authoring` enforces it).
+export const ACTION_ENGINE_FIND_ENVELOPE_PRESCRIPTION =
+    'ctx.engine.find(object, query) takes the engine QUERY ENVELOPE, not a bare filter — '
+    + 'move the filter under `where`: find(object, { where: { … } }).';
+
+/**
+ * The envelope's own key set, read off the DECLARATION rather than restated.
+ *
+ * Resolved on first use, never at module load: `EngineQueryOptionsSchema` is a
+ * `lazySchema` proxy whose whole purpose is to defer building its closures, and
+ * touching `.shape` here would build them for every process that imports this
+ * module whether or not an action ever runs.
+ */
+let actionEngineFindEnvelopeKeys: ReadonlySet<string> | undefined;
+function findEnvelopeKeys(): ReadonlySet<string> {
+    return (actionEngineFindEnvelopeKeys ??= new Set(
+        Object.keys((EngineQueryOptionsSchema as unknown as { shape: Record<string, unknown> }).shape),
+    ));
+}
+
+/**
+ * Refuse the shape #15124 withdrew, loudly, BEFORE the engine sees it.
+ *
+ * ## Why the engine's own refusal is not enough
+ *
+ * `ObjectQL.find` already rejects option keys it does not execute (#4371) —
+ * but that check deliberately exempts a `null` VALUE, because on an option bag
+ * a `null` is a withdrawal carrying no intent a drop could lose. On a FILTER
+ * the same rule is exactly wrong: `{ deleted_at: null }` is the "rows with no
+ * X" idiom, so the key is dropped, the read widens to every row, and the call
+ * resolves. Measured on a real engine over three seeded rows, the excluded row
+ * came back with the others.
+ *
+ * Until this card the facade WRAPPED its argument, so no filter key ever
+ * reached that exemption; passing the envelope through without this guard is
+ * what would have opened the path. A handler's next line after such a read is
+ * routinely a delete, so this is the silent-data-loss class, not a DX nit.
+ *
+ * ## Why the key set comes from the schema
+ *
+ * The declared parameter type is `EngineQueryOptions`. Reading the same
+ * schema's shape here makes the compile-time refusal and the runtime refusal
+ * one fact with one source: a key the type rejects is a key this rejects, and a
+ * key the engine grows in the spec is legal in both on the same day.
+ *
+ * ⚠️ MEASURED DELTA, deliberate: the engine's own `find` set additionally
+ * carries six driver pass-through keys (`transaction`, `tenantId`,
+ * `tenantIds`, `timezone`, `bypassTenantAudit`, `preserveAudit`) that
+ * `EngineQueryOptions` does not declare. They stay refused here. Three of them
+ * are tenancy escape hatches, this facade is trusted and context-less by
+ * design, and no typed caller can write any of them — so agreeing with the
+ * TYPE is both the narrower and the fail-closed reading. Retired keys
+ * (`cursor`, `distinct`) are in the shape and pass through on purpose: the
+ * engine answers them with their tombstone, which is the better message.
+ */
+function assertActionEngineFindEnvelope(object: string, query: Record<string, unknown> | undefined): void {
+    if (!query) return;
+    const legal = findEnvelopeKeys();
+    let stray: string[] | undefined;
+    for (const key of Object.keys(query)) {
+        if (legal.has(key)) continue;
+        (stray ??= []).push(key);
+    }
+    if (!stray) return;
+    throw new Error(
+        `find('${object}') was given ${stray.length > 1 ? 'keys' : 'a key'} `
+        + `${stray.map((k) => `'${k}'`).join(', ')} the query envelope does not carry. `
+        + `${ACTION_ENGINE_FIND_ENVELOPE_PRESCRIPTION} `
+        + `Envelope keys: ${[...legal].sort().join(', ')}.`,
+    );
+}
+
+/**
  * Build the action-body `ctx.engine` — the slim CRUD surface handler suites
  * use. Every call carries {@link buildActionExecutionContext} so `ctx.engine`
  * and `ctx.api` write under the SAME identity (#3914); passing `ec` is what
@@ -1505,9 +1590,34 @@ export function buildActionEngineFacade(_deps: ActionExecutionDeps, ql: any, ec?
                 await ql.delete(object, { where: { id }, context });
             }
         },
-        async find(object: string, query: Record<string, unknown>): Promise<Array<Record<string, unknown>>> {
-            const where = query && Object.keys(query).length ? { where: query } : {};
-            const rows = await ql.find(object, { ...where, context } as any);
+        // [#15124] The ENVELOPE goes through — this arm no longer builds one.
+        //
+        // It used to take the `where` half alone and wrap it
+        // (`{ where: query }`, with an empty bag passed through unwrapped), so
+        // the facade's parameter shape differed from the engine's for no reason
+        // a caller could see. The cost was silent: an author who wrote the
+        // engine's own envelope got `{ where: { where: … } }`, which matches no
+        // row and resolves to `[]` with no error. The director seat withdrew
+        // that parameter shape rather than reserving the field name `where`
+        // across every customer's data model to refuse it — one platform, one
+        // query shape. The spec member (`ActionEngineFacade.find`,
+        // `packages/spec/src/ui/action-params.zod.ts`) now declares
+        // `EngineQueryOptions` by identity, so the handler writes what the
+        // engine reads and this arm only adds the identity.
+        //
+        // `context` is spread LAST on purpose: the facade is trusted and
+        // context-less by design (#3914, ADR-0096), so the elevated context it
+        // built wins over any `context` a caller put in the envelope. The
+        // envelope admits the key because every engine option bag does; it is
+        // not an authorization the caller gets to choose. Pinned in
+        // `action-engine-facade-find-envelope.test.ts`.
+        async find(object: string, query?: Record<string, unknown>): Promise<Array<Record<string, unknown>>> {
+            // …and the withdrawn shape is refused HERE, before the engine, so
+            // the untyped channel gets the same answer the type gives
+            // (`assertActionEngineFindEnvelope` above says why the engine's own
+            // check cannot be the whole of it).
+            assertActionEngineFindEnvelope(object, query);
+            const rows = await ql.find(object, { ...(query ?? {}), context } as any);
             return Array.isArray(rows) ? rows : ((rows as any)?.value ?? []);
         },
     };

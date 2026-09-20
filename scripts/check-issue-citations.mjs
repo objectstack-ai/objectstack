@@ -140,18 +140,52 @@
  *
  * Neither is installed here. That is a DECLARED gap, recorded in the PR body and
  * the report, not an oversight.
+ *
+ * ## The local route -- why this gate re-execs itself
+ *
+ * A seat runs the live modes from an agent container whose only way out is
+ * `HTTPS_PROXY`, and node's `fetch` does not read that variable. Every board
+ * read there answered HTTP 401 and the gate refused, correctly, with
+ * `PREREQUISITE NOT MET` -- while holding, and printing, the very plan that
+ * completes the read. `rearmThroughProxy` below now EXECUTES that plan instead
+ * of prescribing it, on the shape `scripts/pm/post-stamped.mjs` and
+ * `scripts/pm/board-snapshot.mjs` have run daily: re-exec this file under
+ * `--use-env-proxy`, adopt the child's exit code, degrade loudly if the re-exec
+ * cannot happen.
+ *
+ * ⛔ Two things it deliberately is not. It is not a relaxation: the child is
+ * this same file, so a board that still cannot be read still exits with the
+ * same `EXIT_PREREQUISITE_NOT_MET` refusal -- "cannot read" never
+ * becomes "silently passes". And it is not taken by `--self-test` or `--list`,
+ * which make no request; re-execing them would spawn a process to prove a route
+ * nothing is about to use.
  */
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { gitFreeEnv } from './git-env.mjs';
 import { globToRegExp } from './glob-match.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 import { commentProse } from './symbol-anchors.mjs';
 import { EXIT_PREREQUISITE_NOT_MET, PROXY_FLAG, proxyRearmPlan } from './pm/check-half-states.mjs';
+
+/** This file, as the re-exec below has to name it on a child's argv. */
+const SELF_PATH = fileURLToPath(import.meta.url);
+
+/**
+ * THIS gate's OWN re-exec guard -- never a shared name, and never the
+ * patrol's (#18939). A tool that reads a sibling instrument's guard out of
+ * `process.env` is told "already re-armed" by a process that re-armed
+ * something else; the un-re-armed run then bypasses the proxy and answers 401
+ * Bad credentials, which is a false story about the credential rather than
+ * about the route. The failure is SILENT, so the own name is the whole
+ * defence and `--self-test` pins it.
+ */
+const PROXY_REARM_GUARD = 'OS_ISSUE_CITATIONS_PROXY_REARMED';
 
 /**
  * POPULATION DECLARATION -- what `scripts/pm/dispatch-gates.mjs` is told this
@@ -620,6 +654,52 @@ async function buildBoard({ rows, ownerRepo, token, strategy }) {
   return probeBoard(wanted, { ownerRepo, token });
 }
 
+/**
+ * Route this process's `fetch` through `HTTPS_PROXY` before asking the board
+ * anything: node's fetch does not read that variable, so in a container that
+ * only reaches the network through a proxy every request answers 401 and the
+ * gate refuses with `EXIT_PREREQUISITE_NOT_MET` -- loud and correct, one
+ * re-exec short of an answer. The PLAN is imported (one implementation, in
+ * `check-governed-merges.mjs`); only the guard variable is this file's.
+ *
+ * Three arms, and each one is an answer:
+ *
+ *   plan.hint   the route cannot be re-armed (the one re-exec was spent, or
+ *               this node does not take the flag). SAY SO and carry on --
+ *               a refusal below may be about the route, not the credential.
+ *   plan.rearm  re-exec with the flag and ADOPT the child's exit code, so
+ *               the verdict a caller reads is the re-armed run's verdict.
+ *   re-exec failed   degrade in-process, and say plainly that every request
+ *               from here on bypasses the proxy.
+ *
+ * ⛔ It never converts a failed read into a pass: the child runs this same
+ * file, so an unreadable board still reaches `prerequisiteRefusal` below.
+ *
+ * @returns {number|null} the exit code to adopt, or null to continue here.
+ */
+function rearmThroughProxy(args) {
+  const plan = proxyRearmPlan({
+    env: process.env,
+    execArgv: process.execArgv,
+    flagSupported: process.allowedNodeEnvironmentFlags.has(PROXY_FLAG),
+    guard: PROXY_REARM_GUARD,
+  });
+  if (plan.hint) {
+    console.error(`ℹ️  ${plan.reason}. A refusal below may be about the route, not this container.`);
+    return null;
+  }
+  if (!plan.rearm) return null;
+  console.error(`ℹ️  re-exec with ${plan.flag}: ${plan.reason}.`);
+  const quiet = process.allowedNodeEnvironmentFlags.has('--disable-warning') ? ['--disable-warning=UNDICI-EHPA'] : [];
+  const child = spawnSync(process.execPath, [plan.flag, ...quiet, SELF_PATH, ...args], {
+    stdio: 'inherit',
+    env: { ...process.env, [PROXY_REARM_GUARD]: '1' },
+  });
+  if (typeof child.status === 'number') return child.status;
+  console.error(`⚠️  could not re-exec with ${plan.flag} (${child.error?.message ?? 'no exit status'}); continuing in-process — every request will bypass the proxy.`);
+  return null;
+}
+
 function prerequisiteRefusal(message) {
   console.error('❌ check-issue-citations: PREREQUISITE NOT MET — the board was not read.');
   console.error(`   ${message}`);
@@ -646,8 +726,18 @@ export async function run({ root = process.cwd(), scope = 'diff', base = null, j
   try {
     board = await buildBoard({ rows, ownerRepo, token, strategy });
   } catch (err) {
-    const plan = proxyRearmPlan({ env: process.env, execArgv: process.execArgv });
-    const route = plan.rearm ? ` (${plan.reason} — re-run with \`node ${PROXY_FLAG} …\` or NODE_USE_ENV_PROXY=1)` : '';
+    /* The route is re-armed at the dispatch, BEFORE this read, so on any run
+     * that could re-arm `plan.rearm` is already false here. What is left to say
+     * is why it could not: the plan's `hint` arm names the spent guard or the
+     * node that will not take the flag, and that sentence is the difference
+     * between "the credential is bad" and "the request never left the box". */
+    const plan = proxyRearmPlan({
+      env: process.env,
+      execArgv: process.execArgv,
+      flagSupported: process.allowedNodeEnvironmentFlags.has(PROXY_FLAG),
+      guard: PROXY_REARM_GUARD,
+    });
+    const route = plan.rearm || plan.hint ? ` (${plan.reason} — re-run with \`node ${PROXY_FLAG} …\` or NODE_USE_ENV_PROXY=1)` : '';
     prerequisiteRefusal(`${err.message}${route}`);
   }
 
@@ -722,6 +812,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'scope-contract': 12,
   'diff-scope': 6,
   'live-corpus': 3,
+  'proxy-rearm': 10,
 });
 
 /** Deleting a roster entry silences its floor, so the roster's size is pinned too. */
@@ -920,6 +1011,35 @@ export async function selfTest() {
     check(live.rows.some((r) => r.qualifier), 'the live corpus must contain at least one cross-repo citation — the arm that must never be reported as a phantom');
   }
 
+  /* 7. THE LOCAL ROUTE. Offline, over the imported plan: the arms that decide
+   *    whether a live run re-execs, and the guard-name mix-up whose only
+   *    symptom is a 401 blamed on the token. ⛔ Nothing here re-execs anything —
+   *    a self-test that spawned a child would be a self-test with a network. */
+  battery('proxy-rearm');
+  {
+    const PATROL_GUARD = 'OS_HALF_STATES_PROXY_REARMED';
+    const proxied = { HTTPS_PROXY: 'http://127.0.0.1:1' };
+    const rearm = (env) => proxyRearmPlan({ env, guard: PROXY_REARM_GUARD, flagSupported: true });
+    const own = { ...proxied, [PROXY_REARM_GUARD]: '1' };
+    const ownSource = readFileSync(SELF_PATH, 'utf8');
+    check(PROXY_REARM_GUARD !== PATROL_GUARD, "this gate's guard must be its own name, never the patrol's");
+    check(proxyRearmPlan({ env: { ...proxied, [PATROL_GUARD]: '1' } }).guarded === PATROL_GUARD,
+      "…and the patrol name pinned here IS the plan's default, so a rename reds this battery rather than passing it");
+    check(rearm(proxied).rearm === true && rearm(proxied).flag === PROXY_FLAG,
+      'a proxied container with this guard unset must RE-EXEC — advising the operator is what this card was filed about');
+    check(rearm({ ...proxied, [PATROL_GUARD]: '1' }).rearm === true,
+      "a sibling instrument's inherited guard must NOT answer for this one — that silence is the 401-blamed-on-the-token failure");
+    check(rearm(own).rearm === false && rearm(own).hint === true, 'having re-armed once, this gate must not loop');
+    check(rearm(own).reason.includes(PROXY_REARM_GUARD), '…and must name the variable a reader has to unset');
+    check(rearm({}).rearm === false && rearm({}).hint === false,
+      'the Actions-runner leg is unchanged: no proxy, no re-exec, not one extra line of output');
+    check(/\n\s+guard: PROXY_REARM_GUARD,\n/.test(ownSource), "structural: the dispatch really hands the plan THIS file's guard");
+    check(/\bproxyRearmPlan\b/.test(ownSource) && !/function\s+proxyRearmPlan\b/.test(ownSource),
+      'structural: the plan is imported, not restated here');
+    check(/\} else if \(flag\('--list'\)\) list\(\);\n\s*else \{\n\s+const rearmed = rearmThroughProxy\(argv\);/.test(ownSource),
+      'structural: the re-exec is taken by the LIVE modes only — never --self-test (offline, and pinned offline), never --list (no network at all)');
+  }
+
   /* ── The floor: every declared battery RAN, and ran its cases ───────────── */
   const floorMessages = [];
   const floorFailure = (m) => { floorMessages.push(m); };
@@ -974,6 +1094,8 @@ if (isEntrypoint(import.meta.url)) {
     }
   } else if (flag('--list')) list();
   else {
+    const rearmed = rearmThroughProxy(argv);
+    if (rearmed !== null) process.exit(rearmed);
     process.exit(await run({
       scope: flag('--census') ? 'census' : 'diff',
       base: value('--base'),

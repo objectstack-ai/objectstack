@@ -28,7 +28,7 @@ for both corollaries.
 | Type | live | exp | elsewhere | dead | planned | classified |
 |---|---|---|---|---|---|---|
 | `object` | 51 | 0 | 0 | 0 | 1 | 52 |
-| `field` | 90 | 0 | 0 | 1 | 2 | 93 |
+| `field` | 91 | 0 | 0 | 1 | 1 | 93 |
 | `flow` | 34 | 0 | 0 | 6 | 0 | 40 |
 | `action` | 44 | 0 | 0 | 3 | 2 | 49 |
 | `hook` | 19 | 0 | 0 | 3 | 0 | 22 |
@@ -66,4 +66,4 @@ for both corollaries.
 | `sharing_rule` | 16 | 0 | 0 | 0 | 1 | 17 |
 | `connector` | 20 | 0 | 0 | 53 | 1 | 74 |
 | `analytics_cube` | 17 | 0 | 0 | 10 | 0 | 27 |
-| **total** | **914** | **5** | **1** | **160** | **12** | **1092** |
+| **total** | **915** | **5** | **1** | **160** | **11** | **1092** |
