@@ -573,7 +573,7 @@ rr_read_record() {
   # Repeated key, so this one is read as a SET rather than by `rr_field`.
   rr_rec_conflicted="$RR_NL$(awk 'index($0, "conflicted=") == 1 { print substr($0, 12) }' "$rr_record")$RR_NL"
   case "$rr_rec_phase" in
-    pending | done) ;;
+    pending | handoff | done) ;;
     *) return 0 ;;
   esac
   for rr_sha in "$rr_rec_base" "$rr_rec_branch_tip" "$rr_rec_main_tip"; do
@@ -626,6 +626,21 @@ rr_write_record() {
 # history is the safe one: a missing ancestor object answers "not contained",
 # which routes to `plain` — today's behaviour — and never to a repair on a base
 # this script cannot prove.
+
+# Is HEAD the very merge this record was written for? ⚠️ Containment is NOT that
+# question and using it for the rerun was the measured defect: every later commit
+# on the branch contains the recorded pre-merge tip too, so a run made AFTER the
+# operator finished step 3 by hand re-entered `rerun`, pinned the base back to the
+# pre-merge shas, and took main's side over their own regeneration commit — which
+# step 3 then COMMITTED, exit 0, nothing refused. Equality is the question, and
+# both parents answer it: the recorded merge is the commit whose first parent is
+# the recorded pre-merge tip and whose second is the main tip that was merged.
+rr_head_is_recorded_merge() {
+  rr_h1="$(git rev-parse --verify --quiet 'HEAD^1')" || return 1
+  rr_h2="$(git rev-parse --verify --quiet 'HEAD^2')" || return 1
+  [ "$rr_h1" = "$rr_rec_branch_tip" ] && [ "$rr_h2" = "$rr_rec_main_tip" ]
+}
+
 rr_classify() {
   if [ "$rr_have_record" = yes ]; then
     if [ "$rr_record_ok" != yes ]; then
@@ -638,8 +653,17 @@ rr_classify() {
     fi
     if git merge-base --is-ancestor "$rr_rec_main_tip" HEAD 2>/dev/null; then
       # The recorded merge is IN this HEAD, so step 1 is behind us either way.
-      if [ "$rr_rec_phase" != done ]; then
+      # ⛔ Redoing step 2 is sound ONLY while HEAD still IS that merge: a branch
+      # commit past it is work step 2 would discard. `handoff` means step 3's
+      # commit was refused and step 2 was left discharged in the index, so HEAD
+      # back AT the merge means the operator dropped that index and step 2 is
+      # owed again; HEAD past it means they committed and step 4 is what is owed.
+      if [ "$rr_rec_phase" != done ] && rr_head_is_recorded_merge; then
         echo rerun
+      elif [ "$rr_rec_phase" = pending ]; then
+        # Never marked, yet the branch moved past the merge: who discharged step 2
+        # is unreadable from here, so it is refused rather than redone.
+        echo advanced
       elif [ "$(git rev-parse origin/main)" = "$rr_rec_main_tip" ]; then
         echo settled
       else
@@ -670,6 +694,31 @@ rr_refuse_stale() {
   echo "     this merge never touched, which is a revert wearing a repair's message." >&2
   echo "  Delete it and start the sequence again from a clean pre-merge tree:" >&2
   echo "    rm -f $rr_record" >&2
+  exit 1
+}
+
+# The record still says `pending` and the branch has commits PAST the recorded
+# merge — the state step 3's refusal used to leave behind, because it exits before
+# marking anything and its own instruction finishes the commit OUTSIDE this script.
+# Marked `handoff` that refusal no longer lands here; an unmarked record (a run
+# killed after step 1, or one written before this refusal existed) still does.
+rr_refuse_advanced() {
+  echo "✗ the recorded merge is in HEAD, the record still says \`pending\`, and this branch has" >&2
+  echo "  commits PAST that merge — refusing to redo step 2 over them." >&2
+  rr_print_record
+  echo "  \`pending\` means no run ever marked step 2 discharged; the commits past the merge mean" >&2
+  echo "  somebody did something this script cannot read. Redoing step 2 now would pin the base to" >&2
+  echo "  the PRE-MERGE shas above and take main's side of every generated path both sides moved —" >&2
+  echo "  discarding those later commits' bytes — and step 3 would COMMIT that, exit 0." >&2
+  echo "  ⛔ That is a revert wearing a repair's message." >&2
+  echo "  If you finished step 3 BY HAND (its refusal says to), step 2 is already discharged and" >&2
+  echo "  the sequence resumes at STEP 4 — drop the spent record and go there:" >&2
+  echo "    rm -f $rr_record" >&2
+  echo "  If it is NOT discharged, perform step 2 by hand against the RECORDED base first:" >&2
+  echo "    git diff --name-only $rr_rec_base $rr_rec_main_tip -- <the merge=os-regen patterns>" >&2
+  echo "    git diff --name-only $rr_rec_base $rr_rec_branch_tip -- <the same patterns>" >&2
+  echo "    git restore --source=$rr_rec_main_tip -- <every path in BOTH lists>   # tree only, ⛔ never --staged" >&2
+  echo "  then commit that as its own commit and continue with step 4." >&2
   exit 1
 }
 
@@ -759,6 +808,7 @@ mode_run() {
   rr_mode="$(rr_classify)"
   case "$rr_mode" in
     stale) rr_refuse_stale ;;
+    advanced) rr_refuse_advanced ;;
     orphan) rr_refuse_orphan ;;
     settled)
       rr_report_settled
@@ -1132,10 +1182,23 @@ mode_run() {
   if [ -n "$(git status --porcelain)" ]; then
     git add -A
     if ! git commit --no-edit -m "merge origin/main (os-regen artifacts taken from main; regeneration follows)"; then
+      # ⛔ MARKED before this exit, and that marking is the repair: step 2 is
+      # discharged in the index at this instant, and the line below hands the
+      # commit to the operator — the ONE path that finishes step 3 outside this
+      # script. Left `pending`, the next run read containment, re-entered `rerun`
+      # and took main's side back over whatever that hand-off committed. The
+      # recorded conflict set rides along so a rerun after a discarded index
+      # still keeps the resolutions it asked for.
+      rr_write_record handoff "$merge_base" "$branch_tip" "$main_side" "$rr_rec_conflicted"
       echo "✗ step 3's commit was refused — the merge is staged but NOT committed." >&2
       echo "  ⛔ Do not regenerate yet: with a staged index a bare \`git commit\` after" >&2
       echo "     regeneration lands the STAGED side, not the tree you inspected." >&2
       echo "  Clear what the hook reported, then \`git add -A && git commit\` before step 4." >&2
+      echo "  Step 2 IS discharged in that index and the record now says so (phase=handoff):" >&2
+      echo "    $rr_record" >&2
+      echo "  ⛔ Do NOT rerun this script to finish that commit — it would redo step 2 against" >&2
+      echo "     the pre-merge base and take main's side back over what you just committed." >&2
+      echo "  Once the commit exists the sequence resumes at STEP 4." >&2
       exit 1
     fi
   else
