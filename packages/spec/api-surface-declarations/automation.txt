@@ -12,8 +12,8 @@
 # excluded: documentation drift is `check:docs`'s axis, not this one.
 #
 # entry: ./automation
-# exported names: 275
-# declarations: 281
+# exported names: 277
+# declarations: 283
 #
 # GENERATED — ⛔ never hand-edited. Regenerate after a real build:
 #   pnpm --filter @objectstack/spec build && pnpm --filter @objectstack/spec gen:api-surface-declarations
@@ -1098,6 +1098,12 @@ declare const FlowFunctionEntrySchema: z.ZodUnion<readonly [z.ZodFunction<z.core
     }>>;
     handler: z.ZodString;
 }, z.core.$strict>]>;
+
+// ── FlowFunctionLoweredDeclaration (type) ──
+type FlowFunctionLoweredDeclaration = z.input<typeof FlowFunctionLoweredDeclarationSchema>;
+
+// ── FlowFunctionLoweredDeclarationParsed (type) ──
+type FlowFunctionLoweredDeclarationParsed = z.infer<typeof FlowFunctionLoweredDeclarationSchema>;
 
 // ── FlowFunctionLoweredDeclarationSchema (const) ──
 declare const FlowFunctionLoweredDeclarationSchema: z.ZodObject<{

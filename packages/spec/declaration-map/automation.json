@@ -72,6 +72,7 @@
     "FlowFunctionDeclarationSchema": "automation/FlowFunctionLoweredDeclaration",
     "FlowFunctionEffect": "automation/FlowFunctionEffect",
     "FlowFunctionEffectSchema": "automation/FlowFunctionEffect",
+    "FlowFunctionLoweredDeclaration": "automation/FlowFunctionLoweredDeclaration",
     "FlowFunctionLoweredDeclarationSchema": "automation/FlowFunctionLoweredDeclaration",
     "FlowNode": "automation/FlowNode",
     "FlowNodeAction": "automation/FlowNodeAction",
