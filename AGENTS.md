@@ -11,9 +11,12 @@ in this repo (including `.claude/skills/**`) conflicts with this one, **AGENTS.m
 This file carries principles, binding rules and lookup tables — rules only. A rule states
 what to do and what never to do, in one executable sentence; it carries no incident
 narrative, no ruling date or quotation, and no issue-number citation
-(`pnpm check:pm-skill-id-lint`) — a rule's provenance lives in the PR that landed it. Where
-a hook or CI gate enforces a rule mechanically, the rule is stated once here and the
-script's own header is the authority on detail.
+(`pnpm check:pm-skill-id-lint`) — a rule's provenance cites the ADR or ruling record that
+decided it, otherwise the commit sha in this repository's history; a PR number is a
+convenience link, ⛔ never the citation. Runtime strings — refusal prose, prescriptions,
+anything an author is shown — carry no tracker number (`pnpm check:doc-authoring`): the
+lesson goes into the text. Where a hook or CI gate enforces a rule mechanically, the rule is
+stated once here and the script's own header is the authority on detail.
 
 ---
 
