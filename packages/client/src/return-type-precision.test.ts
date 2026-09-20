@@ -703,12 +703,17 @@ declare const assembledRow: AssembledInstalledPackage;
  *
  * ## Ablation, measured rather than asserted
  *
- * Restore `packages/client/src/index.ts` to `origin/main` (`adf4b18777`), keep
- * this file, run `tsc --noEmit -p tsconfig.test.json`: exit 2, **nine** errors —
- * the five `toEqualTypeOf` pins that name the union (TS2344, here and in the
- * three blocks above) and the four direction-1 assignments below (TS2322). Both
- * `@ts-expect-error` lines stay USED in that run, which is what makes them
- * controls rather than evidence: they are labelled GREEN IN BOTH STATES below.
+ * Restore `packages/client/src/index.ts` to the blob it carried BEFORE this card
+ * — `git show 21e6b9887c^:packages/client/src/index.ts`, blob `c12b554d20`, a
+ * fixed anchor rather than a moving `origin/main` — keep this file, run
+ * `tsc --noEmit -p tsconfig.test.json`: exit 2, **ten** errors — the five
+ * `toEqualTypeOf` pins that name the union (TS2344, here and in the three blocks
+ * above), the four direction-1 assignments below (TS2322), and the #19324 gap
+ * pin below (TS2322 — with the authoring stage restored its `objects` value is
+ * refused; ⚠️ that is NOT the tolerance it records at head, so read its own
+ * comment for what it measures). Both `@ts-expect-error` lines stay USED in that
+ * run (0 TS2578), which is what makes them controls rather than evidence: they
+ * are labelled GREEN IN BOTH STATES below.
  */
 export function installedPackageEitherStagePins17536(): void {
     // ── direction 1: the assembled stage is ADMITTED, on all four read members ─
