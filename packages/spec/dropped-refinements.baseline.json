@@ -383,7 +383,7 @@
     },
     "automation/AssignmentConfig": {
       "sites": [
-        "assignments.out.valueType"
+        "out.assignments.out.valueType"
       ]
     },
     "automation/AssignmentValue": {
