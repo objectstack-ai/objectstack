@@ -22327,6 +22327,13 @@ export class ObjectStackProtocolImplementation implements
      * The DB write is best-effort and non-fatal: when the `package` service is
      * absent (e.g. the `marketplace` capability is off) the package is still
      * registered in-memory and visible for the lifetime of the process.
+     *
+     * [#19277] `request.enableOnInstall` is HONOURED here, under the same rule
+     * the HTTP door implements — 「缺省 = 保持，有旗 = 设置」: `true` enables,
+     * `false` disables, and an ABSENT key makes no lifecycle call at all. The
+     * durable disabled-package FILE is not this seam's to write (it is keyed by
+     * environment, which this request does not carry); see the comment on the
+     * flag arms below.
      */
     async installPackage(request: InstallPackageRequest): Promise<InstallPackageResponse> {
         // #2532 — runtime-created base packages routinely arrive versionless
@@ -22363,7 +22370,63 @@ export class ObjectStackProtocolImplementation implements
         // only); an unparsed range never causes a false rejection.
         assertProtocolCompat(manifest);
 
-        const pkg = this.engine.registry.installPackage(manifest as any, request.settings);
+        let pkg = this.engine.registry.installPackage(manifest as any, request.settings);
+
+        // [#19277] HONOUR `enableOnInstall` — the key THIS request contract
+        // declares and this primitive read past. `InstallPackageRequestSchema`
+        // (`packages/spec/src/kernel/package-registry.zod.ts`) has carried the
+        // key since it was written, and the implementation here read
+        // `request.manifest` and `request.settings` and nothing else: a caller
+        // that switched the option off got an ENABLED install, with no refusal
+        // and no warning. That is «declared but not enforced» on a published
+        // option — what ADR-0049 (enforce-or-remove) and Prime Directive #10
+        // refuse outright. Ruling batch #153 item 5 letter 1 (#18605) kept the
+        // kernel declaration as a COPY of the HTTP request key with the SAME
+        // meaning, so the disposition is ENFORCE, not retire.
+        //
+        // ⭐ The contract is 「缺省 = 保持，有旗 = 设置」 — maintainer ruling batch
+        // #157 item 5 letter C, the same rule the HTTP door implements
+        // (`packages/runtime/src/domains/packages.ts`). Three states, three
+        // outcomes, through the SAME registry verbs `PATCH /packages/:id/enable`
+        // and `PATCH /packages/:id/disable` use:
+        //
+        //   true    ⇒ enablePackage
+        //   false   ⇒ disablePackage
+        //   absent  ⇒ nothing at all; the row the registry returned stands
+        //
+        // ⚠️ The `true` arm is not decoration. `SchemaRegistry.installPackage`
+        // has preserved an existing row's `enabled` / `status` /
+        // `statusChangedAt` since #18877, so on a re-install nothing else will
+        // clear a disable any more — dropping this arm would silently stop
+        // honouring `true` on exactly the path an upgrade takes.
+        //
+        // ⚠️ `=== true` / `=== false`, never a truthiness test and never a `??`
+        // default: the THREE states of this key are the contract, and
+        // collapsing absent into either one is the defect. The declaration's own
+        // `.default(true)` never reaches here — nothing parses an install
+        // request through `InstallPackageRequestSchema` on this path — so
+        // absence arrives intact and is read as absence.
+        //
+        // ⛔ What this seam does NOT write, recorded so it is not mistaken for
+        // an oversight: the runtime's durable disabled-package file. That record
+        // is keyed by ENVIRONMENT (`setPackageDisabled(environmentId, id,
+        // disabled)`, `packages/runtime/src/package-state-store.ts`) and this
+        // request carries no environment, so the key cannot even be formed here;
+        // the module also lives in `@objectstack/runtime`, which depends on this
+        // package and not the other way round. The HTTP door owns that half and
+        // writes it from the row it returned. So `enableOnInstall` through this
+        // primitive moves the registry row — what every in-process reader serves
+        // from — for the life of the process, and a caller that needs the choice
+        // to survive a restart goes through the door that owns the durable
+        // record.
+        const requestedEnabled = request.enableOnInstall;
+        if (requestedEnabled === true) {
+            const enabled = this.engine.registry.enablePackage(manifest.id);
+            if (enabled) pkg = enabled;
+        } else if (requestedEnabled === false) {
+            const disabled = this.engine.registry.disablePackage(manifest.id);
+            if (disabled) pkg = disabled;
+        }
 
         // Best-effort durable persistence to `sys_packages` (non-fatal by
         // design — without the `package` service the install stays visible

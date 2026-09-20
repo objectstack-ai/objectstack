@@ -125,7 +125,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - `pm:queue` 卡逾三天欠一次显式转换(派发/转箱/停放/撤单/改前提),⛔ 不是排期。
 - hold/blocked 的行契约、双通道与 `Restart-touch:` 触发文件细则见 `references/state-machine.md`。
 - hold 放行须双查:只放最近一次转换评论的条件,其后卡上有更新的 merged PR 即拒。
-- `Unlock-action: re-check PR #M` 行改写完工卡的解锁动作,只认此一值,别的拼写静默回落。
+- `Unlock-action:` 只认 `re-check PR #M` 与 `re-check #N when label <标签> <absent|present>`,余者静默回落。
 - `needs-user-decision` 是决定待做,`pm:on-hold` 是决定已做;`manual — <理由>` ⛔ 不是合法出口。
 - 无机制可唤醒的卡 ⛔ 不 hold:关 not planned,理由/出处载关单评论;重开免费,维护者可否决。
 - 缺陷卡 ⛔ 不藏进 hold 也不自行关闭:可复现且用户可达 ⇒ 回 `pm:queue`。
@@ -211,7 +211,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - transfer 不可用时重建:出处头 + 裸 `#N` 改全名 + 关源单为 moved。
 - 缝卡收窄为真协调卡:留 objectstack 带 `repo:*`,正文点名读者(哪个座位、哪一步)。
 - 决策收件箱按仓:平台在 objectstack / objectui,元数据项目在本仓;在飞卡 ⛔ 不中途转仓。
-- 规则 2:跨仓 feature 永不是一次派发:父单 + 每仓一 sub-issue,spec/后端先行。
+- 规则 2:跨仓 feature 或 objectui 消费的 `Seam:` 卡恒由分诊立父单 + 每仓一子单,spec/后端先行。
 - 下游带 `Blocked-by: <owner/repo>#<n>`;`Blocked-by` 未关闭/未合并的不派发,对 GitHub 现验。
 - 被链接或同父的两单永不同批。
 - pin 滞后是盲区:本仓 pin 是否已覆盖该 commit 是第二读数,派发前用 REST `compare` 核祖先。
@@ -231,7 +231,6 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 认领即跟到 MERGED:派发后发现的跨车道面(含 spec)不移卡,认领席借契约复审档隔离复核。
 - 复核记录带 `Implemented-by:`/`Reviewed-by:`,自审机读可见;`pm:retriage` 改路由只对未派发卡。
 - 转移落对方队列:目标仓立单带 `pm:queue`、出处行与一行可执行判据,依赖用 `Blocked-by:`。
-- 新 `packages/spec` 工作恒由 `domain:spec` 席收口,不论谁需要它;已派发卡 ⛔ 不因触 spec 转席。
 - 任何跨座位请求都是工作(要读数、要开卡、要授权):一律立卡进目标车道队列。
 - ⛔ 座位贴敲门或裁决评论永不作跨座位请求的唯一载体;评论是加速器不是记录。
 - 等待方同一笔把自卡翻 `pm:blocked` + `Blocked-by:` 指向请求卡;⛔ 不设新标签新 sweep。
@@ -239,8 +238,9 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 
 ## 域车道
 
-- 锚定规则:每个包恰好属于一个域;issue 的 `domain:*` = 修复落地的那个包所属的域。
+- 锚定规则:每个包恰属一个域;`domain:*` = 修复落地包的域;`Seam:` 卡归 spec 席,默认纵向派发。
 - 唯一例外 `packages/lint` 等与 spec 相交的 devx 面:围着 spec 契约转的归 `domain:spec`,余留 devx。
+- `Seam:` 卡认领申报两端;验收 = 消费端读该键(活性账本行离开 `planned`)或键随账本行退役。
 - 域由分诊读代码判定,⛔ 绝不从 issue 标题的词汇猜域;说不出修复碰哪个文件就还不可标。
 
 | 标签 | 包家族 |
@@ -438,7 +438,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 第 N 单派发前读 `scripts/pm/os-verify-lock.sh --status`:到达深度 ≥ `LOCK_DEPTH_HOLD`(= 2)即等。
 - 到达深度 = `queue N:` 行数 + 1(待派 dev 的运行算作到达);`state:` holder 与 `parked` 行不计。
 - 有效上限是锁宽的函数,⛔ 不是第二个 `batch`;`priority:p0` 可超 `batch`,⛔ 不越过深度等待。
-- 同文件单跨轮硬串行;延后不是搁置,被延后那一刻就把已知的坑记到该 issue 上。
+- 同区域单跨轮硬串行;延后不是搁置,被延后那一刻就把已知的坑记到该 issue 上。
 - 家族派发是范围澄清不是豁免:一个 dev 有意覆盖 N 张同区域已裁卡,可折叠为一次派发。
 - 折叠准入五门全过才可折:① 同缺陷形态同修法(⛔ 不是同关键词/同子系统)。
 - ② 同包/区域(一 worktree、一 changeset、一队列位)。
