@@ -21,7 +21,7 @@ import { buildAccessMatrix, diffAccessMatrix } from '@objectstack/lint';
 import { runAuthoringRules, splitBySeverity, authoringRulesFor } from '@objectstack/lint';
 import { resolveSduiManifest } from '../utils/sdui-manifest.js';
 import { preflightRequiredCapabilities, renderCapabilityMessage } from '../utils/capability-preflight.js';
-import { collectAndLintDocs, type DocIssue } from '../utils/collect-docs.js';
+import { attachPackageDocs, collectAndLintDocs, type DocIssue } from '../utils/collect-docs.js';
 import { buildRuntimeBundle, cleanupOldRuntimeBundles } from '../utils/build-runtime.js';
 import {
   printHeader,
@@ -767,8 +767,24 @@ export default class Compile extends Command {
       //     a run that collected four documents. Reporting the count is what
       //     makes the two runs distinguishable; the ordering is what makes the
       //     count available to report.
+      //
+      // [#18431] The count is the whole collection, per-package sets included.
+      //     Those docs do not join `docs` — they go to the body of the package
+      //     that owns them (ADR-0130 D4 option B) — so counting only the
+      //     top-level array would re-create exactly the defect above one layer
+      //     down: a build that read four package docs announcing `0 collected`.
+      //     The parenthetical is added only when there ARE package docs, so a
+      //     single-package build's line is unchanged.
       const docsResult = collectAndLintDocs(absolutePath, result.data as Record<string, unknown>);
-      if (!flags.json) printStep(`Collecting package docs (ADR-0046)... ${docsResult.docs.length} collected`);
+      const packageDocCount = docsResult.packageDocs.reduce((n, set) => n + set.docs.length, 0);
+      if (!flags.json) {
+        printStep(
+          `Collecting package docs (ADR-0046)... ${docsResult.docs.length + packageDocCount} collected`
+          + (packageDocCount > 0
+            ? ` (${packageDocCount} from ${docsResult.packageDocs.length} package director${docsResult.packageDocs.length === 1 ? 'y' : 'ies'})`
+            : ''),
+        );
+      }
       const docErrors = docsResult.issues.filter((i) => i.severity === 'error');
       // [#11727] Consumed by BOTH faces — the text block below and the `--json`
       //     payload. Only the text block read it before, so the advisories were
@@ -815,6 +831,21 @@ export default class Compile extends Command {
       const finalBundle: Record<string, unknown> = { ...(result.data as Record<string, unknown>) };
       if (docsResult.docs.length > 0) {
         finalBundle.docs = docsResult.docs;
+      }
+      // [#18431] Docs read out of `src/<pkg>/docs/` attach to the body of the
+      //     package that owns them — `packages[i].manifest`, ADR-0130 D4 option
+      //     B — and ⛔ never to the top level, which is the maintainer's ruling
+      //     (batch #147 item 4) and also what keeps ownership readable: the
+      //     load path REGISTERS each body — `manifest.register()` ->
+      //     `resolveArtifactPackageOrder` -> `registerApp(body)` ->
+      //     `registerMetadataCollections` over `METADATA_ARRAY_KEYS`, which
+      //     carries `docs` — so a doc on a body is served under that package
+      //     and a flattened copy would buy nothing while destroying the
+      //     attribution. `attachPackageDocs` hands back the
+      //     ARGUMENT when it adds nothing, so a stack with no per-package docs
+      //     serializes from the very same references as before.
+      if (docsResult.packageDocs.length > 0) {
+        finalBundle.packages = attachPackageDocs(finalBundle.packages, docsResult.packageDocs);
       }
 
       // 4b. Bundle handler functions into `<artifactDir>/objectstack-runtime.{hash}.mjs`

@@ -127,10 +127,16 @@ const SCANNED_EXTENSIONS = [...JS_EXTENSIONS, ...HASH_COMMENT_EXTENSIONS, '.json
  * ── Why `scripts/**` is honest here, with the measurement ───────────────────
  *
  * This is the `subtree` case: the walk descends the whole of scripts/ and every
- * file carrying a scanned extension is judged. Measured on this tree, the
- * declaration names 235 tracked files under scripts/ and this gate reads 228 of
- * them — 97.0%. The 7 it skips are the non-code files the extension filter
- * drops, not a subtree it never opens.
+ * file carrying a scanned extension is judged. Measured at `52a41b72e`
+ * (2026-08-23): the declaration named 235 tracked files under scripts/ and this
+ * gate read 228 of them — 97.0%, the 7 it skipped being the non-code files the
+ * extension filter drops rather than a subtree it never opens.
+ *
+ * ⛔ That reading is deliberately pinned to its commit and NOT refreshed here.
+ * Both counts move with every file added under scripts/ and nothing reprints
+ * them, so a figure restored in the present tense would read as current and go
+ * false in silence. What this paragraph argues is the SHARE, and the share is
+ * what survives the churn; for today's counts, run the walk below.
  *
  * ── Why the workspace manifests stay UNDECLARED ─────────────────────────────
  *

@@ -177,32 +177,85 @@ describe('[#18509] OrganizationSchema.logo accept set', () => {
   });
 
   /**
-   * ⛔ Scope fence, deliberately pinned as CURRENT behaviour rather than fixed:
-   * the same measurement found `metadata` served present-and-null and
-   * `/auth/organization/create` omitting the required `updatedAt`. Those are
-   * separate defects, filed separately — #18509 asked about `logo`. This pin
-   * exists so that the fence is visible and so that a later fix for either one
-   * has to come here and say so.
+   * ⭐ [#18728] The scope fence this block used to pin is DOWN, and #18509's own
+   * pin asked whoever took it down to come here and say so. Saying so:
+   *
+   * The fence pinned two refusals as current behaviour — `metadata` served
+   * present-and-null, and `updatedAt` absent while declared required — and
+   * maintainer ruling C (batch #158 item 4) closed each at a different end:
+   *
+   *  - `updatedAt` is now `.optional()` on this schema, which is the ruling's
+   *    own fallback A: the wire is better-auth's serializer and its documented
+   *    organization model declares no such field, so the schema aligns to the
+   *    documented wire rather than the producer inventing a value.
+   *  - `metadata` was fixed at the PRODUCER, not here. plugin-auth's data
+   *    adapter decodes `sys_organization.metadata` from its stored JSON text on
+   *    its read verbs and OMITS the key when the column is unset, so the served
+   *    body now carries an object or nothing — never `null`.
+   *
+   * So a served body parses whole, and the `null` this schema still refuses is
+   * a shape nothing sends any more. Both halves are pinned below, because
+   * "accepts the served body" and "stopped checking" are otherwise the same
+   * green.
    */
-  it('does NOT (yet) accept a served body whole — metadata/updatedAt are separate cards', () => {
+  it('[#18728] accepts a served read-route body WHOLE — updatedAt absent, metadata decoded', () => {
     const served = {
       id: 'org_123',
       name: 'Acme Corporation',
       slug: 'acme-corp',
       logo: null,
-      metadata: null,
+      metadata: { plan: 'pro' },
       createdAt: '2026-01-01T00:00:00.000Z',
-      // `updatedAt` absent, exactly as `/auth/organization/create` serves it
+      // `updatedAt` absent, exactly as every route of this family serves it
     };
     const result = OrganizationSchema.safeParse(served);
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      // `logo` is gone from this list — that is this card's contribution.
-      expect(result.error.issues.map((i) => i.path.join('.')).sort()).toEqual([
-        'metadata',
-        'updatedAt',
-      ]);
+    expect(result.error?.issues.map((i) => i.path.join('.')) ?? []).toEqual([]);
+    expect(result.success).toBe(true);
+  });
+
+  it('[#18728] accepts the same body with metadata OMITTED — an unset column', () => {
+    const { metadata: _unset, ...withoutMetadata } = {
+      id: 'org_123',
+      name: 'Acme Corporation',
+      slug: 'acme-corp',
+      logo: null,
+      metadata: { plan: 'pro' },
+      createdAt: '2026-01-01T00:00:00.000Z',
+    };
+    const result = OrganizationSchema.safeParse(withoutMetadata);
+    expect(result.success).toBe(true);
+  });
+
+  it('⭐ [#18728] still REFUSES metadata as null or as the stored JSON text', () => {
+    // The producer omits an unset column and decodes a set one, so neither of
+    // these is a shape any route sends. They must stay refused: if either ever
+    // parses, the producer has regressed or this schema has been loosened to
+    // hide the regression.
+    for (const wrong of [null, '{"plan":"pro"}']) {
+      const result = OrganizationSchema.safeParse({
+        id: 'org_123',
+        name: 'Acme Corporation',
+        slug: 'acme-corp',
+        logo: null,
+        metadata: wrong,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      expect(result.success).toBe(false);
+      expect(result.error?.issues.map((i) => i.path.join('.'))).toEqual(['metadata']);
     }
+  });
+
+  it('⭐ [#18728] `.optional()` widened updatedAt by ABSENCE only — a present value is still a datetime', () => {
+    const result = OrganizationSchema.safeParse({
+      id: 'org_123',
+      name: 'Acme Corporation',
+      slug: 'acme-corp',
+      logo: null,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: 'whenever',
+    });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.map((i) => i.path.join('.'))).toEqual(['updatedAt']);
   });
 });
 

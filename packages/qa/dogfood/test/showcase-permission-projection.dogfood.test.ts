@@ -130,6 +130,12 @@ describe('sys_permission_set pure projection (ADR-0094)', () => {
     const before = await findSet('member_default');
     const res = await stack.apiAs(adminToken, 'DELETE', `/data/sys_permission_set/${before.id}`);
     expect(res.status).toBeLessThan(300);
+    // [#19306] The status cannot tell this reset apart from a real deletion —
+    // the whole envelope used to be byte-identical to one, so every assertion
+    // below stayed green while the door told the caller the set was gone.
+    // `success: false` is the one field that says the record is still here,
+    // and this is the end-to-end pin on it.
+    expect((await res.json())?.success, 'a reset does not report a deletion').toBe(false);
 
     const after = await findSet('member_default');
     expect(after, 'a packaged/declared set cannot be removed from the environment').toBeTruthy();

@@ -107,6 +107,24 @@ const TYPE_TO_STACK_KEY: Readonly<Record<string, string>> = {
   // guard refuses. Landing the mapping first keeps #8310 a registry data edit.
   permission: 'permissions',
   book: 'books',
+  // [#19143] `dataset` — the ADR-0049 declared-not-enforced shape this table
+  // was one half of. `DEFAULT_METADATA_TYPE_REGISTRY` declares the type
+  // `allowRuntimeCreate: true`, so Studio, REST `/meta` and an MCP/AI author
+  // may all mint one at runtime; nothing declared it in `runtimeTypes` and no
+  // row stood here, and the two absences were CONSISTENT rather than
+  // contradictory (the gate filters by `runtimeTypes` before it consults this
+  // table, per the `permission`/`book` note above). What they summed to is
+  // that a dataset write built no snapshot and dispatched no rule at all.
+  //
+  // ⛔ NOT a mapping ahead of its rules — that is the failure the `seed: 'data'`
+  // note above records. The key is `datasets`, the collection
+  // {@link RuntimeStackContext} already carries, and the rules crossed with
+  // this row in the same commit READ it: `validateDatasetReferences` and
+  // `validateDatasetMeasureAggregates` both open with
+  // `recordsOf(stack.datasets)`, and `validateObjectReferences` walks
+  // `datasets[].object`. The door controls that prove each one fires live in
+  // `runtime-gate.dataset-writes.test.ts`.
+  dataset: 'datasets',
 };
 
 /**
@@ -175,6 +193,14 @@ export interface RuntimeStackContext {
    * is judged per dataset, independent of any widget) in the differential, so
    * a stored dataset's pre-existing condition is not this write's to answer
    * for (#4463 D4).
+   *
+   * [#19143] Since `dataset` joined {@link TYPE_TO_STACK_KEY} this collection is
+   * also the one a DATASET write lands inside, with the same replace-not-erase
+   * semantics `objects` / `permissions` / `books` already had — so an updated
+   * dataset is not read as a second dataset of its own name. The cancellation
+   * described above is unchanged and is what keeps a stored dataset's condition
+   * off an unrelated publish; it is now also what keeps the tenant's OTHER
+   * datasets off this one.
    */
   datasets?: readonly unknown[];
 }
@@ -609,12 +635,19 @@ export const WRITTEN_STACK_KEYS: ReadonlySet<string> = new Set(Object.values(TYP
  * ## Measured against the list it replaces (#13390)
  *
  * The members and their order are derived, never transcribed — today `objects`,
- * `permissions`, `books`. `datasets` falls out on its own, for exactly the
- * reason the old comment had to state by hand: it is context-only, no write type
- * maps into it. So **no member needed a hand-written exception** and none is
- * kept. If a future member ever does need one, state it here WITH its reason —
- * quietly re-introducing a literal is the thing this constant now exists to
- * prevent.
+ * `permissions`, `books`, `datasets`. So **no member needs a hand-written
+ * exception** and none is kept. If a future member ever does need one, state it
+ * here WITH its reason — quietly re-introducing a literal is the thing this
+ * constant now exists to prevent.
+ *
+ * [#19143] `datasets` used to fall OUT on its own — context-only, no write type
+ * mapped into it — and the old comment cited that as the exception it no longer
+ * had to hand-write. Mapping the `dataset` type moved it IN, in the same one-key
+ * edit and with no second spelling to remember: a dataset write's snapshot now
+ * holds the tenant's other datasets beside the written one, so `datasets[3]` is
+ * again an offset into an array the caller has never seen. That is the #10064
+ * defect this constant exists to prevent, and the derivation caught the widening
+ * rather than being told about it.
  */
 const NAME_KEYED_STACK_KEYS: readonly string[] = deriveNameKeyedStackKeys(
   CONTEXT_STACK_KEYS,

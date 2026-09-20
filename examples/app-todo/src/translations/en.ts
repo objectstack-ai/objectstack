@@ -47,6 +47,7 @@ export const en: TranslationData = {
           },
         },
         due_date: { label: 'Due Date' },
+        days_overdue: { label: 'Days Overdue' },
         reminder_date: { label: 'Reminder Date/Time' },
         completed_date: { label: 'Completed Date' },
         owner: { label: 'Assigned To' },
@@ -85,26 +86,37 @@ export const en: TranslationData = {
       description: 'Personal task management application',
     },
   },
+  // `messages` ids are single-segment, and that is the whole contract, not a
+  // style preference: `t()` resolves a key by walking its dot path
+  // (`key.split('.')`, identically in `packages/core/src/fallbacks/memory-i18n.ts`
+  // and `packages/services/service-i18n/src/file-i18n-adapter.ts`), while
+  // `messages` is a FLAT `Record<string, string>`. So an id that merely
+  // *contains* a dot — `'common.save'` — is one key NAMED `common.save`, and
+  // `t('messages.common.save', …)` looks for a nested `common` object, finds
+  // none, and returns the key string. `messages.commonSave` resolves (#18566).
+  // Rule: `content/docs/protocol/kernel/i18n-standard.mdx`; proof that every id
+  // below reaches its string through the real `t()`:
+  // `./message-id-resolution.test.ts`.
   messages: {
-    'common.save': 'Save',
-    'common.cancel': 'Cancel',
-    'common.delete': 'Delete',
-    'common.edit': 'Edit',
-    'common.create': 'Create',
-    'common.search': 'Search',
-    'common.filter': 'Filter',
-    'common.sort': 'Sort',
-    'common.refresh': 'Refresh',
-    'common.export': 'Export',
-    'common.back': 'Back',
-    'common.confirm': 'Confirm',
-    'success.saved': 'Successfully saved',
-    'success.deleted': 'Successfully deleted',
-    'success.completed': 'Task marked as completed',
-    'confirm.delete': 'Are you sure you want to delete this task?',
-    'confirm.complete': 'Mark this task as completed?',
-    'error.required': 'This field is required',
-    'error.load_failed': 'Failed to load data',
+    commonSave: 'Save',
+    commonCancel: 'Cancel',
+    commonDelete: 'Delete',
+    commonEdit: 'Edit',
+    commonCreate: 'Create',
+    commonSearch: 'Search',
+    commonFilter: 'Filter',
+    commonSort: 'Sort',
+    commonRefresh: 'Refresh',
+    commonExport: 'Export',
+    commonBack: 'Back',
+    commonConfirm: 'Confirm',
+    successSaved: 'Successfully saved',
+    successDeleted: 'Successfully deleted',
+    successCompleted: 'Task marked as completed',
+    confirmDelete: 'Are you sure you want to delete this task?',
+    confirmComplete: 'Mark this task as completed?',
+    errorRequired: 'This field is required',
+    errorLoadFailed: 'Failed to load data',
   },
   // `validationMessages` retired in spec 17.0.0 (#4667) — no resolver ever read
   // it, so the zh-CN / ja-JP strings here were never rendered and the `en` ones

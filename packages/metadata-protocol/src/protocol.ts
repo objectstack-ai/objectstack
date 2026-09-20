@@ -20,6 +20,12 @@ import { omitInternalFieldsFromWriteResponse } from './write-response-internal-f
 // `{ not: {} }` — is dropped from it. See the module header for the channels
 // that keep carrying the retirement's prescription.
 import { stripUnauthorableProperties } from './unauthorable-nodes.js';
+// [#19295] The output derivation of a `ZodPipe` erases the arm's own input
+// type, so an authoring arm that accepts a bare string is served as the
+// anonymous `{}`. This annotates that husk — and only that husk — so a
+// consumer can tell an ERASED authoring type from a member that genuinely
+// admits anything. See the module header for the predicate and its controls.
+import { markErasedAuthoringInput } from './erased-authoring-mark.js';
 import {
     evaluateRuntimeAuthoringGate,
     CLOSURE_CONTEXT_KEY_BY_TYPE,
@@ -466,6 +472,21 @@ const _warnedDegenerateDerivation = new Set<string>();
  * documented for and it returns `undefined` as it always did — no retry. Not
  * one type's conversion throws today, so retrying there would move no payload
  * while widening the change past the ruling.
+ *
+ * ## [#19295] Why both derivations carry the erased-authoring `override`
+ *
+ * The degeneracy above is a WHOLE-TYPE husk. The same erasure also happens one
+ * level down, per MEMBER: a predicate slot's string arm is a `ZodPipe`, so the
+ * output derivation describes the transform's result and the arm itself is
+ * served as `{}` — indistinguishable from a member that admits anything.
+ * {@link markErasedAuthoringInput} annotates exactly those arms; it adds a
+ * vendor keyword and changes no keyword zod emitted, so what each document
+ * ACCEPTS is untouched and the refused `io: 'input'` widening stays refused.
+ *
+ * It is passed to BOTH calls on purpose. On the authoring retry a pipe derives
+ * from its input side, nothing is erased, and the hook marks nothing — so a
+ * type served from the retry (`action`) carries a real authoring arm instead
+ * of a marked husk, which is the honest answer rather than a gap.
  */
 const _jsonSchemaCache = new WeakMap<z.ZodTypeAny, Record<string, unknown> | null>();
 function toJsonSchemaSafe(schema: z.ZodTypeAny, typeLabel?: string): Record<string, unknown> | undefined {
@@ -474,7 +495,10 @@ function toJsonSchemaSafe(schema: z.ZodTypeAny, typeLabel?: string): Record<stri
 
     let output: Record<string, unknown>;
     try {
-        output = z.toJSONSchema(schema, { unrepresentable: 'any' }) as Record<string, unknown>;
+        output = z.toJSONSchema(schema, {
+            unrepresentable: 'any',
+            override: markErasedAuthoringInput,
+        }) as Record<string, unknown>;
     } catch {
         // Conversion failed outright — the original hand-crafted-fallback case.
         _jsonSchemaCache.set(schema, null);
@@ -491,7 +515,11 @@ function toJsonSchemaSafe(schema: z.ZodTypeAny, typeLabel?: string): Record<stri
     // before giving up — for a `ZodPipe` this is the derivation that can see
     // the object at all.
     try {
-        const authoring = z.toJSONSchema(schema, { unrepresentable: 'any', io: 'input' }) as Record<string, unknown>;
+        const authoring = z.toJSONSchema(schema, {
+            unrepresentable: 'any',
+            io: 'input',
+            override: markErasedAuthoringInput,
+        }) as Record<string, unknown>;
         if (!isDegenerateDerivation(authoring)) {
             const authorable = stripUnauthorableProperties(authoring);
             _jsonSchemaCache.set(schema, authorable);
@@ -6323,14 +6351,32 @@ export class ObjectStackProtocolImplementation implements
             // Atomic cross-object batch (#3298 / #1604 / ADR-0034 item 4): the
             // REST /batch endpoint runs its ops inside `engine.transaction()`,
             // which only opens a real (all-or-nothing) transaction when the
-            // engine exposes one — otherwise it degrades to a non-atomic
-            // passthrough. Advertise the capability iff the runtime engine can
-            // honour a transaction, so `declared === enforced` (Prime Directive
-            // #10). The rest-server producer ANDs this with `api.enableBatch` so
-            // a server that doesn't mount the route reports `false` at its layer.
-            // (ADR-0119 D1: `transaction` is contract-declared, so this probe
-            // no longer needs a structural cast to ask the question.)
-            transactionalBatch: typeof this.engine?.transaction === 'function',
+            // DEFAULT DRIVER can carry one — otherwise it takes its declared
+            // non-transactional path (ADR-0119 D1) and the batch degrades to a
+            // non-atomic passthrough. Advertise the capability iff the runtime
+            // can actually roll back, so `declared === enforced` (Prime
+            // Directive #10). The rest-server producer ANDs this with
+            // `api.enableBatch` so a server that doesn't mount the route reports
+            // `false` at its layer.
+            //
+            // [#18997] `engineCanRollBack`, NOT `typeof this.engine?.transaction
+            // === 'function'`. The refusal this advertisement exists to help a
+            // caller avoid — `runAtomicBatch`'s `501 NOT_IMPLEMENTED`, whose own
+            // remedy text says to probe `capabilities.transactionalBatch` on
+            // /discovery first — already asks `engineCanRollBack`, which asks the
+            // DRIVER as well as the engine. `engine.transaction` is a function on
+            // every real engine, so the engine-only probe answered `true` for the
+            // two compositions that 501: a default driver with no
+            // `beginTransaction` at all, and one that INHERITED it and declared
+            // `supports.transactionsUnsupported` (#18063). An advertised
+            // capability must answer the same question the refusal path asks,
+            // from the same predicate — two derivations of one capability is how
+            // these drifted. Narrowing only: this predicate is the engine probe
+            // AND a driver clause, so no composition newly advertises `true`
+            // (`protocol.discovery-transactional-batch-honesty.test.ts` pins both
+            // directions, and the driver clause is skipped where the registry is
+            // not inspectable, so a test double keeps its old answer).
+            transactionalBatch: engineCanRollBack(this.engine),
 
             // ── Joined the vocabulary with ruling A (#5672) ───────────────────
             // These six used to be the runtime dispatcher's half of the split.
@@ -11390,10 +11436,33 @@ export class ObjectStackProtocolImplementation implements
         // POSITIVE not-found signal, and inventing a 404 out of it would break
         // deletes against third-party drivers rather than report honestly.
         if (deleted === false) throw recordNotFoundError(request.object, request.id);
+        // The same measurement, one outcome over: `success` was still a
+        // LITERAL for every answer that was not the contract's `false`, so a
+        // row that MATCHED and was deliberately NOT removed reported a
+        // deletion. `sys_permission_set` is the shipped case — a
+        // package-declared set's delete is an ADR-0005 RESET, the record
+        // re-projects to the declared body instead of vanishing — and the
+        // envelope was byte-identical to a real delete, so a UI fired a
+        // success toast and showed the row again on refresh.
+        //
+        // `success` is declared "Whether deletion succeeded", and this is the
+        // only key on `DeleteDataResponseSchema` that can carry the
+        // difference; zero rows removed is a deletion that did not succeed.
+        // The engine's delete result declares two arms — the driver's boolean
+        // for a by-id write, a COUNT of rows removed otherwise — so a numeric
+        // zero is the one answer that positively means "the row is still
+        // there", and it is what the middleware that performs a reset now
+        // returns. It cannot say so with `false`: that value is spoken for by
+        // the not-found 404 above, which would be a second lie about a record
+        // this caller can still GET.
+        //
+        // Everything else keeps its #4435 reading, including an off-contract
+        // `undefined` from a third-party driver: only a POSITIVE zero is read
+        // as "not removed".
         return {
             object: request.object,
             id: request.id,
-            success: true
+            success: deleted !== 0
         };
     }
 
@@ -13049,8 +13118,51 @@ export class ObjectStackProtocolImplementation implements
                 // `id` is `unknown` to this helper only because the caller's
                 // fail-closed `isScalarId` guard is what proves it scalar.
                 if (deleted === false) throw recordNotFoundError(object, id as string | number);
-                results.push({ id: String(id), success: true, index });
-                succeeded++;
+                // [#19412] The SECOND half of the same site. The paragraph above
+                // fixed "no match"; this is "matched, and deliberately NOT
+                // removed" — and until now `success` was still a LITERAL for
+                // every answer that was not the contract's `false`, so that row
+                // was reported as a deletion too.
+                //
+                // `sys_permission_set` is the shipped case: a package-declared
+                // set's delete is an ADR-0005 RESET — plugin-security's
+                // write-through tombstones the overlay and the record
+                // re-projects to the declared body instead of vanishing — so the
+                // row MATCHED, the write ran, and the record is still there. The
+                // batch envelope said `success: true` and counted it in
+                // `succeeded`, which on a security-configuration write tells an
+                // operator a permission set is gone while it is still enforced.
+                //
+                // `IDataEngine.delete` declares `Promise<boolean | number>` —
+                // the driver's boolean for a by-id write, a COUNT of rows
+                // removed otherwise — so a numeric zero is the one value that
+                // positively means "it is still there". ⛔ Not `false`: that
+                // arm is spoken for by the 404 above, about a record this caller
+                // can still GET, and answering it here would trade one wrong
+                // answer for a louder one. Everything else keeps its #4435
+                // reading, an off-contract `undefined` from a third-party driver
+                // included: only a POSITIVE zero is read as "not removed".
+                //
+                // ⛔ The row is NOT given an `errors[]` entry. A surviving record
+                // is an OUTCOME, not a fault — the single-record door answers the
+                // same case with a bare `success: false` on a 200 — and the two
+                // per-row codes this envelope owns (`ROLLED_BACK`,
+                // `NOT_ATTEMPTED`) both describe a row that never ran. Whether
+                // this ending deserves a per-row code of its own is a
+                // `packages/spec` widening (ERROR_CODE_LEDGER) and belongs to the
+                // spec lane, not here.
+                //
+                // It is counted in `failed` because that is the envelope's ONE
+                // declared reading — `succeeded` and `failed` PARTITION `results`
+                // (#7539, `reconcileStoppedBatch`) — which also makes the
+                // request-level `success` false and, on the `atomic` arm, aborts
+                // the batch through `runAtomicBatch`'s `failed > 0`. It does NOT
+                // stop a non-atomic run: the `continueOnError` stop belongs to
+                // the catch below, and nothing was thrown.
+                const removed = deleted !== 0;
+                results.push({ id: String(id), success: removed, index });
+                if (removed) succeeded++;
+                else failed++;
             } catch (err: any) {
                 results.push({ id: String(id), success: false, index, errors: [toRowApiError(err, rowOperationFailureFallback('delete'))] });
                 failed++;
@@ -22307,8 +22419,38 @@ export class ObjectStackProtocolImplementation implements
      *      rows back into the registry on boot).
      *
      * The DB write is best-effort and non-fatal: when the `package` service is
-     * absent (e.g. the `marketplace` capability is off) the package is still
-     * registered in-memory and visible for the lifetime of the process.
+     * absent the package is still registered in-memory and visible for the
+     * lifetime of the process — and that in-memory-only branch STAYS, as the
+     * documented degraded path for reduced hosts (#17676 ruling A' item 2,
+     * decision batch #125 item 2). ⛔ It is not a bug to delete: a host that
+     * mounts no provider (`objectstack serve --preset minimal`, a metadata-only
+     * embedding) must still be able to install a package for the life of its
+     * process, and the `warn` below is what keeps the degradation from being
+     * silent.
+     *
+     * Which capability OWNS the service is no longer `marketplace`: ruling A'
+     * item 1 split the persistence half — the `sys_packages` container and the
+     * boot hydration that replays it — out under its own always-on token
+     * `package-registry` (`PLATFORM_ALWAYS_ON_CAPABILITIES`,
+     * `packages/spec/src/kernel/platform-capabilities.ts`), leaving
+     * `marketplace` naming only the optional catalogue / browsing half. ⚠️ The
+     * runtime half of that split is NOT landed: measured on `origin/main` at
+     * c334ba0f3a, `Serve.CAPABILITY_PROVIDERS`
+     * (`packages/cli/src/commands/serve.ts`) keys `marketplace` and does not key
+     * `package-registry`, so the always-on token is force-appended to every
+     * app's `requires` and then resolves to no provider — silently, because the
+     * resolver only warns for tokens outside the vocabulary. ⇒ on a stock
+     * `objectstack dev` boot of an app that does not itself declare
+     * `requires: ['marketplace']`, this branch is still the one taken, which is
+     * the defect #17676 reports. Recorded here rather than worked around: the
+     * fix belongs to the capability resolver, not to this primitive.
+     *
+     * [#19277] `request.enableOnInstall` is HONOURED here, under the same rule
+     * the HTTP door implements — 「缺省 = 保持，有旗 = 设置」: `true` enables,
+     * `false` disables, and an ABSENT key makes no lifecycle call at all. The
+     * durable disabled-package FILE is not this seam's to write (it is keyed by
+     * environment, which this request does not carry); see the comment on the
+     * flag arms below.
      */
     async installPackage(request: InstallPackageRequest): Promise<InstallPackageResponse> {
         // #2532 — runtime-created base packages routinely arrive versionless
@@ -22345,7 +22487,63 @@ export class ObjectStackProtocolImplementation implements
         // only); an unparsed range never causes a false rejection.
         assertProtocolCompat(manifest);
 
-        const pkg = this.engine.registry.installPackage(manifest as any, request.settings);
+        let pkg = this.engine.registry.installPackage(manifest as any, request.settings);
+
+        // [#19277] HONOUR `enableOnInstall` — the key THIS request contract
+        // declares and this primitive read past. `InstallPackageRequestSchema`
+        // (`packages/spec/src/kernel/package-registry.zod.ts`) has carried the
+        // key since it was written, and the implementation here read
+        // `request.manifest` and `request.settings` and nothing else: a caller
+        // that switched the option off got an ENABLED install, with no refusal
+        // and no warning. That is «declared but not enforced» on a published
+        // option — what ADR-0049 (enforce-or-remove) and Prime Directive #10
+        // refuse outright. Ruling batch #153 item 5 letter 1 (#18605) kept the
+        // kernel declaration as a COPY of the HTTP request key with the SAME
+        // meaning, so the disposition is ENFORCE, not retire.
+        //
+        // ⭐ The contract is 「缺省 = 保持，有旗 = 设置」 — maintainer ruling batch
+        // #157 item 5 letter C, the same rule the HTTP door implements
+        // (`packages/runtime/src/domains/packages.ts`). Three states, three
+        // outcomes, through the SAME registry verbs `PATCH /packages/:id/enable`
+        // and `PATCH /packages/:id/disable` use:
+        //
+        //   true    ⇒ enablePackage
+        //   false   ⇒ disablePackage
+        //   absent  ⇒ nothing at all; the row the registry returned stands
+        //
+        // ⚠️ The `true` arm is not decoration. `SchemaRegistry.installPackage`
+        // has preserved an existing row's `enabled` / `status` /
+        // `statusChangedAt` since #18877, so on a re-install nothing else will
+        // clear a disable any more — dropping this arm would silently stop
+        // honouring `true` on exactly the path an upgrade takes.
+        //
+        // ⚠️ `=== true` / `=== false`, never a truthiness test and never a `??`
+        // default: the THREE states of this key are the contract, and
+        // collapsing absent into either one is the defect. The declaration's own
+        // `.default(true)` never reaches here — nothing parses an install
+        // request through `InstallPackageRequestSchema` on this path — so
+        // absence arrives intact and is read as absence.
+        //
+        // ⛔ What this seam does NOT write, recorded so it is not mistaken for
+        // an oversight: the runtime's durable disabled-package file. That record
+        // is keyed by ENVIRONMENT (`setPackageDisabled(environmentId, id,
+        // disabled)`, `packages/runtime/src/package-state-store.ts`) and this
+        // request carries no environment, so the key cannot even be formed here;
+        // the module also lives in `@objectstack/runtime`, which depends on this
+        // package and not the other way round. The HTTP door owns that half and
+        // writes it from the row it returned. So `enableOnInstall` through this
+        // primitive moves the registry row — what every in-process reader serves
+        // from — for the life of the process, and a caller that needs the choice
+        // to survive a restart goes through the door that owns the durable
+        // record.
+        const requestedEnabled = request.enableOnInstall;
+        if (requestedEnabled === true) {
+            const enabled = this.engine.registry.enablePackage(manifest.id);
+            if (enabled) pkg = enabled;
+        } else if (requestedEnabled === false) {
+            const disabled = this.engine.registry.disablePackage(manifest.id);
+            if (disabled) pkg = disabled;
+        }
 
         // Best-effort durable persistence to `sys_packages` (non-fatal by
         // design — without the `package` service the install stays visible
@@ -22388,6 +22586,10 @@ export class ObjectStackProtocolImplementation implements
      * service so the edit survives a restart. Persistence is best-effort and
      * non-fatal (matching `installPackage`): the registry write already
      * succeeded, so a persist failure is logged, never thrown.
+     *
+     * The service-absent branch below is the same documented degraded path
+     * #17676 ruling A' item 2 keeps — see `installPackage`'s note for which
+     * capability owns the service and for the measured state of that split.
      */
     async updatePackage(request: {
         packageId: string;

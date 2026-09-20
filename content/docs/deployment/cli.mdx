@@ -589,7 +589,7 @@ os compile --json                    # JSON output for CI pipelines
   → Normalizing stack definition...
   → Lowering inline handlers...
   → Validating protocol compliance...
-  → Running author-time rules (45)...
+  → Running author-time rules (46)...
   → Checking capability providers (#3366)...
   → Collecting package docs (ADR-0046)... 0 collected
   → Writing artifact...
@@ -608,9 +608,21 @@ below — the same fixture backs both output examples. It ships no `src/docs/`
 directory, which is why the docs step reads `0 collected`.
 
 The docs step reports what it collected, not what it attempted — a project whose
-`src/docs/` is empty, or whose docs directory moved into a package under an
-ADR-0130 layout, prints `0 collected` here instead of the same sentence a
+`src/docs/` is empty prints `0 collected` here instead of the same sentence a
 successful collection prints.
+
+Under an **ADR-0130 multi-package layout**, docs that moved into a package are
+collected too: a `src/<pkg>/docs/` directory whose `<pkg>` names one of the
+artifact's declared `packages[]` entries is read into **that package's own
+body**, and the step line says so:
+`12 collected (4 from 2 package directories)`.
+`<pkg>` is matched against two spellings of the package: its
+`id`, and the last dot-separated segment of that `id`. The display `name` is
+⛔ not a directory key — it is free to be re-worded, and a docs binding a
+re-wording can break is worse than one that never existed. A directory
+that matches **none** of the declared packages, or **more than one**, is still
+not read — that case keeps the warning that names the files it skipped and the
+spellings it tried, so it is never a silent `0 collected`.
 
 The resulting `dist/objectstack.json` is a **portable, self-describing deployment unit** —
 you can hand it to `os start` (locally or on a server), publish it to a CDN, or fetch it

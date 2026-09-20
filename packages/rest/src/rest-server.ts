@@ -157,6 +157,7 @@ import {
     isApiOperationAllowed,
     API_PRIMITIVES,
     DATA_ACTION_TO_API_OPERATION,
+    referenceCarrierOf,
 } from '@objectstack/spec/data';
 // [#8013] The SHARED envelope writer (#3973), aliased. [#9098] The alias no
 // longer exists to dodge a NAME collision — the local responder this used to
@@ -10842,6 +10843,17 @@ export class RestServer {
                     const p = await this.resolveProtocol(environmentId, req);
                     let referenceObject: string | undefined = picker.object;
                     if (!referenceObject && typeof (p as any).getMetaItems === 'function') {
+                        // [#18550] The field def is HOISTED out of the fetch's
+                        // swallow and the carrier is read after it, deliberately.
+                        // The `catch` below exists for the metadata fetch — a
+                        // protocol that cannot answer leaves `referenceObject`
+                        // unset and the route answers `500 LOOKUP_TARGET_MISSING`
+                        // — and an unreadable carrier read INSIDE it would be
+                        // swallowed by it and land on that same envelope, which
+                        // is the conflation this card exists to end: "no target
+                        // is declared" and "the declared target cannot be read"
+                        // want different fixes from whoever owns the metadata.
+                        let fieldDef: unknown;
                         try {
                             const objectsRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
                                 type: 'object',
@@ -10850,7 +10862,6 @@ export class RestServer {
                             const r: any = await p.getMetaItems(objectsRequest);
                             const items: any[] = Array.isArray(r?.items) ? r.items : Array.isArray(r) ? r : [];
                             const obj = items.find((o: any) => o?.name === match.object);
-                            const def = obj?.fields?.[fieldName];
                             // [#7486] Resolve the target from the canonical key — and, since
                             // [#12920], from it ALONE. `reference` is the spelling `FieldSchema`
                             // accepts, so it is the only spelling a field def can legitimately
@@ -10886,8 +10897,21 @@ export class RestServer {
                             // tolerated is the ADR-0087 conversion layer (`fieldReferenceToAlias`),
                             // replayed on stored-row rehydration — declared, tested and removable
                             // on a schedule, which a `??` arm here never was.
-                            referenceObject = def?.reference;
+                            //
+                            // [#18550] The canonical-key read itself now happens just BELOW this
+                            // `catch`, through the one arbiter — see there for why it moved.
+                            fieldDef = obj?.fields?.[fieldName];
                         } catch {/* ignore */}
+                        // ABSENCE stays silent and unchanged: `undefined` /
+                        // `null` / `''` all answer `undefined`, so the route
+                        // falls to the `LOOKUP_TARGET_MISSING` refusal below
+                        // exactly as before. UNREADABILITY throws past this
+                        // handler's outer `catch`, which classifies and LOGS it
+                        // (`mapDataError` + `logError`) rather than reporting a
+                        // missing target — and it also stops an object-valued
+                        // carrier from being forwarded as `query.object` into
+                        // `findData`, which is what it did before this change.
+                        referenceObject = referenceCarrierOf(fieldDef, 'REST public-form lookup picker');
                     }
                     if (!referenceObject) {
                         res.status(500).json({
@@ -11667,6 +11691,20 @@ export class RestServer {
                     msg.startsWith('[Security] Access denied')
                 ) {
                     return respondError(res, 403, 'PERMISSION_DENIED', msg.slice(0, 1000));
+                }
+                // [#18253] The name asked about is not a declared object
+                // (`ExplainObjectNotFoundError`, plugin-security `errors.ts`) —
+                // a REFUSAL, not a fault, so it keeps its declared answer
+                // instead of falling to the 500 below. 404 `OBJECT_NOT_FOUND`
+                // is what this package already answers for an unregistered
+                // object name (`mapDataError`, `error-response.ts`), emitted
+                // here through this family's ONE refusal emitter so the body
+                // is the same ADR-0112 D5 envelope every other arm sends.
+                // Matched by `code`/`name`, exactly as the 403 arm above is:
+                // `@objectstack/plugin-security` is not a dependency of this
+                // package, and the thrown shape is the contract (#8016).
+                if (error?.code === 'OBJECT_NOT_FOUND' || error?.name === 'ExplainObjectNotFoundError') {
+                    return respondError(res, 404, 'OBJECT_NOT_FOUND', msg.slice(0, 1000));
                 }
                 logError('[REST] Security explain error:', error);
                 // The 500 arm keeps its 500-char cap: an unexpected fault's

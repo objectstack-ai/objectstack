@@ -332,8 +332,20 @@ export function tupleFirstItems(body) {
  *   Every one of the eight sites is correct to omit it, so counting it would
  *   manufacture eight simultaneous deviations and drive eight waiver rows that
  *   each assert the opposite of the truth.
+ * - `devLogins` (#17556) carries what the DEVELOPMENT BOOT BANNER prints — the
+ *   first-run credentials an application contributes so an operator is pointed
+ *   at an account that actually shows something. Its one reader is the CLI
+ *   banner, off the top level of the definition it booted. It names no metadata
+ *   type, registers nothing, persists nothing and creates no account: an entry
+ *   is presentation about accounts the application seeds by other means. Like
+ *   `packages` it has no singular name in `PLURAL_TO_SINGULAR`, no artifact
+ *   subdirectory, no `registerInMemory` kind and no map form — and it is an
+ *   artifact ENVELOPE key besides (`ASSEMBLED_PACKAGE_BODY_ENVELOPE_KEYS`), so
+ *   it is refused inside `packages[].manifest` exactly as `devPlugins` is. All
+ *   eight sites are correct to omit it, so the same eight-contradictory-waivers
+ *   outcome applies.
  */
-const NON_COLLECTION_ARRAY_KEYS = new Set(['packages']);
+const NON_COLLECTION_ARRAY_KEYS = new Set(['packages', 'devLogins']);
 
 /**
  * The stack-collection set: top-level `ObjectStackDefinitionSchema` keys whose

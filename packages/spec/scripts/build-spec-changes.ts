@@ -18,10 +18,19 @@
  * Release-time surface join: `--previous-surface <path>` diffs the current
  * committed export surface against a previously *published* one (both ship in
  * the npm artifact from protocol 15 on) and fills the `added[]`/`removed[]`
- * arrays of the aggregate record, attributed to the current major. The Release
- * workflow runs this against the last published spec tarball and attaches the
- * result to the GitHub Release; the committed copy keeps `added`/`removed`
- * empty (registry-derived content only) so it stays deterministic.
+ * arrays of the aggregate record. The Release workflow runs this against the
+ * last published spec tarball and attaches the result to the GitHub Release; the
+ * committed copy keeps `added`/`removed` empty (registry-derived content only)
+ * so it stays deterministic.
+ *
+ * ⚠️ That diff is ONE RELEASE wide while the aggregate record is keyed by
+ * protocol MAJOR (`from: 10, to: 17`), so the arrays ship with
+ * `surfaceScope: { fromVersion, toVersion }` naming the pair they really span.
+ * Without it a consumer read one minor's 225-export slice as the whole 10 → 17
+ * delta — with `perMajor[16 → 17].added` sitting at `0` beside it and no field
+ * distinguishing the two. The previous version is read off the previous
+ * artifact's own `package.json`; when it cannot be read the arrays are OMITTED,
+ * loudly, and a non-empty unlabelled array is refused outright.
  *
  * `<path>` is whichever shape that published tarball carried: the `api-surface/`
  * directory from #5837 on, or the single `api-surface.json` before it. Reading
@@ -68,9 +77,11 @@ import {
   composeSpecChanges,
   SpecChangesSchema,
   SpecReleaseChangesSchema,
+  surfaceScopeProblem,
   type SpecReleaseChanges,
   type SpecSurfaceAdd,
   type SpecSurfaceRemove,
+  type SpecSurfaceScope,
 } from '../src/migrations/spec-changes';
 import { API_SURFACE_DIR_NAME, readApiSurfaceFrom } from './lib/sharded-artifacts';
 
@@ -103,6 +114,39 @@ const PREV_SURFACE = PREV_PACKAGE
   : prevSurfaceIdx >= 0
     ? process.argv[prevSurfaceIdx + 1]
     : undefined;
+
+/**
+ * The `version` of the unpacked published tarball an export snapshot came out
+ * of, or `null` when the snapshot's path does not sit inside one.
+ *
+ * `--previous-package` points at the `package/` root, so the manifest is right
+ * there; `--previous-surface` points at the snapshot itself (`api-surface/` or
+ * `api-surface.json`), whose parent is that same root in every shape the release
+ * lane has ever produced. Read, never transcribed — the same discipline
+ * {@link previousRelease} already applies to the registry ids.
+ */
+function publishedVersionAt(pkgDir: string): string | null {
+  const pkgPath = resolve(pkgDir, 'package.json');
+  if (!existsSync(pkgPath)) return null;
+  const version = (JSON.parse(readFileSync(pkgPath, 'utf8')) as { version?: string }).version;
+  return typeof version === 'string' && version.length > 0 ? version : null;
+}
+
+/**
+ * The version pair the aggregate's `added`/`removed` really span, or `null` when
+ * the previous release's version cannot be read off the inputs.
+ *
+ * ⛔ `null` is not "omit the label" — the caller then omits the ARRAYS, loudly.
+ * An unlabelled export diff under a major-keyed record is the defect this whole
+ * field exists to end, so producing it would be worse than producing nothing.
+ */
+function surfaceScope(): SpecSurfaceScope | null {
+  const root = PREV_PACKAGE ?? (PREV_SURFACE ? resolve(PREV_SURFACE, '..') : undefined);
+  if (!root) return null;
+  const fromVersion = publishedVersionAt(root);
+  if (!fromVersion) return null;
+  return { fromVersion, toVersion: THIS_VERSION };
+}
 
 /** Flatten an export surface ({ entry: ["name (kind)", …] }) into one set. */
 function flattenSurface(path: string): Set<string> {
@@ -186,7 +230,23 @@ function buildReleaseSection(current: ReturnType<typeof composeSpecChanges>): Sp
 }
 
 function build(): string {
-  const surfaceDiff = PREV_SURFACE ? diffSurfaces(PREV_SURFACE) : {};
+  // The export diff spans ONE RELEASE, so it ships only with the version pair
+  // that says so. No readable previous version ⇒ no arrays, and the reason is
+  // printed: an unlabelled slice under the MAJOR-keyed aggregate record is read
+  // as the whole major-boundary delta, which is strictly worse than an empty
+  // one — the same call `buildReleaseSection` makes for the same reason.
+  const scope = surfaceScope();
+  let surfaceDiff: ReturnType<typeof diffSurfaces> | { scope?: SpecSurfaceScope } = {};
+  if (PREV_SURFACE && scope) {
+    surfaceDiff = { ...diffSurfaces(PREV_SURFACE), scope };
+  } else if (PREV_SURFACE) {
+    console.error(
+      `No aggregate export diff: the previous artifact at ${PREV_PACKAGE ?? PREV_SURFACE} carries no ` +
+        'readable package.json, so the version pair the diff spans cannot be read. Omitting ' +
+        '`added`/`removed` — an unlabelled one-release slice under the major-keyed aggregate record ' +
+        'reads as the whole from → to delta.',
+    );
+  }
 
   // Per-major records compose (ADR-0087 D4): any tool can fold them into a
   // single from→to view. The aggregate is that fold, precomputed.
@@ -197,6 +257,11 @@ function build(): string {
   const aggregate = SpecChangesSchema.parse(
     composeSpecChanges(MIGRATION_SUPPORT_FLOOR, PROTOCOL_MAJOR, surfaceDiff),
   );
+  const problem = surfaceScopeProblem(aggregate);
+  if (problem) {
+    console.error(`Refusing to write ${SNAPSHOT}: ${problem}`);
+    process.exit(1);
+  }
   const release = buildReleaseSection(aggregate);
 
   const doc = {
@@ -204,6 +269,12 @@ function build(): string {
       'GENERATED (ADR-0087 D4) — do not edit. Regenerate with: pnpm --filter @objectstack/spec gen:spec-changes. ' +
       'A projection of the D2 conversion table + D3 migration chain; the upgrade guide and the MCP spec_changes ' +
       'tool derive from this same data. ' +
+      'A record\'s `added`/`removed` are NOT at its `from` → `to` MAJOR resolution: they come from an ' +
+      'api-surface diff against the previously PUBLISHED artifact, so they span ONE RELEASE. When they are ' +
+      'non-empty the record carries `surfaceScope: { fromVersion, toVersion }` naming exactly that pair, and a ' +
+      'release whose arrays disagree with the two tarballs — or carry no `surfaceScope` — does not publish. ' +
+      'Absent `surfaceScope` means the record carries no export diff at all (`added`/`removed` empty), never ' +
+      '"nothing was added between from and to". ' +
       'When a `release` section is present, its four ADR-0087 D4 arrays report what that release ADDED: ' +
       '`added`/`removed` are the export-surface diff of the two published tarballs, and `converted`/`migrated` ' +
       'are the D2/D3 ids FIRST REGISTERED in it. An id that LEFT the published chain between the two releases ' +

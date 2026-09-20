@@ -64,7 +64,7 @@ Server-connected object table with toolbar and switchable visualizations (grid/k
 | `options` | `Record<string, any>` | binding |  | View-type-specific options bag (kanban/calendar/gantt extras); prefer the typed spec props where they exist. |
 | `filters` | `FilterArray e.g. ['status','=','active']` | controlled |  | ObjectQL base filter; drive from React state for tabbed/searched lists. ([field, op, value]; ops =, !=, >, <, contains, in; compound: ["and", […], […]]). |
 | `onRowClick` | `(record) => void` | callback |  | Called with the clicked row's record — the hook for master/detail. |
-| `onNavigate` | `(recordId, action: 'view' \| 'edit') => void` | callback |  | Called for page-level navigation. |
+| `onNavigate` | `(recordId, action: 'view' \| 'new_window') => void` | callback |  | Called for page-level navigation. The second argument is a navigation-MODE token from a CLOSED vocabulary — 'view' opens the record page, 'new_window' opens it in a new browser tab; the reference implementation emits no other value and reads no other branch. |
 | `columns` | `string[] \| object[]` | data | ✓ | Fields to display as columns |
 | `type` | `'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'` | data |  |  |
 | `sort` | `object[]` | data |  |  |
@@ -93,9 +93,9 @@ Chart over an object’s aggregated data. Bind objectName + aggregate; the axes 
 | `subtitle` | `string \| object` | data |  | Chart subtitle |
 | `description` | `string \| object` | data |  | Accessibility description — announced to screen readers as the chart’s label |
 | `height` | `number` | data |  | Fixed plot height in pixels (overrides the container default) |
-| `xAxis` | `object` | data |  | X-Axis configuration |
-| `yAxis` | `object[]` | data |  | Y-Axis configuration (support dual axis) |
-| `series` | `object[]` | data |  | Defined series configuration |
+| `xAxis` | `object` | data |  | X-Axis configuration. Structure, not appearance — authorable where the chart has inline data; refused by name on a dataset-bound dashboard widget, where the da… |
+| `yAxis` | `object[]` | data |  | Y-Axis configuration (support dual axis). Structure, not appearance — authorable where the chart has inline data; refused by name on a dataset-bound dashboard … |
+| `series` | `object[]` | data |  | Defined series configuration. Structure, not appearance — authorable where the chart has inline data; refused by name on a dataset-bound dashboard widget, wher… |
 | `colors` | `string[] \| object` | data |  | Color palette (string[]) or value→color map ({ value: color }) |
 | `showLegend` | `boolean` | data |  | Display legend |
 | `showDataLabels` | `boolean` | data |  | Display data labels |

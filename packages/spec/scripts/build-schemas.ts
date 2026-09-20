@@ -42,7 +42,10 @@ import {
   type UnemittedSkip,
 } from './lib/unemitted-schemas';
 import {
+  UNPROJECTABLE_BRANCHES_KEY,
+  auditUnprojectableBranchRecord,
   projectByPruningUnionBranches,
+  type BranchProjection,
   type PrunedBranch,
 } from './lib/union-branch-projection';
 // The closed list of refinements this generator DOES publish (#18670 item 2).
@@ -449,6 +452,13 @@ const branchPrunedProjections: Array<{
 // keyed by something else is a second thing to keep in step.
 const refinementCensus: RefinementCensusEntry[] = [];
 
+// Every disagreement between an `x-unprojectable-branches` record and the
+// artifact it was written onto (#17107). Collected rather than thrown because
+// this loop's own catch reads a throw as "this export has no JSON Schema" and
+// would file the export as an ordinary skip — the record being wrong is the
+// opposite of that, and it is a build failure of its own kind, reported below.
+const branchRecordDefects: string[] = [];
+
 // Error messages for schema types that inherently cannot be represented in JSON Schema.
 // These are expected warnings, not build-breaking errors.
 const KNOWN_UNSUPPORTED_PATTERNS = [
@@ -497,6 +507,7 @@ for (const [namespaceName, namespaceExports] of Object.entries(Protocol)) {
           let jsonSchema: Record<string, unknown>;
           let io: 'output' | 'input' = 'output';
           let prunedBranches: readonly PrunedBranch[] = [];
+          let branchProjection: BranchProjection | null = null;
           try {
             jsonSchema = projectPublishedJsonSchema(value) as Record<string, unknown>;
           } catch (outputError) {
@@ -524,6 +535,7 @@ for (const [namespaceName, namespaceExports] of Object.entries(Protocol)) {
               jsonSchema = projected.schema;
               io = projected.io;
               prunedBranches = projected.pruned;
+              branchProjection = projected;
             }
           }
 
@@ -536,17 +548,28 @@ for (const [namespaceName, namespaceExports] of Object.entries(Protocol)) {
             // shape — parse-time transforms/defaults are not applied in it.
             jsonSchema['x-io'] = 'input';
           }
-          if (prunedBranches.length > 0) {
+          if (branchProjection && prunedBranches.length > 0) {
             // Say it on the artifact, not only in the build log (#16431 (a)).
             // A reader of this file — or of the reference page rendered from it
             // — can otherwise not tell that the Zod type carries a branch no
             // JSON document could ever satisfy, and the `.describe()` prose
             // above the union DOES name it (the ordering comparand's text says
             // "a number, a Date, a string, or a { $field } reference").
-            jsonSchema['x-unprojectable-branches'] = prunedBranches.map((branch) => ({
+            jsonSchema[UNPROJECTABLE_BRANCHES_KEY] = prunedBranches.map((branch) => ({
               at: branch.at,
               type: branch.type,
             }));
+            // ⭐ And READ it back, here, in the one place that still holds the
+            // tree the record describes (#17107). A published record nothing
+            // consumes is a claim no run can contradict: the guard below is
+            // what makes `x-unprojectable-branches` a statement about this
+            // artifact rather than a decoration on it. It reads the record
+            // the way a consumer of the file would — off `jsonSchema`, by its
+            // key — and checks it against the projection, so the two can never
+            // agree merely by being computed from the same expression twice.
+            for (const defect of auditUnprojectableBranchRecord(jsonSchema, branchProjection)) {
+              branchRecordDefects.push(`${namespaceName}.${key}: ${defect}`);
+            }
             branchPrunedProjections.push({ namespace: namespaceName, exportKey: key, pruned: prunedBranches });
           }
 
@@ -651,6 +674,21 @@ if (errorCount > 0) {
 // measure def keys, and a collision produces exactly one), and neither should
 // adjudicate a build whose output already depends on export iteration order.
 // See lib/def-key-collisions.ts for why a self-alias is exempt.
+// ─── Guard: the branch record describes the artifact it rides on (#17107) ───
+// `x-unprojectable-branches` is published — `files[]` ships `json-schema/` — and
+// until this guard it had one writer and no reader at all, so nothing in the
+// repo could tell a faithful record from one naming branches this projection
+// never dropped. Fatal, not a warning: the record is the only statement on the
+// file that the Zod type behind it accepts a shape the file does not.
+if (branchRecordDefects.length > 0) {
+  console.error(
+    `\n❌ ${branchRecordDefects.length} \`${UNPROJECTABLE_BRANCHES_KEY}\` record(s) disagree with the ` +
+      `schema they annotate:`,
+  );
+  for (const defect of branchRecordDefects) console.error(`     ⤷ ${defect}`);
+  process.exit(1);
+}
+
 const defKeyCollisions = findDefKeyCollisions(emittedDefs);
 if (defKeyCollisions.length > 0) {
   console.error(`\n❌ ${formatDefKeyCollisions(defKeyCollisions)}`);

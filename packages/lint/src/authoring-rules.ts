@@ -103,6 +103,7 @@ import { validateFunctionalCompleteness } from './validate-functional-completene
 import { validateManagedApiMethods } from './validate-managed-api-methods.js';
 import { validateViewContainers } from './validate-view-containers.js';
 import { validateWidgetBindings } from './validate-widget-bindings.js';
+import { validateDatasetMeasureAggregates } from './validate-dataset-measure-aggregates.js';
 import { validateDashboardActionRefs } from './validate-dashboard-action-refs.js';
 import { validateFilterTokens } from './validate-filter-tokens.js';
 import { validateFlowFilterTokens } from './validate-flow-filter-tokens.js';
@@ -601,6 +602,48 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     runtimeTypes: ['dashboard'],
     run: (stack) => validateWidgetBindings(stack),
   },
+  // #16354 — the AUTHORING-TIME leg of the aggregate × field-type contract
+  // (director ruling, decision batch #59, 2026-09-06: "both legs, table in
+  // spec"; the table is `AGGREGATE_FIELD_TYPE_COMPATIBILITY` in
+  // `@objectstack/spec`, #16353). The compile leg (`dataset-compiler`,
+  // `service-analytics`) refuses a refused pair with `400 DATASET_INVALID`
+  // when a query is built; this one refuses it while the author still has the
+  // document open. `parsed`, the same tier as `validateWidgetBindings` above,
+  // because the two read the SAME positions (`datasets[].measures[]`) and must
+  // not be handed two different documents to judge.
+  {
+    name: 'validateDatasetMeasureAggregates',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-dataset-measure-aggregates.ts',
+    // [#19143] The door this rule was written for, finally reachable. The
+    // previous `surfaceReason` here was never RUNTIME_NEEDS_FULL_SNAPSHOT —
+    // the two collections this rule reads, `objects` and `datasets`, are BOTH
+    // carried (#7529). What held it off was the TYPE axis: the metadata type
+    // that carries the declaration is `dataset` (`allowRuntimeCreate: true`),
+    // and `TYPE_TO_STACK_KEY` had no `dataset` row, so a dataset write built
+    // no per-write snapshot and nothing could be dispatched for it. That row
+    // lands in the same commit as this declaration, which is the order the
+    // `seed: 'data'` note demands: never a mapping without a reading rule,
+    // never a declaration without a mapping.
+    //
+    // ⛔ `runtimeTypes: ['dataset']` and nothing else, still. Declaring another
+    // type would only re-judge a STORED dataset, which the #4463 D4
+    // differential cancels as somebody else's pre-existing condition — wired,
+    // and enforcing nothing. The written dataset is the only one this door may
+    // answer for.
+    //
+    // ⚠️ A REFUSAL widening on a door that previously refused nothing: a
+    // runtime dataset write whose measure pairs an aggregate with an
+    // incompatible field type is now 422 rather than silently stored. MEASURED
+    // over the shipped dataset corpus before crossing, at the door's own
+    // snapshot shape: 11 datasets (platform-objects 5, showcase 4, crm 1,
+    // todo 1) — 0 findings, with a lit synthetic probe refused.
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['dataset'],
+    run: (stack) => validateDatasetMeasureAggregates(stack),
+  },
   // ADR-0049 / #3367 — a dashboard header action naming a dead target ships a
   // button that renders and refuses (or does nothing) on click: a `script`
   // target must name a defined action, a `modal` target must name a declared
@@ -770,8 +813,39 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // The gate's differential keeps it honest in the one direction that
     // matters: a STORED sibling already in violation is never charged to this
     // write (#4463 D4).
+    // [#19143] `dataset` joins, and the same granularity mechanism keeps it a
+    // NARROW crossing: this entry says a `dataset` write dispatches the suite;
+    // the suite's per-member `runtimeTypes` says exactly TWO members judge that
+    // snapshot — `validateDatasetReferences` (the dimension / measure / include
+    // / filter-key existence rules, #14105) and `validateObjectReferences`
+    // (whose `datasets[].object` rung owns the base-object name, deliberately
+    // split off from the rule above so it gets the curated
+    // `PLATFORM_PROVIDED_OBJECT_NAMES` ladder). Both resolve only against
+    // `stack.objects` and `stack.datasets`, the two collections a per-write
+    // snapshot carries, so neither has a missing-collection false-positive
+    // channel. Every other member keeps its existing declaration and does not
+    // run on a dataset write.
+    //
+    // The two cross TOGETHER on #7220's reading: they judge the SAME document
+    // and their split is an implementation detail of the severity ladder, so an
+    // author refused for a dangling dimension field and waved through for a
+    // dangling base object could not predict the door.
+    //
+    // The measured state that forced it: `runtimeAuthoringRulesFor('dataset')`
+    // dispatched NOTHING — zero rules, on a type every tenant may create at
+    // runtime and whose own existence rules state their failure mode as a chart
+    // that renders successfully with empty or wrong numbers.
+    //
+    // ⚠️ A REFUSAL widening, like #15254's: a dataset republished with a
+    // pre-existing dangling field path is now refused (422) rather than stored
+    // silently. The gate's differential keeps it honest in the one direction
+    // that matters — a STORED sibling already in violation is never charged to
+    // this write (#4463 D4). MEASURED over the shipped dataset corpus before
+    // crossing, at the door's own snapshot shape: 11 datasets
+    // (platform-objects 5, showcase 4, crm 1, todo 1) — 0 findings, with a lit
+    // synthetic probe refused.
     surfaces: CLI_AND_RUNTIME,
-    runtimeTypes: ['flow', 'view', 'object'],
+    runtimeTypes: ['flow', 'view', 'object', 'dataset'],
     run: (stack, ctx) => validateReferenceIntegrity(stack, ctx),
   },
   // ADR-0078 / #5068 — the SDUI component-props gate. `PageComponent.properties`

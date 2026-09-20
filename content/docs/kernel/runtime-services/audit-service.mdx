@@ -73,10 +73,13 @@ error, so every failure is caught, and callers do not need a surrounding `try`/`
 The consequences are worth knowing precisely, because none of them are visible from the
 caller's side:
 
-- A failed ledger insert is reported at `error` level **once per process** — every later
-  failure drops to `debug` — and the row is simply lost. Nothing retries it. The sign-in
-  itself succeeded and returned 200, so the shipped `auth_events` list view and the
-  system-overview widgets keep showing an empty, healthy-looking screen.
+- A failed ledger insert is reported at `error` level **once per cause** — a cause is the
+  error's `code` plus the object the row is about, so every uncoded failure collapses into
+  one bucket and the object is always `sys_session` on this seam — and the row is simply
+  lost. Nothing retries it. A repeat of an **already-reported** cause drops to `debug`; a
+  **new** cause gets its own `error` line, once. The sign-in itself succeeded and returned
+  200, so the shipped `auth_events` list view and the system-overview widgets keep showing
+  an empty, healthy-looking screen.
 - The call **silently no-ops** when no data engine resolves, or when `userId` is absent.
   A caller that passes an event without a subject records nothing and is told nothing.
 - The most common cause of a failing insert is a datasource split rather than a broken

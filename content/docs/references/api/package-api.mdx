@@ -135,11 +135,14 @@ Installed package row whose manifest is the assembled package body
 
 ## GetInstalledPackageRequest
 
+Get installed package request
+
 ### Properties
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **packageId** | `string` | ✅ | Package identifier |
+| **version** | `string` | optional | Scope the read to this exact installed version; `latest` or omitted reads the installed row |
 
 
 ---
@@ -398,8 +401,9 @@ List installed packages request
 | :--- | :--- | :--- | :--- |
 | **status** | `Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>` | optional | Filter by package status |
 | **enabled** | `boolean` | optional | Filter by enabled state |
-| **limit** | `integer` | optional (default: `50`) | Maximum number of packages to return |
-| **cursor** | `string` | optional | Cursor for pagination |
+| **type** | `string` | optional | Filter by the installed manifest's `type` — exact match, unmatched values select nothing |
+| **limit** | `never` | optional | [REMOVED] `limit` / `cursor` were removed from GET /api/v1/packages in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — both were declared here and read by nothing: the serving door filters on `status` / `type` and then returns every remaining row, so no page was ever withheld and no continuation token was ever minted. `limit` also declared `.default(50)`, so a reader of the published schema was entitled to believe an unparameterised list is capped at 50 rows; it has never been capped at all, and nothing parses a query string through this schema, so that default has never been stamped onto anything. Delete the key. This route is NOT paginated — it answers the whole installed set, which is a bounded table of tens of rows, and `hasMore` on the response is a constant `false` that is now true by construction. Filter with `status` and `type` instead of asking for a window. A first-class package cursor, if one is ever designed, will be a response-minted opaque token, not this key. |
+| **cursor** | `never` | optional | [REMOVED] `limit` / `cursor` were removed from GET /api/v1/packages in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — both were declared here and read by nothing: the serving door filters on `status` / `type` and then returns every remaining row, so no page was ever withheld and no continuation token was ever minted. `limit` also declared `.default(50)`, so a reader of the published schema was entitled to believe an unparameterised list is capped at 50 rows; it has never been capped at all, and nothing parses a query string through this schema, so that default has never been stamped onto anything. Delete the key. This route is NOT paginated — it answers the whole installed set, which is a bounded table of tens of rows, and `hasMore` on the response is a constant `false` that is now true by construction. Filter with `status` and `type` instead of asking for a window. A first-class package cursor, if one is ever designed, will be a response-minted opaque token, not this key. |
 
 
 ---
@@ -447,7 +451,7 @@ List installed packages response
 | **packages** | `({ manifest: object; status?: Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>; enabled?: boolean; installedAt?: string; … } \| … +1 more)[]` | ✅ | Installed packages |
 | **total** | `integer` | optional | Total matching packages |
 | **nextCursor** | `string` | optional | Cursor for the next page |
-| **hasMore** | `boolean` | ✅ | Whether more packages are available |
+| **hasMore** | `boolean` | ✅ | Whether more packages are available — this door serves one page, so always `false` |
 
 
 ---
@@ -491,7 +495,7 @@ Install package request
 | :--- | :--- | :--- | :--- |
 | **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | Package manifest to install (AUTHORING stage: `objects` are glob patterns) |
 | **settings** | `Record<string, any>` | optional | User-provided settings at install time |
-| **enableOnInstall** | `boolean` | optional (default: `true`) | Whether to enable immediately after install |
+| **enableOnInstall** | `boolean` | optional (default: `true`) | Whether to enable immediately after install — honoured at POST /api/v1/packages: the installed row's `enabled` is written from this key |
 | **overwrite** | `boolean` | optional | Overwrite an already-installed package id instead of answering 409 Conflict |
 | **platformVersion** | `string` | optional | Current platform version for compatibility verification |
 | **artifactRef** | `{ url: string; sha256: string; size: integer; format?: Enum<'tgz' \| 'zip'>; … }` | optional | Artifact reference for marketplace installation |
@@ -624,7 +628,7 @@ A navigation contribution: a package injecting nav items into an app it does not
 | **app** | `string` | ✅ | Target app name to contribute navigation into (e.g. "setup") |
 | **group** | `string` | optional | Target group nav-item id to append into (e.g. "group_integrations"); omit to append at the app top level. Naming a group the target app does not declare is not refused: the items are appended at the app top level anyway and a `nav_contribution_group_missing` diagnostic is emitted — by the runtime at `warn`, and by `os build` and `os validate` at compile time. |
 | **priority** | `integer` | optional (default: `200`) | Merge priority within the target group — lower applied first (matches object extender priority) |
-| **items** | `({ id: string; label: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +7 more)[]` | ✅ | Navigation items contributed into the target app/group |
+| **items** | `({ id: string; label?: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +7 more)[]` | ✅ | Navigation items contributed into the target app/group |
 
 ### Nested Shape: `PackageInstallBody[option 2].engine`
 
@@ -654,7 +658,7 @@ Install package request
 | :--- | :--- | :--- | :--- |
 | **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | Package manifest to install (AUTHORING stage: `objects` are glob patterns) |
 | **settings** | `Record<string, any>` | optional | User-provided settings at install time |
-| **enableOnInstall** | `boolean` | optional (default: `true`) | Whether to enable immediately after install |
+| **enableOnInstall** | `boolean` | optional (default: `true`) | Whether to enable immediately after install — honoured at POST /api/v1/packages: the installed row's `enabled` is written from this key |
 | **overwrite** | `boolean` | optional | Overwrite an already-installed package id instead of answering 409 Conflict |
 | **platformVersion** | `string` | optional | Current platform version for compatibility verification |
 | **artifactRef** | `{ url: string; sha256: string; size: integer; format?: Enum<'tgz' \| 'zip'>; … }` | optional | Artifact reference for marketplace installation |
@@ -971,11 +975,14 @@ Resolve dependencies response
 
 ## UninstallPackageApiRequest
 
+Uninstall package request
+
 ### Properties
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **packageId** | `string` | ✅ | Package identifier |
+| **keepData** | `boolean` | optional | Preserve object tables and remove metadata only; on the wire, `?keepData=true` or `?keepData=1` |
 
 
 ---

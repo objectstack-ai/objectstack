@@ -801,12 +801,18 @@ export function verifyAssertion(
  * header: a command that grants coverage is the one thing this gate must not
  * offer.
  *
- * It stands at 0 because the mechanism lands before the migration does: adding
- * an assertion to an existing record means RE-READING that record's cited line
- * against objectui, which is measurement, not a rewrite, and this PR does not
- * touch `packages/spec/src` at all. `--verify-anchors` prints the worklist.
+ * It stood at 0 while the mechanism waited for its first migration: adding an
+ * assertion to an existing record means RE-READING that record's cited line
+ * against objectui, which is measurement, not a rewrite. The first seven are
+ * `ListMapConfigSchema`'s record in `src/ui/view.zod.ts`, re-read at pin
+ * `53ded82b` when that docblock's claim about the map renderer was corrected:
+ * the two flatten sites and their whitelist, the renderer's own
+ * `ObjectMapConfigSchema`, the `safeParse` and the spread beside it, and
+ * `LIST_VIEW_LOCAL_OVERRIDES`. 145 objectui anchors elsewhere in
+ * `packages/spec/src` still carry none — `--verify-anchors` prints that
+ * worklist.
  */
-const ASSERTED_ANCHOR_FLOOR = 0;
+const ASSERTED_ANCHOR_FLOOR = 7;
 
 // ---------------------------------------------------------------------------
 // self-test — the shapes, not the corpus

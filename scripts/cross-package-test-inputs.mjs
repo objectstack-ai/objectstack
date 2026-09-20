@@ -160,11 +160,12 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // instead would re-assert the rule and see nothing about what is
       // checked in.
       //
-      // src/shared/retired-key-migrate-sentence.test.ts also reads this
-      // root (`PUBLISHED_SKILLS_ROOT`, `:102`) as the second corpus for its
-      // widened population (#10848, see the `.claude` entry above) — "plus
-      // every `.md` file under `skills/`" (`:92`), emitted as
-      // `skills:`-prefixed entries (`:484-485`).
+      // `packages/spec/src/shared/retired-key-migrate-sentence.test.ts` also
+      // reads this root (`PUBLISHED_SKILLS_ROOT`, line 102 as measured) as the
+      // second corpus for its widened population (#10848, see the `.claude`
+      // entry above) — "plus every `.md` file under `skills/`" (line 92 as
+      // measured), emitted as `skills:`-prefixed entries (lines 484-485 as
+      // measured).
       //
       // The whole subtree rather than `skills/*/references/_index.md`: the test
       // reads the DIRECTORY too (a new skill dir changes its verdict), and a
@@ -325,6 +326,14 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // this glob, so the pin is all that holds it.
       'packages/**/package.json': [
         'packages/plugins/organizations/src/no-framework-dependents.pin.test.ts',
+        // src/open-only-wall-acceptance.test.ts reads the SAME manifests for its
+        // own reason -- the structural half of clause 3 walks the composition's
+        // transitive workspace closure out of them -- and holds this glob in its
+        // own right since #18871 reseeded it to the recognised `findUp` spelling.
+        // Until then its hand-rolled walk produced no escape, so the radius it
+        // depends on was held entirely by the pin above: correct by coincidence,
+        // and silently wrong the day that pin stopped reading manifests.
+        'packages/plugins/organizations/src/open-only-wall-acceptance.test.ts',
       ],
     },
   },
@@ -1280,9 +1289,25 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // re-run this package's suite. The `.d.mts` sibling is declared alongside it
     // because it is what gives `stripComments` its type, so this package's
     // typecheck verdict is a function of it too.
+    //
+    // src/live-dialect-matrix.budget.test.ts reads `.github/workflows/ci.yml`
+    // for real: the live cell budget is pinned BELOW the stall guard the live
+    // job wraps this suite in, and the pin reads that `--stall-minutes N` off
+    // the workflow rather than re-typing it. Moving the guard has to re-run
+    // this package's suite or the derivation drifts in silence. One file, not
+    // `.github/workflows/**`: the pin reads that workflow and no other, and a
+    // narrower radius is the whole point of this table.
+    //
+    // ⚠️ That read was INVISIBLE here until #18871. It was seeded by a
+    // hand-rolled `for (;;)` walk to `pnpm-workspace.yaml`, which this gate
+    // does not recognise, so the file produced no escape and this entry could
+    // stay silent about a repo-level input. The test now spells the seed
+    // `findUp`; the class -- a future hand-rolled walk -- is recorded on that
+    // card as closed by convention.
     globs: [
       'scripts/js-comment-mask.mjs',
       'scripts/js-comment-mask.d.mts',
+      '.github/workflows/ci.yml',
     ],
   },
   '@objectstack/example-showcase': {
@@ -1368,6 +1393,23 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // with ERR_MODULE_NOT_FOUND), which is exactly the trigger radius this
       // declaration exists to keep honest.
       'scripts/invoked-as.mjs',
+      // The git-environment strip, IMPORTED by src/template-consistency.test.ts.
+      // That file's skills-catalog block asks git two questions whose answers ARE
+      // its verdict — `ls-files '*SKILL.md'` and a `git grep` over the
+      // customer-facing surfaces — and both run against the REAL checkout, so a
+      // `GIT_DIR` or `GIT_INDEX_FILE` inherited from a hook would make them answer
+      // for a DIFFERENT repository while `cwd` still reads as this one. The test
+      // used to spell a hand-maintained ten-name allowlist inline; `gitFreeEnv()`
+      // replaces it, which is the #16644 convergence onto one spelling.
+      //
+      // FORCED rather than chosen, and the same shape as the `.d.mts` pair above:
+      // the import is a relative ES-module specifier vitest RESOLVES AND LOADS at
+      // run time, so the module is a live input to this package's verdict, and an
+      // undeclared escaping import is a red gate by design. Measured on the
+      // conversion commit before this line existed — the gate printed
+      // `scripts/git-env.mjs   (named in packages/create-objectstack/src/template-consistency.test.ts)`
+      // and exited 1.
+      'scripts/git-env.mjs',
       '.github/workflows/scaffold-e2e.yml',
       'packages/cli/src/commands/serve.ts',
       'scripts/gen-sdui-manifest.sh',

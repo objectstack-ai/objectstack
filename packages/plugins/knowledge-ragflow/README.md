@@ -25,7 +25,7 @@ kernel.use(new KnowledgeServicePlugin({
     label: 'Product documentation',
     adapter: 'ragflow',
     source: { kind: 'http', urls: ['https://docs.example.com/sitemap.xml'] },
-    options: { datasetId: 'rgf_doc_dataset_id' }, // RAGFlow dataset to bind
+    adapterConfig: { datasetId: 'rgf_doc_dataset_id' }, // RAGFlow dataset to bind
   }],
 }));
 kernel.use(new KnowledgeRagflowPlugin({
@@ -36,7 +36,7 @@ kernel.use(new KnowledgeRagflowPlugin({
 
 ## Source binding
 
-Each `KnowledgeSource` must include `options.datasetId` pointing to a pre-created RAGFlow dataset. The adapter doesn't create datasets — operators do that once in the RAGFlow UI, where they pick the chunking method, embedding model, and rerank policy.
+Each `KnowledgeSource` must include `adapterConfig.datasetId` pointing to a pre-created RAGFlow dataset. `adapterConfig` is the key `KnowledgeSourceSchema` declares for adapter-specific configuration; a source that spells it anything else loses it on any parsing path, and the adapter refuses it by name. The adapter doesn't create datasets — operators do that once in the RAGFlow UI, where they pick the chunking method, embedding model, and rerank policy.
 
 ## What the adapter does
 

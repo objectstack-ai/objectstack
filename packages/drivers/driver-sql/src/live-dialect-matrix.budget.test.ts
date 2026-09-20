@@ -34,16 +34,32 @@ import { fileURLToPath } from 'node:url';
 import { SqlDriver } from './index.js';
 import { LIVE_CELL_TIMEOUT_MS } from './live-dialect-matrix.testkit.js';
 
-/** The workspace root, found the way the testkit finds it — by its marker file. */
-function repoRoot(): string {
-  let dir = dirname(fileURLToPath(import.meta.url));
+const HERE = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * The workspace root, by its marker file — spelled `findUp` deliberately.
+ *
+ * `check:cross-package-test-inputs` recognises this seed by its SPELLING, not
+ * by its behaviour. The hand-rolled `for (;;)` walk this replaced did the same
+ * thing and resolved to nothing there, so the `.github/workflows/ci.yml` read
+ * below produced no escape at all and the gate stayed green over a real,
+ * undeclared repo-level input (#18871). The spelling is the one
+ * `no-framework-dependents.pin.test.ts` in the organizations plugin already
+ * carries — named without its path on purpose: the flat literal collector
+ * takes quoted whole paths out of PROSE, and a citation is not a read.
+ */
+function findUp(predicate: (dir: string) => boolean): string {
+  let dir = HERE;
   for (;;) {
-    if (existsSync(join(dir, 'pnpm-workspace.yaml'))) return dir;
+    if (predicate(dir)) return dir;
     const parent = dirname(dir);
-    if (parent === dir) throw new Error('no pnpm-workspace.yaml above this file');
+    if (parent === dir) throw new Error('reached the filesystem root without a match');
     dir = parent;
   }
 }
+
+/** The repo root — the directory carrying `pnpm-workspace.yaml`. */
+const REPO = findUp((dir) => existsSync(join(dir, 'pnpm-workspace.yaml')));
 
 /**
  * The connection bounds the driver ACTUALLY installs, read off a constructed
@@ -104,7 +120,7 @@ describe('[#16434] the live-cell budget stays inside the corridor it was derived
   });
 
   it('sits BELOW the stall guard the live job wraps this suite in', () => {
-    const ci = readFileSync(join(repoRoot(), '.github/workflows/ci.yml'), 'utf8');
+    const ci = readFileSync(join(REPO, '.github/workflows/ci.yml'), 'utf8');
     const guarded = /run-with-stall-guard\.mjs[^\n]*--stall-minutes\s+(\d+)[\s\S]{0,400}?driver-sql/;
     const match = guarded.exec(ci);
 

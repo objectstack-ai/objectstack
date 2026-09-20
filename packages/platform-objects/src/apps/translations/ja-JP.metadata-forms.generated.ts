@@ -109,8 +109,8 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "新規レコードの既定値（JSON リテラル）"
       },
       "fields.placeholder": {
-        label: "Placeholder",
-        helpText: "Hint text shown inside the empty input; disappears once a value is entered"
+        label: "プレースホルダー",
+        helpText: "空の入力欄の内側に表示されるヒント文言。値を入力すると消えます"
       },
       "fields.maxLength": {
         label: "最大長",
@@ -121,12 +121,12 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "最小文字数"
       },
       "fields.valueDomain": {
-        label: "Value Domain",
-        helpText: "Standard the written value must belong to; a write carrying a non-member is refused"
+        label: "値ドメイン",
+        helpText: "書き込む値が属していなければならない標準。メンバー以外の値を含む書き込みは拒否されます"
       },
       "fields.rows": {
-        label: "Rows",
-        helpText: "Inline editor height (text rows)"
+        label: "行数",
+        helpText: "インライン編集欄の高さ（テキスト行数）"
       },
       "fields.min": {
         label: "最小値",
@@ -165,44 +165,44 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "対象オブジェクト名。tree フィールドでは省略可能で、指定する場合はこのオブジェクト自身でなければなりません（ツリーは同一オブジェクト内の階層です — 別のオブジェクトへリンクする場合は lookup を使います）"
       },
       "fields.lookupFilters": {
-        label: "Lookup Filters",
-        helpText: "Filter rules applied to the picker ({field, operator, value})"
+        label: "Lookup フィルター",
+        helpText: "ピッカーに適用されるフィルタールール（{field, operator, value}）"
       },
       "fields.deleteBehavior": {
-        label: "Delete Behavior",
-        helpText: "What happens when the referenced record is deleted"
+        label: "削除動作",
+        helpText: "参照先レコード削除時の動作"
       },
       "fields.multiple": {
         label: "複数選択",
         helpText: "複数レコードの選択を許可"
       },
       "fields.expression": {
-        label: "Expression",
-        helpText: "CEL formula expression"
+        label: "式",
+        helpText: "CEL 数式"
       },
       "fields.returnType": {
         label: "戻り値の型",
         helpText: "公式の結果型"
       },
       "fields.summaryOperations": {
-        label: "Summary Operations",
-        helpText: "Roll-up: which child object, which field, which aggregation"
+        label: "集計操作",
+        helpText: "ロールアップ：どの子オブジェクトの、どのフィールドを、どの集計関数で"
       },
       "fields.summaryOperations.object": {
-        label: "Object",
-        helpText: "Source child object name"
+        label: "オブジェクト",
+        helpText: "集計元の子オブジェクト名"
       },
       "fields.summaryOperations.field": {
-        label: "Field",
-        helpText: "Field on the child object to aggregate (ignored for count)"
+        label: "フィールド",
+        helpText: "集計対象となる子オブジェクトのフィールド（count では無視）"
       },
       "fields.summaryOperations.function": {
-        label: "Function",
-        helpText: "Aggregation function"
+        label: "関数",
+        helpText: "集計関数"
       },
       "fields.autonumberFormat": {
-        label: "Autonumber Format",
-        helpText: "e.g. \"INV-{0000}\"; date tokens {YYYY}/{MM}/{DD} and {field_name} interpolation supported"
+        label: "自動採番フォーマット",
+        helpText: "例: \"INV-{0000}\"。日付トークン {YYYY}/{MM}/{DD} と {field_name} の補間に対応"
       },
       "fields.language": {
         label: "言語",
@@ -213,16 +213,16 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "レコードのアクティビティタイムラインでこのフィールドを要約する"
       },
       "fields.visibleWhen": {
-        label: "Visible When",
-        helpText: "CEL predicate — field is shown only when TRUE"
+        label: "表示条件",
+        helpText: "CEL 述語 — TRUE の場合のみフィールドを表示"
       },
       "fields.readonlyWhen": {
-        label: "Readonly When",
-        helpText: "CEL predicate — field is read-only when TRUE (enforced server-side)"
+        label: "読み取り専用条件",
+        helpText: "CEL 述語 — TRUE の場合フィールドは読み取り専用（サーバー側で強制）"
       },
       "fields.requiredWhen": {
-        label: "Required When",
-        helpText: "CEL predicate — field is required when TRUE (enforced server-side)"
+        label: "必須条件",
+        helpText: "CEL 述語 — TRUE の場合フィールドは必須（サーバー側で強制）"
       },
       enable: {
         label: "Enable",
@@ -248,6 +248,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "enable.clone": {
         label: "Clone"
+      },
+      validations: {
+        label: "Validations",
+        helpText: "Object-level validation rules — an array of rule objects, e.g. [{ \"type\": \"script\", \"name\": \"amount_positive\", \"condition\": \"amount > 0\", \"message\": \"Amount must be positive\" }]. State-machine transition tables are declared here too (ADR-0020)"
       },
       datasource: {
         label: "データソース",
@@ -416,6 +420,24 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "選択肢",
         helpText: "使用可能な選択肢（label/value ペア）"
       },
+      "options.label": {
+        label: "表示名"
+      },
+      "options.value": {
+        label: "値"
+      },
+      "options.description": {
+        label: "説明"
+      },
+      "options.color": {
+        label: "色"
+      },
+      "options.default": {
+        label: "既定の選択肢"
+      },
+      "options.visibleWhen": {
+        label: "表示条件"
+      },
       reference: {
         label: "参照",
         helpText: "参照先オブジェクト名"
@@ -423,6 +445,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       deleteBehavior: {
         label: "削除動作",
         helpText: "参照先レコード削除時の動作"
+      },
+      relatedListFilter: {
+        label: "Related List Filter",
+        helpText: "Default filter for this relationship's related list on the parent's detail page — AND-composed with the parent-record match, and the tab badge counts the same set"
       },
       expression: {
         label: "式",
@@ -755,8 +781,8 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         description: "ページ領域とそこに配置するコンポーネント。"
       },
       interface: {
-        label: "Interface (list pages)",
-        description: "Interface mode (Airtable parity): the page defines its own data surface directly — columns, filters, visualizations and toolbar — no inheriting from a separate view."
+        label: "Interface（リストページ）",
+        description: "Interface モード（Airtable 互換）：ページが自身のデータサーフェスを直接定義します——列、フィルター、可視化、ツールバー——独立したビューを継承しません。"
       },
       advanced: {
         label: "詳細",
@@ -809,68 +835,83 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "初期値（未指定の場合は型に応じた空の値）"
       },
       "variables.source": {
-        label: "ソース",
+        label: "書き込み元",
         helpText: "この変数に書き込むコンポーネント（id 指定）— 例: element:record_picker"
       },
       regions: {
         label: "リージョン",
         helpText: "コンポーネントを含むレイアウト領域（header, main, sidebar, footer）"
       },
+      "regions.name": {
+        label: "リージョン"
+      },
+      "regions.width": {
+        label: "幅"
+      },
+      "regions.components": {
+        label: "コンポーネント"
+      },
       interfaceConfig: {
-        label: "Interface Config",
-        helpText: "The page IS the view: source picks the object, columns/filterBy are defined directly here; appearance.allowedVisualizations whitelists renderers (one entry = locked); userActions toggles the toolbar."
+        label: "Interface 設定",
+        helpText: "ページ自体がビューです：source でオブジェクトを選び、columns/filterBy はここで直接定義します。appearance.allowedVisualizations が使用可能なレンダラーを限定し（1 件のみならロック）、userActions がツールバーを切り替えます。"
       },
       "interfaceConfig.source": {
-        label: "Source",
-        helpText: "Object this page reads from"
+        label: "ソース",
+        helpText: "このページがデータを読み取るオブジェクト"
       },
       "interfaceConfig.columns": {
-        label: "Columns",
-        helpText: "Columns to show — defined directly on the page (blank = all object fields)"
+        label: "列",
+        helpText: "表示する列——ページ上で直接定義します（空欄はオブジェクトの全フィールド）"
       },
       "interfaceConfig.filterBy": {
-        label: "Filter By",
-        helpText: "Always-on base filter for the page — same visual builder as the list toolbar."
+        label: "フィルター条件",
+        helpText: "ページに常時適用される基本フィルター——リストツールバーと同じビジュアルビルダー。"
       },
       "interfaceConfig.sort": {
-        label: "Sort",
-        helpText: "Default sort order for the page, defined directly on the page."
+        label: "並び替え",
+        helpText: "ページの既定の並び順。ページ上で直接定義します。"
+      },
+      "interfaceConfig.sort.field": {
+        label: "フィールド"
+      },
+      "interfaceConfig.sort.order": {
+        label: "並び方向"
       },
       "interfaceConfig.levels": {
-        label: "Levels",
-        helpText: "Hierarchy levels to display (tree-like sources)"
+        label: "階層レベル",
+        helpText: "表示する階層レベル（ツリー状のソース）"
       },
       "interfaceConfig.appearance": {
-        label: "Appearance",
-        helpText: "Allowed visualizations (Grid / Kanban / Calendar / …) and description visibility"
+        label: "外観",
+        helpText: "使用可能な可視化（Grid / Kanban / Calendar / …）と説明の表示可否"
       },
       "interfaceConfig.userFilters": {
-        label: "User Filters",
-        helpText: "End-user filter bar: None (no bar) / Tabs (named presets) / Dropdown (per-field). None removes the config."
+        label: "ユーザーフィルター",
+        helpText: "エンドユーザー用フィルターバー：None（バーなし）/ Tabs（名前付きプリセット）/ Dropdown（フィールド単位）。None は設定を削除します。"
       },
       "interfaceConfig.userActions": {
-        label: "User Actions",
-        helpText: "Toolbar toggles (search, sort, filter, row height)"
+        label: "ユーザーアクション",
+        helpText: "ツールバーの切り替え（検索、並べ替え、フィルター、行の高さ）"
       },
       "interfaceConfig.addRecord": {
-        label: "Add Record",
-        helpText: "Add-record entry point"
+        label: "レコードを追加",
+        helpText: "レコード追加の入口"
       },
       "interfaceConfig.buttons": {
-        label: "Buttons",
-        helpText: "Toolbar buttons — pick from this object's actions"
+        label: "ボタン",
+        helpText: "ツールバーのボタン——このオブジェクトのアクションから選択します"
       },
       "interfaceConfig.recordAction": {
-        label: "Record Action",
-        helpText: "How clicking a record opens its detail"
+        label: "レコードアクション",
+        helpText: "レコードをクリックしたときに詳細をどう開くか"
       },
       "interfaceConfig.showRecordCount": {
-        label: "Show Record Count",
-        helpText: "Show the record count bar"
+        label: "レコード数を表示",
+        helpText: "レコード数バーを表示します"
       },
       "interfaceConfig.allowPrinting": {
-        label: "Allow Printing",
-        helpText: "Allow users to print this page"
+        label: "印刷を許可",
+        helpText: "ユーザーがこのページを印刷できるようにします"
       },
       isDefault: {
         label: "既定",
@@ -966,6 +1007,57 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "ウィジェット",
         helpText: "位置とサイズを持つダッシュボードウィジェット"
       },
+      "widgets.id": {
+        label: "ウィジェット ID"
+      },
+      "widgets.title": {
+        label: "タイトル"
+      },
+      "widgets.description": {
+        label: "説明"
+      },
+      "widgets.type": {
+        label: "可視化タイプ"
+      },
+      "widgets.chartConfig": {
+        label: "チャート設定"
+      },
+      "widgets.colorVariant": {
+        label: "カラーバリアント"
+      },
+      "widgets.requiresObject": {
+        label: "必要なオブジェクト"
+      },
+      "widgets.requiresService": {
+        label: "必要なサービス"
+      },
+      "widgets.filter": {
+        label: "フィルター"
+      },
+      "widgets.compareTo": {
+        label: "比較期間"
+      },
+      "widgets.dataset": {
+        label: "データセット"
+      },
+      "widgets.dimensions": {
+        label: "ディメンション"
+      },
+      "widgets.values": {
+        label: "メジャー"
+      },
+      "widgets.layout": {
+        label: "レイアウト"
+      },
+      "widgets.options": {
+        label: "選択肢"
+      },
+      "widgets.filterBindings": {
+        label: "フィルターの紐付け"
+      },
+      "widgets.suppressWarnings": {
+        label: "抑制する警告"
+      },
       dateRange: {
         label: "日付範囲",
         helpText: "既定の日付範囲セレクター"
@@ -973,6 +1065,36 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       globalFilters: {
         label: "グローバルフィルター",
         helpText: "全ウィジェットに適用するフィルター"
+      },
+      "globalFilters.name": {
+        label: "名前"
+      },
+      "globalFilters.field": {
+        label: "フィールド"
+      },
+      "globalFilters.object": {
+        label: "オブジェクト"
+      },
+      "globalFilters.label": {
+        label: "表示名"
+      },
+      "globalFilters.type": {
+        label: "入力タイプ"
+      },
+      "globalFilters.options": {
+        label: "選択肢"
+      },
+      "globalFilters.optionsFrom": {
+        label: "選択肢の取得元"
+      },
+      "globalFilters.defaultValue": {
+        label: "既定値"
+      },
+      "globalFilters.scope": {
+        label: "スコープ"
+      },
+      "globalFilters.targetWidgets": {
+        label: "対象ウィジェット"
       }
     }
   },
@@ -1029,6 +1151,21 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       areas: {
         label: "領域",
         helpText: "項目を折りたたみ可能なエリアにグループ化"
+      },
+      "areas.id": {
+        label: "エリア ID"
+      },
+      "areas.label": {
+        label: "表示名"
+      },
+      "areas.icon": {
+        label: "アイコン"
+      },
+      "areas.description": {
+        label: "説明"
+      },
+      "areas.navigation": {
+        label: "ナビゲーション"
       },
       defaultAgent: {
         label: "既定エージェント",
@@ -1125,6 +1262,60 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "パラメーター",
         helpText: "ユーザー入力パラメーター（実行前にフォームを表示）"
       },
+      "params.name": {
+        label: "名前"
+      },
+      "params.field": {
+        label: "フィールド"
+      },
+      "params.objectOverride": {
+        label: "オブジェクトの上書き"
+      },
+      "params.label": {
+        label: "表示名"
+      },
+      "params.type": {
+        label: "型"
+      },
+      "params.required": {
+        label: "必須"
+      },
+      "params.options": {
+        label: "選択肢"
+      },
+      "params.placeholder": {
+        label: "プレースホルダー"
+      },
+      "params.helpText": {
+        label: "ヘルプテキスト"
+      },
+      "params.defaultValue": {
+        label: "既定値"
+      },
+      "params.multiple": {
+        label: "複数選択"
+      },
+      "params.accept": {
+        label: "許可するタイプ"
+      },
+      "params.maxSize": {
+        label: "最大サイズ（バイト）"
+      },
+      "params.reference": {
+        label: "参照オブジェクト"
+      },
+      "params.defaultFromRow": {
+        label: "行から既定値を取得"
+      },
+      "params.carryOver": {
+        label: "値の引き継ぎ"
+      },
+      "params.visible": {
+        label: "表示条件"
+      },
+      "params.requiresFeature": {
+        label: "必要な機能"
+      },
       confirmText: {
         label: "確認文",
         helpText: "確認メッセージ（例: \"Are you sure?\"）"
@@ -1207,16 +1398,16 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "レポート種別: tabular/summary/matrix/joined"
       },
       dataset: {
-        label: "Dataset",
-        helpText: "Dataset to bind (measures/dimensions come from its semantic layer)"
+        label: "データセット",
+        helpText: "バインドするデータセット（メジャー/ディメンションはセマンティックレイヤーから取得）"
       },
       values: {
-        label: "Values",
-        helpText: "Measure names (from the dataset) to display"
+        label: "メジャー",
+        helpText: "表示するメジャー名（データセットから取得）"
       },
       rows: {
-        label: "Rows",
-        helpText: "Dimension names (from the dataset) to group rows by"
+        label: "行",
+        helpText: "行をグループ化するディメンション名（データセットから取得）"
       },
       columns: {
         label: "列",
@@ -1226,6 +1417,12 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "並び順",
         helpText: "ソートキー（優先度の高い順）。rows/columns のディメンション、または values のメジャーを指定します。時間ディメンションは既定で時系列順です。"
       },
+      "order.by": {
+        label: "並び替えキー"
+      },
+      "order.direction": {
+        label: "並び方向"
+      },
       drilldown: {
         label: "Drilldown",
         helpText: "Click an aggregated row/cell to open the underlying records"
@@ -1233,6 +1430,39 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       blocks: {
         label: "ブロック",
         helpText: "複数オブジェクトを結合（joined レポートのみ）"
+      },
+      "blocks.name": {
+        label: "名前"
+      },
+      "blocks.label": {
+        label: "表示名"
+      },
+      "blocks.description": {
+        label: "説明"
+      },
+      "blocks.type": {
+        label: "ブロックタイプ"
+      },
+      "blocks.chart": {
+        label: "チャート"
+      },
+      "blocks.dataset": {
+        label: "データセット"
+      },
+      "blocks.rows": {
+        label: "行"
+      },
+      "blocks.columns": {
+        label: "列"
+      },
+      "blocks.values": {
+        label: "メジャー"
+      },
+      "blocks.runtimeFilter": {
+        label: "実行時フィルター"
+      },
+      "blocks.order": {
+        label: "並び順"
       },
       runtimeFilter: {
         label: "Runtime Filter",
@@ -1294,9 +1524,48 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Dimensions",
         helpText: "Each: name (referenced by presentations), field, type, and — for dates — a default bucketing granularity"
       },
+      "dimensions.name": {
+        label: "名前"
+      },
+      "dimensions.label": {
+        label: "表示名"
+      },
+      "dimensions.field": {
+        label: "フィールド"
+      },
+      "dimensions.type": {
+        label: "型"
+      },
+      "dimensions.dateGranularity": {
+        label: "日付の粒度"
+      },
       measures: {
-        label: "Measures",
+        label: "メジャー",
         helpText: "各メジャー：名前、集計関数、フィールド（count の場合は省略可）、表示形式/通貨"
+      },
+      "measures.name": {
+        label: "名前"
+      },
+      "measures.label": {
+        label: "表示名"
+      },
+      "measures.aggregate": {
+        label: "集計関数"
+      },
+      "measures.field": {
+        label: "フィールド"
+      },
+      "measures.filter": {
+        label: "フィルター"
+      },
+      "measures.format": {
+        label: "フォーマット"
+      },
+      "measures.currency": {
+        label: "通貨"
+      },
+      "measures.derived": {
+        label: "派生元"
       }
     }
   },
@@ -1337,13 +1606,79 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "ノード",
         helpText: "⚠️ JSON ではなく Flow Designer ビジュアルエディターの利用を検討"
       },
+      "nodes.id": {
+        label: "ノード ID"
+      },
+      "nodes.type": {
+        label: "ノードタイプ"
+      },
+      "nodes.label": {
+        label: "表示名"
+      },
+      "nodes.config": {
+        label: "設定"
+      },
+      "nodes.connectorConfig": {
+        label: "コネクタ操作"
+      },
+      "nodes.position": {
+        label: "キャンバス位置"
+      },
+      "nodes.timeoutMs": {
+        label: "タイムアウト（ms）"
+      },
+      "nodes.inputSchema": {
+        label: "入力スキーマ"
+      },
+      "nodes.waitEventConfig": {
+        label: "待機イベント"
+      },
+      "nodes.boundaryConfig": {
+        label: "境界イベント"
+      },
       edges: {
         label: "エッジ",
         helpText: "ノード間の接続 — 編集しやすい Flow Designer を使用"
       },
+      "edges.id": {
+        label: "エッジ ID"
+      },
+      "edges.source": {
+        label: "開始ノード"
+      },
+      "edges.target": {
+        label: "終了ノード"
+      },
+      "edges.condition": {
+        label: "条件"
+      },
+      "edges.type": {
+        label: "接続タイプ"
+      },
+      "edges.label": {
+        label: "表示名"
+      },
+      "edges.isDefault": {
+        label: "既定パス"
+      },
       variables: {
         label: "変数",
         helpText: "フロー変数（inputs/outputs）"
+      },
+      "variables.name": {
+        label: "名前"
+      },
+      "variables.type": {
+        label: "型"
+      },
+      "variables.isInput": {
+        label: "入力"
+      },
+      "variables.isOutput": {
+        label: "出力"
+      },
+      "variables.defaultValue": {
+        label: "既定値"
       },
       status: {
         label: "状態",
@@ -1705,6 +2040,15 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       triggerConditions: {
         label: "トリガー条件",
         helpText: "プログラム条件（例: objectName == \"case\"）"
+      },
+      "triggerConditions.field": {
+        label: "コンテキストフィールド"
+      },
+      "triggerConditions.operator": {
+        label: "演算子"
+      },
+      "triggerConditions.value": {
+        label: "値"
       }
     }
   }

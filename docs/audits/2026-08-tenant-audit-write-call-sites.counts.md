@@ -19,9 +19,13 @@ line numbers, so a pure displacement cannot move them. Run the generator with
 
 ⚠️ **On a merge conflict here, regenerate — never resolve by hand.** Two branches
 that each add a write call site produce rows git merges cleanly and totals that
-merge cleanly and WRONG. This file is deliberately NOT `merge=os-regen`: that
-driver resolves an artefact's `gen:`/`check:` scripts in `@objectstack/spec`
-only, and these are root-level tooling. The gate is the backstop — a wrongly
+merge cleanly and WRONG. This file is NOT `merge=os-regen`: no `.gitattributes`
+row names it, so `git check-attr merge` over it reads `unspecified`. Routing it
+would take a `REGEN_ARTIFACTS` row whose `gen:`/`check:` names exist in the
+manifest that row declares as owner, and no manifest declares such a pair for
+this census — the gate runs straight from the lint workflow. Root-level tooling
+is no obstacle by itself: the driver resolves those names in whichever manifest
+the row names, the root one included. The gate is the backstop — a wrongly
 merged file fails `check-tenant-audit-census`, so the error is loud rather than
 silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
@@ -29,17 +33,17 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 225 |
-| Object name statically decidable | 149 |
+| Write call sites | 227 |
+| Object name statically decidable | 151 |
 | Object name chosen at run time | 76 |
-| Against a tenancy-enabled object | 149 |
-| Against an object declaring tenancy off | 0 |
-| Threading a tenant context | 141 |
+| Against a tenancy-enabled object | 150 |
+| Against an object declaring tenancy off | 1 |
+| Threading a tenant context | 143 |
 | Provably carrying none | 17 |
 | …and decidably tenancy-enabled | 9 |
 | Options argument unreadable | 67 |
 | …and decidably tenancy-enabled | 32 |
-| Threading a decidably elevated context | 106 |
+| Threading a decidably elevated context | 108 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 102 |
 
@@ -56,15 +60,25 @@ index is built from TRACKED sources only, deliberately. An untracked, generated
 or dependency-owned declaration is one this census never saw, and «never saw it»
 must not be spelled the same way as «read it, not an engine».
 
+⚠️ One arm here says something else again: `type-text-not-round-trippable` is a
+receiver whose declared type the census STORED whitespace-collapsed and could
+not read back — the source parsed, the re-serialisation of it did not, so the
+door rule could never be read off it. That is a fault in this tool rather than
+a fact about the corpus, and it is the one row here that also fails the gate.
+
 | what | count |
 | :--- | ---: |
-| write calls subtracted with no defensible reason | **3** |
-| …whose declared type text states an engine door anyway | **2** |
+| write calls subtracted with no defensible reason | **1** |
+| …whose declared type text states an engine door anyway | **0** |
+
+⛔ The second row is **0 by construction**, not a tally that happens to be low.
+An inline type literal stating a write door has no name for the engine type index
+to be keyed on, so the door rule is read off the type text itself and the site is
+PLACED — it is in the population above rather than subtracted here. A non-zero
+value on that row means a door-shaped receiver reached the subtraction anyway.
 
 | file | receiver | verb | why | declared type | door | n |
 |---|---|---|---|---|---|---:|
-| `packages/plugins/plugin-auth/src/audience-gate-test-support.ts` | `engine` | `insert` | anonymous-type | `{ insert: (name: string, data: any, options?: any) => Promise<unknown> } \| null` | ⚠️ yes | 1 |
-| `packages/plugins/plugin-auth/src/sso-client-secret.ts` | `e` | `update` | anonymous-type | `{ find(object: string, query: unknown): Promise<Record<string, unknown>[]>; update(object: string, data: unknown, options?: unknown): Promise<unknown>; }` | ⚠️ yes | 1 |
 | `packages/plugins/plugin-hono-server/src/adapter.ts` | `this.app` | `delete` | type-not-in-corpus | `Hono` | no | 1 |
 
 ## Corpus scale — present and dated, ⛔ NOT enforced
@@ -76,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-09-18 at `02bdeaaf2`.
+Measured on 2026-09-20 at `215840f43`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 573 |
+| tracked non-test sources scanned | 576 |
 | engine-shaped types recognised | 63 |
 | declared objects in the registry | 117 |
-| same-named calls subtracted as non-engine | 146 |
+| same-named calls subtracted as non-engine | 144 |
 
 ## Every site
 
@@ -108,6 +122,7 @@ Measured on 2026-09-18 at `02bdeaaf2`.
 | `packages/plugins/plugin-auth/src/admin-user-endpoints.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/admin-user-endpoints.ts` | `update` | `sys_user` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/adopt-membership.ts` | `update` | `SystemObjectName.MEMBER` | undecidable | PROVABLY NONE | 1 |
+| `packages/plugins/plugin-auth/src/audience-gate-test-support.ts` | `insert` | `sys_invitation` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/auth-manager.ts` | `update` | `sys_account` | enabled | options unreadable | 1 |
 | `packages/plugins/plugin-auth/src/auth-manager.ts` | `update` | `sys_session` | enabled | options unreadable | 3 |
 | `packages/plugins/plugin-auth/src/auth-manager.ts` | `update` | `sys_two_factor` | enabled | options unreadable | 1 |
@@ -129,6 +144,7 @@ Measured on 2026-09-18 at `02bdeaaf2`.
 | `packages/plugins/plugin-auth/src/reconcile-membership.ts` | `insert` | `sys_member` | enabled | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-auth/src/scim-connection-service.ts` | `insert` | `sys_scim_connection_credential` | enabled | PROVABLY NONE | 1 |
 | `packages/plugins/plugin-auth/src/session-tombstone.ts` | `update` | `objectName` | undecidable | options unreadable | 1 |
+| `packages/plugins/plugin-auth/src/sso-client-secret.ts` | `update` | `sys_sso_provider` | disabled | elevated | 1 |
 | `packages/plugins/plugin-email/src/attachment-reclaim.ts` | `update` | `sys_email` | enabled | elevated | 1 |
 | `packages/plugins/plugin-email/src/bootstrap-declared-email-templates.ts` | `insert` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-email/src/bootstrap-declared-email-templates.ts` | `update` | `object` | undecidable | elevated | 2 |

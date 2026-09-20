@@ -8,6 +8,7 @@ import { PLATFORM_CAPABILITY_TOKENS } from './kernel/platform-capabilities';
 import { DatasourceSchema } from './data/datasource.zod';
 import { TranslationBundleSchema, TranslationConfigSchema } from './system/translation.zod';
 import { StackServerConfigSchema } from './system/stack-server.zod';
+import { DevLoginSchema } from './system/dev-login.zod';
 import { hasPlatformObjectPrefix } from './system/constants/platform-object-names';
 import { objectStackErrorMap, formatZodError } from './shared/error-map.zod';
 import { strictObject } from './shared/strict-object';
@@ -259,11 +260,14 @@ export type ArtifactPackageEntryParsed = z.infer<typeof ArtifactPackageEntrySche
  * built from this shape, so putting it in the shape would make the declaration
  * circular.
  *
- * Two members of this shape are envelope keys as well: `plugins` and
- * `devPlugins` are stack collections (they compose by `concat`, so they live
- * here), but they are runtime ASSEMBLY instructions rather than metadata, and
- * {@link ASSEMBLED_PACKAGE_BODY_ENVELOPE_KEYS} keeps them out of the assembled
- * package body (#15219 — {@link AssembledPackageBodyKey} says why).
+ * Three members of this shape are envelope keys as well: `plugins`,
+ * `devPlugins` and `devLogins` are stack collections (they compose by
+ * `concat`, so they live here), but they describe the BOOT rather than a
+ * package's metadata — the first two are runtime ASSEMBLY instructions, the
+ * third is what the development banner prints — and
+ * {@link ASSEMBLED_PACKAGE_BODY_ENVELOPE_KEYS} keeps all three out of the
+ * assembled package body (#15219, #17556 — {@link AssembledPackageBodyKey}
+ * says why).
  *
  * @internal
  */
@@ -805,6 +809,47 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
   devPlugins: z.array(z.union([ManifestSchema, z.string()])).optional().describe('Plugins to load only in development (CLI dev command)'),
 
   /**
+   * DevHint: One Sentence For The First-Run Operator
+   *
+   * Free-form text the development boot banner prints under the credential
+   * block — the channel for what {@link DevLoginSchema} cannot express: "run
+   * `pnpm seed:demo` first", "sign in with SSO against the local IdP", "the
+   * Hiring group needs a position, see README".
+   *
+   * Composes as `'single'`: two stacks declaring DIFFERENT hints is a
+   * composition ERROR naming both, never a silent last-wins — the same rule
+   * `api` / `server` / `i18n` carry, for the same reason (an application's
+   * first-run instruction is not a detail a composer may pick for the author).
+   *
+   * Read only on a development boot; a production boot prints nothing.
+   */
+  devHint: z.string().optional().describe('One sentence the development boot banner prints under the credential block (dev only)'),
+
+  /**
+   * DevLogins: First-Run Credentials The Application Contributes
+   *
+   * The accounts an operator should actually sign in with on this application,
+   * printed beneath the platform's own seeded dev admin (#17556). See
+   * {@link DevLoginSchema} for what one entry means — in particular that it
+   * CREATES NOTHING and grants nothing; it names accounts the application seeds
+   * by other means so the banner can point at one that shows something.
+   *
+   * ADDITIVE, never a replacement: the seeded-admin line still prints, because
+   * that account exists whether or not the application mentions it and an
+   * application-controlled key must not be able to suppress a platform
+   * disclosure.
+   *
+   * Composes as `'concat'`: composing two applications yields BOTH publishers'
+   * personas, since dropping one would hide an audience the composed artifact
+   * still serves. An artifact ENVELOPE key like `plugins` / `devPlugins` — the
+   * banner reads it off the top level, so it stays there rather than being
+   * folded into an assembled package body where nothing would read it.
+   *
+   * Read only on a development boot; a production boot prints nothing.
+   */
+  devLogins: z.array(DevLoginSchema).optional().describe('First-run credentials the application contributes to the development boot banner (dev only)'),
+
+  /**
    * Compiled Runtime Bundle Reference
    *
    * Path (relative to the JSON artifact) to a sibling ESM module emitted
@@ -994,11 +1039,18 @@ export const COMPOSE_KEY_DISPOSITIONS = Object.freeze({
   requires: 'concat',
   tiers: 'concat',
   devPlugins: 'concat',
+  // #17556 — BOTH publishers' personas survive a compose, for the reason
+  // `packages` concatenates: dropping one would hide an audience the composed
+  // artifact still serves. `devHint` is the scalar half and is `'single'` below.
+  devLogins: 'concat',
 
   // ── Single-valued configuration — same value passes, difference throws ──
   api: 'single',
   server: 'single',
   runtimeModule: 'single',
+  // #17556 — two stacks declaring different first-run instructions is a
+  // conflict to name, not a last-wins to resolve behind the authors' backs.
+  devHint: 'single',
   // #8687: declared alongside the strict close (it was undeclared-but-honoured
   // before, so composition never saw it through a parsed stack). One bundle
   // gets one `onEnable` (`AppPlugin` invokes a single hook at start()); two
@@ -1045,7 +1097,7 @@ const CONCAT_ARRAY_FIELDS = STACK_DEFINITION_KEYS
  * would refuse a multi-package artifact naming a key its author correctly
  * wrote, and the refusal would look like a defect in the author's metadata.
  *
- * Three `concat` keys are excluded — the artifact ENVELOPE keys, declared once
+ * Four `concat` keys are excluded — the artifact ENVELOPE keys, declared once
  * in {@link ASSEMBLED_PACKAGE_BODY_ENVELOPE_KEYS} for this type and the runtime
  * shape alike:
  *
@@ -1064,6 +1116,15 @@ const CONCAT_ARRAY_FIELDS = STACK_DEFINITION_KEYS
  *   in-memory composition) and where `os serve` / `os migrate` read them.
  *   Inside a body both are refused by the manifest's strict close, naming the
  *   key.
+ * - `devLogins`: what the DEVELOPMENT BOOT BANNER prints (#17556), not metadata
+ *   a package registers. Its one reader is the CLI, which reads it off the top
+ *   level of the definition it booted, so an entry folded into
+ *   `packages[i].manifest` would be parsed, stored and never printed — the
+ *   declared-but-unread shape ADR-0049 exists about. Excluded for the same
+ *   reason `plugins` is, one layer over: the artifact is inert JSON describing
+ *   an application, and which account an operator should sign in with is a
+ *   property of the BOOT, not of a package inside it. `concat` stays at the top
+ *   level, where composing two applications keeps both publishers' personas.
  *
  * @internal
  */
@@ -1080,7 +1141,7 @@ type AssembledPackageBodyKey = Exclude<{
  * runtime halves cannot name different sets.
  * @internal
  */
-const ASSEMBLED_PACKAGE_BODY_ENVELOPE_KEYS = ['packages', 'plugins', 'devPlugins'] as const satisfies readonly StackDefinitionKey[];
+const ASSEMBLED_PACKAGE_BODY_ENVELOPE_KEYS = ['packages', 'plugins', 'devPlugins', 'devLogins'] as const satisfies readonly StackDefinitionKey[];
 
 /** One member of {@link ASSEMBLED_PACKAGE_BODY_ENVELOPE_KEYS}. @internal */
 type AssembledPackageBodyEnvelopeKey = (typeof ASSEMBLED_PACKAGE_BODY_ENVELOPE_KEYS)[number];
@@ -1106,8 +1167,10 @@ const ASSEMBLED_PACKAGE_BODY_DISPOSITIONS: readonly string[] = ['concat', 'objec
 function assembledPackageBodyShape(): Pick<typeof STACK_DEFINITION_COLLECTIONS_SHAPE, AssembledPackageBodyKey> {
   const shape: Record<string, unknown> = {};
   for (const [key, disposition] of Object.entries(COMPOSE_KEY_DISPOSITIONS)) {
-    // Envelope keys stay on the artifact: `packages` cannot nest, and
-    // `plugins` / `devPlugins` are assembly instructions no body could carry.
+    // Envelope keys stay on the artifact: `packages` cannot nest,
+    // `plugins` / `devPlugins` are assembly instructions no body could carry,
+    // and `devLogins` is boot-banner text whose only reader looks at the top
+    // level.
     if ((ASSEMBLED_PACKAGE_BODY_ENVELOPE_KEYS as readonly string[]).includes(key)) continue;
     if (!ASSEMBLED_PACKAGE_BODY_DISPOSITIONS.includes(disposition)) continue;
     shape[key] = (STACK_DEFINITION_COLLECTIONS_SHAPE as Record<string, unknown>)[key];
@@ -2853,15 +2916,24 @@ const warnedEmailTemplateFloors = new Set<string>();
  *
  * ## What goes wrong without this
  *
- * `IEmailService.sendTemplate` matches `(name, locale)` EXACTLY and retries
- * exactly one rung — the literal `en-US`. There is no language-subtag folding,
- * so a bundle whose English row is tagged `en` is unreachable from `en-US` and
- * from every other tag it does not itself carry: each such delivery raises
- * `TEMPLATE_NOT_FOUND`, which classifies **permanent**, so it dead-letters with
- * no retry. `sys_user.locale` is user-editable free-text BCP-47 and is NOT
- * constrained to `supportedLocales`, so the locales that can reach the lookup
- * are not the ones the author enumerated — a recipient can break their own mail
- * by setting a legal tag.
+ * `IEmailService.sendTemplate` matches `(name, locale)` EXACTLY and, for a call
+ * that NAMES a locale, retries exactly one rung — the literal `en-US` — and
+ * stops. There is no language-subtag folding, so a bundle whose English row is
+ * tagged `en` is unreachable from `en-US` and from every other tag it does not
+ * itself carry: each such delivery raises `TEMPLATE_NOT_FOUND`, which
+ * classifies **permanent**, so it dead-letters with no retry. `sys_user.locale`
+ * is user-editable free-text BCP-47 and is NOT constrained to
+ * `supportedLocales`, so the locales that can reach the lookup are not the ones
+ * the author enumerated — a recipient can break their own mail by setting a
+ * legal tag.
+ *
+ * ⛔ A call that names NO locale is the other case, and it does not fail: it
+ * starts at `en-US` by name and, when the bundle carries no `en-US` row, drops
+ * to that bundle's lowest locale tag and renders it silently. So one floorless
+ * bundle dead-letters the recipients whose locale was named and quietly fills
+ * for the ones whose was not. The full three-rung ladder is on
+ * `SendTemplateInput.locale` in `packages/spec/src/contracts/email-service.ts`
+ * and is not restated here.
  *
  * ⭐ The trap is that the author does the CONSISTENT thing: a stack declaring
  * `defaultLocale: 'en'` whose English row says `locale: 'en'` agrees with
@@ -2884,6 +2956,37 @@ const warnedEmailTemplateFloors = new Set<string>();
  * not be reported — the reader below mirrors that default rather than relying
  * on the call site for it, so the two agree wherever this is called from.
  * Warn-once per bundle, keyed by name plus the tags it actually carries.
+ *
+ * ## What this deliberately does NOT examine
+ *
+ * Two shapes leave here silently and both can still ship a floorless bundle.
+ * They are written down because the summary line above is the only place the
+ * scope was ever stated, while the hazard section reads as a promise to catch
+ * every floorless bundle — which this does not do:
+ *
+ *  1. **A stack whose `i18n.supportedLocales` is absent or empty.** Measured:
+ *     `i18n` is optional but `supportedLocales` is REQUIRED inside it, so the
+ *     absent arm is reached only by a stack carrying no `i18n` block at all,
+ *     and the empty arm only by a literal `supportedLocales: []`. Either way
+ *     there is nothing to measure "carries rows for this stack's own supported
+ *     locales" against, so the function returns before building anything.
+ *     ⚠️ This early return is not a second scope decision: with no supported
+ *     set every bundle's `declared` list below is empty and shape 2 would skip
+ *     it anyway, so what the return actually buys is not reading `.map` off
+ *     `undefined`.
+ *  2. **A bundle whose tags are ALL outside `supportedLocales`.** `declared` is
+ *     empty, so the bundle is skipped one line after the floor check
+ *     established that it carries no floor row. A stack supporting `en-US`
+ *     whose bundle is tagged `en` alone is exactly that case: floorless, and
+ *     silent here.
+ *
+ * ⚠️ Whether either shape SHOULD warn is the ADR-0049 enforce-or-remove
+ * question, and it is deliberately not answered here: widening a `defineStack`
+ * diagnostic is a behaviour change on an authoring surface, which the posture
+ * note above puts on a scheduled migration rather than behind a lint. What is
+ * closed is the silence being UNDECLARED — both shapes are pinned in
+ * `stack-email-template-locale-floor.test.ts` against a warning control, so
+ * neither can start or stop returning without a test saying so.
  */
 function warnEmailTemplateLocaleFloor(data: ObjectStackDefinition): void {
   const supported = data.i18n?.supportedLocales;
@@ -2914,11 +3017,13 @@ function warnEmailTemplateLocaleFloor(data: ObjectStackDefinition): void {
     warnedEmailTemplateFloors.add(key);
     console.warn(
       `defineStack: emailTemplates '${name}' carries rows for ${declared.map((t) => `'${t}'`).join(', ')} ` +
-      `but none tagged '${EMAIL_TEMPLATE_FLOOR_LOCALE}', so this bundle has no fallback floor. ` +
-      `sendTemplate matches (name, locale) exactly and retries only the literal ` +
-      `'${EMAIL_TEMPLATE_FLOOR_LOCALE}' — there is no language-subtag folding, so every recipient ` +
-      `locale this bundle does not carry a row for raises TEMPLATE_NOT_FOUND, which is permanent ` +
-      `(dead-letter, no retry). Your stack's own i18n.defaultLocale is the wrong tag here unless ` +
+      `but none tagged '${EMAIL_TEMPLATE_FLOOR_LOCALE}', so this bundle has no fallback floor for a ` +
+      `send that names a locale. sendTemplate matches (name, locale) exactly and retries only the ` +
+      `literal '${EMAIL_TEMPLATE_FLOOR_LOCALE}' — there is no language-subtag folding, so every ` +
+      `recipient locale this bundle does not carry a row for raises TEMPLATE_NOT_FOUND, which is ` +
+      `permanent (dead-letter, no retry). A send naming NO locale does not fail: it drops to this ` +
+      `bundle's lowest tag and renders that silently, so one gap is loud for some recipients and ` +
+      `invisible for others. Your stack's own i18n.defaultLocale is the wrong tag here unless ` +
       `it is spelled '${EMAIL_TEMPLATE_FLOOR_LOCALE}': tag the English row '${EMAIL_TEMPLATE_FLOOR_LOCALE}' ` +
       `and keep the other tags beside it.`,
     );
@@ -3024,9 +3129,15 @@ export function defineStack(
     throw new StackTriggerCapabilityRequiredError(`${header}\n\n${lines.join('\n')}`, triggerErrors);
   }
 
-  // Post-parse and advisory: the stack is valid and is returned unchanged.
-  // `locale` carries a default, so this has to run AFTER the parse or a row
-  // that omits the key would read as a missing floor it actually has.
+  // Post-parse and advisory only: this call has no effect on what is
+  // returned. `locale` carries a default, so this has to run AFTER the parse
+  // or a row that omits the key would read as a missing floor it actually
+  // has. [objectstack#17852] The stack is NOT "returned unchanged" — that
+  // was true of neither half of this function: the parse itself can drop an
+  // authored key a record's key schema never gets to see (the defect this
+  // card fixes), and `mergeActionsIntoObjects` below rewrites `actions`
+  // and/or `objects` (bound-action merge, `order` sort) before the result
+  // reaches the caller.
   warnEmailTemplateLocaleFloor(data);
 
   return mergeActionsIntoObjects(data);

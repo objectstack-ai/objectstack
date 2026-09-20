@@ -7,6 +7,8 @@ import type { AutomationContext } from '@objectstack/spec/contracts';
 import type { AutomationEngine, StepLogEntry } from '../engine.js';
 import { parseNodeConfig } from './parse-config.js';
 import { currentLoopIteration } from './loop-frame.js';
+import { isRegionSuspensionRefusal } from '../region-suspension-refusal.js';
+import { attachPartialSteps } from '../partial-steps.js';
 
 /**
  * `try_catch` built-in node — **structured try/catch/retry** (ADR-0031 §Decision 3).
@@ -214,6 +216,23 @@ export function registerTryCatchNode(engine: AutomationEngine, ctx: PluginContex
             childSteps: [...failedAttemptSteps, ...trySteps],
           };
         } catch (err) {
+          // [#18881] ⛔ NOT a try-region failure, and the one arm that decides
+          // whether this card's defect exists. A durable pause raised inside
+          // this region is refused at the region boundary; read as a failure it
+          // would run the catch handler and the node would return SUCCESS — the
+          // measured shape, `loop { try_catch { map(pausing child) } }`
+          // reporting `completed` with `summary.failed = 0` over a sweep that
+          // processed nothing. It is re-thrown so the RUN fails, and ⛔ no
+          // retry attempt is spent on it: re-entering the region would re-enter
+          // the pausing node, and the metadata is what is wrong.
+          //
+          // The attempt's steps ride out with it (#13803's channel), so the
+          // rows the region really did write before the pause stay in the run
+          // log and in the #4354 totals.
+          if (isRegionSuspensionRefusal(err)) {
+            attachPartialSteps(err, [...failedAttemptSteps, ...attemptSteps]);
+            throw err;
+          }
           lastError = err instanceof Error ? err.message : String(err);
           const innerError = variables.get('$error');
           // Only a `$error` that actually CHANGED (identity, not content —
@@ -284,6 +303,14 @@ export function registerTryCatchNode(engine: AutomationEngine, ctx: PluginContex
             childSteps: [...failedAttemptSteps, ...catchSteps],
           };
         } catch (catchErr) {
+          // [#18881] The CATCH region is a region body too — ruling D names
+          // `try_catch`'s try and catch alike — so a durable pause raised in
+          // the handler is refused on exactly the same terms and travels out
+          // rather than becoming this node's returned failure.
+          if (isRegionSuspensionRefusal(catchErr)) {
+            attachPartialSteps(catchErr, [...failedAttemptSteps, ...catchAttemptSteps]);
+            throw catchErr;
+          }
           const catchMsg = catchErr instanceof Error ? catchErr.message : String(catchErr);
           // #14222 — the THIRD returned-failure path, and the last one still
           // discarding its record. #13803 taught the engine to fold a dying

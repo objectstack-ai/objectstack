@@ -354,16 +354,11 @@
  *
  *   1. A PARAMETER ADDED to an ALREADY-exported function is a signature
  *      widening, and it now goes unreported here. Nothing else in this file
- *      catches it: T3's listing records that an export EXISTS, and its shape
- *      sibling is not on this surface. ⚠️ That sibling CHANGED at #16045 and the
- *      silence did not: the 27-row `api-surface-signatures.json` hash was retired
- *      for `api-surface-declarations/`, which does record the declaration text of
- *      every export — but the ruling that built it assigned "is a snapshot diff a
- *      Clause-② signal" to the skills seat, out of that card's scope, so it is a
- *      declared non-surface here rather than a forgotten one (both directions
- *      pinned in T3's battery). What is NOT lost is the function itself — a newly
- *      exported check adds its own row to the listing, which is the T3 row PR
- *      #17616 still reports.
+ *      catches it: T3's listing records that an export EXISTS, and its
+ *      signatures sibling `api-surface-signatures.json` carries 27 `define*`
+ *      helpers (measured on this tree), none of them one of these checks. What
+ *      is NOT lost is the function itself — a newly exported check adds its own
+ *      row to the listing, which is the T3 row PR #17616 still reports.
  *   2. A widening carried by the CHAINED methods rather than by the member list
  *      — `.optional()` first among them — now declines on a closed-set-valued
  *      key. ⛔ Not a new class: #16943 already declines it for every key whose
@@ -1024,6 +1019,145 @@
  * one closes the first bullet by reading the removed value's shape rather than
  * its text.
  *
+ * ## #19099 — NOT a variable removed: a walk that says when it stopped reading
+ *
+ * ⛔ This section removes no accidental variable and moves no row, and that is
+ * the claim — ⛔ not an improvement measured somewhere and asserted here. What
+ * changed is that {@link enclosingDelimiters} now reports the one thing it
+ * could not say before: whether the stack it hands back is a READING or a
+ * GUESS.
+ *
+ * ⚠️ THE HORIZON COMES FIRST, because a shallow clone answers at exit 0 with no
+ * warning and every corpus reading below is worthless without it. Git renders a
+ * GRAFT BOUNDARY commit against the EMPTY TREE, so a shallow clone shows one
+ * ordinary commit as the whole repository arriving at once — here 1,092 files
+ * and 309,028 insertions under `packages/spec/src` for a commit the API reports
+ * as 2 files, +41/-7. Every added line of that phantom is then judged as if it
+ * were a diff. ⛔ So state the horizon and what was dropped, or do not report a
+ * rate: read `.git/shallow` (or `historyHorizon()` in
+ * `scripts/pm/git-history.mjs`, which AGENTS.md routes windowed history through
+ * for exactly this reason) and EXCLUDE every boundary.
+ *
+ * ⚠️ AND THE READ PATH IS PART OF THE HORIZON, which cost this paragraph a
+ * round of its own. A census must call {@link wideningTells} with
+ * {@link headBlobSource} live — the path the gate itself takes. Reading each
+ * file through {@link tellsInFile} alone drops {@link ledgerRowLicences}, so
+ * every #17300 ledger row tells and T2 inflates; handing it a `readSource` that
+ * answers `null` drops #18702's file-local factory resolution, so T1 deflates.
+ * ⛔ Worse, BOTH failures are silent. `ROOT` here is derived from
+ * `import.meta.url`, so a copy of this module imported from outside a git
+ * worktree makes every `git cat-file` fail and every blob read answer `null`
+ * with nothing raised. ⇒ a census asserts its own resolution before it counts —
+ * probe one known blob, and refuse to report if it comes back empty.
+ *
+ * CORPUS, on that discipline — this clone IS shallow, with ONE boundary
+ * (`ae8edd2c4f`, 2026-08-31), excluded: 436 non-merge commits touching
+ * `packages/spec/src` are reachable, 435 after the exclusion, giving **1,149
+ * file diffs** of non-test `.ts`, of which **1,133 head blobs resolved** and 22
+ * definitions were reported unresolved by name. The version of this file at the
+ * branch's merge base and the version in it were run row for row over all of
+ * them through `wideningTells`: **484 rows against 484 rows, 0 differing
+ * commits** (T2 125, T1 270, T4 89). ⇒ this change moves no tell anywhere on
+ * the corpus. The two firing-only readers agree as well — `enclosingDelimiter`
+ * and `inParameterList` over **84,924 side-lines**, **0 disagreements** each.
+ * ⛔ Answer-identical, ⛔ not byte-identical: both bodies changed.
+ *
+ * The reading lexes no regex literal and pops type-blind. Both limits are free
+ * while every caller only makes a tell FIRE — a guessed stack buys a false tell
+ * (loud) and never a swallowed one. They stop being free for any caller that
+ * DECLINES on the answer: `.regex(/^\{\{/)` pushes two openers the scan never
+ * closes, the enclosing shape's own closers are eaten, and a genuinely new key
+ * at the OUTER level reads as a member nested inside it — a widening, gone
+ * quiet. #18488 had already named that blindness for `readToCloser`, which
+ * carries a type check AND an `unreadable` flag; this walker had neither.
+ *
+ * ⛔ THE FLAG HAS NO SUPPRESSING READER TODAY, and that is stated rather than
+ * left to be discovered. The reader that would have had one — a decline for a
+ * member bounded inside a re-declared universal-acceptor bag — was dropped by
+ * ruling D′ (below). What lands is the READING; the obligation on the next
+ * author who declines anything on these frames is written at the definition.
+ *
+ * ⭐ Two cheap SOUND discriminations are taken, and both are the difference
+ * between a flag that is informative and one that is noise:
+ *
+ *   • A `*\/` outside a block comment, on a walk that has opened none of its
+ *     own, closed no leading one, and raised no flag, is not a guess: outside a
+ *     string and outside a comment `*\/` is not valid TypeScript, so it says
+ *     the hunk BEGAN INSIDE a comment whose opener sits above the hunk. The
+ *     frames the comment text pushed are discarded and the walk restarts after
+ *     it. Each of those three guards is pinned by its own case, because without
+ *     them the reset throws away frames the hunk really showed — the quiet
+ *     direction.
+ *   • A LONE `/` is arithmetic. A regex literal cannot span lines, so a `/`
+ *     with no second `/` left on its line cannot open one; it pushes and pops
+ *     nothing and the stack is as correct as it was.
+ *
+ * ⚠️ THE RESIDUAL. This paragraph has been wrong four times, every time by
+ * asserting a RATE, so it is written to be checkable rather than persuasive:
+ * the population is the **270 T1 rows this gate REPORTS** on the corpus above
+ * — one boundary commit excluded and the gate's own read path used, without
+ * which the count moves in both directions at once and every trigger below
+ * reads as common.
+ *
+ * ⭐ ONE trigger OCCURS, and it is the apostrophe. The walk is unreadable at
+ * **2 of those 270 rows (0.7%)**, and both are an APOSTROPHE IN JSDOC PROSE in
+ * a hunk that begins inside the comment — `automation/approval.zod.ts`
+ * (`Entra's`) and `ai/solution-blueprint.zod.ts` (`object's`). Read as code an
+ * apostrophe opens a string literal that never closes on its line, so the walk
+ * is unreadable at that byte BEFORE the terminator line the reset above would
+ * have used is ever reached. ⛔ Widening the reset does not close it — the flag
+ * is already up — and closing it needs a lexer that knows prose from code,
+ * which is the guess this reader does not make.
+ *
+ * ⛔ THE OTHER THREE TRIGGERS OCCUR ZERO TIMES in this window, and they are
+ * still triggers: a reader that meets one must refuse, and a reader written
+ * against this paragraph must know they exist. They are triggers BY
+ * CONSTRUCTION, ⛔ not by observation — each is pinned by its own `--self-test`
+ * case rather than by a corpus row:
+ *
+ *   • a `/` with another `/` left on its line, which MAY open a regex literal —
+ *     **0 rows**. ⚠️ ⛔ Do not read that zero as "regex literals are rare here":
+ *     they are common, and the flag is deliberately conservative about them.
+ *     It says only that none sat on a line this walk CROSSED before a reported
+ *     T1 row in this window — and the lines it crosses are every kind the hunk
+ *     shows before that row, ⛔ not the leading context alone.
+ *   • a closer whose type does not match the opener it popped — **0 rows**.
+ *   • a `*\/` this walk cannot explain — **0 rows**.
+ *
+ * ⇒ Nothing is silenced by any of them today: no reader suppresses on the flag.
+ * The number a future suppressing reader needs is the 0.7%, and it should be
+ * re-measured on that day rather than quoted from here — on the gate's own read
+ * path, with its blob resolution asserted first.
+ *
+ * ## The shape this gate keeps firing on, and what to do about it — ruling D′
+ *
+ * PR #19095 bounded two members, `pageSize` and `pageSizeOptions`, inside a
+ * door that had carried `pagination: z.unknown().optional()` — every value,
+ * under every key. `--declaration no` exited 4 on both, against a declaration
+ * an at-tier reviewer had MEASURED correct: 0 newly accepted inputs of 53, and
+ * no new export. Read as text the tell is right and the semantics are inverted.
+ *
+ * ⛔ The gate is NOT repaired for it, and the reason is a ruling rather than a
+ * shrug. Three rounds each tried a wider proxy for 「the two lines name the same
+ * place」 and each proxy was not identity; the one that survived is sound only
+ * INSIDE a hunk, and the class that leaks lives ACROSS hunks — an earlier hunk
+ * of the same file moving the parent boundary, which silences every member of
+ * the bag at once. A gate that refuses too much is noisy; one that refuses too
+ * little is dangerous, and this gate is the compensating control for a
+ * self-declared `Clause-②: no`. Diff-wide decidability is UNMEASURED, and a
+ * text matcher does not grow cross-hunk assembly: the class belongs to a parsed
+ * schema comparison, the way `oasdiff` judges breaking changes on the parsed
+ * document rather than on text.
+ *
+ * ⇒ THE DISPOSITION, and it is carried in {@link REFUSAL_SENTENCE} so a refused
+ * author reads it without opening this file: for a member bounded inside a bag
+ * that was a universal acceptor, **declare `Clause-②: yes` and route it to
+ * at-tier review**. The gate cannot verify a narrowing per line without
+ * subtyping (#18640), and collapsing the bag refuses authored keys that parsed
+ * before — which is exactly what at-tier review exists to see. ⛔ This moves no
+ * criterion line: the `no (narrowing)` declarations on `main` stay valid for
+ * every shape the gate CAN read, and only this one is named.
+ *
  * ## The remedy with no reader — #17848, and a pin the shape never had
  *
  * #17848 filed two halves against this family. Re-measuring both on the tree
@@ -1298,7 +1432,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'T4 — a new registration in a registry': 10,
   '#16448 acceptance: the four positive controls, each with its file:line': 8,
   '#16448 acceptance: the negative controls a widening gate must let through': 10,
-  'the refusal sentence, and the two prohibitions it must keep': 11,
+  'the refusal sentence, and the two prohibitions it must keep': 13,
   'the exit register is distinct in every direction it must be': 6,
   'the declared registry rows still exist in this tree': 4,
   '#17112 — the count is split: examined is not examinable': 23,
@@ -1307,6 +1441,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#18640 — an inline closed set RE-SPELLED at the same binding is not a set that gained a value': 20,
   '#18702 — a declaring factory PRIVATE to one file, resolved through its own DEFINITION': 54,
   "#18721 — a hunk's LEADING CONTEXT is not a reason to abandon the parameter reading": 14,
+  '#19099 — the enclosing-delimiter walk says when it STOPPED READING and started guessing': 15,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1346,6 +1481,15 @@ export const EXIT_REFUSED = 4;
  * is repaired HERE, in the matcher, with a `--self-test` case pinning the
  * shape — and to say plainly that the claim is not where it gets repaired.
  *
+ * ⭐ #19099 — and it now names ONE SHAPE that is a true refusal although the
+ * diff only narrows, because the card this closes was filed against a gate that
+ * refused the criterion-honest declaration WITHOUT SAYING WHY. Ruling D′ leaves
+ * the gate firing on it and puts the disposition here, where a refused author
+ * reads it: the matcher cannot verify a narrowing per line without subtyping
+ * (#18640), so the remedy is the tier, not a repair. ⛔ It is the only shape
+ * named, and naming it moves no criterion line — every other narrowing the gate
+ * can read is still a narrowing.
+ *
  * It stays a constant for #16448's reason: the author knows the ways out
  * without opening this file. A row renders it once; ⛔ never a second wording
  * per tell.
@@ -1354,7 +1498,12 @@ export const REFUSAL_SENTENCE =
   'a widening tell with `Clause-②: no` — re-declare `yes` if the diff really widens; if the tell ' +
   'is FALSE, repair it here in the matcher (`scripts/pm/check-widening-tells.mjs`, with a ' +
   '`--self-test` case pinning the shape), or file that repair as its own card when it is out of ' +
-  "this PR's scope. ⛔ An explanation in the claim moves no exit code — nothing reads one";
+  "this PR's scope. ⛔ ONE shape is a true refusal although it only narrows, and is ruled NOT " +
+  'repairable here: a member bounded inside a bag that was a universal acceptor (`z.unknown()` / ' +
+  '`z.any()`) — this matcher cannot verify a narrowing per line without subtyping, and collapsing ' +
+  'the bag refuses authored keys that parsed before, which is what at-tier review exists to see, ' +
+  'so declare `Clause-②: yes` and route it to at-tier review. ⛔ An explanation in the claim ' +
+  'moves no exit code — nothing reads one';
 
 // ---------------------------------------------------------------------------
 // The surfaces
@@ -2155,23 +2304,76 @@ function topLevelMembers(s, open, close) {
 }
 
 /**
- * The innermost delimiter still OPEN where one side-line sits, as far as THIS
- * HUNK shows it — `{ opener: '(' | '[' | '{', head: <the text left of it> }`,
- * or `null` for "the hunk does not say".
+ * Every delimiter still OPEN where one side-line sits, as far as THIS HUNK
+ * shows it — `{ frames, unreadable }`, the frames outermost first, each
+ * `{ opener: '(' | '[' | '{', head: <the text left of it> }`. An EMPTY
+ * `frames` is "the hunk does not say": no opener it showed is still open where
+ * the line sits.
  *
- * ⭐ Positive evidence only, and `null` is the whole safety property. The scan
- * starts at the first line of the line's OWN hunk, so a construct opened before
- * the hunk is never guessed at, and a string literal that does not close on its
- * line means the state cannot be carried across it — that answers `null`, and
- * both callers read `null` as "keep the tell firing". The answer is ALWAYS an
- * opener this hunk showed, never one inferred from a closer.
+ * ⭐ #19099 — `unreadable`, and it is the half an index cannot carry, exactly
+ * as {@link readToCloser} separates the two facts a `-1` wore. This scan lexes
+ * NO regex literal and pops TYPE-BLIND, and neither limit costs anything while
+ * a reader only ever makes a tell FIRE: a guessed stack then buys a false tell
+ * (loud) and never a swallowed one. They stop being harmless the moment a
+ * reader SUPPRESSES on the answer — `.regex(/^\{\{/)` pushes two openers this
+ * scan never closes, so the enclosing shape's own closers are eaten and a key
+ * at the OUTER level reads as a member nested INSIDE it. ⇒ the flag is raised
+ * where the stack stops being a reading and becomes a guess, and THESE ARE ITS
+ * TRIGGERS, all of them, in the order a reader meets them:
+ *
+ *   • a `/` with another `/` left on its line — the only shape a single-line
+ *     regex literal can have, and this scan does not lex one. ⛔ A LONE `/` is
+ *     NOT a trigger: a regex literal cannot span lines, so one is arithmetic,
+ *     and division pushes and pops nothing.
+ *   • a closer whose type does not match the opener it popped.
+ *   • a string literal that never closes on its line.
+ *   • a `*\/` this walk cannot explain — a second one, or one after the flag is
+ *     already up. ⛔ The FIRST `*\/` on a clean walk is not a trigger at all: it
+ *     says the hunk began inside a comment (see the reset below).
+ *
+ * ⛔ NO READER SUPPRESSES ON THIS FLAG TODAY, and saying so is the point. The
+ * one that did — #19099's bag-internal decline — was dropped by ruling D′, so
+ * what lands here is the READING and not a consumer of it: the obligation is
+ * stated at the definition rather than left for the next author to infer.
+ * ⇒ any future reader that DECLINES a tell on these frames refuses when the
+ * flag is set, and states every trigger above wherever it describes itself. A
+ * disclosure naming only the division operator — which raises nothing — while
+ * leaving ` *\/` unnamed is how the first cut of this flag regressed a landed
+ * #18234 decline, and it did so in the commonest hunk shape there is: a hunk
+ * that BEGINS inside a comment is **35 of the 270 T1 rows** this gate reports
+ * on the corpus in the header (13.0%), against **2** rows for the one residual
+ * that still raises the flag. ⇒ the undisclosed trigger outnumbered the
+ * disclosed one by more than an order of magnitude, which is the whole lesson.
+ *
+ * ⭐ Like `readToCloser`, raising the flag does NOT move the frames: a caller
+ * that only ever makes a tell FIRE (⇒ {@link inParameterList}) reads the same
+ * ANSWER it read before this flag existed. ⛔ Not the same BYTES — this
+ * function's body and `enclosingDelimiter`'s both changed — and the claim is
+ * only worth what it is measured over: `enclosingDelimiter` and
+ * `inParameterList` agree on **84,924 side-lines** over the 1,149 file diffs
+ * the header's corpus names, one graft boundary excluded, **0 disagreements**
+ * each. That is 2,298 sides counted as two per file diff — 1,939 of them
+ * non-empty, the other 359 being the absent side of an added or deleted file.
+ * ⛔ Fixing the stack instead — lexing regex literals
+ * in full — was deliberately not attempted: telling a regex literal from a
+ * division at every position needs the preceding TOKEN, which is one more guess
+ * in a reader whose whole safety property is that it makes none. The two cheap,
+ * SOUND discriminations above are taken; the rest is left loud, and the residual
+ * is named in the header.
+ *
+ * ⭐ Positive evidence only, and an empty `frames` is the whole safety property.
+ * The scan starts at the first line of the line's OWN hunk, so a construct
+ * opened before the hunk is never guessed at, and a string literal that does not
+ * close on its line means the state cannot be carried across it — that answers
+ * no frames, and every caller reads that as "keep the tell firing". The answer
+ * is ALWAYS an opener this hunk showed, never one inferred from a closer.
  *
  * ⭐ #18721 — a closer arriving with an EMPTY stack closes an opener the hunk
  * never showed, and that is NOT a reason to abandon the reading. The openers
  * the hunk DOES show are strictly INSIDE the ones it did not, so the shown
  * stack is a SUFFIX of the real one: whenever it is non-empty its top IS the
  * innermost open delimiter, whatever sits below it. So an underflow drops the
- * closer and the walk continues, and the answer is still `null` for exactly the
+ * closer and the walk continues, and the answer is still EMPTY for exactly the
  * state that has no positive evidence — a shown stack that is empty where the
  * line sits. ⛔ The reading this replaces abandoned the walk at the FIRST
  * underflow, which a real hunk reaches on its LEADING CONTEXT LINES: a hunk
@@ -2181,20 +2383,24 @@ function topLevelMembers(s, open, close) {
  *
  * ⛔ This is NOT the depth-aware `z.object({ … })` reader T1's own comment
  * refuses, and ⛔ it must never be grown into one. It answers exactly one
- * question — which bracket is innermost — and nothing about WHICH construct
- * opened it, so it has no truncating failure mode: an unreadable state is
- * `null`, never "no longer inside a shape".
+ * question — which brackets are open — and nothing about WHICH construct
+ * opened one, so it has no truncating failure mode: a state it cannot read is
+ * reported as one, never as "no longer inside a shape".
  *
  * @param {{ text: string, hunk: number }[]} side — one SIDE of `patchLines`
  * @param {number} index — the line's index into that side
+ * @returns {{ frames: { opener: string, head: string }[], unreadable: boolean }}
  */
-export function enclosingDelimiter(side, index) {
-  if (!Array.isArray(side) || typeof index !== 'number' || !side[index]) return null;
+export function enclosingDelimiters(side, index) {
+  if (!Array.isArray(side) || typeof index !== 'number' || !side[index]) return { frames: [], unreadable: true };
   const { hunk } = side[index];
   let start = index;
   while (start > 0 && side[start - 1]?.hunk === hunk) start -= 1;
-  const stack = [];
+  const frames = [];
+  let unreadable = false;
   let inBlockComment = false;
+  let openedBlockComment = false;
+  let leadingCommentClosed = false;
   for (let j = start; j < index; j += 1) {
     const s = String(side[j]?.text ?? '');
     for (let k = 0; k < s.length; k += 1) {
@@ -2204,27 +2410,92 @@ export function enclosingDelimiter(side, index) {
         if (ch === '*' && next === '/') { inBlockComment = false; k += 1; }
         continue;
       }
-      if (ch === '/' && next === '*') { inBlockComment = true; k += 1; continue; }
+      if (ch === '/' && next === '*') { inBlockComment = true; openedBlockComment = true; k += 1; continue; }
       if (ch === '/' && next === '/') break;
+      // #19099 — `*/` OUTSIDE a block comment: the hunk BEGAN INSIDE one. A
+      // hunk's scan starts at the hunk's own first line, so a doc comment that
+      // opened above it is invisible and its body was being read as code —
+      // which is what raised the flag on ` */` before this reset existed, in
+      // the commonest hunk shape there is — 35 of the 270 T1 rows this gate
+      // reports on the header's corpus begin inside one. ⭐ It needs no regex
+      // lexer and it is not a heuristic: outside a string and outside a comment,
+      // `*/` is not valid TypeScript, so the only reading it has is a
+      // terminator. Everything scanned so far was comment text, so the frames it
+      // pushed are DISCARDED and the walk restarts after it.
+      //
+      // ⛔ Guarded on three sides, and each guard is pinned by its own case.
+      // Once this walk has opened a block comment of its own, a later `*/` is
+      // unexplained; once one leading comment has already been closed, a second
+      // is not the same fact; and once anything has made the walk unreadable, a
+      // `*/` may be bytes inside a string this scan mis-read, so the reset could
+      // throw away real frames — the QUIET direction. Either way the flag is
+      // raised instead.
+      if (ch === '*' && next === '/') {
+        if (!openedBlockComment && !leadingCommentClosed && !unreadable) {
+          leadingCommentClosed = true;
+          frames.length = 0;
+          k += 1;
+          continue;
+        }
+        unreadable = true;
+        k += 1;
+        continue;
+      }
+      // #19099 — a `/` that opens neither comment form is a division operator or
+      // a REGEX LITERAL this scan does not lex, and the two are TELLABLE APART
+      // without lexing either, because a regex literal cannot span lines: one
+      // with no second `/` left on this line does not exist. So a lone `/` is a
+      // DIVISION, which pushes and pops nothing and leaves the stack exactly as
+      // correct as it was — no flag. A `/` with another `/` after it on the same
+      // line may be a regex whose body carries brackets, and from there the
+      // stack is a guess. ⛔ The conservative half is deliberate: a division
+      // followed by a slash inside a string later on the line raises the flag it
+      // does not need to.
+      if (ch === '/') {
+        if (s.indexOf('/', k + 1) !== -1) unreadable = true;
+        continue;
+      }
       if (ch === "'" || ch === '"' || ch === '`') {
         const end = endOfStringLiteral(s, k);
-        if (end === -1) return null;
+        if (end === -1) return { frames: [], unreadable: true };
         k = end;
         continue;
       }
-      if (BRACKET_CLOSERS[ch] !== undefined) { stack.push({ opener: ch, head: s.slice(0, k) }); continue; }
+      if (BRACKET_CLOSERS[ch] !== undefined) { frames.push({ opener: ch, head: s.slice(0, k) }); continue; }
       if (ch === ')' || ch === ']' || ch === '}') {
         // #18721 — UNDERFLOW: this closes an opener the hunk never showed. Drop
         // it and keep walking. The shown stack is a suffix of the real one, so
         // nothing below it can ever be the innermost open delimiter; an empty
-        // shown stack still answers `null` at the end, which is the same "no
-        // positive evidence" this reader has always reported.
-        if (stack.length === 0) continue;
-        stack.pop();
+        // shown stack still answers "no frames" at the end, which is the same
+        // "no positive evidence" this reader has always reported. ⛔ Underflow
+        // raises NO flag: it is the one mismatch this reader can explain.
+        if (frames.length === 0) continue;
+        // #19099 — a TYPE-BLIND pop, flagged rather than fixed. In source this
+        // reader lexed correctly a closer always matches the frame it pops, so a
+        // mismatch says the stack is already wrong — which is what the flag is.
+        if (BRACKET_CLOSERS[frames[frames.length - 1].opener] !== ch) unreadable = true;
+        frames.pop();
       }
     }
   }
-  return stack.length > 0 ? stack[stack.length - 1] : null;
+  return { frames, unreadable };
+}
+
+/**
+ * The INNERMOST delimiter a hunk shows open where one side-line sits — the top
+ * of {@link enclosingDelimiters}, and this reading's original shape.
+ *
+ * ⛔ `null` still covers both "unreadable" and "the hunk showed none still
+ * open", because its two callers ({@link inParameterList} and #17618's decline)
+ * read the two the same way: no positive evidence, so the tell keeps firing.
+ * ⭐ #19099 — and that is why this reading ignores `unreadable`: both of them
+ * only ever make a tell FIRE, so a guessed stack costs a false tell (loud) and
+ * never a swallowed one, and folding the flag in here would instead have made a
+ * REMOVED parameter earn budget it does not earn today.
+ */
+export function enclosingDelimiter(side, index) {
+  const { frames } = enclosingDelimiters(side, index);
+  return frames.length > 0 ? frames[frames.length - 1] : null;
 }
 
 /**
@@ -4286,12 +4557,7 @@ export function selfTest() {
   t('the contract source surface is IMPORTED from SUSPECT_TIER_GLOBS, not spelled here', CONTRACT_SOURCE_SURFACES.some((s) => s.imported === 'SUSPECT_TIER_GLOBS'));
   t('…and it covers exactly what that table declares', SUSPECT_TIER_GLOBS.every((g) => CONTRACT_SOURCE_SURFACES.some((s) => s.glob === g.glob)));
   t('the published surface is DERIVED from REGEN_ARTIFACTS', PUBLISHED_SURFACES.length > 0 && PUBLISHED_SURFACES.every((s) => s.imported === 'REGEN_ARTIFACTS'));
-  t('…so the api-surface listing reaches it without a literal here', surfaceCovers(PUBLISHED_SURFACES, 'packages/spec/api-surface/kernel.json'));
-  // The counterfactual half of the line above, and the reason it is worth a case:
-  // `api-surface-signatures.json` used to be the SECOND row this derivation picked
-  // up, and #16045 retired that artifact. The path falling off this surface is the
-  // derivation tracking REGEN_ARTIFACTS; a literal here would still be matching it.
-  t('⛔ …and the RETIRED signatures sibling does not — the surface follows the table, not a literal', !surfaceCovers(PUBLISHED_SURFACES, 'packages/spec/api-surface-signatures.json'));
+  t('…so both api-surface artifacts reach it without a literal here', surfaceCovers(PUBLISHED_SURFACES, 'packages/spec/api-surface/kernel.json') && surfaceCovers(PUBLISHED_SURFACES, 'packages/spec/api-surface-signatures.json'));
   t('a spec source file is on the contract surface', surfaceCovers(CONTRACT_SOURCE_SURFACES, 'packages/spec/src/kernel/plugin.zod.ts'));
   t('⛔ a sibling directory that merely shares a prefix is not', !surfaceCovers(CONTRACT_SOURCE_SURFACES, 'packages/spec/src-legacy/plugin.zod.ts'));
   t('an api-surface file is NOT on the contract source surface — the two tells stay apart', !surfaceCovers(CONTRACT_SOURCE_SURFACES, 'packages/spec/api-surface/kernel.json'));
@@ -4902,17 +5168,42 @@ export function selfTest() {
   t('⛔ …and a `removedTexts` that is not an array is not evidence', widensKeyIntoUniversalAcceptor('  filter: z.unknown(),', null) === false);
   t('⭐ …and it is the MIRROR of `replacesUniversalAcceptorKey`: one pair of lines, read from either end, and the neutral pair is a replacement to one and a widening to neither', widensKeyIntoUniversalAcceptor('  filter: z.unknown(),', ['  filter: z.union([A, B]),']) === true && replacesUniversalAcceptorKey('  filter: z.union([A, B]),', ['  filter: z.unknown(),']) === true && widensKeyIntoUniversalAcceptor('  filter: z.unknown(),', ['  filter: z.unknown(),']) === false);
 
+  // -- #19099: the walk says when it stopped reading -------------------------
+  battery('#19099 — the enclosing-delimiter walk says when it STOPPED READING and started guessing');
+  const CTX = (text) => ({ text, hunk: 0 });
+  // -- the stack, and the flag beside it -------------------------------------
+  const NESTED_SIDE = [CTX('  pagination: z.looseObject({'), CTX('    pageSize: z.number(),')];
+  t('`enclosingDelimiters` answers the whole SHOWN stack, outermost first, where this reading used to answer only its top — which `enclosingDelimiter` still does', enclosingDelimiters(NESTED_SIDE, 1).frames.length === 2 && enclosingDelimiters(NESTED_SIDE, 1).frames[1]?.opener === '{' && enclosingDelimiter(NESTED_SIDE, 1)?.opener === '{');
+  t('⛔ …and an unterminated string is UNREADABLE, while an underflow is a readable "the hunk showed none still open"', enclosingDelimiters([CTX("const s = 'opens here"), CTX('  extra: z.string(),')], 1).unreadable === true && enclosingDelimiters([CTX('  });'), CTX('  extra: z.string(),')], 1).unreadable === false && enclosingDelimiters([CTX('  });'), CTX('  extra: z.string(),')], 1).frames.length === 0);
+  t('⭐ a `/` that may open a REGEX raises the flag, and leaves the frames it had exactly where they were', enclosingDelimiters([CTX('  label: z.string().regex(/^x/),'), CTX('  next: z.string(),')], 1).unreadable === true && enclosingDelimiters([CTX('  label: z.string(),'), CTX('  next: z.string(),')], 1).unreadable === false);
+  t('⭐ …while a LONE `/` is a DIVISION and raises nothing: a regex literal cannot span lines, so the stack it did not touch is still a reading', enclosingDelimiters([CTX('  half: z.number().default(TOTAL / 2),'), CTX('  next: z.string(),')], 1).unreadable === false);
+  t('⛔ …and a `/` inside a STRING or a line comment raises nothing either — the flag is for bytes this scan could not lex, never for every slash', enclosingDelimiters([CTX("  label: z.string().describe('a/b'),"), CTX('  next: z.string(),')], 1).unreadable === false && enclosingDelimiters([CTX('  // a/b'), CTX('  next: z.string(),')], 1).unreadable === false);
+  t('⛔ …and a TYPE-BLIND pop is flagged too, while #18721’s UNDERFLOW is not: one says the stack was already wrong, the other says the hunk began inside something it never showed', enclosingDelimiters([CTX('  f(x[0 }'), CTX('  next: z.string(),')], 1).unreadable === true && enclosingDelimiters([CTX('  });'), CTX('  next: z.string(),')], 1).unreadable === false);
+  // -- a hunk that BEGINS inside a comment, and the three guards on the reset -
+  const JSDOC_START = [CTX(' * see makeThing({ a, b'), CTX(' */'), CTX('  next: z.string(),')];
+  t('⭐ a `*/` outside a block comment reads as "the hunk BEGAN inside one", and the frames the comment text pushed are DISCARDED', enclosingDelimiters(JSDOC_START, 2).unreadable === false && enclosingDelimiters(JSDOC_START, 2).frames.length === 0);
+  t('⛔ GUARD 1 — a SECOND leading terminator is not the same fact: the reset applies once, and the next one raises the flag', enclosingDelimiters([CTX(' */'), CTX(' */'), CTX('  next: z.string(),')], 2).unreadable === true);
+  t('⭐ GUARD 2 — a `*/` arriving after this walk opened AND closed a comment of its OWN is unexplained, so it raises the flag and KEEPS the frames rather than discarding real ones', enclosingDelimiters([CTX('  /* note */ wrap: z.object({'), CTX(' */'), CTX('  next: z.string(),')], 2).unreadable === true && enclosingDelimiters([CTX('  /* note */ wrap: z.object({'), CTX(' */'), CTX('  next: z.string(),')], 2).frames.length === 2);
+  t('⛔ …and the same walk WITHOUT the stray terminator keeps those frames and raises nothing, so the case above measures the guard and not the comment', enclosingDelimiters([CTX('  /* note */ wrap: z.object({'), CTX('  next: z.string(),')], 1).unreadable === false && enclosingDelimiters([CTX('  /* note */ wrap: z.object({'), CTX('  next: z.string(),')], 1).frames.length === 2);
+  t('⭐ GUARD 3 — once the walk is UNREADABLE the reset is REFUSED, which is what that guard protects: `enclosingDelimiter` ignores the flag, and would otherwise lose a frame the hunk really showed', enclosingDelimiter([CTX('  wrap: z.object({'), CTX('  slug: z.string().regex(/^x/),'), CTX(' */'), CTX('  next: z.string(),')], 3)?.opener === '{' && enclosingDelimiters([CTX('  wrap: z.object({'), CTX('  slug: z.string().regex(/^x/),'), CTX(' */'), CTX('  next: z.string(),')], 3).frames.length === 2);
+  // -- the residual the header names, pinned as the residual it is ------------
+  //
+  // ⛔ An APOSTROPHE in doc prose is the trigger that actually occurs on this
+  // tree — 7 of 95 T1 lines — and it fires BEFORE the terminator line is ever
+  // reached, so the reset above cannot help it. Pinned in the direction it
+  // fails: unreadable, no frames, and every reader that suppresses must refuse.
+  t('⚠️ THE RESIDUAL — an apostrophe in the prose of a hunk that begins inside a JSDoc opens a string that never closes, so the walk is UNREADABLE before the terminator is read', enclosingDelimiters([CTX(" * the value's shape is { id"), CTX(' */'), CTX('  next: z.string(),')], 2).unreadable === true && enclosingDelimiters([CTX(" * the value's shape is { id"), CTX(' */'), CTX('  next: z.string(),')], 2).frames.length === 0);
+  t('⛔ CONTROL — the identical prose with the apostrophe spelled away resets cleanly, so the case above measures the apostrophe and nothing else', enclosingDelimiters([CTX(' * the value shape is { id'), CTX(' */'), CTX('  next: z.string(),')], 2).unreadable === false);
+  // -- the reset reaches a CALLER, which is the half a unit case cannot show --
+  const JSDOC_ARROW = [CTX(' * const check = ('), CTX(' */'), CTX('  extra: z.string(),')];
+  t('⭐ THE RESET REACHES `inParameterList` — an arrow in an `@example` block would otherwise read as a real parameter list and SWALLOW the key line behind it; discarded frames make it fire', inParameterList(JSDOC_ARROW, 2) === false);
+  t('⛔ CONTROL — the identical head on a line the walk really reads as code still declines, so the case above measures the comment and not the head', inParameterList([CTX('const check = ('), CTX('  extra: z.string(),')], 1) === true);
+
   // -- T3 --------------------------------------------------------------------
   battery('T3 — a new row in a published entry point');
   t('a new export row is a tell', tells(FILE_API_SURFACE)[0]?.tell === 'T3');
   t('…reported at its file:line', at(FILE_API_SURFACE)[0] === 'packages/spec/api-surface/kernel.json:14');
-  t('⛔ the RETIRED signatures sibling is off this surface', tells({ filename: 'packages/spec/api-surface-signatures.json', patch: patchOf(4, '+  "defineWorkflow": "sha256:0000000000000000",') }).length === 0);
-  // ⛔ And its replacement is deliberately NOT on it either. #16045's ruling put
-  // the declaration-text snapshot in `api-surface-declarations/` and assigned the
-  // question of whether a snapshot diff is a Clause-② signal to the skills seat,
-  // by name and out of that card's scope. So this is a DECLARED boundary, not an
-  // oversight: wiring it in is a separate decision with its own owner.
-  t('⛔ nor is its declaration-text replacement — a separate decision, with its own owner', tells({ filename: 'packages/spec/api-surface-declarations/kernel.txt', patch: patchOf(4, '+declare const Added: z.ZodString;') }).length === 0);
+  t('the signatures sibling is on the surface too', tells({ filename: 'packages/spec/api-surface-signatures.json', patch: patchOf(4, '+  "defineWorkflow": "sha256:0000000000000000",') })[0]?.tell === 'T3');
   t('⛔ a removed row is not a tell', tells({ filename: 'packages/spec/api-surface/kernel.json', patch: '@@ -14,1 +14,0 @@\n-    "Gone (const)",' }).length === 0);
   t('⛔ a JSON file elsewhere is not on this surface', tells({ filename: 'packages/spec/package.json', patch: patchOf(4, '+    "./workflow": "./dist/workflow.js",') }).length === 0);
   t('⛔ nor a non-string structural line inside the listing', tells({ filename: 'packages/spec/api-surface/kernel.json', patch: patchOf(4, '+  ]') }).length === 0);
@@ -4972,6 +5263,8 @@ export function selfTest() {
   t('…and its uselessness is stated outright, so no author spends a round rediscovering it', says(REFUSAL_SENTENCE, 'moves no exit code'));
   t('…while the matcher door names the file to open and the case that must come with it', says(REFUSAL_SENTENCE, 'scripts/pm/check-widening-tells.mjs') && says(REFUSAL_SENTENCE, '`--self-test` case pinning the shape'));
   t('…and quotes the declaration in the spelling the reader uses', says(REFUSAL_SENTENCE, '`Clause-②: no`'));
+  t('⭐ #19099 — the ONE shape the gate keeps refusing although it only narrows is NAMED, with both acceptor spellings, so the refusal says why it fires', says(REFUSAL_SENTENCE, 'bounded inside a bag that was a universal acceptor') && says(REFUSAL_SENTENCE, '`z.unknown()`') && says(REFUSAL_SENTENCE, '`z.any()`'));
+  t('…and its disposition is the TIER, ⛔ never a matcher repair — the card this closes was filed against a refusal that said neither', says(REFUSAL_SENTENCE, 'declare `Clause-②: yes` and route it to at-tier review') && says(REFUSAL_SENTENCE, 'cannot verify a narrowing per line without subtyping'));
   t('⛔ no label name appears anywhere in this file\'s outputs — a checker that hung one would be issuing the verdict', !says(REFUSAL_SENTENCE, 'needs:') && refusalLines(refusedAll).every((l) => !l.includes('needs:')));
   t('⛔ no new claim-line syntax is invented: the two values are the sibling\'s two', wideningRefusal({ declaration: 'maybe', files: positives }).state === 'not-applicable');
   t('a tell is reported as a tell — its `why` says what it is evidence OF', refusedAll.rows.every((r) => typeof r.why === 'string' && r.why.length > 20));
@@ -5796,6 +6089,7 @@ export function selfTest() {
       "#18640's inline closed set re-spelled at the same binding — bounded by the control set that IS the finding, the same edit spelled one member per line and at a keyed property, with the added-arm, different-binding, brand-new, widened-enum and new-key controls that still fire, " +
       "#18702's FILE-LOCAL declaring factory, resolved through its own definition at the head BLOB and classified by what its body returns — every factory the filing card names pinned against its own arm, the refusal arm read off a `z.never` definition rather than a name with its chained-arm control, the counterfactual bracketed by the same fixture with the resolver blind, and both boundaries (an imported factory, an unclassifiable body) pinned as a STATED silence the reader prints, " +
       "#18721's hunk LEADING CONTEXT — an underflowing closer drops and the walk goes on, so #17618's parameter decline reaches a real diff: PR #18720's own hunk silent at its reported line, bracketed by the same file's true-positive control that fires, by a new key behind the same underflowing context, by a key added after the parameter list closes, and by the removed side where a phantom budget disappearing makes a genuine key fire, " +
+      "#19099's walk saying when it STOPPED READING — the whole shown stack beside a flag raised on a possible regex literal, a type-blind pop and an unterminated string, with a lone slash read as the division it is, a hunk that BEGINS inside a JSDoc read rather than guessed at, each of the reset's three guards pinned against the frames it protects, the apostrophe residual pinned in the direction it fails, and the reset reaching `inParameterList` so an `@example` arrow cannot swallow the key line behind it, " +
       "#16448's four positive controls each with its file:line, its negative controls — " +
       'the same diffs with `yes`, and a removal-only diff with `no` — the local path composed end ' +
       'to end so a binary change to a tell surface cannot read as clean, #17112\'s split count with ' +

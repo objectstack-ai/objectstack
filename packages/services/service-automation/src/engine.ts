@@ -211,6 +211,7 @@ const FLOW_NODE_UNKNOWN_KEY_GUIDANCE: Record<string, Record<string, string>> = {
 import { runIsUnscopedUserMode, flowTouchesData } from './runtime-identity.js';
 import { isGuardRefusal, refuseNode } from './guard-refusal.js';
 import { readPartialSteps } from './partial-steps.js';
+import { isRegionSuspensionRefusal, refuseRegionSuspension } from './region-suspension-refusal.js';
 import { summarizeRun, formatRunSummaryLine } from './run-summary.js';
 // #5660 — the degrade registration reports a FOREIGN failure (a third-party
 // provider factory's text), so it renders it as structured `meta` rather than
@@ -1204,6 +1205,39 @@ class FlowRefusalSignal {
 
 function isRefusalSignal(err: unknown): err is FlowRefusalSignal {
     return typeof err === 'object' && err !== null && (err as FlowRefusalSignal).__flowRefused === true;
+}
+
+/**
+ * [#18714] "The child run this frame is parked on finished `refused`" — the
+ * RESUMED-leg counterpart of the synchronous `subflow` / `map` executors'
+ * `refuse` result (#18110 / #18555).
+ *
+ * Those two executors read `child.status === 'refused'` off the value
+ * `engine.execute` returned to them. A run that PAUSES first never returns
+ * through that call at all: the child's outcome reaches its parent on one of
+ * the two resumed legs instead — the delegated resume
+ * ({@link AutomationEngine.resumeInternal}'s `subflow:` block, which drives the
+ * child itself) and the up-bubble ({@link AutomationEngine.bubbleToParent},
+ * where the child's own frame drives the parent). Neither leg had an arm for
+ * `refused`, so the two failed differently and both fail-open in their own way:
+ * the delegated leg read the refusal as an ordinary success and walked the
+ * parent's out-edges, and the up-bubble leg never resumed the parent at all,
+ * leaving it `paused` in `listSuspendedRuns()` forever.
+ *
+ * ⛔ Not an error and ⛔ not an error CODE. A refusal is a successful
+ * evaluation that says no, so the only thing this carries is the rendered
+ * reason — exactly what {@link FlowRefusalSignal} already carries, and the
+ * reason both legs converge on that one signal rather than growing a second
+ * terminal exit apiece.
+ */
+interface ChildRunRefusal {
+    /**
+     * The child run's own `refusalMessage`, passed through verbatim.
+     * `undefined` only when the child carried none — recorded honestly rather
+     * than filled in with invented text, exactly as `FlowRefusalSignal.message`
+     * is.
+     */
+    readonly message?: string;
 }
 
 /**
@@ -6153,6 +6187,13 @@ export class AutomationEngine implements IAutomationService {
      *   child's own up-bubble must stay off so the parent isn't resumed twice.
      * @param childSummary - #4354: totals of the child run whose completion
      *   triggered this resume (the up-bubble path), credited to the awaiting step.
+     * @param childRefusal - [#18714] Set ONLY by {@link bubbleToParent}'s
+     *   refusal arm: the child this run is parked on finished `refused`, so
+     *   this run must refuse too instead of continuing past its `subflow` /
+     *   `map` node. Carried as a parameter rather than on the resume signal
+     *   because it is engine-internal control flow, not data the parent's
+     *   variable map should ever see — the reserved-name guard
+     *   (`applyResumeSignal`) polices that map, and a refusal is not a variable.
      */
     private async resumeInternal(
         runId: string,
@@ -6164,6 +6205,7 @@ export class AutomationEngine implements IAutomationService {
         signal: ResumeSignal,
         skipBubble: boolean,
         childSummary?: FlowRunSummary,
+        childRefusal?: ChildRunRefusal,
     ): Promise<AutomationResult> {
         // Idempotency guard (set synchronously, before any await): reject a
         // concurrent duplicate resume of the same run so side effects can't run
@@ -6261,6 +6303,16 @@ export class AutomationEngine implements IAutomationService {
             // it, before traversal appends anything further.
             this.creditChildRun(run.steps, run.nodeId, childSummary);
 
+            // [#18714] The refusal this run must end on instead of continuing
+            // past its `subflow` / `map` node, if any. Seeded from the UP-BUBBLE
+            // leg (the child's own frame drove this resume and already knows),
+            // and set below by the DELEGATED leg (this frame drives the child
+            // and reads its answer). Both legs hand it to the ONE throw site
+            // inside the traversal `try` further down, so a refusal leaves this
+            // method through the same `finishRefusedRun` chokepoint every other
+            // producer uses — see `ChildRunRefusal`.
+            let pendingChildRefusal: ChildRunRefusal | undefined = childRefusal;
+
             // ── Subflow delegation (nested pause): this run is paused at a
             // `subflow` node whose child run itself suspended. The caller's
             // signal is meant for the node the CHILD paused on (its screen /
@@ -6350,6 +6402,46 @@ export class AutomationEngine implements IAutomationService {
                             this.consumedSuspensions.has(childRunId) ? childRunId : undefined,
                         );
                         return { success: false, error, durationMs: Date.now() - run.startTime };
+                    }
+                    // [#18714] DELEGATED-LEG REFUSAL. The child ran to a
+                    // refusing terminal — an `end` declaring
+                    // `outcome: 'refused'`, or a node of its own whose child
+                    // refused — and answered `{ success: true, status:
+                    // 'refused' }`, because *a refusal is a successful
+                    // evaluation that says no*. The branch set above tests only
+                    // `paused` and `!success`, so until this arm existed a
+                    // refused child was neither and fell straight through the
+                    // ordinary success exit below: measured, the parent
+                    // returned `{ success: true, successMessage: … }`, its run
+                    // row recorded `completed`, and the node downstream of the
+                    // `subflow` RAN. That is the identical fail-open shape
+                    // #18110 / #18555 closed on the synchronous leg, still open
+                    // on the leg 「the one a screen flow actually takes」.
+                    //
+                    // ⛔ NOT folded into the `!childRes.success` arm above. That
+                    // arm calls `failSuspendedRun` and records the parent
+                    // `failed`; a refusal is not a failure — it must not be
+                    // routable by a `fault` edge, must not consume retry budget
+                    // and must not be counted in `nodes[].failures`, all of
+                    // which the failure arm would confer. The parent's terminal
+                    // row must read `refused`, the same word the child's does.
+                    //
+                    // Recorded, ⛔ not thrown here. The pause is not consumed
+                    // yet — `claimAdvance` / `forgetSuspendedRun` are still
+                    // below — and a refusal that unwound from this position
+                    // would leave the parent's own suspension live while its
+                    // run row said terminal. The throw site inside the
+                    // traversal `try` is past the consumption, which is why
+                    // both legs converge there.
+                    //
+                    // The mapping below still runs, deliberately: the child's
+                    // declared outputs really were produced and the nodes
+                    // before its refusal really ran, so the parent's answer
+                    // must not depend on HOW the child ended — the same call
+                    // the synchronous `subflow` arm makes when it returns the
+                    // success envelope PLUS `refuse`.
+                    if (childRes.status === 'refused') {
+                        pendingChildRefusal = { message: childRes.refusalMessage };
                     }
                     // Child completed — continue below with its output as the
                     // resume signal (replaces the caller's signal, which the
@@ -6576,6 +6668,32 @@ export class AutomationEngine implements IAutomationService {
             const context = run.context;
 
             try {
+                // [#18714] The child this run is parked on REFUSED — on either
+                // resumed leg (see `ChildRunRefusal`). Thrown HERE, and the
+                // position is the point:
+                //
+                //  - Past the consumption. `claimAdvance` and
+                //    `forgetSuspendedRun` have run, so the parent's own pause is
+                //    gone exactly as it is for every other way this resume can
+                //    end. A refusal raised before them would record a terminal
+                //    run while leaving its suspension live in
+                //    `listSuspendedRuns()` — the very leak the up-bubble leg is
+                //    filed for, moved one frame up.
+                //  - Before the traversal. Nothing downstream of the awaiting
+                //    node runs, which is the whole content of "a refusal stops
+                //    the run".
+                //  - As `FlowRefusalSignal`, so the `catch` below converts it
+                //    through `finishRefusedRun` — ONE terminal shape, whichever
+                //    producer raised it. ⛔ Deliberately not a second terminal
+                //    exit of its own: this file's own history is a list of
+                //    outcomes that became a function of WHICH ROUTE a run took.
+                //
+                // `run.nodeId` is the node that was awaiting the child — the
+                // `subflow` / `map` this frame is parked on, the same node the
+                // synchronous leg names on its `FlowRefusalSignal`.
+                if (pendingChildRefusal) {
+                    throw new FlowRefusalSignal(run.nodeId, pendingChildRefusal.message);
+                }
                 // ── Map re-entry (sequential multi-instance, ADR-0037 A2).
                 // A run paused at a `map` node (correlation `map:<childRunId>`)
                 // does NOT continue past the node on resume — it RE-RUNS the
@@ -6706,7 +6824,7 @@ export class AutomationEngine implements IAutomationService {
                 // here, never through `execute()`'s exit. Tested first, beside
                 // the re-suspend, for the same reason it is tested first there.
                 if (isRefusalSignal(err)) {
-                    return this.finishRefusedRun({
+                    const refused = this.finishRefusedRun({
                         runId,
                         flowName: run.flowName,
                         flowVersion: run.flowVersion,
@@ -6715,6 +6833,47 @@ export class AutomationEngine implements IAutomationService {
                         steps, flow, variables,
                         refusalMessage: err.message, context,
                     });
+                    // [#18714] UP-BUBBLE LEG. This run is terminal and the
+                    // caller holds ITS id — but if it was a subflow CHILD, some
+                    // ancestor is still parked at the `subflow` / `map` node
+                    // that started it, and nothing else in the engine will ever
+                    // move that ancestor: `bubbleToParent` was called on the
+                    // completion path alone, so a child resumed to a refusal
+                    // returned from here having resolved exactly one of the two
+                    // runs it is responsible for. Measured: the child row read
+                    // `refused` while its parent stayed `paused` and stayed in
+                    // `listSuspendedRuns()` indefinitely — a leaked run, not a
+                    // wrong answer, which is why it fails DIFFERENTLY from the
+                    // delegated leg above and needs its own arm.
+                    //
+                    // The same call the completion path makes, with the refusal
+                    // attached: the parent is genuinely resumed — it consumes
+                    // its pause, records its own terminal row and bubbles to
+                    // ITS parent in turn, so a chain of any depth resolves by
+                    // the same induction completions already rely on. ⛔ Not a
+                    // direct walk like `failAncestors`: that verb exists for a
+                    // cascade in which no ancestor can be resumed at all, and
+                    // it records them `failed` — the wrong word here.
+                    //
+                    // `output` and `summary` are the refused run's own, for the
+                    // reason `finishRefusedRun` collects them: the nodes before
+                    // the refusal really ran, and a parent that refuses must
+                    // still be able to report what its child did.
+                    //
+                    // `skipBubble` is honoured exactly as on the completion
+                    // path — under the DELEGATED leg the parent's frame is the
+                    // caller, and it raises its own refusal at the throw site
+                    // above. Bubbling here as well would resume the parent
+                    // twice.
+                    if (!skipBubble) {
+                        await this.bubbleToParent(
+                            run,
+                            (refused.output ?? {}) as Record<string, unknown>,
+                            refused.summary,
+                            { message: err.message },
+                        );
+                    }
+                    return refused;
                 }
                 // Re-suspended at a downstream node: persist a fresh continuation.
                 if (isSuspendSignal(err)) {
@@ -7046,11 +7205,18 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
-     * Up-bubble for the subflow chain: when a completed run carries
+     * Up-bubble for the subflow chain: when a TERMINAL run carries
      * `$parentRunId`, resume that parent with this run's output. Recursion via
-     * the parent's own completion bubbles multi-level chains. Best-effort —
+     * the parent's own terminal exit bubbles multi-level chains. Best-effort —
      * a failed parent continuation is logged, never thrown back at the
      * caller who resumed the child.
+     *
+     * [#18714] "Terminal" is two outcomes, not one. The completion path was the
+     * only caller until this card, so a child that resumed to a REFUSAL left
+     * its parent parked at the awaiting node forever — visible in
+     * `listSuspendedRuns()`, resumable by nobody, because the child it waits on
+     * no longer exists. The refusal arm calls this with `refusal` set; every
+     * other thing this method does is identical on both outcomes.
      *
      * [#15556] Best-effort at the ENGINE layer only, since this call never
      * throws either way: on the `'stranded'` exit — the one #15556's ruling
@@ -7068,6 +7234,17 @@ export class AutomationEngine implements IAutomationService {
         output: Record<string, unknown>,
         /** #4354 — this child's totals, credited to the parent's awaiting step. */
         summary?: FlowRunSummary,
+        /**
+         * [#18714] Set when this child finished `refused` rather than
+         * `completed`. Everything about the bubble is unchanged — the same
+         * mapped signal, the same best-effort contract, the same per-outcome
+         * #4632 grading below — except that the parent ends on the child's
+         * refusal instead of continuing past its awaiting node. Carried to
+         * {@link resumeInternal} as its own argument, ⛔ never folded into
+         * `sig`: the signal is the parent's variable map, and a refusal is
+         * control flow, not a variable.
+         */
+        refusal?: ChildRunRefusal,
     ): Promise<void> {
         const ctx = run.context as Record<string, unknown> | undefined;
         const parentRunId = ctx?.$parentRunId;
@@ -7082,7 +7259,7 @@ export class AutomationEngine implements IAutomationService {
                 // the one writer allowed to set them (#3853 follow-up).
                 ? engineBuilt({ variables: { [`${mapNode}.$mapItemOutput`]: output ?? null, [`${mapNode}.$mapItemDone`]: true } })
                 : this.buildSubflowResumeSignal(run.context, output);
-            const parentRes = await this.resumeInternal(parentRunId, sig, false, summary);
+            const parentRes = await this.resumeInternal(parentRunId, sig, false, summary, refusal);
             if (!parentRes.success) {
                 // #6499 — `parentRes.error` is the envelope field that carries
                 // a failing node's / driver's text VERBATIM (#5912 left it
@@ -9507,15 +9684,35 @@ export class AutomationEngine implements IAutomationService {
                 }
             } catch (execErr: unknown) {
                 const errMsg = execErr instanceof Error ? execErr.message : String(execErr);
-                steps.push({
-                    nodeId: node.id,
-                    nodeType: node.type,
-                    status: 'failure',
-                    startedAt: stepStartedAt,
-                    completedAt: new Date().toISOString(),
-                    durationMs: Date.now() - stepStart,
-                    error: { code: 'EXECUTION_ERROR', message: errMsg },
-                });
+                // [#18881] ONE region refusal is ONE failure. The refusal names
+                // the region node whose body could not carry the pause, and
+                // that node's own frame records it exactly as any other thrown
+                // failure does. Every ENCLOSING container the unwind passes
+                // through — the `loop` around the `try_catch` in the card's
+                // reproduction — records nothing: it did not fail, it is the
+                // frame a failure is travelling out through, and a step for it
+                // would make `summary.failed` count the NESTING DEPTH rather
+                // than the fault. `summary.failed` is `Σ nodes[].failures`
+                // (#14456), so a second step here reads as a second lost row to
+                // every operator and every #4354 reader.
+                //
+                // Keyed on the refusal's OWN `regionNodeId` rather than on a
+                // mutable "already reported" flag: the identity is decided once
+                // at the boundary that raised it and cannot drift as the error
+                // travels.
+                const enclosingFrameOfRegionRefusal =
+                    isRegionSuspensionRefusal(execErr) && execErr.regionNodeId !== node.id;
+                if (!enclosingFrameOfRegionRefusal) {
+                    steps.push({
+                        nodeId: node.id,
+                        nodeType: node.type,
+                        status: 'failure',
+                        startedAt: stepStartedAt,
+                        completedAt: new Date().toISOString(),
+                        durationMs: Date.now() - stepStart,
+                        error: { code: 'EXECUTION_ERROR', message: errMsg },
+                    });
+                }
 
                 // #13803 — a structured container that DIED mid-body still did
                 // whatever its completed iterations did, and those writes are
@@ -9573,8 +9770,17 @@ export class AutomationEngine implements IAutomationService {
                 // untouched and still decides, alone, which failures a `fault`
                 // edge may carry. Nor is the thrown value touched — `execErr` is
                 // rethrown below exactly as caught.
-                variables.set('$error', { nodeId: node.id, message: errMsg });
-                this.setNodeError(variables, node.id, errMsg);
+                //
+                // [#18881] …and it is published for the SAME frames that record
+                // a step, for the same reason: an enclosing container the
+                // region refusal is travelling out through did not fail, so
+                // `{$error}` naming it would be a false sentence about which
+                // node produced the run's failure. The region node's own frame
+                // publishes, as any failing node does.
+                if (!enclosingFrameOfRegionRefusal) {
+                    variables.set('$error', { nodeId: node.id, message: errMsg });
+                    this.setNodeError(variables, node.id, errMsg);
+                }
 
                 // #3863 — a guard that THROWS is as un-routable as one that
                 // returns: `UnscopedRunDataAccessError` (ADR-0049/#1888) reports
@@ -9997,9 +10203,15 @@ export class AutomationEngine implements IAutomationService {
      * larger seams than an out-parameter the two callers that want it opt into.
      * Callers that do not pass a sink (`loop`, `parallel`) are unaffected.
      *
-     * Durable pause (`suspend`) inside a region is not supported in this
-     * iteration — it is converted into a clear error (mirrors the `subflow`
-     * nested-pause guard).
+     * [#18881] Durable pause (`suspend`) inside a region is not supported —
+     * #3267 ruled that limit 禁, and this boundary is where the run meets it.
+     * The conversion is a NAMED refusal
+     * ({@link FlowRegionSuspensionRefusalError}) carrying the region node, the
+     * suspending node and the sub-flow, ⛔ not the plain `Error` it used to
+     * raise: an enclosing `try_catch` read that one as an ordinary region
+     * failure, ran its catch handler, and the run reported success over a sweep
+     * that had processed nothing. The container executors test for the named
+     * type and re-throw, so no region can contain it.
      */
     async runRegion(
         region: FlowRegionParsed,
@@ -10065,10 +10277,35 @@ export class AutomationEngine implements IAutomationService {
             // this path's contract is (still) to throw.
             tag();
             partialSteps?.push(...regionSteps);
+            // [#18881] A refusal raised at an INNER region boundary is already
+            // the named one, and it is re-thrown untouched. Re-wrapping it here
+            // would rename the region: for `loop { try_catch { map } }` the
+            // author's fault is the try region, and the loop is only the frame
+            // the unwind passes through. Tested before the suspend arm because
+            // this error is not a suspend signal and must not reach the generic
+            // rethrow below with an enclosing region's identity stamped on it.
+            if (isRegionSuspensionRefusal(err)) throw err;
+            // [#18881] The runtime half of #15646's ruling D: a region body
+            // cannot carry a durable pause, and the refusal is now NAMED
+            // (region node, suspending node, sub-flow) instead of a plain
+            // `Error` that an enclosing `try_catch` read as an ordinary region
+            // failure and handed to its catch handler. See
+            // `region-suspension-refusal.ts` for the measurement that is.
+            //
+            // The sub-flow is read off the suspending node's own `config`
+            // (`map` / `subflow` name their child there). The node is looked up
+            // in THIS region's `nodes` because this is the innermost boundary
+            // the signal crosses — a deeper suspension was already converted by
+            // the arm above, so `err.nodeId` always names a node of this body.
             if (isSuspendSignal(err)) {
-                throw new Error(
-                    `durable pause inside a structured region (node '${err.nodeId}') is not supported`,
-                );
+                const suspended = region.nodes.find(n => n.id === err.nodeId);
+                const flowName = (suspended?.config as { flowName?: unknown } | undefined)?.flowName;
+                throw refuseRegionSuspension({
+                    regionNodeId: grouping?.parentNodeId ?? entryId,
+                    regionKind: grouping?.regionKind ?? 'region',
+                    suspendedNodeId: err.nodeId,
+                    ...(typeof flowName === 'string' && flowName ? { subFlowName: flowName } : {}),
+                });
             }
             // [#15788] The refusing `end` node's signal, converted at exactly
             // the same boundary and for the same reason: a control signal must

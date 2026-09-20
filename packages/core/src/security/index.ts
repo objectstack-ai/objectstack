@@ -213,6 +213,10 @@ export {
 // (plugin-auth's break-glass guard, plugin-security's bootstrap, the audit
 // surface) ask the SAME question instead of re-implementing the parse — which
 // is the whole reason the config read has exactly one home.
+//
+// [#11663 L5] ⛔ `reportLegacyPlatformAdminGrant` and
+// `resetLegacyPlatformAdminGrantReport` are NO LONGER exported — they are gone.
+// They carried L4's time-boxed migration notice, and L5 is that window's exit.
 export {
   PLATFORM_ADMIN_EMAIL_SEPARATOR,
   normalizePlatformAdminEmail,
@@ -221,8 +225,6 @@ export {
   resetPlatformAdminEmailMemo,
   matchesConfiguredPlatformAdmin,
   isConfiguredPlatformAdminEmail,
-  reportLegacyPlatformAdminGrant,
-  resetLegacyPlatformAdminGrantReport,
   setPlatformAdminConfigSink,
   type PlatformAdminEmailConfig,
   type PlatformAdminConfigSink,

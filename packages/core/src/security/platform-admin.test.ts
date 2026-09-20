@@ -11,15 +11,13 @@
  * row it has no business looking at.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 import {
   isConfiguredPlatformAdminEmail,
   matchesConfiguredPlatformAdmin,
   normalizePlatformAdminEmail,
   parsePlatformAdminEmails,
-  reportLegacyPlatformAdminGrant,
-  resetLegacyPlatformAdminGrantReport,
   resetPlatformAdminEmailMemo,
   resolvePlatformAdminEmails,
   setPlatformAdminConfigSink,
@@ -41,7 +39,6 @@ beforeEach(() => {
   ambient = process.env[ENV];
   delete process.env[ENV];
   resetPlatformAdminEmailMemo();
-  resetLegacyPlatformAdminGrantReport();
   sink = makeSink();
   setPlatformAdminConfigSink(sink);
 });
@@ -50,7 +47,6 @@ afterEach(() => {
   if (ambient === undefined) delete process.env[ENV];
   else process.env[ENV] = ambient;
   resetPlatformAdminEmailMemo();
-  resetLegacyPlatformAdminGrantReport();
   setPlatformAdminConfigSink(undefined);
 });
 
@@ -244,55 +240,49 @@ describe('matchesConfiguredPlatformAdmin — verified match only, fail closed', 
   });
 });
 
-describe('[#11663 P5] reportLegacyPlatformAdminGrant', () => {
-  it('names the holder, the variable and the line to add — once per process', () => {
-    reportLegacyPlatformAdminGrant({ userId: 'usr_1', email: 'Ada@Example.com' });
-    reportLegacyPlatformAdminGrant({ userId: 'usr_2', email: 'bob@example.com' });
-    expect(sink.warns).toHaveLength(1);
-    expect(sink.warns[0]).toContain('usr_1');
-    expect(sink.warns[0]).toContain(`${ENV}=ada@example.com`);
-    expect(sink.warns[0]).toContain('admin_full_access');
+/**
+ * [#11663 L5] The migration pointer is RETIRED — an ABSENCE pin, because absence
+ * is the only thing left to assert about it.
+ *
+ * L4 opened a time-boxed, loud migration window and this module carried its
+ * pointer: `reportLegacyPlatformAdminGrant`, latched once per process, plus
+ * `resetLegacyPlatformAdminGrantReport` to drop the latch for tests. L5 closed
+ * the window — under a walled posture the row the pointer pointed away from is
+ * no longer an anchor at all (`resolve-authz-context.ts` §6b), and under
+ * `single` the pointer never fired (it was posture-keyed by #13667). Both
+ * symbols are gone, from this module AND from `@objectstack/core`'s published
+ * entry.
+ *
+ * ⛔ This pin is not decoration. The suites that USED to cover these symbols all
+ * asserted a message or a latch count; deleting them leaves nothing that notices
+ * a well-meaning later edit re-adding a "helpful" deprecation warn to the
+ * authorization path — which is a per-request cost on every walled rig and a
+ * second, silent dual-track of the very kind the window existed to close. If a
+ * future leg genuinely needs a pointer again, ⛔ do not re-add it here: the
+ * operator-facing line belongs at BOOT, in
+ * `plugin-security/src/bootstrap-platform-admin.ts`, where an operator can act
+ * on it. Re-authoring this pin is then a deliberate act, which is the point.
+ */
+describe('[#11663 L5] the legacy-grant deprecation pointer is retired', () => {
+  it('⛔ neither symbol is exported by this module any more', async () => {
+    const mod: Record<string, unknown> = await import('./platform-admin.js');
+    expect('reportLegacyPlatformAdminGrant' in mod).toBe(false);
+    expect('resetLegacyPlatformAdminGrantReport' in mod).toBe(false);
+    // Positive control — the same probe on the same module object finds the
+    // symbols this leg KEEPS, so an absence read here is an absence and not a
+    // module that failed to load.
+    expect('matchesConfiguredPlatformAdmin' in mod).toBe(true);
+    expect('resolvePlatformAdminEmails' in mod).toBe(true);
   });
 
-  it('falls back to a placeholder when the row was never loaded', () => {
-    // The notice must never force a `sys_user` read of its own — see the
-    // §6b-config branch, which passes the memoized row only if it is already
-    // there. A fully-seeded API-key principal has no row loaded.
-    reportLegacyPlatformAdminGrant({ userId: 'usr_1' });
-    expect(sink.warns[0]).toContain(`${ENV}=<the administrator's verified email address>`);
-  });
-
-  it('⭐ [#11975] the latch is PER PROCESS, never persistent — a fresh instance re-announces', async () => {
-    // The migration window's loudness discipline (#11975), in the half nothing
-    // else pins. Every sibling pin asserts SUPPRESSION — this file's
-    // "once per process" above, and plugin-security's boot-side
-    // `bootstrap-platform-admin-walled-owner.test.ts` "EXACTLY ONE line ... even
-    // across repeated bootstraps" — so all of them stay GREEN if the latch is
-    // ever hardened past the process: moved onto `globalThis`, stored in a
-    // module the host keeps alive, or persisted to a row or file to quiet the
-    // noise. Any of those turns "once per process" into "once EVER", and a
-    // deployment restarted onto the old anchor is then never told again, which
-    // is the silent dual-track the window exists to prevent.
-    //
-    // A fresh module registry is the closest in-process stand-in for a boot: it
-    // re-instantiates the module scope the latch lives in exactly as a new
-    // process would. ⛔ Do not "fix" a red here by resetting the latch in the
-    // loop — the point is that nothing had to.
-    const linesPerBoot: number[] = [];
-    for (let boot = 0; boot < 3; boot++) {
-      vi.resetModules();
-      const fresh = await import('./platform-admin.js');
-      const bootSink = makeSink();
-      fresh.setPlatformAdminConfigSink(bootSink);
-      // Twice, so a per-call regression is caught by the same assertion.
-      fresh.reportLegacyPlatformAdminGrant({ userId: 'usr_1', email: 'ada@example.com' });
-      fresh.reportLegacyPlatformAdminGrant({ userId: 'usr_1', email: 'ada@example.com' });
-      fresh.setPlatformAdminConfigSink(undefined);
-      linesPerBoot.push(bootSink.warns.length);
-    }
-    // Exactly one per boot: not 0 (a latch that outlived the process) and not 2
-    // (a pointer that became per-call).
-    expect(linesPerBoot).toEqual([1, 1, 1]);
+  it("⛔ nor by `@objectstack/core`'s security entry — the published surface lost them", async () => {
+    const entry: Record<string, unknown> = await import('./index.js');
+    expect('reportLegacyPlatformAdminGrant' in entry).toBe(false);
+    expect('resetLegacyPlatformAdminGrantReport' in entry).toBe(false);
+    // Positive control on the same entry: its sibling config exports are still
+    // re-exported, so the two absences above are about these two names.
+    expect('matchesConfiguredPlatformAdmin' in entry).toBe(true);
+    expect('setPlatformAdminConfigSink' in entry).toBe(true);
   });
 });
 

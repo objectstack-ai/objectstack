@@ -3,7 +3,7 @@ title: Protocol Architecture
 description: How the Data, System, and UI protocols work together as one cohesive system
 ---
 
-import { Database, Layout, Cpu, ArrowRight, CheckCircle, Workflow, Bot, Cloud } from 'lucide-react';
+import { Database, Layout, Cpu, ArrowRight, CheckCircle, Workflow, Bot, Package } from 'lucide-react';
 
 ## The Protocol Stack
 
@@ -45,9 +45,9 @@ machinery underneath.
     description="Intelligence: Agents, RAG, Models."
   />
   <Card
-    icon={<Cloud />}
-    title="Cloud Protocol"
-    description="Management: Multi-tenancy, Marketplace, Licensing."
+    icon={<Package />}
+    title="Marketplace Protocol"
+    description="Packaging: package format, versions, listings, templates."
   />
 </Cards>
 
@@ -60,7 +60,7 @@ ObjectStack enforces **Separation of Concerns** through protocol boundaries:
 ```mermaid
 flowchart TD
     UI["<b>UI Protocol &amp; AI Protocol</b><br/>Apps · Views · Dashboards · Agents · RAG<br/><i>How do users and agents interact?</i>"]
-    OS["<b>System · Automation · Cloud Protocol</b><br/>Auth · Permissions · Orchestration · Multi-tenancy<br/><i>Who / what can do what, when, and where?</i>"]
+    OS["<b>System · Automation · Marketplace Protocol</b><br/>Auth · Permissions · Orchestration · Packaging<br/><i>Who / what can do what, when, and where?</i>"]
     DATA["<b>Data Protocol</b><br/>Objects · Fields · Queries · Drivers<br/><i>What is the data structure?</i>"]
     UI -->|Interface| OS
     OS -->|Control| DATA

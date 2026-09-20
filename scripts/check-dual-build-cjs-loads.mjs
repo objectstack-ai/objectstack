@@ -190,7 +190,8 @@
  *
  * So the repair is not enforcement. What was missing is that a GREEN run never
  * showed the reader the two numbers side by side, so the record could stop
- * describing the tree with nothing, anywhere, saying so. `provenanceLine`
+ * describing the tree with nothing, anywhere, saying so.
+ * `populationProvenanceLine`
  * prints both on every pass: the drift is a fact in the log now, not a
  * discovery.
  *
@@ -218,6 +219,7 @@ import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from './invoked-as.mjs';
+import { definePopulationFloor } from './population-floor.mjs';
 
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
 //
@@ -519,67 +521,55 @@ const MIN_TYPED_JUDGED = 88;
 const MEASURED_TYPED = Object.freeze({ ref: '196612a313', typedJudged: 102 });
 
 /**
- * The first floor a run falls below, as a refusal message -- or `null` when
- * every count clears. Pure, so `--self-test` drives every floor with no tree.
+ * The vacuity floors and the provenance line, over the row table THIS gate
+ * declares. The row-walk, the refusal wording and the provenance formatting are
+ * shared with the two other gates that carry the same mechanism
+ * (`scripts/population-floor.mjs`); the rows stay HERE, because each `why` is a
+ * claim about this gate's internals and is true of nothing else.
  *
- * @param {{entries?: number, packages?: number, cjsFiles?: number, probes?: number}} counts
- * @returns {string | null}
+ * This file is the PRECEDENT the other two were copied from, and it carried the
+ * mechanism under the older name `floorProblem` / `provenanceLine`. The names
+ * here are now the shared spelling, so the mechanism is spelled ONE way in all
+ * three gates -- which is the whole point: the refusal text is what an operator
+ * acts on, and three hand-typed copies of it are three places for it to drift.
+ *
+ * ⛔ `typedJudged` has a floor but NO provenance column. Its number comes from a
+ * SECOND census (`MEASURED_TYPED`), taken on a different commit, and a
+ * one-ref provenance line cannot carry two refs without lying about one of
+ * them. The row itself names its own ref through `at`, which is where the
+ * refusal quotes it from.
+ *
+ * Exported, unlike the two other gates' copies: this file already guards its
+ * dispatch with `isEntrypoint`, so `check:entry-guard`'s "exports a binding AND
+ * runs on import" rule does not reach it.
+ *
+ * @type {{populationFloorProblem: (counts?: object) => string | null,
+ *         populationProvenanceLine: (counts?: object) => string}}
  */
-export function floorProblem(counts) {
-  const rows = [
-    [counts?.entries ?? 0, MIN_ENTRIES, MEASURED.entries, 'published `require` entry point(s)',
-      'The manifest walk or the `exports` resolver broke. With no entries nothing is required, nothing is parsed, and the gate prints what a clean tree prints.',
-      MEASURED.ref],
-    [counts?.packages ?? 0, MIN_PACKAGES, MEASURED.packages, 'publishable package(s)',
-      'Entries were found but collapsed onto a fraction of the tree — the walk is reading part of `packages/`, not the whole of it.',
-      MEASURED.ref],
-    [counts?.cjsFiles ?? 0, MIN_CJS_FILES, MEASURED.cjsFiles, 'emitted CommonJS file(s)',
-      'This is the PARSES population. `commonJsFilesUnder` matched (almost) nothing, so `node --check` ran over an empty set and every byte we emit went unread.',
-      MEASURED.ref],
-    [counts?.probes ?? 0, MIN_PROBES, MEASURED.probes, 'cross-format behaviour probe(s) run',
-      'AGREES is the invariant loading alone cannot give you, and an empty probe table satisfies it vacuously.',
-      MEASURED.ref],
-    [counts?.typedJudged ?? 0, MIN_TYPED_JUDGED, MEASURED_TYPED.typedJudged, 'require entry point(s) JUDGED by TYPED',
-      'This is the TYPED population — entries reached and answered, clean or not. It does not move when packages are defective, only when the row loop stops asking, so a fall here means TYPED went silent rather than that the tree got worse.',
-      MEASURED_TYPED.ref],
-  ];
-  for (const [got, min, measured, what, why, at] of rows) {
-    if (got >= min) continue;
-    return `measured only ${got} ${what}, below the floor of ${min} (${measured} on ${at}).\n`
-      + `  ${why}\n`
-      + '  ⛔ NOT a pass: nothing, or nearly nothing, was read.';
-  }
-  return null;
-}
-
-/**
- * The provenance footer for a PASSING run: the census this run read, the floors
- * it cleared, the census those floors were derived from, and the ref that
- * census belongs to -- side by side.
- *
- * This is the whole repair. The floors are inequalities on purpose, so no run
- * can ever contradict the record; without this line the record could stop
- * describing the tree and every green log would look identical either way. The
- * delta is reported as INFORMATION and never as a verdict: this population
- * moves in both directions for good reasons (see the header), and only the
- * floors decide anything.
- *
- * Pure, so `--self-test` drives it with no tree.
- *
- * @param {{entries?: number, packages?: number, cjsFiles?: number, probes?: number}} counts
- * @returns {string}
- */
-export function provenanceLine(counts) {
-  const got = [counts?.entries ?? 0, counts?.packages ?? 0, counts?.cjsFiles ?? 0, counts?.probes ?? 0];
-  const rec = [MEASURED.entries, MEASURED.packages, MEASURED.cjsFiles, MEASURED.probes];
-  const floors = [MIN_ENTRIES, MIN_PACKAGES, MIN_CJS_FILES, MIN_PROBES];
-  const delta = got.map((g, i) => (g === rec[i] ? '=' : `${g > rec[i] ? '+' : ''}${g - rec[i]}`));
-  return `  provenance — entries/packages/cjsFiles/probes: this run ${got.join('/')}`
-    + ` · floors ${floors.join('/')} · derived from ${rec.join('/')} measured on ${MEASURED.ref}`
-    + ` (${delta.join('/')} vs the record).\n`
-    + '  ⚠ The delta is information, not a verdict — this population grows AND shrinks for good'
-    + ' reasons, and only the floors decide. Reproduce the record: see this file\'s header.';
-}
+const populationFloor = definePopulationFloor({
+  ref: MEASURED.ref,
+  provenance: ['entries', 'packages', 'cjsFiles', 'probes'],
+  reproduce: 'Reproduce the record: see this file\'s header.',
+  rows: [
+    { key: 'entries', min: MIN_ENTRIES, measured: MEASURED.entries,
+      what: 'published `require` entry point(s)',
+      why: 'The manifest walk or the `exports` resolver broke. With no entries nothing is required, nothing is parsed, and the gate prints what a clean tree prints.' },
+    { key: 'packages', min: MIN_PACKAGES, measured: MEASURED.packages,
+      what: 'publishable package(s)',
+      why: 'Entries were found but collapsed onto a fraction of the tree — the walk is reading part of `packages/`, not the whole of it.' },
+    { key: 'cjsFiles', min: MIN_CJS_FILES, measured: MEASURED.cjsFiles,
+      what: 'emitted CommonJS file(s)',
+      why: 'This is the PARSES population. `commonJsFilesUnder` matched (almost) nothing, so `node --check` ran over an empty set and every byte we emit went unread.' },
+    { key: 'probes', min: MIN_PROBES, measured: MEASURED.probes,
+      what: 'cross-format behaviour probe(s) run',
+      why: 'AGREES is the invariant loading alone cannot give you, and an empty probe table satisfies it vacuously.' },
+    { key: 'typedJudged', min: MIN_TYPED_JUDGED, measured: MEASURED_TYPED.typedJudged, at: MEASURED_TYPED.ref,
+      what: 'require entry point(s) JUDGED by TYPED',
+      why: 'This is the TYPED population — entries reached and answered, clean or not. It does not move when packages are defective, only when the row loop stops asking, so a fall here means TYPED went silent rather than that the tree got worse.' },
+  ],
+});
+export const populationFloorProblem = populationFloor.populationFloorProblem;
+export const populationProvenanceLine = populationFloor.populationProvenanceLine;
 
 /**
  * Ledger rows naming an id the discovered population does not contain. Pure.
@@ -1133,7 +1123,7 @@ async function main(argv) {
   // ⛔ Before any verdict: a run that read (almost) nothing must refuse, not
   // report the clean tree. Ordered after the prerequisite check so an unbuilt
   // tree still answers 3 — "nothing was measured" has its own code.
-  const floor = floorProblem({
+  const floor = populationFloorProblem({
     entries: rows.length,
     packages: new Set(rows.map((r) => r.pkg)).size,
     cjsFiles: cjsFileCount,
@@ -1167,7 +1157,7 @@ async function main(argv) {
   );
   for (const h of ledgerHits) console.log(`  · declared: ${h}`);
   for (const h of typedExempt) console.log(`  · declared UNREACHABLE declaration: ${h}`);
-  console.log(provenanceLine({
+  console.log(populationProvenanceLine({
     entries: rows.length,
     packages: new Set(rows.map((r) => r.pkg)).size,
     cjsFiles: cjsFileCount,
@@ -1486,25 +1476,25 @@ export async function selfTest() {
   // real run, which is the opposite failure and just as invisible in review.
   battery('the vacuity floors, each driven to zero');
   const full = { entries: MEASURED.entries, packages: MEASURED.packages, cjsFiles: MEASURED.cjsFiles, probes: MEASURED.probes, typedJudged: MEASURED_TYPED.typedJudged };
-  t('FLOOR — the values in the records clear every floor', floorProblem(full) === null, JSON.stringify(floorProblem(full)));
-  t('FLOOR — a dead manifest walk refuses', floorProblem({ ...full, entries: 0 }) !== null);
-  t('FLOOR — entries collapsed onto too few packages refuses', floorProblem({ ...full, packages: 0 }) !== null);
-  t('FLOOR — a dead CommonJS collector refuses (PARSES over an empty set)', floorProblem({ ...full, cjsFiles: 0 }) !== null);
-  t('FLOOR — an emptied probe table refuses (AGREES satisfied vacuously)', floorProblem({ ...full, probes: 0 }) !== null);
-  t('FLOOR — a dead types resolver refuses (TYPED judged nothing)', floorProblem({ ...full, typedJudged: 0 }) !== null);
+  t('FLOOR — the values in the records clear every floor', populationFloorProblem(full) === null, JSON.stringify(populationFloorProblem(full)));
+  t('FLOOR — a dead manifest walk refuses', populationFloorProblem({ ...full, entries: 0 }) !== null);
+  t('FLOOR — entries collapsed onto too few packages refuses', populationFloorProblem({ ...full, packages: 0 }) !== null);
+  t('FLOOR — a dead CommonJS collector refuses (PARSES over an empty set)', populationFloorProblem({ ...full, cjsFiles: 0 }) !== null);
+  t('FLOOR — an emptied probe table refuses (AGREES satisfied vacuously)', populationFloorProblem({ ...full, probes: 0 }) !== null);
+  t('FLOOR — a dead types resolver refuses (TYPED judged nothing)', populationFloorProblem({ ...full, typedJudged: 0 }) !== null);
   t('FLOOR — the TYPED refusal cites the tree ITS number came from, not the older one',
-    /\(102 on 196612a313\)/.test(floorProblem({ ...full, typedJudged: 0 }) ?? ''), JSON.stringify(floorProblem({ ...full, typedJudged: 0 })));
+    /\(102 on 196612a313\)/.test(populationFloorProblem({ ...full, typedJudged: 0 }) ?? ''), JSON.stringify(populationFloorProblem({ ...full, typedJudged: 0 })));
   // ⛔ The measured regression the floor must NOT produce: a tree where every
   // one of the 35 defective entries is judged and reported still clears it,
   // because judged does not fall when clean does. With the floor on the clean
   // count this returned a refusal and the 35 findings were never printed.
   t('FLOOR — a tree FULL of TYPED findings still reports them, never refuses',
-    floorProblem({ ...full, typedJudged: MEASURED_TYPED.typedJudged }) === null);
-  t('FLOOR — a missing count is zero, not "unmeasured but fine"', floorProblem({}) !== null);
+    populationFloorProblem({ ...full, typedJudged: MEASURED_TYPED.typedJudged }) === null);
+  t('FLOOR — a missing count is zero, not "unmeasured but fine"', populationFloorProblem({}) !== null);
   t('FLOOR — the refusal names the count, the floor and the measurement',
     new RegExp(`measured only 0 .* below the floor of \\d+ \\(${MEASURED.cjsFiles} on ${MEASURED.ref}\\)`, 's')
-      .test(floorProblem({ ...full, cjsFiles: 0 }) ?? ''),
-    JSON.stringify(floorProblem({ ...full, cjsFiles: 0 })));
+      .test(populationFloorProblem({ ...full, cjsFiles: 0 }) ?? ''),
+    JSON.stringify(populationFloorProblem({ ...full, cjsFiles: 0 })));
   t('FLOOR — every floor sits at or below the value it was measured from',
     MIN_ENTRIES <= MEASURED.entries && MIN_PACKAGES <= MEASURED.packages
     && MIN_CJS_FILES <= MEASURED.cjsFiles && MIN_PROBES <= MEASURED.probes
@@ -1525,9 +1515,9 @@ export async function selfTest() {
   t('PROVENANCE — the record carries the ref it was measured on',
     typeof MEASURED.ref === 'string' && /^[0-9a-f]{7,40}$/.test(MEASURED.ref), JSON.stringify(MEASURED.ref));
   t('PROVENANCE — the refusal reads the ref from the record rather than restating it',
-    (floorProblem({ ...full, entries: 0 }) ?? '').includes(MEASURED.ref),
-    JSON.stringify(floorProblem({ ...full, entries: 0 })));
-  const provDrifted = provenanceLine({ entries: 102, packages: 66, cjsFiles: 610, probes: 1 });
+    (populationFloorProblem({ ...full, entries: 0 }) ?? '').includes(MEASURED.ref),
+    JSON.stringify(populationFloorProblem({ ...full, entries: 0 })));
+  const provDrifted = populationProvenanceLine({ entries: 102, packages: 66, cjsFiles: 610, probes: 1 });
   t('PROVENANCE — a passing run shows the census it read AND the census the floors came from',
     provDrifted.includes('102/66/610/1')
     && provDrifted.includes(`${MEASURED.entries}/${MEASURED.packages}/${MEASURED.cjsFiles}/${MEASURED.probes}`)
@@ -1535,12 +1525,12 @@ export async function selfTest() {
     && provDrifted.includes(MEASURED.ref), provDrifted);
   t('PROVENANCE — drift is reported in BOTH directions, and equality says so',
     provDrifted.includes('-1/-1/-3/=')
-    && provenanceLine({ ...full }).includes('=/=/=/=')
-    && provenanceLine({ ...full, entries: MEASURED.entries + 15 }).includes('+15/'),
+    && populationProvenanceLine({ ...full }).includes('=/=/=/=')
+    && populationProvenanceLine({ ...full, entries: MEASURED.entries + 15 }).includes('+15/'),
     provDrifted);
   t('PROVENANCE — the PASS path actually prints it (a line nothing calls is the defect above)',
-    readFileSync(fileURLToPath(import.meta.url), 'utf8').includes(`console.log(${'provenanceLine'}({`),
-    'the pass path in main() no longer calls provenanceLine — the record would stop being reconciled in the log');
+    readFileSync(fileURLToPath(import.meta.url), 'utf8').includes(`console.log(${'populationProvenanceLine'}({`),
+    'the pass path in main() no longer calls populationProvenanceLine — the record would stop being reconciled in the log');
   t('PROVENANCE — the delta is marked as information, never as a verdict',
     /not a verdict/i.test(provDrifted) && !/✗|REFUSES/.test(provDrifted), provDrifted);
 

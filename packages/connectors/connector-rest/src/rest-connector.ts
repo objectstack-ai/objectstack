@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import type { Connector } from '@objectstack/spec/integration';
+import type { Connector, RetryConfig } from '@objectstack/spec/integration';
+import { connectorFetchOptions } from '@objectstack/spec/integration';
 import { resilientFetch } from '@objectstack/spec/shared';
 
 /**
@@ -33,6 +34,19 @@ export interface RestConnectorOptions {
     auth?: RestAuth;
     /** Headers merged into every request (request-level headers win). */
     defaultHeaders?: Record<string, string>;
+    /**
+     * Retry policy for the `request` action, executed by `resilientFetch`
+     * (ADR-0049 · #18975). Omitted ⇒ the wrapper's own defaults.
+     */
+    retryConfig?: RetryConfig;
+    /**
+     * Declared connect deadline (ms). Carried onto the def so `GET /connectors`
+     * reports what the author declared; ⚠️ not enforced — one `fetch` signal
+     * cannot bound the connection phase alone (`connector-fetch-policy.ts`).
+     */
+    connectionTimeoutMs?: number;
+    /** Per-request deadline (ms) — `resilientFetch`'s per-attempt timeout. */
+    requestTimeoutMs?: number;
     /** Injected for tests; defaults to the global `fetch`. */
     fetchImpl?: typeof fetch;
 }
@@ -98,6 +112,13 @@ function applyAuth(
 export function createRestConnector(opts: RestConnectorOptions): RestConnectorBundle {
     const name = opts.name ?? 'rest';
     const auth: RestAuth = opts.auth ?? { type: 'none' };
+    // Resolved once per connector, not per request: the policy is fixed for the
+    // bundle's lifetime, and a declarative instance re-materializes (with a new
+    // bundle) whenever the author edits it.
+    const fetchOptions = connectorFetchOptions(
+        { retryConfig: opts.retryConfig, requestTimeoutMs: opts.requestTimeoutMs },
+        { fetchImpl: opts.fetchImpl },
+    );
 
     const def: Connector = {
         name,
@@ -110,8 +131,9 @@ export function createRestConnector(opts: RestConnectorOptions): RestConnectorBu
         // the (post-parse) Connector output type.
         status: 'active',
         enabled: true,
-        connectionTimeoutMs: 30000,
-        requestTimeoutMs: 30000,
+        connectionTimeoutMs: opts.connectionTimeoutMs ?? 30000,
+        requestTimeoutMs: opts.requestTimeoutMs ?? 30000,
+        ...(opts.retryConfig === undefined ? {} : { retryConfig: opts.retryConfig }),
         actions: [
             {
                 key: 'request',
@@ -158,7 +180,7 @@ export function createRestConnector(opts: RestConnectorOptions): RestConnectorBu
             method,
             headers,
             body: hasBody ? JSON.stringify(req.body) : undefined,
-        }, { fetchImpl: opts.fetchImpl });
+        }, fetchOptions);
 
         // Parse JSON when advertised; fall back to text so non-JSON endpoints
         // don't throw.

@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import type { Connector } from './connector.zod';
+import type { Connector, RetryConfigParsed } from './connector.zod';
 import type { ResolvedConnectorAuth } from '../shared/connector-auth.zod';
 
 /**
@@ -53,6 +53,13 @@ export interface ConnectorMaterialization {
  * the `auth` already **resolved** from the entry's `credentialRef` through the
  * secrets/env layer, so the factory receives a usable static credential rather
  * than a raw reference (`undefined` when the entry declares no auth).
+ *
+ * It also carries the entry's **resilience policy** — `retryConfig`,
+ * `connectionTimeoutMs`, `requestTimeoutMs` — so a provider that performs its
+ * own I/O can honour what the author declared. Before that, those keys were
+ * parsed and then reached nothing: a factory was never handed them and had no
+ * way to honour them, which is what `packages/spec/liveness/connector.json`
+ * recorded as `dead`.
  */
 export interface ConnectorProviderContext {
   readonly name: string;
@@ -62,6 +69,36 @@ export interface ConnectorProviderContext {
   readonly type: string;
   readonly providerConfig: Record<string, unknown>;
   readonly auth?: ResolvedConnectorAuth;
+  /**
+   * The entry's declared retry policy, **resolved** — the host parses it so the
+   * schema's defaults (`maxAttempts: 3`, `[408, 429, 500, 502, 503, 504]`, …)
+   * are already applied and a factory reads real values rather than re-deriving
+   * them. `undefined` when the entry declares none.
+   *
+   * A factory that performs its own I/O honours it by handing this (and
+   * {@link requestTimeoutMs}) to `connectorFetchOptions()` →
+   * `resilientFetch()`; the built-in HTTP providers do exactly that, which is
+   * what makes the keys live rather than merely carried.
+   */
+  readonly retryConfig?: RetryConfigParsed;
+  /**
+   * The entry's declared connect deadline (ms), carried verbatim.
+   *
+   * ⚠️ **Carried, not enforced by the built-in HTTP path** — a WHATWG `fetch`
+   * exposes one `AbortSignal` for the whole operation and never the connection
+   * phase alone, so the platform has nowhere to apply a connect-only bound and
+   * deliberately does not pretend otherwise (see
+   * `connector-fetch-policy.ts`). It is handed over because a custom provider
+   * on a transport that CAN separate the phases (a database client, a pooled
+   * socket) is able to honour it; `packages/spec/liveness/connector.json`
+   * records the platform side as `dead` for that reason.
+   */
+  readonly connectionTimeoutMs?: number;
+  /**
+   * The entry's declared per-request deadline (ms). The built-in HTTP path
+   * applies it as `resilientFetch`'s per-attempt timeout.
+   */
+  readonly requestTimeoutMs?: number;
   /**
    * Host-injected package file reader (#3016, ADR-0097 follow-up). Resolves a
    * **relative** path against the root of the stack/package that declared the

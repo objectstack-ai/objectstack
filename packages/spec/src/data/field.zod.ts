@@ -335,8 +335,8 @@ export const SelectOptionSchema = lazySchema(() => strictObject({
   // no existing pointer is shadowed (`alias-integrity.test.ts`, #7889).
   guidanceSets: [SELECT_OPTION_EDITABILITY_GUIDANCE],
 }, {
-  label: z.string().describe('Display label (human-readable, any case allowed)'),
-  value: SystemIdentifierSchema.describe('Stored value (lowercase machine identifier)'),
+  label: z.string().describe('Display label (human-readable, any case allowed)').meta({ title: 'Label' }),
+  value: SystemIdentifierSchema.describe('Stored value (lowercase machine identifier)').meta({ title: 'Value' }),
   /**
    * Optional secondary text for the option (objectui#6153, inheriting the
    * objectui#6140 ruling frame — maintainer 2026-08-25: a key that is
@@ -356,9 +356,9 @@ export const SelectOptionSchema = lazySchema(() => strictObject({
    * spelling on its own metadata type (maintainer ruling 2026-09-02 on
    * objectui#6153).
    */
-  description: z.string().optional().describe('Optional secondary/help text for this option. Lookup option search matches it in addition to the label; renderers may show it as supporting text.'),
-  color: z.string().optional().describe('Color code for badges/charts'),
-  default: z.boolean().optional().describe('Is default option'),
+  description: z.string().optional().describe('Optional secondary/help text for this option. Lookup option search matches it in addition to the label; renderers may show it as supporting text.').meta({ title: 'Description' }),
+  color: z.string().optional().describe('Color code for badges/charts').meta({ title: 'Color' }),
+  default: z.boolean().optional().describe('Is default option').meta({ title: 'Default' }),
   /**
    * Per-option visibility predicate (CEL) — the option is offered only when this
    * evaluates TRUE. Omit = always available. Evaluated against the live `record`
@@ -384,7 +384,7 @@ export const SelectOptionSchema = lazySchema(() => strictObject({
    * rule-validator evaluates the picked value's `visibleWhen`) — hiding it in the
    * dropdown alone is bypassable.
    */
-  visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Env: the live `record` plus the host predicate scope, which binds `current_user`. The one VISIBILITY predicate the SERVER also enforces — the rule validator refuses a write of a value whose predicate is false — so a user-gated CHOICE belongs here. e.g. P`record.country == 'cn'` or P`'admin' in current_user.positions`"),
+  visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Env: the live `record` plus the host predicate scope, which binds `current_user`. The one VISIBILITY predicate the SERVER also enforces — the rule validator refuses a write of a value whose predicate is false — so a user-gated CHOICE belongs here. e.g. P`record.country == 'cn'` or P`'admin' in current_user.positions`").meta({ title: 'Visible When' }),
 }));
 
 /**
@@ -809,6 +809,51 @@ function fieldKeyGuidanceAsStrictOptions() {
 }
 
 /**
+ * The platform ceiling on decimal places — why a spec-valid `scale` may not
+ * exceed 100 (#18972, the objectstack half of objectui#9808).
+ *
+ * Every renderer that turns a declared `scale` into fraction digits reaches one
+ * of two platform primitives, and BOTH refuse above 100. Measured first-hand on
+ * node v22.22.2:
+ *
+ *   (1.5).toFixed(100)                                 -> '1.5000...'  (ok)
+ *   (1.5).toFixed(101)                                 -> RangeError: toFixed() digits argument must be between 0 and 100
+ *   new Intl.NumberFormat(u, { maximumFractionDigits: 100 })  -> ok
+ *   new Intl.NumberFormat(u, { maximumFractionDigits: 101 })  -> RangeError: maximumFractionDigits value is out of range.
+ *
+ * Both readers are live, one per `scale` declaration in this file: objectui's
+ * `computeRow` (`packages/fields/src/widgets/GridField.tsx`) rounds a computed
+ * grid cell with `Number(v.toFixed(column.scale))`, and its number cell
+ * renderer (`packages/fields/src/index.tsx`) passes a FIELD's `scale` straight
+ * into `maximumFractionDigits`. So an unbounded declaration published clean
+ * here and arrived as a `RangeError` at render time in someone else's
+ * repository, with no signal to the author at publish time.
+ *
+ * The bound is the PLATFORM's, not a policy: it is the largest value every
+ * conforming consumer can render. `packages/objectql` records the same 100 from
+ * the consumer side in its module-private `MAX_FORMULA_SCALE` (it skips the
+ * rounding past it so a display declaration can never fail a read) — this is
+ * the producer-side half of that same fact. The two are deliberately not one
+ * import: `packages/spec` may not depend on a consumer package.
+ *
+ * Deliberately module-private — exporting it would widen the published API
+ * surface, and nothing outside this file reads the number today.
+ */
+const MAX_RENDERABLE_SCALE = 100;
+
+/**
+ * The refusal text for a `scale` past {@link MAX_RENDERABLE_SCALE}. It names
+ * WHY, so an author reads a platform limit they can verify rather than an
+ * arbitrary cap somebody chose.
+ */
+const SCALE_UPPER_BOUND_MESSAGE =
+  'Decimal places cannot exceed 100 — the limit is the renderers\', not a policy: every consumer '
+  + 'turns `scale` into fraction digits, and both `Number.prototype.toFixed` and '
+  + '`Intl.NumberFormat`\'s `maximumFractionDigits` throw a RangeError above 100, so a larger '
+  + 'declaration is unrenderable rather than merely large. Declare at most 100 (an IEEE-754 '
+  + 'double carries ~17 significant digits, so a meaningful display precision is far below it).';
+
+/**
  * What `z.array(z.any())` cost on the two explicit column lists below (#9227):
  * every column object validated — right keys, wrong keys, misspelled keys,
  * empty objects — so a mis-keyed column published clean and surfaced only in
@@ -879,7 +924,12 @@ export const InlineGridColumnSchema = lazySchema(() => strictObject({
   defaultHidden: z.boolean().optional().describe("Collapsed into the grid's column chooser by default (not dropped); required columns are never default-hidden."),
   computed: z.boolean().optional().describe('Read-only computed column, recomputed live from sibling cells via `expr` and written back into the row.'),
   expr: z.string().min(1).optional().describe("Arithmetic expression for a computed column — a BARE string over `+ - * / %`, parentheses, numeric literals and field refs (`record.qty` or `qty`), evaluated by the grid's own safe evaluator. Deliberately NOT a CEL Expression envelope; `{ dialect, source }` is refused here."),
-  scale: z.number().int().nonnegative().optional().describe('Decimal places to round a computed numeric/currency result to.'),
+  // #18972 — the upper bound is the SAME platform ceiling as `FieldSchema.scale`
+  // below, reached by a different primitive: this key is the one objectui's
+  // `computeRow` hands to `Number(v.toFixed(scale))`, which throws above 100.
+  // See {@link MAX_RENDERABLE_SCALE}.
+  scale: z.number().int().nonnegative().max(MAX_RENDERABLE_SCALE, { message: SCALE_UPPER_BOUND_MESSAGE }).optional()
+    .describe('Decimal places to round a computed numeric/currency result to (integer 0-100). The upper bound is the renderer\'s: the grid rounds with `toFixed`, which throws a RangeError above 100.'),
   autofill: z.boolean().optional().describe("For `lookup` columns: picking a record copies its same-named fields into sibling columns (a product's unit_price/description). On by default; set false to disable."),
   readonlyWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — the cell is read-only when TRUE, evaluated per row against the row as `record` plus the header as `parent` (e.g. P`parent.status == 'paid'`)."),
   requiredWhen: EvaluatedExpressionInputSchema.optional().describe('Predicate (CEL) — the cell is required when TRUE. Same `record` + `parent` scope as `readonlyWhen`. PRESENTATION ONLY: this flags the cell inline-invalid in the grid; nothing on the write path reads it. The server-enforced contract is the child FIELD\'s own `requiredWhen` — a transition gate, see `Field.requiredWhen` — which hydration copies onto an identity-only column, so declaring the requirement here alone enforces nothing.'),
@@ -1155,7 +1205,13 @@ export const FieldSchema = lazySchema(() => {
   // ⚠️ `CurrencyConfigSchema.precision` above is a DIFFERENT surface with its
   // own alias table (`scale → precision` there) — do not conflate.
   precision: z.number().int().min(0).optional().describe('Total digits (non-negative integer)'),
-  scale: z.number().int().min(0).optional().describe('Decimal places (non-negative integer)'),
+  // #18972 — and an UPPER bound, for the same declared=enforced reason one
+  // axis over: `scale` is unrenderable above 100 at every consumer, so a
+  // larger declaration could only ever crash a reader. See
+  // {@link MAX_RENDERABLE_SCALE} for the measurement and why the number is
+  // the platform's rather than a policy.
+  scale: z.number().int().min(0).max(MAX_RENDERABLE_SCALE, { message: SCALE_UPPER_BOUND_MESSAGE }).optional()
+    .describe('Decimal places (integer 0-100). The upper bound is the platform\'s, not a policy: renderers turn `scale` into fraction digits through `toFixed` and `Intl.NumberFormat`\'s `maximumFractionDigits`, both of which throw a RangeError above 100 — so a larger declaration is unrenderable by any conforming consumer.'),
   min: z.number().optional().describe('Minimum value. Checked on the WRITTEN value only — the same transition-gate class as `requiredWhen`: an UPDATE validates just the fields the payload carries, so a stored value below a bound declared later is never re-read and survives unrelated edits; only a write that carries an out-of-bound value is refused, and a repairing write is accepted. For an invariant re-checked on every write, declare a `validations[]` `script` rule instead.'),
   max: z.number().optional().describe('Maximum value. Checked on the WRITTEN value only — the same transition-gate class as `min`: a stored value above a bound declared later is never re-read and survives unrelated edits; only a write that carries an out-of-bound value is refused. For an invariant re-checked on every write, declare a `validations[]` `script` rule instead.'),
   /**
@@ -1398,8 +1454,19 @@ export const FieldSchema = lazySchema(() => {
    * Deliberately narrower than `inlineColumns`: the related list is not an
    * editable grid, and per-column display overrides are not part of its
    * measured renderer contract (objectui RelatedList hydrates string entries
-   * fully; the page-block sibling `record:related_list.columns` is the same
-   * strings-only shape). Column OBJECTS are refused with a prescription.
+   * fully). Column OBJECTS are refused with a prescription.
+   *
+   * ⚠️ AND deliberately narrower than the PAGE-BLOCK sibling, which is no
+   * longer the same shape (#18639). `record:related_list.columns`
+   * (`ui/component.zod.ts`) now declares the SAME union as the saved-view key
+   * `listViews[].columns` — field-name strings OR `ListColumnSchema` entries —
+   * because objectui composes a saved view's `columns` onto that block
+   * VERBATIM, so a decorated list arrives there already in the `ListColumn`
+   * spelling. THIS key stays strings-only BY RULING: objectui#9593 ruling A
+   * widened that one and fenced this one in the same breath, and the
+   * `field-column-lists-canonicalized` conversion still folds an object entry
+   * here down to its identity string. The two keys diverge ON PURPOSE —
+   * ⛔ do not "align" them.
    */
   relatedListColumns: z.array(z.string({
     error: (issue) => issue.code === 'invalid_type'

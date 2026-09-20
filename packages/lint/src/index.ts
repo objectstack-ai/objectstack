@@ -50,6 +50,18 @@ export {
 } from './validate-widget-bindings.js';
 export type { WidgetBindingFinding, WidgetBindingSeverity } from './validate-widget-bindings.js';
 
+// [#16354] The authoring-time leg of the aggregate × field-type contract
+// (director ruling, decision batch #59: "both legs, table in spec"). Exported
+// as its own rule because the verdict is the SPEC TABLE's — the same
+// `isAggregateCompatibleWithFieldType` the compile leg calls — so a consumer
+// that authors datasets outside a config file (Studio, an MCP/AI author, a
+// generator) runs one rule rather than re-deriving the table.
+export {
+  validateDatasetMeasureAggregates,
+  MEASURE_AGGREGATE_FIELD_TYPE_REFUSED,
+} from './validate-dataset-measure-aggregates.js';
+export type { DatasetMeasureAggregateFinding } from './validate-dataset-measure-aggregates.js';
+
 export { validateStackExpressions, fieldRuleRootIssue, FIELD_RULE_BOUND_ROOTS } from './validate-expressions.js';
 export type { ExprIssue } from './validate-expressions.js';
 
