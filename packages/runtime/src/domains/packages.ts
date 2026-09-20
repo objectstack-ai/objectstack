@@ -91,6 +91,15 @@ import { ManifestSchema } from '@objectstack/spec/kernel';
 // `res`, and every error body on this surface is `deps.error`'s. See the
 // `@objectstack/rest` barrel entry that publishes the pair.
 import { repeatedQueryParamMessage } from '@objectstack/rest';
+// [#19394] The repo's ONE coercion for a query parameter its schema declares
+// `z.boolean()`, from the module whose header is the authority on the rule
+// (`packages/runtime/src/query-param.ts`). Imported, never restated: the list
+// door's `enabled` is declared `z.boolean().optional()` — character for
+// character the shape `ListNotificationsRequestSchema.read` carries — and that
+// door reads it with this same parser. A hand-written `=== 'true'` here would
+// be a second dialect for one declared type, which is precisely the `?read=1`
+// defect (#6928) this module exists to stop anyone writing again.
+import { parseBooleanParam } from '../query-param.js';
 import { setPackageDisabled } from '../package-state-store.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
@@ -664,6 +673,90 @@ function installedVersionOf(pkg: unknown): string | undefined {
     return typeof mirror === 'string' && mirror !== '' ? mirror : undefined;
 }
 
+/**
+ * The `?enabled=` filter of `GET /api/v1/packages`, read the way the schema
+ * that publishes it declares it (#19394 — ruling item 2 of #17667).
+ *
+ * ⭐ THE DECLARATION IS THE AUTHORITY, and it is quoted here so the next reader
+ * does not have to reconstruct it from this function's behaviour.
+ * `ListInstalledPackagesRequestSchema` (`packages/spec/src/api/package-api.zod.ts`)
+ * declares, since #19364:
+ *
+ * ```ts
+ *   enabled: z.boolean().optional()
+ *     .describe('Filter by enabled state'),
+ * ```
+ *
+ * Four properties are read off that one line, and every one of them is a
+ * decision this door would otherwise have had to invent:
+ *
+ * - **the name** — `enabled`, not `disabled` and not `status`;
+ * - **the type** — `z.boolean()`: TWO spellings on the wire and no third. That
+ *   is why the coercion is {@link parseBooleanParam} rather than a local
+ *   `=== 'true'`: the same declared type on `ListNotificationsRequestSchema.read`
+ *   is read by that parser one domain over;
+ * - **the default when absent** — there is NONE. `.optional()` with no
+ *   `.default()` means an absent key is an absent key, so it has to stay
+ *   reachable as `undefined` and must never collapse into `false`;
+ * - **absent ≠ an explicit value** — and the difference is load-bearing in the
+ *   direction that is easy to get backwards. Absent means NO FILTER (every
+ *   row, enabled and disabled alike, which is what this door served before
+ *   this card). `enabled=false` is a FILTER and selects the disabled rows
+ *   only. The first-party SDK already spells exactly that distinction —
+ *   `if (filters?.enabled !== undefined) params.set('enabled', String(filters.enabled))`
+ *   in `packages/client/src/index.ts` — so `?enabled=false` is a request this
+ *   door receives from a shipped producer, ⛔ not a hypothetical.
+ *
+ * ⛔ The ruling's own words for this item are 「one filter line, same shape as
+ * `status`」. The shape is NOT transferable and this is the one place to say
+ * so: `status` is declared `z.enum([…])` and read as `if (query?.status)` plus
+ * a string comparison. Applied to a declared BOOLEAN, that truthiness guard
+ * and that comparison are wrong twice — the string `'false'` is truthy so the
+ * guard admits it, and `p.enabled === 'false'` matches no row at all, so the
+ * caller who asked for the disabled half would be handed an empty list with a
+ * `200`. The filter is one line; its READ cannot be a copy of `status`'s.
+ *
+ * ## Multiplicity is answered before the type, by this door's own rule
+ *
+ * `?enabled=true&enabled=false` is a well-formed request carrying two
+ * conflicting intents, and `IHttpRequest.query` declares that array arm. This
+ * door already answers that condition for `?version=` with
+ * {@link repeatedQueryParamMessage} (#17672), so `enabled` answers it with the
+ * same sentence rather than a second one. A ONE-element array is one
+ * occurrence encoded differently by an adapter and is unwrapped, and an empty
+ * array is no occurrence — both per that rule's own header, which is why this
+ * cannot simply hand the raw value to {@link parseBooleanParam} (it refuses
+ * every array, `['true']` included).
+ *
+ * @returns `repeated` for the refusal the caller renders, or `value` carrying
+ *          the tri-state filter: `undefined` (no filter), `true`, `false`.
+ *          Throws {@link parseBooleanParam}'s declared validation failure —
+ *          `400` / `VALIDATION_FAILED` with a `details.fields[]` entry naming
+ *          `enabled` — for a spelling the declared type does not admit.
+ */
+function readEnabledFilter(raw: unknown): { kind: 'repeated'; count: number } | { kind: 'value'; value: boolean | undefined } {
+    if (Array.isArray(raw) && raw.length > 1) return { kind: 'repeated', count: raw.length };
+    return { kind: 'value', value: parseBooleanParam('enabled', Array.isArray(raw) ? raw[0] : raw) };
+}
+
+/**
+ * Whether a registry row counts as enabled, for {@link readEnabledFilter}'s
+ * comparison (#19394).
+ *
+ * `InstalledPackageSchema` (`packages/spec/src/kernel/package-registry.zod.ts`)
+ * declares the record's own key `enabled: z.boolean().default(true)`, so a row
+ * that carries no `enabled` at all IS enabled by declaration — which is the
+ * same read this file already makes at the install door's post-enable
+ * reconciliation (`pkg?.enabled === false`). Spelled as that one-sided
+ * comparison rather than `p.enabled === want` so the two halves PARTITION the
+ * registry: every row answers exactly one of `?enabled=true` / `?enabled=false`
+ * and the two results sum to the unfiltered list. `=== want` would drop a row
+ * whose `enabled` is absent out of BOTH halves — silently, on a 200.
+ */
+function packageCountsAsEnabled(pkg: unknown): boolean {
+    return (pkg as { enabled?: unknown } | null)?.enabled !== false;
+}
+
 export async function handlePackagesRequest(deps: DomainHandlerDeps, path: string, method: string, body: any, query: any, _context: HttpProtocolContext): Promise<HttpDispatcherResult> {
     const m = method.toUpperCase();
 
@@ -705,6 +798,30 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         // GET /packages → list packages
         if (parts.length === 0 && m === 'GET') {
             const denied = requireReadCapability(deps, _context); if (denied) return denied;
+            // [#19394] ⭐ THE DOOR READS `enabled` — ruling item 2 of #17667.
+            //
+            // Read BEFORE the registry, deliberately: a request-shape refusal
+            // must not depend on server state (the same ordering argument the
+            // `version` gate at the install door records). Placed after the
+            // capability gate so an unauthorized caller still cannot use a
+            // 400-vs-403 difference to learn anything.
+            //
+            // `ListInstalledPackagesRequestSchema` has declared this key all
+            // along and this door never read it, so a caller filtering an
+            // installed-package list by `enabled` was handed the UNFILTERED
+            // list with no refusal and no warning — «declared ≠ enforced» in
+            // the silent direction (Prime Directive #10), which is the one
+            // shape no status, header or field on the answer distinguishes
+            // from a request served as asked. {@link readEnabledFilter} is
+            // where the declaration is quoted and every semantic read off it
+            // is argued; ⛔ do not re-derive them here.
+            const enabled = readEnabledFilter(query?.enabled);
+            if (enabled.kind === 'repeated') {
+                return {
+                    handled: true,
+                    response: deps.error(repeatedQueryParamMessage('enabled', enabled.count), 400),
+                };
+            }
             let packages = registry.getAllPackages();
             // Apply optional filters
             if (query?.status) {
@@ -712,6 +829,12 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             }
             if (query?.type) {
                 packages = packages.filter((p: any) => p.manifest?.type === query.type);
+            }
+            // Absent is absent: `undefined` means NO filter and every row
+            // stays, which is what this door served before this card and what
+            // `.optional()` with no `.default()` declares.
+            if (enabled.value !== undefined) {
+                packages = packages.filter((p: any) => packageCountsAsEnabled(p) === enabled.value);
             }
             // [#14375] Every row carries the server's own writability verdict
             // (see `withWritableVerdict`) — copies, so the registry records the
@@ -736,8 +859,8 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // baseline), additively — nothing that was on this wire left it.
             //
             // The value is a constant `false` because it is TRUE, not because
-            // it is convenient: this door applies the `status` / `type`
-            // filters and then returns every remaining row. It reads no
+            // it is convenient: this door applies the `status` / `type` /
+            // `enabled` filters and then returns every remaining row. It reads no
             // `limit` and no `cursor`, so there is never a next page to
             // announce and `nextCursor` (optional) stays absent. If this route
             // ever starts paginating, `hasMore` is the key that has to start
