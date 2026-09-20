@@ -14557,8 +14557,24 @@ export function h59FalseCloseRow({ pr, card, attribution, closedEvent, closedAtM
  *
  * The card's presence in the open listing IS the reading, so a truncated
  * listing can only lose a row and never invent one.
+ *
+ * ⭐ The row also carries `state_reason`, the whole discriminator for the
+ * REOPENED arm: a card open because somebody REOPENED it is a deliberate act,
+ * ⛔ never GitHub failing to close it, so the arm changes the SENTENCE only.
  */
 export function h59FalseOpenRow({ pr, card, keyword }) {
+  if (String(card?.state_reason ?? '') === 'reopened') {
+    return (
+      `FALSE OPEN (reopened): merged PR #${pr?.number} binds \`${keyword} #${card?.number}\` in its body and ` +
+      'the card is open carrying `state_reason: reopened` — it was CLOSED at some point and REOPENED since, a ' +
+      'deliberate act and ⛔ never the platform failure the plain row names. ⚠️ This row buys no timeline, so it ' +
+      'does not PLACE that reopen against the merge: whether the declared closure fired and was reversed, or ' +
+      'never fired on an already-reopened card, is unread here — what the payload settles is that a REOPEN ' +
+      'happened, and that is the act to read. Remedy, and it belongs to the SEAT THAT OWNS the card: read the ' +
+      'reopen\'s own reason — the comment that made it, or the decision-box label it carries — and ⛔ do not ' +
+      'close a card somebody reopened on purpose. ⛔ This row closes nothing and writes no label.'
+    );
+  }
   return (
     `FALSE OPEN: merged PR #${pr?.number} binds \`${keyword} #${card?.number}\` in its body, and the card ` +
     'is STILL OPEN after that merge — GitHub did not perform the closure the PR declared. ' +
@@ -34839,6 +34855,19 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('H59 (b): ⛔ this row closes nothing', row59b.includes('closes nothing and writes no label'), true);
   t('H59 (b): ⛔ no angle-bracket placeholder reaches the row body', /[<>]/.test(row59b), false);
   t('H59 (b): not a loud finding', isLoudFinding(row59b), false);
+
+  // ⭐ Direction (b), REOPENED — the discriminator rides the same open listing row, so the arm buys nothing.
+  const row59bBy = (state_reason) => h59FalseOpenRow({ pr: pr59FalseOpen, card: { ...card59Open, state_reason }, keyword: 'Fixes' });
+  const row59bReopened = row59bBy('reopened');
+  t('H59 (b) reopened: ⛔ the platform-failure sentence is NOT printed at all', row59bReopened.includes('GitHub did not perform the closure'), false);
+  t('H59 (b) reopened: …it quotes the field it read off the payload it already held', row59bReopened.includes('`state_reason: reopened`'), true);
+  t('H59 (b) reopened: it says the card was closed and REOPENED since, a deliberate act', row59bReopened.includes('CLOSED at some point and REOPENED since'), true);
+  t('H59 (b) reopened: ⛔ it refuses to PLACE the reopen against the merge, buying no timeline', row59bReopened.includes('buys no timeline'), true);
+  t('H59 (b) reopened: the remedy points at the REOPEN\'s own reason', row59bReopened.includes('read the reopen\'s own reason'), true);
+  t('H59 (b) reopened: …and ⛔ warns off closing a card somebody reopened on purpose', row59bReopened.includes('do not close a card somebody reopened on purpose'), true);
+  t('H59 (b) reopened: the row still FIRES — this changed the SENTENCE, ⛔ not the population', row59bReopened.startsWith('FALSE OPEN (reopened):'), true);
+  t('H59 (b) reopened: ⛔ no angle-bracket placeholder reaches this one either', /[<>]/.test(row59bReopened), false);
+  t('H59 (b) reopened: ⛔ every OTHER state_reason keeps today\'s sentence, null included', [null, undefined, 'completed', 'not_planned'].every((r) => row59bBy(r).includes('GitHub did not perform the closure')), true);
 
   // The two directions are DISTINCT sentences — neither restates the other.
   t('H59 directions: the two rows do not share an opening', row59a.slice(0, 20) === row59b.slice(0, 20), false);
