@@ -169,9 +169,12 @@ const REFUSAL = 'TIMEOUT OVERRIDE CANNOT REACH THIS PACKAGE';
  * "this leg failed, and here is why", so it sits far above any plausible load
  * multiple: measured p100 over 80 children on this container is 1942 ms, and the
  * card's loaded-runner factor of ~3x projects that to ~5.8 s, so 60 s is ~31x
- * the measured p100 and ~10x the projected one. The job-level stall guard
- * (`scripts/run-with-stall-guard.mjs`, 10 min of silence) is the outer bound
- * this one sits inside; what it adds is a failure NAMED at the leg.
+ * the measured p100 and ~10x the projected one. CI already wraps the whole job
+ * in a stall guard that reds after ten minutes of silence (⛔ that script is
+ * DESCRIBED rather than spelled, the way `packageRoots` above describes its own
+ * excluded path: the cross-package-input scanner collects quoted paths out of
+ * comments, and this file does not read that script); the bound here sits far
+ * inside it, and what it adds is a failure NAMED at the leg that owns it.
  */
 const CHILD_LIVENESS_TIMEOUT_MS = 60_000;
 
