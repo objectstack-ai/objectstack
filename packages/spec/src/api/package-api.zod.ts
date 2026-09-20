@@ -213,13 +213,22 @@ const PACKAGES_LIST_PAGINATION_REMOVED =
 /**
  * Query parameters for listing installed packages.
  *
- * ⭐ Every key here is one the serving door — `handlePackagesRequest`'s
- * `parts.length === 0 && m === 'GET'` branch in
- * `packages/runtime/src/domains/packages.ts` — actually reads, and every key
- * that door reads is here. That symmetry is the whole point of this
- * declaration and is what #17667 restored in BOTH directions: `type` was
- * executed and undeclared, `limit` / `cursor` were declared and never executed
- * (maintainer ruling 2026-09-13, decision batch #126 item 1, route 2).
+ * ⭐ The contract this declaration is being held to: every key here is one the
+ * serving door — `handlePackagesRequest`'s `parts.length === 0 && m === 'GET'`
+ * branch in `packages/runtime/src/domains/packages.ts` — actually reads, and
+ * every key that door reads is here. #17667 moved it in BOTH directions
+ * (maintainer ruling 2026-09-13, decision batch #126 item 1, route 2): `type`
+ * was executed and undeclared, `limit` / `cursor` were declared and never
+ * executed.
+ *
+ * ⚠️ ONE key is not there yet, and it is recorded rather than glossed:
+ * **`enabled` is still declared here and still unread by that door.** The same
+ * ruling closes it (item 2 — one filter line, the shape `status` already has)
+ * in the runtime, which is a different file and a different PR, so the
+ * symmetry above is TRUE of `status` / `type` / `limit` / `cursor` and PENDING
+ * for `enabled`. ⛔ Do not read this docblock as saying the divergence is
+ * fully closed, and ⛔ do not close it by deleting `enabled` — the ruling
+ * chose to implement that one, not to retire it.
  *
  * ⛔ Never add a key here that the door does not read. A declared-and-ignored
  * query parameter fails undetectably: the caller is answered `200` with the
