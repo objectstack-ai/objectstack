@@ -114,10 +114,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      # Kept as this job's own step rather than folded into the composite below:
-      # `scripts/check-node-version.mjs` scans `.github/workflows/*.yml` only and
-      # reports how many setup-node steps it audited, so a step moved out of
-      # sight would silently shrink its census.
+      # Kept as this job's own step rather than folded into the composite below.
+      # ⛔ No longer because a gate cannot see it: `scripts/check-node-version.mjs`
+      # reads `.github/actions/**` too since #19229, so its census follows a
+      # setup-node step wherever it is written. Kept because the pin is already
+      # here and moving it buys nothing.
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:

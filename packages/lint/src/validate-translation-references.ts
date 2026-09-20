@@ -109,10 +109,11 @@
  * labels are exactly the kind of thing an app localizes. Resolution follows the
  * §4 ladder of the assessment, with the field-level S3 rule intact:
  *
- *   1. own object                          → check its fields/views/actions/
- *                                             sections/tabs, PLUS whatever an
- *                                             `objectExtensions[]` entry merges
- *                                             into it (#18441)
+ *   1. own object — or one a SIBLING       → check its fields/views/actions/
+ *      package of the same artifact          sections/tabs, PLUS whatever an
+ *      declares, which the per-package       `objectExtensions[]` entry merges
+ *      leg reads through `packages[]`        into it (#18441)
+ *      (#19064)
  *   2. platform object in the registry     → skip WHOLLY (we cannot see its
  *                                             fields, so we cannot judge them)
  *   2b. an `objectExtensions[]` target      → skip WHOLLY, for rung 2's reason:
@@ -833,6 +834,64 @@ function objectExtensionsByTarget(stack: AnyRec): Map<string, AnyRec[]> {
 }
 
 /**
+ * Every object RECORD an entry of `packages[]` declares — what THIS ARTIFACT
+ * provides, beyond the collections the stack in hand carries at its top level
+ * (#19064).
+ *
+ * ## Why this rung needs the reach at all
+ *
+ * `os build` runs the rule table per PACKAGE as well as over the union
+ * (`compile.ts` step 3b-ii): each package body is handed over as its own stack,
+ * with the artifact's own `packages[]` beside it as resolution context
+ * (`packageBodyAsStack`, #16611). On that leg `stack.objects` therefore holds
+ * ONE package's objects, and a bundle key naming an object a SIBLING package of
+ * the same artifact declares resolved against nothing — reported at `error` as
+ * a name "which no object in this stack defines", carrying the remedy that
+ * deletes a translation the runtime resolves. ADR-0130 makes the release
+ * artifact the co-ownership boundary, so that miss is the RUN's blind spot and
+ * not the author's mistake.
+ *
+ * ## The same carrier and the same reach as #16611 — ⛔ not the same return
+ *
+ * `validateObjectReferences`' `artifactProvidedObjectNames` reads this exact
+ * carrier for the same question, and this file's header already declared that
+ * reach for this rung while the rung read `stack.objects` alone. What the
+ * sibling rule needs back is a NAME set, because its question is whether a
+ * reference resolves. This universe is keyed by FACTS — the fields, options,
+ * views, sections and rules a key may address beneath `objects.<name>` — so the
+ * records are returned whole and folded by {@link buildUniverse}'s own
+ * collector. ⛔ A name-only fold would resolve the object key and then judge
+ * the owner's own field keys against an EMPTY fact set, reporting every one of
+ * them as an orphan: the same false positive one level up, which is the mistake
+ * {@link objectExtensionsByTarget} records for a target it cannot see.
+ *
+ * ⇒ And because the sibling's declaration IS readable here, this is NOT rung
+ * 2b. The subtree stays judged, against the sibling's own fields and rules, so
+ * a typo under a sibling's object is still an `error` and the per-package leg
+ * reaches the same verdict the union leg does.
+ *
+ * Read from the ADR-0130 D4 entry shape (`{ manifest: <assembled body> }`,
+ * `ArtifactPackageSchema`). An entry with no readable body contributes nothing
+ * — a segment reference carries no manifest content, and inventing a name for
+ * it would be the one mistake this context must not make, since a name in here
+ * SILENCES the ladder.
+ *
+ * ⛔ Nothing else is read off the entry, and there is no `stack.manifest` form
+ * beside it: `objects` is a STACK collection, not a manifest key — the same
+ * asymmetry {@link objectExtensionsByTarget} records one collection over, and
+ * the reason the single-`defineStack` shape is untouched by this fold.
+ */
+function artifactProvidedObjects(stack: AnyRec): AnyRec[] {
+  const provided: AnyRec[] = [];
+  for (const entry of recordsOf(stack.packages)) {
+    const body = entry.manifest;
+    if (!isRec(body)) continue;
+    provided.push(...recordsOf(body.objects));
+  }
+  return provided;
+}
+
+/**
  * Collect every name a translation bundle may resolve against. Built once per
  * run: the same universe answers all bundles and all locales.
  */
@@ -848,18 +907,27 @@ function buildUniverse(stack: AnyRec): Universe {
   };
 
   // ── Objects: fields, embedded actions/views, fieldGroups (the `_sections` anchor) ──
-  for (const obj of recordsOf(stack.objects)) {
+  //
+  // One collector for both sources below. `ownDeclaration` marks the stack in
+  // hand's own `objects`; the artifact fold that follows passes `false`, and
+  // only the two VALUE-carrying maps read it — see that fold for why the
+  // declaration this leg is JUDGING keeps the slot.
+  const collectObjectRecord = (obj: AnyRec, { ownDeclaration }: { ownDeclaration: boolean }) => {
     const objectName = strName(obj.name);
-    if (!objectName) continue;
+    if (!objectName) return;
     const facts = factsFor(objectName);
 
     for (const field of recordsOf(obj.fields)) {
       const fieldName = strName(field.name);
-      if (fieldName) facts.fields.set(fieldName, field);
+      if (!fieldName) continue;
+      if (!ownDeclaration && facts.fields.has(fieldName)) continue;
+      facts.fields.set(fieldName, field);
     }
     for (const action of recordsOf(obj.actions)) {
       const actionName = strName(action.name);
-      if (actionName) facts.actions.set(actionName, action);
+      if (!actionName) continue;
+      if (!ownDeclaration && facts.actions.has(actionName)) continue;
+      facts.actions.set(actionName, action);
     }
     // An object can carry views directly, including the `objects[].listViews`
     // container the chart rule also walks. `{ ...view, object: objectName }`
@@ -891,6 +959,30 @@ function buildUniverse(stack: AnyRec): Universe {
     for (const rule of recordsOf(obj.validations)) {
       collectValidationRuleNames(rule, facts.validations);
     }
+  };
+
+  for (const obj of recordsOf(stack.objects)) {
+    collectObjectRecord(obj, { ownDeclaration: true });
+  }
+
+  // ── Artifact-provided objects: what a SIBLING package of the same artifact
+  //    declares, which the per-package leg sees nowhere else (#19064) ──
+  //
+  // Folded through the SAME collector as the declaration loop above, because
+  // the two answer one question — what may a key address under this name — and
+  // a second walk here would be free to disagree with that one about which
+  // carriers anchor `_sections` or how a `conditional` rule nests.
+  //
+  // Read AFTER the declaration loop, and `ownDeclaration: false` is what makes
+  // the order load-bearing: where both declare the same field or action name,
+  // the record this leg is JUDGING keeps the slot. Which layer's `options` a
+  // merged field ends up carrying is the registry's precedence question
+  // (`priority`), and `checkOptionKeys` is the only consumer of the stored
+  // definition here — re-deriving that precedence to feed it would be a second
+  // opinion on it. The NAME is addressable either way, which is all this
+  // universe answers — the same decision the extension fold below takes.
+  for (const obj of artifactProvidedObjects(stack)) {
+    collectObjectRecord(obj, { ownDeclaration: false });
   }
 
   // ── Object extensions: the fields and validation rules a package MERGES
@@ -908,6 +1000,10 @@ function buildUniverse(stack: AnyRec): Universe {
   // which is the false positive this fold exists to remove, moved one level
   // up. Those targets are rung 2b of the §4 ladder instead (skipped wholly,
   // for rung 2's reason), and `extended` below is what the object branch asks.
+  // ⚠️ A target a SIBLING package of the artifact declares is NOT one of
+  // them any more: the fold above gives that target real facts, so an
+  // extension aimed at it lands in the owner's own field set rather than in
+  // nothing (#19064).
   const extensionsByTarget = objectExtensionsByTarget(stack);
   const extended = new Set(extensionsByTarget.keys());
   for (const [target, extensions] of extensionsByTarget) {

@@ -66,6 +66,13 @@ import type {
     OrganizationWire,
 } from './index';
 import type { SearchAllResponse } from '@objectstack/spec/api';
+// [#17536] The two READ doors' declared element, and the branch of it that made
+// the client's authoring-stage declaration wrong. Both are imported as TYPES:
+// the pins below are the only thing that can observe a return-type move.
+import type {
+    AssembledInstalledPackage,
+    InstalledPackageAtEitherStage,
+} from '@objectstack/spec/api';
 import type {
     AnalyticsMetadataResponse,
     AnalyticsSqlResponse,
@@ -193,8 +200,12 @@ export async function returnTypePrecisionPins(): Promise<void> {
     // ── shape class 6: the ScopedEnvironmentClient MIRROR carries the same types ─
     expectTypeOf(await scoped.automation.getFlow('flow_a')).toEqualTypeOf<FlowParsed>();
     expectTypeOf(await scoped.automation.getRun('flow_a', 'run_1')).toEqualTypeOf<ExecutionLog>();
+    // ⚠️ [#17536] The ELEMENT moved off `InstalledPackage` (the authoring stage)
+    // onto the union the door is declared at. The envelope #8140 pinned here is
+    // untouched; see `installedPackageEitherStagePins17536` below for the door
+    // reading and the two directions that measure it.
     expectTypeOf(await scoped.packages.list()).toEqualTypeOf<{
-        packages: InstalledPackage[];
+        packages: InstalledPackageAtEitherStage[];
         total: number;
     }>();
 
@@ -303,8 +314,11 @@ export async function returnTypePrecisionPins11925(): Promise<void> {
     // send `{ packages, total: packages.length }`. The REST rows also carry a
     // `source` discriminator the dispatcher rows lack, so it stays undeclared
     // — the same treatment #8140 gave the scoped sibling directly above.
+    // ⚠️ [#17536] The ELEMENT moved, the envelope did not — this pin is still
+    // #11925's statement that both mounted surfaces agree on
+    // `{ packages, total }`, and that half is unchanged.
     expectTypeOf(await client.packages.list()).toEqualTypeOf<{
-        packages: InstalledPackage[];
+        packages: InstalledPackageAtEitherStage[];
         total: number;
     }>();
 
@@ -332,7 +346,14 @@ export async function returnTypePrecisionPins11925(): Promise<void> {
     // sees it — and answers the bare row. ⇒ "one surface and one shape" is
     // still true; the shape is the ROW, and #12034 moved the declaration to
     // match it.
-    expectTypeOf(await scoped.packages.get('com.acme.crm')).toEqualTypeOf<InstalledPackage>();
+    //
+    // ⚠️ [#17536] And the ROW's own declaration moved once more, at the stage
+    // axis rather than the envelope axis: `GetInstalledPackageResponseSchema`
+    // has read `data: InstalledPackageAtEitherStageSchema` since PR #17517. "One
+    // surface and one shape" is STILL true — the shape is the row at whichever
+    // manifest stage it was installed at.
+    expectTypeOf(await scoped.packages.get('com.acme.crm'))
+        .toEqualTypeOf<InstalledPackageAtEitherStage>();
 
     // ── direction 2: a WRONG shape must now be rejected ───────────────────
     // ⚠️ Only ONE of the two below was red before #11925's change, and the
@@ -568,9 +589,21 @@ export async function returnTypePrecisionPins12034(): Promise<void> {
     // The two the ruling added. Same row, same projection: the `/packages`
     // domain builds the detail body and every `list` row with ONE expression,
     // `withWritableVerdict(qlService, toPackageResponse(pkg))`, so this pin and
-    // the `InstalledPackage[]` on `list` are two readings of one producer.
-    expectTypeOf(await client.packages.get('com.acme.crm')).toEqualTypeOf<InstalledPackage>();
-    expectTypeOf(await scoped.packages.get('com.acme.crm')).toEqualTypeOf<InstalledPackage>();
+    // the element type on `list` are two readings of one producer.
+    //
+    // ⚠️ [#17536] Which is why these two READ members moved and the WRITE
+    // members above did not — all four of them (`install`, `enable`, `disable`,
+    // `update`) still answer `Promise<InstalledPackage>`. One producer expression
+    // serves `list` and `get`, and PR #17517 declared what it serves —
+    // `InstalledPackageAtEitherStageSchema` — on both read doors. The install
+    // member answers the row its own request contract produced
+    // (`PackageInstallRequestSchema` declares `manifest: ManifestSchema`, the
+    // AUTHORING stage), so its declaration is unchanged and this asymmetry is the
+    // measurement, not an oversight.
+    expectTypeOf(await client.packages.get('com.acme.crm'))
+        .toEqualTypeOf<InstalledPackageAtEitherStage>();
+    expectTypeOf(await scoped.packages.get('com.acme.crm'))
+        .toEqualTypeOf<InstalledPackageAtEitherStage>();
 
     // ── direction 2: the read the false declaration invited must now FAIL ─
     // ⚠️ RED BEFORE, all three: while the member was `any`, `.package` was a
@@ -614,6 +647,154 @@ export async function returnTypePrecisionPins12034(): Promise<void> {
     void (await client.packages.get('com.acme.crm')).package;
     // @ts-expect-error the scoped detail route answers the row; there is no `.package`
     void (await scoped.packages.get('com.acme.crm')).package;
+}
+
+declare const authoringRow: InstalledPackage;
+declare const assembledRow: AssembledInstalledPackage;
+
+/**
+ * [#17536] The four `/packages` READ members declare the stage the DOOR is
+ * declared at, not the stage they happened to be bound to first.
+ *
+ * ## What was wrong
+ *
+ * PR #17517 declared both read doors at EITHER manifest stage —
+ * `ListInstalledPackagesResponseSchema.packages` is
+ * `z.array(InstalledPackageAtEitherStageSchema)` and
+ * `GetInstalledPackageResponseSchema.data` is that same schema. This SDK went on
+ * declaring `InstalledPackage`, the AUTHORING stage, on all four read members.
+ * ⇒ A response the server is declared able to send was one this client's own
+ * types said could not arrive. `packages/spec` is the one contract and this is a
+ * consumer of it (Prime Directive #12), so the consumer's declaration moves.
+ *
+ * ## Why these pins are type-level, like every other pin in this file
+ *
+ * Nothing about the VALUES changed. A `defineStack()` host has been installing
+ * assembled-manifest rows into the same table the whole time, and both read
+ * doors have been serving them. Only the declaration moved, so only a
+ * compile-time assertion can observe it — a runtime test is green either way.
+ *
+ * ## The two directions, and the control that makes direction 1 mean something
+ *
+ * Direction 1 asserts the declared return now ADMITS an assembled-stage row.
+ * That assertion is only evidence if an assembled row was REFUSED before, so the
+ * refusal is pinned in the same breath: the four WRITE members did not move,
+ * and the `@ts-expect-error` on `install` below is exactly the assignment
+ * direction 1 makes. If `AssembledInstalledPackage` were assignable to
+ * `InstalledPackage` after all, that suppression would go UNUSED and tsc would
+ * report TS2578 — so the pair fails loudly instead of passing vacuously.
+ *
+ * Direction 2 asserts what the widening did NOT buy, and it is narrower than it
+ * looks: the suppressed assignment gives `manifest` a STRING PRIMITIVE, which
+ * both branches of the union refuse, so the suppression is USED. That is the
+ * line that reddens (TS2578, unused directive) if these members are ever
+ * "widened" to `any` / `unknown` to make a payload fit.
+ *
+ * ⛔ It does NOT measure object-shaped tolerance, and at this head there is
+ * some: on the assembled branch `manifest` is declared `Record<string, unknown>`
+ * (the deliberate annotation at `packages/spec/src/stack.zod.ts:1283`, #14513),
+ * so an object `manifest` belonging to NEITHER stage compiles against these
+ * members. The runtime is the half that is correct —
+ * `InstalledPackageAtEitherStageSchema.safeParse()` refuses that same row, and
+ * that refusal is pinned beside its producer in
+ * `packages/runtime/src/domains/packages-read-delete-response-conformance.test.ts`.
+ * The type-level gap is #19324's to close; the third pin below records it as the
+ * behaviour it is, so the day it closes this file says so.
+ *
+ * ## Ablation, measured rather than asserted
+ *
+ * Restore `packages/client/src/index.ts` to the blob it carried BEFORE this card
+ * — `git show 21e6b9887c^:packages/client/src/index.ts`, blob `c12b554d20`, a
+ * fixed anchor rather than a moving `origin/main` — keep this file, run
+ * `tsc --noEmit -p tsconfig.test.json`: exit 2, **ten** errors — the five
+ * `toEqualTypeOf` pins that name the union (TS2344, here and in the three blocks
+ * above), the four direction-1 assignments below (TS2322), and the #19324 gap
+ * pin below (TS2322 — with the authoring stage restored its `objects` value is
+ * refused; ⚠️ that is NOT the tolerance it records at head, so read its own
+ * comment for what it measures). Both `@ts-expect-error` lines stay USED in that
+ * run (0 TS2578), which is what makes them controls rather than evidence: they
+ * are labelled GREEN IN BOTH STATES below.
+ */
+export function installedPackageEitherStagePins17536(): void {
+    // ── direction 1: the assembled stage is ADMITTED, on all four read members ─
+    // RED BEFORE, all four: the declared element was `InstalledPackage`, whose
+    // `manifest` is `ManifestSchema` (the authoring stage), and an assembled body
+    // is not assignable to it.
+    const getAdmitsAssembled: Awaited<ReturnType<typeof client.packages.get>> = assembledRow;
+    const scopedGetAdmitsAssembled: Awaited<ReturnType<typeof scoped.packages.get>> = assembledRow;
+    const listAdmitsAssembled: Awaited<ReturnType<typeof client.packages.list>>['packages'][number] =
+        assembledRow;
+    const scopedListAdmitsAssembled: Awaited<
+        ReturnType<typeof scoped.packages.list>
+    >['packages'][number] = assembledRow;
+
+    // GREEN IN BOTH STATES — regression guard, not red-before evidence. The move
+    // is a WIDENING: the authoring stage stays admitted. A "fix" that swapped one
+    // stage for the other rather than declaring the union reddens here.
+    const getStillAdmitsAuthoring: Awaited<ReturnType<typeof client.packages.get>> = authoringRow;
+
+    // ── the control: the WRITE members did not move ──────────────────────────
+    // GREEN IN BOTH STATES — a control, not red-before evidence, and that is
+    // exactly its job. `POST /packages` declares `manifest: ManifestSchema` on
+    // its REQUEST contract, so the row it answers is the authoring stage and
+    // stays declared as one. This suppression is the same assignment direction 1
+    // makes, against the member that did NOT move: it is USED precisely because
+    // an assembled row is refused by an `InstalledPackage` annotation, so if the
+    // two were assignable after all it would go unused (TS2578) and direction 1
+    // would be shown to have been passing vacuously.
+    // @ts-expect-error the install door answers the AUTHORING stage; an assembled row is not one
+    const installRefusesAssembled: Awaited<ReturnType<typeof client.packages.install>> = assembledRow;
+
+    // ── direction 2: a manifest that is not an OBJECT AT ALL is refused ─────
+    // GREEN IN BOTH STATES — the second control, and this is the whole of what
+    // it measures: a STRING PRIMITIVE is refused by both branches of the union,
+    // so the suppression is USED. It reddens (TS2578, unused suppression) if
+    // these members are ever widened to `any` or `unknown`. ⛔ It says nothing
+    // about an object-shaped `manifest` belonging to neither stage — that one
+    // compiles today, and is pinned as such directly below.
+    //
+    // ⚠️ The suppression sits on the PROPERTY, not on the `const`. Measured: tsc
+    // reports this mismatch at the offending member of the object literal, so a
+    // directive on the declaration line covers the wrong line and goes unused —
+    // TS2578, a red gate that says nothing about the union.
+    const neitherStage: Awaited<ReturnType<typeof client.packages.get>> = {
+        ...authoringRow,
+        // @ts-expect-error a manifest must at least be an object; neither branch of the union admits a string
+        manifest: 'com.acme.crm@1.0.0',
+    };
+
+    // ── the KNOWN GAP, pinned as the behaviour it IS (#19324) ─────────────
+    // ⛔ NOT a guarantee — a measurement, written down so it cannot change in
+    // silence. `AssembledInstalledPackage['manifest']` is
+    // `Record<string, unknown>` (from the deliberate
+    // `z.ZodType<Record<string, unknown>, …>` annotation at
+    // `packages/spec/src/stack.zod.ts:1283`, #14513 — TS7056 and a
+    // declaration-chunk ceiling), so the assembled branch admits ANY object and
+    // the assignment below COMPILES at this head. Measured with `tsc` against the
+    // published declarations; the runtime disagrees and is the correct half:
+    // `InstalledPackageAtEitherStageSchema.safeParse()` answers `success: false`
+    // for this very row.
+    //
+    // ⚠️ There is deliberately no `@ts-expect-error` here. The day #19324 types
+    // the assembled body, tsc reds on THIS line — and that red is the
+    // notification this pin exists to deliver: read it as "the gap closed", then
+    // delete this block and tighten the `manifest` guidance on
+    // `ObjectStackClient.packages.list` in `index.ts`, which sends callers
+    // through a `packages/spec` parse precisely because the type cannot carry
+    // the narrowing today.
+    const objectToleranceGap19324: Awaited<ReturnType<typeof client.packages.get>> = {
+        ...authoringRow,
+        manifest: { bogus: 1, objects: 'not-even-an-array' },
+    };
+
+    void getAdmitsAssembled;
+    void scopedGetAdmitsAssembled;
+    void listAdmitsAssembled;
+    void scopedListAdmitsAssembled;
+    void getStillAdmitsAuthoring;
+    void installRefusesAssembled;
+    void neitherStage;
+    void objectToleranceGap19324;
 }
 
 /**
@@ -1248,6 +1429,7 @@ describe('client SDK return-type precision (#8140)', () => {
         expect(typeof returnTypePrecisionPins11925).toBe('function');
         expect(typeof returnTypePrecisionPins12038).toBe('function');
         expect(typeof returnTypePrecisionPins12034).toBe('function');
+        expect(typeof installedPackageEitherStagePins17536).toBe('function');
         expect(typeof returnTypePrecisionPins12104).toBe('function');
         expect(typeof returnTypePrecisionPins14312).toBe('function');
         expect(typeof returnTypePrecisionPins15451).toBe('function');
