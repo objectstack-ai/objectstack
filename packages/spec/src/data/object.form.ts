@@ -215,10 +215,10 @@ export const objectForm = defineForm({
               helpText: 'Available choices',
               visibleWhen: "data.type in ['select','multiselect','radio','checkboxes']",
               fields: [
-                { field: 'label', type: 'text', required: true },
-                { field: 'value', type: 'text', required: true },
-                { field: 'color', type: 'color' },
-                { field: 'description', type: 'text' },
+                { field: 'label', label: 'Label', type: 'text', required: true },
+                { field: 'value', label: 'Value', type: 'text', required: true },
+                { field: 'color', label: 'Color', type: 'color' },
+                { field: 'description', label: 'Description', type: 'text' },
               ],
             },
 
