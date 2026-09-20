@@ -781,8 +781,8 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         description: "Regiones de página y componentes colocados en ellas."
       },
       interface: {
-        label: "Interface (list pages)",
-        description: "Interface mode (Airtable parity): the page defines its own data surface directly — columns, filters, visualizations and toolbar — no inheriting from a separate view."
+        label: "Interface (páginas de lista)",
+        description: "Modo Interface (paridad con Airtable): la página define directamente su propia superficie de datos — columnas, filtros, visualizaciones y barra de herramientas — sin heredar de una vista aparte."
       },
       advanced: {
         label: "Avanzado",
@@ -852,24 +852,24 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Componentes"
       },
       interfaceConfig: {
-        label: "Interface Config",
-        helpText: "The page IS the view: source picks the object, columns/filterBy are defined directly here; appearance.allowedVisualizations whitelists renderers (one entry = locked); userActions toggles the toolbar."
+        label: "Configuración de Interface",
+        helpText: "La página ES la vista: source elige el objeto, columns/filterBy se definen directamente aquí; appearance.allowedVisualizations restringe los renderizadores (una sola entrada = bloqueado); userActions conmuta la barra de herramientas."
       },
       "interfaceConfig.source": {
-        label: "Source",
-        helpText: "Object this page reads from"
+        label: "Origen de datos",
+        helpText: "Objeto del que lee esta página"
       },
       "interfaceConfig.columns": {
-        label: "Columns",
-        helpText: "Columns to show — defined directly on the page (blank = all object fields)"
+        label: "Columnas",
+        helpText: "Columnas que mostrar — definidas directamente en la página (en blanco = todos los campos del objeto)"
       },
       "interfaceConfig.filterBy": {
-        label: "Filter By",
-        helpText: "Always-on base filter for the page — same visual builder as the list toolbar."
+        label: "Filtrar por",
+        helpText: "Filtro base siempre activo para la página — el mismo constructor visual que la barra de herramientas de la lista."
       },
       "interfaceConfig.sort": {
-        label: "Sort",
-        helpText: "Default sort order for the page, defined directly on the page."
+        label: "Orden",
+        helpText: "Orden predeterminado de la página, definido directamente en la página."
       },
       "interfaceConfig.sort.field": {
         label: "Campo"
@@ -878,40 +878,40 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Dirección"
       },
       "interfaceConfig.levels": {
-        label: "Levels",
-        helpText: "Hierarchy levels to display (tree-like sources)"
+        label: "Niveles",
+        helpText: "Niveles de jerarquía que mostrar (orígenes de tipo árbol)"
       },
       "interfaceConfig.appearance": {
-        label: "Appearance",
-        helpText: "Allowed visualizations (Grid / Kanban / Calendar / …) and description visibility"
+        label: "Apariencia",
+        helpText: "Visualizaciones permitidas (Grid / Kanban / Calendar / …) y visibilidad de la descripción"
       },
       "interfaceConfig.userFilters": {
-        label: "User Filters",
-        helpText: "End-user filter bar: None (no bar) / Tabs (named presets) / Dropdown (per-field). None removes the config."
+        label: "Filtros de usuario",
+        helpText: "Barra de filtros para el usuario final: None (sin barra) / Tabs (preajustes con nombre) / Dropdown (por campo). None elimina la configuración."
       },
       "interfaceConfig.userActions": {
-        label: "User Actions",
-        helpText: "Toolbar toggles (search, sort, filter, row height)"
+        label: "Acciones de usuario",
+        helpText: "Conmutadores de la barra de herramientas (buscar, ordenar, filtrar, altura de fila)"
       },
       "interfaceConfig.addRecord": {
-        label: "Add Record",
-        helpText: "Add-record entry point"
+        label: "Agregar registro",
+        helpText: "Punto de entrada para agregar registros"
       },
       "interfaceConfig.buttons": {
-        label: "Buttons",
-        helpText: "Toolbar buttons — pick from this object's actions"
+        label: "Botones",
+        helpText: "Botones de la barra de herramientas — elige entre las acciones de este objeto"
       },
       "interfaceConfig.recordAction": {
-        label: "Record Action",
-        helpText: "How clicking a record opens its detail"
+        label: "Acción de registro",
+        helpText: "Cómo se abre el detalle al hacer clic en un registro"
       },
       "interfaceConfig.showRecordCount": {
-        label: "Show Record Count",
-        helpText: "Show the record count bar"
+        label: "Mostrar recuento de registros",
+        helpText: "Mostrar la barra de recuento de registros"
       },
       "interfaceConfig.allowPrinting": {
-        label: "Allow Printing",
-        helpText: "Allow users to print this page"
+        label: "Permitir impresión",
+        helpText: "Permitir que los usuarios impriman esta página"
       },
       isDefault: {
         label: "Predeterminado",

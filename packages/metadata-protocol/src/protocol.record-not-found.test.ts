@@ -233,4 +233,78 @@ describe('[#4435] deleteManyData reports per id, not per request', () => {
     expect(res.results[1].errors[0].code).toBe('NOT_ATTEMPTED');
     expect(del).toHaveBeenCalledTimes(1);
   });
+
+  it('a row that MATCHED and was deliberately NOT removed is not reported as a deletion', async () => {
+    // [#19412] The SECOND half of this site. The comment beside the loop
+    // records the first: `success` used to be pushed unconditionally, so a
+    // batch of typo'd ids reported every one of them deleted — fixed by the
+    // `deleted === false` throw above, which reads the driver contract's
+    // POSITIVE not-found value. This is the other ending: the row was there,
+    // the write ran, and the record deliberately SURVIVED. `success` stayed a
+    // LITERAL for every answer that was not `false`, so that row was reported
+    // as deleted too.
+    //
+    // `IDataEngine.delete` declares `Promise<boolean | number>` — the driver
+    // boolean for a by-id write, a COUNT of rows removed otherwise — so a
+    // numeric zero is the one value that positively says "it is still there".
+    // ⛔ Not the `false` arm: that is "no row matched", which becomes the 404
+    // above, about a record this caller can still GET.
+    const engine = {
+      registry: { getObject: () => SCHEMA },
+      delete: vi.fn(async (_object: string, opts: any) => { assertEngineDeleteDispatch(opts); return 0; }),
+    };
+    const p = new ObjectStackProtocolImplementation(engine as any);
+    const res: any = await p.deleteManyData({ object: 'task', ids: ['still_there'] } as any);
+
+    // Pre-#19412: { success: true, succeeded: 1, failed: 0, results: [{ success: true }] }.
+    expect(res).toMatchObject({ success: false, total: 1, succeeded: 0, failed: 1 });
+    expect(res.results).toHaveLength(1);
+    expect(res.results[0]).toMatchObject({ id: 'still_there', success: false, index: 0 });
+    // ⛔ And NOT the not-found row. A caller branching on `errors[0].code`
+    // must not read a surviving record as one that was never there — the two
+    // are opposite facts about the same id.
+    expect(res.results[0].errors).toBeUndefined();
+    expect(engine.delete).toHaveBeenCalledTimes(1);
+  });
+
+  it('the count arm still reports a deletion when rows DID go', async () => {
+    // The control leg for the pin above: `deleted !== 0` must not collapse
+    // into "a number is never a deletion". A predicate-shaped engine that
+    // removed the row answers with a POSITIVE count, and that is a success.
+    const engine = {
+      registry: { getObject: () => SCHEMA },
+      delete: vi.fn(async (_object: string, opts: any) => { assertEngineDeleteDispatch(opts); return 1; }),
+    };
+    const p = new ObjectStackProtocolImplementation(engine as any);
+    const res: any = await p.deleteManyData({ object: 'task', ids: ['gone'] } as any);
+    expect(res).toMatchObject({ success: true, total: 1, succeeded: 1, failed: 0 });
+    expect(res.results[0]).toMatchObject({ id: 'gone', success: true });
+  });
+
+  it('a mixed batch separates the rows that went from the row that stayed', async () => {
+    // Both directions in ONE run, so neither a blanket `true` nor a blanket
+    // `false` can pass: `kept` survives, its two neighbours do not, and the
+    // counters still partition the results (#7539).
+    const engine = {
+      registry: { getObject: () => SCHEMA },
+      delete: vi.fn(async (_object: string, opts: any) => {
+        assertEngineDeleteDispatch(opts);
+        return String(opts?.where?.id) === 'kept' ? 0 : 1;
+      }),
+    };
+    const p = new ObjectStackProtocolImplementation(engine as any);
+    const res: any = await p.deleteManyData({
+      object: 'task',
+      ids: ['a', 'kept', 'b'],
+    } as any);
+
+    expect(res.results.map((r: any) => [r.id, r.success])).toEqual([
+      ['a', true], ['kept', false], ['b', true],
+    ]);
+    expect(res).toMatchObject({ success: false, total: 3, succeeded: 2, failed: 1 });
+    // A surviving row is not an ERROR, so it does not stop the run the way a
+    // throw does — `b` was attempted and really went, without `continueOnError`.
+    expect(engine.delete).toHaveBeenCalledTimes(3);
+    expect(res.succeeded + res.failed).toBe(res.total);
+  });
 });
