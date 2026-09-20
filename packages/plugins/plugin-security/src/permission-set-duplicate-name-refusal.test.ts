@@ -48,7 +48,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
+import { assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import { createPermissionSetWriteThrough } from './permission-set-projection.js';
 import {
@@ -88,7 +88,10 @@ const rowFor = (name: string, over: Record<string, any> = {}) => ({
  * `registry.listItems('permission')` is the artifact source the lock reads, so
  * seeding it IS seeding "this name is package-declared". It REFUSES query
  * shapes it does not implement rather than answering `[]`, which would report
- * "no such row" and let every case pass while measuring the double.
+ * "no such row" and let every case pass while measuring the double — and it
+ * holds the caller's `limit` and opens `update` with the producer's own
+ * dispatch predicate, so a fake looser than `ObjectQL` cannot collect a green
+ * the real engine would not have given.
  */
 function makeQl(rows: any[], declared: any[]) {
   const permRows = [...rows];
@@ -98,13 +101,17 @@ function makeQl(rows: any[], declared: any[]) {
     async find(object: string, q: any) {
       if (object !== 'sys_permission_set') return [];
       const where = q?.where ?? {};
-      return permRows.filter((r) =>
+      const matched = permRows.filter((r) =>
         Object.entries(where).every(([k, v]) => {
           if (k.startsWith('$')) throw new Error(`fake engine: unsupported operator ${k}`);
           if (v && typeof v === 'object') throw new Error(`fake engine: unsupported operand for ${k}`);
           return r[k] === v;
         }),
       );
+      // The caller's bound, applied AFTER the filter and by PRESENCE — the
+      // duplicate pre-check asks for `limit: 1`, and a limit-blind double
+      // would be answering a different question than the engine does.
+      return typeof q?.limit === 'number' ? matched.slice(0, q.limit) : matched;
     },
     async findOne(object: string, q: any) {
       assertEngineFindOnePredicate(object, q);
@@ -114,10 +121,13 @@ function makeQl(rows: any[], declared: any[]) {
       permRows.push({ ...data });
       return { id: data.id };
     },
-    async update(_object: string, data: any) {
-      const r = permRows.find((x) => x.id === data.id);
-      if (r) Object.assign(r, data);
-      return r ?? null;
+    async update(object: string, data: any, options?: any) {
+      const dispatch = assertEngineUpdateDispatch(data, options);
+      const targets = dispatch.kind === 'by-id'
+        ? permRows.filter((r) => r.id === dispatch.id)
+        : await this.find(object, options);
+      for (const r of targets) Object.assign(r, data);
+      return dispatch.kind === 'by-id' ? (targets[0] ?? null) : targets.length;
     },
   };
 }
