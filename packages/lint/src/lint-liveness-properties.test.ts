@@ -581,6 +581,10 @@ describe('lintLivenessProperties', () => {
   // reaches `getNested` at all, because `checkItem` takes the
   // `path.includes('.') ? getNested(…) : [item[path]]` branch. So there is no
   // dotted subject left anywhere to re-point at, and the fan-out is untested.
+  // (That enumeration is dated to its own commit and has since lost a member:
+  // `field.relatedListFilter` left the warned set in #19187 when objectui#4664
+  // reached the pin. The claim it supports — every warned entry is TOP-LEVEL, so
+  // no dotted subject is left — is unchanged by a top-level row leaving.)
   // Filed as **#10262**, which also carries the recommendation not to play this
   // round a third time (test the WALKER against a synthetic warn map, and leave
   // the ledger-driven coupling to the assertions that are genuinely about the
@@ -654,6 +658,114 @@ describe('lintLivenessProperties', () => {
         navItem('nav_accounts', { objectName: 'crm_account', label: 'Accounts' }),
         navItem('nav_leads', { viewName: 'hot_leads' }),
       ]));
+      expect(findings).toEqual([]);
+    });
+  });
+
+  // ── #19187: the related-list filter is applied by the derived list now ─────
+  //
+  // `field.relatedListFilter` was seeded `planned` + `authorWarn` by #8704, the
+  // contract-first spec half of objectui#4664, and its ledger note wrote its own
+  // flip condition: flip to `live` and drop `authorWarn` when that consumer
+  // lands. It landed — objectui d796c8dde (objectui PR #6946), an ancestor of
+  // this repo's `.objectui-sha` pin `53ded82bf7` (`git merge-base
+  // --is-ancestor` exit 0) — so `deriveRelatedLists` puts the authored value on
+  // the derived descriptor and `RecordDetailView` writes it onto the synthesized
+  // `record:related_list` node, which ANDs it with the parent-relationship
+  // condition and composes the same pair for the tab badge.
+  //
+  // Until the row was flipped, this lint repeated the row's `authorHint` — "the
+  // auto-derived related list does not apply this filter yet" — at every
+  // compile, about a key the PINNED console applies. That is the same defect
+  // shape as `dashboard.widgets.colorVariant` (#6774) and
+  // `app.…navigation.runAction` (#10068): an advisory that survives its own
+  // premise stops being stale bookkeeping and becomes a false sentence steering
+  // authors off a working key.
+  //
+  // What is kept here is the disposition those two flips used: a SILENCE pin (so
+  // a half-reverted flip — the ledger row restored to `planned`, or the objectui
+  // pin rolled back under it — shows up right here) plus the anti-vacuity guard
+  // below, because `lintLivenessProperties` returns [] both when the walk is
+  // broken and when it cannot resolve the ledgers at all.
+  //
+  // ⚠️ `field.json` now carries NO warned row at any depth, so `loadWarnMap(dir,
+  // 'field')` is empty and `lintLivenessProperties` skips the field walk
+  // entirely on the `if (fieldWarn.size > 0)` guard. Every assertion below is
+  // therefore about silence, and the guard is what makes the silence readable.
+  describe('field related-list filter (#19187 — the derived list applies it now)', () => {
+    const accountWith = (...fields: Record<string, unknown>[]) => ({
+      objects: [{ name: 'account', label: 'Account', fields }],
+    });
+    const filtered = (name: string) => ({
+      name,
+      type: 'master_detail',
+      reference: 'crm_order',
+      relatedListFilter: { status: { $ne: 'deleted' } },
+    });
+
+    // The silence pin. Authored on `fields[1]` and nowhere on `fields[0]` — the
+    // shape the old positive assertion used — so this keeps saying something
+    // specific about the field the walk would have had to reach.
+    it('no longer warns on `relatedListFilter` — the derived list applies it since objectui#4664 (#19187)', () => {
+      const findings = lintLivenessProperties(accountWith(
+        { name: 'owner', type: 'lookup', reference: 'sys_user' },
+        filtered('related_orders'),
+      ));
+      expect(paths(findings).some((m) => m.includes('relatedListFilter'))).toBe(false);
+    });
+
+    // Same pin with the key on index 0 and on several fields at once: a
+    // half-reverted flip is caught wherever the author happened to put it.
+    it('stays quiet however many fields author the filter', () => {
+      const findings = lintLivenessProperties(accountWith(
+        filtered('related_orders'),
+        filtered('related_invoices'),
+        filtered('related_cases'),
+      ));
+      expect(paths(findings).some((m) => m.includes('relatedListFilter'))).toBe(false);
+    });
+
+    // Anti-vacuity guard for both silence pins above — the shape the dashboard
+    // and navigation blocks use, and the reason those pins are worth keeping at
+    // all. It answers ONE question, and the test name is narrowed to exactly
+    // that question: could this file's silence be coming from a lint that never
+    // resolved the ledger DIRECTORY? `lintLivenessProperties` returns [] outright
+    // when `resolveLivenessDir()` finds nothing, so "no field findings" is also
+    // what a lint holding no ledgers at all returns; and with `relatedListFilter`
+    // live the FIELD ledger has no warned row left, so nothing inside the field
+    // walk can tell those two apart on its own. This authors the flipped key and
+    // a property that IS still `authorWarn` — `object.externalSharingModel`, on
+    // the very object carrying the fields — in the SAME call: one warning and
+    // not two, out of a directory that demonstrably resolved.
+    //
+    // ⚠️ What it does NOT cover, measured rather than assumed: a missing or
+    // unparseable `field.json` ALONE. `loadWarnMap` returns an empty map
+    // SILENTLY for both — `lint-liveness-properties.ts:77` for the absent file,
+    // `:81-83` for the parse failure — and `object` and `field` are two separate
+    // loads (`:485-486`), so the second warning below still arrives from
+    // `object.json` and this test stays green. With the row live, a lost
+    // `field.json` is observationally identical to the flip from inside
+    // `lintLivenessProperties`. That blind spot belongs to `loadWarnMap`'s silent
+    // returns, is shared by the #6774 and #10068 blocks this one is modelled on,
+    // and is left to its own card rather than patched in behind a test name.
+    it('the related-list silence is a real verdict, not a lint that never resolved the ledger directory', () => {
+      const findings = lintLivenessProperties({
+        objects: [{
+          name: 'account',
+          externalSharingModel: 'read',
+          fields: [filtered('related_orders')],
+        }],
+      });
+      const messages = findings.map((f) => f.message);
+      expect(messages.some((m) => m.includes('externalSharingModel'))).toBe(true);
+      expect(messages.some((m) => m.includes('relatedListFilter'))).toBe(false);
+    });
+
+    it('stays silent on fields that author no warned key', () => {
+      const findings = lintLivenessProperties(accountWith(
+        { name: 'owner', type: 'lookup', reference: 'sys_user' },
+        { name: 'amount', type: 'currency', precision: 2 },
+      ));
       expect(findings).toEqual([]);
     });
   });
@@ -801,14 +913,36 @@ describe('lintLivenessProperties', () => {
       expect(paths(findings).some((m) => m.includes('externalSharingModel'))).toBe(true);
     });
 
-    it('field walk: skips a null item (nested under a well-formed object) and keeps walking past it', () => {
+    // ⚠️ THE FIELD CASE LOST ITS SUBJECT (#19187), and unlike the fan-out
+    // block at the bottom of this file the code path went with it (that block's
+    // own `#10262` citation is left as found; the number resolves in NEITHER
+    // objectstack nor objectui — measured, with `#7079` answering 200 on the
+    // same instrument — so this comment names the block rather than re-citing
+    // it): `field.relatedListFilter` was the
+    // ONE `authorWarn` row on `field.json` at any depth, so flipping it `live`
+    // empties `loadWarnMap(dir, 'field')` and `lintLivenessProperties` skips the
+    // whole field loop on `if (fieldWarn.size > 0)` — the `if (!isRecord(field))
+    // continue` guard this case was written for is not reached at all today.
+    // There is no other warned field row to re-subject to: the field walk reads
+    // `field.json` and nothing else.
+    //
+    // So the fixture is kept and the CLAIM is narrowed to the half that is still
+    // real — a malformed `fields` array hanging off a well-formed object does
+    // not throw, and the object walk still reaches its own finding past it. The
+    // "kept walking past the null FIELD" half is NOT asserted, because with the
+    // loop gated off it would pass over a walk that never ran: the vacuous shape
+    // #7079 was filed to avoid writing. Re-point this at a real field row the
+    // day `field.json` warns again; the gap is reported rather than papered over.
+    it('field walk: a malformed `fields` array under a well-formed object neither throws nor stops the object walk', () => {
       const findings = lintLivenessProperties({
         objects: [{
           name: 'widget',
+          externalSharingModel: 'read',
           fields: [null, { name: 'related_orders', type: 'text', relatedListFilter: { field: 'account_id' } }],
         }],
       });
-      expect(paths(findings).some((m) => m.includes('relatedListFilter'))).toBe(true);
+      expect(paths(findings).some((m) => m.includes('externalSharingModel'))).toBe(true);
+      expect(paths(findings).some((m) => m.includes('relatedListFilter'))).toBe(false);
     });
   });
 });
@@ -932,7 +1066,8 @@ describe('the array fan-out, against a synthetic warn map (#10262)', () => {
 // the `dead` branch, so the finding's MESSAGE told the author to remove
 // something the ledger's own `authorHint`/`note` on the SAME finding said to
 // keep. `field.relatedListFilter`, `object.externalSharingModel` and
-// `translation.flows` are the three shipped rows this hit.
+// `translation.flows` are the three shipped rows this hit — two of them still,
+// the third only until #19187 flipped `field.relatedListFilter` `live`.
 //
 // The real ledgers currently have PLANNED rows and EXPERIMENTAL rows, but — as
 // this file's other comments document at length (#2377, #3896, #4509) — no
@@ -963,18 +1098,13 @@ describe('dead / experimental / planned / live-elsewhere verdicts are distinct, 
     expect(f.hint).toContain('screen-flow runner');
   });
 
-  it('REAL LEDGER: field.relatedListFilter (planned) — planned rule id, non-contradictory message', () => {
-    const findings = lintLivenessProperties({
-      objects: [{
-        name: 'account',
-        fields: [{ name: 'related_orders', type: 'text', relatedListFilter: { field: 'account_id' } }],
-      }],
-    });
-    const f = findings.find((x) => x.message.includes('relatedListFilter'));
-    expect(f).toBeDefined();
-    expect(f!.rule).toBe('liveness-planned-property');
-    expect(f!.message).not.toContain('dead');
-  });
+  // ⚠️ The third of the card's rows, `field.relatedListFilter`, no longer has a
+  // REAL LEDGER case here: #19187 flipped it `live` once objectui#4664 reached
+  // the `.objectui-sha` pin, so it warns about nothing and can pin no verdict.
+  // Its silence is pinned in the `field related-list filter (#19187)` block
+  // above, where a half-reverted flip surfaces. The PLANNED branch stays a
+  // contract test on the two rows that are still planned — `translation.flows`
+  // just above and `object.externalSharingModel` just below.
 
   it('REAL LEDGER: object.externalSharingModel (planned, no authorHint — falls back to `note`) — planned rule id, note hint does not say Remove it', () => {
     const findings = lintLivenessProperties({ objects: [{ name: 'widget', externalSharingModel: 'read' }] });
