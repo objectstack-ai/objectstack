@@ -425,7 +425,11 @@
  *       Three target states, never two: a target that could not be resolved
  *       fires its own quieter row saying the liveness is UNJUDGED, because a
  *       silently dropped target reads as a healthy block forever — this item's
- *       own disease in a new mask (#4690). Report-only, and pointedly: the
+ *       own disease in a new mask (#4690). Both verdicts — the expiry and the
+ *       UNJUDGED — are founded on the set the row JUDGES (the body's, whenever
+ *       the body states one), so a target the body superseded cannot veto a
+ *       verdict from the comment archive; what the archive still does is
+ *       withhold, which is what #11747 paid for (#18379). Report-only, and pointedly: the
  *       release is a protocol procedure with two mechanical double-checks
  *       (state model, 「放行双查」) over the card's conversion comments and its
  *       merged-PR timeline, so this row surfaces the candidate and the unlock
@@ -957,8 +961,10 @@
  * ## Exit codes
  *
  *   0  the sweep completed — 0 or 40 findings alike (report-only, see above).
- *   3  PREREQUISITE NOT MET — a classified transport failure. Nothing was swept,
- *      and the report says so instead of implying a clean board.
+ *   3  PREREQUISITE NOT MET — a classified transport failure, or a
+ *      `PM_SWEEP_CHECKOUT` naming a checkout that does not serve the swept
+ *      board. Nothing was swept, and the report says so instead of implying a
+ *      clean board.
  *   2  the sweep could not run for a reason this file cannot classify. The
  *      pre-existing catch-all, kept so an unfamiliar failure stays loud (#4690).
  *
@@ -970,7 +976,7 @@
 
 import process from 'node:process';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from '../invoked-as.mjs';
 
@@ -1042,6 +1048,50 @@ export function resolveSweepRepo(env = {}) {
     return { repo: value, source, valid: SWEEP_REPO_SHAPE.test(value) };
   }
   return { repo: DEFAULT_SWEEP_REPO, source: 'default', valid: true };
+}
+
+/**
+ * WHICH checkout serves that board — the half `PM_SWEEP_REPO` never answered. The three local git
+ * reads below feed H17's oracle and H57's workflow files, and each inherited whatever tree the shell
+ * stood in: measured 2026-09-19 (#19191), a sweep of objectui validated its H17 trigger-file index
+ * against OBJECTSTACK's 8888 tracked files (objectui has 7945) and H57 refused for the whole run,
+ * hiding a lane dead through five scheduled fires — internally consistent and externally wrong, the
+ * #11217 disease one layer down. Set: the three reads take it as `cwd`, and a checkout whose `origin`
+ * is not the swept board REFUSES (exit 3) rather than reading a second repo's tree. Unset: today's
+ * behaviour exactly, plus the H17 footer NAMING the tree it read. Returns `{ path, source, set }`.
+ */
+export function resolveSweepCheckout(env = {}) {
+  const value = String(env?.PM_SWEEP_CHECKOUT ?? '').trim();
+  return value ? { path: value, source: 'PM_SWEEP_CHECKOUT', set: true } : { path: null, source: 'cwd', set: false };
+}
+
+// The ONE local git read in this file, so the knob above answers for every reader at once. ⛔ A
+// fourth reader spelled with its own `execFileSync` keeps the defect — the self-test pins the count.
+function gitRead(args, extra = {}) {
+  const cwd = resolveSweepCheckout(process.env).path ?? undefined;
+  return execFileSync('git', args, { encoding: 'utf8', cwd, ...extra });
+}
+
+/**
+ * The knob's refusal, in the shape `reportPrerequisiteNotMet` prints (exit 3). `null` when the knob is
+ * unset — today's behaviour is not a prerequisite — or when the named checkout really serves the board.
+ * Otherwise a NAMED failure: ⛔ never a silent fall back to `cwd`, because a report built from another
+ * repo's tree reads exactly like a report about this one. `originUrl` is read IN that tree.
+ */
+export function checkoutPrerequisite(sweepRepo, env = {}, originUrl = null) {
+  const checkout = resolveSweepCheckout(env);
+  if (!checkout.set) return null;
+  const serves = localCheckoutServes(sweepRepo, env, originUrl);
+  if (serves.serves) return null;
+  return {
+    kind: 'checkout-does-not-serve',
+    headline: `PM_SWEEP_CHECKOUT=${JSON.stringify(checkout.path)} does not serve \`${sweepRepo}\``,
+    detail: [`${serves.reason}.`, '',
+      'H17 validates every on-hold trigger path against that checkout and H57 classifies its workflow',
+      'files there, so a foreign tree renders an index whose paths were checked against another repo.'],
+    fix: ['point PM_SWEEP_CHECKOUT at the checkout whose `origin` IS the swept board,',
+      'or unset it and run the sweep from inside that checkout.'],
+  };
 }
 
 const SWEEP_REPO = resolveSweepRepo(process.env);
@@ -1164,6 +1214,474 @@ export const CLAIM_COMMENT_MARKER = /^\s*>?\s*Claim(?:ed)?\s*:/mi;
  */
 export const RELEASE_COMMENT_MARKER = /^\s*>?\s*Release\s*:/mi;
 
+// ---------------------------------------------------------------------------
+// Reading the two ownership markers — ONE place, decoration included (#18680).
+//
+// The two constants above describe the BARE directive and still do: they are
+// exported, a sibling gate imports the claim one (`check-clause2-carriers.mjs`)
+// and several cases here assert on them directly, so their semantics are held
+// still on purpose. What was missing is the READING — how a line written by a
+// seat is offered to them.
+//
+// ## The defect, measured
+//
+// A seat that BOLDS the directive writes `**Release:** session …`. The line
+// then begins with `*`, the marker anchors the word at line start, and the
+// record reads as ABSENT — silently, in the one direction nothing goes red:
+// a lawfully released card looks un-released to every row that reads ownership
+// (H2, H47, H66, H67). The live specimen is objectstack#16529 comment
+// `5691473966` (2026-09-16T03:11:44Z), a real return-to-`pm:queue` record whose
+// `**Release:** …` line no marker in this file could see, while the same line
+// in the bare spelling matches.
+//
+// ## Why undecorate-then-match, and ⛔ not `\*\*` bolted onto the regexes
+//
+// #10102 already made this judgement for the OTHER directive family
+// (`Blocked-by:` / `Restart-when:`): authors format these lines, and a
+// decorated one means what the bare one means, so the anchors are matched
+// against `undecorateProseLine(line)`. Decoration is an OPEN set — bold,
+// italics, a backticked directive, all of them nestable — so admitting one
+// spelling in the pattern buys exactly that spelling and replays this card on
+// the next one. The reading below borrows the SAME stripper, so the two
+// directive families cannot drift on what "decorated" means, and there is ⛔ no
+// second stripper to keep in step.
+//
+// ## Strictly a SUPERSET, provably
+//
+// The bare test is tried FIRST and short-circuits, so no body that matches
+// today can stop matching: the reading only ever ADDS. That is what makes this
+// safe to drop under rows whose populations are live on a shared board — the
+// delta is one-directional by construction, not by inspection.
+//
+// ## The one thing it refuses to undecorate through: a LIST ITEM
+//
+// `undecorateProseLine` strips every `*` and backtick on the line, so a
+// markdown bullet `* Claim: …` would become ` Claim: …` and read as a claim.
+// This file already rules on that shape from the other side — H20's case
+// 「a bulleted `Claim:` is still not a claim comment」 pins `- Claim:` as NOT a
+// claim, and `CLAIM_NEAR_MISS_MARKER`'s docblock names the bullet hazard by
+// name — so undecorating a `*` bullet would accept through decoration exactly
+// what the `-` bullet is refused for. A bullet is a LIST, not a decoration:
+// the marker for one is followed by whitespace, the decoration for the other
+// is not, and that is the whole discriminator.
+//
+// A line that STILL does not read after all of this does not vanish either:
+// `OWNERSHIP_MARKER_NEAR_MISS_FORMS` below is the vocabulary that makes it
+// audible, because a widening alone would simply wait for the next decoration.
+// ---------------------------------------------------------------------------
+
+/**
+ * A markdown LIST ITEM's opening — a bullet or an ordered marker — and the one
+ * prefix `markerMatches` refuses to undecorate through.
+ *
+ * `[ \t]`, ⛔ never `\s`, on both sides: `\s` matches a NEWLINE, which is the
+ * defect `CLAIM_NEAR_MISS_MARKER`'s docblock measured the hard way — a hyphen
+ * is the commonest line-opening character in this repo's comment bodies, so a
+ * class that can span lines reads an ordinary list as a directive.
+ *
+ * The REQUIRED whitespace after the marker character is the discriminator, and
+ * it is markdown's own: `* Claim:` is a list item, `**Claim:**` is bold, and
+ * nothing else separates them.
+ */
+const MARKER_LIST_ITEM_PREFIX = /^[ \t]*>?[ \t]*(?:[-+*]|\d+[.)])[ \t]+/u;
+
+/**
+ * Does `marker` read `text` — the ownership markers' ONE reading (#18680).
+ *
+ * Every site in this file that asks whether a comment (or one line of one) IS
+ * a `Claim:` or a `Release:` goes through here, so the reading is the FAMILY's
+ * rather than per-row. A row that tested a marker directly would be the one
+ * reader that still cannot see a bolded record, and it would look identical to
+ * the rows that can.
+ *
+ * ⚠️ ⛔ Do NOT use this to ask about the two constants THEMSELVES. A case
+ * pinning what the bare directive is (`CLAIM_COMMENT_MARKER.test('- Claim: …')`
+ * is false, `RELEASE_COMMENT_MARKER.test('Released: …')` is false) asserts on
+ * the constant on purpose — the constants are the protocol's spelling and this
+ * is how a written line is offered to them.
+ *
+ * @param {RegExp} marker — `CLAIM_COMMENT_MARKER` or `RELEASE_COMMENT_MARKER`.
+ *   Both are `g`-less, so neither `.test` below carries a `lastIndex`.
+ * @param {string} text — one comment body, or one line of one.
+ */
+export function markerMatches(marker, text) {
+  const raw = String(text ?? '');
+  // The bare reading FIRST: it is the semantics, and trying it first is what
+  // makes the undecorated leg provably additive.
+  if (marker.test(raw)) return true;
+  const undecorated = raw
+    .split(/\r?\n/)
+    .map((line) => (MARKER_LIST_ITEM_PREFIX.test(line) ? line : undecorateProseLine(line)))
+    .join('\n');
+  return marker.test(undecorated);
+}
+
+/**
+ * The spellings a line opens with that LOOK like an ownership marker and are
+ * still refused — a NAMED, enumerable vocabulary rather than a guess.
+ *
+ * ## Why a list and not a wider reading
+ *
+ * Widening the reader alone leaves the same silence one decoration further
+ * out: the next spelling nobody anticipated is read as ABSENT, with nothing
+ * anywhere saying a line was passed over. So the reading above is paired with
+ * this vocabulary, whose whole job is to make the refusal AUDIBLE. A future
+ * decoration is ADDED here — where a fixture and a case come with it — ⛔ never
+ * discovered again from a silent row.
+ *
+ * The register is `SCHEMA_PROPERTY_FORMS`' (`scripts/pm/check-widening-tells.mjs`,
+ * #18560): a frozen roster the detector is BUILT from, each member carrying its
+ * own `example`, so a form added without a fixture and a form silently dropped
+ * both go red instead of quietly changing what the instrument sees.
+ *
+ * ## What a member is, and what it is NOT
+ *
+ * A member describes a line that BEGINS with the marker word — the same anchor
+ * the markers themselves hold, so prose 「we will release: tomorrow」 is not a
+ * member and never was. What varies is the PREFIX or the SEPARATOR around the
+ * word, which is exactly where every measured miss lives.
+ *
+ * ⚠️ Deliberate overlaps, stated rather than hidden:
+ *   · `separator` overlaps H34 on the CLAIM side (`nearMissClaimSeparators`).
+ *     H34 is a ROW with a remedy, gated to cards H2 is already reporting; this
+ *     is a census over every thread the sweep already holds. Two readers of one
+ *     shape answering two different questions, ⛔ not a second vocabulary for
+ *     the claim separator: H34 keeps naming the codepoint and prescribing the
+ *     rewrite.
+ *   · `list-item` is the shape `markerMatches` refuses to undecorate through,
+ *     named here so that refusal is a reading rather than a silence.
+ *
+ * ## The two forms the #18831 measurement added, and the asymmetry inside them
+ *
+ * Measured over the WHOLE open board rather than the filing card's table:
+ * objectstack's 514 OPEN cards, the 459 of them carrying a comment, 131,587
+ * comment lines, read through the REST proxy 2026-09-18T04:26Z–04:31Z with the
+ * repo at `0b31d90fb`. Both readings are counts over that corpus, ⛔ not a
+ * judgement of what the shapes look like:
+ *
+ *   · `heading-bare` — a heading whose word carries NO canonical colon (a `+`,
+ *     a dash, or nothing at all): 10 line(s) on 10 card(s), every one of them a
+ *     real ownership record. It is SYMMETRIC — both directives, inflected
+ *     spellings included — because the heading prefix is already the strong
+ *     signal its `heading` sibling reads. The one prose casualty the measurement
+ *     turned up was `### release-aftercare.md`, a FILE NAME, and the required
+ *     whitespace-or-end after the word excludes it by construction.
+ *   · `bare-word` — the PARTICIPLE at line start with no separator at all: 13
+ *     line(s) on 13 card(s), every one a claim-shaped line. ⛔ CLAIM side only,
+ *     and ⛔ deliberately NOT the bare imperative `Claim ` — both omissions are
+ *     measured, and both counterfactuals are stated so the next editor extends
+ *     this roster from evidence rather than from symmetry:
+ *       — the bare imperative would have added 5 line(s) on 5 card(s), all real
+ *         records today, and would also read the PROTOCOL's own sentence
+ *         「Claim the issue BEFORE you write any code」 — which seats quote — as
+ *         a near miss. A participle cannot open an imperative; that is the
+ *         whole discriminator, and it is why the omission is the word and ⛔ not
+ *         a lookahead full of English determiners.
+ *       — the release participles would have added 19 line(s) on 12 card(s), of
+ *         which 7 are ordinary release-board PROSE (`Release timing, …`,
+ *         `Release checklist, …`, `Release board: …`, `Release condition:`,
+ *         `Release confirmed …`): the noun opens a sentence in this repo, the
+ *         claim participles do not.
+ *
+ * ⚠️ Two boundaries this pair does NOT cross, both stated with their reading:
+ *   · A heading that carries the word ALONE stays silent, because the census
+ *     skips a form whose remainder is empty — objectstack#15638's `## Claim`
+ *     heading is exactly that line, and the card is named through its PROSE
+ *     line (`Claimed by the …`) instead. ⛔ Do not trade the empty-remainder
+ *     rule for that one line: it is what keeps this clause from filling with
+ *     section headings.
+ *   · A heading carrying an INFLECTED word AND the canonical colon
+ *     (`## Released:`) is named by no form here. Measured ZERO occurrences over
+ *     the corpus above, so it is left unnamed rather than guessed at — add it
+ *     WITH its fixture when a live line appears.
+ *
+ * ## The `leading-sigil` form (#18829 A) — the shape a SECOND stripper used to swallow
+ *
+ * `check-clause2-carriers.mjs` read its retraction lines through a stripper of
+ * its own, which removed every leading non-letter/non-digit character before
+ * matching — so `🚨 Claim:`, `## Claim:`, `- Claim:` and `__Claim:__` all
+ * read as the directive THERE while `markerMatches` refused every one of them:
+ * two undecoration paths, 5 of 12 spellings apart. The maintainer ruled (batch
+ * #156 item 4, letter A) that the protocol's definition of a decorated
+ * ownership line is THIS reading, that the other stripper is deleted, and that
+ * the sigil-led #18373 shape 「becomes a **named** near-miss row with its own
+ * fixture, so the loud, declared direction keeps reading it」. This member is
+ * that row.
+ *
+ * A sigil is an emoji or symbol run (`So` / `Sm` / `Sk` / `Sc`, with its
+ * combining and format marks) in front of the word — 「🚨 」, 「⚠️ 」, 「⇒ 」,
+ * 「⛔ 」, the fleet's own openers — optionally under a bullet or a blockquote
+ * (「- ⚠️ 」 is on #18373's own thread). It is ⛔ NOT decoration:
+ * `undecorateProseLine` strips asterisks and backticks and nothing else, on
+ * purpose, so a sigil-led `**Release:**` stays unread by `markerMatches` and
+ * is NAMED here instead — the same trade the `underscore-emphasis` member
+ * makes. The fixture is the #18373 line written in the act the protocol names
+ * (`Release:`, 去向 「让先到者」 — #18773 A), sigil and bold intact.
+ *
+ * ⚠️ Two boundaries, stated: the specimen's own PROSE (「🚨 **撤回上一条认领…」)
+ * is named by NO form, because naming it would mean reading the verb — the
+ * channel #18773 A retires (⛔ B: 「a reader inferring an act from a verb
+ * replays the next spelling」); its thread is named by the cross-author row
+ * one file over instead. And a heading AND a sigil (`## 🚨 Release:`) is named
+ * by no form — no live line has shown it; add it WITH its fixture when one does.
+ *
+ * Ordered MOST SPECIFIC FIRST: the form a line is named by is the first that
+ * matches it, so `## __Release:__` is a heading rather than an emphasis, and
+ * `## Claim + dispatch` is `heading-bare` rather than `heading` only because
+ * `heading` holds out for the colon. The two #18831 additions sit LAST, so
+ * neither can rename a line an older form already read; `leading-sigil` sits
+ * between `separator` and them — no older form's fixture opens with a sigil,
+ * and neither addition's does.
+ *
+ * `re` matches the OFFENDING OPENING only and never the remainder, so the
+ * matched text IS the prefix a row prints and a seat greps for. No `g` flag,
+ * for `CLAIM_COMMENT_MARKER`'s reason.
+ */
+export const OWNERSHIP_MARKER_NEAR_MISS_FORMS = Object.freeze([
+  Object.freeze({
+    id: 'heading',
+    what: 'the directive written as a markdown HEADING',
+    example: '## Release: session `session_x` — 去向 `pm:queue`',
+    re: /^[ \t]*#{1,6}[ \t]*[_*`]{0,3}(?:Claim(?:ed)?|Release)[_*`]{0,3}[ \t]*[:：]/iu,
+  }),
+  Object.freeze({
+    id: 'list-item',
+    what: 'the directive written as a markdown LIST ITEM',
+    example: '- Release: session `session_x` — 去向 `pm:queue`',
+    re: /^[ \t]*>?[ \t]*(?:[-+*]|\d+[.)])[ \t]+[_*`]{0,3}(?:Claim(?:ed)?|Release)[_*`]{0,3}[ \t]*[:：]/iu,
+  }),
+  Object.freeze({
+    id: 'underscore-emphasis',
+    what: 'the directive emphasised with UNDERSCORES, which the shared stripper does not remove',
+    example: '__Release:__ session `session_x` — 去向 `pm:queue`',
+    re: /^[ \t]*>?[ \t]*_{1,3}(?:Claim(?:ed)?|Release)_{0,3}[ \t]*[:：]/iu,
+  }),
+  Object.freeze({
+    id: 'inflected-word',
+    what: 'a spelling of the word the marker\'s vocabulary does not carry',
+    example: 'Released: session `session_x` — 去向 `pm:queue`',
+    re: /^[ \t]*>?[ \t]*[_*`]{0,3}(?:Released|Releasing|Claiming)[_*`]{0,3}[ \t]*[:：]/iu,
+  }),
+  Object.freeze({
+    id: 'separator',
+    what: 'the canonical word with a separator that is not the canonical colon',
+    example: 'Release — session `session_x` — 去向 `pm:queue`',
+    re: /^[ \t]*>?[ \t]*[_*`]{0,3}(?:Claim(?:ed)?|Release)[_*`]{0,3}[ \t]*[：–—-]/iu,
+  }),
+  Object.freeze({
+    id: 'leading-sigil',
+    what: 'the directive led by a SIGIL — an emoji or symbol run before the word, which the shared stripper does not remove (it strips decoration, ⛔ never a sigil)',
+    example: '🚨 **Release:** session `session_01JbZnqu8bt6YqfJsr9vaFb3` · 因:本卡已由 `os-litant` 在先认领,本席晚了 13 分钟 · 去向:让先到者',
+    re: /^[ \t]*>?[ \t]*(?:(?:[-+*]|\d+[.)])[ \t]+)?(?:[\p{So}\p{Sm}\p{Sk}\p{Sc}][\p{So}\p{Sm}\p{Sk}\p{Sc}\p{Mn}\p{Me}\p{Cf}]*[ \t]*)+[_*`]{0,3}(?:Claim(?:ed)?|Release)[_*`]{0,3}[ \t]*[:：]/iu,
+  }),
+  Object.freeze({
+    id: 'heading-bare',
+    what: 'the directive written as a markdown HEADING with NO colon after the word — a `+`, a dash, or nothing at all',
+    example: '## Claim + dispatch — **design only**, no implementation, no follow-up cards filed',
+    re: /^[ \t]*#{1,6}[ \t]*[_*`]{0,3}(?:Claim(?:ed|ing)?|Releas(?:e|ed|ing))[_*`]{0,3}(?=[ \t]|$)/iu,
+  }),
+  Object.freeze({
+    id: 'bare-word',
+    what: 'a claim written as PROSE — the participle at line start, with no separator at all',
+    example: 'Claimed by the `os-dev` seat. Session `01D47qPfEWVPmhguWgBZCi5N`.',
+    re: /^[ \t]*>?[ \t]*[_*`]{0,3}(?:Claimed|Claiming)[_*`]{0,3}[ \t]+/iu,
+  }),
+]);
+
+/** How many near misses one summary clause NAMES before it stops. */
+export const OWNERSHIP_MARKER_NEAR_MISS_NAME_CAP = 5;
+
+/**
+ * The census POPULATION — a `pm:seat` post is OUT of it (#18926).
+ *
+ * The vocabulary above asks 「does this line LOOK like an ownership record the
+ * reader refused?」. The population asks a prior question the first version never
+ * asked: 「is an ownership record owed on this thread AT ALL?」. On a `pm:seat`
+ * post the answer is no, and the protocol says so in as many words: a seat
+ * post's ownership is its BODY (the registration, the 🟢/⏳ title the H5 pair
+ * reads) plus its AUDIT COMMENTS — the protocol never puts a `Claim:` comment on
+ * one. What its comments carry instead is SHIFT NARRATION, and a shift
+ * narration written by a seat about its own lane opens sentences with exactly
+ * the directive words this vocabulary anchors on.
+ *
+ * Measured, ⛔ not assumed — objectstack's OPEN board read through the REST
+ * proxy 2026-09-18T13:0xZ with the tree at `784366372`, 539 open cards, 484 of
+ * them carrying a comment, the census run over every thread: 36 near-miss lines
+ * on 30 cards, of which 9 lines on 5 `pm:seat` posts (#6017 · #6021 · #6023 ×4 ·
+ * #6026 · #6367). Every one of the nine is narration — 「Claimed and dispatched,
+ * batch refilled to 3:」, 「### Released clean」 — and not one of them asks
+ * anything of anybody. Four of the five are rows 1–4 of #18914's sixteen, filed
+ * as 「no readable ownership record」 where no record was ever owed.
+ *
+ * ⛔ It is NOT a silent drop, and the difference is the whole point of a census:
+ * an excluded thread is COUNTED and reported under its own clause member, so the
+ * report says 「5 `pm:seat` thread(s) OUT of the population (9 line(s))」 rather
+ * than shrinking a number nobody can reconstruct. A filter you cannot see is
+ * indistinguishable from the over-reading it replaced.
+ *
+ * ⛔ And it reads the LABEL, buying nothing: the same `labelNames` the H5/H6 seat
+ * rows read, off the issue the caller already holds from the label page it
+ * already consumed. No extra request, which is what lets the census keep its
+ * 「buys NOTHING」 contract.
+ *
+ * @param {object} issue — the REST issue row the sweep already holds.
+ * @returns {boolean} — false for a `pm:seat` post, true for every work card.
+ */
+export function ownershipCensusSpeaksAbout(issue) {
+  return !labelNames(issue ?? {}).includes('pm:seat');
+}
+
+/**
+ * The release ANNOUNCEMENT heading — a delivery report, ⛔ not an ownership
+ * near miss (#18926).
+ *
+ * The shape, measured on the live board rather than guessed at: a heading whose
+ * word is the PARTICIPLE `Released`, whose remainder names the `PR #n` that
+ * landed or the `pm:*` → `pm:*` transition it unblocked, and which names NO
+ * session. The specimen the filing card is about, pasted from the REST read of
+ * objectstack#17536 comment `5625672905`:
+ *
+ *   `## Released — **PR #17517 merged.** `pm:blocked` → `pm:queue`; …`
+ *
+ * That line hands nothing over. #17536 was never claimed — no assignee, no
+ * `Claim:` of any spelling — so no `Release:` is owed on it, and the heading is
+ * reporting that a blocker fell, in the voice of the board rather than of a
+ * holder. Read as a near miss it says 「someone's release line is unreadable」
+ * about a card nobody ever held.
+ *
+ * ## The three narrowings, each with the line that forced it
+ *
+ * Measured over the same corpus `ownershipCensusSpeaksAbout` names (539 open
+ * cards, 484 threads, 36 near-miss lines). ⚠️ Every one of these is a
+ * NARROWING — a line this reading declines to swallow stays in the census, which
+ * is the safe direction for a filter whose failure mode is silence:
+ *
+ *   · HEADING forms only (`RELEASE_ANNOUNCEMENT_HEADING_FORMS`). A heading is an
+ *     announcement; the colon-anchored DIRECTIVE spellings are how the protocol
+ *     writes an ownership record, and `inflected-word`'s own fixture is
+ *     `Released: session …`. The corpus carries three `separator` lines spelled
+ *     `Release-landed: … (PR #18852)` (#18740 ×3, #16529) which name a PR and no
+ *     session: they are NOT swallowed, because they are not headings.
+ *   · The PARTICIPLE, ⛔ never the bare noun `Release`. `Release` opens the
+ *     directive (`## Release: …`, `## Release + seat ruling — …`) and the corpus
+ *     carries three such headings on live work cards (#16233 names a PR inside
+ *     one — `### Release: PR #18523 落下了…` — and stays listed; #16712, #18172).
+ *     `Releasing` is left unnamed: measured ZERO, and this file adds a form WITH
+ *     its fixture, never from symmetry.
+ *   · NO session token on the line, in either spelling (`session`, 「会话」). This
+ *     is the clause the mechanism assumption demanded be tested: a release that
+ *     DOES name its session is a record, readable or not, and must stay in the
+ *     census. The corpus's own counter-example is #6023's
+ *     `## Released tail — in flight under THIS session's process tree` — a
+ *     participle heading that is not swallowed by this reading at all.
+ *
+ * Judged on the LINE, ⛔ not the comment: the census is line-level by
+ * construction, and the comment level is already `markerMatches`' — a thread
+ * carrying a readable record elsewhere is a question for the rows that read
+ * ownership, never for this one.
+ *
+ * @param {string} formId — the form the census named the line by.
+ * @param {string} prefix — the offending prefix the census captured.
+ * @param {string} line — the whole line, for the session and remainder reads.
+ * @returns {{ pr: boolean, transition: boolean }|null} — null when the line is
+ *   an ordinary near miss, otherwise WHICH of the two things it names.
+ */
+export const RELEASE_ANNOUNCEMENT_HEADING_FORMS = Object.freeze(['heading-bare']);
+/** `PR #n` in the remainder — the delivery the announcement reports. */
+export const RELEASE_ANNOUNCEMENT_PR_RE = /\bPR[ \t]*#\d+/iu;
+/** A `pm:x` → `pm:y` transition — the unblocking, decorations tolerated. */
+export const RELEASE_ANNOUNCEMENT_TRANSITION_RE =
+  /[_*`]{0,3}pm:[a-z][a-z-]*[_*`]{0,3}[ \t]*(?:→|⇒|->|=>)[ \t]*[_*`]{0,3}pm:[a-z][a-z-]*/iu;
+/** The token that makes a line a RECORD rather than an announcement. */
+export const OWNERSHIP_SESSION_TOKEN_RE = /session|会话/iu;
+
+export function releaseAnnouncementHeading(formId, prefix, line) {
+  if (!RELEASE_ANNOUNCEMENT_HEADING_FORMS.includes(String(formId))) return null;
+  if (String(prefix ?? '').replace(/[#_*`\s]/gu, '').toLowerCase() !== 'released') return null;
+  const text = String(line ?? '');
+  if (OWNERSHIP_SESSION_TOKEN_RE.test(text)) return null;
+  const pr = RELEASE_ANNOUNCEMENT_PR_RE.test(text);
+  const transition = RELEASE_ANNOUNCEMENT_TRANSITION_RE.test(text);
+  if (!pr && !transition) return null;
+  return { pr, transition };
+}
+
+/**
+ * Every near miss on one thread — the card-level reading the census consumes.
+ *
+ * Pure over REST rows so the self-test drives it offline, and it BUYS NOTHING:
+ * the caller hands it the thread another row already paid for.
+ *
+ * A line that `markerMatches` DOES read is never a near miss — the two are
+ * complements by construction, so a widening of the reading shrinks this census
+ * automatically and can never leave a line counted twice.
+ *
+ * A form whose remainder is empty is skipped: 「Release:」 alone carries no
+ * record, and reporting it would fill the clause with headings. That is the
+ * conservative half, `looksLikeClaimContent`'s judgement at H34 applied one
+ * notch looser — this is a census, and a threshold as strict as H34's would
+ * recreate the silence it exists to end.
+ *
+ * @param {{ id?: number, body?: string }[]} commentRows — REST rows, NOT bodies:
+ *   the row names the COMMENT, and an id is what a seat opens.
+ * ## The two channels (#18926), and why this is a SPLIT rather than a filter
+ *
+ * `releaseAnnouncementHeading` above names a line that looks like a refused
+ * release and is a delivery report. Such a line leaves `misses` and lands in
+ * `announcements`, with its card, its comment and its prefix intact, so the
+ * summary reports it under its OWN clause member. ⛔ Nothing is dropped: the two
+ * arrays partition exactly the lines the single array used to carry, which is
+ * what lets a reader reconstruct the old number from the new report and is the
+ * only honest shape for narrowing a census.
+ *
+ * `ownershipMarkerNearMisses` stays the near-miss half, and stays the name every
+ * caller and every fixture already uses.
+ *
+ * @param {{ id?: number, body?: string }[]} commentRows — REST rows, NOT bodies:
+ *   the row names the COMMENT, and an id is what a seat opens.
+ * @returns {{ misses: object[], announcements: object[] }} — each member a
+ *   `{ commentId, form, what, prefix }` row; an announcement also carries
+ *   `names` (which of `pr` / `transition` the line spells out).
+ */
+export function ownershipMarkerNearMissCensus(commentRows) {
+  const rows = Array.isArray(commentRows) ? commentRows : [];
+  const misses = [];
+  const announcements = [];
+  for (const row of rows) {
+    const body = String(row?.body ?? '');
+    const seen = new Set();
+    for (const line of body.split(/\r?\n/)) {
+      if (markerMatches(CLAIM_COMMENT_MARKER, line)) continue;
+      if (markerMatches(RELEASE_COMMENT_MARKER, line)) continue;
+      for (const form of OWNERSHIP_MARKER_NEAR_MISS_FORMS) {
+        const hit = form.re.exec(line);
+        if (!hit) continue;
+        if (line.slice(hit[0].length).trim() === '') break;
+        const prefix = hit[0].trim();
+        const key = `${form.id}\u0001${prefix}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          const named = {
+            commentId: commentIdText(row?.id),
+            form: form.id,
+            what: form.what,
+            prefix,
+          };
+          const announcement = releaseAnnouncementHeading(form.id, prefix, line);
+          if (announcement) announcements.push({ ...named, names: announcement });
+          else misses.push(named);
+        }
+        break;
+      }
+    }
+  }
+  return { misses, announcements };
+}
+
+export function ownershipMarkerNearMisses(commentRows) {
+  return ownershipMarkerNearMissCensus(commentRows).misses;
+}
+
 /**
  * The release ACT, quoted from `.claude/skills/pm-dispatch/SKILL.md` VERBATIM
  * and kept UNBROKEN on one line so it stays greppable against its source:
@@ -1197,7 +1715,7 @@ export function h2AssigneeNoClaimComment(issue, commentBodies) {
   const labels = labelNames(issue);
   const pmTracked = labels.some((l) => l === 'pm:queue' || l === 'pm:dispatched');
   if (!pmTracked || (issue.assignees ?? []).length === 0) return false;
-  return !commentBodies.some((b) => CLAIM_COMMENT_MARKER.test(b ?? ''));
+  return !commentBodies.some((b) => markerMatches(CLAIM_COMMENT_MARKER, b ?? ''));
 }
 
 export function h3QueueAndDispatched(issue) {
@@ -1362,7 +1880,7 @@ function stripMatchingDecoration(value, opener) {
  * cause with.
  *
  * @param {string} text
- * @param {'Blocked-by'|'Restart-when'|'Maintainer-action'} key
+ * @param {'Blocked-by'|'Restart-when'|'Maintainer-action'|'Unlock-action'} key
  * @returns {string[]}
  */
 export function directiveValues(text, key) {
@@ -4091,10 +4609,7 @@ export function decisionDependentIndex(issues, index) {
  */
 function readTrackedFiles() {
   try {
-    const out = execFileSync('git', ['ls-files', '-z'], {
-      encoding: 'utf8',
-      maxBuffer: 64 * 1024 * 1024,
-    });
+    const out = gitRead(['ls-files', '-z'], { maxBuffer: 64 * 1024 * 1024 });
     const set = new Set(out.split('\0').filter(Boolean));
     return set.size > 0 ? set : null;
   } catch {
@@ -4189,10 +4704,20 @@ export function h18RetriageAged(issue, nowMs = Date.now()) {
 // claims, and only the first one survived measurement. A body is rewritten in
 // place and a comment is an archive, so a target a seat superseded by
 // refreshing the body line keeps living in the thread and kept being counted
-// (#17564). The union is therefore still what is discovered and resolved, and
-// the BODY's set is what the row judges whenever the body states one — which
-// leaves the comment-channel fixture above judged exactly as before, its body
-// carrying no line at all. `h19BlockOutlivedBlocker` carries the whole of it.
+// (#17564). The union is therefore still what is discovered and resolved —
+// H26 and H28 share those resolutions and a comment-borne target is a perfectly
+// good answer to what they ask — and the BODY's set is what the row judges
+// whenever the body states one, which leaves the comment-channel fixture above
+// judged exactly as before, its body carrying no line at all.
+//
+// ⚠️ EVERY verdict is founded on that judged set, the UNJUDGED one included
+// (#18379). The unjudged branch used to be founded on the union, so a target
+// the body had superseded could still veto the verdict from the archive when
+// its number was unreadable — a row nothing the card's owner could do would
+// ever clear, because the remedy would be editing the archive the protocol
+// keeps. The archive keeps exactly one power here, and it is the one #11747
+// paid for: evidence that the wait may still be RUNNING, which can only
+// withhold. `h19BlockOutlivedBlocker` carries the whole of it.
 //
 // ## Report-only, and pointedly so
 //
@@ -4499,21 +5024,60 @@ function namedTargets(rows) {
  *
  *   CLOSED, body-borne (or comment-borne on a body-less card) -> can MAKE a row
  *   CLOSED, comment-only beside a body set  -> a spent line; makes nothing
+ *   UNRESOLVED, body-borne (or on a body-less card) -> MAKES the UNJUDGED row
+ *   UNRESOLVED, comment-only beside a body set -> a spent line nobody can even
+ *                                              read; withholds, is named, and
+ *                                              makes nothing (#18379)
  *   OPEN, either channel                    -> can only WITHHOLD a row
- *   UNRESOLVED, either channel              -> can only WITHHOLD, and says so
  *
- * So precedence decides which CLOSED target may found a finding, and nothing
- * else. Every reading that says the wait might still be running is counted
- * whichever channel carried it. Both false positives die and the error that
- * remains possible is the harmless one: a row withheld on a card that really
- * had finished waiting, which the very next sweep re-asks.
+ * So precedence decides which target may FOUND a finding — of either kind, an
+ * expiry or an UNJUDGED — and nothing else. Every reading that says the wait
+ * might still be running is counted whichever channel carried it. Both false
+ * positives die and the error that remains possible is the harmless one: a row
+ * withheld on a card that really had finished waiting, which the very next
+ * sweep re-asks.
  *
  * That is the same posture #4690 already fixed for the third target state —
  * ⛔ never resolve an ambiguity in the direction of release — applied to the
- * carrier question instead of the readability one. It is also why an
- * UNRESOLVED target is not silenced by precedence: it is by this file's own
- * vocabulary *not judged*, it only ever withholds, and dropping it would
- * re-create the silence the three-state split exists to end.
+ * carrier question instead of the readability one.
+ *
+ * ## The set this row RESOLVES OVER is the set it JUDGES (#18379)
+ *
+ * The rule above was stated in exactly these words when the carrier split
+ * landed, and the UNRESOLVED line of the table was the one the code did not
+ * keep: the unjudged branch was founded on the UNION, so a target the body had
+ * SUPERSEDED could still veto the verdict from the archive. Two conditions had
+ * to coincide, which is why it outlived #17564 — (1) the target is superseded
+ * in the body, so judging correctly ignores it, and (2) the superseded number
+ * is unreadable, so resolution cannot dismiss it either.
+ *
+ * Measured on anchor #9857, sweep 2026-09-16T01:55:47Z: #11975 carries
+ * `Blocked-by: #18336` in its body, refreshed by the triage seat ~2.7 h before
+ * that sweep, and FOUR archived comments still name `#13515` — one of them
+ * triage's own re-pointing note, which has to name the dead number in order to
+ * explain that it is dead. `#13515` answers 404 (re-probed with live controls:
+ * `#18336` 200, `#11973` 200), so the row published
+ * 「1 of 2 … could NOT be resolved … the set judged against the BODY's set」
+ * every 6 h, permanently.
+ *
+ * ⭐ That row was unclearable BY CONSTRUCTION, which is what made it worth a
+ * card rather than a disposition: its owner had already done the prescribed
+ * thing, and the only remaining lever — editing or deleting the archived
+ * comments — is the one the protocol forbids, because those comments record
+ * what an earlier seat measured and why the line was migrated. 「A row no
+ * reader can ever clear trains readers to skip the family」, and it landed in
+ * the UNJUDGED class, which the anchor names as the rows a human must judge by
+ * hand. So the cure is the rule the table already stated, actually applied:
+ * ⛔ UNJUDGED is not silenced (a body-borne unreadable target fires it exactly
+ * as before) — the archive simply cannot found it.
+ *
+ * ⛔ What the archive is STILL consulted for, and must be: an OPEN target it
+ * names WITHHOLDS a discharge, and an UNREADABLE one withholds a FULL
+ * discharge, whichever channel carries them. Narrowing that half to the body
+ * too would re-create #11747 — the mirror false positive, measured, where a
+ * card was released to `pm:queue` while its real blocker was open and
+ * dispatched. Evidence that a wait may still be RUNNING is never discarded by
+ * carrier; only the power to FOUND a verdict is.
  *
  * ## The superseded-closed clause rides the row; it never becomes one (shape 3)
  *
@@ -4533,6 +5097,11 @@ function namedTargets(rows) {
  * family」. Trading a false unlock row for an unclearable hygiene row would
  * have bought nothing.
  *
+ * Its sibling clause is the same shape one state further out: an archive-only
+ * target this sweep could not READ is named in its own appended sentence,
+ * withholds a full discharge where one was being reported, and — like the
+ * closed one — emits NOTHING where the row does not otherwise fire (#18379).
+ *
  * @param {object} issue — an OPEN issue.
  * @param {{ key: string, number: number, local: boolean,
  *   state: 'open'|'closed'|'unresolved', closedAt?: string|null,
@@ -4550,14 +5119,23 @@ export function h19BlockOutlivedBlocker(issue, resolutions, ownerRepo = OWNER_RE
   const bodyKeys = blockerChannelKeys(issue?.body, issue, ownerRepo);
   const judgedFrom = bodyKeys.size > 0 ? 'body' : 'comments';
   const carries = (r) => judgedFrom === 'comments' || bodyKeys.has(r.key);
-  // Precedence applies to the evidence that a block has ENDED and to nothing
-  // else. A CLOSED target reachable only through the comment archive is a
-  // spent line, so it cannot MAKE a finding; an OPEN or UNRESOLVED one is
-  // evidence the wait may still be running, so it is counted whichever
-  // channel carries it and can only ever WITHHOLD one.
+  // ⭐ FOUNDING is the judged set's privilege, and BOTH founding states are
+  // taken over it (#18379). A CLOSED target founds the expiry row and an
+  // UNRESOLVED one founds the UNJUDGED row; both sentences are VERDICTS ABOUT
+  // THIS CARD, so both may only be founded on the set this card's
+  // authoritative carrier names. A target reachable only through the comment
+  // archive beside a body set is a spent line either way — closed, it is
+  // hygiene; unreadable, it is hygiene nobody can even read — and neither can
+  // MAKE a finding.
+  //
+  // An OPEN target is the one reading that says the wait may still be RUNNING,
+  // and that evidence is never discarded by carrier (#11747's re-park parks the
+  // LIVE blocker in a comment while the body still names the spent one): it is
+  // counted whichever channel carries it and can only ever WITHHOLD a row.
   const closed = rows.filter((r) => r.state === 'closed' && carries(r));
   const superseded = rows.filter((r) => r.state === 'closed' && !carries(r));
-  const unresolved = rows.filter((r) => r.state === 'unresolved');
+  const unresolved = rows.filter((r) => r.state === 'unresolved' && carries(r));
+  const supersededUnreadable = rows.filter((r) => r.state === 'unresolved' && !carries(r));
   const open = rows.filter((r) => r.state === 'open');
   if (closed.length === 0 && unresolved.length === 0) return null;
   const judgedCount = closed.length + open.length + unresolved.length;
@@ -4577,6 +5155,22 @@ export function h19BlockOutlivedBlocker(issue, resolutions, ownerRepo = OWNER_RE
         'candidate and ⛔ never a reason to release. ⛔ Nothing to repair on the card either: the ' +
         'body is already correct and the comment is not rewritable, which is exactly why this is a ' +
         'clause on a row that fired for another reason rather than a row of its own.';
+  // The same clause for the same class of target, one state further out: an
+  // archive-only target this sweep could not READ (#18379). It is named, it
+  // withholds a full discharge below, and it founds nothing.
+  const supersededUnreadableNote =
+    supersededUnreadable.length === 0
+      ? ''
+      : ` ⚠️ A further ${supersededUnreadable.length} target(s) (${namedTargets(supersededUnreadable)}) ` +
+        'could NOT be read this sweep AND reach this card only through the comment archive, so they ' +
+        'found nothing here: UNJUDGED is a verdict about THIS CARD, and this card states its own ' +
+        '`Blocked-by:` set in the body. ⛔ Not silenced — they are named right here, and an unread ' +
+        'target still withholds a full discharge (#4690) — but ⛔ never a row of their own. A ' +
+        'superseded number that is ALSO unreadable used to manufacture exactly that row, and it was ' +
+        'unclearable by construction: the body was already refreshed to the live blocker, the ' +
+        'archive comments are history the protocol forbids rewriting (one of them is usually triage\'s ' +
+        'own re-pointing note, which must name the dead number to explain that it is dead), so every ' +
+        'sweep re-fired a row no correct action by the card\'s owner could ever clear.';
 
   const release =
     ' Report-only, and the release is NOT this script\'s to make: the state model gives it two ' +
@@ -4600,7 +5194,13 @@ export function h19BlockOutlivedBlocker(issue, resolutions, ownerRepo = OWNER_RE
         ? ` ${open.length} target(s) are still open (${namedTargets(open)}), so this is a PARTIAL ` +
           'discharge and the card may still be legitimately blocked — the row reports it, it does not ' +
           'decide it.'
-        : ' Every target it names is closed: nothing this card declared a wait on is still running.';
+        : supersededUnreadable.length > 0
+          ? ` No target this row JUDGED is still open, but ${supersededUnreadable.length} target(s) ` +
+            `the comment archive names (${namedTargets(supersededUnreadable)}) could not be read at ` +
+            'all, so this is ⛔ NOT reported as a full discharge: unread is not closed and it is not ' +
+            'absent either (#4690), and a RE-PARK is exactly the shape that parks a LIVE blocker in a ' +
+            'comment (#11747).'
+          : ' Every target it names is closed: nothing this card declared a wait on is still running.';
     const alsoUnresolved =
       unresolved.length === 0
         ? ''
@@ -4616,6 +5216,7 @@ export function h19BlockOutlivedBlocker(issue, resolutions, ownerRepo = OWNER_RE
       rest +
       alsoUnresolved +
       supersededNote +
+      supersededUnreadableNote +
       release
     );
   }
@@ -4644,6 +5245,7 @@ export function h19BlockOutlivedBlocker(issue, resolutions, ownerRepo = OWNER_RE
       ? ` The card's other ${open.length} target(s) did resolve, and are still open.`
       : '') +
     supersededNote +
+    supersededUnreadableNote +
     release
   );
 }
@@ -4881,7 +5483,7 @@ export function claimGovernance(commentRows) {
   let newest = null;
   rows.forEach((row, index) => {
     const body = String(row?.body ?? '');
-    if (!CLAIM_COMMENT_MARKER.test(body)) return;
+    if (!markerMatches(CLAIM_COMMENT_MARKER, body)) return;
     const branches = claimedBranches(body);
     const parsed = Date.parse(row?.created_at ?? '');
     const stamp = Number.isFinite(parsed) ? parsed : null;
@@ -6235,6 +6837,49 @@ export function h31ContractReviewCarrierSplit(issue, openPrs) {
 }
 
 // ---------------------------------------------------------------------------
+// The label-transition exit — the second `Unlock-action:` value (#19255).
+//
+// The unlock predicate is "the `Blocked-by:` target CLOSED", and the one rewrite the state model admitted
+// (`re-check PR #M`) is read by seats and by no script — so a block on a `needs-user-decision` / `pm:on-hold`
+// target had no exit a machine could fire (H26), and any other spelling fell back to the closed predicate in
+// SILENCE. This value names the CARD, the LABEL and the STATE tested on it (a state, not an event: a sweep
+// observes labels, never transitions; `absent` is the live case — the ruling lands, `needs-user-decision` leaves
+// the target). ⛔ Every other spelling still falls back silently, by ruling: the closed set IS the contract.
+// ---------------------------------------------------------------------------
+
+const UNLOCK_LABEL_EXIT_RE =
+  /^re-check[ \t]+(?:([A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*))?#([1-9]\d{0,5})[ \t]+when[ \t]+label[ \t]+`?([^\s`]+?)`?[ \t]+(absent|present)\b/;
+/** Every `re-check #N when label <label> <absent|present>` exit a card declares (trailing prose tolerated), body then comments, keyed like its `Blocked-by:` targets. */
+export function unlockLabelExits(issue, commentBodies, ownerRepo = OWNER_REPO) {
+  const out = [];
+  for (const text of [issue?.body, ...(commentBodies ?? [])]) {
+    for (const m of directiveValues(text, 'Unlock-action').map((v) => UNLOCK_LABEL_EXIT_RE.exec(v))) {
+      if (m) out.push({ ...blockerTargetKey({ repo: m[1] ?? null, number: m[2] }, ownerRepo), label: m[3], state: m[4] });
+    }
+  }
+  return out;
+}
+
+// The unlock sweep's second exit, under H19 because it is H19's reading (what the card waits for has happened): null
+// unless a declared label exit has COME TRUE on a resolved OPEN target — closed and unresolved ones are H19's own legs.
+export function h19DeclaredExitFired(issue, resolutions, commentBodies, ownerRepo = OWNER_REPO) {
+  if (!needsBlockerLiveness(issue)) return null;
+  const exits = unlockLabelExits(issue, commentBodies, ownerRepo);
+  const fired = (resolutions ?? []).flatMap((r) => (r?.state !== 'open' || !Array.isArray(r.labels) ? [] :
+    exits.filter((e) => e.key === r.key && (e.state === 'present') === r.labels.includes(e.label)).map((e) => ({ r, e }))));
+  if (fired.length === 0) return null;
+  const named = fired.map(({ r, e }) => `\`${r.local ? `#${r.number}` : r.key}\` (\`${e.label}\` ${e.state})`).join(', ');
+  return (
+    `\`pm:blocked\` while the label-transition exit its \`Unlock-action:\` line declares has COME TRUE on ${named}: the target ` +
+    'is open and the named label is in the state the line asked this sweep to test — the second recognised `Unlock-action:` ' +
+    'value (`re-check #N when label needs-user-decision absent` is the live spelling; any label, `absent` or `present`, body ' +
+    'or comment), the exit a block on a `needs-user-decision` / `pm:on-hold` target can now hand a machine. Report-only: the ' +
+    'release is the unlock sweep\'s, under the same two double-checks (「放行双查」) and the same landed act as a closed target — ' +
+    '⛔ never a label written from this script.'
+  );
+}
+
+// ---------------------------------------------------------------------------
 // H26 — a block whose target can never CLOSE, and the stale chain (#11219).
 //
 // The unlock predicate is "the `Blocked-by:` target CLOSED". `pm:on-hold` and
@@ -6313,16 +6958,18 @@ export const INDEFINITE_TARGET_LABELS = ['pm:on-hold', 'needs-user-decision'];
  * @param {{ key: string, number: number, local: boolean,
  *   state: 'open'|'closed'|'unresolved', labels?: string[]|null }[]} resolutions
  */
-export function h26BlockOnIndefiniteTarget(issue, resolutions) {
+export function h26BlockOnIndefiniteTarget(issue, resolutions, commentBodies, ownerRepo = OWNER_REPO) {
   if (!needsBlockerLiveness(issue)) return null;
   const open = (resolutions ?? []).filter(
     (r) => r?.state === 'open' && Array.isArray(r.labels),
   );
   if (open.length === 0) return null;
 
+  // A target the card gives a label-transition exit for is not indefinite: the sweep can fire it, so the row stands down (#19255).
+  const exitKeys = new Set(unlockLabelExits(issue, commentBodies, ownerRepo).map((e) => e.key));
   const indefinite = open
     .map((r) => ({ row: r, states: INDEFINITE_TARGET_LABELS.filter((l) => r.labels.includes(l)) }))
-    .filter((r) => r.states.length > 0);
+    .filter((r) => r.states.length > 0 && !exitKeys.has(r.row.key));
   // A target that is BOTH parked and blocked is named once, under the reading
   // that ends the wait forever rather than the one that merely lengthens it.
   const chained = open.filter(
@@ -6355,6 +7002,16 @@ export function h26BlockOnIndefiniteTarget(issue, resolutions) {
         'sometimes exactly right. It says the wait is indefinite BY CONSTRUCTION, so the release ' +
         'has to come from the target\'s own state changing (a ruling answered, a hold restarted) ' +
         'and someone has to want that.',
+    );
+    // The remedy — the exit the state model admits, or the close — and the silent fallback made loud on the card (#19255).
+    const unread = [issue?.body, ...(commentBodies ?? [])].flatMap((t) => directiveValues(t, 'Unlock-action')).filter((v) => !UNLOCK_LABEL_EXIT_RE.test(v));
+    parts.push(
+      '⭐ The exit: write `Unlock-action: re-check #N when label needs-user-decision absent` (or `pm:on-hold absent` — the second ' +
+        'recognised value: the card, the label, and `absent`/`present`; body or comment) and this row stands down for that target, ' +
+        'because the unlock sweep can then fire the exit (H19 reports it the moment the label state matches); or close the waiting ' +
+        'card `not planned`, which is 「无机制可唤醒的卡 ⛔ 不 hold」 one state over. ⛔ Any other spelling falls back silently, by ' +
+        `ruling, and leaves this row firing${unread.length === 0 ? '.' : ` — as ${unread.length} \`Unlock-action:\` line(s) on this ` +
+          `card already do (${unread.slice(0, 3).map((v) => `\`${v}\``).join(', ')}): PR-shaped, or a spelling nothing reads.`}`,
     );
   }
   if (chained.length > 0) {
@@ -6872,6 +7529,15 @@ export function seatDeclaresWait(markerBody) {
  *   `domain:devx @ objectui`      — a lane on a SIBLING board
  *   `repo:cloud` / `skills` / `triage (objectstack-wide)`
  *
+ * plus the free-claim multi-seat shape the protocol added afterwards:
+ *
+ *   `domain:spec · seat 2`        — seat NUMBER 2 of a lane several PMs sit on
+ *
+ * The `· seat N` suffix is a roster axis, not a lane: it is stripped BEFORE the
+ * lane test, so a numbered seat reads as its `domain:*` lane exactly as the
+ * bare post does, and seat 1 keeps the bare title (an absent suffix reads as
+ * seat 1 — every seat post written before the suffix existed is seat 1).
+ *
  * The `foreign` flag is the load-bearing half and it exists for the same reason
  * H19 refuses to guess at a cross-repo 404: this sweep reads ONE repo. A seat
  * whose lane lives in a sibling repo has an inventory this patrol cannot see at
@@ -6881,19 +7547,27 @@ export function seatDeclaresWait(markerBody) {
  * changes. `repo:*`-scoped and lane-less seats (`triage`) are foreign for the
  * same reason: there is no `domain:*` label to count a lane inventory against.
  *
- * @returns {{ lane: string|null, foreign: boolean }}
+ * @returns {{ lane: string|null, foreign: boolean, seat: number|null }} —
+ *   `seat` is the seat number (1 when the title carries no `· seat N`), or
+ *   null when the title does not parse as a seat post at all.
  */
 export function seatLane(issue) {
   const m = /^\[PM seat\]\s*(.*?)\s*—\s*(.*)$/u.exec(issue?.title ?? '');
-  if (!m) return { lane: null, foreign: true };
-  const raw = m[1].trim();
+  if (!m) return { lane: null, foreign: true, seat: null };
+  let raw = m[1].trim();
+  // The `· seat N` suffix (free-claim multi-seat) is a seat NUMBER, wherever
+  // it sits in the lane half; taken out first so the lane test below sees the
+  // same text a bare post would. Absent ⇒ seat 1.
+  const seatM = /\s*·\s*seat\s+(\d+)\b/iu.exec(raw);
+  const seat = seatM ? Number(seatM[1]) : 1;
+  if (seatM) raw = (raw.slice(0, seatM.index) + raw.slice(seatM.index + seatM[0].length)).trim();
   // An `@ <repo>` suffix names the board the lane lives on. Present ⇒ the lane
   // is only READABLE there, whatever its `domain:*` spelling says here.
   const at = /^(.*?)\s*@\s*(\S+)\s*$/u.exec(raw);
   const lane = (at ? at[1] : raw).trim();
   const elsewhere = at ? at[2] !== SWEEP_REPO.repo.split('/')[1] : false;
-  if (!/^domain:[a-z0-9][a-z0-9._-]*$/i.test(lane)) return { lane: null, foreign: true };
-  return { lane, foreign: elsewhere };
+  if (!/^domain:[a-z0-9][a-z0-9._-]*$/i.test(lane)) return { lane: null, foreign: true, seat };
+  return { lane, foreign: elsewhere, seat };
 }
 
 /**
@@ -7025,6 +7699,30 @@ export function h44NeedsSeatComments(issue) {
 }
 
 /**
+ * The opening line of the seat-post memo, so the audit below can slice its body.
+ *
+ * ⚠️ ASSEMBLED rather than spelled, and that is not style: this audit reads THIS
+ * FILE, so a literal needle would be found at its own declaration — hundreds of
+ * lines above the memo — and the slice would run from the constant to the next
+ * `};`, a region containing no purchase at all. Measured: the first draft
+ * answered `seatPurchaseSites: 0` on a file with the purchase plainly inside the
+ * memo. `RETIRED_ASSIGNEE_COINAGE`'s hazard, one instrument over.
+ */
+const SEAT_MEMO_OPEN = ['const seatPostRowsFor = async', '(issue) => {'].join(' ');
+
+/**
+ * The `seatPostRowsFor` body, sliced out of a source text — '' when the memo is
+ * not in it at all, which is the honest answer for a synthetic fixture and makes
+ * a slice that silently matched the WHOLE file impossible.
+ */
+function seatMemoBody(text) {
+  const at = String(text ?? '').indexOf(SEAT_MEMO_OPEN);
+  if (at < 0) return '';
+  const end = String(text).indexOf('\n  };', at);
+  return end < 0 ? String(text).slice(at) : String(text).slice(at, end);
+}
+
+/**
  * The seat-post WINDOW audit (#18312) — read off this file's own source, the
  * detector shape `h57RunsPathAudit` and `familyRegistryCoverage` use, and for
  * their reason: the window lives inside `sweepInto`, which takes no injectable
@@ -7039,15 +7737,27 @@ export function h44NeedsSeatComments(issue) {
  *                   `commentRowsFor` — and a second one is a new row quietly
  *                   reading a seat thread's archive.
  *   purchaseSites   call sites that actually REQUEST a located page
- *                   (`h65CommentPagePath` against the swept repo). ONE, inside
- *                   the memo, is what makes the fetch-per-post bound hold; two
- *                   is the same page bought twice per run.
+ *                   (`h65CommentPagePath` against the swept repo), FILE-WIDE and
+ *                   across both populations.
+ *   seatPurchaseSites
+ *                   those of them inside `seatPostRowsFor`. ⭐ This is the one
+ *                   that carries the original argument: ONE, inside the memo, is
+ *                   what makes the fetch-per-SEAT-POST bound hold; two is the
+ *                   same page bought twice per run.
  *   readers         call sites that take the window through the memo. More of
  *                   these is free by construction — that is the point of the
  *                   memo — so this count is reported rather than bounded.
  *
+ * ⚠️ `seatPurchaseSites` was SPLIT OUT rather than the file-wide pin weakened
+ * (#18299). H66's bounded buy pass is a second located-page purchase, and it is
+ * a purchase against a DISJOINT population — an unassigned `pm:queue` CARD, never
+ * a `pm:seat` post — so it cannot be the 「same page bought twice」 the original
+ * bound is about. Reading that as a licence to raise the seat bound would have
+ * retired the check; the slice keeps it at one and names the second site instead.
+ *
  * @param {string} [source] — defaults to this file; injectable for the self-test.
- * @returns {{ commentPaths: string[], pagelessPaths: string[], purchaseSites: number, readers: number }}
+ * @returns {{ commentPaths: string[], pagelessPaths: string[], purchaseSites: number,
+ *   seatPurchaseSites: number, readers: number }}
  */
 export function seatWindowAudit(source) {
   const text =
@@ -7056,12 +7766,14 @@ export function seatWindowAudit(source) {
   const re = /`\/repos\/[^`]*?\/issues\/[^`]*?\/comments\?[^`]*`/g;
   let m;
   while ((m = re.exec(text))) commentPaths.push(m[0]);
+  const purchase = /h65CommentPagePath\(OWNER_REPO/g;
   return {
     commentPaths,
     // ⚠️ `[?&]page=` rather than `page=`: `per_page=100` carries that substring
     // and a bare `includes` would read every path in the file as paged.
     pagelessPaths: commentPaths.filter((p) => !/[?&]page=/.test(p)),
-    purchaseSites: (text.match(/h65CommentPagePath\(OWNER_REPO/g) ?? []).length,
+    purchaseSites: (text.match(purchase) ?? []).length,
+    seatPurchaseSites: (seatMemoBody(text).match(purchase) ?? []).length,
     readers: (text.match(/await seatPostRowsFor\(/g) ?? []).length,
   };
 }
@@ -7282,7 +7994,7 @@ export function latestClaimComment(commentRows) {
   const rows = Array.isArray(commentRows) ? commentRows : [];
   let best = null;
   rows.forEach((row, index) => {
-    if (!CLAIM_COMMENT_MARKER.test(String(row?.body ?? ''))) return;
+    if (!markerMatches(CLAIM_COMMENT_MARKER, String(row?.body ?? ''))) return;
     const parsed = Date.parse(row?.created_at ?? '');
     const stamp = Number.isFinite(parsed) ? parsed : null;
     const candidate = { createdAt: row?.created_at ?? null, stamp, index };
@@ -7569,7 +8281,7 @@ export function h34ClaimShapedNonCanonicalSeparator(issue, commentBodies) {
   if (!pmTracked || (issue?.assignees ?? []).length === 0) return null;
   if (!Array.isArray(commentBodies)) return null;
   // A card with a readable claim is machine-visible; the row has no remedy for it.
-  if (commentBodies.some((b) => CLAIM_COMMENT_MARKER.test(String(b ?? '')))) return null;
+  if (commentBodies.some((b) => markerMatches(CLAIM_COMMENT_MARKER, String(b ?? '')))) return null;
 
   const separators = [];
   let lines = 0;
@@ -8479,7 +9191,38 @@ export function seatPostLastEventMs(seat, commentRows) {
 }
 
 /**
- * The newest `Claim:` on a lane, over the dispatched cards this sweep holds.
+ * The `Seat:` line of a claim body — the seat NUMBER the claiming PM sits on
+ * (`Seat: domain:<x>#<n>`, free-claim multi-seat), read with the same key-line
+ * tolerance as `threadReadField` (leading bullet or blockquote, bold or code
+ * decoration around the key).
+ *
+ * Absent ⇒ 1. Every claim written before the line existed belongs to seat 1,
+ * which is the only seat those lanes had, so the default is backward
+ * compatible with every existing claim rather than a guess. A line that is
+ * PRESENT but names no `#<n>` is unreadable and returns null: it matches no
+ * seat, so its claim is invisible to the seat filter below — the file's
+ * under-reporting direction on every unrecognised spelling — and ⛔ never
+ * silently read as seat 1.
+ */
+const CLAIM_SEAT_KEY_LINE = /^[ \t]*(?:[-*+][ \t]+)?>?[ \t]*(?:\*\*)?`?Seat`?(?:\*\*)?[ \t]*:[ \t]*(.*)$/im;
+
+/** @returns {number|null} the seat number, 1 when the line is absent, null when it is present but unreadable. */
+export function claimSeatNumber(body) {
+  const m = CLAIM_SEAT_KEY_LINE.exec(String(body ?? ''));
+  if (!m) return 1;
+  const n = /#(\d+)\b/.exec(String(m[1] ?? ''));
+  return n ? Number(n[1]) : null;
+}
+
+/**
+ * The newest `Claim:` on a lane, over the dispatched cards this sweep holds,
+ * restricted to the claims of ONE seat number.
+ *
+ * Free-claim multi-seat puts several PMs on one lane, one post each. A post is
+ * behind only when a claim of ITS OWN seat outran it — another seat's claim is
+ * that seat's business and would otherwise read every second seat as stale on
+ * every fire. The seat filter narrows the ROWS handed to the shared claim
+ * predicate, so what a claim IS stays `latestClaimComment`'s call (below).
  *
  * ⚠️ The claim predicate is `latestClaimComment` — REUSED, deliberately not
  * re-spelled. The filing card is explicit that the literal `Claim:` marker is
@@ -8499,9 +9242,10 @@ export function seatPostLastEventMs(seat, commentRows) {
  * @param {string} lane — a `domain:*` label.
  * @param {Iterable<any>} issues — open cards this sweep already listed.
  * @param {Map<number, any[]>} commentsByNumber — threads already in the cache.
+ * @param {number} [seat=1] — the seat number whose claims count (`seatLane(post).seat`).
  * @returns {{ number: number, at: number }|null} the newest claim, or null.
  */
-export function newestLaneClaim(lane, issues, commentsByNumber) {
+export function newestLaneClaim(lane, issues, commentsByNumber, seat = 1) {
   let best = null;
   for (const issue of issues ?? []) {
     const labels = labelNames(issue ?? {});
@@ -8509,7 +9253,9 @@ export function newestLaneClaim(lane, issues, commentsByNumber) {
     if (!labels.includes('pm:dispatched') || !labels.includes(lane)) continue;
     const rows = commentsByNumber?.get?.(issue.number);
     if (!rows) continue;
-    const claim = latestClaimComment(rows);
+    // Only this seat's claims: the filter runs on the rows, the predicate is reused.
+    const own = (Array.isArray(rows) ? rows : []).filter((row) => claimSeatNumber(row?.body) === seat);
+    const claim = latestClaimComment(own);
     if (!claim) continue;
     const at = Date.parse(claim.createdAt ?? '');
     if (!Number.isFinite(at)) continue;
@@ -8523,11 +9269,12 @@ export function newestLaneClaim(lane, issues, commentsByNumber) {
  *
  * @param {object} seat — the `pm:seat` post.
  * @param {number|null} seatAt — `T_seat` (`seatPostLastEventMs`).
- * @param {{ number: number, at: number }|null} claim — the newest lane claim.
+ * @param {{ number: number, at: number }|null} claim — the newest lane claim
+ *   OF THIS POST'S SEAT NUMBER (`newestLaneClaim(lane, …, seatLane(seat).seat)`).
  */
 export function h38SeatPostStale(seat, seatAt, claim) {
   if (!labelNames(seat ?? {}).includes('pm:seat')) return null;
-  const { lane, foreign } = seatLane(seat ?? {});
+  const { lane, foreign, seat: seatNo } = seatLane(seat ?? {});
   // A lane this board cannot count has no readable claim population here, so
   // an absent claim would mean "unreadable", not "none" — H32's `foreign`
   // reasoning, and the reason this row declines rather than reporting silence.
@@ -8542,7 +9289,7 @@ export function h38SeatPostStale(seat, seatAt, claim) {
 
   const behindHours = (claim.at - seatAt) / 3_600_000;
   return (
-    `\`pm:seat\` post is STALE — its lane \`${lane}\` carries a \`Claim:\` on #${claim.number} written ` +
+    `\`pm:seat\` post is STALE — its lane \`${lane}\` (seat ${seatNo}) carries a \`Claim:\` on #${claim.number} written ` +
     `${behindHours.toFixed(1)}h AFTER this post's last event (claim ${new Date(claim.at).toISOString()}, ` +
     `post ${new Date(seatAt).toISOString()}). A shift dispatched work and did not record it, so every ` +
     'number the post states — 在飞 / 队列 / 决策箱 / the round number — describes a round that has since ' +
@@ -9577,7 +10324,7 @@ export function h43GovernedReviewRequestGap(pr, governed, approvers, reviewed = 
 //               of these five artefacts a table of bare numbers is a board
 //               reading essentially always.
 //
-// ## Three narrowings, each of which can only make the row QUIETER
+// ## Four narrowings, each of which can only make the row QUIETER
 //
 // 1. A paragraph carrying a timestamp is clean, and the timestamp shape is
 //    `HH:MM[:SS]Z`. ⚠️ The optional SECONDS field is a deliberate widening of
@@ -9592,6 +10339,35 @@ export function h43GovernedReviewRequestGap(pr, governed, approvers, reviewed = 
 // 3. ⛔ No comment-length floor. The fragment requirement is a stronger filter
 //    than a character count, and a length constant with no measurement behind it
 //    is a number nobody can defend later.
+// 4. ⚠️ A `tree` candidate that is lexically part of an IDENTIFIER is not a tip
+//    (#18385). A SESSION ID satisfies the tree shape — measured on a live board,
+//    6 of 9 H44 rows in one sweep were this and nothing else: 「PM session
+//    c5c0ce54」 / 「PM 会话 c5c0ce54」 fired on the shorthand itself, and a
+//    canonical `Session:` line carrying `session_71836b57-…-c6d9d7dd2cc6` fired
+//    on the UUID's LAST SEGMENT, because `-` is a word boundary. ⛔ The cost is
+//    not a noisy row: this row's remedy sentence says 「add the time the reading
+//    was taken」, and there is no board state behind an id — applied to one it
+//    asks a seat to STAMP A READING NOBODY TOOK, and a later reader cannot tell
+//    that stamp from a real one. So the row would teach the wrong discipline,
+//    which is worse than saying nothing. ⛔ The `tree` SHAPE is not loosened —
+//    a real tip is matched exactly as before (`h44TreeCandidateIsIdentifier` is
+//    the whole of the change, and it excludes a CANDIDATE, never a spelling):
+//      • the UUID leg — the candidate sits immediately behind a `-` or `_` that
+//        itself follows a word character, i.e. it is the tail of a longer token.
+//      • the introduction leg — the candidate's SENTENCE says `session` /
+//        `会话` (`session_` is that word with its separator).
+//    ⚠️ SENTENCE, not paragraph, and that boundary is a DECISION pinned in the
+//    self-test rather than a detail: every claim comment carries a `Session:`
+//    line, so a paragraph-scoped test would silence H44 on the whole claim
+//    population — a false negative exactly where CONTROL A lives. A dateless
+//    real tip in its OWN sentence still fires with a session id one line above
+//    it; the declared false negative is the two in ONE sentence, which is the
+//    narrowest shape that covers the measured spellings.
+//    ⚠️ The paragraph is RESCANNED past an excluded candidate — only for a shape
+//    that declares an `exclude`, which is this one alone — so a comment that
+//    fired before can change WHICH fragment it names but a quiet one cannot
+//    start firing. Like narrowings 1–3 it admits strictly more paragraphs as
+//    clean and cannot manufacture a finding.
 //
 // ## Cost, and the residual this row DECLARES rather than hides
 //
@@ -9712,10 +10488,84 @@ export function h43GovernedReviewRequestGap(pr, governed, approvers, reviewed = 
 export const H44_READING_TIMESTAMP = /(?:\b|(?<=T))\d{2}:\d{2}(?::\d{2})?Z\b/;
 
 /**
+ * The word that INTRODUCES an identifier rather than a reading — narrowing 4's
+ * second leg, anchored at the END of the text that precedes the candidate, so
+ * it reads 「the thing right after this word」 and not 「this word occurs
+ * somewhere near」. `session_` is `session` with its separator, so one
+ * alternative reaches both spellings, and 「会话」 is the same word on a
+ * Chinese-language board.
+ *
+ * ⚠️ ADJACENCY is the whole of its precision, and it was measured rather than
+ * chosen: with the leg written as 「the sentence mentions a session」, live
+ * comment `5695539587` on this board — 「every harness-loaded path on
+ * `origin/main` is in this session's checkout HEAD `588475c3`」 — went QUIET,
+ * and that is a real dateless tip reading this row exists to file. A possessive
+ * three words away introduces nothing. Only separators may stand between:
+ * whitespace, a colon in either width, quotes, backticks, emphasis and bracket
+ * characters — the decorations the claim template actually writes.
+ *
+ * ⛔ An intervening WORD (「session id c5c0ce54」) is therefore not excluded
+ * here: it is one measurement away, not a guess to make now.
+ *
+ * ⛔ Case-insensitive on purpose and safe to be: unlike `H44_VERDICT_MARKER`
+ * this word is not a protocol verb whose lower-case twin is ordinary prose —
+ * `Session:`, `session` and `SESSION` all name the same thing.
+ */
+export const H44_IDENTIFIER_INTRO = /(?:session|会话)[\s:：=·*'"`([\]_-]*$/i;
+
+/**
+ * The characters that END a sentence for narrowing 4 — the ASCII set and the
+ * full-width forms a Chinese-language board writes, plus the newline, which is
+ * what keeps a claim's `Session:` LINE from reaching the tip on the line below
+ * it (see the banner: that is the whole of the sentence-vs-paragraph decision).
+ */
+export const H44_SENTENCE_BREAKS = '\n。.!?;！？；';
+
+/**
+ * The part of the candidate's own sentence that PRECEDES it: from the nearest
+ * sentence break before `index` up to `index`. ⛔ Never widened to the
+ * paragraph, and never read past the candidate — what follows a fragment
+ * introduces nothing.
+ */
+export function h44SentenceLead(paragraph, index) {
+  const text = String(paragraph ?? '');
+  const at = Math.max(0, Math.min(Number(index) || 0, text.length));
+  let start = at;
+  while (start > 0 && !H44_SENTENCE_BREAKS.includes(text[start - 1])) start--;
+  return text.slice(start, at);
+}
+
+/**
+ * Narrowing 4's predicate: is this `tree` CANDIDATE lexically part of an
+ * identifier rather than a tip? Two legs, both measured on live claim comments
+ * (#18385), and the banner carries the argument.
+ *
+ * ⛔ It reads the TEXT AROUND the candidate and never the candidate itself: a
+ * session id and a tip are the same 7–40 hex characters, so anything that
+ * judged the token alone would have to loosen the shape for real tips, which is
+ * the one thing this change must not do.
+ */
+export function h44TreeCandidateIsIdentifier(paragraph, index, _matched = '') {
+  const text = String(paragraph ?? '');
+  // The UUID leg: `…-c6d9d7dd2cc6` / `…_c6d9d7dd2cc6` — a separator that itself
+  // follows a word character, so the candidate is the TAIL of a longer token
+  // and not a token a reader could quote as a tip. (A bullet's `- ` or a lone
+  // dash is not this: the separator must be flush against both sides.)
+  if (/[0-9A-Za-z_][-_]$/.test(text.slice(0, index))) return true;
+  // The introduction leg: the candidate's own sentence introduces it as a
+  // session, immediately and with only decoration in between.
+  return H44_IDENTIFIER_INTRO.test(h44SentenceLead(text, index));
+}
+
+/**
  * The reading grammar, as data so the self-test can drive every shape by name
  * and a reader can check the banner against the regexes. ⛔ No `g` flag on any
  * of them: `exec` on a sticky regex carries `lastIndex` between calls, and this
  * row runs the same regex over thousands of paragraphs.
+ *
+ * An entry may carry an `exclude(paragraph, index, matched)` — narrowing 4's
+ * seam, and the `tree` shape is the only holder. A shape without one is read
+ * exactly as before: first match wins, no rescan.
  */
 export const H44_READING_FRAGMENTS = Object.freeze([
   Object.freeze({
@@ -9737,6 +10587,7 @@ export const H44_READING_FRAGMENTS = Object.freeze([
     kind: 'tree',
     what: 'a tree tip',
     re: /\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b/,
+    exclude: h44TreeCandidateIsIdentifier,
   }),
   Object.freeze({
     kind: 'tableCount',
@@ -9840,10 +10691,37 @@ export function h44IsRoundOpenMarker(body) {
 
 export function h44ArtefactShape(body, onSeatPost = false) {
   const text = String(body ?? '');
-  if (CLAIM_COMMENT_MARKER.test(text)) return 'a claim';
+  if (markerMatches(CLAIM_COMMENT_MARKER, text)) return 'a claim';
   if (h44IsRoundOpenMarker(text)) return ROUND_OPEN_ARTEFACT_KIND;
   if (H44_VERDICT_MARKER.test(text)) return 'an ACCEPT/REJECT/REWORK verdict';
   if (onSeatPost) return 'a seat-post section';
+  return null;
+}
+
+/**
+ * The first match of one shape in one paragraph that the shape ADMITS, or null.
+ *
+ * ⛔ The rescan walks the paragraph by SLICING rather than by setting a `g`
+ * flag's `lastIndex`: the declared regexes are frozen and shared across every
+ * comment in a run, and a sticky one would make this row's answer depend on how
+ * many comments preceded it (the grammar pin). A shape with no `exclude` never
+ * reaches the loop's second turn, which is what keeps the anchored `tableCount`
+ * shape — whose `^`/`$` a slice would misread — on its original reading.
+ *
+ * @returns {{ matched: string, index: number }|null}
+ */
+export function h44AdmittedMatch(fragment, paragraph) {
+  const text = String(paragraph ?? '');
+  let offset = 0;
+  while (offset <= text.length) {
+    const m = fragment.re.exec(text.slice(offset));
+    if (!m) return null;
+    const index = offset + m.index;
+    if (typeof fragment.exclude !== 'function' || !fragment.exclude(text, index, m[0])) {
+      return { matched: m[0], index };
+    }
+    offset = index + Math.max(1, m[0].length);
+  }
   return null;
 }
 
@@ -9862,9 +10740,9 @@ export function h44UntimestampedReading(body, onSeatPost = false) {
     if (!paragraph.trim()) continue;
     if (H44_READING_TIMESTAMP.test(paragraph)) continue;
     for (const fragment of H44_READING_FRAGMENTS) {
-      const m = fragment.re.exec(paragraph);
+      const m = h44AdmittedMatch(fragment, paragraph);
       if (m) {
-        return { shape, kind: fragment.kind, what: fragment.what, fragment: m[0].trim().slice(0, H44_FRAGMENT_ECHO_CAP) };
+        return { shape, kind: fragment.kind, what: fragment.what, fragment: m.matched.trim().slice(0, H44_FRAGMENT_ECHO_CAP) };
       }
     }
   }
@@ -10176,7 +11054,7 @@ export function h46ClaimNamesBranch(commentBodies, branch) {
   const ref = String(branch ?? '');
   if (!ref) return false;
   return (Array.isArray(commentBodies) ? commentBodies : []).some(
-    (body) => CLAIM_COMMENT_MARKER.test(String(body ?? '')) && claimedBranches(body).includes(ref),
+    (body) => markerMatches(CLAIM_COMMENT_MARKER, String(body ?? '')) && claimedBranches(body).includes(ref),
   );
 }
 
@@ -10312,7 +11190,7 @@ export function latestMarkedComment(commentRows, marker) {
   const rows = Array.isArray(commentRows) ? commentRows : [];
   let best = null;
   rows.forEach((row, index) => {
-    if (!marker.test(String(row?.body ?? ''))) return;
+    if (!markerMatches(marker, String(row?.body ?? ''))) return;
     const parsed = Date.parse(row?.created_at ?? '');
     const stamp = Number.isFinite(parsed) ? parsed : null;
     const candidate = { createdAt: row?.created_at ?? null, stamp, index };
@@ -12929,6 +13807,7 @@ export function h57ScheduledWorkflowRed(entry, nowMs = Date.now()) {
  * runs would classify by one repo and alarm about another, with no symptom at
  * all. So the answer is two definite readings and a refusal, never a guess:
  *
+ *   the knob leg     `PM_SWEEP_CHECKOUT` names the tree — the `origin` below is read IN it (#19191).
  *   the runner leg   `GITHUB_REPOSITORY` names the repo a runner checks out, so
  *                    when it equals the swept repo the disk is that repo. This
  *                    is the leg that answers on every real patrol run.
@@ -12942,7 +13821,8 @@ export function h57ScheduledWorkflowRed(entry, nowMs = Date.now()) {
  */
 export function localCheckoutServes(sweepRepo, env = {}, originUrl = null) {
   const want = String(sweepRepo ?? '').trim();
-  const fromEnv = String(env?.GITHUB_REPOSITORY ?? '').trim();
+  // The knob outranks the runner leg: `GITHUB_REPOSITORY` names the tree the RUNNER checked out.
+  const fromEnv = resolveSweepCheckout(env).set ? '' : String(env?.GITHUB_REPOSITORY ?? '').trim();
   if (fromEnv) {
     return fromEnv === want
       ? { serves: true, source: 'GITHUB_REPOSITORY', reason: null }
@@ -14455,16 +15335,18 @@ export function h63StaleFindingBesideGrade(issue) {
 // Every agent on this board shares one protocol identity, so an artefact's
 // GitHub author cannot say WHO wrote it. The protocol answers that with the
 // TEXT: 「`user.login` 记令牌不记席位,归属 = 文本里的 session ID」
-// (`.claude/skills/pm-dispatch/SKILL.md`), and the write identity follows the
-// CHANNEL rather than the account — 「REST 按会话为 `claude[bot]` 或用户,MCP
-// 恒用户」 (`.claude/skills/pm-dispatch/references/rest-channel.md`).
+// (`.claude/skills/pm-dispatch/SKILL.md`), and the login it does record is a
+// TOKEN CLASS bound to the Claude Code ACCOUNT rather than to the session — it
+// is read back from each write and can flip between two writes of ONE session
+// with no seat act behind it
+// (`.claude/skills/pm-dispatch/references/platform-readings.md` 配额段).
 //
 // So the half-state is an artefact whose text asserts seat/dev provenance —
 // a claim, a report, a contract review, a filing header — while carrying no
 // `session_…` id anywhere. The text says a seat or a dev wrote it; nothing in
-// it says WHICH, and the author field records only the token that session was
-// handed. Two carriers disagree about one live artefact and the repair is on
-// the board: that is `state`'s definition exactly, and the repair is one an
+// it says WHICH, and the author field records only the token class behind that
+// write. Two carriers disagree about one live artefact and the repair is on the
+// board: that is `state`'s definition exactly, and the repair is one an
 // owner can actually perform — it gives the artefact its id.
 //
 // ## The premise this row was BUILT on, and the measurement that retired it
@@ -14483,8 +15365,8 @@ export function h63StaleFindingBesideGrade(issue) {
 //   slug (#18045, objectui#9404, PR #18051, comment 5652138683).
 //
 // The first two are both REST-proxy writes and differ only in the TOKEN CLASS
-// the session was handed. The field names the APP whose credential signed the
-// write; it never names the TOOL. ⛔ So no channel is inferred from it here,
+// behind them. The field names the APP whose credential signed the write; it
+// never names the TOOL. ⛔ So no channel is inferred from it here,
 // and an MCP-tool write is indistinguishable from a REST-proxy write in this
 // payload. What the field still separates is an App credential from none: an
 // absent slug is a user PAT, outside the App entirely.
@@ -14507,10 +15389,12 @@ export function h63StaleFindingBesideGrade(issue) {
 //
 // ⛔ Nothing here relaxes it. It is reported as an INFORMATIONAL count plus a
 // login roster in the summary clause, on every run, and files NO row — because
-// the token class is handed to a session at start rather than chosen at write
-// time, so no act available to a user-token session moves its content to the
-// App. A row naming no remedy that a reader could perform is the unclearable
-// shape above; the clause states the exposure without spending the cap on it.
+// the token class follows the Claude Code ACCOUNT and flips between writes
+// with no seat act behind it: nothing available to a user-token session
+// chooses the class of its own write, and nothing moves content it already
+// authored to the App. A row naming no remedy that a reader could perform is
+// the unclearable shape above; the clause states the exposure without spending
+// the cap on it.
 //
 // ## The artefact is recognised STRUCTURALLY — ⛔ and never from a roster
 //
@@ -14733,7 +15617,7 @@ export const SEAT_SIGNATURE_FORMS = Object.freeze([
   Object.freeze({
     kind: 'claim',
     what: 'a `Claim:` block',
-    test: (text) => CLAIM_COMMENT_MARKER.test(text),
+    test: (text) => markerMatches(CLAIM_COMMENT_MARKER, text),
   }),
   Object.freeze({
     kind: 'report',
@@ -14878,7 +15762,7 @@ export function h64UnattributedSeatContent(text, more = 0, since = UNATTRIBUTED_
       : `this open ${kind}`;
   const authorClause = author
     ? `GitHub records its author as \`${author.login}\` (\`user.type\` = \`${author.type}\`), which is the ` +
-      'TOKEN that session was handed and not the seat that wrote'
+      'TOKEN CLASS that write was made with and not the seat that wrote'
     : 'GitHub serves no readable `user` for it, so not even the token is known — the artefact is unattributed ' +
       'on both carriers at once';
   const moreClause =
@@ -14892,9 +15776,10 @@ export function h64UnattributedSeatContent(text, more = 0, since = UNATTRIBUTED_
       : '';
   return (
     `${subject} carries ${signature.what} — a seat/dev artefact — and NO session id appears anywhere in its ` +
-    `text. ${authorClause}: attribution on this board is the \`session_\` id the text carries, because the ` +
-    'write identity follows the CHANNEL and one protocol identity is shared by every agent here ' +
-    '(`.claude/skills/pm-dispatch/SKILL.md`, `.claude/skills/pm-dispatch/references/rest-channel.md`). The two ' +
+    `text. ${authorClause}: attribution on this board is the \`session_\` id the text carries, because one ` +
+    'protocol identity is shared by every agent here and the token class behind that login follows the Claude ' +
+    'Code ACCOUNT rather than the session (`.claude/skills/pm-dispatch/SKILL.md`, ' +
+    '`.claude/skills/pm-dispatch/references/platform-readings.md` 配额段). The two ' +
     'carriers disagree about one live artefact: the text says a seat or a dev wrote it, and nothing says which ' +
     'session, so a reader who needs the author of this act has nobody to ask and no branch to read.' +
     `${moreClause}${dated} Remedy — WHO and HOW: the seat or dev that owns the artefact gives it its session ` +
@@ -15021,9 +15906,10 @@ export function h64ExposureClause(counts = {}, cap = H64_LOGIN_ROSTER_CAP) {
   return (
     `INFORMATIONAL, no remedy and no row: ${counts.seatSignedUser ?? 0} signed text(s) are authored by a USER ` +
     `account rather than \`claude[bot]\`${list}. A suspended user account hides everything it authored — ` +
-    'measured on this board, not hypothetical — so those artefacts carry that exposure; but the token class is ' +
-    'handed to a session at start rather than chosen at write time, and no act available to a user-token session ' +
-    'moves its content to the App, so this half names NO remedy and files NO row rather than re-filing an ' +
+    'measured on this board, not hypothetical — so those artefacts carry that exposure; but the token class ' +
+    'follows the Claude Code ACCOUNT and flips between writes with no seat act behind it, and nothing ' +
+    'available to a user-token session chooses the class of its own write or moves content it already ' +
+    'authored to the App, so this half names NO remedy and files NO row rather than re-filing an ' +
     `unclearable one every sweep. ${counts.seatSignedUserPat ?? 0} of them carry no App credential at all (a ` +
     `user PAT) and ${counts.seatSignedUserUnreadChannel ?? 0} ride the \`/pulls\` shape that does not serve ` +
     '`performed_via_github_app`; ⛔ that field names the APP whose credential signed a write and never the TOOL, ' +
@@ -15065,7 +15951,7 @@ export function h64ExposureClause(counts = {}, cap = H64_LOGIN_ROSTER_CAP) {
 // first" is a different reading over a different corpus. This row forces the
 // NAMING, and the naming is what sends the seat to the selector.
 //
-// ## The one spelling, and why it is closed
+// ## The English spelling, and why its WORD SET is closed
 //
 // A line beginning `Tier:` followed by `hourly` or `daily`; everything after the
 // tier word is free text, so both of these are clean:
@@ -15078,14 +15964,67 @@ export function h64ExposureClause(counts = {}, cap = H64_LOGIN_ROSTER_CAP) {
 // refusals are the same call the skill's own remedy order makes: 让正确形态成为
 // 唯一拼写. A lenient reader here would accept `Tier: full` / `Tier: 全量` /
 // `**Tier:** hourly` and hand the next seat four spellings of one declaration,
-// which is the state the rule exists to leave. The remedy text prints the two
-// legal lines verbatim, so the row can only ever be cleared into the spelling
+// which is the state the rule exists to leave. The remedy text prints the
+// legal lines verbatim, so the row can only ever be cleared into a spelling
 // it names.
 //
 // ⚠️ A blockquoted `> Tier: daily` is NOT accepted, and that is the deliberate
 // half of the line-start rule: a quoted line is this artefact repeating ANOTHER
 // one, and letting it clean the carrier would let a marker quoting last round's
 // brief satisfy this round's duty.
+//
+// ## The CHINESE spelling — the clause prescribes none, so neither may this row
+//
+// The measured defect (#18547): this row asks 「did the seat write down which
+// tier this round ran」 and answered it with an ASCII-LITERAL predicate, so a
+// round-open marker that DOES name its tier — in Chinese — was reported as
+// SILENCE. The live specimen is objectstack#6015 comment `5706306387`, whose
+// headline reads
+//
+//   **Round-open marker** · triage seat · `session_…` · **R+259** · fire … ·
+//   **objectstack 轮** · **层:小时层(增量)**,锚 = 本席 R+258 轮报 …
+//
+// 「层:小时层(增量)」 IS the declaration the clause asks for. One sweep
+// reported that carrier plus 45 further artefacts on it as tier-less: 46 false
+// rows drowning the true ones.
+//
+// The filing card measured, and this file's flight re-measured, that the
+// English word `Tier` in any casing appears NOWHERE in the charter: the only
+// clause is SKILL.md 〈分诊座位职责〉 「选层按 fire 时刻,⛔ 不用计数器;简报写明
+// 本轮跑的层」, which requires the tier to be WRITTEN and prescribes no
+// spelling. So the repair is HERE, in the predicate, and ⛔ NOT in adding an
+// English spelling to a charter that is a governed surface and never said it.
+//
+// ⛔ What this is NOT: it is not "accept any text that mentions a tier-ish
+// word". The Chinese reading keeps every property the English one has, and each
+// one has a control in the battery below:
+//
+//   · the KEY is closed — 「层」 plus a colon (ASCII or full-width), nothing else;
+//   · the WORD SET is closed — 「小时层」/「每日层」, the runbook's own two names
+//     (〈分诊两级盘点细则〉「每日层(当日首 fire)= 四仓全量对账 …」). Any other
+//     word after the key is `unknown-tier`, exactly as `Tier: full` is;
+//   · it must sit in a DECLARATION SLOT, never mid-sentence: the start of a
+//     line, or immediately after a 「·」 field separator, which is the marker
+//     headline's own field idiom (`**R+259**`, `**objectstack 轮**` and the
+//     tier field itself are all written that way). 「…简报写明本轮跑的层:小时
+//     层」 inside a sentence is prose and still reads as `absent` — the verdict
+//     it has today, KEPT and pinned rather than reclassified;
+//   · a BLOCKQUOTED Chinese declaration is refused for the same reason
+//     `> Tier: daily` is: a quoted line is this artefact repeating another.
+//
+// ⚠️ ONE asymmetry, deliberate and named: a leading `**` is refused on the
+// English line (`**Tier:** daily` stays `not-at-line-start`, untouched) and
+// ACCEPTED on the Chinese field. The English spelling is a whole LINE whose
+// legal forms the remedy prints verbatim; the Chinese spelling as MEASURED is a
+// bold field inside a `·`-separated headline, where every sibling field is bold
+// too — refusing the bold would refuse the idiom itself and re-file the same
+// false positive one layer down. The property preserved in both is the one the
+// design rests on: a key in a declaration slot, never a mention in prose.
+//
+// ⛔ And the row still fires on real silence. That is the half a repair like
+// this one is measured by, so it is not left to the reader: the battery keeps
+// the three tier-less specimens firing, plus a mid-sentence Chinese mention, a
+// blockquoted Chinese declaration and an unknown Chinese tier word.
 //
 // ## The artefact shapes, measured and named
 //
@@ -15186,6 +16125,66 @@ export const H65_TIER_LINE = /^[ \t]*Tier:[ \t]*(\S*)/m;
 export const H65_TIER_KEY = /Tier:/;
 
 /**
+ * The CHINESE tier words (#18547) — the runbook's own two names, mapped onto
+ * the same closed set the English words resolve to.
+ *
+ * ⛔ A closed set for exactly the reason `H65_TIER_WORDS` is one: 「层:全量」 is
+ * a dialect and reports as `unknown-tier`, not as a tolerated third tier.
+ * Neither word is a prefix of the other, so the scan order carries no meaning.
+ */
+/** How the Chinese key is NAMED in a row, so the row never claims `Tier:`. */
+export const H65_TIER_KEY_CN_LABEL = '层:';
+
+export const H65_TIER_WORDS_CN = Object.freeze([
+  Object.freeze({ word: '小时层', tier: 'hourly' }),
+  Object.freeze({ word: '每日层', tier: 'daily' }),
+]);
+
+/**
+ * The Chinese declaration, matched against ONE line at a time.
+ *
+ * `(?:^|·)` is the whole declaration-slot rule: the start of the line, or
+ * immediately after the 「·」 field separator the marker headline is built from.
+ * ⛔ Nothing else anchors it — a 「层:」 reached from inside a sentence does not
+ * match, which is what keeps this a declaration reader rather than a mention
+ * finder. The optional `**` is the headline's field decoration, not a general
+ * licence (see the asymmetry note in this row's header).
+ *
+ * The value runs to the first delimiter rather than to whitespace: the measured
+ * field is `层:小时层(增量)**,锚 = …` with no space anywhere near the word, so a
+ * `\S*` capture would swallow the rest of the headline. Everything after the
+ * tier word is free text, exactly as it is on the English line.
+ *
+ * ⛔ No `g` and no `m` flag: the caller feeds it single lines, and a sticky
+ * `lastIndex` would make this row's answer depend on what it read before.
+ */
+export const H65_TIER_FIELD_CN = /(?:^|·)[ \t]*(?:\*\*)?层[:\uFF1A][ \t]*([^\s*·,\uFF0C、;\uFF1B。]*)/;
+
+/**
+ * The Chinese declaration's reading, or null when the artefact carries none.
+ *
+ * A line whose first non-blank character is `>` is SKIPPED, the deliberate half
+ * of the slot rule on this side too: a quoted line is this artefact repeating
+ * ANOTHER one, and letting it clean the carrier would let a marker quoting last
+ * round's headline satisfy this round's duty.
+ *
+ * @param {string} text — the body, fences already blanked.
+ * @returns {{ tier: string|null, word: string }|null} — `tier` is null when the
+ *   slot is filled with a word outside the closed set (including no word).
+ */
+export function h65DeclaredTierCn(text) {
+  for (const line of String(text ?? '').split('\n')) {
+    if (/^[ \t]*>/.test(line)) continue;
+    const hit = H65_TIER_FIELD_CN.exec(line);
+    if (!hit) continue;
+    const rest = hit[1];
+    const named = H65_TIER_WORDS_CN.find((entry) => rest.startsWith(entry.word));
+    return named ? { tier: named.tier, word: named.word } : { tier: null, word: rest };
+  }
+  return null;
+}
+
+/**
  * The artefact grammar, as data so the self-test can drive every shape by name.
  * ⛔ No `g` flag on any of them: a sticky `lastIndex` would make this row's
  * answer depend on how many comments preceded it (H44's rule, same reason).
@@ -15268,13 +16267,26 @@ export function h65TierlessRoundArtefact(body) {
   if (!shape) return null;
   const text = h44StripFences(body);
   const declared = H65_TIER_LINE.exec(text);
-  if (declared) {
-    const word = declared[1];
-    if (H65_TIER_WORDS.includes(word)) return null;
+  const declaredCn = h65DeclaredTierCn(text);
+  // EITHER spelling naming a legal tier answers the clause, so both are read
+  // before any defect is classified: an artefact that names its tier in Chinese
+  // AND carries an off-spec `Tier:` line has still named its tier (#18547).
+  if (declared && H65_TIER_WORDS.includes(declared[1])) return null;
+  if (declaredCn?.tier) return null;
+  // The classification order below is the English one, UNCHANGED: a `Tier:`
+  // line outranks the Chinese slot for the echo, so every row this file printed
+  // before #18547 about an English dialect still prints the same words.
+  const dialect = declared ? declared[1] : declaredCn ? declaredCn.word : null;
+  if (dialect !== null) {
     return {
       shape,
       reason: 'unknown-tier',
-      detail: word ? word.slice(0, H44_FRAGMENT_ECHO_CAP) : '(nothing)',
+      // ⛔ The row must name the key it actually read: a `层:全量层` field
+      // reported as 「carries a `Tier:` line」 would be this row asserting a
+      // spelling the artefact does not carry — the same class of false
+      // statement #18547 was filed on, one layer down.
+      key: declared ? 'Tier:' : H65_TIER_KEY_CN_LABEL,
+      detail: dialect ? dialect.slice(0, H44_FRAGMENT_ECHO_CAP) : '(nothing)',
     };
   }
   if (H65_TIER_KEY.test(text)) return { shape, reason: 'not-at-line-start', detail: null };
@@ -15294,6 +16306,15 @@ export const H65_TIER_EXAMPLES =
   '`Tier: hourly (since 2026-09-15T13:45Z)` or `Tier: daily (first fire of the day)`';
 
 /**
+ * The Chinese legal forms, printed beside the English ones (#18547).
+ *
+ * The clause prescribes no spelling, so a remedy that named only the English
+ * one would be this row teaching a rule the charter does not carry — the very
+ * defect the card was filed on, relocated into the remedy text.
+ */
+export const H65_TIER_EXAMPLES_CN = '`层:小时层(增量)` or `层:每日层(当日首 fire)`';
+
+/**
  * The row. Report-only, and it names the comment so the remedy is an EDIT of a
  * known artefact rather than a hunt.
  *
@@ -15311,7 +16332,7 @@ export function h65TierlessRoundArtefactRow(hit, comment, total = 1) {
   const id = String(comment?.id ?? 'an unread id');
   const because =
     hit.reason === 'unknown-tier'
-      ? `carries a \`Tier:\` line naming ${hit.detail === '(nothing)' ? 'NOTHING' : `\`${hit.detail}\``}, which is not one of \`${H65_TIER_WORDS.join('` / `')}\``
+      ? `carries a \`${hit.key ?? 'Tier:'}\` declaration naming ${hit.detail === '(nothing)' ? 'NOTHING' : `\`${hit.detail}\``}, which is not one of \`${[...H65_TIER_WORDS, ...H65_TIER_WORDS_CN.map((entry) => entry.word)].join('` / `')}\``
       : hit.reason === 'not-at-line-start'
         ? 'spells `Tier:` somewhere that is NOT the start of a line — decorated or mid-paragraph, where neither a reader nor this row looks for a declaration'
         : 'names NO tier at all';
@@ -15325,12 +16346,1114 @@ export function h65TierlessRoundArtefactRow(hit, comment, total = 1) {
     '简报写明本轮跑的层」) is satisfied by SILENCE here. The clause is the rule\'s forcing ' +
     'function: a seat that must NAME its tier cannot skip choosing one, and the one measured ' +
     'instance of the skipped choice was a full-board enumeration on a fire that owed a `since` ' +
-    `window. Remedy: one line, at the start of a line — ${H65_TIER_EXAMPLES} — with the selector ` +
+    `window. Remedy: one declaration — ${H65_TIER_EXAMPLES} at the start of a line, or ` +
+    `${H65_TIER_EXAMPLES_CN} at the start of a line or as a 「·」-delimited field of the ` +
+    'headline — with the selector ' +
     'read from `.claude/skills/pm-dispatch/references/dispatch-runbook.md` 〈分诊两级盘点细则〉 ' +
     '(「每日层(当日首 fire)= 四仓全量对账 + 归集本就日频的职责」). ⛔ This row does NOT judge ' +
     'whether the tier chosen was the RIGHT one — that reading is the seat\'s and is pinned in the ' +
     'runbook; this one only refuses the silence. Report-only: patrol input, never a gate verdict.' +
     more
+  );
+}
+
+// ---------------------------------------------------------------------------
+// H66 — an unassigned `pm:queue` card whose NEWEST comment is a RELEASE whose
+// remainder no dispatch can execute (#18299, report-only).
+//
+// ## The clause this row enforces
+//
+// `pm:queue` is DEFINED by the state model, not described by it —
+// 「`pm:queue` = 有具名落点或复现的具体缺陷,或范围明确的工具/门禁修复,无可问之事。」
+// (`.claude/skills/pm-dispatch/SKILL.md`, quoted whole in `QUEUE_STATE_RULE`).
+// The release act is defined in the same file, and `RELEASE_ACT_RULE` quotes it whole; a
+// seat may lawfully release a card it has only PARTLY landed, back into that
+// pool, for the next seat to pick up.
+//
+// The two clauses meet on one shape the label cannot express: a seat lands part
+// of a card and lets it go, but what REMAINS is not work — it is a maintainer
+// ruling, a reading only the reporter can take, a confirmation owed by another
+// seat. The card then wears `pm:queue` with no assignee, which the selection
+// order reads as 「ready to hand to a dev」, and the card is the opposite of
+// dispatchable. Measured by the filer over one lane's 全序: the FOUR OLDEST p2
+// cards in objectui's `domain:ui` queue were all in this state at once — i.e.
+// precisely the cards an execution seat reaches for first under 「最老优先」.
+//
+// ⚠️ The remedy is NOT a relabel, and this row does not propose one. Whether
+// these cards belong in `needs-user-decision`, in `pm:awaiting-maintainer` or in
+// a state that does not exist yet is a maintainer question the filing card
+// explicitly leaves open (「the state question … is a separate decision」). So
+// this row is a LISTING: it turns 「read every queued candidate's whole thread」
+// into 「read the candidates whose newest word is a release」, and the reading
+// itself stays a human's.
+//
+// ## A1 — the `Release:` line's 去向, MEASURED and FALSIFIED as the live leg
+//
+// The obvious discriminator is machine-readable and canonical: the release line
+// carries (会话/因/去向), so a 去向 naming anything but the queue, on a card still
+// wearing `pm:queue`, is the label and the record disagreeing with no prose
+// matching at all. It was measured before it was built, on 2026-09-16, over both
+// boards the filing card names — the filer's own four specimens and the 25 most
+// recently updated open unassigned `pm:queue` cards on this board:
+//
+//   corpus                                                  threads  `Release:` lines
+//   objectui#7696 #8167 #8826 #8938 (the filer's four)             4   0
+//   objectstack-ai/objectstack, 25 newest queued cards            25   0
+//
+// ZERO of 29. ⭐ The LIT CONTROL for that zero is the prose leg below, read by
+// the same fetch over the same 29 threads: it answers THREE on the same four
+// specimens. So the zero is a property of the board, not of a broken reader or
+// an unread corpus — the canonical line is simply not being written yet.
+//
+// ⛔ The leg stays anyway, FIRST, and the reason is not symmetry. H47 exists to
+// report exactly that absence, and as it is answered the canonical line starts
+// appearing; on the day it does, it is the only reading here that can tell a
+// return-to-queue from an exit, because 「back to `pm:queue`」 and 「to the
+// maintainer」 are written in the SAME announcement heading otherwise. It costs
+// one regex the file already owns (`RELEASE_COMMENT_MARKER`, H47's).
+//
+// ## A2 — what IS written, and it is a HEADING
+//
+// Three spellings, each frozen beside the live comment it was measured on
+// (`H66_RELEASE_ANNOUNCEMENT_ANCHORS`). All three were measured as ATX HEADINGS,
+// and the scan is heading-anchored for H58's reason, which this row inherits
+// whole rather than re-deriving: a marker quoted in prose, a table cell, a code
+// span, a blockquote or a fence is a card TALKING ABOUT the shape rather than
+// declaring it — and the filing card #18299, this row's own report comment, and
+// this very docblock all quote the spellings. None of them may fire.
+//
+// ⛔ No fuzzy matching and no regex over free prose: each anchor is two literal
+// tokens with a bounded gap, matched on the undecorated heading text.
+//
+// ## Where the 去向 is read, and why it is the whole line
+//
+// On the `Release:` LINE itself, whole — ⛔ not a positional third field. With
+// zero measured instances there is no field layout to pin, and a positional
+// parse would be pinned against imagination. A line that names `pm:queue`
+// anywhere is a return to the pool and stands the row down; a line that does not
+// is listed, naming whichever destination out of `H66_NON_QUEUE_DESTINATIONS` it
+// could read, or saying it could read none. ⚠️ The unreadable case LISTS rather
+// than clears, which is the #4690 direction for a listing: an exit record nobody
+// can parse, on a card the queue view calls ready, is exactly what a human
+// should look at.
+//
+// ⛔ `pm:queue` is NOT read over the whole comment body, and that is measured
+// rather than stylistic: the two release comments on objectui#8167 and #8938
+// BOTH say 「`pm:dispatched` stripped, `pm:queue` added」 in their state-write
+// paragraph, so a body-wide read would clear precisely the specimens this row
+// exists to list.
+//
+// ## Recency — the NEWEST comment, which is also clause (d)
+//
+// `latestSeatMarker`, H32's and H38's reader, reused rather than re-spelled: the
+// newest comment on the thread, by `created_at` with a THREAD-ORDER fallback so
+// an unparseable stamp cannot promote an older comment to 「latest」. That single
+// choice IS the filing card's 「without a later comment returning it to
+// dispatchable」 clause, structurally: any later comment — a `Claim:`, a ruling,
+// a state repair, a re-triage — is then the newest, and no release heading is
+// there to match. Measured: all four specimens carry such a later comment TODAY
+// (7696 a state repair to `pm:awaiting-maintainer`, 8167 and 8826 a fresh
+// `Claim:`, 8938 an ACCEPT before it closed), and all four are correctly silent.
+//
+// ## Disjointness (A3) — and the ONE overlap, stated rather than hidden
+//
+//   H8   requires `pm:dispatched`; this population is `pm:queue` WITHOUT it.
+//        Disjoint by label, in every input.
+//   H47  leg (a) requires an ASSIGNEE; this population has none. Leg (b) is the
+//        INVERSE of this row: it fires when a `Claim:` is the newest ownership
+//        record and NO `Release:` answers it, i.e. exactly when the release was
+//        never written. This row's release-line leg fires only when one WAS —
+//        `releaseAnswersClaim` is then true and H47 leg (b) returns null.
+//   H49  requires `pm:dispatched` and an assignee. Disjoint.
+//   H58  reads the CARD's own declaration of its deliverable, in a heading, in
+//        the body or anywhere on the thread. This row reads the RELEASE RECORD,
+//        on the newest comment only. A card may wear both carriers and fire
+//        both: two readings, never one restated (H54/H58's own posture).
+//
+// ⚠️ The overlap, and it is real: on the PROSE leg, a card whose release was
+// announced in a heading and never written as a `Release:` line fires H47 leg
+// (b) TOO — which is correct and is a different defect (the record is missing
+// its canonical line) from this one (the card is in the dispatch pool with a
+// remainder nobody can dispatch). Three of the four specimens are in exactly
+// that shape. When the canonical line is written, H47 goes quiet and this row
+// becomes the only reader of the pair.
+//
+// ## Population and cost
+//
+// The `pm:queue` label page the sweep's loop already consumes, minus every card
+// another row already contradicts: a second member of `PM_EXCLUSIVE_STATE_LABELS`
+// beside `pm:queue` is H3's, H25's or H29's pair and a card the board still reads
+// as somewhere else has not exited anything here (H47 leg (b)'s refusal, taken
+// for its reason and against the same vocabulary rather than a second list). An
+// ASSIGNED card is H24's row and is out.
+//
+// ⛔ It buys NOTHING: one `commentCache.get` per card, never a fetch, so a card
+// whose thread nobody else bought is UNJUDGED rather than clean — and on this
+// population that is the THIN half by construction, because H2 buys a thread
+// only for an ASSIGNED card. The coverage pair on the summary line is what makes
+// that legible; without it a corpus of two cards and a clean queue render the
+// same way.
+// ---------------------------------------------------------------------------
+
+/**
+ * The `pm:queue` state's own definition, quoted from
+ * `.claude/skills/pm-dispatch/SKILL.md` VERBATIM and kept UNBROKEN on one line
+ * so it stays greppable against its source — `RELEASE_ACT_RULE`'s discipline,
+ * applied to the clause this row enforces.
+ *
+ * ⛔ Do not paraphrase it and do not coin a shorthand: the brackets in a row's
+ * sentence promise these are the protocol's OWN words. `selfTest` keeps its own
+ * transcription (`QUEUE_RULE_LINE`) so the pin compares two copies rather than
+ * reading the value it pins.
+ */
+const QUEUE_STATE_RULE =
+  '`pm:queue` = 有具名落点或复现的具体缺陷,或范围明确的工具/门禁修复,无可问之事。';
+
+/**
+ * The release-announcement spellings, each frozen beside the LIVE comment it was
+ * measured on so a reader can check the anchor against the thread that wrote it.
+ *
+ * ⛔ Never extend this list from imagination — `H58_RULING_MARKER_ANCHORS`'s
+ * rule, for its reason. Extend it when a new spelling is measured AS A HEADING
+ * on a live comment, and record where. Each regex matches the distinctive PAIR
+ * of literal tokens rather than a whole line, so the three measured variants
+ * (「Card RELEASED, ⛔ not closed」, 「the card is RELEASED, ⛔ not closed」,
+ * 「Card RELEASED for (c), ⛔ not closed」) are one anchor and not three.
+ *
+ * ⚠️ `RELEASED` is matched CASE-SENSITIVELY, in the uppercase the three measured
+ * headings write. That is the anchor, not a style preference: the same card's
+ * later prose says 「released rather than closed」 in lowercase, about the same
+ * event, and it is not a declaration.
+ *
+ * ⚠️ The third anchor's provenance is DIFFERENT from the first two and is
+ * recorded as such: it is named by the filing card's own criterion and was NOT
+ * measured on a live comment by this row's author. It is carried because the
+ * card names it; it is labelled so nobody later reads it as a measurement.
+ */
+export const H66_RELEASE_ANNOUNCEMENT_ANCHORS = Object.freeze([
+  Object.freeze({
+    heading: /\bRELEASED\b[^\n]{0,40}⛔\s*not closed/u,
+    spelling: 'Card RELEASED, ⛔ not closed',
+    instance: 'objectui#7696 `5664140343` · #8167 `5663517223` · #8938 `5668851500` (3 live comments)',
+    measured: true,
+  }),
+  Object.freeze({
+    heading: /⛔\s*not a dispatchable step/iu,
+    spelling: '⛔ not a dispatchable step',
+    instance: 'objectui#7696 (the releasing seat\'s own heading)',
+    measured: true,
+  }),
+  Object.freeze({
+    heading: /\bremainder is a ruling\b/iu,
+    spelling: 'remainder is a ruling',
+    instance: 'objectstack#18299 (the filing card\'s criterion — ⛔ NOT measured on a live comment)',
+    measured: false,
+  }),
+]);
+
+/**
+ * The ceiling on that frozen set — `H58_MARKER_ANCHOR_CAP`'s mechanism, for its
+ * reason: a cap on the ANCHOR SET (this row buys no requests) is what keeps
+ * 「measured, then frozen」 from drifting into 「whatever seemed plausible」. A
+ * sixth entry is an argument about whether the set is still a set of readings,
+ * not a one-line edit.
+ */
+export const H66_RELEASE_ANCHOR_CAP = 5;
+
+/**
+ * The destinations a `Release:` line's 去向 may name that are NOT the dispatch
+ * pool — a CLOSED vocabulary, so the row's sentence can say WHO the card went
+ * to instead of merely saying it did not say `pm:queue`.
+ *
+ * ⛔ Not a judgement about which of them is right: the filing card leaves the
+ * state question open, and this list only reads what a line already says.
+ */
+export const H66_NON_QUEUE_DESTINATIONS = Object.freeze([
+  Object.freeze({ re: /\bneeds-user-decision\b/iu, name: '`needs-user-decision`' }),
+  Object.freeze({ re: /\bpm:awaiting-maintainer\b/iu, name: '`pm:awaiting-maintainer`' }),
+  Object.freeze({ re: /维护者|\bmaintainer\b/iu, name: 'the maintainer' }),
+  Object.freeze({ re: /总监|\bdirector\b/iu, name: 'the director seat' }),
+  Object.freeze({ re: /报告人|\breporter\b|\bfiler\b/iu, name: 'the reporter' }),
+]);
+
+/**
+ * Every release-announcement anchor this text carries AS A HEADING, in the order
+ * written, deduped by anchor so a comment repeating a spelling names it once.
+ *
+ * Fenced code is blanked first through `stripMarkdownCode`'s `{ inline: false }`
+ * reading — H17's and H58's fence parser, shared rather than re-derived — so a
+ * marker inside a fence contributes nothing, while an inline code span on the
+ * heading itself survives to be undecorated by `undecorateProseLine`.
+ *
+ * Exported for the self-test: the anchor set and the heading anchoring are the
+ * whole design of this leg, and a spelling that silently stopped matching would
+ * cost every row without costing a case.
+ *
+ * @param {string} text
+ * @returns {{ spelling: string, instance: string, heading: string }[]}
+ */
+export function releaseAnnouncementHeadings(text) {
+  const out = [];
+  const claimed = new Set();
+  for (const raw of stripMarkdownCode(text, { inline: false }).split(/\r?\n/)) {
+    const m = H58_HEADING_LINE.exec(raw);
+    if (!m) continue;
+    const written = undecorateProseLine(m[2]).trim();
+    for (const anchor of H66_RELEASE_ANNOUNCEMENT_ANCHORS) {
+      if (claimed.has(anchor.spelling)) continue;
+      if (!anchor.heading.test(written)) continue;
+      claimed.add(anchor.spelling);
+      out.push({
+        spelling: anchor.spelling,
+        instance: anchor.instance,
+        measured: anchor.measured,
+        heading: `${m[1]} ${written}`,
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * What ONE comment says about the card's release, three-valued.
+ *
+ * `null`      — this comment is not a release record at all.
+ * `dispatchable: true`  — the canonical line names `pm:queue`: a normal return
+ *               to the pool, which is the whole point of the release act and is
+ *               ⛔ never a finding.
+ * `dispatchable: false` — a release whose destination is not the pool, or a
+ *               release announced in prose with no canonical line to read.
+ *
+ * The canonical leg WINS over the announcement leg where both are present: a
+ * comment that says 「back to `pm:queue`」 in the protocol's own words has
+ * answered the question, whatever its heading is shaped like.
+ *
+ * @param {string} body — ONE comment body.
+ */
+export function h66ReleaseVerdict(body) {
+  const text = String(body ?? '');
+  const line = markerMatches(RELEASE_COMMENT_MARKER, text)
+    ? (text.split(/\r?\n/).find((l) => markerMatches(RELEASE_COMMENT_MARKER, l)) ?? null)
+    : null;
+  if (line !== null) {
+    const bare = undecorateProseLine(line).trim();
+    if (/\bpm:queue\b/u.test(bare)) {
+      return { leg: 'release-line', line: bare, destination: '`pm:queue`', dispatchable: true };
+    }
+    const named = H66_NON_QUEUE_DESTINATIONS.find((d) => d.re.test(bare)) ?? null;
+    return {
+      leg: 'release-line',
+      line: bare,
+      destination: named ? named.name : null,
+      dispatchable: false,
+    };
+  }
+  const headings = releaseAnnouncementHeadings(text);
+  if (headings.length === 0) return null;
+  return { leg: 'announcement', headings, destination: null, dispatchable: false };
+}
+
+/**
+ * Which cards this row can speak about AT ALL — exported for the reason every
+ * counting policy here is: the predicate that decides what is even counted is
+ * where a silent hole would live, and the summary's pair is `judged of these`.
+ *
+ * ⛔ ISSUES only (the dispatch pool is cards), ⛔ closed cards out (`pm:queue` on
+ * one is residue the closed census already counts), ⛔ an unreadable `labels` out
+ * rather than read as unlabelled (#4690 on the one field that decides
+ * membership), ⛔ an ASSIGNED card out (that is H24's row), and ⛔ a card carrying
+ * a SECOND member of `PM_EXCLUSIVE_STATE_LABELS` out — that pair is H3's, H25's
+ * or H29's contradiction, and a card the board still reads as somewhere else has
+ * not exited anything here.
+ */
+export function h66SpeaksAbout(issue) {
+  if (issue?.pull_request) return false;
+  if (issue?.state === 'closed') return false;
+  if (!Array.isArray(issue?.labels)) return false;
+  const labels = labelNames(issue);
+  if (!labels.includes('pm:queue')) return false;
+  if (PM_EXCLUSIVE_STATE_LABELS.some((l) => l !== 'pm:queue' && labels.includes(l))) return false;
+  return (
+    (issue?.assignees ?? []).map((a) => (typeof a === 'string' ? a : a?.login)).filter(Boolean)
+      .length === 0
+  );
+}
+
+/**
+ * How many comment pages this row may BUY in one run.
+ *
+ * ## Why this row buys at all, when the first landing did not
+ *
+ * It shipped reading `commentCache` and nothing else — one map lookup per card,
+ * no request. The first live sweep measured what that costs: **194 candidates,
+ * a thread in hand for 1**. The corpus is thin BY CONSTRUCTION and not by luck,
+ * because the only row that buys a card thread for a pm-tracked card is H2's
+ * claim read, and H2 buys one only for an **ASSIGNED** card — which is this
+ * population's exact complement. A listing that cannot see 99.5% of its own
+ * population is a row whose silence means nothing, and the filing card's own
+ * criterion already asks for the fetch: 「fetch the newest comment authored by a
+ * seat」.
+ *
+ * ## Why ONE page, and why the NEWEST one
+ *
+ * The whole thread is not needed and is not bought: this row reads the NEWEST
+ * comment and nothing else. The page is located from the carrier's own
+ * `comments` count through H65's two exported helpers (`h65NewestPagePlan` /
+ * `h65CommentPagePath`) rather than a second copy of the arithmetic — ⛔ never
+ * page 1, because GitHub serves issue comments OLDEST-FIRST and a page-less
+ * request returns the archive rather than the current word (the #18312 reading:
+ * five weeks stale on a long thread).
+ *
+ * ## Why 100
+ *
+ * The standing caller is `.github/workflows/half-state-patrol.yml` on
+ * `PATROL_CRON` — `37 1,7,13,19 * * *`, FOUR runs a day — under the Actions
+ * token's **1000 requests per hour per repository**. Each run already spends
+ * the label pages, the unscoped listing, the PR windows, H50's walks, H43's
+ * review probes, H45's parent reads and the seat pages; 100 is a ceiling that
+ * adds at most a tenth of one hour's budget to a run that happens at most once
+ * every six hours, and it covers the whole measured population of unassigned
+ * `pm:queue` cards on this board with room to spare (194 candidates, of which
+ * the overwhelming majority are old and quiet — see the ordering below).
+ *
+ * ⚠️ A cap is not a coverage claim. The candidates beyond it are NOT ATTEMPTED,
+ * which is neither judged nor clean, and the summary clause prints that number
+ * separately — H40's `H40_RESOLUTION_BUDGET` posture, taken for its reason.
+ */
+export const H66_THREAD_BUY_CAP = 100;
+
+/**
+ * Which candidates this run buys a page for, and which it defers — NEWEST-TOUCHED
+ * FIRST.
+ *
+ * A release is a WRITE on the card, so `updated_at` descending puts the cards a
+ * release could plausibly have just landed on at the front of the queue; a card
+ * that has not moved in a month is the last place a fresh release lives. That
+ * is the opposite of the dispatch order 「最老优先」 on purpose: the dispatch
+ * order says which card to WORK, this says where the evidence IS.
+ *
+ * ⚠️ An unreadable `updated_at` sorts LAST rather than first. A stamp that does
+ * not parse must never be promoted ahead of one that does (#4690's direction on
+ * every timestamp in this file), and the `number` tiebreak keeps the order total
+ * so two runs over one board agree.
+ *
+ * Pure, and exported, for the reason every budget in this file is: the thing
+ * that decides what gets READ AT ALL is where a silent hole would live, and a
+ * plan the self-test can drive offline is the only kind that can be pinned.
+ *
+ * @param {{ number?: number, updated_at?: string }[]} issues
+ * @param {number} [cap]
+ * @returns {{ buy: object[], deferred: object[] }}
+ */
+export function h66BuyOrder(issues, cap = H66_THREAD_BUY_CAP) {
+  const rows = (Array.isArray(issues) ? issues : []).filter(Boolean);
+  const stamp = (issue) => {
+    const parsed = Date.parse(issue?.updated_at ?? '');
+    return Number.isFinite(parsed) ? parsed : -Infinity;
+  };
+  const ordered = [...rows].sort(
+    (a, b) => stamp(b) - stamp(a) || Number(b?.number ?? 0) - Number(a?.number ?? 0),
+  );
+  const limit = Number.isFinite(cap) && cap > 0 ? Math.floor(cap) : 0;
+  return { buy: ordered.slice(0, limit), deferred: ordered.slice(limit) };
+}
+
+/**
+ * The BUY pass audit (#18299) — read off this file's own source, the detector
+ * shape `seatWindowAudit` and `familyRegistryCoverage` use, and for their
+ * reason: the pass lives inside `sweepInto`, which takes no injectable
+ * transport, so the two properties a spy would prove have to be proved on the
+ * text.
+ *
+ *   pushSites / guardedPushSites
+ *       where a candidate is DEFERRED to the buy. Exactly one site, and it must
+ *       sit under an `=== undefined` cache test — which is the whole of 「a card
+ *       whose thread is already in hand is never re-bought」. An unguarded push
+ *       would buy a page the sweep already holds, once per run, silently.
+ *   cacheWriteSites / wholeThreadCacheWrites
+ *       where the pass writes back into `commentCache`. Every one of them must
+ *       sit under a `pagePlan.page === 1` test, because only there is the page
+ *       bought the WHOLE thread; an unguarded write hands a partial window to
+ *       every reader keyed on that card, which is precisely why
+ *       `seatPostRowsFor` keeps its own window out of that map.
+ *
+ * ⚠️ The needles are ASSEMBLED, for `SEAT_MEMO_OPEN`'s measured reason: a
+ * literal one would be found at its own declaration in this very file.
+ *
+ * @param {string} [source] — defaults to this file; injectable for the self-test.
+ * @returns {{ pushSites: number, guardedPushSites: number, cacheWriteSites: number,
+ *   wholeThreadCacheWrites: number }}
+ */
+export function h66BuyAudit(source) {
+  const text =
+    typeof source === 'string' ? source : readFileSync(fileURLToPath(import.meta.url), 'utf8');
+  const before = (needle) => {
+    const out = [];
+    let at = text.indexOf(needle);
+    while (at >= 0) {
+      out.push(text.slice(Math.max(0, at - 200), at));
+      at = text.indexOf(needle, at + needle.length);
+    }
+    return out;
+  };
+  const pushes = before(['queueReleaseDeferred', '.push('].join(''));
+  const writes = before(['commentCache', '.set(issue.number, rows)'].join(''));
+  return {
+    pushSites: pushes.length,
+    guardedPushSites: pushes.filter((text_) => text_.includes('=== undefined')).length,
+    cacheWriteSites: writes.length,
+    wholeThreadCacheWrites: writes.filter((text_) => text_.includes('pagePlan.page === 1')).length,
+  };
+}
+
+/**
+ * H66 — null when clean OR unjudged, else the finding sentence.
+ *
+ * Three input states for the thread, never two (#4690), the H4 contract
+ * verbatim: `undefined` never consulted, `null` consulted and unreadable — both
+ * UNJUDGED, kept apart from clean by the coverage pair on the summary line — and
+ * rows, judged.
+ *
+ * @param {object} issue — a card from a listing this sweep already holds.
+ * @param {{ body?: string, created_at?: string }[]|null|undefined} commentRows —
+ *   REST rows rather than bodies: this row resolves the NEWEST comment and needs
+ *   its stamp.
+ */
+export function h66ReleasedNonDispatchableRemainder(issue, commentRows) {
+  if (commentRows === undefined || commentRows === null) return null;
+  if (!h66SpeaksAbout(issue)) return null;
+  const newest = latestSeatMarker(Array.isArray(commentRows) ? commentRows : []);
+  if (!newest) return null;
+  const verdict = h66ReleaseVerdict(newest.body);
+  if (!verdict || verdict.dispatchable) return null;
+  const what =
+    verdict.leg === 'release-line'
+      ? `its \`Release:\` line — 「${verdict.line}」 — names ` +
+        `${verdict.destination ? `${verdict.destination}, ⛔ not the dispatch pool` : 'NO destination this row can read, so it cannot say the card came back to the pool'}`
+      : `it is a release ANNOUNCED IN A HEADING with no canonical \`Release:\` line to read — ` +
+        `${verdict.headings.map((h) => `「${h.heading}」`).join('; ')} ` +
+        `(anchor(s): ${verdict.headings.map((h) => `「${h.spelling}」, ${h.measured === false ? 'from' : 'measured on'} ${h.instance}`).join('; ')})`;
+  return (
+    '`pm:queue` with NO assignee while the card\'s NEWEST comment is a RELEASE — ' +
+    `${what}. The label is a definition, not a habit — 「${QUEUE_STATE_RULE}」 — so the queue view ` +
+    'and 「最老优先」 both read this card as ready to hand to a dev, and a release can lawfully ' +
+    'leave behind a remainder that is NOT work: a maintainer ruling, a reading only the reporter ' +
+    'can take, a confirmation owed by another seat. The act itself is 「' + RELEASE_ACT_RULE + '」, ' +
+    'and its 去向 is the only field that can tell those apart. Measured at filing: the FOUR OLDEST ' +
+    'p2 cards in one lane\'s queue were all in this state at once — the cards a seat reaches for ' +
+    'FIRST. ⛔ This row does NOT say the remainder is undispatchable, and it does NOT propose a ' +
+    'state: whether these cards belong in `needs-user-decision`, `pm:awaiting-maintainer` or a ' +
+    'spelling that does not exist yet is an open maintainer question (#18299), and a sweeper ' +
+    'guessing at it would write the very half-state it reports. Remedy: judge by hand — this is a ' +
+    'listing. Read the newest comment; if the remainder IS dispatchable, nothing is owed and the ' +
+    'next comment on the card stands this row down by construction. ⚠️ LOWER BOUND: this row ' +
+    'fetches NOTHING, so a card whose thread no other row bought is UNJUDGED rather than clean, ' +
+    'and on an unassigned population that is most of it. Report-only patrol INPUT: nothing here ' +
+    'is blocked, ⛔ no label is written and ⛔ nothing is relabelled.'
+  );
+}
+
+// ---------------------------------------------------------------------------
+// H67 — an open, UNASSIGNED `pm:queue` card whose timeline carries a MERGED
+// cross-referenced PR and no OPEN one (#18372, report-only).
+//
+// ## The defect, in the filing card's own measurement
+//
+// On 2026-09-09 a BATCH state transition moved a bucket of cards back onto
+// `pm:queue`. The transition set the label correctly and NOBODY re-read each
+// card's own closing condition — and part of that bucket had been delivered by
+// another PR during the wait. The filer then read the timeline of all 63 open
+// unassigned `pm:queue` cards in one lane, card by card:
+//
+//   A  a MERGED cross-referenced PR, and zero OPEN ones      38
+//   B  an OPEN cross-referenced PR                            0
+//   C  no cross-referenced PR at all                         25
+//
+// ⇒ the queue view says 63 and 38 of them have had a PR land on them. ⛔ That
+// is a CANDIDATE SET and it is ⛔ NOT a defect count — the filer did not read a
+// single one of the 38 closing conditions, and says so. What it measures is
+// that the number every seat reads — 取卡全序, the priority sort, a batch
+// decision — is an UPPER BOUND rather than a to-do count, and that a seat can
+// be handed work that is already done.
+//
+// The filer hit the shape THREE TIMES IN A ROW in one shift taking cards in
+// 全序, and caught all three only by a rule of its own invention: 「派发前先重
+// 读关闭条件」. That rule is in no repo text. This row is that rule, mechanised
+// — and nothing more than mechanised: it is a LISTING that says WHERE to look,
+// and the reading itself stays a human's.
+//
+// ## What this row is NOT, said first because the card rules on it twice
+//
+// ⛔ It does NOT judge the devx A bucket's 38 cards, and it closes NOTHING
+// anywhere. The filing card's acceptance ①②③⑤ bind whoever closes them, with
+// this reading in hand; this file writes no state, ever.
+// ⛔ 「有已合 PR」 IS NOT A CLOSING CRITERION (acceptance ③, verbatim: 「⛔ 不许
+// 拿「有已合 PR」当关卡判据」). The proof is in the filer's own three instances:
+// #15815 (work done, closed after its residue was carried out) and #16529
+// (a true remainder, correctly KEPT) are mechanically INDISTINGUISHABLE —
+// both were reached by a merged PR declaring `Part of #N` and nothing else.
+// So this row prints DISCRIMINATORS and a bucket, and the bucket for a
+// `Part of` / `Refs` card says in as many words that it is ⛔ not a candidate
+// for closing. That is H49's shape (the partial-landing rule re-dispatches the
+// remainder), named here rather than re-judged.
+// ⛔ And closing a card whose work IS done is not free: its thread usually
+// carries other seats' after-the-fact readings, and closing it buries them.
+// The filer's own two closures each filed the residue FIRST (#18343, #18364),
+// on the recorded ground that 「a second card would be **invisible** to whoever
+// fixes this one」. The remedy sentence carries that clause; it is the half a
+// reader skips.
+//
+// ## The instrument — the card's own timeline, and it is the card's own
+//
+// `cross-referenced` events plus `pull_request.merged_at`: the filer's method,
+// taken as-is rather than re-derived, because the card's readings are stated
+// against it and a second instrument would make this row's output unable to
+// meet the card's numbers. Three classes off ONE page:
+//
+//   MERGED     `source.issue.pull_request.merged_at` parses.
+//   OPEN       the source PR is `state: open` with no `merged_at` — the B
+//              bucket, and it stands this row down: work is still in flight.
+//   ABANDONED  closed, never merged. It delivered nothing and it is not an
+//              open PR, so it neither fires nor clears; the row NAMES it,
+//              because a reader told 「no open PR」 should know one was dropped.
+//
+// ⭐ The discriminators cost ZERO extra requests, and that is a property of the
+// payload rather than a trade: a `cross-referenced` event carries the whole
+// source issue INCLUDING ITS BODY, so `closingKeywordTargets` / `partOfTargets`
+// / `refsTargets` / `referencedNumbers` — this file's own four relation
+// grammars, CALLED and ⛔ never restated — read the relation off the page that
+// was already bought. `commented` events ride the same page, so the seat-marker
+// leg is free too.
+//
+// ⚠️ The filer's own declared blind spot travels with the instrument and is
+// repeated on the row: a delivery that left NO cross-reference (a PR whose body
+// only alludes to the card, or names it in a branch name alone) is invisible
+// here, so the C bucket is an upper bound and these rows are a LOWER bound.
+//
+// ## Why ONE page, and why a FULL page is UNJUDGED
+//
+// H59's contract verbatim, for H59's reason: the timeline is served
+// OLDEST-FIRST and no field on any listing carries an event COUNT, so the
+// newest page cannot be LOCATED the way H65/H66 locate a newest comment page.
+// One page it is, and a page that came back FULL may hide later events — a
+// later merge, a later OPEN PR, a later `Claim:` — so that card is UNJUDGED and
+// counted, ⛔ never clean (#4690). Measured on the filer's three instances:
+// 46 / 32 / 30 events, so the ordinary card fits inside one page.
+//
+// ## Recency — the newest seat marker, and what it means here
+//
+// H49's resolution, reused rather than re-spelled: a `Claim:` or a `Release:`
+// NEWER than the newest merge is a seat that has already looked at this card
+// SINCE the delivery landed, and either answer stands the row down — a claim
+// re-dispatches the remainder, a release records the hand-off. That is the
+// structural half of the filing card's own complaint: what went wrong was not
+// that nobody could look, it is that the batch transition wrote a label with
+// nobody looking, and a marker after the merge is the looking.
+//
+// ⚠️ A marker whose `created_at` does not parse cannot be PLACED against a
+// merge. H49 declines there because H49 accuses; this row LISTS, so it fires
+// and SAYS the marker could not be placed — H66's own call on an unreadable
+// release line, for H66's reason: 「an exit record nobody can parse, on a card
+// the queue view calls ready, is exactly what a human should look at」.
+//
+// ⛔ The marker regexes are `CLAIM_COMMENT_MARKER` / `RELEASE_COMMENT_MARKER`,
+// this file's own, which anchor the word at LINE START and tolerate a leading
+// blockquote and nothing else. A DECORATED line (`**Release:** …`) is invisible
+// to them — measured on objectstack#16529 `5697022358` — and that reach is
+// shared with H2, H47 and H66 rather than being this row's to widen. The row
+// declares the loss; widening the marker is a different card.
+//
+// ## The card's own closing condition — quoted, never paraphrased
+//
+// Acceptance ① asks 「卡自己写下的关闭条件满足了吗?」, so the row must put the
+// line in front of the reader. A frozen, capped anchor set, each entry beside
+// the LIVE instance it was measured on (`H67_CLOSING_CONDITION_ANCHORS`) —
+// `PROSE_BLOCKER_ANCHORS`'s rule and `H58_RULING_MARKER_ANCHORS`'s discipline,
+// both for their reason — and the row quotes the LINE it matched, bounded, and
+// labels it a CANDIDATE. ⛔ Never a verdict: nothing here decides whether the
+// condition is SATISFIED, which is the hand read.
+//
+// ⚠️ MEASURED, and the number is small: over the 202 open unassigned `pm:queue`
+// cards on this board on 2026-09-17, the English and Chinese 「closes when」 /
+// 「关闭条件」 spellings appear ZERO times in a body and the 「## 验收」 section
+// appears 8 times. The live instance of the first anchor is a COMMENT — the
+// filer's instance one, objectstack#15815 `5551946223` — which is why the
+// reader spans body AND the timeline's comments, newest-first, rather than the
+// body alone. A card stating no condition at all gets that said on its row: the
+// hand read then has nothing to check against, which is itself the reading.
+//
+// ## Disjointness — argued on each neighbouring row's OWN criterion
+//
+//   H8   requires `pm:dispatched`. This population is `pm:queue` WITHOUT it
+//        (`PM_EXCLUSIVE_STATE_LABELS` excludes the pair, which is H3's row).
+//        Disjoint by label, in every input.
+//   H47  leg (a) requires an ASSIGNEE; this population has none. Leg (b) fires
+//        when a `Claim:` is the newest ownership record and NO `Release:`
+//        answers it — a question about the OWNERSHIP RECORD's shape, asked
+//        with no PR in the input at all. This row asks whether a PR LANDED and
+//        reads the ownership record only to date it against that merge. A card
+//        can fire both; they are two readings, not one restated.
+//   H49  requires `pm:dispatched` AND a non-empty assignee. Disjoint by both
+//        fields. It is nonetheless this row's nearest neighbour in SUBSTANCE —
+//        a merged `Refs` PR against an unreleased card — and that is why the
+//        `Part of`/`Refs` bucket here names H49's rule rather than inventing a
+//        second disposition for the same shape.
+//   H58  reads the CARD's own declaration that its deliverable is a RULING, in
+//        a heading, over the same population. It buys nothing and never looks
+//        at a PR. This row reads the DELIVERY. A card may wear both and fire
+//        both (H54/H58's own posture).
+//   H59  direction (b) — a merged PR binds a closing keyword to a card that is
+//        still OPEN — is the ONE real overlap, and it is stated rather than
+//        hidden. The two differ in the axis each is bounded on, and neither
+//        covers the other: H59 starts from H8's MERGED WINDOW
+//        (`MERGED_WINDOW_DAYS`, 8 days) over EVERY open card, so a delivery
+//        older than that window is invisible to it — which is exactly the tail
+//        this card is about, since the batch transition it names predates the
+//        window and the deliveries are older still. This row starts from the
+//        CARD and reads its whole timeline, with no time bound at all, over the
+//        unassigned queue population only. In the intersection — a keyword-bound
+//        PR merged inside 8 days against an unassigned queued card — BOTH fire,
+//        with different sentences and different remedies, and that is correct:
+//        H59 says GitHub's linkage mis-stated the card, this one says the queue
+//        length is a fake number. ⛔ Neither is narrowed to serve the other.
+//   H66  reads the NEWEST COMMENT for a RELEASE, over the same population, and
+//        buys a COMMENT page. This row reads the TIMELINE for a MERGE and buys
+//        a TIMELINE page. The stand-down legs point opposite ways, which is the
+//        cleanest statement of the difference: a release as the newest word
+//        FIRES H66 and CLEARS this row (a seat looked, after the merge).
+//
+// ## Budget — bounded on the axis that can actually run away
+//
+// One timeline page per card, and the population is the WHOLE unassigned queue:
+// 202 cards on this board on 2026-09-17, and the filing card puts the fleet at
+// roughly twice that. Nothing else in this file caches a timeline, so there is
+// no free half here of the kind H66 has — every judged card costs its page.
+// `H67_TIMELINE_READ_CAP` is therefore the row's whole budget AND its row
+// ceiling: a row can only come from a page this run bought.
+//
+// ⚠️ A cap is not a coverage claim. Candidates beyond it are NOT ATTEMPTED,
+// which is neither judged nor clean, and the summary clause prints that number
+// as its own member of a COVERAGE QUADRUPLE (candidates / read / listed / not
+// attempted) — H40's `H40_RESOLUTION_BUDGET` posture and H66's coverage triple,
+// taken for their reason. ⛔ A partial read is never published as a zero.
+//
+// ## Order — OLDEST-FIRST, which is the OPPOSITE of H66's, deliberately
+//
+// H66 orders NEWEST-TOUCHED first because a release is a fresh WRITE and that
+// is where the evidence is. Here the evidence is a merge that may be weeks old
+// — the filing card's whole subject is a tail left by a transition on
+// 2026-09-09 — so recency says nothing about where to look. What decides is
+// WHO GETS HURT: a seat takes cards in 取卡全序, and 「队列每轮清空时最新优先;
+// 清不空的那一刻起改最老优先」 — the queue has not emptied, so the order in
+// force is OLDEST FIRST. The cards a seat will reach for next are exactly the
+// cards this row must have read. So the plan sorts by the two legs of that
+// order this file can see for free off the label page — the priority rank, then
+// card AGE — and the cap eats the tail a seat reaches LAST.
+//
+// ⛔ It models the full 取卡全序 only in part, and says so rather than implying
+// otherwise: `target:` board membership is a board read this file does not
+// make, and the same-priority 「先 `Bug`」 tiebreak is not taken. An unreadable
+// `created_at` sorts LAST rather than first (#4690's direction on every
+// timestamp here), with `number` as a total-order tiebreak so two runs over one
+// board agree.
+// ---------------------------------------------------------------------------
+
+/**
+ * One page of a card's timeline, and how big that page is.
+ *
+ * H59's constants and H59's argument: the timeline is OLDEST-FIRST and no
+ * listing payload carries an event count, so the newest page cannot be located
+ * the way `h65NewestPagePlan` locates a newest comment page. One page, page
+ * one, and a FULL page means later events may exist — UNJUDGED, ⛔ never clean.
+ */
+export const H67_TIMELINE_PAGE_SIZE = 100;
+
+/**
+ * The per-sweep cap on timeline pages this row buys — and, because this row has
+ * no free half, its ROW ceiling too.
+ *
+ * The standing caller is `.github/workflows/half-state-patrol.yml` on
+ * `PATROL_CRON` — FOUR runs a day — under the Actions token's 1000 requests per
+ * hour per repository. 120 is a little over a tenth of one hour's budget added
+ * to a run that happens at most once every six hours, and it covers 59% of the
+ * 202 open unassigned `pm:queue` cards measured on this board on 2026-09-17,
+ * taken in the order a dispatching seat reaches them. ⚠️ The remaining 41% are
+ * NOT ATTEMPTED and the coverage quadruple prints them as such; raising this
+ * number is an argument about the hourly budget, not a tuning knob.
+ */
+export const H67_TIMELINE_READ_CAP = 120;
+
+/** How much of a matched closing-condition line the row quotes. */
+export const H67_QUOTE_LIMIT = 220;
+
+/**
+ * The selection-order legs this row can read for free off the label page, in
+ * rank order. ⛔ NOT the whole 取卡全序: `target:` board membership needs a board
+ * read this file does not make, and the same-priority 「先 `Bug`」 tiebreak is
+ * not taken. Everything not listed shares the last rank and is then ordered by
+ * age, which is the order in force 「清不空的那一刻起」.
+ */
+export const H67_SELECTION_ORDER_LABELS = Object.freeze([
+  'priority:p0',
+  'pm:blocking',
+  'priority:p1',
+  'priority:p2',
+  'priority:p3',
+]);
+
+/**
+ * The spellings by which a card writes down ITS OWN closing condition, each
+ * frozen beside the LIVE instance it was measured on.
+ *
+ * ⛔ Never extend this list from imagination — `PROSE_BLOCKER_ANCHORS`'s rule
+ * and `H58_RULING_MARKER_ANCHORS`'s, both for their reason. Extend it when a
+ * new spelling is measured on a live card or comment, and record where.
+ *
+ * ⚠️ Read as a CANDIDATE and never a verdict: the row quotes what it matched so
+ * a human can check the condition, and ⛔ nothing here decides whether the
+ * condition is satisfied. That is the hand read acceptance ① asks for.
+ */
+export const H67_CLOSING_CONDITION_ANCHORS = Object.freeze([
+  Object.freeze({
+    line: /\bit closes when\b/iu,
+    spelling: 'it closes when …',
+    instance:
+      'objectstack#15815 `5551946223` (2026-09-05T12:52:22Z) — 「…assignee stripped in the same action; it closes when #15885 lands.」',
+    measured: true,
+  }),
+  Object.freeze({
+    line: /^[ \t]{0,3}#{1,6}[ \t]+[^\n]{0,24}验收/u,
+    spelling: '## 验收 — the acceptance section',
+    instance:
+      'the 「## 验收」 heading on 8 of the 202 open unassigned `pm:queue` cards on objectstack-ai/objectstack, read 2026-09-17; the filing card #18372 writes it 「## 验收(⛔ 不规定实现)」',
+    measured: true,
+  }),
+]);
+
+/**
+ * The ceiling on that frozen set — `H58_MARKER_ANCHOR_CAP`'s mechanism, for its
+ * reason: a cap on the ANCHOR SET is what keeps 「measured, then frozen」 from
+ * drifting into 「whatever seemed plausible」. A sixth entry is an argument about
+ * whether the set is still a set of readings, not a one-line edit.
+ */
+export const H67_CLOSING_CONDITION_ANCHOR_CAP = 5;
+
+/**
+ * Which cards this row can speak about AT ALL.
+ *
+ * `h66SpeaksAbout` CALLED rather than restated — `refsOnlyLinksFor`'s
+ * discipline, for its reason. The two rows read one population from two
+ * channels (H66 the newest comment, this one the timeline), and a population
+ * that drifted apart would let a card be 「in the pool, unowned」 for one row and
+ * not the other with nothing saying so. Every refusal is therefore H66's, taken
+ * for H66's reasons: ⛔ ISSUES only, ⛔ closed cards out, ⛔ an unreadable
+ * `labels` out rather than read as unlabelled (#4690 on the one field that
+ * decides membership), ⛔ an ASSIGNED card out (H24's row), and ⛔ a card
+ * carrying a SECOND member of `PM_EXCLUSIVE_STATE_LABELS` out (H3's, H25's or
+ * H29's contradiction — a card the board still reads as somewhere else has not
+ * been offered to anybody).
+ *
+ * Exported for the reason every counting policy here is: the predicate that
+ * decides what is even counted is where a silent hole would live, and the
+ * summary's quadruple opens on `candidates`.
+ */
+export function h67SpeaksAbout(issue) {
+  return h66SpeaksAbout(issue);
+}
+
+/**
+ * Which candidates this run buys a page for, and which it defers — OLDEST
+ * FIRST, by the two legs of 取卡全序 this file can read for free.
+ *
+ * ⛔ The opposite of `h66BuyOrder`, deliberately, and the header carries the
+ * argument: H66 chases a fresh write, this one chases the card a dispatching
+ * seat reaches NEXT. An unreadable `created_at` sorts LAST rather than first
+ * (#4690's direction on every timestamp in this file), and `number` keeps the
+ * order total so two runs over one board agree.
+ *
+ * Pure and exported for the reason every budget here is: the thing that decides
+ * what gets READ AT ALL is where a silent hole would live, and a plan the
+ * self-test can drive offline is the only kind that can be pinned.
+ *
+ * @param {{ number?: number, created_at?: string, labels?: object[] }[]} issues
+ * @param {number} [cap]
+ * @returns {{ read: object[], deferred: object[] }}
+ */
+export function h67ReadOrder(issues, cap = H67_TIMELINE_READ_CAP) {
+  const rows = (Array.isArray(issues) ? issues : []).filter(Boolean);
+  const rank = (issue) => {
+    const labels = Array.isArray(issue?.labels) ? labelNames(issue) : [];
+    const at = H67_SELECTION_ORDER_LABELS.findIndex((l) => labels.includes(l));
+    return at === -1 ? H67_SELECTION_ORDER_LABELS.length : at;
+  };
+  const age = (issue) => {
+    const parsed = Date.parse(issue?.created_at ?? '');
+    return Number.isFinite(parsed) ? parsed : Infinity;
+  };
+  const ordered = [...rows].sort(
+    (a, b) =>
+      rank(a) - rank(b) || age(a) - age(b) || Number(a?.number ?? 0) - Number(b?.number ?? 0),
+  );
+  const limit = Number.isFinite(cap) && cap > 0 ? Math.floor(cap) : 0;
+  return { read: ordered.slice(0, limit), deferred: ordered.slice(limit) };
+}
+
+/**
+ * What ONE merged PR body declares about card `n` — the discriminator
+ * acceptance ① asks for, in this file's own four grammars.
+ *
+ * ⛔ Bound PER CARD NUMBER, as H7 binds: a PR that is `Fixes #A` and `Part of
+ * #B` declares one relation to each, never one to both.
+ *
+ * `none` is a real answer and not an error: a `cross-referenced` event is
+ * raised by a mention ANYWHERE on the PR, its comments included, so a PR whose
+ * BODY never names the card reaches the card's timeline with no declaration at
+ * all — which is the weakest evidence of delivery there is, and the row says so
+ * rather than upgrading it.
+ */
+export function h67DeclaredRelation(body, n, repo) {
+  const target = String(n);
+  const text = String(body ?? '');
+  const keyword = closingKeywordTargets(text).get(target);
+  if (keyword) return { relation: 'closing', keyword };
+  if (partOfTargets(text).has(target)) return { relation: 'part-of', keyword: null };
+  if (refsTargets(text).has(target)) return { relation: 'refs', keyword: null };
+  // `referencedNumbers` rather than a fifth grammar — H59's own call, for its
+  // reason: a mention is a POINTER A READER FOLLOWS, so fenced blocks go and an
+  // inline span STAYS. Measured on the filer's instance three: PR #17309's body
+  // opens 「Addresses items 1 and 3 of #16565」 and declares nothing at all.
+  if (referencedNumbers(text, repo).has(Number(n))) return { relation: 'mention', keyword: null };
+  return { relation: 'none', keyword: null };
+}
+
+/**
+ * The READ pass audit (#18372) — read off this file's own source, the detector
+ * shape `h66BuyAudit`, `seatWindowAudit` and `familyRegistryCoverage` use, and
+ * for their reason: the pass lives inside `sweepInto`, which takes no
+ * injectable transport, so the two properties a spy would prove have to be
+ * proved on the text.
+ *
+ *   timelineSites   call sites requesting a card TIMELINE page. Exactly TWO in
+ *                   this file — H59's per-card read and this row's — and a
+ *                   third is a new row quietly spending a page per card against
+ *                   a budget three rows now share.
+ *   cacheWrites     `commentCache` writes, file-wide. This pass must add NONE:
+ *                   a timeline page's `commented` events are the thread's
+ *                   OLDEST window — the object #18312 measured as five weeks
+ *                   stale — and handing it to H2's claim read or H4's fallback
+ *                   would manufacture an absence out of a window nobody chose.
+ *
+ * ⚠️ The needles are ASSEMBLED, for `SEAT_MEMO_OPEN`'s measured reason: a
+ * literal one would be found at its own declaration in this very file.
+ *
+ * @param {string} [source] — defaults to this file; injectable for the self-test.
+ * @returns {{ timelineSites: number, cacheWrites: number }}
+ */
+export function h67ReadAudit(source) {
+  const text =
+    typeof source === 'string' ? source : readFileSync(fileURLToPath(import.meta.url), 'utf8');
+  const timeline = new RegExp(['/issues/', '\\$\\{[A-Za-z.]+\\}', '/timeline', '\\?'].join(''), 'g');
+  const cache = new RegExp(['commentCache', '\\.set\\('].join(''), 'g');
+  return {
+    timelineSites: (text.match(timeline) ?? []).length,
+    cacheWrites: (text.match(cache) ?? []).length,
+  };
+}
+
+/**
+ * One page of a card's timeline, projected to the four things this row reads.
+ *
+ * @param {object[]|null|undefined} rows — ONE timeline page, oldest-first.
+ * @param {number|string} cardNumber — the card the page belongs to.
+ * @param {string} repo — `owner/name` of the swept board.
+ * @param {number} [pageSize]
+ * @returns {{ complete: boolean, merged: object[], open: number[],
+ *   abandoned: number[], comments: object[] }}
+ */
+export function h67TimelineDelivery(rows, cardNumber, repo, pageSize = H67_TIMELINE_PAGE_SIZE) {
+  const page = Array.isArray(rows) ? rows : [];
+  const out = { complete: page.length < pageSize, merged: [], open: [], abandoned: [], comments: [] };
+  if (!Array.isArray(rows)) return { ...out, complete: false };
+  const want = String(repo ?? '').toLowerCase();
+  for (const row of page) {
+    if (row?.event === 'commented') {
+      out.comments.push({ body: String(row?.body ?? ''), created_at: row?.created_at ?? null });
+      continue;
+    }
+    if (row?.event !== 'cross-referenced') continue;
+    const src = row?.source?.issue;
+    if (!src?.pull_request) continue;
+    const number = Number(src?.number);
+    if (!Number.isFinite(number)) continue;
+    const from = String(src?.repository?.full_name ?? want).toLowerCase();
+    const foreign = from !== want;
+    const at = Date.parse(src.pull_request?.merged_at ?? '');
+    if (Number.isFinite(at)) {
+      // ⛔ A foreign PR's bare `#N` names a card in ITS repo, not this board's,
+      // so its body is NOT read for a relation — it is carried as `foreign` and
+      // the row says the relation went unread rather than inventing one.
+      const declared = foreign
+        ? { relation: 'foreign', keyword: null }
+        : h67DeclaredRelation(src?.body ?? '', cardNumber, repo);
+      out.merged.push({
+        number,
+        repo: from,
+        foreign,
+        mergedAt: src.pull_request.merged_at,
+        at,
+        relation: declared.relation,
+        keyword: declared.keyword,
+      });
+      continue;
+    }
+    if (src?.state === 'open') out.open.push(number);
+    else out.abandoned.push(number);
+  }
+  return out;
+}
+
+/**
+ * The card's own closing condition, as a quoted LINE — body first, then the
+ * timeline's comments NEWEST-first, because the newest record supersedes an
+ * older one and the measured instance is a comment.
+ *
+ * Fenced code is blanked through `stripMarkdownCode`'s `{ inline: false }`
+ * reading — H17's, H58's and H66's fence parser, shared rather than re-derived
+ * — so a condition quoted inside a fence declares nothing, while an inline code
+ * span on the line survives to be undecorated by `undecorateProseLine`.
+ *
+ * @returns {{ spelling: string, instance: string, channel: string, line: string }|null}
+ */
+export function h67ClosingConditionLine(body, comments) {
+  const rows = Array.isArray(comments) ? comments : [];
+  const newestFirst = [...rows]
+    .map((row, index) => ({ row, index, stamp: Date.parse(row?.created_at ?? '') }))
+    .sort(
+      (a, b) =>
+        (Number.isFinite(b.stamp) ? b.stamp : -Infinity) -
+          (Number.isFinite(a.stamp) ? a.stamp : -Infinity) || b.index - a.index,
+    )
+    .map((entry) => ({ text: String(entry.row?.body ?? ''), channel: 'the thread' }));
+  for (const source of [{ text: String(body ?? ''), channel: 'the body' }, ...newestFirst]) {
+    for (const raw of stripMarkdownCode(source.text, { inline: false }).split(/\r?\n/)) {
+      for (const anchor of H67_CLOSING_CONDITION_ANCHORS) {
+        if (!anchor.line.test(raw)) continue;
+        const written = undecorateProseLine(raw).trim();
+        return {
+          spelling: anchor.spelling,
+          instance: anchor.instance,
+          channel: source.channel,
+          line:
+            written.length > H67_QUOTE_LIMIT
+              ? `${written.slice(0, H67_QUOTE_LIMIT)}…`
+              : written,
+        };
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * H67 — null when clean OR unjudged, else the finding sentence.
+ *
+ * Three input states for the page, never two (#4690), the H4 contract verbatim:
+ * `undefined` never bought, `null` bought and unreadable — both UNJUDGED and
+ * kept apart from clean by the coverage quadruple — and a projection, judged.
+ * A projection whose `complete` is false is UNJUDGED for the same reason: a
+ * full page may hide the very event that would clear or found the row.
+ *
+ * @param {object} issue — a card from a listing this sweep already holds.
+ * @param {ReturnType<typeof h67TimelineDelivery>|null|undefined} timeline
+ * @param {string} repo — `owner/name` of the swept board, for the row's text.
+ */
+export function h67QueuedCardWithMergedDelivery(issue, timeline, repo) {
+  if (timeline === undefined || timeline === null) return null;
+  if (!h67SpeaksAbout(issue)) return null;
+  if (!timeline.complete) return null;
+  const merged = Array.isArray(timeline.merged) ? timeline.merged : [];
+  if (merged.length === 0) return null;
+  // The B bucket. An open PR is work still in flight, and the filer counted it
+  // as its own bucket for exactly that reason.
+  if ((timeline.open ?? []).length > 0) return null;
+  const newestMerge = merged.reduce((max, m) => (m.at > max ? m.at : max), -Infinity);
+  const claim = latestMarkedComment(timeline.comments ?? [], CLAIM_COMMENT_MARKER);
+  const release = latestMarkedComment(timeline.comments ?? [], RELEASE_COMMENT_MARKER);
+  // A marker NEWER than the newest merge is a seat that looked after the
+  // delivery landed — H49's stand-down, for H49's reason.
+  const answered = [claim, release].filter((m) => m && m.stamp !== null && m.stamp > newestMerge);
+  if (answered.length > 0) return null;
+  // …and one whose stamp does not parse cannot be placed against the merge. It
+  // LISTS rather than clears, which is H66's call on an unreadable record and
+  // the #4690 direction for a listing.
+  const unplaceable = [claim, release].filter((m) => m && m.stamp === null).length;
+  const byRelation = (name) => merged.filter((m) => m.relation === name);
+  const closing = byRelation('closing');
+  const partial = [...byRelation('part-of'), ...byRelation('refs')];
+  const nameMerge = (m) =>
+    `${m.foreign ? `${m.repo}#${m.number}` : `#${m.number}`} (merged ${String(m.mergedAt).slice(0, 10)}, ` +
+    `${
+      m.relation === 'closing'
+        ? `\`${m.keyword} #${issue.number}\``
+        : m.relation === 'part-of'
+          ? `\`Part of #${issue.number}\``
+          : m.relation === 'refs'
+            ? `\`Refs #${issue.number}\``
+            : m.relation === 'foreign'
+              ? 'a FOREIGN repo, so its body was ⛔ not read for a relation'
+              : m.relation === 'mention'
+                ? `a BARE mention of \`#${issue.number}\`, with NO relation keyword bound to it`
+                : 'NO reference to this card in its body at all — the cross-reference came from somewhere else on the PR'
+    })`;
+  const bucket =
+    closing.length > 0
+      ? 'A merged PR BINDS A CLOSING KEYWORD to this card and the card is still open — the ' +
+        'strongest evidence here, and still ⛔ NOT a criterion: GitHub either never fired, or ' +
+        'somebody reopened the card, and only the thread says which.'
+      : partial.length > 0
+        ? '⛔ NOT A CANDIDATE FOR CLOSING. Every merged PR here declares `Part of` / `Refs` and ' +
+          'nothing more, which is H49\'s shape and the partial-landing rule\'s: 「' +
+          PARTIAL_LANDING_RULE +
+          '」 — the remainder goes BACK to the pool and is re-dispatched, so a card in this shape ' +
+          'is lawfully queued and what is owed is a RE-READ of the remainder, ⛔ never a close.'
+        : 'No merged PR here declares ANY relation to this card in its body — the cross-reference ' +
+          'was raised by a mention, possibly in a comment. Weakest evidence of the three, and it ' +
+          'is listed because the filer\'s own instance #16565 had exactly this shape and its work ' +
+          'really was done.';
+  const condition = h67ClosingConditionLine(issue?.body ?? '', timeline.comments ?? []);
+  return (
+    `\`pm:queue\` with NO assignee while ${merged.length} cross-referenced PR(s) have MERGED on ` +
+    `this card and NONE is open — ${merged.map(nameMerge).join('; ')}` +
+    `${(timeline.abandoned ?? []).length > 0 ? `; ⚠️ ${timeline.abandoned.length} further linked PR(s) CLOSED WITHOUT MERGING (${timeline.abandoned.map((n) => `#${n}`).join(', ')}), which delivers nothing and clears nothing` : ''}. ` +
+    `${bucket} ` +
+    `Closing condition: ${
+      condition
+        ? `the card states one in ${condition.channel} — 「${condition.line}」 (anchor 「${condition.spelling}」, measured on ${condition.instance})`
+        : `⛔ NONE this row can find, against ${H67_CLOSING_CONDITION_ANCHORS.length} frozen anchor(s) in the body or on the thread — so the hand read has nothing to check the landing against, which is itself the reading`
+    }. ` +
+    `Newest ownership record: ${
+      unplaceable > 0
+        ? `${unplaceable} \`Claim:\`/\`Release:\` marker(s) whose \`created_at\` does NOT parse, so they cannot be PLACED against the merge — listed rather than cleared, because an ownership record nobody can date, on a card the queue view calls ready, is exactly what a human should look at`
+        : 'no `Claim:` and no `Release:` newer than the newest merge — nobody has looked at this card SINCE the delivery landed'
+    }. ` +
+    'Why it matters: the queue length every seat reads — 取卡全序, the priority sort, a batch ' +
+    'decision — counts this card as work to hand out, and a batch state transition that set the ' +
+    'label without re-reading each card\'s own closing condition is how the tail grew (#18372, ' +
+    'measured on 2026-09-09: 38 of one lane\'s 63 unassigned queued cards had a PR already ' +
+    'merged on them). Remedy: JUDGE BY HAND, card by card. ⛔ 「有已合 PR」 is NOT a closing ' +
+    'criterion — the filer\'s #15815 (work done) and #16529 (a true remainder, correctly KEPT) ' +
+    'are mechanically indistinguishable from each other. ⛔ And before closing anything, carry ' +
+    'the thread\'s residual readings out into a NEW card first: they are other seats\' ' +
+    'after-the-fact measurements, and closing buries them — 「a second card would be ' +
+    '**invisible** to whoever fixes this one」 (#15815; the two closures that followed this rule ' +
+    'filed #18343 and #18364 first). ⚠️ LOWER BOUND, two ways: a delivery that left NO ' +
+    'cross-reference on the timeline is invisible to this instrument; and the cap of ' +
+    `${H67_TIMELINE_READ_CAP} page(s) leaves the rest of the queue NOT ATTEMPTED. A DECORATED ` +
+    'ownership line (`**Release:** …`) WAS a third way and is no longer: `markerMatches` reads ' +
+    'it, and a spelling that reading still refuses is named as a NEAR MISS on the summary line ' +
+    'rather than dropped. Report-only ' +
+    'patrol INPUT: ⛔ nothing is closed, ⛔ no label is written, ⛔ no state is proposed, and this ' +
+    `row judges NONE of the ${repo ? `${repo} ` : ''}A-bucket cards for anybody — it says where to look.`
   );
 }
 
@@ -15352,15 +17475,118 @@ export function h65TierlessRoundArtefactRow(hit, comment, total = 1) {
 export const OUTPUT_FORMATS = ['plain', 'markdown'];
 
 /**
- * GitHub's hard cap on an issue body, and the budget the markdown renderer
- * keeps under it. A body that exceeds the cap is REJECTED by the API — the
- * whole run's report would vanish over one long row — so the renderer trims
- * and SAYS it trimmed. Silent truncation is the #4690 shape (an unreadable
- * result must not read as a clean one), so the omission notice is part of the
- * rendered body, never a log line the anchor's reader never sees.
+ * GitHub's cap on an issue body, in UTF-8 BYTES, and the budget the markdown
+ * renderer keeps under it.
+ *
+ * ## The number is MEASURED now, and it replaces one that was false twice over
+ *
+ * This constant read 65,536 and carried no provenance — no unit, no reading,
+ * no date. It was wrong in BOTH directions at once, which is what got it filed
+ * (#18664):
+ *
+ *   TOO STRICT WHERE IT CUTS   far larger bodies store fine. The filing seat
+ *     read objectstack#6015 at 150,507 chars / 257,945 bytes, byte-complete on
+ *     read-back; re-read on 2026-09-17 after that card had been compacted it
+ *     was still 72,754 chars / 125,561 bytes — past 65,536 in EITHER unit, so
+ *     no reading of the old number survives its own re-measurement.
+ *   BLIND WHERE THE REFUSAL LIVES   a real boundary sits four times higher and
+ *     nothing was watching that band. And crossing it is SILENT: the platform
+ *     keeps the OLD body, answers 200, and reports nothing
+ *     (`post-stamped.mjs`'s `EXIT_NOT_STORED` exists for exactly this).
+ *
+ * So it was bisected rather than guessed — 17 measurement writes on
+ * 2026-09-17, on a throwaway issue opened for the purpose and closed
+ * `completed` with the bisection table as its body (objectstack#18793), every
+ * write read back byte-exact:
+ *
+ *   262,144 bytes  STORED   (read-back class `identical`)
+ *   262,145 bytes  REFUSED  (old body kept, nothing reported)
+ *
+ * ⭐ One value, bracketed on BOTH sides — 256 KiB exactly. ⛔ It is not this
+ * number because 256 KiB is a good-looking guess; the filing card refused that
+ * guess by name. The bisection LANDED here, and one byte more was measured
+ * refused.
+ *
+ * ⛔ And the unit is BYTES, measured rather than assumed. A body of 262,145
+ * bytes carrying only 222,145 characters (a run of 3-byte U+4E2D plus ASCII
+ * padding) was REFUSED — a cap counted in characters, or in UTF-16 code units,
+ * would have taken it with 40,000 to spare. The same multi-byte shape at
+ * 262,144 bytes / 222,144 characters STORED, so what refused it is the one
+ * extra byte and not the content. That control is why `renderMarkdown` counts
+ * `bodyBytes` and never `.length`: these reports are largely CJK prose, where
+ * the two numbers differ by 3×, in the direction that loses the body.
+ *
+ * ## The budget is not the cap, and it did NOT move with it
+ *
+ * `MARKDOWN_BODY_BUDGET` is the renderer's own working budget, in the same
+ * unit. It stays 60,000 BYTES: a cap that was mis-measured is a correction to
+ * a reading, never a licence to print more, and how much the anchor issue
+ * prints is a fold decision nobody has taken. The margin is stated so it can
+ * be checked instead of recalled — the budget sits 202,144 bytes below the
+ * measured cap, which is 22.9% of it.
+ *
+ * A body over the CAP does not land at all — the whole run's report would
+ * vanish over one long row — so the renderer trims and SAYS it trimmed. Silent
+ * truncation is the #4690 shape (an unreadable result must not read as a clean
+ * one), so the omission notice is part of the rendered body, never a log line
+ * the anchor's reader never sees.
  */
-export const ISSUE_BODY_LIMIT = 65536;
+export const ISSUE_BODY_LIMIT = 262144;
 export const MARKDOWN_BODY_BUDGET = 60000;
+
+/**
+ * The largest COMMENT body the platform stores, in the same unit: UTF-8 BYTES.
+ *
+ * The sibling surface, bisected separately. `post-stamped.mjs` imports this to
+ * name the cap in a size refusal, and it is declared HERE rather than there
+ * because this file is already where this fleet's measured body caps live: five
+ * workflow comments send a reader to `ISSUE_BODY_LIMIT` in this file for the
+ * number, and the 65,536 folklore this pair replaces is the kind that grows back
+ * wherever one of two caps is kept somewhere else.
+ *
+ * Bisected on a throwaway probe opened for it (objectstack#18826, 2026-09-17),
+ * twelve measurement writes, every one read back byte-exact:
+ *
+ *   262,144 bytes  STORED   (read-back class `identical`)
+ *   262,145 bytes  REFUSED  (HTTP 422, nothing written)
+ *
+ * ⭐ The same value as `ISSUE_BODY_LIMIT`, reached by a SECOND, independent
+ * bisection — two surfaces, two brackets, one number: 256 KiB exactly. ⛔ And
+ * therefore two constants and not one: two measurements that agree is not one
+ * measurement, and the day the platform moves one surface a shared number would
+ * lie about the other.
+ *
+ * ⛔ The unit is measured here too. A comment of 262,145 bytes carrying only
+ * 222,145 characters (a run of 3-byte U+4E2D plus ASCII padding) was REFUSED —
+ * a cap counted in characters, or in UTF-16 code units, would have taken it with
+ * 40,000 to spare — and the same multi-byte shape at 262,144 bytes / 222,144
+ * characters STORED.
+ *
+ * ⚠️ What the two surfaces do NOT share is the SHAPE of the refusal. Over the
+ * cap, a comment create answers a real HTTP 422 and writes nothing, while an
+ * issue-body update refuses SILENTLY — 200, the old body kept, nothing reported
+ * (#18793). `post-stamped.mjs` carries one exit code for each.
+ *
+ * ⛔ And the platform's own 422 text says `maximum is 65536 characters`, which
+ * is false in unit AND value: write 3 of that probe stored a 65,537-character
+ * comment and write 4 a 262,144-byte one, four times the claimed maximum. ⛔
+ * Nothing here is derived from that sentence.
+ */
+export const COMMENT_BODY_LIMIT = 262144;
+
+/**
+ * A body's size as the PLATFORM counts it: UTF-8 bytes.
+ *
+ * ⛔ Never `.length` for anything judged against `ISSUE_BODY_LIMIT` or
+ * `MARKDOWN_BODY_BUDGET`. A JS string's `.length` is UTF-16 code units, the
+ * refusal above is measured to be in bytes, and this file's rows are largely
+ * CJK prose: a body a character count calls 60,000 can be 180,000 bytes. H6
+ * next door has counted bytes since it was written (`h6SeatBodyOversized`);
+ * this makes the renderer agree with it and with the platform.
+ */
+export function bodyBytes(text) {
+  return Buffer.byteLength(String(text ?? ''), 'utf8');
+}
 
 /** Is this finding one of H13's louder self-declared-P0 rows? */
 export function isLoudFinding(message) {
@@ -15706,6 +17932,68 @@ export const SWEEP_COUNT_KEYS = [
   'roundTierComments',
   'roundTierArtefacts',
   'roundTierRows',
+  // H66's coverage triple (#18299). `queueReleaseCandidates` is how many open
+  // unassigned `pm:queue` cards the row could speak about at all
+  // (`h66SpeaksAbout`) and `queueReleaseThreadRead` how many of those had a
+  // comment thread ALREADY in hand — this row buys none, and on an UNASSIGNED
+  // population that gap is most of it, because H2 buys a thread only for an
+  // assigned card. `queueReleaseRows` is what was FILED, so a run that judged
+  // nothing and a queue with nothing to judge stay distinguishable.
+  'queueReleaseCandidates',
+  'queueReleaseThreadRead',
+  // …and the BOUNDED buy leg's own counters (#18299 patch round).
+  // `queueReleaseBought` is how many pages this run actually paid for,
+  // `queueReleaseCap` the ceiling it was allowed (a CONSTANT on the contract
+  // rather than a count, so the clause can say `of cap K` without a second
+  // import), `queueReleaseDeferred` the candidates the cap did NOT attempt —
+  // not attempted is not clean, H40's posture — and `queueReleaseUnjudged` the
+  // cards whose page failed or whose newest page could not be LOCATED.
+  'queueReleaseBought',
+  'queueReleaseCap',
+  'queueReleaseDeferred',
+  'queueReleaseUnjudged',
+  'queueReleaseRows',
+  // H67's coverage QUADRUPLE (#18372). `queueDeliveryCandidates` is the whole
+  // unassigned queue population (`h67SpeaksAbout`, which IS H66's),
+  // `queueDeliveryRead` how many of them got their one timeline page this run,
+  // `queueDeliveryRows` what was LISTED, and `queueDeliveryDeferred` the
+  // candidates the cap did NOT attempt — the fourth member, and the one the
+  // filing card demands, because a partial read published as a zero is the fake
+  // number it is about. `queueDeliveryCap` is a CONSTANT on the contract rather
+  // than a count, so the clause can say `cap K` without a second import, and
+  // `queueDeliveryUnjudged` is the two ways a bought page still answers nothing
+  // (the fetch failed, or the page came back FULL).
+  'queueDeliveryCandidates',
+  'queueDeliveryRead',
+  'queueDeliveryCap',
+  'queueDeliveryDeferred',
+  'queueDeliveryUnjudged',
+  'queueDeliveryRows',
+  // The ownership-marker NEAR-MISS census (#18680). `markerNearMissJudged` is
+  // the DENOMINATOR — how many threads the census actually read — and it is the
+  // member that keeps a census which read nothing separable from a board with
+  // no near miss on it: this pass buys no fetch, so a card no other row needed a
+  // thread for is simply not judged. `markerNearMissNamed` is an ARRAY of
+  // strings rather than a counter, riding the same contract for
+  // `awaitingLegacyOldest`'s reason — a count alone tells a seat there is
+  // something to find and ⛔ not where.
+  'markerNearMissLines',
+  'markerNearMissCards',
+  'markerNearMissJudged',
+  'markerNearMissNamed',
+  // The census POPULATION and the announcement CHANNEL (#18926). Both are
+  // EXCLUSIONS, so both ride this contract for one reason: an exclusion a report
+  // cannot print is indistinguishable from the over-reading it replaced.
+  // `markerNearMissSeatPosts` counts the `pm:seat` threads that left the
+  // population and `markerNearMissSeatLines` the near-miss lines they carried —
+  // the pair is what lets a reader reconstruct the pre-filter number.
+  // `markerNearMissAnnouncements` / `markerNearMissAnnounced` are the delivery
+  // reports, a count beside an ARRAY of names for `markerNearMissNamed`'s reason:
+  // a count alone tells a seat there is something to find and ⛔ not where.
+  'markerNearMissSeatPosts',
+  'markerNearMissSeatLines',
+  'markerNearMissAnnouncements',
+  'markerNearMissAnnounced',
   'refBeyond',
 ];
 
@@ -15828,6 +18116,23 @@ export function summaryLine(counts, findingCount) {
   const refDangling = counts.refDangling ?? 0;
   const refUnjudged = counts.refUnjudged ?? 0;
   const refDeferred = counts.refDeferred ?? 0;
+  // The near-miss census (#18680). Every member defaults, for the reason every
+  // count here does: the bare `summaryLine({}, 0)` is a pinned shape and must
+  // ⛔ never render `undefined`. `markerNearMissNamed` defaults to an ARRAY
+  // rather than a string — the clause joins it, and a caller that gathered no
+  // names must render a sentence, not throw.
+  const nearMissLines = counts.markerNearMissLines ?? 0;
+  const nearMissCards = counts.markerNearMissCards ?? 0;
+  const nearMissJudged = counts.markerNearMissJudged ?? 0;
+  const nearMissNamed = Array.isArray(counts.markerNearMissNamed) ? counts.markerNearMissNamed : [];
+  // The population and the announcement channel (#18926), defaulting for the
+  // reason every count here does, and the ARRAY defaulting to an array.
+  const nearMissSeatPosts = counts.markerNearMissSeatPosts ?? 0;
+  const nearMissSeatLines = counts.markerNearMissSeatLines ?? 0;
+  const nearMissAnnouncements = counts.markerNearMissAnnouncements ?? 0;
+  const nearMissAnnounced = Array.isArray(counts.markerNearMissAnnounced)
+    ? counts.markerNearMissAnnounced
+    : [];
   const refBeyond = counts.refBeyond ?? 0;
   return (
     `check-half-states: swept ${counts.issues} open pm-/p0-labeled issue(s), ${counts.unscoped} open ` +
@@ -15931,7 +18236,11 @@ export function summaryLine(counts, findingCount) {
         ? ` — the ${btTargets - btResolved} unresolved target(s) are named on their own cards' rows, and ` +
           'those rows sort ABOVE the size trim so they cannot be what a truncated body drops (#11218: ' +
           'this clause used to be an unconditional promise, and on the 2026-08-25T02:08Z sweep it was ' +
-          'false — 199 rows were trimmed and not one rendered row carried an unresolved target)'
+          'false — 199 rows were trimmed and not one rendered row carried an unresolved target). ' +
+          '⚠️ One class is named only where its card already has a row: a target reaching a card ONLY ' +
+          'through the comment archive beside a body that states its own `Blocked-by:` set is outside ' +
+          'what H19 judges, so it rides a row rather than founding one (#18379) — it is a spent line, ' +
+          'and the row it used to found was unclearable by construction'
         : ''
     }` +
     // #13650: this terminator is UNCONDITIONAL, and belongs to the CLAUSE
@@ -16217,6 +18526,99 @@ export function summaryLine(counts, findingCount) {
     'cache itself, so no other row\'s corpus moves here. An artefact OLDER than that page is outside ' +
     'this row by construction and a post whose page could not be read is UNJUDGED rather than clean, ' +
     'so the rows are a LOWER BOUND. ' +
+    // H66's coverage triple (#18299). UNCONDITIONAL like every other window's,
+    // and it is the only place three things are visible: how thin this row's
+    // corpus is (it buys nothing and its population is the one H2 never fetches
+    // for), that the canonical `Release:` line had ZERO instances when the row
+    // was measured, and that the rows are therefore a lower bound rather than a
+    // census of the queue.
+    `Released queue cards (H66): ${counts.queueReleaseCandidates ?? 0} open unassigned \`pm:queue\` ` +
+    `card(s) could be spoken about, ${counts.queueReleaseThreadRead ?? 0} with a comment thread ` +
+    `ALREADY in hand, ${counts.queueReleaseBought ?? 0} NEWEST comment page(s) BOUGHT this run ` +
+    `(cap ${counts.queueReleaseCap ?? H66_THREAD_BUY_CAP}` +
+    `${(counts.queueReleaseDeferred ?? 0) > 0 ? `, ${counts.queueReleaseDeferred} candidate(s) NOT ATTEMPTED at that cap` : ''}), ` +
+    `${counts.queueReleaseRows ?? 0} listed. ${counts.queueReleaseUnjudged ?? 0} card(s) stayed ` +
+    'UNJUDGED — a page whose fetch failed, or a carrier whose `comments` count is unreadable and ' +
+    'whose first page came back FULL, so the newest comment could not be LOCATED; neither is clean ' +
+    '(#4690), and a candidate the cap did not attempt is not clean either. The buy is ONE page per ' +
+    'card, the NEWEST one, located from the carrier\'s own `comments` count through H65\'s helpers ' +
+    '— ⛔ never page 1 on a long thread, because GitHub serves issue comments OLDEST-FIRST — and ' +
+    'candidates are ordered NEWEST-TOUCHED first, because a release is a write on the card. The ' +
+    'free half is unchanged: a thread another row already paid for costs nothing here. ⚠️ Measured ' +
+    '2026-09-16 over 29 threads on two boards, the canonical `Release:` line appeared ZERO times, ' +
+    'so the live leg is the release ANNOUNCEMENT heading and the rows are a LOWER BOUND. ⛔ A ' +
+    'LISTING, never a verdict: the remedy is a hand read, and no state is proposed for what it ' +
+    'lists. ' +
+    // H67's coverage QUADRUPLE (#18372). UNCONDITIONAL like every other
+    // window's, and it is the only place four things are visible: how big the
+    // unassigned queue population actually is, how much of it this run READ,
+    // how much it LISTED, and how much it never attempted at the cap — the
+    // fourth member is the one the filing card demands, because 「a partial read
+    // published as a zero」 is precisely the fake number it is about.
+    `Queued cards with a merged delivery (H67): ${counts.queueDeliveryCandidates ?? 0} open ` +
+    `unassigned \`pm:queue\` card(s) could be spoken about, ${counts.queueDeliveryRead ?? 0} had ONE ` +
+    `timeline page READ this run (cap ${counts.queueDeliveryCap ?? H67_TIMELINE_READ_CAP} page(s)), ` +
+    `${counts.queueDeliveryRows ?? 0} LISTED, ` +
+    `${counts.queueDeliveryDeferred ?? 0} NOT ATTEMPTED at that cap. ` +
+    `${counts.queueDeliveryUnjudged ?? 0} card(s) stayed UNJUDGED — a page whose fetch FAILED (⛔ no ` +
+    'retry on any status) or a page that came back FULL, which may hide a later merge, a later ' +
+    'OPEN PR or a later `Claim:`; neither is clean (#4690), and a candidate the cap did not ' +
+    'attempt is not clean either. The read is ONE page per card, page 1, because the timeline is ' +
+    'served OLDEST-FIRST and no listing payload carries an event count to locate a newest page ' +
+    'from — H59\'s contract, and this row has no free half at all, because nothing else in this ' +
+    'file caches a timeline. Candidates are ordered OLDEST-FIRST — the OPPOSITE of H66\'s — ' +
+    'because the order in force is 「清不空的那一刻起改最老优先」 and the cards a seat reaches ' +
+    'NEXT are the ones that must have been read; the plan models the priority and age legs of ' +
+    '取卡全序 only, ⛔ not `target:` board membership and ⛔ not the 「先 `Bug`」 tiebreak. ' +
+    '⚠️ Rows are a LOWER BOUND: a delivery that left NO cross-reference is invisible to this ' +
+    'instrument (the filer\'s own declared blind spot). A DECORATED `**Release:**` line WAS a ' +
+    'second way and is no longer — the ownership marker this row shares with H2/H47/H66 reads it ' +
+    'through `markerMatches`, and what that reading still refuses is named by the near-miss ' +
+    'clause below rather than lost. ⛔ A LISTING, never a ' +
+    'verdict, and 「有已合 PR」 is ⛔ not a closing criterion: the remedy on every row is a hand ' +
+    'read, with the thread\'s residual readings carried out into a new card BEFORE anything is ' +
+    'closed. ' +
+    // The ownership-marker NEAR-MISS census (#18680). UNCONDITIONAL, like
+    // every other window's clause, and for a reason this one owns: the whole
+    // point of the vocabulary is that a line the reader passed over must make a
+    // SOUND. A clause that rendered only when it had something to say would be
+    // indistinguishable from the silence it replaces — the census that read
+    // nothing and the census that found nothing would print identically.
+    `Ownership-marker near misses: ${nearMissLines} line(s) on ${nearMissCards} of ` +
+    `${nearMissJudged} thread(s) already in hand OPEN with \`Claim:\`/\`Release:\` in a spelling ` +
+    `the marker refuses even after decoration is removed, against ` +
+    `${OWNERSHIP_MARKER_NEAR_MISS_FORMS.length} NAMED form(s) ` +
+    `(${OWNERSHIP_MARKER_NEAR_MISS_FORMS.map((f) => f.id).join(', ')})` +
+    `${nearMissNamed.length > 0 ? ` — ${nearMissNamed.join('; ')}` : ''}` +
+    `${nearMissLines > nearMissNamed.length ? `, ${nearMissLines - nearMissNamed.length} further line(s) NOT NAMED at the ${OWNERSHIP_MARKER_NEAR_MISS_NAME_CAP}-entry cap` : ''}. ` +
+    'The reading itself is `markerMatches` — ONE place, sharing the `Blocked-by:` ' +
+    'family\'s stripper — so a DECORATED `**Release:**` line IS read and this census is what is ' +
+    'left over. ⛔ Report-only and ⛔ NEVER a half-state verdict by itself: a near miss is a line ' +
+    'no ownership row (H2/H47/H66/H67) counted, named with its card, its comment id and the ' +
+    'offending prefix so the next decoration is ADDED to the vocabulary instead of replaying this ' +
+    'silently. ⚠️ A LOWER BOUND twice over: it reads only the threads other rows already bought, ' +
+    'and only the forms the vocabulary names. ' +
+    // The two EXCLUSIONS (#18926), rendered UNCONDITIONALLY beside the census
+    // for the clause's own reason: a narrowing nobody can see is the
+    // over-reading it replaced, wearing a smaller number. Both members print
+    // their count even at zero, so a run where nothing was excluded and a run
+    // where the exclusions stopped being applied cannot print alike.
+    `${nearMissSeatPosts} \`pm:seat\` thread(s) are OUT of that population ` +
+    `(${nearMissSeatLines} near-miss line(s) not listed above): a seat post's ownership is its ` +
+    'BODY — the registration and the 🟢/⏳ title H5/H6 read — plus its AUDIT COMMENTS, and the ' +
+    'protocol never puts a `Claim:` comment on one, so what its comments carry is SHIFT NARRATION ' +
+    'in which a directive word opens a sentence. ⛔ COUNTED, never silently dropped: the two ' +
+    'numbers are what let a reader reconstruct what the unfiltered census printed. ' +
+    `${nearMissAnnouncements} further line(s) are release ANNOUNCEMENTS rather than refused ` +
+    'records — a heading whose word is the PARTICIPLE `Released`, whose remainder names the ' +
+    '`PR #n` that landed or the `pm:*` → `pm:*` transition it unblocked, and which names NO ' +
+    'session: a delivery report on a card nobody held, so no `Release:` is owed and there is no ' +
+    'unreadable record to normalise' +
+    `${nearMissAnnounced.length > 0 ? ` — ${nearMissAnnounced.join('; ')}` : ''}. ` +
+    'The reading is deliberately NARROW and every narrowing leaves the line in the census above: ' +
+    'HEADING forms only (`Release-landed: … (PR #n)` is a `separator` line and stays), the ' +
+    'PARTICIPLE only (`## Release: …` opens the directive and stays), and NO session token in ' +
+    'either spelling (a release that names its session is a record, readable or not, and stays). ' +
     `Report-only: findings are patrol input, not a gate verdict.`
   );
 }
@@ -16281,6 +18683,9 @@ export const SUMMARY_CLAUSE_ANCHORS = [
   ['h59Linkage', 'Merged-PR closing linkage (H59): '],
   ['h64SeatSigned', 'Unattributed seat content (H64): '],
   ['h65RoundTier', 'Triage round tiers (H65): '],
+  ['h66QueueRelease', 'Released queue cards (H66): '],
+  ['h67QueueDelivery', 'Queued cards with a merged delivery (H67): '],
+  ['markerNearMiss', 'Ownership-marker near misses: '],
   ['reportOnly', 'Report-only: '],
 ];
 
@@ -16369,8 +18774,8 @@ export function summaryClause(summary, key) {
  *   - read, nothing found → says the holds were READ and name no tracked file
  *   - read, rows          → the index
  *
- * @param {{ rows: Array<{issue: object, files: string[]}>, candidates?: number,
- *   probed?: number, tracked?: number|null }} [index]
+ * @param {{ rows: Array<{issue: object, files: string[]}>, candidates?: number, probed?: number,
+ *   tracked?: number|null, checkoutRoot?: string|null, checkoutOrigin?: string|null }} [index]
  * @param {{ markdown?: boolean }} [options]
  */
 export function renderTriggerIndex(index, { markdown = false } = {}) {
@@ -16379,6 +18784,10 @@ export function renderTriggerIndex(index, { markdown = false } = {}) {
   const probed = index.probed ?? 0;
   const candidates = index.candidates ?? 0;
   const read = `read on ${probed} of ${candidates} open \`pm:on-hold\` card(s)`;
+  // WHICH tree the oracle was read in (#19191) — printed knob or no knob, because a wrong-tree read
+  // is internally consistent and the tree it names is the only thing that distinguishes it.
+  const where = ` Read in ${index.checkoutRoot ? `\`${index.checkoutRoot}\`` : 'an unnamed tree'}` +
+    ` (\`origin\` ${index.checkoutOrigin ? `\`${index.checkoutOrigin}\`` : 'unresolved'}).`;
   const head = markdown
     ? ['### On-hold trigger-file index (H17)', '']
     : ['', 'On-hold trigger-file index (H17)'];
@@ -16387,7 +18796,7 @@ export function renderTriggerIndex(index, { markdown = false } = {}) {
     head.push(
       `⚠️ The tracked-file oracle (\`git ls-files\`) could not be read, so NO candidate path was ` +
         `validated and this index is EMPTY BY FAILURE, not by finding. Run the patrol from inside a ` +
-        `checkout. (${read}.)`,
+        `checkout. (${read}.)${where}`,
     );
     return head;
   }
@@ -16399,7 +18808,7 @@ export function renderTriggerIndex(index, { markdown = false } = {}) {
     `measured at 0-for-19 while it lived only as a remembered protocol step (#10034). Report-only: ` +
     `a card here is a hold in good standing, never a finding. Extraction is deterministic — every ` +
     `path shown is a tracked file; anything unverifiable was dropped rather than guessed, so this ` +
-    `list under-reports and never invents. (${read}; ${index.tracked} tracked file(s) in the oracle.)`;
+    `list under-reports and never invents. (${read}; ${index.tracked} tracked file(s) in the oracle.)${where}`;
   head.push(intro, '');
 
   if (rows.length === 0) {
@@ -16944,6 +19353,65 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   // one whose date is wrong, and this one whose tier is unnamed.
   H65: 'state',
 
+  // H66 is a `state` (#18299), and the three refusals are each taken on the
+  // refused band's OWN criterion rather than on this subject's vocabulary.
+  //
+  // ⛔ NOT `gate`: that band exists for the row that can tell a STRIPPED gate
+  // from an ungated card — an ABSENCE reading as a green light on a check that
+  // decides whether something may LAND. Nothing here decides a landing, and
+  // nothing is absent in the required sense: a label is PRESENT and says
+  // 「dispatchable」 while the newest record on the thread says the card was let
+  // go. Reading `gate` off 「something protective is missing」 alone is H57's
+  // refusal, taken for H57's reason.
+  // ⛔ NOT `stall`: that band's criterion is forward motion STOPPED with nothing
+  // else to move it, and BOTH halves fail. The card sits in the dispatch pool
+  // and any seat may pick it up at any hour — which is the defect, not a halt —
+  // and something else DOES move it: a seat's hand read, which is what disposed
+  // all four measured specimens within two days of the filing. H4 is `stall`
+  // because a blocked card with no machine-readable line is one the unlock scan
+  // can NEVER free; nothing here is waiting on a scan.
+  // ⛔ NOT `inventory`: the row alarms about ONE card. The population reading —
+  // how many queued cards this row could speak about and how many had a thread
+  // in hand — is a summary clause and takes no band at all (H39's shape).
+  //
+  // What is left is `state`'s criterion exactly: two carriers contradicting each
+  // other on a LIVE card, readable from the board, the repair a disposition a
+  // human writes. And it is H58's band, the row this one sits beside — one reads
+  // the card's own declaration of what it IS, this one reads the release record
+  // of where it WENT.
+  H66: 'state',
+
+  // H67 is a `state` (#18372), and the three refusals are each taken on the
+  // refused band's OWN criterion rather than on this subject's vocabulary.
+  //
+  // ⛔ NOT `gate`: that band exists for the row that can tell a STRIPPED gate
+  // from an ungated card — an ABSENCE reading as a green light on a check that
+  // decides whether something may LAND. Nothing here decides a landing, and
+  // nothing is absent in the required sense: a label is PRESENT and says
+  // 「dispatchable」 while the card's own timeline says a PR already landed on
+  // it. Reading `gate` off 「something protective is missing」 alone is H57's
+  // refusal, taken for H57's reason.
+  // ⛔ NOT `stall`: that band's criterion is forward motion STOPPED with
+  // nothing else to move it, and BOTH halves fail. The card sits in the
+  // dispatch pool and any seat may pick it up at any hour — which is the
+  // defect, not a halt — and something else DOES move it: a seat's hand read,
+  // which is exactly what disposed all three of the filer's instances inside
+  // one shift. H4 is `stall` because a blocked card with no machine-readable
+  // line is one the unlock scan can NEVER free; nothing here waits on a scan.
+  // ⛔ NOT `inventory`: the row alarms about ONE card. The population reading —
+  // how many queued cards could be spoken about, how many were read, how many
+  // the cap never attempted — is a summary clause and takes no band at all
+  // (H39's shape), even though the filing card's own number is a population of
+  // 38.
+  //
+  // What is left is `state`'s criterion exactly: two carriers contradicting
+  // each other on a LIVE card — a label that says 「work to hand out」 and a
+  // timeline that says 「a PR landed here」 — the repair a disposition a human
+  // writes. And it is H66's band, the row this one sits beside: one reads the
+  // RELEASE RECORD on the newest comment, this one reads the DELIVERY on the
+  // timeline.
+  H67: 'state',
+
   // H57 is a `stall` (#17132), and the three refusals are each taken on the
   // refused band's own criterion rather than on this subject's vocabulary —
   // which is how every band call since H51 has been argued.
@@ -17081,8 +19549,13 @@ export const FAMILY_LEDGER_CALLOUT_CAP = 12;
  * 3,754 B with enough unregistered
  * codes on top to reach `FAMILY_LEDGER_ROW_CAP`. 6,000 is the declared ceiling
  * above both, and it is under an EIGHTH of `MARKDOWN_BODY_BUDGET` (60,000) —
- * and reserved out of that budget, so the 5,536-byte headroom between the
- * budget and `ISSUE_BODY_LIMIT` (65,536) is untouched by it.
+ * and reserved out of that budget, so the headroom between the budget and
+ * `ISSUE_BODY_LIMIT` is untouched by it. ⚠️ Those two measured figures were
+ * taken with `.length` while this constant's name said BYTES; both are now
+ * measured in bytes (#18664) and the pins below take them that way, which is
+ * why they moved without the ceiling moving. The headroom they leave alone is
+ * 202,144 bytes, not the 5,536 this paragraph used to name against a cap of
+ * 65,536 that was never measured.
  *
  * ⚠️ The GUARANTEE is not this constant. `renderMarkdown` reserves the ledger's
  * own exact upper bound for the run in hand (`familyLedgerReservation`) BEFORE
@@ -17202,7 +19675,10 @@ export function familyLedgerReservation(rows, ledgerText) {
   const callout = probe.families
     .slice(0, FAMILY_LEDGER_CALLOUT_CAP)
     .reduce((s, e) => s + widen(e), 0);
-  return Math.max(ledgerText(0).length, ledgerText(rows.length).length) + table + callout;
+  // In BYTES, as this function's own header has always said and as the
+  // budget it is reserved out of now counts (#18664). The two digit-slack
+  // terms are ASCII digits, one byte each, so they are already byte-correct.
+  return Math.max(bodyBytes(ledgerText(0)), bodyBytes(ledgerText(rows.length))) + table + callout;
 }
 
 /**
@@ -17428,20 +19904,25 @@ export function renderMarkdown(findings, counts, options = {}) {
   const body = head.join('\n');
   const rendered = [];
   let shown = rows.length;
-  let used = body.length + indexText.length + ledgerReservation;
+  // ⛔ Every term here is in BYTES, because that is the unit the platform
+  // refuses in — measured, see `ISSUE_BODY_LIMIT` (#18664). `.length` would
+  // count UTF-16 code units, and these rows are largely CJK prose: a body this
+  // loop called 60,000 could be 180,000 bytes on the wire. The `+ 1` is the
+  // joining newline, one byte in UTF-8.
+  let used = bodyBytes(body) + bodyBytes(indexText) + ledgerReservation;
   for (let i = 0; i < rows.length; i++) {
     const [issue, code, msg] = rows[i];
     const line = `- **${code}** [#${issue.number}](${issue.html_url}) — ${msg}`;
     // Reserve room for the omission notice itself, so the trim can always
     // announce itself even when it fires on the very last row.
     const notice = `\n- _… ${rows.length - i} further row(s) omitted to fit GitHub's issue-body limit; the full list is in the workflow run log._`;
-    if (used + line.length + 1 + notice.length > MARKDOWN_BODY_BUDGET) {
+    if (used + bodyBytes(line) + 1 + bodyBytes(notice) > MARKDOWN_BODY_BUDGET) {
       rendered.push(notice.slice(1));
       shown = i;
       break;
     }
     rendered.push(line);
-    used += line.length + 1;
+    used += bodyBytes(line) + 1;
   }
   return `${body}${rendered.join('\n')}${ledgerText(shown)}${indexText}`;
 }
@@ -17496,6 +19977,12 @@ export const EXIT_PREREQUISITE_NOT_MET = 3;
  * identically — both are read at process START, which is the whole reason this
  * is a re-exec rather than an assignment (header, "Routing node through the
  * session proxy").
+ *
+ * `PROXY_REARM_GUARD` is THIS file's OWN guard and the plan's DEFAULT — it is
+ * not a name every instrument shares (#18939). A consumer that sets its own
+ * variable on the child it spawns passes that name to `proxyRearmPlan` as
+ * `guard`; the consumers that instead map their own name ONTO this one before
+ * calling keep working through the default, unchanged.
  */
 export const PROXY_FLAG = '--use-env-proxy';
 export const PROXY_REARM_GUARD = 'OS_HALF_STATES_PROXY_REARMED';
@@ -17527,16 +20014,46 @@ export function proxyRoute({ env = {}, execArgv = [] } = {}) {
  * VERBATIM into a sibling repo (#11217): a GitHub Actions runner carries no
  * proxy env, so it never re-execs and behaves exactly as it did before.
  *
- * @param {{ env?: Record<string,string|undefined>, execArgv?: string[], flagSupported?: boolean }} [ctx]
- * @returns {{ rearm: boolean, hint: boolean, flag?: string, reason: string }}
+ * ## The guard is a NAME, and it belongs to the CALLER (#18939)
+ *
+ * Every consumer sets its OWN variable on the child it re-execs, but this plan
+ * read ONE hard-coded name — this file's. So ANY sibling instrument's guard,
+ * once inherited, answered "already re-armed" for a tool that had never
+ * re-armed; the suppressed run then took the bypassed route and answered 401
+ * Bad credentials on every endpoint, `/rate_limit` included. A uniform 401 is a
+ * self-consistent story — the credential is dead — and it was read as one for
+ * about an hour against a channel that was alive the whole time. `guard` is
+ * therefore a parameter: a caller passes the name it actually sets, and only
+ * its own guard can stop its own re-exec.
+ *
+ * And a suppressed run must not be a SILENT one. `rearm: false, hint: false`
+ * prints nothing at any consumer, so the suppression left no line anywhere in
+ * the run log, which is the whole cost of that chain. This branch therefore
+ * sets `hint: true` — the one branch every consumer already prints — and its
+ * reason names the variable, the route and the 401 it would be mistaken for.
+ * It can only fire on the anomaly: a real re-exec's child carries `PROXY_FLAG`
+ * in its `execArgv` and is answered by the `routed` branch above, never here.
+ *
+ * @param {{ env?: Record<string,string|undefined>, execArgv?: string[], flagSupported?: boolean, guard?: string }} [ctx]
+ * @returns {{ rearm: boolean, hint: boolean, flag?: string, guarded?: string, reason: string }}
  */
-export function proxyRearmPlan({ env = {}, execArgv = [], flagSupported = true } = {}) {
+export function proxyRearmPlan({ env = {}, execArgv = [], flagSupported = true, guard = PROXY_REARM_GUARD } = {}) {
   const { proxy, routed } = proxyRoute({ env, execArgv });
   if (!proxy) {
     return { rearm: false, hint: false, reason: 'no HTTPS_PROXY in the environment — node fetch reaches api.github.com directly' };
   }
   if (routed) return { rearm: false, hint: false, reason: `already routed through the proxy (${PROXY_FLAG} / NODE_USE_ENV_PROXY=1)` };
-  if (env[PROXY_REARM_GUARD] === '1') return { rearm: false, hint: false, reason: 'already re-armed once this run' };
+  if (env[guard] === '1') {
+    return {
+      rearm: false,
+      hint: true,
+      guarded: guard,
+      reason:
+        `${guard}=1 is set and this process is NOT routed through ${proxy}, so the one re-exec this run allows ` +
+        `was already spent and every request below bypasses the proxy — if they answer 401 Bad credentials, that ` +
+        `inherited guard is why, and unsetting ${guard} is the fix rather than a new token`,
+    };
+  }
   if (!flagSupported) {
     return { rearm: false, hint: true, reason: `this node does not accept ${PROXY_FLAG}; every request will bypass ${proxy}` };
   }
@@ -18327,6 +20844,10 @@ async function listIssues(label, stats = {}) {
 }
 
 async function sweep(options = {}) {
+  // WHICH tree serves this board (#19191), BEFORE the probe: a foreign checkout reads nothing.
+  const originUrl = readOriginUrl();
+  const foreignTree = checkoutPrerequisite(OWNER_REPO, process.env, originUrl);
+  if (foreignTree) reportPrerequisiteNotMet(foreignTree);
   // Answered once, before any listing — so an unusable transport costs ONE
   // classified verdict instead of a raw HTTP status from whichever label page
   // happened to go first (`pm:dispatched`, in the failure #7412 recorded).
@@ -18379,6 +20900,20 @@ async function sweep(options = {}) {
     awaitingLegacy: 0,
     awaitingLegacyOldest: null,
     awaitingUndated: 0,
+    // The ownership-marker near-miss census (#18680). Initialised here for the
+    // reason every counter above is: a sweep that throws before the per-card
+    // loop must still render numbers rather than the string `undefined`, and
+    // the clause is unconditional.
+    markerNearMissLines: 0,
+    markerNearMissCards: 0,
+    markerNearMissJudged: 0,
+    markerNearMissNamed: [],
+    // The population and the announcement channel (#18926), initialised on the
+    // same grounds: an exclusion that renders `undefined` reads as no exclusion.
+    markerNearMissSeatPosts: 0,
+    markerNearMissSeatLines: 0,
+    markerNearMissAnnouncements: 0,
+    markerNearMissAnnounced: [],
     maintainerActionCandidates: 0,
     maintainerActionProbed: 0,
     // H56's census (#17314) — how many of the comments H44 already read carry
@@ -18509,6 +21044,8 @@ async function sweep(options = {}) {
     candidates: hold.candidates,
     probed: hold.probed,
     tracked: tracked ? tracked.size : null,
+    checkoutRoot: readRepoRoot(),
+    checkoutOrigin: originUrl,
   };
   // Instruction ④'s NOT-MEASURED population: H4's OWN rows, counted rather than
   // re-derived (one computation, two readers). It has to be read HERE because
@@ -19971,7 +22508,7 @@ export const SEEN_LABEL_PAGES = Object.freeze([
  */
 function readRepoRoot() {
   try {
-    return execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim() || null;
+    return gitRead(['rev-parse', '--show-toplevel']).trim() || null;
   } catch {
     return null;
   }
@@ -19979,7 +22516,7 @@ function readRepoRoot() {
 
 function readOriginUrl() {
   try {
-    return execFileSync('git', ['remote', 'get-url', 'origin'], { encoding: 'utf8' }).trim() || null;
+    return gitRead(['remote', 'get-url', 'origin']).trim() || null;
   } catch {
     return null;
   }
@@ -20344,6 +22881,21 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   // loop boundary, the same way H8's merged-PR window is.
   const seatMarkers = new Map();
 
+  // H66's deferred candidates (#18299), gathered here and bought at the FOOT of
+  // the sweep for the same split reason: the buy is ORDERED across the whole
+  // population and CAPPED, and neither can be decided one card at a time from
+  // inside this loop. A card whose thread is already in hand never lands here —
+  // it is judged in place, free, exactly as it was.
+  const queueReleaseDeferred = [];
+
+  // H67's candidates (#18372), gathered here and READ at the FOOT of the sweep.
+  // ⛔ There is no free half to split off the way H66 has one: nothing in this
+  // file caches a timeline, so every judged card costs its own page and the
+  // whole population is deferred by construction. The split exists for H66's
+  // other reason alone — the ORDER and the CAP are properties of the whole
+  // candidate set and cannot be decided one card at a time from inside a loop.
+  const queueDeliveryCandidates = [];
+
   for (const issue of seen.values()) {
     const labels = labelNames(issue);
     if (h1DispatchedNoAssignee(issue)) {
@@ -20562,6 +23114,70 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
       const releaseDesync = h47ReleaseRecordDesync(issue, releaseRows);
       if (releaseDesync) findings.push([issue, 'H47', releaseDesync]);
     }
+    // The ownership-marker NEAR-MISS census (#18680) — the sound a line makes
+    // when it LOOKS like a `Claim:`/`Release:` and the reading still refuses it.
+    //
+    // At the foot of this iteration for H47's reason and no other: it reads the
+    // thread out of `commentCache`, which every gate above this line fills, so
+    // asked at the top the cache would be empty on every iteration and the
+    // census would report a spotless board forever while looking healthy — the
+    // #4690 shape, self-inflicted by placement.
+    //
+    // ⛔ It buys NOTHING: `commentCache.get` never fetches, so a card no other
+    // row needed a thread for is simply NOT JUDGED, and `markerNearMissJudged`
+    // is the denominator that says so. ⛔ It files no finding and proposes no
+    // state either — a near miss is a line nobody read, never a half-state.
+    //
+    // ⛔ Gated on NOTHING else that costs a fetch: every population gate in this
+    // file exists to avoid buying one, and this pass buys none. A near miss on a
+    // card no row speaks about is exactly the reading that would otherwise be
+    // lost.
+    //
+    // ⚠️ It IS gated on one thing that costs nothing — `ownershipCensusSpeaksAbout`
+    // (#18926), a read of the label page's own `labels` array. A `pm:seat` post is
+    // out of the POPULATION, not out of the report: it is counted, its lines are
+    // counted, and the clause says so. The reason is at the predicate, and the
+    // difference between the two exclusions matters — a seat post leaves the
+    // population (no record is owed on the THREAD), a release announcement leaves
+    // the near-miss CHANNEL (the LINE is not a refused record).
+    {
+      const nearMissRows = commentCache.get(issue.number);
+      if (nearMissRows !== undefined && !ownershipCensusSpeaksAbout(issue)) {
+        // ⛔ Counted, never silently dropped — and the LINES are counted too,
+        // because the population statement a reader can act on is the one that
+        // lets them reconstruct what the old census printed.
+        stats.markerNearMissSeatPosts = (stats.markerNearMissSeatPosts ?? 0) + 1;
+        stats.markerNearMissSeatLines =
+          (stats.markerNearMissSeatLines ?? 0) + ownershipMarkerNearMisses(nearMissRows).length;
+      } else if (nearMissRows !== undefined) {
+        stats.markerNearMissJudged = (stats.markerNearMissJudged ?? 0) + 1;
+        const { misses, announcements } = ownershipMarkerNearMissCensus(nearMissRows);
+        if (misses.length > 0) {
+          stats.markerNearMissLines = (stats.markerNearMissLines ?? 0) + misses.length;
+          stats.markerNearMissCards = (stats.markerNearMissCards ?? 0) + 1;
+          for (const miss of misses) {
+            if (stats.markerNearMissNamed.length >= OWNERSHIP_MARKER_NEAR_MISS_NAME_CAP) break;
+            stats.markerNearMissNamed.push(
+              `#${issue.number} comment ${miss.commentId ?? 'id UNREADABLE'} 「${miss.prefix}」 (${miss.form})`,
+            );
+          }
+        }
+        // The release-ANNOUNCEMENT channel (#18926) — its own count and its own
+        // names, under the same cap, so the excluded line stays as greppable as
+        // the ones that remain.
+        if (announcements.length > 0) {
+          stats.markerNearMissAnnouncements =
+            (stats.markerNearMissAnnouncements ?? 0) + announcements.length;
+          for (const shout of announcements) {
+            if (stats.markerNearMissAnnounced.length >= OWNERSHIP_MARKER_NEAR_MISS_NAME_CAP) break;
+            stats.markerNearMissAnnounced.push(
+              `#${issue.number} comment ${shout.commentId ?? 'id UNREADABLE'} 「${shout.prefix}」 `
+                + `(${[shout.names.pr ? 'names a PR' : '', shout.names.transition ? 'names a `pm:*` transition' : ''].filter(Boolean).join(', ')})`,
+            );
+          }
+        }
+      }
+    }
     // H58 (#17417) — the queued card whose own text says it is not queue work.
     // At the FOOT of this iteration for H47's reason and no other: it reads the
     // thread out of `commentCache`, which every gate above this line fills, so
@@ -20584,6 +23200,39 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
         markerRows === undefined ? undefined : markerRows.map((c) => c?.body ?? ''),
       );
       if (declaresRuling) findings.push([issue, 'H58', declaresRuling]);
+    }
+    // H66 (#18299) — the queued card whose NEWEST comment is a release. Beside
+    // H58 at the FOOT of this iteration for H47's reason and no other: it reads
+    // the thread out of `commentCache`, which every gate above this line fills,
+    // so judged at the top the cache would be empty on every iteration and the
+    // row would report UNJUDGED forever while looking perfectly healthy —
+    // #4690, self-inflicted by placement.
+    //
+    // ⚠️ TWO halves since the first live sweep. A card whose thread is ALREADY
+    // in hand is judged HERE and costs nothing — the free half, unchanged. A
+    // card whose thread nobody bought is DEFERRED to the bounded buy pass at the
+    // foot of the sweep, because the buy is ordered and capped across the whole
+    // population and cannot be decided one card at a time from inside a loop.
+    // H67 (#18372) — the queued card a PR already landed on. Its population IS
+    // H66's (`h67SpeaksAbout` calls it), so the two are gathered side by side
+    // and can never disagree about which cards are in the pool and unowned.
+    if (h67SpeaksAbout(issue)) {
+      stats.queueDeliveryCandidates = (stats.queueDeliveryCandidates ?? 0) + 1;
+      queueDeliveryCandidates.push(issue);
+    }
+    if (h66SpeaksAbout(issue)) {
+      stats.queueReleaseCandidates = (stats.queueReleaseCandidates ?? 0) + 1;
+      const queueReleaseRows = commentCache.get(issue.number);
+      if (queueReleaseRows === undefined) {
+        queueReleaseDeferred.push(issue);
+      } else {
+        stats.queueReleaseThreadRead = (stats.queueReleaseThreadRead ?? 0) + 1;
+        const releasedRemainder = h66ReleasedNonDispatchableRemainder(issue, queueReleaseRows);
+        if (releasedRemainder) {
+          stats.queueReleaseRows = (stats.queueReleaseRows ?? 0) + 1;
+          findings.push([issue, 'H66', releasedRemainder]);
+        }
+      }
     }
   }
 
@@ -21256,12 +23905,13 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   // would put an accusation of staleness on a post that correctly says it is
   // not running a shift.
   for (const { issue, rows } of seatMarkers.values()) {
-    const { lane } = seatLane(issue);
+    const { lane, seat } = seatLane(issue);
     if (!lane) continue;
+    // Free-claim multi-seat: the post is compared against ITS seat's claims only.
     const stale = h38SeatPostStale(
       issue,
       seatPostLastEventMs(issue, rows),
-      newestLaneClaim(lane, seen.values(), commentCache),
+      newestLaneClaim(lane, seen.values(), commentCache, seat),
     );
     if (stale) findings.push([issue, 'H38', stale]);
   }
@@ -21580,12 +24230,15 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     if (unblockedByNothing) findings.push([issue, 'H4', unblockedByNothing]);
     const expired = h19BlockOutlivedBlocker(issue, resolutions);
     if (expired) findings.push([issue, 'H19', expired]);
+    // …and the same row's second exit: a declared label transition that came true on an open target (#19255).
+    const exitFired = h19DeclaredExitFired(issue, resolutions, fallbackFor(issue));
+    if (exitFired) findings.push([issue, 'H19', exitFired]);
     // H26 — the same resolutions, asked the OTHER question: not "has the target
     // closed" but "can it ever". Both rows can fire on one card (a two-target
     // block where one blocker closed and the other is parked indefinitely), and
     // they must: they name different halves of the same wait and prescribe
     // different reads.
-    const indefinite = h26BlockOnIndefiniteTarget(issue, resolutions);
+    const indefinite = h26BlockOnIndefiniteTarget(issue, resolutions, fallbackFor(issue));
     if (indefinite) findings.push([issue, 'H26', indefinite]);
     // H28 — the same resolutions, asked a THIRD question: which CHANNEL each
     // target arrived in. H19 reports that the block is half-expired; this
@@ -21940,6 +24593,105 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     }
   }
 
+  // H66's BUY pass (#18299) — the bounded half of the row, placed HERE for two
+  // reasons that are both mechanical.
+  //
+  //   1. AFTER every row that reads `commentCache`. A page bought here is the
+  //      NEWEST page of a thread, which is not the same object as the FIRST page
+  //      `commentRowsFor` caches; handing a partial window to H2's claim read or
+  //      H4's `Blocked-by:` fallback would make an absence out of a page nobody
+  //      read. Running last means no other row can be handed one. ⛔ And the
+  //      cache is written ONLY where the bought page IS the whole thread
+  //      (`plan.page === 1`), which is `seatPostRowsFor`'s own rule — it keeps
+  //      its window out of `commentCache` for exactly this reason — applied to
+  //      the one case where the two objects coincide.
+  //   2. AFTER the label pages are complete, because the ORDER and the CAP are
+  //      properties of the whole candidate set, not of one card.
+  //
+  // The request shape is H65's, reused rather than re-derived: ONE page per
+  // card, located from the carrier's own `comments` count, ⛔ never page 1 on a
+  // long thread (GitHub serves issue comments OLDEST-FIRST, so a page-less read
+  // returns the archive — the #18312 measurement).
+  //
+  // Three outcomes per card, and the summary clause counts all three: a page
+  // read and judged; a page whose fetch FAILED, which is UNJUDGED and never
+  // clean (#4690); and a carrier whose `comments` count is unreadable AND whose
+  // page 1 came back FULL — the newest comment may sit on a page nobody read, so
+  // it cannot be located and the card is UNJUDGED too, which is
+  // `h65NewestPagePlan`'s own contract rather than a second rule.
+  if (queueReleaseDeferred.length > 0) {
+    const plan = h66BuyOrder(queueReleaseDeferred, H66_THREAD_BUY_CAP);
+    stats.queueReleaseCap = H66_THREAD_BUY_CAP;
+    stats.queueReleaseDeferred = plan.deferred.length;
+    for (const issue of plan.buy) {
+      const pagePlan = h65NewestPagePlan(issue);
+      let rows = null;
+      try {
+        const page = await rest(h65CommentPagePath(OWNER_REPO, issue.number, pagePlan.page));
+        rows = Array.isArray(page) ? page : [];
+        stats.queueReleaseBought = (stats.queueReleaseBought ?? 0) + 1;
+      } catch {
+        rows = null;
+      }
+      if (rows !== null && !pagePlan.counted && rows.length >= H65_COMMENTS_PAGE_SIZE) rows = null;
+      if (rows === null) {
+        stats.queueReleaseUnjudged = (stats.queueReleaseUnjudged ?? 0) + 1;
+      } else if (pagePlan.page === 1) {
+        commentCache.set(issue.number, rows);
+      }
+      const releasedRemainder = h66ReleasedNonDispatchableRemainder(issue, rows);
+      if (releasedRemainder) {
+        stats.queueReleaseRows = (stats.queueReleaseRows ?? 0) + 1;
+        findings.push([issue, 'H66', releasedRemainder]);
+      }
+    }
+  }
+
+  // H67's READ pass (#18372) — one timeline page per card, at the FOOT for
+  // H59's and H66's reason: this row BUYS, so it is placed where every free
+  // read is already done and the purchase is provably the smallest thing left.
+  //
+  // ⛔ It writes NOTHING into `commentCache`. A timeline page's `commented`
+  // events are the thread's OLDEST window, exactly the object #18312 measured
+  // as five weeks stale on a long thread, and handing it to H2's claim read or
+  // H4's `Blocked-by:` fallback would manufacture an absence out of a window
+  // nobody chose. The page is read, judged and dropped — `seatPostRowsFor`'s
+  // own refusal, taken for its reason.
+  //
+  // Three outcomes per card, and the coverage quadruple counts all four states:
+  // a page read and judged; a page whose fetch FAILED, which is UNJUDGED and
+  // never clean (#4690, and ⛔ no retry loop on any status — #17374); a page
+  // that came back FULL, which may hide a later merge, a later OPEN PR or a
+  // later `Claim:` and is UNJUDGED for the same reason; and a candidate beyond
+  // the cap, which is NOT ATTEMPTED and is not clean either.
+  if (queueDeliveryCandidates.length > 0) {
+    const plan = h67ReadOrder(queueDeliveryCandidates, H67_TIMELINE_READ_CAP);
+    stats.queueDeliveryCap = H67_TIMELINE_READ_CAP;
+    stats.queueDeliveryDeferred = plan.deferred.length;
+    for (const issue of plan.read) {
+      let page;
+      try {
+        page = await rest(
+          `/repos/${OWNER_REPO}/issues/${issue.number}/timeline?per_page=${H67_TIMELINE_PAGE_SIZE}&page=1`,
+        );
+      } catch {
+        stats.queueDeliveryUnjudged = (stats.queueDeliveryUnjudged ?? 0) + 1;
+        continue;
+      }
+      stats.queueDeliveryRead = (stats.queueDeliveryRead ?? 0) + 1;
+      const timeline = h67TimelineDelivery(page, issue.number, OWNER_REPO);
+      if (!timeline.complete) {
+        stats.queueDeliveryUnjudged = (stats.queueDeliveryUnjudged ?? 0) + 1;
+        continue;
+      }
+      const delivered = h67QueuedCardWithMergedDelivery(issue, timeline, OWNER_REPO);
+      if (delivered) {
+        stats.queueDeliveryRows = (stats.queueDeliveryRows ?? 0) + 1;
+        findings.push([issue, 'H67', delivered]);
+      }
+    }
+  }
+
   // H45's second half — the `pm:epic` index, read as its own population.
   //
   // LAST in the sweep, and that placement is the mechanism rather than a
@@ -21982,9 +24734,124 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
 // as one that passed (#13798).
 const SELF_TEST_VERDICT = 'check-half-states self-test reached its verdict';
 
+// ---------------------------------------------------------------------------
+// The battery FLOOR — battery NAMES with a minimum case count each (#18299)
+// ---------------------------------------------------------------------------
+//
+// AGENTS.md 「Writing a `--self-test`」 is explicit that a printed case count is
+// EVIDENCE, NOT PROOF — a battery falling 40 → 3 still prints a non-zero total —
+// and that ONE pinned total rots the moment a sibling grows. This file printed
+// exactly that one total: `N cases pass`, over a suite whose cases are declared
+// in one flat list. The handshake below it (`SELF_TEST_VERDICT`) closes the
+// orthogonal hole — a `return` above the verdict — and neither closes the other.
+//
+// ⚠️ This roster is NEW and it is PARTIAL, said plainly so nobody reads it as a
+// census of the suite: the several hundred `t(...)` cases above and below are
+// UNBATTERIED and stay that way here. Retrofitting them is a diff of its own and
+// not this card's; what this roster does is make a floor EXIST, so the next row
+// registers against it instead of adding to an unfloored list. Three failure
+// conditions, all of them producing a real exit 1:
+//
+//   · a declared battery registering FEWER cases than its pin;
+//   · a case registered against a battery the roster does not declare;
+//   · the roster itself falling below `SELF_TEST_BATTERY_FLOOR` batteries.
+//
+// ⛔ Copied from a landed shape (`scripts/check-agent-model-declared.mjs`),
+// never imported: a shared assertion module is one point of failure for every
+// instrument at once, and every self-test here must keep running standalone.
+
+/** Battery name → the minimum number of cases that battery must register. */
+export const SELF_TEST_BATTERIES = Object.freeze({
+  // 183 registered as the bounded buy leg landed (139 before it); the pin sits
+  // just under that so an ordinary refactor does not have to move a number,
+  // while a battery losing a THIRD of its cases — the 40 → 3 shape AGENTS.md
+  // names — fails loudly. Raise it with the battery, never ahead of it.
+  'H66 released queue card': 172,
+  // 37 registered with the judged-set repair (#18379); the pin sits just under
+  // that on the same grounds as its neighbour. What this battery floors is a
+  // NEGATIVE — a row that must not fire — plus the four controls proving the
+  // silence is scoped (UNJUDGED still fires on a body-borne unreadable target,
+  // a body-less card still judges its comments, a closed body target still
+  // reads as the ordinary row, and an OPEN archive target still withholds a
+  // discharge). A negative with no live control beside it is how a repair
+  // becomes a silencer, so the controls are inside the same floored battery.
+  'H19 judged-set founding': 34,
+  // Registered with the second-spelling repair (#18547): 45 cases, the pin just
+  // under the count on the same grounds as its two neighbours. What this
+  // battery floors is a WIDENING — the row stopped reporting a Chinese
+  // declaration as silence — so the FIRING CONTROLS are inside it: the three
+  // measured tier-less specimens, a Chinese mention in prose, a blockquoted
+  // declaration, a dialect word, a bare key and a key-less mention. A widening
+  // whose controls can drift out of the suite is how a repair becomes a
+  // silencer, which is the failure this row was filed for in the first place.
+  'H65 tier declaration spelling': 42,
+  // 151 registered with the queued merged-delivery reading (#18372); the pin
+  // sits just under that on its neighbours' grounds. What this battery floors is a
+  // LISTING whose whole value is its discriminators — the bucket a card lands
+  // in, the closing condition it quotes, the ownership record it dates against
+  // the merge — plus the two negatives the filing card rules on TWICE: a
+  // `Part of` card must never read as a candidate for closing, and an OPEN PR
+  // must stand the row down. A listing whose discriminators quietly stopped
+  // being asserted would still print rows, and every one of them would read as
+  // 「close this」, which is the one thing the card forbids.
+  'H67 queued merged-delivery reading': 142,
+  // Registered with the decorated ownership-marker reading (#18680); the pin
+  // sits just under the count on its neighbours' grounds. What this battery
+  // floors is a WIDENING of the two markers' READING, so the FIRING CONTROLS
+  // live inside it: the live #16529 specimen in both spellings, the bare
+  // roster that must keep matching, the prose and fullwidth controls that must
+  // NOT, and the two bullet shapes the reading refuses to undecorate through.
+  // Beside them the NEAR-MISS vocabulary is driven member by member against its
+  // own fixtures, with the counterfactual pin that reds on a form added without
+  // one or silently dropped. A widening whose controls can drift out of the
+  // suite is how a repair becomes a silencer, and a vocabulary nobody asserts
+  // on is how the next decoration replays this card.
+  //
+  // ⭐ RAISED 136 → 184 by #18926 (140 → 193 registered), which is the floor
+  // discipline working rather than a number being tidied: that card NARROWS the
+  // census — a `pm:seat` thread leaves the population, a release ANNOUNCEMENT
+  // heading leaves the near-miss channel — and a narrowing is the one direction
+  // in which a suite can go green by asserting less. So the cases it adds are
+  // the ones that would catch that: the five measured rows as fixtures, the
+  // three narrowings each pinned through the corpus line that forced it (a
+  // `separator` release, a bare-noun heading, a participle heading naming a
+  // session), the positive control that a real near miss on a non-seat card is
+  // still listed byte-identically, and the ablation pin proving the excluded
+  // line IS a near miss under the vocabulary alone. ⛔ Never lower it to
+  // accommodate a filter that swallowed more than it declared.
+  'H2/H47/H66 decorated ownership marker': 184,
+  // Registered with the measured body cap (#18664); the pin sits just under
+  // the count on its neighbours' grounds. What this battery floors is a
+  // MEASUREMENT and its UNIT — `ISSUE_BODY_LIMIT` bisected to one byte on a
+  // throwaway issue, and a renderer trim that counts the bytes the platform
+  // refuses in rather than the UTF-16 units JS hands out. So the FIRING
+  // CONTROLS are inside it: the CJK report whose character count sails under a
+  // budget its bytes overrun, the non-vacuity pin proving that fixture really
+  // is multi-byte, the counterfactual row count a character-counting guard
+  // would have laid out, and the over-cap report that must still trim and SAY
+  // so. Beside them the provenance is asserted off the constant's own
+  // docblock — unit, both sides of the bracket, the date and the probe issue —
+  // because a number with no provenance is what got re-derived from memory the
+  // first time.
+  'ISSUE_BODY_LIMIT measured cap': 52,
+  // Registered with the label-transition unlock exit (#19255), pin just under the count: a NEW EXIT beside a STAND-DOWN.
+  'H19/H26 label-transition unlock exit': 10,
+});
+
+/** The floor on the ROSTER itself — how many batteries must be declared at all. */
+export const SELF_TEST_BATTERY_FLOOR = 7;
+
 async function selfTest() {
   const cases = [];
   const t = (name, actual, expected) => cases.push([name, actual, expected]);
+  // Battery-registered cases go through THIS. `b('<battery>', name, …)` is `t`
+  // plus one tally, so a battery that stops registering cases fails the floor
+  // below instead of shrinking a total nobody reads.
+  const batteryCounts = new Map();
+  const b = (battery, name, actual, expected) => {
+    batteryCounts.set(battery, (batteryCounts.get(battery) ?? 0) + 1);
+    t(name, actual, expected);
+  };
   // -- Summary-disclosure cases go through THIS, never through the raw line ---
   //
   // `summaryLine` is one sentence carrying every window's disclosure, so a bare
@@ -24224,11 +27091,20 @@ async function selfTest() {
   t('H19 precedence (d): a closed body target fires even beside a comment-borne one', bodyGoverns.includes('outlived its blocker'), true);
   t('H19 precedence (d): …and an OPEN comment-borne target still withholds the full discharge', bodyGoverns.includes('PARTIAL'), true);
   t('H19 precedence (d): …⛔ never claiming every target is closed', bodyGoverns.includes('Every target it names is closed'), false);
-  // The asymmetry, stated as its own pin: precedence selects which CLOSED
-  // target may FOUND a row; every reading that says the wait may still be
-  // running counts whichever channel carried it (#4690's posture, applied to
-  // the carrier question).
-  t('H19 precedence: an UNRESOLVED comment-borne target is NOT silenced by the body', h19row(blockedCard(1, 'Blocked-by: #2'), [target(2, 'open'), foreign('objectstack-ai/cloud', 88, 'unresolved', { detail: 'HTTP 404' })], REPO_OS).includes('UNJUDGED, not confirmed'), true);
+  // The asymmetry, stated as its own pin: precedence selects which target may
+  // FOUND a row — an expiry or an UNJUDGED — while every reading that says the
+  // wait may still be RUNNING counts whichever channel carried it (#4690's
+  // posture, applied to the carrier question).
+  //
+  // ⚠️ This first line used to run the other way: it asserted that an
+  // UNRESOLVED comment-only target fires the UNJUDGED row beside a body set,
+  // which is the row #18379 measured as unclearable by construction — the
+  // card's body was already refreshed to the live blocker, and the only
+  // remaining lever was editing the archive the protocol keeps. It is re-judged
+  // rather than deleted: the fixture is the same, the direction is the one the
+  // asymmetry table always declared, and every other direction of it is pinned
+  // in the battery below.
+  t('H19 precedence: an UNRESOLVED comment-only target founds NO row beside a body set', h19row(blockedCard(1, 'Blocked-by: #2'), [target(2, 'open'), foreign('objectstack-ai/cloud', 88, 'unresolved', { detail: 'HTTP 404' })], REPO_OS), '');
   t('H19 precedence: …and an OPEN comment-borne target is counted in the denominator', h19row(blockedCard(1, 'Blocked-by: #2'), [target(2, 'closed'), target(3, 'open')], REPO_OS).includes('1 of 2 `Blocked-by:` target(s)'), true);
   // The shape-3 sentence RIDES a row that fired for another reason. It never
   // becomes a row, so it is only ever readable beside an actionable finding.
@@ -24239,12 +27115,119 @@ async function selfTest() {
   t('H19 superseded: …and says there is nothing on the card to repair', withSuperseded.includes('Nothing to repair on the card either'), true);
   t('H19 superseded: ⛔ the clause is absent when nothing was superseded', bodyClosed.includes('A further 1 CLOSED target(s)'), false);
   t('H19 superseded: ⛔ and absent on a comment-judged card, where nothing can be', commentOnly.includes('reach this card ONLY through the comment archive'), false);
-  // It rides the UNJUDGED branch too — one carrier rule, both branches.
-  t('H19 superseded: the clause rides the UNJUDGED branch as well', h19row(blockedCard(1, 'Blocked-by: #2'), [foreign('objectstack-ai/cloud', 88, 'unresolved', { detail: 'HTTP 404' }), target(3, 'closed')], REPO_OS).includes('HYGIENE reading'), true);
+  // It rides the UNJUDGED branch too — one carrier rule, both branches. ⚠️ The
+  // fixture's unreadable target is the BODY's own (#18379): the row has to be
+  // founded on something the judged set carries before a hygiene clause can
+  // ride it, and an archive-only pair founds nothing at all now.
+  t('H19 superseded: the clause rides the UNJUDGED branch as well', h19row(blockedCard(1, 'Blocked-by: #2'), [target(2, 'unresolved', { detail: 'HTTP 404' }), target(3, 'closed')], REPO_OS).includes('HYGIENE reading'), true);
   // ⛔ The precedence rule must not reach the DISCOVERY union that H26 and H28
   // read: both still see the comment-borne target on the live #11333 shape.
   t('H19 precedence: ⛔ H28 is unaffected on the live shape (no spent body line)', h28StaleBodyBlockerLine(live11333, live11333Targets, [LIVE_11333_COMMENT], REPO_OS), null);
   t('H19 precedence: ⛔ and H26 still reads the full union', typeof h26BlockOnIndefiniteTarget(live11333, [target(13457, 'open', { labels: ['pm:blocking'] }), target(13458, 'open', { labels: ['pm:blocked'] })]), 'string');
+
+  // -- BATTERY: H19 founds every verdict on the set it JUDGES (#18379) -------
+  //
+  // Every case here goes through `b(BATTERY19, …)` rather than `t(…)`, so
+  // deleting the block fails the roster floor instead of shrinking a total
+  // nobody reads — the H66 battery's shape, the file's second.
+  //
+  // The defect: the UNJUDGED branch was founded on the DISCOVERY union while
+  // the row judged the body, so a target superseded in the body could veto the
+  // verdict from the comment archive whenever its number was also unreadable.
+  // Two conditions had to coincide, which is why it outlived #17564, and the
+  // resulting row was unclearable BY CONSTRUCTION: the owner had already done
+  // the prescribed thing, and the only remaining lever — editing or deleting
+  // the archived comments — is the write the protocol forbids, because those
+  // comments record what an earlier seat measured and why the line was
+  // migrated.
+  //
+  // ⛔ UNJUDGED is NOT silenced by this repair, and the controls below are
+  // where that is asserted rather than asked for: a body-borne unreadable
+  // target fires it exactly as before, a body-less card still judges its
+  // comment-borne targets, and an archive-only unreadable target still
+  // WITHHOLDS a full discharge and is still named on the row it rides.
+  const BATTERY19 = 'H19 judged-set founding';
+
+  // The instance from the card, in its recorded shape: #11975 on anchor #9857,
+  // sweep 2026-09-16T01:55:47Z. The body line was refreshed to `#18336` by the
+  // triage seat ~2.7 h BEFORE that sweep; four archived comments still name
+  // `#13515` — one of them triage's own re-pointing note, which has to name the
+  // dead number to explain that it is dead — and `#13515` answers 404 (re-probed
+  // with live controls: `#18336` 200, `#11973` 200). The struck earlier pointer
+  // sits mid-sentence in prose, which is not a directive.
+  const LIVE_11975_BODY =
+    'Blocked-by: #18336\n\n' +
+    'The earlier `Blocked-by: #11974` pointer is struck rather than deleted: it records what an ' +
+    'earlier seat measured and why the line was migrated, and editing it would erase that.';
+  const LIVE_11975_COMMENT =
+    'Re-pointing note (triage): the recorded blocker is dead, so the line is migrated.\n\n' +
+    'Blocked-by: #13515';
+  const live11975 = blockedCard(11975, LIVE_11975_BODY);
+  const live11975Targets = [target(18336, 'open'), target(13515, 'unresolved', { detail: 'HTTP 404' })];
+  b(BATTERY19, 'H19 #18379: the card\'s body states ONE target, the live one', [...blockerChannelKeys(LIVE_11975_BODY, live11975, REPO_OS)].join(' '), 'objectstack-ai/objectstack#18336');
+  b(BATTERY19, 'H19 #18379: …so the unreadable number is one the body no longer names', blockerChannelKeys(LIVE_11975_BODY, live11975, REPO_OS).has('objectstack-ai/objectstack#13515'), false);
+  b(BATTERY19, 'H19 #18379: DISCOVERY is untouched — the archive still yields it', keysOf(live11975, [LIVE_11975_COMMENT]), 'objectstack-ai/objectstack#18336 objectstack-ai/objectstack#13515');
+  b(BATTERY19, 'H19 #18379: …and the unclearable row is GONE', h19BlockOutlivedBlocker(live11975, live11975Targets, REPO_OS), null);
+  b(BATTERY19, 'H19 #18379: …⛔ with no quieter row invented in its place', h19row(live11975, live11975Targets, REPO_OS), '');
+  // The generic shape of the same card, and the direction the re-judged
+  // precedence pin above now runs in.
+  const archiveOnlyUnreadable = [target(2, 'open'), foreign('objectstack-ai/cloud', 88, 'unresolved', { detail: 'HTTP 404' })];
+  b(BATTERY19, 'H19 #18379: a superseded target the archive alone names founds nothing', h19BlockOutlivedBlocker(blockedCard(1, 'Blocked-by: #2'), archiveOnlyUnreadable, REPO_OS), null);
+  b(BATTERY19, 'H19 #18379: …and that holds for a LOCAL superseded number too', h19BlockOutlivedBlocker(blockedCard(1, 'Blocked-by: #2'), [target(2, 'open'), target(3, 'unresolved', { detail: 'HTTP 404' })], REPO_OS), null);
+
+  // CONTROL ①: a body-borne unreadable target — ⛔ UNJUDGED is not silenced.
+  const bodyUnreadable19 = h19row(blockedCard(1, 'Blocked-by: #2'), [target(2, 'unresolved', { detail: 'HTTP 404' })], REPO_OS);
+  b(BATTERY19, 'H19 #18379 control: a BODY-borne unreadable target still fires UNJUDGED', bodyUnreadable19.includes('UNJUDGED, not confirmed'), true);
+  b(BATTERY19, 'H19 #18379 control: …counted over the judged set', bodyUnreadable19.includes('1 of 1 `Blocked-by:` target(s)'), true);
+  b(BATTERY19, 'H19 #18379 control: …naming the body as the carrier it judged', bodyUnreadable19.includes('judged against the BODY\'s `Blocked-by:` set'), true);
+  b(BATTERY19, 'H19 #18379 control: …and still refusing to be read as a quiet row', bodyUnreadable19.includes('must not be skimmed'), true);
+  b(BATTERY19, 'H19 #18379 control: …citing the unread-is-not-absent rule', bodyUnreadable19.includes('#4690'), true);
+  // CONTROL ②: a body-LESS card judges its comment-borne targets, unchanged —
+  // this row's founding fixture is one of those.
+  const commentUnreadable19 = h19row(blockedCard(1, 'body carries no line'), [target(2, 'unresolved', { detail: 'HTTP 404' })], REPO_OS);
+  b(BATTERY19, 'H19 #18379 control: a body-LESS card still fires UNJUDGED from its comments', commentUnreadable19.includes('UNJUDGED, not confirmed'), true);
+  b(BATTERY19, 'H19 #18379 control: …and says the comment-borne set is what it judged', commentUnreadable19.includes('judged against the COMMENT-borne set'), true);
+  // CONTROL ③: a closed BODY target is H19's ordinary row, byte-unchanged.
+  const bodyClosed19 = h19row(blockedCard(1, 'Blocked-by: #2'), [target(2, 'closed', { closedAt: '2026-08-20T07:58:08Z' })], REPO_OS);
+  b(BATTERY19, 'H19 #18379 control: a closed BODY target is the ordinary row', bodyClosed19.includes('outlived its blocker'), true);
+  b(BATTERY19, 'H19 #18379 control: …counted 1 of 1 over the judged set', bodyClosed19.includes('1 of 1 `Blocked-by:` target(s)'), true);
+  b(BATTERY19, 'H19 #18379 control: …and reads as a full discharge', bodyClosed19.includes('Every target it names is closed'), true);
+  // CONTROL ④: #11747's mirror is untouched — an OPEN target is evidence the
+  // wait may still be RUNNING and is counted whichever channel carries it, so
+  // a re-park can never be published as a full discharge.
+  const repark19 = h19row(blockedCard(1, 'Blocked-by: #2'), [target(2, 'closed'), target(3, 'open')], REPO_OS);
+  b(BATTERY19, 'H19 #18379 control: an OPEN archive target still withholds the discharge', repark19.includes('PARTIAL'), true);
+  b(BATTERY19, 'H19 #18379 control: …⛔ never claiming every target is closed', repark19.includes('Every target it names is closed'), false);
+  b(BATTERY19, 'H19 #18379 control: …and is still counted in the denominator', repark19.includes('1 of 2 `Blocked-by:` target(s)'), true);
+
+  // WITHHOLDING: an archive-only UNREADABLE target beside a closed body target.
+  // It founds nothing, and it is neither silenced nor allowed to be read as a
+  // full discharge — unread is not closed, and not absent either.
+  const archiveUnreadableRides = h19row(blockedCard(1, 'Blocked-by: #2'), [target(2, 'closed'), foreign('objectstack-ai/cloud', 88, 'unresolved', { detail: 'HTTP 404' })], REPO_OS);
+  b(BATTERY19, 'H19 #18379 withhold: the judged closed target still founds the row', archiveUnreadableRides.includes('outlived its blocker'), true);
+  b(BATTERY19, 'H19 #18379 withhold: …⛔ but it is NOT published as a full discharge', archiveUnreadableRides.includes('Every target it names is closed'), false);
+  b(BATTERY19, 'H19 #18379 withhold: …the withholding is stated, not implied', archiveUnreadableRides.includes('No target this row JUDGED is still open'), true);
+  b(BATTERY19, 'H19 #18379 withhold: …the unreadable archive target is NAMED', archiveUnreadableRides.includes('`objectstack-ai/cloud#88`'), true);
+  b(BATTERY19, 'H19 #18379 withhold: …in a clause saying it founds nothing', archiveUnreadableRides.includes('found nothing here'), true);
+  b(BATTERY19, 'H19 #18379 withhold: …and naming the row it used to manufacture', archiveUnreadableRides.includes('unclearable by construction'), true);
+  b(BATTERY19, 'H19 #18379 withhold: …and the count stays the judged set\'s', archiveUnreadableRides.includes('1 of 1 `Blocked-by:` target(s)'), true);
+  b(BATTERY19, 'H19 #18379 withhold: the row is still report-only', archiveUnreadableRides.includes('never a label written from this script'), true);
+  // The two archive clauses are SIBLINGS, not one clause: a card can carry a
+  // spent closed line and an unreadable one at once, and each says its own
+  // thing.
+  const bothArchiveClauses = h19row(blockedCard(1, 'Blocked-by: #2'), [target(2, 'closed'), target(3, 'closed'), foreign('objectstack-ai/cloud', 88, 'unresolved', { detail: 'HTTP 404' })], REPO_OS);
+  b(BATTERY19, 'H19 #18379 clauses: the closed archive target keeps its HYGIENE sentence', bothArchiveClauses.includes('A further 1 CLOSED target(s)'), true);
+  b(BATTERY19, 'H19 #18379 clauses: …the unreadable one gets its own', bothArchiveClauses.includes('could NOT be read this sweep AND reach this card only through the comment archive'), true);
+  b(BATTERY19, 'H19 #18379 clauses: …and neither enters the count', bothArchiveClauses.includes('1 of 1 `Blocked-by:` target(s)'), true);
+  // The UNJUDGED denominator is the judged set's too — the row's own count was
+  // half of what made the measured sentence unreadable (「1 of 2 … judged
+  // against the BODY's set」 on a card whose body names one target).
+  b(BATTERY19, 'H19 #18379: the UNJUDGED denominator never counts an archive-only target', h19row(blockedCard(1, 'Blocked-by: #2'), [target(2, 'unresolved', { detail: 'HTTP 404' }), foreign('objectstack-ai/cloud', 88, 'unresolved', { detail: 'HTTP 404' })], REPO_OS).includes('1 of 1 `Blocked-by:` target(s)'), true);
+  b(BATTERY19, 'H19 #18379: …and the archive-only one is named in its clause instead', h19row(blockedCard(1, 'Blocked-by: #2'), [target(2, 'unresolved', { detail: 'HTTP 404' }), foreign('objectstack-ai/cloud', 88, 'unresolved', { detail: 'HTTP 404' })], REPO_OS).includes('`objectstack-ai/cloud#88`'), true);
+  // ⛔ And the repair must not reach DISCOVERY: H26 and H28 share these
+  // resolutions and a comment-borne target answers what they ask.
+  b(BATTERY19, 'H19 #18379: ⛔ H28 still reads the archive on a re-parked card', typeof h28StaleBodyBlockerLine(blockedCard(1, 'Blocked-by: #2'), [target(2, 'closed'), target(3, 'open')], ['Blocked-by: #3'], REPO_OS), 'string');
+  b(BATTERY19, 'H19 #18379: ⛔ and the union still discovers both channels', keysOf(blockedCard(1, 'Blocked-by: #2'), ['Blocked-by: #3']), 'objectstack-ai/objectstack#2 objectstack-ai/objectstack#3');
 
   // The summary line's fourth `read X of Y` pair. Unlike the other three a
   // shortfall here suspends nothing — the unresolved targets fire their own
@@ -24261,6 +27244,12 @@ async function selfTest() {
   // unjudged sort band). The bare "never dropped" wording was measurably false
   // on 2026-08-25T02:08Z; see `UNJUDGED_MARKER`.
   t('summary: an H19 shortfall points at the rows that carry it', saidBy('h19Blockers', summaryLine(btCounts(11, 12), 1)).includes("unresolved target(s) are named on their own cards' rows"), true);
+  // …and names the ONE class that is not named on a row of its own, because
+  // #18379 stopped it founding one. The clause was measured false once already
+  // (#11218) by promising more than the rows deliver; a repair that narrows
+  // what a row founds owes the same sentence a correction.
+  b(BATTERY19, 'summary: the H19 shortfall clause declares the archive-only class it no longer names', saidBy('h19Blockers', summaryLine(btCounts(11, 12), 1)).includes('it rides a row rather than founding one (#18379)'), true);
+  b(BATTERY19, 'summary: …and a complete pass still says none of it', saidBy('h19Blockers', summaryLine(btCounts(12, 12), 1)).includes('#18379'), false);
   t('summary: …and names the mechanism instead of promising the outcome', saidBy('h19Blockers', summaryLine(btCounts(11, 12), 1)).includes('sort ABOVE the size trim'), true);
   t('summary: a complete H19 pass adds no shortfall clause', saidBy('h19Blockers', summaryLine(btCounts(12, 12), 1)).includes('unresolved target(s) are named'), false);
   t('summary: absent H19 counts degrade to 0, never to undefined', saidBy('h19Blockers', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0)).includes('resolved on 0 of 0 distinct'), true);
@@ -25164,7 +28153,7 @@ async function selfTest() {
   t('⛔ H64 author: …and comment 5654046782 — the App-authored claim that DOES name its session — is clean', h64UnattributedSeatContent(text64('comment', comment5654046782(), carrier64)), null);
   t('H64 author: …as is the byte-identical comment under a USER login, because the ID decides and the login does not', h64UnattributedSeatContent(text64('comment', comment5654046782({ user: user64('os-tesla') }), carrier64)), null);
   t('H64 author: the row names the login it read', row64(claim64()).includes('`os-tesla`'), true);
-  t('H64 author: …and says that login is the TOKEN the session was handed, not the seat', row64(claim64()).includes('TOKEN that session was handed and not the seat that wrote'), true);
+  t('H64 author: …and says that login is the TOKEN CLASS the write was made with, not the seat', row64(claim64()).includes('TOKEN CLASS that write was made with and not the seat that wrote'), true);
   t('H64 author: an unreadable `user` no longer silences the row — the finding is about the TEXT', typeof h64UnattributedSeatContent(text64('comment', comment5652138683({ user: undefined }), carrier64)), 'string');
   t('H64 author: …and the row says so rather than guessing one', row64(text64('comment', comment5652138683({ user: undefined }), carrier64)).includes('serves no readable `user`'), true);
   t('H64 author: a `Bot` type is an App, whatever its login', isApp64({ user: { login: 'some-app[bot]', type: 'Bot' } }), true);
@@ -25197,7 +28186,7 @@ async function selfTest() {
   t('H64 exposure: the suspension hazard is stated, ⛔ not relaxed', h64ExposureClause({}).includes('A suspended user account hides everything it authored'), true);
   t('H64 exposure: …as measured on this board rather than hypothetical', h64ExposureClause({}).includes('measured on this board, not hypothetical'), true);
   t('⛔ H64 exposure: …and it names NO remedy, which is the whole reason it files no row', h64ExposureClause({}).includes('names NO remedy and files NO row'), true);
-  t('H64 exposure: …and says why no remedy exists — the token class is handed to a session, not chosen', h64ExposureClause({}).includes('handed to a session at start rather than chosen at write time'), true);
+  t('H64 exposure: …and says why no remedy exists — the class follows the ACCOUNT, and no act of the session chooses it', h64ExposureClause({}).includes('follows the Claude Code ACCOUNT and flips between writes with no seat act behind it'), true);
   t('H64 exposure: the PAT reading and the unread-channel reading are separate numbers', h64ExposureClause({ seatSignedUserPat: 2, seatSignedUserUnreadChannel: 5 }).includes('2 of them carry no App credential at all (a user PAT) and 5 ride'), true);
   t('H64 exposure: a bare clause renders numbers, never `undefined`', h64ExposureClause({}).includes('undefined'), false);
   t('H64 exposure: ⛔ no less-than fragment — it is rendered into a GitHub issue body', /[<>]/.test(h64ExposureClause({ seatSignedLogins: ['os-warren'] })), false);
@@ -25219,7 +28208,7 @@ async function selfTest() {
   t('H64 row: …a PR as a pull request', row64(text64('pull request', pr18051({ body: BODY18051_NOID }))).includes('this open pull request'), true);
   t('H64 row: …and a card as a card', row64(text64('card', card9404({ body: BODY9404_NOID }))).includes('this open card'), true);
   t('H64 row: it cites the rule by FILE rather than by issue number', row64(claim64()).includes('`.claude/skills/pm-dispatch/SKILL.md`'), true);
-  t('H64 row: …both halves of it', row64(claim64()).includes('`.claude/skills/pm-dispatch/references/rest-channel.md`'), true);
+  t('H64 row: …both halves of it', row64(claim64()).includes('`.claude/skills/pm-dispatch/references/platform-readings.md`'), true);
   t('H64 row: the remedy is the artefact\'s own session id', row64(claim64()).includes('gives it its session id'), true);
   t('H64 row: …an edit in place is enough where the owner can edit', row64(claim64()).includes('an edit in place is enough'), true);
   t('H64 row: …and the original STAYS as history', row64(claim64()).includes('the original STAYS as history'), true);
@@ -25984,10 +28973,142 @@ async function selfTest() {
   // announce itself, keep the body under the cap, and never reach a loud row.
   const many = [loudRow, ...Array.from({ length: 400 }, (_, i) => finding(1000 + i, 'H2', 'assignee set but no claim comment on the thread — '.repeat(6)))];
   const trimmed = renderMarkdown(many, counts);
-  t('markdown: an oversized report stays under GitHub\'s body cap', trimmed.length <= ISSUE_BODY_LIMIT, true);
-  t('markdown: …and under the renderer\'s own budget', trimmed.length <= MARKDOWN_BODY_BUDGET, true);
+  t('markdown: an oversized report stays under the MEASURED body cap, in bytes', bodyBytes(trimmed) <= ISSUE_BODY_LIMIT, true);
+  t('markdown: …and under the renderer\'s own budget, in the same unit', bodyBytes(trimmed) <= MARKDOWN_BODY_BUDGET, true);
   t('markdown: the trim announces itself in the body', trimmed.includes('further row(s) omitted'), true);
   t('markdown: truncation can never reach a loud row', trimmed.includes('#900'), true);
+
+  // -- #18664: the cap is MEASURED, and the trim counts the unit it refuses in
+  //
+  // `ISSUE_BODY_LIMIT` read 65,536 with no provenance — no unit, no reading,
+  // no date — and was false in both directions at once: bodies four times
+  // larger store fine, and the refusal that DOES exist sits above it and is
+  // SILENT (the platform keeps the old body and answers 200). It was bisected
+  // on a throwaway issue opened for it (objectstack#18793, 2026-09-17), every
+  // write read back byte-exact: 262,144 bytes stored, 262,145 refused.
+  //
+  // What this battery floors is a MEASUREMENT and its UNIT, so the FIRING
+  // CONTROLS live inside it: the byte/char discriminator a character count
+  // would sail through, the non-vacuity control proving the fixture really is
+  // multi-byte, the over-cap report that must still be trimmed and SAY so, and
+  // the margin arithmetic a reviewer can check by hand. A cap nobody asserts
+  // on is how the next seat re-derives 65,536 from memory, and a byte guard
+  // whose discriminator drifts out of the suite is a byte guard in name only.
+  const BATTERY18664 = 'ISSUE_BODY_LIMIT measured cap';
+
+  // The provenance is part of the deliverable, so it is pinned rather than
+  // trusted. Anchored on the docblock ATTACHED to the constant — not on the
+  // file text, where these assertion strings would satisfy themselves.
+  const selfSource = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+  const capDocblock = (() => {
+    const at = selfSource.indexOf('\nexport const ISSUE_BODY_LIMIT =');
+    const open = at < 0 ? -1 : selfSource.lastIndexOf('/**', at);
+    return at < 0 || open < 0 ? '' : selfSource.slice(open, at);
+  })();
+  b(BATTERY18664, '#18664 provenance: ⭐ the extractor really found the constant\'s own docblock', capDocblock.startsWith('/**') && capDocblock.endsWith('*/'), true);
+  b(BATTERY18664, '#18664 provenance: ⛔ …and not the whole file, which would satisfy every pin below with its own text', capDocblock.includes('export const'), false);
+  b(BATTERY18664, '#18664 provenance: the docblock names the UNIT', capDocblock.includes('UTF-8 BYTES'), true);
+  b(BATTERY18664, '#18664 provenance: …the landed side of the bracket', capDocblock.includes('262,144 bytes  STORED'), true);
+  b(BATTERY18664, '#18664 provenance: …the refused side, one byte up', capDocblock.includes('262,145 bytes  REFUSED'), true);
+  b(BATTERY18664, '#18664 provenance: …the date it was taken', capDocblock.includes('2026-09-17'), true);
+  b(BATTERY18664, '#18664 provenance: …and the issue it was measured on', capDocblock.includes('objectstack#18793'), true);
+
+  // The constant itself.
+  b(BATTERY18664, '#18664 cap: the cap is the bisected value', ISSUE_BODY_LIMIT, 262144);
+  b(BATTERY18664, '#18664 cap: …which is 256 KiB exactly, checkable by hand', ISSUE_BODY_LIMIT === 256 * 1024, true);
+  b(BATTERY18664, '#18664 cap: ⛔ the retired 65,536 is gone', ISSUE_BODY_LIMIT === 65536, false);
+  b(BATTERY18664, '#18664 cap: …and the measured cap is four times it', ISSUE_BODY_LIMIT === 65536 * 4, true);
+
+  // #18843: the COMMENT surface's cap, declared beside its sibling. Pinned in
+  // THIS battery because what the battery floors is a measurement and its unit,
+  // and the sibling is the same measurement on the other surface — ⛔ not in a
+  // battery of its own, which would leave the name-roster pin below describing
+  // a ledger it no longer covers.
+  const commentCapDocblock = (() => {
+    const at = selfSource.indexOf('\nexport const COMMENT_BODY_LIMIT =');
+    const open = at < 0 ? -1 : selfSource.lastIndexOf('/**', at);
+    return at < 0 || open < 0 ? '' : selfSource.slice(open, at);
+  })();
+  b(BATTERY18664, '#18843 provenance: ⭐ the extractor really found the comment cap\'s own docblock', commentCapDocblock.startsWith('/**') && commentCapDocblock.endsWith('*/'), true);
+  b(BATTERY18664, '#18843 provenance: ⛔ …and not the whole file, which would satisfy every pin below with its own text', commentCapDocblock.includes('export const'), false);
+  b(BATTERY18664, '#18843 provenance: the docblock names the UNIT', commentCapDocblock.includes('UTF-8 BYTES'), true);
+  b(BATTERY18664, '#18843 provenance: …the landed side of the bracket', commentCapDocblock.includes('262,144 bytes  STORED'), true);
+  b(BATTERY18664, '#18843 provenance: …the refused side, one byte up', commentCapDocblock.includes('262,145 bytes  REFUSED'), true);
+  b(BATTERY18664, '#18843 provenance: …the date it was taken', commentCapDocblock.includes('2026-09-17'), true);
+  b(BATTERY18664, '#18843 provenance: …the issue it was measured on', commentCapDocblock.includes('objectstack#18826'), true);
+  b(BATTERY18664, '#18843 provenance: …and that THIS surface refuses LOUDLY, which the issue body does not', commentCapDocblock.includes('HTTP 422'), true);
+  b(BATTERY18664, '#18843 cap: the comment cap is the bisected value', COMMENT_BODY_LIMIT, 262144);
+  b(BATTERY18664, '#18843 cap: …which is 256 KiB exactly, checkable by hand', COMMENT_BODY_LIMIT === 256 * 1024, true);
+  b(BATTERY18664, '#18843 cap: ⛔ the retired 65,536 is gone here too', COMMENT_BODY_LIMIT === 65536, false);
+  b(BATTERY18664, '#18843 cap: …and the measured cap is four times it', COMMENT_BODY_LIMIT === 65536 * 4, true);
+  b(BATTERY18664, '#18843 pair: ⭐ the two surfaces agree — two bisections, one number', COMMENT_BODY_LIMIT === ISSUE_BODY_LIMIT, true);
+  b(BATTERY18664, '#18843 pair: ⛔ …and each stands on its OWN probe, so neither provenance borrows the other\'s', capDocblock.includes('objectstack#18793') && capDocblock.includes('objectstack#18826') === false, true);
+  b(BATTERY18664, '#18843 pair: ⛔ …the comment one likewise cites only the probe that measured it', commentCapDocblock.includes('objectstack#18793') === false, true);
+
+  // The unit, at the primitive the guard is built on.
+  b(BATTERY18664, '#18664 unit: bodyBytes counts UTF-8 bytes', bodyBytes('\u4e2d'), 3);
+  b(BATTERY18664, '#18664 unit: …where `.length` calls the same character one', '\u4e2d'.length, 1);
+  b(BATTERY18664, '#18664 unit: on ASCII the two agree, so nothing changed there', bodyBytes('abc') === 'abc'.length, true);
+  b(BATTERY18664, '#18664 unit: an absent body is zero bytes, never a throw', bodyBytes(undefined), 0);
+
+  // ⭐ THE DISCRIMINATOR. A report whose rows are CJK prose — which is what
+  // this file's rows actually are — must be cut on its BYTES. Under the
+  // character-counting guard this replaces, the same rows would have been laid
+  // out until the CHARACTER count reached the budget, i.e. to roughly three
+  // times the budget in bytes.
+  const cjkMsg = '巡检行的汉字正文'.repeat(12);
+  const cjkRows = Array.from({ length: 4000 }, (_, i) => finding(2000 + i, 'H2', cjkMsg));
+  const cjkBody = renderMarkdown(cjkRows, counts);
+  const cjkShown = cjkBody.split('\n').filter((l) => l.startsWith('- **H2**')).length;
+  const cjkRowChars = `- **H2** [#2000](https://example.test/2000) — ${cjkMsg}`.length + 1;
+  const cjkRowBytes = bodyBytes(`- **H2** [#2000](https://example.test/2000) — ${cjkMsg}`) + 1;
+  b(BATTERY18664, '#18664 guard: a CJK report is trimmed to the BYTE budget', bodyBytes(cjkBody) <= MARKDOWN_BODY_BUDGET, true);
+  b(BATTERY18664, '#18664 guard: …and it announces the trim', cjkBody.includes('further row(s) omitted'), true);
+  b(BATTERY18664, '#18664 guard: ⭐ the row text really is multi-byte, so the bound above is not vacuous', bodyBytes(cjkMsg) === cjkMsg.length * 3, true);
+  b(BATTERY18664, '#18664 guard: …and it did lay out rows, so the counts below are a trim and not an empty body', cjkShown > 0, true);
+  b(BATTERY18664, '#18664 guard: ⭐ the block it laid out fills the budget in BYTES while its character count is under half that', cjkShown * cjkRowChars * 2 < cjkShown * cjkRowBytes, true);
+  // ⭐ THE COUNTERFACTUAL, computed from this same run rather than asserted:
+  // how many rows a CHARACTER-counting guard would have laid out from the same
+  // fixture, and what that body would have WEIGHED on the wire. ⚠️ Read the
+  // second number honestly — it overruns the renderer's BUDGET, not the
+  // platform's measured cap, which at today's budget no character count can
+  // reach. The budget is the thing that stops meaning anything when it is kept
+  // in the wrong unit, and it is the thing that would become dangerous the day
+  // anybody raises it toward the cap.
+  const cjkHeadChars = cjkBody.length - cjkShown * cjkRowChars;
+  const cjkHeadBytes = bodyBytes(cjkBody) - cjkShown * cjkRowBytes;
+  const charGuardShown = Math.floor((MARKDOWN_BODY_BUDGET - cjkHeadChars) / cjkRowChars);
+  const charGuardBytes = cjkHeadBytes + charGuardShown * cjkRowBytes;
+  b(BATTERY18664, '#18664 guard: ⭐ …so it lays out FEWER rows than a character-counting guard would have', cjkShown < charGuardShown, true);
+  b(BATTERY18664, '#18664 guard: ⭐ …whose body would have weighed half again the budget it was meant to keep', charGuardBytes > MARKDOWN_BODY_BUDGET * 1.5, true);
+  b(BATTERY18664, '#18664 guard: …and that counterfactual is a real layout, not a division by zero', charGuardShown > 0 && cjkHeadBytes > 0, true);
+
+  // ⭐ The #4690 shape against the MEASURED cap: rows that alone would overrun
+  // 262,144 bytes are trimmed, announced, and land.
+  const overCapRows = [loudRow, ...Array.from({ length: 3000 }, (_, i) => finding(4000 + i, 'H2', 'assignee set but no claim comment on the thread — '.repeat(3)))];
+  const overCapRowBytes = overCapRows.reduce((n, [card, code, msg]) => n + bodyBytes(`- **${code}** [#${card.number}](${card.html_url}) — ${msg}`) + 1, 0);
+  const overCapBody = renderMarkdown(overCapRows, counts);
+  b(BATTERY18664, '#18664 over-cap: ⭐ the fixture really would exceed the measured cap untrimmed', overCapRowBytes > ISSUE_BODY_LIMIT, true);
+  b(BATTERY18664, '#18664 over-cap: …and the rendered body is under that cap', bodyBytes(overCapBody) <= ISSUE_BODY_LIMIT, true);
+  b(BATTERY18664, '#18664 over-cap: …under the renderer\'s own budget too', bodyBytes(overCapBody) <= MARKDOWN_BODY_BUDGET, true);
+  b(BATTERY18664, '#18664 over-cap: …and it SAYS it trimmed — the #4690 shape, never a silent cut', overCapBody.includes('further row(s) omitted'), true);
+  b(BATTERY18664, '#18664 over-cap: …with the notice pointing at the run log', overCapBody.includes('the full list is in the workflow run log'), true);
+  b(BATTERY18664, '#18664 over-cap: …and the trim still never reached the loud row', overCapBody.includes('#900'), true);
+
+  // The margin, stated in the docblock and checkable here.
+  b(BATTERY18664, '#18664 margin: the budget sits under the measured cap', MARKDOWN_BODY_BUDGET < ISSUE_BODY_LIMIT, true);
+  b(BATTERY18664, '#18664 margin: …by the stated margin, to the byte', ISSUE_BODY_LIMIT - MARKDOWN_BODY_BUDGET, 202144);
+  b(BATTERY18664, '#18664 margin: …and the docblock states that margin rather than leaving it to arithmetic', capDocblock.includes('202,144 bytes below'), true);
+  b(BATTERY18664, '#18664 margin: ⛔ the budget did NOT move with the cap — a corrected reading is not a licence to print more', MARKDOWN_BODY_BUDGET, 60000);
+  b(BATTERY18664, '#18664 margin: the family ledger\'s ceiling still sits under an eighth of the budget, in bytes', FAMILY_LEDGER_WORST_CASE_BYTES * 8 <= MARKDOWN_BODY_BUDGET, true);
+
+  // The floor, in the shape every battery here keeps.
+  b(BATTERY18664, '#18664 floor: this battery is DECLARED on the roster', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY18664), true);
+  b(BATTERY18664, '#18664 floor: …with a positive pin, so an empty battery cannot satisfy it', SELF_TEST_BATTERIES[BATTERY18664] > 0, true);
+  b(BATTERY18664, '#18664 floor: the roster is frozen', Object.isFrozen(SELF_TEST_BATTERIES), true);
+  b(BATTERY18664, '#18664 floor: the roster now declares SEVEN batteries, and the floor rose with it', SELF_TEST_BATTERY_FLOOR, 7);
+  b(BATTERY18664, '#18664 floor: …including the five this battery landed BESIDE, so neither side of the base merge silently dropped one', ['H66 released queue card', 'H19 judged-set founding', 'H65 tier declaration spelling', 'H67 queued merged-delivery reading', 'H2/H47/H66 decorated ownership marker'].every((name) => Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, name)), true);
+  b(BATTERY18664, '#18664 floor: …and the roster really carries at least that many', Object.keys(SELF_TEST_BATTERIES).length >= SELF_TEST_BATTERY_FLOOR, true);
 
   // -- The UNJUDGED band and the trim (#11218) -------------------------------
   //
@@ -26009,7 +29130,7 @@ async function selfTest() {
   t('markdown: the trim can never reach an UNJUDGED row', withUnjudged.includes('#9999'), true);
   t('markdown: …even though that row sorts LAST by card number', many.every(([i]) => i.number < 9999), true);
   t('markdown: …and the trim still fired', withUnjudged.includes('further row(s) omitted'), true);
-  t('markdown: …and the body is still under budget', withUnjudged.length <= MARKDOWN_BODY_BUDGET, true);
+  t('markdown: …and the body is still under budget', bodyBytes(withUnjudged) <= MARKDOWN_BODY_BUDGET, true);
   t('markdown: an UNJUDGED row is banner-announced', withUnjudged.includes('UNJUDGED row(s) in this sweep'), true);
   t('markdown: …and the banner says a later sweep will not fix it', withUnjudged.includes('nothing in a later sweep will resolve them'), true);
   t('markdown: no banner when nothing is unjudged', renderMarkdown([quietRow], counts).includes('UNJUDGED row(s) in this sweep'), false);
@@ -26093,6 +29214,12 @@ async function selfTest() {
   const noOracle = renderMarkdown([], counts, { triggerIndex: { rows: idxRows, candidates: 79, probed: 79, tracked: null } });
   t('H17 no-oracle: says the index is empty BY FAILURE', noOracle.includes('EMPTY BY FAILURE, not by finding'), true);
   t('H17 no-oracle: …and renders no row, so nothing unvalidated leaks out', noOracle.includes('#8331'), false);
+  // The tree the oracle was read in (#19191) — named in BOTH oracle states, knob set or not.
+  const tree19191 = (over) => renderTriggerIndex({ ...triggerIdx, ...over }).join('\n');
+  t('#19191 footer: the H17 footer NAMES the tree the oracle was read in', renderMarkdown([], counts, { triggerIndex: { ...triggerIdx, checkoutRoot: '/home/user/objectui', checkoutOrigin: 'https://github.com/objectstack-ai/objectui' } }).includes('Read in `/home/user/objectui` (`origin` `https://github.com/objectstack-ai/objectui`)'), true);
+  t('#19191 footer: …beside the oracle size, so the two are read together', tree19191({ checkoutRoot: '/r', checkoutOrigin: 'o' }).includes('6360 tracked file(s) in the oracle.) Read in `/r`'), true);
+  t('#19191 footer: an unnamed tree says so rather than reading as this one', tree19191({}).includes('Read in an unnamed tree (`origin` unresolved).'), true);
+  t('#19191 footer: …and the EMPTY-BY-FAILURE branch names its tree too', tree19191({ tracked: null, checkoutRoot: '/r', checkoutOrigin: 'o' }).includes('EMPTY BY FAILURE, not by finding. Run the patrol from inside a checkout. (read on 79 of 79 open `pm:on-hold` card(s).) Read in `/r`'), true);
   // The partial-read gap is stated, never implied.
   t('H17 partial: a partial hold read says so', renderMarkdown([], counts, { triggerIndex: { rows: [], candidates: 79, probed: 12, tracked: 10 } }).includes('read on 12 of 79'), true);
   // Budget: the index is RESERVED, so a board noisy enough to truncate the
@@ -26106,8 +29233,8 @@ async function selfTest() {
   // under MARKDOWN_BODY_BUDGET. Asserting only ISSUE_BODY_LIMIT would pass
   // even with the reservation removed (the index is ~1.5 KB and the two
   // numbers are 5.5 KB apart), i.e. it would pin nothing.
-  t('H17 budget: …and the whole body stays inside the render budget', crowded.length <= MARKDOWN_BODY_BUDGET, true);
-  t('H17 budget: …which the hard cap also bounds', crowded.length <= ISSUE_BODY_LIMIT, true);
+  t('H17 budget: …and the whole body stays inside the render budget', bodyBytes(crowded) <= MARKDOWN_BODY_BUDGET, true);
+  t('H17 budget: …which the measured cap also bounds', bodyBytes(crowded) <= ISSUE_BODY_LIMIT, true);
   // The index's own overflow announces itself rather than truncating silently.
   const overflow = renderTriggerIndex(
     { rows: Array.from({ length: H17_INDEX_ROW_CAP + 3 }, (_, i) => ({ issue: { number: i, html_url: 'u' }, files: ['f'] })), candidates: 1, probed: 1, tracked: 1 },
@@ -26240,7 +29367,7 @@ async function selfTest() {
   const crowdedBox = renderMarkdown(manyRows, counts, { triggerIndex: triggerIdx, decisions: { ...twoDeps, unmeasured: 3 } });
   t('④ budget: a truncated findings list still carries the section', crowdedBox.includes('### Decision-box dependency flags'), true);
   t('④ budget: …and the H17 index beside it', crowdedBox.includes('### On-hold trigger-file index'), true);
-  t('④ budget: …and the whole body stays inside the render budget', crowdedBox.length <= MARKDOWN_BODY_BUDGET, true);
+  t('④ budget: …and the whole body stays inside the render budget', bodyBytes(crowdedBox) <= MARKDOWN_BODY_BUDGET, true);
 
   // -- #13947: family legibility, and a trim that ranks by WHAT a row is ------
   //
@@ -26320,8 +29447,8 @@ async function selfTest() {
   t('#13947 order: …and is laid out FIRST, above every inventory row', ranked.indexOf('#99999') > 0 && ranked.indexOf('#99999') < ranked.indexOf('#1000'), true);
   t('#13947 order: …and the ledger records it as fully rendered', ranked.includes('| `H31` | gate | 1 | 1 |'), true);
   t('#13947 order: …while the inventory family is the one that loses rows', ranked.includes('| `H14` | inventory | 900 |'), true);
-  t('#13947 order: the body still fits the render budget', ranked.length <= MARKDOWN_BODY_BUDGET, true);
-  t('#13947 order: …and the hard cap', ranked.length <= ISSUE_BODY_LIMIT, true);
+  t('#13947 order: the body still fits the render budget', bodyBytes(ranked) <= MARKDOWN_BODY_BUDGET, true);
+  t('#13947 order: …and the measured cap', bodyBytes(ranked) <= ISSUE_BODY_LIMIT, true);
   // The loud and unjudged bands still outrank the family bands: an inventory
   // row that is UNJUDGED is a gap in what was READ, and #11218's reservation
   // must survive this change rather than be re-litigated by it.
@@ -26356,7 +29483,7 @@ async function selfTest() {
   const withIdx = renderMarkdown(loudFlood, counts, { triggerIndex: triggerIdx });
   t('#13947 reserved: …and above the other reserved sections', withIdx.indexOf('### Family ledger') < withIdx.indexOf('### On-hold trigger-file index'), true);
   t('#13947 reserved: which still render under a flooded body', withIdx.includes('### On-hold trigger-file index'), true);
-  t('#13947 reserved: …with the whole body inside the render budget', withIdx.length <= MARKDOWN_BODY_BUDGET, true);
+  t('#13947 reserved: …with the whole body inside the render budget', bodyBytes(withIdx) <= MARKDOWN_BODY_BUDGET, true);
   // Markdown only, and the asymmetry is deliberate: the terminal never trims.
   t('#13947 plain: the ledger has no terminal half', renderPlain([quietRow], counts).includes('Family ledger'), false);
   t('#13947 plain: …and the summary sentence is still the last line', renderPlain([quietRow], counts).endsWith('not a gate verdict.'), true);
@@ -26378,17 +29505,17 @@ async function selfTest() {
   };
   const bound = familyLedgerReservation(boundRows, boundText);
   let widest = 0;
-  for (let n = 0; n <= boundRows.length; n++) widest = Math.max(widest, boundText(n).length);
+  for (let n = 0; n <= boundRows.length; n++) widest = Math.max(widest, bodyBytes(boundText(n)));
   t('#13947 budget: ⭐ the reservation bounds EVERY trim outcome', widest <= bound, true);
   t('#13947 budget: …and is tight, not vacuously large', bound - widest <= 64, true);
   t('#13947 budget: the run-in-hand bound is under the declared ceiling', bound <= FAMILY_LEDGER_WORST_CASE_BYTES, true);
   // The declared ceiling, built rather than claimed: every registered family
   // computing 999 rows at once, then unregistered codes on top to the row cap.
   const everyFamily = Object.keys(HALF_STATE_FAMILY_BAND).flatMap((code) => Array.from({ length: 999 }, (_, i) => finding(60000 + i, code, 'row')));
-  t('#13947 budget: a ledger over EVERY registered family fits the ceiling', renderFamilyLedger(familyLedger(everyFamily, 1)).join('\n').length <= FAMILY_LEDGER_WORST_CASE_BYTES, true);
+  t('#13947 budget: a ledger over EVERY registered family fits the ceiling', bodyBytes(renderFamilyLedger(familyLedger(everyFamily, 1)).join('\n')) <= FAMILY_LEDGER_WORST_CASE_BYTES, true);
   const overCap = [...everyFamily, ...Array.from({ length: FAMILY_LEDGER_ROW_CAP + 5 - Object.keys(HALF_STATE_FAMILY_BAND).length }, (_, k) => k).flatMap((k) => Array.from({ length: 999 }, (_, i) => finding(70000 + i, `H${900 + k}`, 'row')))];
   const overCapLedger = renderFamilyLedger(familyLedger(overCap, 1)).join('\n');
-  t('#13947 budget: …and one crowded to the row cap fits it too', overCapLedger.length <= FAMILY_LEDGER_WORST_CASE_BYTES, true);
+  t('#13947 budget: …and one crowded to the row cap fits it too', bodyBytes(overCapLedger) <= FAMILY_LEDGER_WORST_CASE_BYTES, true);
   t('#13947 budget: the ceiling is a small fraction of the render budget', FAMILY_LEDGER_WORST_CASE_BYTES * 8 <= MARKDOWN_BODY_BUDGET, true);
 
   // ⑨ The ledger's own overflow announces itself — the in-family-cap tradition
@@ -27596,6 +30723,25 @@ async function selfTest() {
   const waitingBoth = { ...waiting(), body: 'Blocked-by: #900\nBlocked-by: #987' };
   t('H26 + H19: a partially expired, partially indefinite block fires both', Boolean(h19BlockOutlivedBlocker(waitingBoth, expiredAndIndefinite, REPO_OS)) && Boolean(h26BlockOnIndefiniteTarget(waitingBoth, expiredAndIndefinite)), true);
 
+  // -- The label-transition exit, the second `Unlock-action:` value (#19255): firing controls and fallbacks together --
+  const BATTERY19255 = 'H19/H26 label-transition unlock exit';
+  const LIVE_EXIT = 'Unlock-action: re-check #68 when label needs-user-decision absent';
+  const exitsOf = (body, comments) => unlockLabelExits({ body }, comments, REPO_OS).map((e) => `${e.key} ${e.label} ${e.state}`).join('|');
+  const exitCard = (body) => ({ ...waiting(75), body });
+  const h19exit = (card, targets, comments) => h19DeclaredExitFired(card, targets, comments, REPO_OS);
+  const [ruled, parked] = [tgt(68, ['pm:queue']), tgt(68, ['needs-user-decision'])];
+  b(BATTERY19255, 'exit reader: the live spelling names the card, the label and the state, in either channel', [exitsOf(LIVE_EXIT), exitsOf('no line here', [LIVE_EXIT])].join(), 'objectstack-ai/objectstack#68 needs-user-decision absent,objectstack-ai/objectstack#68 needs-user-decision absent');
+  b(BATTERY19255, 'exit reader: `present` is the same reader the other way, a cross-repo card keeps its qualifier, two lines are two exits in order', exitsOf('Unlock-action: re-check #987 when label pm:queue present\nUnlock-action: re-check objectstack-ai/objectos#68 when label needs-user-decision absent'), 'objectstack-ai/objectstack#987 pm:queue present|objectstack-ai/objectos#68 needs-user-decision absent');
+  b(BATTERY19255, 'exit reader: a decorated line, a backticked label and trailing prose are all the same line (shared reader)', exitsOf('- **`Unlock-action: re-check #68 when label `needs-user-decision` absent (the ruling lands)`**'), 'objectstack-ai/objectstack#68 needs-user-decision absent');
+  b(BATTERY19255, 'exit reader: ⛔ the closed set — PR-shaped, no state word, a word outside the pair, the pair in another case, a lowercase key and a mid-sentence mention all fall back; a missing issue does not crash', exitsOf(`Unlock-action: re-check PR #123\nUnlock-action: re-check #68 when label needs-user-decision\nUnlock-action: re-check #68 when label needs-user-decision removed\nUnlock-action: re-check #68 when label needs-user-decision Absent\nunlock-action: re-check #68 when label needs-user-decision absent\nseats write the ${LIVE_EXIT} line`) + unlockLabelExits(undefined, undefined, REPO_OS).length, '0');
+  b(BATTERY19255, 'H19 exit: `absent` fires once the target no longer carries the label, names the target, the label and the state, and is report-only', [typeof h19exit(exitCard(`Blocked-by: #68\n${LIVE_EXIT}`), [ruled]), String(h19exit(exitCard(`Blocked-by: #68\n${LIVE_EXIT}`), [ruled])).includes('`#68` (`needs-user-decision` absent)'), String(h19exit(exitCard(`Blocked-by: #68\n${LIVE_EXIT}`), [ruled])).includes('never a label written from this script')].join(), 'string,true,true');
+  b(BATTERY19255, 'H19 exit: ⛔ silent while the label is still on the target, on a card the block does not wait on, on a CLOSED or unresolved target (H19\'s own legs), and past the label gate', [h19exit(exitCard(`Blocked-by: #68\n${LIVE_EXIT}`), [parked]), h19exit(exitCard(`Blocked-by: #987\n${LIVE_EXIT}`), [tgt(987, ['pm:queue'])]), h19exit(exitCard(`Blocked-by: #68\n${LIVE_EXIT}`), [{ ...ruled, state: 'closed' }, { ...tgt(68, null), state: 'unresolved', detail: 'HTTP 404' }]), h19exit({ ...exitCard(`Blocked-by: #68\n${LIVE_EXIT}`), labels: [{ name: 'pm:queue' }] }, [ruled])].every((v) => v === null), true);
+  b(BATTERY19255, 'H19 exit: `present` fires when the target carries the label and not before; a comment-borne exit fires too', [typeof h19exit(exitCard('Blocked-by: #68\nUnlock-action: re-check #68 when label pm:queue present'), [ruled]), h19exit(exitCard('Blocked-by: #68\nUnlock-action: re-check #68 when label pm:queue present'), [parked]), typeof h19exit(exitCard('Blocked-by: #68'), [ruled], [LIVE_EXIT])].join(), 'string,,string');
+  b(BATTERY19255, '⭐ H26 stand-down: an exit naming the parked target silences the row in either channel — and once the label leaves, H19 fires the exit while H26 stays quiet', [h26row(exitCard(`Blocked-by: #68\n${LIVE_EXIT}`), [parked], undefined, REPO_OS), h26row(exitCard('Blocked-by: #68'), [parked], [LIVE_EXIT], REPO_OS), h26row(exitCard(`Blocked-by: #68\n${LIVE_EXIT}`), [ruled], undefined, REPO_OS)].every((v) => v === '') && typeof h19exit(exitCard(`Blocked-by: #68\n${LIVE_EXIT}`), [ruled]) === 'string', true);
+  b(BATTERY19255, 'H26 stand-down: ⛔ a comment it was not handed is not read; an exit naming ANOTHER card, or the PR-shaped value, leaves the row firing and the latter is named as a line nothing fires; two parked targets with one exit report only the other', [h26row(exitCard('Blocked-by: #68'), [parked], undefined, REPO_OS) !== '', h26row(exitCard('Blocked-by: #68\nUnlock-action: re-check #987 when label pm:on-hold absent'), [parked], undefined, REPO_OS) !== '', h26row(exitCard('Blocked-by: #68\nUnlock-action: re-check PR #123'), [parked], undefined, REPO_OS).includes('already do (`re-check PR #123`)'), h26row(exitCard(`Blocked-by: #68, #987\n${LIVE_EXIT}`), [parked, tgt(987, ['pm:on-hold'])], undefined, REPO_OS).includes('on 1 target(s)'), h26row(exitCard(`Blocked-by: #68, #987\n${LIVE_EXIT}`), [parked, tgt(987, ['pm:on-hold'])], undefined, REPO_OS).includes('`#987`')].join(), 'true,true,true,true,true');
+  b(BATTERY19255, 'H26 remedy: the row without an exit prescribes the live spelling and the close, says other spellings fall back silently, and the chain leg carries none of it', [h26row(waiting(75), [parked]).includes('`Unlock-action: re-check #N when label needs-user-decision absent`'), h26row(waiting(75), [parked]).includes('close the waiting card `not planned`'), h26row(waiting(75), [parked]).includes('falls back silently'), h26row(waiting(1395), [tgt(10101, ['pm:blocked'])]).includes('⭐ The exit')].join(), 'true,true,true,false');
+  b(BATTERY19255, 'floor: the roster now declares SEVEN batteries, and this one is on it', SELF_TEST_BATTERY_FLOOR === 7 && Object.hasOwn(SELF_TEST_BATTERIES, BATTERY19255), true);
+
   // -- The UNGATED liveness read + H28: the stale body line (#11747) ----------
   //
   // The fixture is the measured card's RECORDED BYTE SHAPE, not a sketch: body
@@ -28245,6 +31391,43 @@ async function selfTest() {
   t('H38 lane: an em-dash claim stays invisible (malformed by ruling)', newestLaneClaim('domain:services', [laneCard(1, ['pm:dispatched', 'domain:services'])], new Map([[1, [{ body: 'Claim — the skills seat', created_at: '2026-08-30T00:00:00Z' }]]])), null);
   t('H38 lane: an unreadable claim stamp is not an ordering', newestLaneClaim('domain:services', [laneCard(1, ['pm:dispatched', 'domain:services'])], new Map([[1, [{ body: 'Claim: x', created_at: 'nope' }]]])), null);
 
+  // Free-claim multi-seat: several PMs on one lane, one post per seat, and a
+  // post is compared only against claims of ITS seat number. The title suffix
+  // and the claim's `Seat:` line are the two readings; both default to seat 1.
+  const seat2Title = '[PM seat] domain:services · seat 2 — 🟢 os-b (session_y)';
+  t('H38 seat: a `· seat N` title suffix parses as the LANE, not foreign', seatLane(seat38(seat2Title)).lane, 'domain:services');
+  t('H38 seat: …and is not foreign', seatLane(seat38(seat2Title)).foreign, false);
+  t('H38 seat: …and carries the seat number', seatLane(seat38(seat2Title)).seat, 2);
+  t('H38 seat: a bare title is seat 1', seatLane(seat38()).seat, 1);
+  t('H38 seat: a numbered seat on a SIBLING board is still foreign', seatLane(seat38('[PM seat] domain:devx · seat 3 @ objectui — 🟢 os-b')).foreign, true);
+  t('H38 seat: …and still carries its number', seatLane(seat38('[PM seat] domain:devx · seat 3 @ objectui — 🟢 os-b')).seat, 3);
+  t('H38 seat: a numbered seat still buys the H32 comment fetch', h32NeedsSeatComments(seat38(seat2Title)), true);
+  t('H38 seat: an unparseable title has no seat', seatLane(seat38('not a seat title')).seat, null);
+  t('H38 seat: a claim with no `Seat:` line is seat 1', claimSeatNumber('Claim: x\nBranch: `claude/issue-1-a`'), 1);
+  t('H38 seat: `Seat: domain:services#2` reads 2', claimSeatNumber('Claim: x\nSeat: domain:services#2'), 2);
+  t('H38 seat: …backticked too', claimSeatNumber('Claim: x\nSeat: `domain:services#2`'), 2);
+  t('H38 seat: …and behind a bullet then a blockquote, bold key', claimSeatNumber('- > **Seat**: domain:services#4'), 4);
+  // ⛔ Blockquote-then-bullet is out, exactly as `claimedBranches` pins for `Branch:` — invisible, so absent, so seat 1.
+  t('H38 seat: a `> - Seat:` line is not read (measured shape, same as `Branch:`)', claimSeatNumber('> - Seat: domain:services#4'), 1);
+  t('H38 seat: a `Seat:` line naming no number is unreadable, not seat 1', claimSeatNumber('Claim: x\nSeat: domain:services'), null);
+  t('H38 seat: prose mentioning a seat is not a `Seat:` line', claimSeatNumber('the seat: domain:services#2 is busy'), 1);
+  const seatRow = (seatLine, iso) => [{ body: `Claim: PM loop round 1\nSession: \`session_x\`\n${seatLine}`, created_at: iso }];
+  const oneCard = [laneCard(1, ['pm:dispatched', 'domain:services'])];
+  const seat2Claim = new Map([[1, seatRow('Seat: `domain:services#2`', '2026-08-30T00:00:00Z')]]);
+  const seat1Claim = new Map([[1, seatRow('Branch: `claude/issue-1-a`', '2026-08-30T00:00:00Z')]]);
+  t('H38 seat: a SAME-seat newer claim is found (seat 2 post, seat 2 claim)', newestLaneClaim('domain:services', oneCard, seat2Claim, 2).number, 1);
+  t('H38 seat: ANOTHER seat\'s claim is not counted (seat 1 post, seat 2 claim)', newestLaneClaim('domain:services', oneCard, seat2Claim, 1), null);
+  t('H38 seat: an absent `Seat:` line is seat 1 — the seat 1 post sees it', newestLaneClaim('domain:services', oneCard, seat1Claim, 1).number, 1);
+  t('H38 seat: …and the seat 2 post does not', newestLaneClaim('domain:services', oneCard, seat1Claim, 2), null);
+  t('H38 seat: the default seat argument is 1, so every pre-existing call reads as before', newestLaneClaim('domain:services', laneIssues, laneComments).number, 13398);
+  t('H38 seat: an unreadable `Seat:` line matches no seat', newestLaneClaim('domain:services', oneCard, new Map([[1, seatRow('Seat: domain:services', '2026-08-30T00:00:00Z')]]), 1), null);
+  t('H38 seat: the newest SAME-seat claim wins over a newer other-seat one', newestLaneClaim('domain:services', oneCard, new Map([[1, [...seatRow('Seat: domain:services#1', '2026-08-29T00:00:00Z'), ...seatRow('Seat: domain:services#2', '2026-08-30T00:00:00Z')]]]), 1).at, at38('2026-08-29T00:00:00Z'));
+  // End to end on the post: a seat-2 post is judged against the claim handed to it, and names its seat.
+  t('H38 seat: a seat-2 post behind a same-seat claim -> finding', typeof h38SeatPostStale(seat38(seat2Title), SEAT_AT_38, claim38(13398, '2026-08-30T07:30:00Z')), 'string');
+  t('H38 seat: …and the finding names the seat', h38row(seat38(seat2Title), SEAT_AT_38, claim38(13398, '2026-08-30T07:30:00Z')).includes('seat 2'), true);
+  t('H38 seat: …while the bare post names seat 1', h38row(seat38(), SEAT_AT_38, claim38(13398, '2026-08-30T07:30:00Z')).includes('seat 1'), true);
+  t('H38 seat: a seat-2 post with no same-seat claim -> clean', h38SeatPostStale(seat38(seat2Title), SEAT_AT_38, newestLaneClaim('domain:services', oneCard, seat1Claim, 2)), null);
+
   // -- H39 — the closed `pm:*` residue census (#13526, report-only) ---------
   //
   // The card's central fence, restated as an assertion rather than as prose:
@@ -28751,7 +31934,7 @@ async function selfTest() {
   t('#13947: the flood really does trigger the row trim', floodedBody.includes('further row(s) omitted'), true);
   t('#13947: ⭐ …and the H40 section is STILL rendered', floodedBody.includes('### Dangling references (H40)'), true);
   t('#13947: …naming the dangling number itself, not just the heading', floodedBody.includes('**#13398** — HTTP 404'), true);
-  t('#13947: the body still fits the renderer budget it was trimmed for', floodedBody.length <= MARKDOWN_BODY_BUDGET, true);
+  t('#13947: the body still fits the renderer budget it was trimmed for', bodyBytes(floodedBody) <= MARKDOWN_BODY_BUDGET, true);
   t('#13947: a clean H40 section is rendered on a flooded body too', renderMarkdown(flood40, { repo: 'o/r', issues: 900, unscoped: 0, prs: 0, merged: 0 }, { references: clean40 }).includes('No reference in the corpus failed to resolve'), true);
   // …and the SECTION is absent when no reference pass ran, so every existing
   // caller of the two renderers keeps its byte-identical output. ⚠️ Asserted on
@@ -29123,7 +32306,15 @@ Mutual exclusion: \`get_comments\` page 747 → \`[]\`, page 746 = my own R+117 
   // shares. ⚠️ The needles are ASSEMBLED — a literal one in a fixture would be
   // counted by the file-wide audit it exists to check (`RETIRED_ASSIGNEE_COINAGE`'s
   // reason, one row over).
-  t('seat window: the located page is REQUESTED in exactly one place', audit18312.purchaseSites, 1);
+  // ⚠️ REWRITTEN (#18299), not weakened: this pin read `1` while the located-page
+  // purchase existed only inside the seat memo. H66's bounded buy pass is a
+  // second one, against a DISJOINT population (an unassigned `pm:queue` CARD,
+  // never a `pm:seat` post), so the original argument — 「two is the same page
+  // bought twice per run」 — moves to `seatPurchaseSites`, which still reads 1
+  // and is the leg that would go red if a second seat purchase appeared.
+  t('seat window: the located page is REQUESTED in exactly two places, file-wide', audit18312.purchaseSites, 2);
+  t('seat window: ⭐ …and exactly ONE of them is inside the seat memo, which is the bound that matters', audit18312.seatPurchaseSites, 1);
+  t('seat window: …so the second is OUTSIDE the memo, on the card population', audit18312.purchaseSites - audit18312.seatPurchaseSites, 1);
   // ⚠️ REWRITTEN (#18325), not deleted: this pin read `2` while the memo's
   // readers were H44's seat leg and H65. H32's gather is the third, and it is
   // the FIRST to ask on every post in both populations — which is what makes
@@ -29135,7 +32326,15 @@ Mutual exclusion: \`get_comments\` page 747 → \`[]\`, page 746 = my own R+117 
   t('seat window: the audit SEES a second page-less read when one exists', seatWindowAudit([commentsPath18312('per_page=100'), commentsPath18312('per_page=100')].join('\n')).pagelessPaths.length, 2);
   t('seat window: …and does not read `per_page=` as a page number', seatWindowAudit(commentsPath18312('per_page=100&page=9')).pagelessPaths.length, 0);
   t('seat window: the audit SEES a second purchase site when one exists', seatWindowAudit(['h65CommentPagePath(', 'OWNER_REPO, a)\n', 'h65CommentPagePath(', 'OWNER_REPO, b)'].join('')).purchaseSites, 2);
-  t('seat window: …and the assembled needles did not defeat the file-wide audit', seatWindowAudit().purchaseSites, 1);
+  t('seat window: …and the assembled needles did not defeat the file-wide audit', seatWindowAudit().purchaseSites, 2);
+  // ⭐ The slicer's own controls. Without these `seatPurchaseSites` could read 1
+  // for the wrong reason — or 0 forever — and nobody would know: a slice that
+  // finds nothing and a memo with no purchase print the same number.
+  const MEMO_OPEN18312 = ['const seatPostRowsFor = async', '(issue) => {'].join(' ');
+  t('seat window: a source with NO memo slices to nothing, so the count is 0 rather than the whole file', seatWindowAudit(['h65CommentPagePath(', 'OWNER_REPO, a)'].join('')).seatPurchaseSites, 0);
+  t('seat window: …and a source WITH the memo finds the purchase inside it', seatWindowAudit([MEMO_OPEN18312, '  h65CommentPagePath(' + 'OWNER_REPO, a)', '  };'].join('\n')).seatPurchaseSites, 1);
+  t('seat window: …while a purchase AFTER the memo body is not counted as the memo\'s', seatWindowAudit([MEMO_OPEN18312, '  };', 'h65CommentPagePath(' + 'OWNER_REPO, a)'].join('\n')).seatPurchaseSites, 0);
+  t('seat window: the memo needle is ASSEMBLED, so it does not match its own declaration', (seatWindowAudit().commentPaths.length > 0) && seatWindowAudit().seatPurchaseSites === 1, true);
 
   // -- H32's clock and H38's `T_seat` read the NEWEST page (#18325) ----------
   //
@@ -29237,6 +32436,72 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('H44 summary: …with the located count beside the read count', saidBy('h44Readings', summaryLine({ readingSeatRead: 6, readingSeatCandidates: 6, readingSeatNewest: 5 }, 0)).includes('5 of those post(s) had that page LOCATED'), true);
   t('H44 summary: …and that the page is shared rather than bought per row', saidBy('h44Readings', summaryLine({}, 0)).includes('shared with H56, H64 and H65'), true);
   t('H44: the window count key rides the enumerated forwarding contract too', SWEEP_COUNT_KEYS.includes('readingSeatNewest'), true);
+
+  // -- H44's tree shape: an IDENTIFIER is not a tip (#18385) -----------------
+  //
+  // ⭐ The three firing inputs are the live spellings measured on the cloud
+  // board, where 6 of 9 H44 rows in one sweep were this and nothing else. What
+  // makes them worse than noise is the row's own remedy: 「add the time the
+  // reading was taken」 applied to a session id asks a seat to stamp a reading
+  // nobody took. CONTROL A and CONTROL B are the regression pins that say the
+  // row still does its job, and CONTROL C is the canonical spelling that was
+  // already quiet — the three of them are what make the change a NARROWING
+  // rather than a silencing.
+  const TIP_18385 = '480080c7a0';
+  const CLAIM_SHORTHAND = 'Claim: PM session c5c0ce54 — dispatching this card';
+  const CLAIM_SHORTHAND_ZH = 'Claim: PM 会话 c5c0ce54 派发本卡(席位 F)。';
+  const CLAIM_UUID = 'Claim: PM loop round 1 (skills seat)\nSession: `session_71836b57-5db6-459d-ae4d-c6d9d7dd2cc6`';
+  const CLAIM_TIP_A = `Claim: PM loop round 1\nreviewed head \`${TIP_18385}\` of the PR`;
+  const CLAIM_TIP_B = `${CLAIM_TIP_A} at 2026-09-16T06:48Z`;
+  const CLAIM_CANONICAL = 'Claim: PM loop round 1\nSession: `session_01TAUTP6Yky8QWoHUAPDKNJQ`';
+  t('H44 identifier: ⭐ 「PM session c5c0ce54」 is an id, not a tip — quiet', h44hit(CLAIM_SHORTHAND), null);
+  t('H44 identifier: ⭐ …and the 「PM 会话」 spelling of the same claim', h44hit(CLAIM_SHORTHAND_ZH), null);
+  t('H44 identifier: ⭐ …and a canonical `Session:` line, which fired on the UUID\'s LAST SEGMENT', h44hit(CLAIM_UUID), null);
+  t('H44 identifier: ⭐ CONTROL A — a dateless REAL tip still fires, which is the whole point', h44kind(CLAIM_TIP_A), 'tree');
+  t('H44 identifier: ⭐ …echoed as the tip itself, so the remedy still names what to date', h44frag(CLAIM_TIP_A), TIP_18385);
+  t('H44 identifier: ⭐ CONTROL B — the same tip WITH its stamp stays quiet', h44hit(CLAIM_TIP_B), null);
+  t('H44 identifier: ⭐ CONTROL C — the canonical session spelling was already quiet and still is', h44hit(CLAIM_CANONICAL), null);
+  // ⭐ CONTROL D, and it is the reason the introduction leg reads ADJACENCY
+  // rather than 「the sentence mentions a session」: this is comment 5695539587
+  // on this board, a REAL dateless tip reading, and the loose spelling of the
+  // leg silenced it. A possessive three words away introduces nothing.
+  const POSSESSIVE_18385 = 'Claim: x\n\n**Harness reading** — every harness-loaded path on `origin/main` is in this session\'s checkout HEAD `588475c3` (the STALE reading that closed the previous shift)';
+  t('H44 identifier: ⭐ CONTROL D — 「this session\'s checkout HEAD` + a tip」 is a READING and still fires', h44frag(POSSESSIVE_18385), '588475c3');
+  // The sentence-vs-paragraph DECISION, both directions. A claim carries a
+  // `Session:` line by template, so a paragraph-scoped test would silence the
+  // whole claim population — CONTROL A's own habitat.
+  t('H44 identifier: a session line ABOVE a dateless tip does not silence it — the break is the newline', h44frag(`${CLAIM_CANONICAL}\n\`5bc2f2727ae\` is the tip`), '5bc2f2727ae');
+  t('H44 identifier: …and the rescan reaches a real tip past an excluded id in ONE sentence', h44frag(`Claim: x\n\nPM session c5c0ce54 reviewed head ${TIP_18385} of the PR`), TIP_18385);
+  // ⛔ The two declared residuals: a word between the introduction and the
+  // candidate is NOT excluded (one measurement away, not a guess), and no other
+  // shape is touched at all.
+  t('H44 identifier: ⛔ an intervening word is not an introduction — 「session id …」 still fires', h44kind('Claim: x\n\nPM session id c5c0ce54 dispatching'), 'tree');
+  t('H44 identifier: ⛔ a count beside a session id is still a count', h44kind('Claim: PM session c5c0ce54 — 12 open cards on this lane.'), 'count');
+  // ⛔ The SHAPE is not loosened for real tips — pinned as the regex source, so
+  // a future widening of the token itself cannot ride in under this row.
+  const tree18385 = H44_READING_FRAGMENTS.find((f) => f.kind === 'tree');
+  t('H44 identifier: ⛔ the `tree` shape itself is byte-for-byte what it was', tree18385.re.source, '\\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\\d)[0-9a-f]{7,40}\\b');
+  t('H44 identifier: …and the exclusion is declared on exactly one shape', H44_READING_FRAGMENTS.filter((f) => typeof f.exclude === 'function').length, 1);
+  t('H44 identifier: …that one being the tree shape', typeof tree18385.exclude, 'function');
+  // The two legs, driven directly.
+  t('H44 identifier leg: the UUID tail — a separator flush against a word character', h44TreeCandidateIsIdentifier('session_71836b57-5db6-459d-ae4d-c6d9d7dd2cc6', 32), true);
+  t('H44 identifier leg: ⛔ …but a bullet dash is not that — the separator must be flush on BOTH sides', h44TreeCandidateIsIdentifier('- 5bc2f2727ae is the tip', 2), false);
+  t('H44 identifier leg: the introduction — `session` with only decoration between', h44TreeCandidateIsIdentifier('PM session `c5c0ce54`', 12), true);
+  t('H44 identifier leg: …and 「会话」 is the same word', h44TreeCandidateIsIdentifier('PM 会话 c5c0ce54', 6), true);
+  t('H44 identifier leg: ⛔ a possessive three words away is not an introduction', h44TreeCandidateIsIdentifier('this session\'s checkout HEAD 588475c3', 29), false);
+  t('H44 identifier leg: the lead stops at the sentence break, so a `Session:` LINE cannot reach the line below', h44SentenceLead('Session: `session_01x`\n`5bc2f2727ae` is the tip', 24), '`');
+  t('H44 identifier leg: …and a full-width stop breaks it too', h44SentenceLead('会话 c5c0ce54。tip 5bc2f2727ae', 16), 'tip ');
+  // The rescan seam. ⛔ A shape with no `exclude` is read exactly as before —
+  // first match wins, no slicing, which is what keeps the ANCHORED `tableCount`
+  // shape on its original reading.
+  // ⛔ Read through `?.` — a case that THROWS on a null takes the whole
+  // self-test down before its verdict, hiding every sibling reading with it.
+  const admitted18385 = (kind, paragraph) => h44AdmittedMatch(H44_READING_FRAGMENTS.find((f) => f.kind === kind), paragraph);
+  t('H44 rescan: the first admissible match is returned with its index', String(admitted18385('tree', `session c5c0ce54 then ${TIP_18385}`)?.matched ?? ''), TIP_18385);
+  t('H44 rescan: …and its index is the position in the WHOLE paragraph, not the slice', Number(admitted18385('tree', `session c5c0ce54 then ${TIP_18385}`)?.index ?? -1), 22);
+  t('H44 rescan: a paragraph of nothing but excluded candidates has no match', admitted18385('tree', 'session c5c0ce54 and 会话 5bc2f2727ae'), null);
+  t('H44 rescan: a shape with no exclusion returns its first match untouched', String(admitted18385('count', 'we hold 12 open cards and 4 PRs')?.matched ?? ''), '12 open cards');
+  t('H44 rescan: …and the anchored tableCount shape still reads its row', String(admitted18385('tableCount', '| objectstack | **2** |')?.matched ?? '').includes('**2**'), true);
 
   // -- H45 — reserved and handed over at once (#15667, report-only) ----------
   // Both directions of a pure label intersection. The neighbour cases pin that
@@ -31019,6 +34284,24 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('H57 checkout: a DIFFERENT origin refuses and names both repos', localCheckoutServes('o/r', {}, 'https://github.com/o/other').reason.includes('o/other'), true);
   t('H57 checkout: no origin at all refuses', localCheckoutServes('o/r', {}, null).serves, false);
 
+  // The checkout knob (#19191) — WHICH tree the three local git reads take.
+  const SELF19191 = readFileSync(SELF_PATH, 'utf8');
+  t('#19191 knob: ONE git read site in the file, so a fourth reader cannot skip the cwd', SELF19191.split(['execFileSync', "('git'"].join('')).length - 1, 1);
+  t('#19191 knob: …and no `spawnSync` git read beside it', SELF19191.split(['spawnSync', "('git'"].join('')).length - 1, 0);
+  t('#19191 knob: …and that one site takes the knob as its `cwd`', /resolveSweepCheckout\(process\.env\)\.path[\s\S]{0,120}cwd,/.test(SELF19191), true);
+  t('#19191 knob: unset is the inherited cwd — no path is handed to git', resolveSweepCheckout({}).path, null);
+  t('#19191 knob: whitespace is unset too', resolveSweepCheckout({ PM_SWEEP_CHECKOUT: '  ' }).set, false);
+  t('#19191 knob: a path becomes the cwd every local git read takes', resolveSweepCheckout({ PM_SWEEP_CHECKOUT: '/home/user/objectui' }).path, '/home/user/objectui');
+  t('#19191 knob: the knob outranks GITHUB_REPOSITORY, which names the RUNNER\'s tree', localCheckoutServes('o/r', { PM_SWEEP_CHECKOUT: '/t', GITHUB_REPOSITORY: 'o/r' }, 'https://github.com/o/other').serves, false);
+  t('#19191 knob: …so a knob tree whose `origin` IS the board serves, whatever the runner says', localCheckoutServes('o/r', { PM_SWEEP_CHECKOUT: '/t', GITHUB_REPOSITORY: 'o/other' }, 'https://github.com/o/r').serves, true);
+  t('#19191 refusal: unset is no prerequisite at all — today\'s behaviour, unchanged', checkoutPrerequisite('o/r', {}, 'https://github.com/o/other'), null);
+  t('#19191 refusal: knob + matching origin passes, and the sweep runs', checkoutPrerequisite('o/r', { PM_SWEEP_CHECKOUT: '/t' }, 'https://github.com/o/r'), null);
+  const FOREIGN19191 = checkoutPrerequisite('o/r', { PM_SWEEP_CHECKOUT: '/t' }, 'https://github.com/o/other') ?? { headline: '', detail: [], fix: [] };
+  t('#19191 refusal: knob + mismatching origin REFUSES, naming the checkout it was given', String(FOREIGN19191.headline).includes('"/t"'), true);
+  t('#19191 refusal: …and names the repo that tree actually is', FOREIGN19191.detail.join(' ').includes('o/other'), true);
+  t('#19191 refusal: …and carries a fix, ⛔ never a fall back to cwd', String(FOREIGN19191.fix[1]).includes('unset it'), true);
+  t('#19191 refusal: a knob path with no `origin` at all refuses too', checkoutPrerequisite('o/r', { PM_SWEEP_CHECKOUT: '/nope' }, null)?.kind, 'checkout-does-not-serve');
+
   // Census and forwarding.
   t('H57 census: every count key rides the enumerated forwarding contract', ['scheduledDeclared', 'scheduledJudged', 'scheduledUnreadRuns', 'scheduledGating', 'scheduledInactive', 'scheduledInactiveNames', 'scheduledUnreadable', 'scheduledRequests', 'scheduledListingShort', 'scheduledUnresolved'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
   const SUM57 = saidBy('h57Scheduled', summaryLine({ scheduledDeclared: 22, scheduledJudged: 7, scheduledUnreadRuns: 0, scheduledGating: 15, scheduledInactive: 0, scheduledUnreadable: 0, scheduledRequests: 8 }, 0));
@@ -31535,6 +34818,1057 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('H65 summary: the clause is rendered on EVERY run, not just interesting ones', saidBy('h65RoundTier', summaryLine({}, 0)).includes('0 of 0'), true);
   t('H65 summary: a bare line renders numbers, never `undefined`', saidBy('h65RoundTier', summaryLine({}, 0)).includes('undefined'), false);
 
+  // -- BATTERY: H65 reads the DECLARATION, not the ASCII string (#18547) -----
+  //
+  // Every case here goes through `b(BATTERY65, …)` rather than `t(…)`, so the
+  // repair cannot quietly lose its cases — the H66 and H19 batteries' shape,
+  // the file's third.
+  //
+  // What this battery floors is a WIDENING: the row stopped reporting a Chinese
+  // declaration as silence, and a widening with no live control beside it is
+  // how a repair becomes a silencer. So the firing controls live INSIDE the
+  // same floored battery — the three measured tier-less specimens, a Chinese
+  // mention in PROSE, a BLOCKQUOTED Chinese declaration, a Chinese dialect
+  // word, a bare key naming nothing, and 「层」 with no key punctuation at all.
+  // Take any of them away and the battery is short of its pin.
+  //
+  // ⛔ The English cases are repeated here rather than referenced: this repair's
+  // one live hazard is a Chinese branch that changes an English verdict, and a
+  // control for that has to be in the battery that floors the branch.
+  const BATTERY65 = 'H65 tier declaration spelling';
+  // The MEASURED specimen, headline verbatim from objectstack#6015 comment
+  // `5706306387` (2026-09-16T23:58Z) — the artefact the card was filed on.
+  const MARKER65_CN =
+    '**Round-open marker** · triage seat · `session_01U6nJJSVZb476ckbRxmaMCA` · **R+259** · fire 2026-09-16T23:56Z · 2026-09-16T23:58Z · **objectstack 轮** · **层:小时层(增量)**,锚 = 本席 R+258 轮报 2026-09-16T23:15Z\n\n'
+    + 'Doubles as this fire\'s **write self-check**(step 0)。';
+  const cnTier = (body) => String(h65DeclaredTierCn(body)?.tier ?? 'none');
+  const cnWord = (body) => String(h65DeclaredTierCn(body)?.word ?? 'none');
+
+  // ⭐ The acceptance: the measured marker DOES name its tier, and the row now
+  // reads the VALUE rather than merely declining to fire.
+  b(BATTERY65, 'H65 #18547: ⭐ the MEASURED Chinese marker reads as DECLARED, not as silence', h65(MARKER65_CN), null);
+  b(BATTERY65, 'H65 #18547: …and the tier VALUE is extracted', cnTier(MARKER65_CN), 'hourly');
+  b(BATTERY65, 'H65 #18547: …naming the word the charter uses', cnWord(MARKER65_CN), '小时层');
+  b(BATTERY65, 'H65 #18547: the daily spelling resolves too', cnTier(withTier65(MARKER65, '层:每日层(当日首 fire)')), 'daily');
+  b(BATTERY65, 'H65 #18547: …and clears the artefact', h65(withTier65(MARKER65, '层:每日层(当日首 fire)')), null);
+  b(BATTERY65, 'H65 #18547: a full-width colon is the same key', cnTier(withTier65(MARKER65, '层\uFF1A小时层(增量)')), 'hourly');
+  b(BATTERY65, 'H65 #18547: …and that case is NO PHANTOM — the two colon spellings are different bytes', '层\uFF1A' === '层:', false);
+  b(BATTERY65, 'H65 #18547: leading indentation does not break the slot rule', h65(withTier65(MARKER65, '  层:小时层')), null);
+  b(BATTERY65, 'H65 #18547: free text after the tier word is allowed, as it is in English', h65(withTier65(MARKER65, '层:小时层 —— 锚 = 上一份收班简报')), null);
+  b(BATTERY65, 'H65 #18547: the round close clears the same way', h65(withTier65(CLOSE65, '层:每日层(当日首 fire)')), null);
+  b(BATTERY65, 'H65 #18547: …and so does the stand-down brief', h65(withTier65(BRIEF65, '层:小时层(增量)')), null);
+
+  // ⭐ FIRING CONTROLS — what must STILL fire, or this repair is a silencer.
+  b(BATTERY65, 'H65 #18547 control: the measured tier-LESS marker still fires', h65reason(MARKER65), 'absent');
+  b(BATTERY65, 'H65 #18547 control: …the measured round close still fires', h65reason(CLOSE65), 'absent');
+  b(BATTERY65, 'H65 #18547 control: …the measured stand-down brief still fires', h65reason(BRIEF65), 'absent');
+  b(BATTERY65, 'H65 #18547 control: …and each is still NAMED as the artefact it is', h65shape(MARKER65), 'a round-open marker');
+  b(BATTERY65, 'H65 #18547 control: ⛔ a mid-sentence Chinese mention is PROSE — it keeps today\'s verdict', h65reason(MARKER65 + '\n\n简报写明本轮跑的层:小时层,照旧。'), 'absent');
+  b(BATTERY65, 'H65 #18547 control: ⛔ …and a 「·」 elsewhere on that line does not license it', h65reason(MARKER65 + '\n\n锚 · 简报写明本轮跑的层:小时层。'), 'absent');
+  b(BATTERY65, 'H65 #18547 control: ⛔ a BLOCKQUOTED Chinese declaration is this artefact quoting another', h65reason(withTier65(MARKER65, '> 层:每日层(当日首 fire)')), 'absent');
+  // ⚠️ The case above is carried by the SLOT rule, not by the blockquote skip:
+  // `> ` is not `[ \t]`, so the line-start branch never reaches the key. The
+  // measured hazard is a quoted HEADLINE, where the 「·」 branch does reach it — a
+  // marker repeating last round's field would otherwise clear this round's duty.
+  // An ablation deleting the skip left the case above GREEN, which is how this
+  // second one came to exist; ⛔ do not merge them.
+  b(BATTERY65, 'H65 #18547 control: ⛔ …and a quoted HEADLINE cannot clear the duty through its 「·」 field', h65reason(withTier65(MARKER65, '> **Round-open marker** · triage seat · **R+258** · **层:小时层(增量)**')), 'absent');
+  b(BATTERY65, 'H65 #18547 control: ⛔ the WORD SET is closed — a Chinese dialect is a finding', h65reason(withTier65(MARKER65, '层:全量层')), 'unknown-tier');
+  b(BATTERY65, 'H65 #18547 control: …and the row echoes the word it refused', h65row(withTier65(MARKER65, '层:全量层')).includes('`全量层`'), true);
+  b(BATTERY65, 'H65 #18547 control: …naming the key it ACTUALLY read', h65row(withTier65(MARKER65, '层:全量层')).includes('carries a `层:` declaration'), true);
+  b(BATTERY65, 'H65 #18547 control: ⛔ …and never claiming a `Tier:` the artefact does not carry', h65row(withTier65(MARKER65, '层:全量层')).includes('`Tier:` declaration'), false);
+  b(BATTERY65, 'H65 #18547 control: …while an English dialect still names `Tier:`', h65row(withTier65(MARKER65, 'Tier: full')).includes('carries a `Tier:` declaration'), true);
+  b(BATTERY65, 'H65 #18547 control: …and the refusal lists all four legal words, not two', ['hourly', 'daily', '小时层', '每日层'].every((w) => h65row(withTier65(MARKER65, 'Tier: full')).includes(`\`${w}\``)), true);
+  b(BATTERY65, 'H65 #18547 control: …a bare 「层:」 naming nothing reports as naming nothing', h65row(withTier65(MARKER65, '层:')).includes('naming NOTHING'), true);
+  b(BATTERY65, 'H65 #18547 control: ⛔ the KEY is closed — 「层」 with no colon declares nothing', h65reason(withTier65(MARKER65, '本轮跑 小时层 增量')), 'absent');
+  b(BATTERY65, 'H65 #18547 control: ⛔ …nor does another key carrying the same word', h65reason(withTier65(MARKER65, '本轮:小时层(增量)')), 'absent');
+  b(BATTERY65, 'H65 #18547 control: ⛔ scope is untouched — a Chinese declaration is not owed by ordinary prose', h65('分诊答复 #18042:评级维持。层:小时层'), null);
+
+  // ⭐ ENGLISH IS UNTOUCHED — the one live hazard of a second spelling.
+  b(BATTERY65, 'H65 #18547: `Tier: hourly …` still clears', h65(withTier65(MARKER65, 'Tier: hourly (since 2026-09-15T13:45Z)')), null);
+  b(BATTERY65, 'H65 #18547: `Tier: daily …` still clears', h65(withTier65(MARKER65, 'Tier: daily (first fire of the day)')), null);
+  b(BATTERY65, 'H65 #18547: `Tier: full` is still the dialect finding', h65reason(withTier65(MARKER65, 'Tier: full')), 'unknown-tier');
+  b(BATTERY65, 'H65 #18547: …and still echoes the English word, not a Chinese one', h65row(withTier65(MARKER65, 'Tier: full')).includes('`full`'), true);
+  b(BATTERY65, 'H65 #18547: `**Tier:** daily` is still `not-at-line-start`', h65reason(withTier65(MARKER65, '**Tier:** daily')), 'not-at-line-start');
+  b(BATTERY65, 'H65 #18547: a mid-paragraph `Tier: daily` is still `not-at-line-start`', h65reason(MARKER65 + '\n\nThe round ran with Tier: daily, as it happens.'), 'not-at-line-start');
+  b(BATTERY65, 'H65 #18547: `> Tier: daily` is still `not-at-line-start`', h65reason(withTier65(MARKER65, '> Tier: daily (first fire of the day)')), 'not-at-line-start');
+  b(BATTERY65, 'H65 #18547: `Tier: 全量` is still a dialect, not a Chinese declaration', h65reason(withTier65(MARKER65, 'Tier: 全量')), 'unknown-tier');
+
+  // ⭐ Either spelling answers the clause — the seat that wrote BOTH has named
+  // its tier, whichever half is off-spec.
+  b(BATTERY65, 'H65 #18547: a legal Chinese field outranks an off-spec `Tier:` line — the tier IS named', h65(withTier65(MARKER65_CN, 'Tier: full')), null);
+  b(BATTERY65, 'H65 #18547: …and a legal `Tier:` line outranks an off-spec Chinese field', h65(withTier65(MARKER65, 'Tier: daily\n层:全量层')), null);
+
+  // ⭐ The declared shape of the second spelling, pinned where it is read.
+  b(BATTERY65, 'H65 #18547: the Chinese word set is CLOSED at two', H65_TIER_WORDS_CN.length, 2);
+  b(BATTERY65, 'H65 #18547: …and every one of them resolves into the English closed set', H65_TIER_WORDS_CN.every((e) => H65_TIER_WORDS.includes(e.tier)), true);
+  b(BATTERY65, 'H65 #18547: ⛔ no `g` flag on the field regex — a sticky index would make the answer order-dependent', H65_TIER_FIELD_CN.global, false);
+  b(BATTERY65, 'H65 #18547: ⛔ nor `m` — the caller feeds it one line at a time', H65_TIER_FIELD_CN.multiline, false);
+  b(BATTERY65, 'H65 #18547: the remedy prints the Chinese forms too, so the row teaches no rule the charter lacks', h65row(MARKER65).includes('层:每日层(当日首 fire)'), true);
+  b(BATTERY65, 'H65 #18547: …and still prints the English ones', h65row(MARKER65).includes('Tier: daily (first fire of the day)'), true);
+  b(BATTERY65, 'H65 #18547: …and still names the 「·」 field slot rather than implying any placement works', h65row(MARKER65).includes('-delimited field'), true);
+
+  // -- H66 — a released `pm:queue` card whose remainder is not work (#18299) --
+  //
+  // ⛔ The self-test never touches GitHub. Every heading below is a spelling
+  // MEASURED on a live comment (the banner names the three), the anchor carried
+  // from the filing card included — it is exercised here precisely BECAUSE its
+  // provenance is different and must not be mistaken for a measurement.
+  //
+  // ⭐ This is the file's FIRST registered battery: every case goes through
+  // `b(BATTERY66, …)` rather than `t(…)`, so deleting the block fails the floor
+  // instead of shrinking a total nobody reads.
+  const BATTERY66 = 'H66 released queue card';
+  const H66_ANNOUNCE = '## Measurement landed — verified in `main` by CONTENT. Card RELEASED, ⛔ not closed.';
+  const H66_ANNOUNCE_B = '## Slice landed — verified in `main` by CONTENT, and the card is RELEASED, ⛔ not closed';
+  const H66_ANNOUNCE_C = '## (a), (b) and (d) landed — verified in `main` by CONTENT. Card RELEASED for **(c)**, ⛔ not closed.';
+  const H66_STEP = '## What this card still owes — and it is ⛔ not a dispatchable step';
+  const H66_RULING = '## The remainder is a ruling, not a mechanical fix';
+  // The protocol line this row enforces, transcribed INDEPENDENTLY of the
+  // constant it pins — `RELEASE_RULE_LINE`'s discipline: two copies compared
+  // against each other is a check, a pin reading the value it pins is not.
+  const QUEUE_RULE_LINE =
+    '`pm:queue` = 有具名落点或复现的具体缺陷,或范围明确的工具/门禁修复,无可问之事。';
+  const cm66 = (body, at) => ({ body, created_at: at });
+  const T66_CLAIM = '2026-09-14T10:40:21Z';
+  const T66_RELEASE = '2026-09-14T12:44:12Z';
+  const T66_LATER = '2026-09-16T07:21:14Z';
+  const card66 = (extra = {}) => ({
+    number: 7696,
+    state: 'open',
+    labels: [{ name: 'pm:queue' }, { name: 'priority:p2' }],
+    assignees: [],
+    title: 'bug(analytics): the local select dimension is untranslated',
+    body: '## Measured\n\nthe pie widget renders raw keys.\n',
+    ...extra,
+  });
+  const thread66 = (body, at = T66_RELEASE) => [
+    cm66('Claim: PM loop round R37\nSession: `session_x`', T66_CLAIM),
+    cm66(body, at),
+  ];
+  const RELEASED66 = thread66(`${H66_ANNOUNCE}\n\nPR objectui#9498 merged.\n`);
+  const h66 = (extra = {}, rows) => h66ReleasedNonDispatchableRemainder(card66(extra), rows);
+  const h66row = (extra = {}, rows) =>
+    String(h66ReleasedNonDispatchableRemainder(card66(extra), rows) ?? '');
+
+  // ⭐ (c) — the measured PROSE leg, in each of the three spellings and in the
+  // heading shape all three were measured in.
+  b(BATTERY66, 'H66 fires: the measured release announcement on the newest comment', typeof h66({}, RELEASED66), 'string');
+  b(BATTERY66, 'H66 fires: …the second measured variant (`the card is RELEASED`)', typeof h66({}, thread66(H66_ANNOUNCE_B)), 'string');
+  b(BATTERY66, 'H66 fires: …and the third, whose RELEASED carries an item between the tokens', typeof h66({}, thread66(H66_ANNOUNCE_C)), 'string');
+  b(BATTERY66, 'H66 fires: the 「⛔ not a dispatchable step」 heading', typeof h66({}, thread66(`${H66_STEP}\n\nthe reading is the reporter\'s.\n`)), 'string');
+  b(BATTERY66, 'H66 fires: the 「remainder is a ruling」 heading', typeof h66({}, thread66(`${H66_RULING}\n\nthree arms.\n`)), 'string');
+  // ⚠️ Quoted UNDECORATED, which is what the scanner matched on: the live
+  // heading writes `main` in a code span, and quoting the raw line back would
+  // assert on a byte the anchor never saw.
+  b(BATTERY66, 'H66 fires: …and the row quotes the heading, depth and all, as the scanner read it', h66row({}, RELEASED66).includes(`「${undecorateProseLine(H66_ANNOUNCE)}」`), true);
+  b(BATTERY66, 'H66 fires: …and that really is the live heading with its decoration removed', undecorateProseLine(H66_ANNOUNCE), '## Measurement landed — verified in main by CONTENT. Card RELEASED, ⛔ not closed.');
+  b(BATTERY66, 'H66 fires: the UNMEASURED anchor is quoted as `from` its card, never `measured on`', h66row({}, thread66(H66_RULING)).includes('from objectstack#18299'), true);
+  b(BATTERY66, 'H66 fires: …and says the canonical line was ABSENT, not merely unmatched', h66row({}, RELEASED66).includes('with no canonical `Release:` line to read'), true);
+  b(BATTERY66, 'H66 fires: …naming the anchor with the live comments it was measured on', h66row({}, RELEASED66).includes('measured on objectui#7696 `5664140343`'), true);
+  b(BATTERY66, 'H66 fires: the filing card\'s own anchor is labelled NOT measured where it fires', h66row({}, thread66(H66_RULING)).includes('⛔ NOT measured on a live comment'), true);
+
+  // ⭐ (a) — the canonical `Release:` leg, the discriminator the dispatch named.
+  const REL66 = (tail) => thread66(`Release: session \`session_x\` — 部分落地 — ${tail}\n`);
+  b(BATTERY66, 'H66 fires: a `Release:` line whose 去向 is the maintainer', typeof h66({}, REL66('去向 the maintainer')), 'string');
+  b(BATTERY66, 'H66 fires: …the director seat', typeof h66({}, REL66('去向 the director seat confirms on #7650')), 'string');
+  b(BATTERY66, 'H66 fires: …the reporter', typeof h66({}, REL66('去向 the reporter takes one devtools reading')), 'string');
+  b(BATTERY66, 'H66 fires: …`needs-user-decision`', typeof h66({}, REL66('去向 `needs-user-decision`')), 'string');
+  b(BATTERY66, 'H66 fires: …`pm:awaiting-maintainer`', typeof h66({}, REL66('去向 `pm:awaiting-maintainer`')), 'string');
+  b(BATTERY66, 'H66 fires: …the Chinese spelling of the maintainer reads too', typeof h66({}, REL66('去向 维护者')), 'string');
+  b(BATTERY66, 'H66 fires: the row NAMES the destination it read', h66row({}, REL66('去向 the maintainer')).includes('names the maintainer, ⛔ not the dispatch pool'), true);
+  b(BATTERY66, 'H66 fires: …and quotes the line it read it off', h66row({}, REL66('去向 the maintainer')).includes('Release: session session_x'), true);
+  b(BATTERY66, 'H66 fires: a blockquoted release line reads the same, as at the claim marker', typeof h66({}, thread66('> Release: session `session_x` — 去向 the maintainer')), 'string');
+  // ⚠️ The unreadable 去向 LISTS rather than clears — the #4690 direction for a
+  // listing, and the row says which of the two it is.
+  b(BATTERY66, 'H66 fires: a `Release:` line naming NO destination is listed, never cleared', typeof h66({}, REL66('done')), 'string');
+  b(BATTERY66, 'H66 fires: …and says so in as many words', h66row({}, REL66('done')).includes('NO destination this row can read'), true);
+
+  // ⛔ (b) — a normal return to the pool. The whole point of the release act.
+  b(BATTERY66, 'H66 silent: a `Release:` line whose 去向 IS `pm:queue`', h66({}, REL66('去向 `pm:queue`, next seat re-claims')), null);
+  b(BATTERY66, 'H66 silent: …undecorated, without the code span', h66({}, REL66('去向 pm:queue')), null);
+  b(BATTERY66, 'H66 silent: …and the canonical line WINS over an announcement heading beside it', h66({}, thread66(`${H66_ANNOUNCE}\n\nRelease: session \`session_x\` — 去向 \`pm:queue\`\n`)), null);
+  b(BATTERY66, 'H66 silent: …which is the case that makes the leg worth keeping at all', typeof h66({}, thread66(`${H66_ANNOUNCE}\n\nRelease: session \`session_x\` — 去向 the maintainer\n`)), 'string');
+
+  // ⛔ (d) — a later comment returns the card to dispatchable. Structural: the
+  // row reads the NEWEST comment, so any later word stands it down.
+  b(BATTERY66, 'H66 silent: a later comment after the release', h66({}, [...RELEASED66, cm66('## Re-scoped — the remainder is a named fix, back to the queue', T66_LATER)]), null);
+  b(BATTERY66, 'H66 silent: …a later `Claim:` likewise', h66({}, [...RELEASED66, cm66('Claim: PM loop round 1\nBranch: `claude/issue-7696-x`', T66_LATER)]), null);
+  b(BATTERY66, 'H66 silent: …a later state repair likewise', h66({}, [...RELEASED66, cm66('## State repair — `pm:queue` → `pm:awaiting-maintainer`', T66_LATER)]), null);
+  b(BATTERY66, 'H66 silent: an OLDER release under a newer ordinary comment', h66({}, [cm66(H66_ANNOUNCE, T66_CLAIM), cm66('graded p2', T66_RELEASE)]), null);
+  // …and the ordering rule itself, which is `latestSeatMarker`'s, not a second one.
+  b(BATTERY66, 'H66 order: an unreadable stamp falls back to THREAD ORDER, release last', typeof h66({}, [cm66('graded p2', 'not-a-date'), cm66(H66_ANNOUNCE, 'not-a-date')]), 'string');
+  b(BATTERY66, 'H66 order: …and the reverse thread order goes clean', h66({}, [cm66(H66_ANNOUNCE, 'not-a-date'), cm66('graded p2', 'not-a-date')]), null);
+
+  // ⛔ (f) — no seat comment at all, and the two UNJUDGED states beside it.
+  b(BATTERY66, 'H66 silent: an EMPTY thread is a real reading, not a finding', h66({}, []), null);
+  b(BATTERY66, 'H66 silent: a thread with no release on it at all', h66({}, [cm66('## 分诊 · `pm:queue` / `domain:ui`', T66_CLAIM)]), null);
+  b(BATTERY66, 'H66 unjudged: an UNCONSULTED thread is UNJUDGED, never clean', h66({}, undefined), null);
+  b(BATTERY66, 'H66 unjudged: an UNREADABLE thread too', h66({}, null), null);
+
+  // ⛔ (e) — and the rest of the population gate.
+  b(BATTERY66, 'H66 population: an ASSIGNED card is out — that is H24\'s row', h66SpeaksAbout(card66({ assignees: [{ login: 'os-justin' }] })), false);
+  b(BATTERY66, 'H66 population: …and the predicate is silent on it, thread or no thread', h66({ assignees: [{ login: 'os-justin' }] }, RELEASED66), null);
+  b(BATTERY66, 'H66 population: an assignee given as a plain login is read too', h66SpeaksAbout(card66({ assignees: ['os-justin'] })), false);
+  b(BATTERY66, 'H66 population: an open unassigned `pm:queue` card is in', h66SpeaksAbout(card66()), true);
+  b(BATTERY66, 'H66 population: a CLOSED card is out — the queue label on it is residue', h66SpeaksAbout(card66({ state: 'closed' })), false);
+  b(BATTERY66, 'H66 population: a PULL REQUEST is out — the dispatch pool is cards', h66SpeaksAbout(card66({ pull_request: { url: 'x' } })), false);
+  b(BATTERY66, 'H66 population: an unreadable `labels` is out, ⛔ never read as unlabelled', h66SpeaksAbout(card66({ labels: undefined })), false);
+  b(BATTERY66, 'H66 population: a card with no `pm:queue` is out', h66SpeaksAbout(card66({ labels: [{ name: 'bug' }] })), false);
+  b(BATTERY66, 'H66 population: `pm:queue` + `pm:dispatched` is out — H3\'s contradiction', h66SpeaksAbout(card66({ labels: [{ name: 'pm:queue' }, { name: 'pm:dispatched' }] })), false);
+  b(BATTERY66, 'H66 population: `pm:queue` + `needs-user-decision` is out — H29\'s pair', h66SpeaksAbout(card66({ labels: [{ name: 'pm:queue' }, { name: 'needs-user-decision' }] })), false);
+  b(BATTERY66, 'H66 population: `pm:queue` + `pm:awaiting-maintainer` is out — H25\'s pair', h66SpeaksAbout(card66({ labels: [{ name: 'pm:queue' }, { name: AWAITING_MAINTAINER_LABEL }] })), false);
+  b(BATTERY66, 'H66 population: …and the exclusion reads ONE vocabulary, ⛔ not a second list', PM_EXCLUSIVE_STATE_LABELS.includes('pm:queue'), true);
+  b(BATTERY66, 'H66 population: `pm:retriage` is an ANNOTATION and does NOT exclude', h66SpeaksAbout(card66({ labels: [{ name: 'pm:queue' }, { name: 'pm:retriage' }] })), true);
+  b(BATTERY66, 'H66 population: a missing card is out, never a crash', h66SpeaksAbout(undefined), false);
+  b(BATTERY66, 'H66 population: …and the predicate does not crash on one either', h66ReleasedNonDispatchableRemainder(undefined, RELEASED66), null);
+  b(BATTERY66, 'H66 population: it is the label page the sweep already lists', SEEN_LABEL_PAGES.includes('pm:queue'), true);
+
+  // ⛔ The four quoting shapes the heading anchoring refuses STRUCTURALLY — the
+  // filing card, this row's own report and this file's banner all quote the
+  // spellings, and none of them may fire.
+  const QUOTES66 = [
+    ['the spelling in PROSE — a card talking about the shape, not declaring it', 'The releasing seat wrote Card RELEASED, ⛔ not closed at the top.'],
+    ['…inside an inline CODE SPAN in prose', 'the `Card RELEASED, ⛔ not closed` heading is the marker.'],
+    ['…inside a BLOCKQUOTED heading — one card quoting another', `> ${H66_ANNOUNCE}`],
+    ['…inside a FENCED block', `\`\`\`\n${H66_ANNOUNCE}\n\`\`\``],
+    ['…inside a tilde-fenced block, the other fence spelling', `~~~\n${H66_STEP}\n~~~`],
+    ['…in a TABLE cell, which is how the filing card carries it', '| card | why |\n|:--|:--|\n| objectui#7696 | the seat wrote ⛔ not a dispatchable step |'],
+    ['…and the lowercase prose the same card writes about the same event', '## What happened\n\nthe card was released rather than closed.'],
+  ];
+  b(BATTERY66, 'H66 controls: the quoting table is exercised WHOLE — seven fixtures, none quietly dropped', QUOTES66.length, 7);
+  for (const [why, body] of QUOTES66) b(BATTERY66, `H66 silent: ${why}`, h66({}, thread66(body)), null);
+  // …and the fixtures really carry the words, or every negative above is vacuous.
+  b(BATTERY66, 'H66 controls: the PROSE fixture really contains the spelling', QUOTES66[0][1].includes('RELEASED, ⛔ not closed'), true);
+  b(BATTERY66, 'H66 controls: …the FENCED one too', QUOTES66[3][1].includes('RELEASED, ⛔ not closed'), true);
+  b(BATTERY66, 'H66 controls: …the TABLE one too', QUOTES66[5][1].includes('⛔ not a dispatchable step'), true);
+  b(BATTERY66, 'H66 controls: …and the lowercase one really says the word', QUOTES66[6][1].includes('released rather than closed'), true);
+
+  // The heading scanner, read on its own — depth, indent, decoration, order.
+  //
+  // ⚠️ Through `heading66`, never `…[0].heading`: the scanner returns an EMPTY
+  // array when it matches nothing, so the direct index throws while evaluating
+  // `b()`'s ARGUMENTS — before `b()` runs — and the whole suite ABORTS at that
+  // line with a TypeError instead of reporting a case. That cost is paid
+  // exactly during ABLATION, which is the one run this battery exists to be
+  // read in; it was measured here (mutate the anchor, watch the suite abort at
+  // this line and every later case never run). The describing string is `says()`'s
+  // shape, one block over, for `says()`'s reason.
+  const heading66 = (text) => releaseAnnouncementHeadings(text)[0]?.heading ?? 'NO HEADING MATCHED';
+  b(BATTERY66, 'H66 scan: an `h3` heading matches and comes back AS WRITTEN', heading66('### Card RELEASED, ⛔ not closed'), '### Card RELEASED, ⛔ not closed');
+  b(BATTERY66, 'H66 scan: `h6` matches too', releaseAnnouncementHeadings('###### Card RELEASED, ⛔ not closed').length, 1);
+  b(BATTERY66, 'H66 scan: ⛔ seven hashes is not a heading', releaseAnnouncementHeadings('####### Card RELEASED, ⛔ not closed').length, 0);
+  b(BATTERY66, 'H66 scan: ⛔ nor a hash with no space after it', releaseAnnouncementHeadings('##Card RELEASED, ⛔ not closed').length, 0);
+  b(BATTERY66, 'H66 scan: three leading spaces still open a heading', releaseAnnouncementHeadings('   ## Card RELEASED, ⛔ not closed').length, 1);
+  b(BATTERY66, 'H66 scan: ⛔ four do not — that is an indented code block', releaseAnnouncementHeadings('    ## Card RELEASED, ⛔ not closed').length, 0);
+  b(BATTERY66, 'H66 scan: decoration on the heading is read through', releaseAnnouncementHeadings('## **Card RELEASED**, ⛔ not closed').length, 1);
+  b(BATTERY66, 'H66 scan: two distinct anchors come back in the order written', releaseAnnouncementHeadings(`${H66_STEP}\n\n${H66_ANNOUNCE}`).map((h) => h.spelling).join(' | '), '⛔ not a dispatchable step | Card RELEASED, ⛔ not closed');
+  b(BATTERY66, 'H66 scan: one spelling written twice is named once', releaseAnnouncementHeadings(`${H66_ANNOUNCE}\n\ntext\n\n${H66_ANNOUNCE_B}`).length, 1);
+  b(BATTERY66, 'H66 scan: CRLF bodies read the same', releaseAnnouncementHeadings('## Card RELEASED, ⛔ not closed\r\n').length, 1);
+  b(BATTERY66, 'H66 scan: an empty text is not a crash', releaseAnnouncementHeadings(undefined).length, 0);
+  // ⛔ The gap between the two literal tokens is BOUNDED, so the anchor stays an
+  // anchor rather than becoming a fuzzy match across a paragraph.
+  b(BATTERY66, 'H66 scan: ⛔ a 41-character gap between the tokens does NOT match', releaseAnnouncementHeadings(`## Card RELEASED ${'x'.repeat(41)} ⛔ not closed`).length, 0);
+  b(BATTERY66, 'H66 scan: ⛔ and the two tokens on DIFFERENT lines never match', releaseAnnouncementHeadings('## Card RELEASED\n## ⛔ not closed').length, 0);
+  b(BATTERY66, 'H66 scan: ⛔ lowercase `released` is not the declaration', releaseAnnouncementHeadings('## Card released, ⛔ not closed').length, 0);
+
+  // The anchor set — measured, frozen, capped, provenance-labelled.
+  b(BATTERY66, 'H66 anchors: the set is at or under its declared cap', H66_RELEASE_ANNOUNCEMENT_ANCHORS.length <= H66_RELEASE_ANCHOR_CAP, true);
+  b(BATTERY66, 'H66 anchors: …and the cap is 5, so a sixth is an argument rather than an edit', H66_RELEASE_ANCHOR_CAP, 5);
+  b(BATTERY66, 'H66 anchors: every declared spelling fires against its OWN regex', H66_RELEASE_ANNOUNCEMENT_ANCHORS.every((a) => a.heading.test(a.spelling)), true);
+  b(BATTERY66, 'H66 anchors: …and every one of them fires as a real heading', H66_RELEASE_ANNOUNCEMENT_ANCHORS.every((a) => releaseAnnouncementHeadings(`## ${a.spelling}`).length === 1), true);
+  b(BATTERY66, 'H66 anchors: every anchor records where it came from', H66_RELEASE_ANNOUNCEMENT_ANCHORS.every((a) => /#\d+/u.test(a.instance)), true);
+  b(BATTERY66, 'H66 anchors: exactly TWO are measured on live comments…', H66_RELEASE_ANNOUNCEMENT_ANCHORS.filter((a) => a.measured === true).length, 2);
+  b(BATTERY66, 'H66 anchors: …and the third is labelled as the filing card\'s, ⛔ not a measurement', H66_RELEASE_ANNOUNCEMENT_ANCHORS.filter((a) => a.measured === false).map((a) => a.spelling).join(','), 'remainder is a ruling');
+  b(BATTERY66, 'H66 anchors: the set is frozen', Object.isFrozen(H66_RELEASE_ANNOUNCEMENT_ANCHORS), true);
+  b(BATTERY66, 'H66 anchors: …and so is every member', H66_RELEASE_ANNOUNCEMENT_ANCHORS.every((a) => Object.isFrozen(a)), true);
+  b(BATTERY66, 'H66 anchors: the destination vocabulary is frozen and CLOSED', Object.isFrozen(H66_NON_QUEUE_DESTINATIONS) && H66_NON_QUEUE_DESTINATIONS.every((d) => Object.isFrozen(d)), true);
+  b(BATTERY66, 'H66 anchors: …and every destination names itself for the sentence', H66_NON_QUEUE_DESTINATIONS.every((d) => typeof d.name === 'string' && d.name.length > 0), true);
+
+  // The verdict helper, read three-valued on its own.
+  //
+  // ⚠️ Through `verdict66`, never `h66ReleaseVerdict(…).<field>`: the helper is
+  // three-valued BY DESIGN — `null` when the comment is no release record — so a
+  // direct field read throws while evaluating `b()`'s ARGUMENTS and ABORTS the
+  // whole suite. Measured here during the anchor ablation, on the announcement
+  // case. The describing string keeps 「the verdict went null」 distinguishable
+  // from 「the field said something else」, which is `says()`'s reason one block over.
+  const verdict66 = (body, field) => {
+    const v = h66ReleaseVerdict(body);
+    return v === null ? 'NO VERDICT (null)' : v[field];
+  };
+  b(BATTERY66, 'H66 verdict: an ordinary comment is not a release record at all', h66ReleaseVerdict('looks good to me'), null);
+  b(BATTERY66, 'H66 verdict: a `Release:` line to the pool is DISPATCHABLE', verdict66('Release: session `x` — 去向 `pm:queue`', 'dispatchable'), true);
+  b(BATTERY66, 'H66 verdict: …to anywhere else it is not', verdict66('Release: session `x` — 去向 the maintainer', 'dispatchable'), false);
+  b(BATTERY66, 'H66 verdict: …and it says which leg answered', verdict66('Release: session `x` — 去向 the maintainer', 'leg'), 'release-line');
+  b(BATTERY66, 'H66 verdict: the announcement leg names itself too', verdict66(H66_ANNOUNCE, 'leg'), 'announcement');
+  b(BATTERY66, 'H66 verdict: ⛔ `Released:` is a MALFORMED release, ⛔ not a dialect — no line is read', h66ReleaseVerdict('Released: session `x` — 去向 the maintainer'), null);
+  b(BATTERY66, 'H66 verdict: ⛔ prose about releasing is not a record', h66ReleaseVerdict('We will release: the card tomorrow'), null);
+  b(BATTERY66, 'H66 verdict: an empty body is not a crash', h66ReleaseVerdict(undefined), null);
+  // ⛔ MEASURED, not stylistic: the two live release comments both write
+  // 「`pm:queue` added」 in their state-write paragraph, so a body-wide read for
+  // the label would clear precisely the specimens this row exists to list.
+  b(BATTERY66, 'H66 verdict: ⛔ `pm:queue` in the BODY does not clear an announcement', typeof h66({}, thread66(`${H66_ANNOUNCE}\n\nState written: \`pm:dispatched\` stripped, \`pm:queue\` added, assignee cleared.\n`)), 'string');
+  b(BATTERY66, 'H66 verdict: …the 去向 is read on the `Release:` LINE and nowhere else', verdict66('Release: session `x` — 去向 the maintainer\n\nback to `pm:queue` eventually.', 'dispatchable'), false);
+
+  // The row's own sentence — the halves the direction requires.
+  b(BATTERY66, 'H66 row: it quotes the clause it enforces, in the protocol\'s own words', h66row({}, RELEASED66).includes(`「${QUEUE_RULE_LINE}」`), true);
+  b(BATTERY66, 'H66 row: …and that transcription matches the constant the row reads', h66row({}, RELEASED66).includes('无可问之事'), true);
+  b(BATTERY66, 'H66 row: it quotes the release ACT as well, since the 去向 is its field', h66row({}, RELEASED66).includes('释放是显式动作'), true);
+  b(BATTERY66, 'H66 row: the remedy is the card\'s own — judge by hand', h66row({}, RELEASED66).includes('judge by hand — this is a listing'), true);
+  b(BATTERY66, 'H66 row: ⛔ it proposes NO state, which the filing card leaves open', h66row({}, RELEASED66).includes('does NOT propose a state'), true);
+  b(BATTERY66, 'H66 row: ⛔ nor does it claim the remainder is undispatchable', h66row({}, RELEASED66).includes('does NOT say the remainder is undispatchable'), true);
+  b(BATTERY66, 'H66 row: report-only — it writes nothing and relabels nothing', h66row({}, RELEASED66).includes('⛔ no label is written and ⛔ nothing is relabelled'), true);
+  b(BATTERY66, 'H66 row: it declares what it CANNOT see, so a reader does not over-trust it', h66row({}, RELEASED66).includes('LOWER BOUND'), true);
+  b(BATTERY66, 'H66 row: …and names the measurement that made it a p2', h66row({}, RELEASED66).includes('FOUR OLDEST'), true);
+
+  // Adjacency — ⛔ this row restates no neighbour's verdict on its own specimen.
+  b(BATTERY66, 'H66 adjacency: H8 is silent — no `pm:dispatched` anywhere in this population', h8MergedPrStillDispatched(card66(), [], []), null);
+  b(BATTERY66, 'H66 adjacency: H24 is silent — the card is UNASSIGNED, correct for `pm:queue`', h24QueuedWithAssignee(card66()), null);
+  b(BATTERY66, 'H66 adjacency: H3 is silent — one pm state label, not two', h3QueueAndDispatched(card66()), false);
+  b(BATTERY66, 'H66 adjacency: H58 is silent — the specimen declares no ruling heading', h58QueuedRulingRow(card66(), [RELEASED66[1].body]), null);
+  b(BATTERY66, 'H66 adjacency: H47 is silent on the CANONICAL leg — the release answers the claim', h47ReleaseRecordDesync(card66(), REL66('去向 the maintainer')), null);
+  // ⚠️ …and the ONE overlap, asserted rather than hidden: on the PROSE leg the
+  // release was never written as a line, so H47 leg (b) fires TOO. Two
+  // readings — a record missing its canonical line, and a card in the pool with
+  // a remainder — never one restated.
+  b(BATTERY66, 'H66 adjacency: on the PROSE leg H47 (b) fires as well, and that is two readings', [typeof h47ReleaseRecordDesync(card66(), RELEASED66), typeof h66({}, RELEASED66)].join(','), 'string,string');
+
+  // Band, registry and the forwarding contract.
+  b(BATTERY66, 'H66 band: registered as a STATE row — two carriers on one live card', familyBand('H66'), 'state');
+  b(BATTERY66, 'H66 band: ⛔ NOT `gate` — nothing here decides a landing', familyBand('H66') === 'gate', false);
+  b(BATTERY66, 'H66 band: ⛔ NOT `stall` — the card sits in the pool and any seat may take it', familyBand('H66') === 'stall', false);
+  b(BATTERY66, 'H66 band: ⛔ NOT `inventory` — it alarms about ONE card; the population is a clause', familyBand('H66') === 'inventory', false);
+  b(BATTERY66, 'H66 band: it is H58\'s band, the row it sits beside', familyBand('H66'), familyBand('H58'));
+  b(BATTERY66, 'H66 band: …and the sweep really pushes it, so the registry sees it', familyRegistryCoverage().emitted.includes('H66'), true);
+  b(BATTERY66, 'H66 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
+  b(BATTERY66, 'H66 band: …and no band names a family the sweep never emits', familyRegistryCoverage().extra.length, 0);
+  b(BATTERY66, 'H66 band: the registry still fits inside the ledger ROW CAP', Object.keys(HALF_STATE_FAMILY_BAND).length <= FAMILY_LEDGER_ROW_CAP, true);
+  b(BATTERY66, 'H66 band: a gate row still outranks it', familyRank('H31') < familyRank('H66'), true);
+  b(BATTERY66, 'H66 census: every count key rides the enumerated forwarding contract', ['queueReleaseCandidates', 'queueReleaseThreadRead', 'queueReleaseBought', 'queueReleaseCap', 'queueReleaseDeferred', 'queueReleaseUnjudged', 'queueReleaseRows'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
+  const SUM66 = saidBy('h66QueueRelease', summaryLine({ queueReleaseCandidates: 194, queueReleaseThreadRead: 7, queueReleaseBought: 100, queueReleaseCap: 100, queueReleaseDeferred: 87, queueReleaseUnjudged: 3, queueReleaseRows: 2 }, 0));
+  b(BATTERY66, 'H66 summary: the QUADRUPLE — candidates…', SUM66.includes('194 open unassigned `pm:queue` card(s) could be spoken about'), true);
+  b(BATTERY66, 'H66 summary: …already in hand…', SUM66.includes('7 with a comment thread ALREADY in hand'), true);
+  b(BATTERY66, 'H66 summary: …bought this run, with the cap named…', SUM66.includes('100 NEWEST comment page(s) BOUGHT this run (cap 100'), true);
+  b(BATTERY66, 'H66 summary: …and listed', SUM66.includes('2 listed'), true);
+  b(BATTERY66, 'H66 summary: the candidates the cap did NOT attempt are named, and are not clean', SUM66.includes('87 candidate(s) NOT ATTEMPTED at that cap'), true);
+  b(BATTERY66, 'H66 summary: …and the UNJUDGED count rides beside them', SUM66.includes('3 card(s) stayed UNJUDGED'), true);
+  b(BATTERY66, 'H66 summary: it says which two ways a card stays unjudged', SUM66.includes('whose fetch failed') && SUM66.includes('could not be LOCATED'), true);
+  b(BATTERY66, 'H66 summary: it says the buy is ONE page, the NEWEST one', SUM66.includes('ONE page per card, the NEWEST one'), true);
+  b(BATTERY66, 'H66 summary: …⛔ never page 1, and WHY', SUM66.includes('never page 1 on a long thread') && SUM66.includes('OLDEST-FIRST'), true);
+  b(BATTERY66, 'H66 summary: …and the candidate ORDER, with its reason', SUM66.includes('NEWEST-TOUCHED first, because a release is a write on the card'), true);
+  b(BATTERY66, 'H66 summary: the free half is still named, so a cached thread is visibly free', SUM66.includes('a thread another row already paid for costs nothing here'), true);
+  b(BATTERY66, 'H66 summary: a run under the cap does NOT print a not-attempted clause', saidBy('h66QueueRelease', summaryLine({ queueReleaseCandidates: 5, queueReleaseBought: 5, queueReleaseDeferred: 0 }, 0)).includes('NOT ATTEMPTED'), false);
+  b(BATTERY66, 'H66 summary: …and the cap is still named on that run', saidBy('h66QueueRelease', summaryLine({ queueReleaseCandidates: 5, queueReleaseBought: 5, queueReleaseDeferred: 0 }, 0)).includes('(cap 100)'), true);
+  b(BATTERY66, 'H66 summary: a bare line falls back to the DECLARED cap rather than to `undefined`', saidBy('h66QueueRelease', summaryLine({}, 0)).includes(`(cap ${H66_THREAD_BUY_CAP})`), true);
+  b(BATTERY66, 'H66 summary: it publishes the zero the canonical leg measured', saidBy('h66QueueRelease', summaryLine({}, 0)).includes('appeared ZERO times'), true);
+  b(BATTERY66, 'H66 summary: …and that it is a LISTING rather than a verdict', saidBy('h66QueueRelease', summaryLine({}, 0)).includes('A LISTING, never a verdict'), true);
+  b(BATTERY66, 'H66 summary: the clause is rendered on EVERY run, not just interesting ones', saidBy('h66QueueRelease', summaryLine({}, 0)).includes('0 open unassigned'), true);
+  b(BATTERY66, 'H66 summary: a bare line renders numbers, never `undefined`', saidBy('h66QueueRelease', summaryLine({}, 0)).includes('undefined'), false);
+  b(BATTERY66, 'H66 summary: the anchor is declared in RENDER order, before the report-only tail', SUMMARY_CLAUSE_ANCHORS.findIndex(([k]) => k === 'h66QueueRelease') < SUMMARY_CLAUSE_ANCHORS.findIndex(([k]) => k === 'reportOnly'), true);
+
+  // -- H66's BOUNDED BUY leg (#18299 patch round) ---------------------------
+  //
+  // The row shipped reading the shared cache and nothing else; the first live
+  // sweep measured 194 candidates with a thread in hand for ONE. These cases
+  // pin the leg that closes that gap: what it buys, in which order, how much,
+  // and what it does when a buy fails.
+  const q66 = (n, updated, extra = {}) => ({
+    number: n,
+    state: 'open',
+    labels: [{ name: 'pm:queue' }],
+    assignees: [],
+    updated_at: updated,
+    ...extra,
+  });
+  const CAND66 = [
+    q66(1, '2026-09-10T00:00:00Z'),
+    q66(2, '2026-09-16T00:00:00Z'),
+    q66(3, '2026-09-01T00:00:00Z'),
+    q66(4, '2026-09-16T00:00:00Z'),
+  ];
+  const order66 = (issues, cap) => h66BuyOrder(issues, cap).buy.map((i) => i.number).join(',');
+
+  b(BATTERY66, 'H66 buy: the cap is 100, and it is a named constant rather than a literal in the pass', H66_THREAD_BUY_CAP, 100);
+  b(BATTERY66, 'H66 buy: ORDER is newest-touched first', order66(CAND66, 10), '4,2,1,3');
+  b(BATTERY66, 'H66 buy: …and the tie between two equal stamps is broken by card number, so the order is TOTAL', order66([CAND66[1], CAND66[3]], 10), '4,2');
+  b(BATTERY66, 'H66 buy: …an UNREADABLE stamp sorts LAST, ⛔ never promoted ahead of a dated card', order66([q66(9, 'not-a-date'), CAND66[2]], 10), '3,9');
+  b(BATTERY66, 'H66 buy: …a MISSING stamp likewise', order66([q66(9), CAND66[2]], 10), '3,9');
+  b(BATTERY66, 'H66 buy: the CAP is respected when candidates exceed it', h66BuyOrder(CAND66, 2).buy.length, 2);
+  b(BATTERY66, 'H66 buy: …and it takes the NEWEST ones, not the first ones handed in', order66(CAND66, 2), '4,2');
+  b(BATTERY66, 'H66 buy: …the rest are DEFERRED, ⛔ not dropped silently', h66BuyOrder(CAND66, 2).deferred.map((i) => i.number).join(','), '1,3');
+  b(BATTERY66, 'H66 buy: candidates + deferred always account for the whole set', h66BuyOrder(CAND66, 2).buy.length + h66BuyOrder(CAND66, 2).deferred.length, CAND66.length);
+  b(BATTERY66, 'H66 buy: a cap ABOVE the population buys all of it and defers none', h66BuyOrder(CAND66, 100).deferred.length, 0);
+  b(BATTERY66, 'H66 buy: a zero cap buys nothing and defers everything', `${h66BuyOrder(CAND66, 0).buy.length}:${h66BuyOrder(CAND66, 0).deferred.length}`, '0:4');
+  b(BATTERY66, 'H66 buy: a nonsense cap is read as zero, ⛔ never as unbounded', h66BuyOrder(CAND66, Number.NaN).buy.length, 0);
+  b(BATTERY66, 'H66 buy: a negative cap likewise', h66BuyOrder(CAND66, -5).buy.length, 0);
+  b(BATTERY66, 'H66 buy: an empty candidate set is not a crash', `${h66BuyOrder([], 10).buy.length}:${h66BuyOrder([], 10).deferred.length}`, '0:0');
+  b(BATTERY66, 'H66 buy: a non-array is not a crash either', h66BuyOrder(undefined, 10).buy.length, 0);
+  b(BATTERY66, 'H66 buy: the plan is PURE — the caller\'s array is not reordered under it', (() => { const input = [...CAND66]; h66BuyOrder(input, 2); return input.map((i) => i.number).join(','); })(), '1,2,3,4');
+
+  // What the buy actually asks for — H65's helpers, reused, ⛔ never page 1 on a
+  // long thread.
+  b(BATTERY66, 'H66 buy: a long thread is located on its NEWEST page, from the card\'s own count', h65NewestPagePlan({ comments: 250 }).page, 3);
+  b(BATTERY66, 'H66 buy: …and the request is that page, at the shared page size', h65CommentPagePath('o/r', 7696, h65NewestPagePlan({ comments: 250 }).page), '/repos/o/r/issues/7696/comments?per_page=100&page=3');
+  b(BATTERY66, 'H66 buy: a short thread stays on page 1 — there is no second request to make', h65NewestPagePlan({ comments: 12 }).page, 1);
+  b(BATTERY66, 'H66 buy: ⛔ an unreadable `comments` count cannot LOCATE a newest page', h65NewestPagePlan({}).counted, false);
+  b(BATTERY66, 'H66 buy: …which is why a FULL page-1 on such a carrier is read as UNJUDGED, never clean', h66ReleasedNonDispatchableRemainder(card66(), null), null);
+
+  // The bought rows are judged exactly as a cached thread is — one predicate,
+  // ⛔ not a second reader for the bought half.
+  b(BATTERY66, 'H66 buy: a BOUGHT page carrying a release is listed', typeof h66({}, RELEASED66), 'string');
+  b(BATTERY66, 'H66 buy: …and a bought page whose release returns the card to the pool stays silent', h66({}, REL66('去向 `pm:queue`, next seat re-claims')), null);
+  b(BATTERY66, 'H66 buy: a FAILED buy is UNJUDGED, ⛔ never clean — the H4 three-state contract', h66({}, null), null);
+  b(BATTERY66, 'H66 buy: …and is distinct from an EMPTY page, which is a real reading', h66({}, []), null);
+
+  // The pass itself, read off this file's source — the two properties no
+  // in-process call can observe.
+  const buyAudit66 = h66BuyAudit();
+  b(BATTERY66, 'H66 buy: a candidate is deferred in exactly ONE place', buyAudit66.pushSites, 1);
+  b(BATTERY66, 'H66 buy: ⭐ …and that place is guarded by the cache test, so a thread ALREADY in hand is never re-bought', buyAudit66.guardedPushSites, 1);
+  b(BATTERY66, 'H66 buy: the pass writes back into the shared cache in exactly one place', buyAudit66.wholeThreadCacheWrites, 1);
+  b(BATTERY66, 'H66 buy: …and every cache write in this file is accounted for — the card window, H50\'s walk, and this one', buyAudit66.cacheWriteSites, 3);
+  const PUSH66 = ['queueReleaseDeferred', '.push('].join('');
+  const WRITE66 = ['commentCache', '.set(issue.number, rows)'].join('');
+  b(BATTERY66, 'H66 buy: the audit SEES an UNGUARDED defer when one exists', h66BuyAudit(`if (true) { ${PUSH66}issue); }`).guardedPushSites, 0);
+  b(BATTERY66, 'H66 buy: …and still counts it as a site, so the two readings cannot be confused', h66BuyAudit(`if (true) { ${PUSH66}issue); }`).pushSites, 1);
+  b(BATTERY66, 'H66 buy: the audit SEES an UNGUARDED cache write when one exists', h66BuyAudit(`if (true) { ${WRITE66}; }`).wholeThreadCacheWrites, 0);
+  b(BATTERY66, 'H66 buy: …and the assembled needles did not defeat the file-wide audit', h66BuyAudit().pushSites, 1);
+  // ⭐ The located-page purchase this leg adds is OUTSIDE the seat memo, which is
+  // what keeps `seatWindowAudit`'s fetch-per-seat-post bound at one.
+  b(BATTERY66, 'H66 buy: the purchase it adds is outside the seat memo', seatWindowAudit().purchaseSites - seatWindowAudit().seatPurchaseSites, 1);
+  b(BATTERY66, 'H66 buy: …and the seat bound is untouched by it', seatWindowAudit().seatPurchaseSites, 1);
+
+  // The roster itself — a floor that cannot be satisfied by a zero.
+  b(BATTERY66, 'H66 floor: this battery is DECLARED on the roster', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY66), true);
+  b(BATTERY66, 'H66 floor: …with a positive pin, so an empty battery cannot satisfy it', SELF_TEST_BATTERIES[BATTERY66] > 0, true);
+  b(BATTERY66, 'H66 floor: the roster is frozen', Object.isFrozen(SELF_TEST_BATTERIES), true);
+  b(BATTERY66, 'H66 floor: …and the roster floor is at least one battery', SELF_TEST_BATTERY_FLOOR >= 1, true);
+
+
+  // -- BATTERY: H67 — a queued card a PR already landed on (#18372) ----------
+  //
+  // Every case here goes through `b(BATTERY67, …)` rather than `t(…)`, so
+  // deleting the block fails the roster floor instead of shrinking a total
+  // nobody reads — the H66 and H19 batteries' shape, the file's third.
+  //
+  // ⛔ The self-test never touches GitHub. Every fixture below is shaped on a
+  // LIVE reading taken 2026-09-17 off the three instances the filing card
+  // names, and the two that must NOT be listed as candidates for closing are
+  // exercised here precisely BECAUSE they must not be.
+  //
+  // ⭐ The load-bearing fact the card rules on, pinned as a pair rather than
+  // asserted in prose: #15815 (work done, closed) and #16529 (a true remainder,
+  // correctly KEPT) carry the SAME machine evidence — a merged PR declaring
+  // `Part of #N` and nothing else. So no bucket here may read as 「close this」,
+  // and the `Part of` bucket says so in as many words (acceptance ③).
+  const BATTERY67 = 'H67 queued merged-delivery reading';
+  const REPO67 = 'objectstack-ai/objectstack';
+  const xref67 = (number, { merged = null, state = 'closed', body = '', repo = REPO67, at = '2026-09-05T12:00:00Z' } = {}) => ({
+    event: 'cross-referenced',
+    created_at: at,
+    source: { type: 'issue', issue: { number, state, body, repository: { full_name: repo }, pull_request: { merged_at: merged } } },
+  });
+  const comment67 = (body, at) => ({ event: 'commented', body, created_at: at });
+  const card67 = (extra = {}) => ({
+    number: 15815,
+    state: 'open',
+    labels: [{ name: 'pm:queue' }, { name: 'domain:devx' }, { name: 'priority:p2' }],
+    assignees: [],
+    created_at: '2026-08-28T00:00:00Z',
+    body: '## What\n\n`git merge-tree` is read-only in name only here.\n',
+    ...extra,
+  });
+  const tl67 = (rows, extra = {}) => h67TimelineDelivery(rows, card67(extra).number, REPO67);
+  const h67 = (rows, extra = {}) => h67QueuedCardWithMergedDelivery(card67(extra), tl67(rows, extra), REPO67);
+  const h67row = (rows, extra = {}) => String(h67(rows, extra) ?? '');
+
+  // INSTANCE ONE — objectstack#15815, in its recorded shape: two merged PRs
+  // both declaring `Part of #15815` (#15868 12:49:58Z, #15885 09:15:52Z), and
+  // the card's own closing condition parked in a landing-record COMMENT
+  // (`5551946223`) rather than in the body. Listed.
+  const I15815 = [
+    xref67(15868, { merged: '2026-09-05T12:49:58Z', body: 'Part of #15815 — the ORDINARY half only.' }),
+    xref67(15885, { merged: '2026-09-07T09:15:52Z', body: 'Fixes #15871\nPart of #15815 — the GOVERNED half.' }),
+    comment67('**LANDED (partial — `Part of`)** — PR #15868 merged.\n\nRemainder: the governed half, #15871 / draft PR #15885; it closes when #15885 lands.', '2026-09-05T12:52:22Z'),
+  ];
+  b(BATTERY67, 'H67 #15815: a queued card with two merged PRs and no open one is LISTED', typeof h67(I15815), 'string');
+  b(BATTERY67, 'H67 #15815: …naming both merges with their dates', h67row(I15815).includes('#15868 (merged 2026-09-05') && h67row(I15815).includes('#15885 (merged 2026-09-07'), true);
+  b(BATTERY67, 'H67 #15815: …and the relation each one declared', (h67row(I15815).match(/`Part of #15815`/g) ?? []).length, 2);
+  b(BATTERY67, 'H67 #15815: ⭐ the card\'s own closing condition is QUOTED, not paraphrased', h67row(I15815).includes('it closes when #15885 lands'), true);
+  b(BATTERY67, 'H67 #15815: …with the channel it was read from', h67row(I15815).includes('states one in the thread'), true);
+  b(BATTERY67, 'H67 #15815: …and the anchor named beside the live comment it was measured on', h67row(I15815).includes('measured on objectstack#15815 `5551946223`'), true);
+  b(BATTERY67, 'H67 #15815: the ownership reading says nobody looked since the merge', h67row(I15815).includes('nobody has looked at this card SINCE the delivery landed'), true);
+
+  // INSTANCE TWO — objectstack#16529, `Part of #16529` on merged PR #18347 and
+  // a TRUE remainder. ⛔ It must never read as a candidate for closing, and the
+  // row says so on its face. This is acceptance ③.
+  const I16529 = [xref67(18347, { merged: '2026-09-16T02:39:26Z', body: 'Part of #16529\n\nSegment 1 only — the `limit 2` question.' })];
+  b(BATTERY67, 'H67 #16529: a `Part of`-only card is listed, because the queue count is what is wrong', typeof h67(I16529, { number: 16529 }), 'string');
+  b(BATTERY67, 'H67 #16529: ⭐ …and it is ⛔ NOT A CANDIDATE FOR CLOSING, in as many words', h67row(I16529, { number: 16529 }).includes('⛔ NOT A CANDIDATE FOR CLOSING'), true);
+  b(BATTERY67, 'H67 #16529: …naming H49 as the row that owns the shape', h67row(I16529, { number: 16529 }).includes("H49's shape"), true);
+  b(BATTERY67, 'H67 #16529: …and quoting the partial-landing rule VERBATIM rather than paraphrasing it', h67row(I16529, { number: 16529 }).includes(PARTIAL_RULE_LINE), true);
+  b(BATTERY67, 'H67 #16529: …saying what IS owed instead — a re-read, ⛔ never a close', h67row(I16529, { number: 16529 }).includes('a RE-READ of the remainder, ⛔ never a close'), true);
+  // ⭐ The pair that carries the card's ruling: the two instances differ in
+  // their disposition and NOT in their machine evidence.
+  b(BATTERY67, 'H67 ⭐ #15815 and #16529 land in the SAME bucket — the evidence cannot tell them apart', h67row(I15815).includes('⛔ NOT A CANDIDATE FOR CLOSING') && h67row(I16529, { number: 16529 }).includes('⛔ NOT A CANDIDATE FOR CLOSING'), true);
+  b(BATTERY67, 'H67 ⭐ …which is why every row says 「有已合 PR」 is NOT a closing criterion', h67row(I15815).includes('⛔ 「有已合 PR」 is NOT a closing criterion'), true);
+  b(BATTERY67, 'H67 ⭐ …and names both instances as the proof', h67row(I16529, { number: 16529 }).includes('#15815 (work done)') && h67row(I16529, { number: 16529 }).includes('#16529 (a true remainder, correctly KEPT)'), true);
+
+  // INSTANCE THREE — objectstack#16565, whose merged PRs name the card with NO
+  // relation keyword at all (「Addresses items 1 and 3 of #16565」) and whose
+  // third linked PR does not reference it in its body. Listed, weakest bucket.
+  const I16565 = [
+    xref67(17309, { merged: '2026-09-10T06:53:54Z', body: 'Addresses items 1 and 3 of #16565. **This PR does not close that card**.' }),
+    xref67(17310, { merged: '2026-09-13T14:08:38Z', body: 'Item 2 of #16565. No closing keyword is used here.' }),
+    xref67(17766, { merged: '2026-09-12T04:36:25Z', body: 'Fixes #17149\n\nA `Claim:` comment that parses to ZERO branches.' }),
+  ];
+  b(BATTERY67, 'H67 #16565: a card reached only by BARE mentions is listed too', typeof h67(I16565, { number: 16565 }), 'string');
+  b(BATTERY67, 'H67 #16565: …the mention is named as a bare one, ⛔ not upgraded to a declaration', h67row(I16565, { number: 16565 }).includes('a BARE mention of `#16565`, with NO relation keyword bound to it'), true);
+  b(BATTERY67, 'H67 #16565: …a PR that names the card NOWHERE in its body says exactly that', h67row(I16565, { number: 16565 }).includes('NO reference to this card in its body at all'), true);
+  b(BATTERY67, 'H67 #16565: …and the bucket declares itself the WEAKEST evidence', h67row(I16565, { number: 16565 }).includes('Weakest evidence of the three'), true);
+  b(BATTERY67, 'H67 #16565: …carrying the reason it is listed anyway — this instance\'s work really was done', h67row(I16565, { number: 16565 }).includes('its work really was done'), true);
+  b(BATTERY67, 'H67 #16565: a card that states NO closing condition says so, ⛔ rather than going quiet', h67row(I16565, { number: 16565 }).includes('⛔ NONE this row can find'), true);
+  b(BATTERY67, 'H67 #16565: …and names how many anchors it looked for', h67row(I16565, { number: 16565 }).includes(`${H67_CLOSING_CONDITION_ANCHORS.length} frozen anchor(s)`), true);
+
+  // The CLOSING-KEYWORD bucket — the strongest evidence, and still ⛔ not a
+  // criterion. It is also the ONE overlap with H59, stated rather than hidden.
+  const CLOSING67 = [xref67(17558, { merged: '2026-09-10T23:44:33Z', body: 'Fixes #15815\n\nthe delivery.' })];
+  b(BATTERY67, 'H67 closing: a merged PR BINDING a closing keyword fires its own bucket', h67row(CLOSING67).includes('BINDS A CLOSING KEYWORD'), true);
+  b(BATTERY67, 'H67 closing: …naming the keyword as written', h67row(CLOSING67).includes('`Fixes #15815`'), true);
+  b(BATTERY67, 'H67 closing: …and still refusing to read it as a criterion', h67row(CLOSING67).includes('still ⛔ NOT a criterion'), true);
+  b(BATTERY67, 'H67 closing: ⛔ …and never as a `Part of` card', h67row(CLOSING67).includes('⛔ NOT A CANDIDATE FOR CLOSING'), false);
+
+  // THE B BUCKET — an OPEN PR is work in flight and stands the row down.
+  b(BATTERY67, 'H67 B bucket: an OPEN linked PR stands the row down', h67([...I15815, xref67(18648, { state: 'open', body: 'Fixes #18343' })]), null);
+  b(BATTERY67, 'H67 B bucket: …even when it declares nothing about this card', h67([...I16529, xref67(99, { state: 'open', body: 'unrelated' })], { number: 16529 }), null);
+  // THE C BUCKET — no linked PR at all.
+  b(BATTERY67, 'H67 C bucket: a card with NO cross-referenced PR is silent', h67([comment67('graded p2', '2026-09-01T00:00:00Z')]), null);
+  b(BATTERY67, 'H67 C bucket: …a cross-referenced ISSUE is not a PR and does not count', h67([{ event: 'cross-referenced', created_at: 'x', source: { type: 'issue', issue: { number: 6023, state: 'open', repository: { full_name: REPO67 } } } }]), null);
+  b(BATTERY67, 'H67 C bucket: an empty timeline is a real reading, ⛔ not a crash', h67([]), null);
+  // ABANDONED — closed, never merged. It neither fires nor clears, and it is
+  // NAMED, because a reader told 「none is open」 should know one was dropped.
+  b(BATTERY67, 'H67 abandoned: a closed-unmerged PR alone founds nothing', h67([xref67(77, { state: 'closed', body: 'Part of #15815' })]), null);
+  b(BATTERY67, 'H67 abandoned: …beside a merged one it is NAMED on the row', h67row([...I16529, xref67(77, { state: 'closed', body: 'Part of #16529' })], { number: 16529 }).includes('1 further linked PR(s) CLOSED WITHOUT MERGING (#77)'), true);
+  b(BATTERY67, 'H67 abandoned: …and is ⛔ never counted as an open PR', typeof h67([...I16529, xref67(77, { state: 'closed' })], { number: 16529 }), 'string');
+
+  // RECENCY — H49's stand-down, reused: a seat that looked SINCE the merge.
+  const RELEASED67 = [...I16529, comment67('Release: session `session_x` — 去向 `pm:queue`, next seat re-claims', '2026-09-16T03:11:44Z')];
+  b(BATTERY67, 'H67 recency: a `Release:` NEWER than the merge stands the row down', h67(RELEASED67, { number: 16529 }), null);
+  b(BATTERY67, 'H67 recency: a `Claim:` newer than the merge does too — the remainder is re-dispatched', h67([...I16529, comment67('Claim: PM loop round 2\nBranch: `claude/issue-16529-x`', '2026-09-16T03:11:44Z')], { number: 16529 }), null);
+  b(BATTERY67, 'H67 recency: …a blockquoted marker reads the same, as at the claim marker', h67([...I16529, comment67('> Release: session `session_x`', '2026-09-16T03:11:44Z')], { number: 16529 }), null);
+  b(BATTERY67, 'H67 recency: a marker OLDER than the merge does NOT stand it down — that seat never saw the landing', typeof h67([comment67('Claim: PM loop round 1', '2026-09-01T00:00:00Z'), ...I16529], { number: 16529 }), 'string');
+  b(BATTERY67, 'H67 recency: ⛔ an ordinary comment after the merge is not an ownership record', typeof h67([...I16529, comment67('a reading, no marker here', '2026-09-16T03:11:44Z')], { number: 16529 }), 'string');
+  // …and an UNPLACEABLE marker LISTS rather than clears — H66's call on an
+  // unreadable record, the #4690 direction for a listing.
+  const UNPLACEABLE67 = [...I16529, comment67('Release: session `session_x`', 'not-a-timestamp')];
+  b(BATTERY67, 'H67 recency: a marker whose stamp does not parse LISTS rather than clears', typeof h67(UNPLACEABLE67, { number: 16529 }), 'string');
+  b(BATTERY67, 'H67 recency: …and the row says the record could not be PLACED against the merge', h67row(UNPLACEABLE67, { number: 16529 }).includes('cannot be PLACED against the merge'), true);
+  b(BATTERY67, 'H67 recency: …citing the reason a listing lists rather than clears', h67row(UNPLACEABLE67, { number: 16529 }).includes('exactly what a human should look at'), true);
+  // ⚠️ THE DECLARED LOSS — CLOSED by #18680, and these cases are EDITED rather
+  // than deleted so the pair keeps reading as one history. The loss was real
+  // (a DECORATED release line was invisible to `RELEASE_COMMENT_MARKER`, live
+  // on objectstack#16529 `5691473966`); this row DECLARED it instead of
+  // widening, because widening the marker was H2/H47/H66's surface and a
+  // different card. That card landed: the reading is `markerMatches`, the
+  // marker CONSTANT is untouched, and the two control cases below still assert
+  // on the constant for exactly that reason.
+  b(BATTERY67, 'H67 ⚠️ loss CLOSED: a DECORATED `**Release:**` line now STANDS THE ROW DOWN, as the bare one always did', h67([...I16529, comment67('**Release:** session `session_x` — 去向 `pm:queue`', '2026-09-16T03:11:44Z')], { number: 16529 }), null);
+  b(BATTERY67, 'H67 ⚠️ loss CLOSED: …and the row no longer DECLARES a blind spot it no longer has', h67row(I16529, { number: 16529 }).includes('is invisible to `RELEASE_COMMENT_MARKER`'), false);
+  b(BATTERY67, 'H67 ⚠️ loss: …the marker CONSTANT still refuses the decorated spelling — the bare directive is untouched', RELEASE_COMMENT_MARKER.test('**Release:** session `session_x`'), false);
+  b(BATTERY67, 'H67 ⚠️ loss: …while the bare spelling still matches, so the reader is not simply broken', RELEASE_COMMENT_MARKER.test('Release: session `session_x`'), true);
+
+  // THE THREE PAGE STATES, never two (#4690) — H59's contract verbatim.
+  b(BATTERY67, 'H67 page: an UNBOUGHT page is UNJUDGED, ⛔ never clean', h67QueuedCardWithMergedDelivery(card67(), undefined, REPO67), null);
+  b(BATTERY67, 'H67 page: a FAILED fetch is UNJUDGED too', h67QueuedCardWithMergedDelivery(card67(), null, REPO67), null);
+  b(BATTERY67, 'H67 page: a FULL page may hide a later merge or a later `Claim:` — UNJUDGED', h67QueuedCardWithMergedDelivery(card67(), h67TimelineDelivery(Array.from({ length: H67_TIMELINE_PAGE_SIZE }, () => I15815[0]), 15815, REPO67), REPO67), null);
+  b(BATTERY67, 'H67 page: …and a page one SHORT of full is complete and judged', typeof h67QueuedCardWithMergedDelivery(card67(), h67TimelineDelivery([...Array.from({ length: H67_TIMELINE_PAGE_SIZE - 1 }, () => I15815[0])], 15815, REPO67), REPO67), 'string');
+  b(BATTERY67, 'H67 page: a non-array page is ⛔ never read as an empty one', h67TimelineDelivery(undefined, 15815, REPO67).complete, false);
+
+  // THE POPULATION GATES — H66's, called rather than restated.
+  const NEGATIVES67 = [
+    ['a card with NO `pm:queue` — nothing over-reads it as capacity', { labels: [{ name: 'tracking' }] }],
+    ['a CLOSED card — the queue label on it is residue the closed census counts', { state: 'closed' }],
+    ['a PULL REQUEST — the dispatch pool is cards, ⛔ never PRs', { pull_request: { url: 'x' } }],
+    ['an unreadable `labels` — ⛔ never read as unlabelled', { labels: undefined }],
+    ['an ASSIGNED card — that is H24\'s row', { assignees: [{ login: 'os-justin' }] }],
+    ['a card ALSO carrying `pm:dispatched` — H3\'s contradiction, ⛔ not an exit', { labels: [{ name: 'pm:queue' }, { name: 'pm:dispatched' }] }],
+    ['a card ALSO carrying `needs-user-decision` — the board reads it as somewhere else', { labels: [{ name: 'pm:queue' }, { name: 'needs-user-decision' }] }],
+  ];
+  b(BATTERY67, 'H67 population: the negative table is exercised WHOLE — seven fixtures, none quietly dropped', NEGATIVES67.length, 7);
+  for (const [why, extra] of NEGATIVES67) b(BATTERY67, `H67 silent: ${why}`, h67(I15815, extra), null);
+  b(BATTERY67, 'H67 population: …and it is H66\'s gate CALLED, so the two rows cannot drift apart', h67SpeaksAbout(card67()) === h66SpeaksAbout(card67()), true);
+  b(BATTERY67, 'H67 population: the predicate does not crash on a missing card', h67QueuedCardWithMergedDelivery(undefined, tl67(I15815), REPO67), null);
+
+  // A FOREIGN PR — counted as a merge, its body ⛔ NOT read for a relation,
+  // because a bare `#N` in another repo's PR names a card in THAT repo.
+  const FOREIGN67 = [xref67(9498, { merged: '2026-09-05T12:00:00Z', repo: 'objectstack-ai/objectui', body: 'Fixes #15815' })];
+  b(BATTERY67, 'H67 foreign: a foreign merged PR is still a delivery on this card\'s timeline', typeof h67(FOREIGN67), 'string');
+  b(BATTERY67, 'H67 foreign: …named with its own repo', h67row(FOREIGN67).includes('objectstack-ai/objectui#9498'), true);
+  b(BATTERY67, 'H67 foreign: ⛔ …and its body is NOT read for a relation to this board\'s `#N`', h67row(FOREIGN67).includes('a FOREIGN repo, so its body was ⛔ not read for a relation'), true);
+  b(BATTERY67, 'H67 foreign: ⛔ …so it can never be mistaken for a closing keyword bound here', h67row(FOREIGN67).includes('BINDS A CLOSING KEYWORD'), false);
+
+  // THE RELATION LADDER — one grammar per rung, this file's own four, CALLED.
+  b(BATTERY67, 'H67 relation: a closing keyword wins the ladder', h67DeclaredRelation('Fixes #15815', 15815, REPO67).relation, 'closing');
+  b(BATTERY67, 'H67 relation: …carrying the keyword the author wrote', h67DeclaredRelation('Resolves #15815', 15815, REPO67).keyword, 'Resolves');
+  b(BATTERY67, 'H67 relation: `Part of` is the next rung', h67DeclaredRelation('Part of #15815', 15815, REPO67).relation, 'part-of');
+  b(BATTERY67, 'H67 relation: `Refs` is the third', h67DeclaredRelation('Refs #15815 (item 2)', 15815, REPO67).relation, 'refs');
+  b(BATTERY67, 'H67 relation: a bare mention is the fourth', h67DeclaredRelation('Addresses item 1 of #15815.', 15815, REPO67).relation, 'mention');
+  b(BATTERY67, 'H67 relation: …and no reference at all is a real answer', h67DeclaredRelation('Fixes #17149', 15815, REPO67).relation, 'none');
+  b(BATTERY67, 'H67 relation: ⛔ bound PER CARD NUMBER — a keyword on ANOTHER card is not this card\'s', h67DeclaredRelation('Fixes #15871\nPart of #15815', 15815, REPO67).relation, 'part-of');
+  b(BATTERY67, 'H67 relation: …and that other card reads its own keyword', h67DeclaredRelation('Fixes #15871\nPart of #15815', 15871, REPO67).relation, 'closing');
+  b(BATTERY67, 'H67 relation: a BACKTICKED keyword is inert to GitHub and to this ladder', h67DeclaredRelation('the body says `Fixes #15815` in a span', 15815, REPO67).relation, 'mention');
+
+  // THE CLOSING-CONDITION READER — measured anchors, quoted lines, and the
+  // shapes it structurally refuses.
+  b(BATTERY67, 'H67 condition: the BODY is read first', h67ClosingConditionLine('## 验收(⛔ 不规定实现)\n\n1. judge per card.\n', []).spelling, '## 验收 — the acceptance section');
+  b(BATTERY67, 'H67 condition: …and the matched LINE is what is quoted', h67ClosingConditionLine('## 验收(⛔ 不规定实现)\n', []).line, '## 验收(⛔ 不规定实现)');
+  b(BATTERY67, 'H67 condition: a condition parked in a COMMENT is found when the body is clean', h67ClosingConditionLine('## What\n\nnothing.\n', [{ body: 'it closes when #15885 lands.', created_at: '2026-09-05T12:52:22Z' }]).channel, 'the thread');
+  b(BATTERY67, 'H67 condition: comments are read NEWEST-first, so a later record supersedes an older one', h67ClosingConditionLine('', [{ body: 'it closes when #1 lands', created_at: '2026-09-01T00:00:00Z' }, { body: 'it closes when #2 lands', created_at: '2026-09-09T00:00:00Z' }]).line, 'it closes when #2 lands');
+  b(BATTERY67, 'H67 condition: ⛔ a condition inside a FENCE declares nothing', h67ClosingConditionLine('## What\n\n```\nit closes when #15885 lands\n```\n', []), null);
+  b(BATTERY67, 'H67 condition: ⛔ …and a tilde fence likewise', h67ClosingConditionLine('~~~\nit closes when #15885 lands\n~~~\n', []), null);
+  b(BATTERY67, 'H67 condition: a card stating none at all answers null, ⛔ never a guess', h67ClosingConditionLine('## What\n\na `groupBy` survives the lane resolve.\n', []), null);
+  b(BATTERY67, 'H67 condition: a long line is bounded and says it was cut', h67ClosingConditionLine(`it closes when ${'x'.repeat(H67_QUOTE_LIMIT + 50)}`, []).line.endsWith('…'), true);
+  b(BATTERY67, 'H67 condition: …at the declared limit', h67ClosingConditionLine(`it closes when ${'x'.repeat(H67_QUOTE_LIMIT + 50)}`, []).line.length, H67_QUOTE_LIMIT + 1);
+  b(BATTERY67, 'H67 condition: the anchor set is FROZEN', Object.isFrozen(H67_CLOSING_CONDITION_ANCHORS), true);
+  b(BATTERY67, 'H67 condition: …and inside its own cap', H67_CLOSING_CONDITION_ANCHORS.length <= H67_CLOSING_CONDITION_ANCHOR_CAP, true);
+  b(BATTERY67, 'H67 condition: every anchor names the live instance it was measured on', H67_CLOSING_CONDITION_ANCHORS.every((a) => typeof a.instance === 'string' && a.instance.length > 20), true);
+  b(BATTERY67, 'H67 condition: …and every one of them is MEASURED, ⛔ none carried from imagination', H67_CLOSING_CONDITION_ANCHORS.every((a) => a.measured === true), true);
+  b(BATTERY67, 'H67 condition: a non-string body is not a crash', h67ClosingConditionLine(undefined, undefined), null);
+
+  // THE READ PLAN — OLDEST-FIRST, the OPPOSITE of H66's, and the cap.
+  const CAND67 = [
+    { number: 1, created_at: '2026-09-10T00:00:00Z', labels: [{ name: 'pm:queue' }] },
+    { number: 2, created_at: '2026-08-01T00:00:00Z', labels: [{ name: 'pm:queue' }] },
+    { number: 3, created_at: '2026-09-01T00:00:00Z', labels: [{ name: 'pm:queue' }, { name: 'priority:p0' }] },
+    { number: 4, created_at: 'not-a-date', labels: [{ name: 'pm:queue' }] },
+  ];
+  const order67 = (rows, cap) => h67ReadOrder(rows, cap).read.map((i) => i.number).join(',');
+  b(BATTERY67, 'H67 order: `priority:p0` is reached FIRST, whatever its age', order67(CAND67, 4), '3,2,1,4');
+  b(BATTERY67, 'H67 order: …then OLDEST-FIRST among equals, which is the order in force', order67(CAND67.filter((i) => i.number !== 3), 3), '2,1,4');
+  b(BATTERY67, 'H67 order: ⛔ an unreadable `created_at` sorts LAST, ⛔ never promoted', order67([CAND67[3], CAND67[1]], 2), '2,4');
+  b(BATTERY67, 'H67 order: `pm:blocking` ranks above p1, as the selection order does', order67([{ number: 8, created_at: '2026-09-10T00:00:00Z', labels: [{ name: 'priority:p1' }] }, { number: 9, created_at: '2026-09-11T00:00:00Z', labels: [{ name: 'pm:blocking' }] }], 2), '9,8');
+  b(BATTERY67, 'H67 order: ⭐ it is the OPPOSITE of H66\'s, and that is the point', order67(CAND67.filter((i) => i.number !== 3 && i.number !== 4), 2) === h66BuyOrder(CAND67.filter((i) => i.number !== 3 && i.number !== 4).map((i) => ({ ...i, updated_at: i.created_at })), 2).buy.map((i) => i.number).join(','), false);
+  b(BATTERY67, 'H67 cap: the rest are DEFERRED, ⛔ not dropped silently', h67ReadOrder(CAND67, 2).deferred.map((i) => i.number).join(','), '1,4');
+  b(BATTERY67, 'H67 cap: read + deferred always account for the whole set', h67ReadOrder(CAND67, 2).read.length + h67ReadOrder(CAND67, 2).deferred.length, CAND67.length);
+  b(BATTERY67, 'H67 cap: a cap ABOVE the population reads all of it and defers none', h67ReadOrder(CAND67, 100).deferred.length, 0);
+  b(BATTERY67, 'H67 cap: a zero cap reads nothing and defers everything', `${h67ReadOrder(CAND67, 0).read.length}:${h67ReadOrder(CAND67, 0).deferred.length}`, '0:4');
+  b(BATTERY67, 'H67 cap: a nonsense cap is read as zero, ⛔ never as unbounded', h67ReadOrder(CAND67, Number.NaN).read.length, 0);
+  b(BATTERY67, 'H67 cap: a negative cap likewise', h67ReadOrder(CAND67, -5).read.length, 0);
+  b(BATTERY67, 'H67 cap: an empty candidate set is not a crash', `${h67ReadOrder([], 10).read.length}:${h67ReadOrder([], 10).deferred.length}`, '0:0');
+  b(BATTERY67, 'H67 cap: a non-array is not a crash either', h67ReadOrder(undefined, 10).read.length, 0);
+  b(BATTERY67, 'H67 cap: the plan is PURE — the caller\'s array is not reordered under it', (() => { const input = [...CAND67]; h67ReadOrder(input, 2); return input.map((i) => i.number).join(','); })(), '1,2,3,4');
+  b(BATTERY67, 'H67 cap: the selection-order legs are frozen and partial BY DECLARATION', Object.isFrozen(H67_SELECTION_ORDER_LABELS) && H67_SELECTION_ORDER_LABELS.length, 5);
+
+  // THE PASS ITSELF, read off this file's source — the two properties no
+  // in-process call can observe.
+  const audit67 = h67ReadAudit();
+  b(BATTERY67, 'H67 pass: exactly TWO timeline reads in this file — H59\'s and this row\'s', audit67.timelineSites, 2);
+  b(BATTERY67, 'H67 pass: ⛔ …and this pass adds NO `commentCache` write, so no other row\'s corpus moves', audit67.cacheWrites, 4);
+  b(BATTERY67, 'H67 pass: the audit SEES a third timeline read when one exists', h67ReadAudit(['`/repos/x/issues/', '${n}', '/timeline?per_page=1`'].join('')).timelineSites, 1);
+  b(BATTERY67, 'H67 pass: …and the assembled needles did not defeat the file-wide read', h67ReadAudit().timelineSites >= 2, true);
+  b(BATTERY67, 'H67 pass: ⭐ the located-page purchase bound is untouched — this row buys no COMMENT page', seatWindowAudit().seatPurchaseSites, 1);
+  b(BATTERY67, 'H67 pass: …and no pageless comment path was added', seatWindowAudit().pagelessPaths.length, 1);
+
+  // DISJOINTNESS — argued on each neighbouring row's OWN criterion, as PR
+  // #18514 did for H66.
+  b(BATTERY67, 'H67 disjoint H8: H8 needs `pm:dispatched`, which this population cannot carry', h67SpeaksAbout(card67({ labels: [{ name: 'pm:queue' }, { name: 'pm:dispatched' }] })), false);
+  b(BATTERY67, 'H67 disjoint H49: H49 needs `pm:dispatched` AND an assignee — silent here', h49PartialLandingUnreleased(card67(), [{ number: 18347, body: 'Refs #15815', merged_at: '2026-09-16T02:39:26Z' }], [], []), null);
+  b(BATTERY67, 'H67 disjoint H49: …and this row is silent on H49\'s own carrier', h67SpeaksAbout({ number: 1, state: 'open', labels: [{ name: 'pm:dispatched' }], assignees: [{ login: 'os-justin' }] }), false);
+  b(BATTERY67, 'H67 disjoint H66: H66 reads the NEWEST COMMENT for a release and is silent on a delivery', h66ReleasedNonDispatchableRemainder(card67(), [{ body: 'a landing record, no release', created_at: '2026-09-05T12:52:22Z' }]), null);
+  b(BATTERY67, 'H67 disjoint H66: ⭐ …and the stand-down legs point OPPOSITE ways — a release FIRES H66 and CLEARS this row', `${typeof h66ReleasedNonDispatchableRemainder(card67({ number: 16529 }), [{ body: 'Release: session `session_x` — 去向 the maintainer', created_at: '2026-09-16T03:11:44Z' }])}:${h67(RELEASED67, { number: 16529 })}`, 'string:null');
+  b(BATTERY67, 'H67 disjoint H58: H58 reads the card\'s own RULING heading and never looks at a PR', h58QueuedRulingRow(card67(), []), null);
+  b(BATTERY67, 'H67 disjoint H59: the overlap is STATED on the row rather than hidden', h67row(CLOSING67).includes('still ⛔ NOT a criterion'), true);
+  b(BATTERY67, 'H67 disjoint H59: …and the axes really differ — H59 is bounded by a merged WINDOW this row does not read', MERGED_WINDOW_DAYS > 0 && H67_TIMELINE_READ_CAP > 0, true);
+
+  // THE ROW'S STANDING REFUSALS — the two the card rules on twice.
+  b(BATTERY67, 'H67 refusal: report-only, and it says so', h67row(I15815).includes('⛔ nothing is closed, ⛔ no label is written, ⛔ no state is proposed'), true);
+  b(BATTERY67, 'H67 refusal: ⛔ it judges NONE of the filing lane\'s A-bucket cards for anybody', h67row(I15815).includes('judges NONE of the'), true);
+  b(BATTERY67, 'H67 refusal: the residue clause is on EVERY row, because it is the half a reader skips', h67row(I16565, { number: 16565 }).includes('carry the thread\'s residual readings out into a NEW card first'), true);
+  b(BATTERY67, 'H67 refusal: …quoting the recorded reason', h67row(I15815).includes('a second card would be **invisible** to whoever fixes this one'), true);
+  b(BATTERY67, 'H67 refusal: …and naming the two cards that were filed before the closes', h67row(I15815).includes('#18343 and #18364'), true);
+  b(BATTERY67, 'H67 refusal: the instrument\'s own blind spot is declared on the row', h67row(I15815).includes('a delivery that left NO cross-reference on the timeline is invisible'), true);
+
+  // THE COVERAGE QUADRUPLE — candidates / read / listed / not attempted.
+  const q67 = (counts) => saidBy('h67QueueDelivery', summaryLine(counts, 1));
+  const FULL67 = q67({ queueDeliveryCandidates: 202, queueDeliveryRead: 120, queueDeliveryRows: 41, queueDeliveryDeferred: 82, queueDeliveryCap: H67_TIMELINE_READ_CAP, queueDeliveryUnjudged: 3 });
+  b(BATTERY67, 'H67 quadruple ①: the whole candidate population is stated', FULL67.includes('202 open unassigned `pm:queue` card(s) could be spoken about'), true);
+  b(BATTERY67, 'H67 quadruple ②: …how many were READ this run', FULL67.includes('120 had ONE timeline page READ this run'), true);
+  b(BATTERY67, 'H67 quadruple ③: …how many were LISTED', FULL67.includes('41 LISTED'), true);
+  b(BATTERY67, 'H67 quadruple ④: ⭐ …and how many were NOT ATTEMPTED at the cap', FULL67.includes('82 NOT ATTEMPTED at that cap'), true);
+  b(BATTERY67, 'H67 quadruple: the cap itself is named, so the fourth number can be checked', FULL67.includes(`cap ${H67_TIMELINE_READ_CAP} page(s)`), true);
+  b(BATTERY67, 'H67 quadruple: UNJUDGED is its own number, ⛔ never folded into clean', FULL67.includes('3 card(s) stayed UNJUDGED'), true);
+  b(BATTERY67, 'H67 quadruple: …naming both ways a bought page still answers nothing', FULL67.includes('fetch FAILED') && FULL67.includes('came back FULL'), true);
+  b(BATTERY67, 'H67 quadruple: ⛔ …and saying a candidate the cap skipped is not clean either', FULL67.includes('a candidate the cap did not attempt is not clean either'), true);
+  b(BATTERY67, 'H67 quadruple: the clause renders UNCONDITIONALLY — a zero run is a reading, not a silence', q67({}).includes('0 open unassigned `pm:queue` card(s) could be spoken about'), true);
+  b(BATTERY67, 'H67 quadruple: …and the cap still renders from the constant on a zero run', q67({}).includes(`cap ${H67_TIMELINE_READ_CAP} page(s)`), true);
+  b(BATTERY67, 'H67 quadruple: the clause declares there is NO free half', FULL67.includes('this row has no free half at all'), true);
+  b(BATTERY67, 'H67 quadruple: …and the OLDEST-FIRST order with its reason', FULL67.includes('清不空的那一刻起改最老优先'), true);
+  b(BATTERY67, 'H67 quadruple: ⛔ …and what the order does NOT model', FULL67.includes('⛔ not `target:` board membership'), true);
+  b(BATTERY67, 'H67 quadruple: the anchor is UNIQUE in the rendered line', (summaryLine({}, 0).match(/Queued cards with a merged delivery \(H67\): /g) ?? []).length, 1);
+  b(BATTERY67, 'H67 quadruple: every count key rides the enumerated forwarding contract', ['queueDeliveryCandidates', 'queueDeliveryRead', 'queueDeliveryCap', 'queueDeliveryDeferred', 'queueDeliveryUnjudged', 'queueDeliveryRows'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
+
+  // BAND — `state`, with each other band refused on its own criterion.
+  b(BATTERY67, 'H67 band: registered as a STATE row', familyBand('H67'), 'state');
+  b(BATTERY67, 'H67 band: ⛔ NOT `gate` — nothing here decides whether something may LAND', familyBand('H67') === 'gate', false);
+  b(BATTERY67, 'H67 band: ⛔ NOT `stall` — the card is in the pool and a hand read moves it', familyBand('H67') === 'stall', false);
+  b(BATTERY67, 'H67 band: ⛔ NOT `inventory` — the row alarms about ONE card; the population is a clause', familyBand('H67') === 'inventory', false);
+  b(BATTERY67, 'H67 band: the sweep really pushes it, so the registry sees it', familyRegistryCoverage().emitted.includes('H67'), true);
+  b(BATTERY67, 'H67 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
+  b(BATTERY67, 'H67 band: …and none is registered that the sweep never pushes', familyRegistryCoverage().extra.length, 0);
+  b(BATTERY67, 'H67 band: the registry still fits inside the ledger ROW CAP', Object.keys(HALF_STATE_FAMILY_BAND).length <= FAMILY_LEDGER_ROW_CAP, true);
+  b(BATTERY67, 'H67 band: it shares H66\'s band, the row it sits beside', familyBand('H67'), familyBand('H66'));
+
+  // THE ROSTER — a floor that cannot be satisfied by a zero.
+  b(BATTERY67, 'H67 floor: this battery is DECLARED on the roster', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY67), true);
+  b(BATTERY67, 'H67 floor: …with a positive pin, so an empty battery cannot satisfy it', SELF_TEST_BATTERIES[BATTERY67] > 0, true);
+  b(BATTERY67, 'H67 floor: the roster grew again with #19255\'s battery, and the floor rose with it', SELF_TEST_BATTERY_FLOOR, 7);
+  b(BATTERY67, 'H67 floor: …including the two batteries this row landed BESIDE, so neither side of the base merge silently dropped one', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, 'H65 tier declaration spelling') && Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, 'H19 judged-set founding'), true);
+  b(BATTERY67, 'H67 floor: …and the roster really carries at least that many', Object.keys(SELF_TEST_BATTERIES).length >= SELF_TEST_BATTERY_FLOOR, true);
+
+  // -- The DECORATED ownership marker (#18680) ------------------------------
+  //
+  // The card: a seat that BOLDS the directive writes `**Release:** …`, the two
+  // markers anchor the bare word at line start, and the record reads as ABSENT
+  // to every row that reads ownership — H2, H47, H66 and H67 at once. Nothing
+  // goes red; the rows simply read a different history than the thread carries.
+  //
+  // What this battery floors is a WIDENING, so the FIRING CONTROLS live inside
+  // it: the bare spellings that matched before still match, the prose control
+  // that must never match still does not, and the two bullet shapes stay
+  // refused. A widening whose controls can drift out of the suite is how a
+  // repair becomes a silencer — the failure this whole file exists to report.
+  //
+  // It also floors the second half the grading comment ruled on (5716952460):
+  // 「一个写入者与一个读取者对「同一件事该长什么样」意见不同,而分歧是静默的」
+  // — so a line that LOOKS like a marker and is still refused must make a
+  // sound. Every member of `OWNERSHIP_MARKER_NEAR_MISS_FORMS` is driven here
+  // against its own `example`, and the roster is asserted EQUAL to a frozen
+  // list of ids: a form added without a fixture reds, a form silently dropped
+  // reds. ⛔ The vocabulary is what a future decoration is ADDED to; ⛔ it is
+  // never rediscovered from a silent row.
+  const BATTERY68 = 'H2/H47/H66 decorated ownership marker';
+  // The card's LIVE specimen — objectstack#16529 comment `5691473966`
+  // (os-try-charles, 2026-09-16T03:11:44Z), a real return-to-`pm:queue` record.
+  // FETCHED through the REST proxy and pasted, ⛔ never retyped from the card's
+  // prose. ⚠️ It is the 45th line of that comment and ⛔ not its first (the
+  // card's body says "first line"): both markers are `m`-flagged and scan every
+  // line, so line POSITION was never what hid this record — the `**` prefix was.
+  const SPECIMEN_16529 =
+    '**Release:** session `session_017ef78bLdybu3AffehKkhfk` · 因:第 1 段(limit 2)已落地 `9ddaa067f`,PR 带 `Part of` 故 GitHub 不关卡 · 去向:回 `pm:queue`,余项为上列第 2、3 段,第 2 段需维护者背书后方可派。';
+  // The SAME line in the bare spelling, DERIVED from the specimen rather than
+  // typed beside it: a control written by hand can drift from the thing it
+  // controls, and then the pair proves nothing about one line in two spellings.
+  const SPECIMEN_16529_BARE = SPECIMEN_16529.replace('**Release:**', 'Release:');
+  const rows68 = (body, id = 5691473966) => [{ id, body, created_at: '2026-09-16T03:11:44Z' }];
+  // Row-wrapper, the file's own convention: `h66ReleaseVerdict` is three-valued
+  // and returns `null` for a comment that carries no release at all, so a bare
+  // `…(…).leg` THROWS while evaluating `t()`'s arguments — before `t()` runs,
+  // which ABORTS the suite and makes every later case vanish. That is exactly
+  // what an ABLATION of this reading produces, so the wrapper is what lets the
+  // ablation report red cases instead of one TypeError.
+  const rel68 = (body) => h66ReleaseVerdict(body) ?? {};
+  const miss68 = (body, id) => ownershipMarkerNearMisses(rows68(body, id))[0] ?? {};
+
+  // ⭐ THE CARD, both readings on one line.
+  b(BATTERY68, '#16529 ⭐ the LIVE specimen is refused by the bare marker — the defect, pinned', RELEASE_COMMENT_MARKER.test(SPECIMEN_16529), false);
+  b(BATTERY68, '#16529 ⭐ …and IS read through `markerMatches`, which is the whole card', markerMatches(RELEASE_COMMENT_MARKER, SPECIMEN_16529), true);
+  b(BATTERY68, '#16529 control: the bare spelling of the SAME line still matches the bare marker', RELEASE_COMMENT_MARKER.test(SPECIMEN_16529_BARE), true);
+  b(BATTERY68, '#16529 control: …and reads identically through the reading, so nothing was traded away', markerMatches(RELEASE_COMMENT_MARKER, SPECIMEN_16529_BARE), true);
+  b(BATTERY68, '#16529 control: the derived bare line really differs from the decorated one', SPECIMEN_16529 === SPECIMEN_16529_BARE, false);
+  b(BATTERY68, '#16529: a release line is ⛔ still not a claim, decorated or not', markerMatches(CLAIM_COMMENT_MARKER, SPECIMEN_16529), false);
+  b(BATTERY68, '#16529: the record is read from ANY line of the body, ⛔ not only the first', markerMatches(RELEASE_COMMENT_MARKER, ['## ✅ 第 1 段已落地', '', SPECIMEN_16529].join('\n')), true);
+  b(BATTERY68, '#16529: …and the whole comment body reads as a release, which is what the rows ask', markerMatches(RELEASE_COMMENT_MARKER, `heading\n\n${SPECIMEN_16529}\n\n### 状态\n`), true);
+
+  // THE ROWS THE CARD NAMES — H2, H47, H66, H67, each on a decorated record.
+  b(BATTERY68, 'H2: a DECORATED claim is a claim, so the row goes clean', h2AssigneeNoClaimComment(issue(['pm:dispatched'], ['os-help']), ['**Claim:** PM loop round 3\nSession: `session_x`']), false);
+  b(BATTERY68, 'H2 control: the same card with no claim at all still fires', h2AssigneeNoClaimComment(issue(['pm:dispatched'], ['os-help']), ['**Note:** looks good']), true);
+  b(BATTERY68, 'H47: a DECORATED `Release:` is located as the newest ownership record', latestMarkedComment(rows68(SPECIMEN_16529), RELEASE_COMMENT_MARKER)?.index, 0);
+  b(BATTERY68, 'H47 control: …and a thread with neither marker still yields null', latestMarkedComment(rows68('**Note:** nothing here'), RELEASE_COMMENT_MARKER), null);
+  b(BATTERY68, 'H66: a DECORATED release to `pm:queue` reads on the canonical leg, ⛔ not the announcement one', rel68(SPECIMEN_16529).leg, 'release-line');
+  b(BATTERY68, 'H66: …with the destination the protocol names', rel68(SPECIMEN_16529).destination, '`pm:queue`');
+  b(BATTERY68, 'H66: …and the quoted line comes back UNDECORATED, as the row prints it', String(rel68(SPECIMEN_16529).line ?? '').startsWith('Release: session session_017ef78bLdybu3AffehKkhfk'), true);
+  b(BATTERY68, 'H66 control: the bare spelling of the same line reads identically', String(rel68(SPECIMEN_16529_BARE).line ?? 'BARE-UNREAD'), String(rel68(SPECIMEN_16529).line ?? 'DECORATED-UNREAD'));
+
+  // WHAT THE SHARED STRIPPER ACTUALLY REMOVES — measured, ⛔ not assumed. The
+  // reading borrows `undecorateProseLine`, the #10102 function, so its reach IS
+  // the reach of this repair: backticks and asterisks, and nothing else.
+  b(BATTERY68, 'stripper: asterisks and backticks come off, which is why `**Release:**` reads', undecorateProseLine('**a`b`c**'), 'abc');
+  b(BATTERY68, 'stripper: ⛔ UNDERSCORES do NOT come off — measured, and the reason `__Release:__` is a near miss', undecorateProseLine('__a__'), '__a__');
+  b(BATTERY68, 'stripper: ⛔ nor a heading hash', undecorateProseLine('## a'), '## a');
+  b(BATTERY68, 'decoration: a BACKTICKED directive reads', markerMatches(RELEASE_COMMENT_MARKER, '`Release:` session `session_x`'), true);
+  b(BATTERY68, 'decoration: bold-italic reads', markerMatches(RELEASE_COMMENT_MARKER, '***Release:*** session `session_x`'), true);
+  b(BATTERY68, 'decoration: a decorated `**Claim:**` reads too — one reading, both markers', markerMatches(CLAIM_COMMENT_MARKER, '**Claim:** PM loop round 3'), true);
+  b(BATTERY68, 'decoration: …and `**Claimed:**`, the spelling the claim marker already carried', markerMatches(CLAIM_COMMENT_MARKER, '**Claimed:** PM loop round 3'), true);
+  b(BATTERY68, 'decoration: a decorated BLOCKQUOTED record reads, as the bare blockquote always did', markerMatches(RELEASE_COMMENT_MARKER, '> **Release:** session `session_x`'), true);
+  b(BATTERY68, 'decoration: ⛔ `__Release:__` does NOT read, because the stripper does not reach it', markerMatches(RELEASE_COMMENT_MARKER, '__Release:__ session `session_x`'), false);
+
+  // ⭐ STRICTLY ADDITIVE, and provable rather than argued: the bare test runs
+  // FIRST and short-circuits, so no body that read before can stop reading.
+  // ⚠️ These are the FIRING CONTROLS of a widening — ⛔ do not remove one.
+  const BARE68 = ['Release: x', '> Release: x', 'Release : x', 'Claim: x', 'Claimed: x', '> Claim: x', '   > Claimed: x'];
+  b(BATTERY68, '⭐ superset: every spelling the bare markers read is still read', BARE68.every((line) => (RELEASE_COMMENT_MARKER.test(line) || CLAIM_COMMENT_MARKER.test(line)) === (markerMatches(RELEASE_COMMENT_MARKER, line) || markerMatches(CLAIM_COMMENT_MARKER, line))), true);
+  b(BATTERY68, '⭐ superset: …and the control roster is not vacuous', BARE68.every((line) => RELEASE_COMMENT_MARKER.test(line) || CLAIM_COMMENT_MARKER.test(line)), true);
+  b(BATTERY68, 'control: prose containing the word is ⛔ still not a record (#7488 strictness kept)', markerMatches(RELEASE_COMMENT_MARKER, 'We will release: tomorrow'), false);
+  b(BATTERY68, 'control: …and the blockquoted prose control too', markerMatches(CLAIM_COMMENT_MARKER, '> the next seat should claim: only after the ruling lands'), false);
+  b(BATTERY68, 'control: ⛔ `Released:` is still a MALFORMED release, ⛔ not a dialect', markerMatches(RELEASE_COMMENT_MARKER, 'Released: session `session_x`'), false);
+  b(BATTERY68, 'control: ⛔ the FULLWIDTH colon still does not read — the 2026-08-11 ruling is untouched', markerMatches(RELEASE_COMMENT_MARKER, 'Release：session `session_x`'), false);
+  b(BATTERY68, 'control: ⛔ nor a dash-written claim, which is H34\'s row and ⛔ not a widening', markerMatches(CLAIM_COMMENT_MARKER, 'Claim — skills seat, session 019x'), false);
+
+  // THE LIST-ITEM GUARD — `undecorateProseLine` strips EVERY `*`, so a `*`
+  // bullet would become a directive. H20 pins `- Claim:` as NOT a claim; a `*`
+  // bullet is the same shape and is refused the same way. The discriminator is
+  // markdown's own: a list marker is followed by whitespace, a decoration is not.
+  b(BATTERY68, 'bullet: ⛔ a `*` bullet is a LIST, ⛔ not decoration — refused exactly as H20\'s `-` bullet is', markerMatches(CLAIM_COMMENT_MARKER, '* Claim: seat, session_x'), false);
+  b(BATTERY68, 'bullet: ⛔ …and the `-` bullet H20 pins is unchanged', markerMatches(CLAIM_COMMENT_MARKER, '- Claim: seat.'), false);
+  b(BATTERY68, 'bullet: ⛔ …an ORDERED list marker too', markerMatches(RELEASE_COMMENT_MARKER, '1. Release: session `session_x`'), false);
+  b(BATTERY68, 'bullet: ⛔ …and a blockquoted bullet', markerMatches(RELEASE_COMMENT_MARKER, '> - Release: session `session_x`'), false);
+  b(BATTERY68, 'bullet: ⭐ the discriminator is the WHITESPACE — `**Claim:**` reads while `* Claim:` does not', [markerMatches(CLAIM_COMMENT_MARKER, '**Claim:** x'), markerMatches(CLAIM_COMMENT_MARKER, '* Claim: x')].join(','), 'true,false');
+  b(BATTERY68, 'bullet: a bullet elsewhere in the body ⛔ never suppresses a real record on another line', markerMatches(RELEASE_COMMENT_MARKER, `- a list item\n${SPECIMEN_16529}`), true);
+
+  // THE NEAR-MISS VOCABULARY — every member driven by name against its own
+  // fixture. ⭐ The counterfactual pin: the roster is asserted EQUAL to a frozen
+  // list of ids, so a form added without a fixture reds and a form silently
+  // dropped reds. That is the failure mode that produced this card.
+  b(BATTERY68, 'vocabulary ⭐ the roster is EXACTLY the declared forms — an addition without a fixture reds, a silent drop reds', OWNERSHIP_MARKER_NEAR_MISS_FORMS.map((f) => f.id).join(','), 'heading,list-item,underscore-emphasis,inflected-word,separator,leading-sigil,heading-bare,bare-word');
+  b(BATTERY68, 'vocabulary: the roster is FROZEN', Object.isFrozen(OWNERSHIP_MARKER_NEAR_MISS_FORMS), true);
+  b(BATTERY68, 'vocabulary: …and so is every member', OWNERSHIP_MARKER_NEAR_MISS_FORMS.every((f) => Object.isFrozen(f)), true);
+  b(BATTERY68, 'vocabulary: every member carries an id, a printable name, a fixture and a pattern', OWNERSHIP_MARKER_NEAR_MISS_FORMS.every((f) => typeof f.id === 'string' && typeof f.what === 'string' && typeof f.example === 'string' && f.re instanceof RegExp), true);
+  b(BATTERY68, 'vocabulary: the ids are DISTINCT, so a row names one form and not two', new Set(OWNERSHIP_MARKER_NEAR_MISS_FORMS.map((f) => f.id)).size, OWNERSHIP_MARKER_NEAR_MISS_FORMS.length);
+  b(BATTERY68, 'vocabulary: ⛔ no `g` flag anywhere — a shared regex carrying `lastIndex` is the state bug the markers refuse', OWNERSHIP_MARKER_NEAR_MISS_FORMS.every((f) => f.re.global === false), true);
+  b(BATTERY68, 'vocabulary: ⛔ nor `m` — the reader runs these per SPLIT LINE, so a body-wide `.test` must ⛔ not claim a reading this vocabulary did not take', OWNERSHIP_MARKER_NEAR_MISS_FORMS.every((f) => f.re.multiline === false), true);
+  for (const form of OWNERSHIP_MARKER_NEAR_MISS_FORMS) {
+    const found = ownershipMarkerNearMisses(rows68(form.example));
+    b(BATTERY68, `vocabulary ${form.id}: ⛔ the fixture is NOT read by either marker — the silence is real`, markerMatches(CLAIM_COMMENT_MARKER, form.example) || markerMatches(RELEASE_COMMENT_MARKER, form.example), false);
+    b(BATTERY68, `vocabulary ${form.id}: …and it REPORTS, naming its own form`, found.map((m) => m.form).join(','), form.id);
+    b(BATTERY68, `vocabulary ${form.id}: …with the comment id a seat opens`, miss68(form.example).commentId, '5691473966');
+    b(BATTERY68, `vocabulary ${form.id}: …and the OFFENDING PREFIX, ⛔ not the whole line`, String(miss68(form.example).prefix ?? '').length > 0 && form.example.startsWith(String(miss68(form.example).prefix ?? '\u0000')) && String(miss68(form.example).prefix ?? '').length < form.example.length, true);
+  }
+
+  // ⭐ THE FOUR MEASURED ROWS (#18831) — each line PASTED from the REST read of
+  // its own comment, ⛔ never retyped from the filing card's table, and each
+  // re-read live at 2026-09-18T04:26Z (all four cards still OPEN, none of them
+  // carrying a readable `Claim:`/`Release:` anywhere in its thread). The remedy
+  // is the WRITERS' — a compliant `Claim:` by the holder, requested on #18886
+  // (cli) · #18887 (spec) · #18888 (services) — so what this half owes is that
+  // the sweep SOUNDS on them instead of reading absence.
+  const M18831_11633 = '## Claim + dispatch — **design only**, no implementation, no follow-up cards filed';
+  const M18831_11663 = '## Claim + dispatch — **design only**, no implementation, no product code';
+  const M18831_14512 = 'Claiming the producer half (ruling 5518059994, option B) — dev seat, session `session_01UHvF5hyiZjnCyExFnfQB8m`, branch `claude/issue-14512-multi-package-artifact-single-copy` (pushed, empty, at `7251bad7d`).';
+  const M18831_15638 = 'Claimed by the `os-dev` seat. Session `01D47qPfEWVPmhguWgBZCi5N`.';
+  const M18831_15638_HEADING = '## Claim';
+  const M18831_ALL = [M18831_11633, M18831_11663, M18831_14512, M18831_15638];
+  for (const [where, line, form, prefix] of [
+    ['#11633 comment 5394770585', M18831_11633, 'heading-bare', '## Claim'],
+    ['#11663 comment 5394306066', M18831_11663, 'heading-bare', '## Claim'],
+    ['#14512 comment 5523309738', M18831_14512, 'bare-word', 'Claiming'],
+    ['#15638 comment 5555005915', M18831_15638, 'bare-word', 'Claimed'],
+  ]) {
+    b(BATTERY68, `#18831 ${where}: ⛔ the measured line is read by NEITHER marker — the silence IS the defect`, markerMatches(CLAIM_COMMENT_MARKER, line) || markerMatches(RELEASE_COMMENT_MARKER, line), false);
+    b(BATTERY68, `#18831 ${where} ⭐ …and it REPORTS now, naming its own form`, miss68(line).form, form);
+    b(BATTERY68, `#18831 ${where}: …with the offending PREFIX a seat greps for`, miss68(line).prefix, prefix);
+    b(BATTERY68, `#18831 ${where}: …and the comment id a seat opens`, miss68(line).commentId, '5691473966');
+  }
+  b(BATTERY68, '#18831 ⭐ counterfactual: under the roster WITHOUT the two added forms, all four measured lines are silent — which is what the card measured', OWNERSHIP_MARKER_NEAR_MISS_FORMS.filter((f) => f.id !== 'heading-bare' && f.id !== 'bare-word').some((f) => M18831_ALL.some((line) => { const h = f.re.exec(line); return h !== null && line.slice(h[0].length).trim() !== ''; })), false);
+  b(BATTERY68, '#18831 ⭐ …and with them every one of the four is named', M18831_ALL.every((line) => ownershipMarkerNearMisses(rows68(line)).length === 1), true);
+  b(BATTERY68, '#18831: #15638\'s `## Claim` heading carries NO record after it, so the census stays silent on THAT line — the card is named through its prose line instead', [ownershipMarkerNearMisses(rows68(M18831_15638_HEADING)).length, miss68(`${M18831_15638_HEADING}\n${M18831_15638}`).form].join(','), '0,bare-word');
+  b(BATTERY68, '#18831: a heading carrying an INFLECTED word AND the canonical colon is named by NO form — measured zero, left unnamed rather than guessed', ownershipMarkerNearMisses(rows68('## Released: session `session_x`')).length, 0);
+
+  // ORDERING — the first form that matches names the line, so the two
+  // additions can only ever name what no older form read.
+  b(BATTERY68, '#18831 ordering: the two additions are LAST on the roster, in that order', OWNERSHIP_MARKER_NEAR_MISS_FORMS.slice(-2).map((f) => f.id).join(','), 'heading-bare,bare-word');
+  b(BATTERY68, '#18831 ordering: a heading WITH the canonical colon is still `heading`, ⛔ not `heading-bare`', miss68('## Claim: seat, session `session_x`').form, 'heading');
+  b(BATTERY68, '#18831 ordering: …an inflected word with a colon is still `inflected-word`', miss68('Claiming: seat, session `session_x`').form, 'inflected-word');
+  b(BATTERY68, '#18831 ordering: …and a dash-written claim is still `separator`, which is H34\'s row and ⛔ not this addition\'s', miss68('Claim — skills seat, session 019x').form, 'separator');
+  b(BATTERY68, '#18831 ordering: …a `-` bulleted claim with no colon is named by NEITHER addition — a list is not a heading and not a line start', ownershipMarkerNearMisses(rows68('- Claiming the producer half, seat `domain:spec`')).length, 0);
+
+  // THE `leading-sigil` FORM (#18829 A) — the shape the sibling's retired
+  // retraction stripper used to swallow, NAMED here instead. The fixture is the
+  // #18373 retraction (`os-bill`, comment 5717333576) written in the act the
+  // protocol names, its own sigil and bold kept; the PROSE it was actually
+  // written as is pinned below as named by NO form, with the reason.
+  const SIGIL_RELEASE = '🚨 **Release:** session `session_01JbZnqu8bt6YqfJsr9vaFb3` · 因:本卡已由 `os-litant` 在先认领,本席晚了 13 分钟 · 去向:让先到者';
+  const SIGIL_18373_PROSE = '🚨 **撤回上一条认领(`5717315121`)—— 本卡已由 `os-litant` 在先认领,本席晚了 13 分钟。** `domain:spec` seat 2(`session_01JbZnqu8bt6YqfJsr9vaFb3`,座位贴 #18549)。⏱️ 本条读数取自同一动作:2026-09-17T15:54Z。';
+  b(BATTERY68, '#18829 ⭐ a sigil-led `Release:` is read by NEITHER marker — the stripper removes decoration, ⛔ never a sigil', markerMatches(RELEASE_COMMENT_MARKER, SIGIL_RELEASE) || markerMatches(CLAIM_COMMENT_MARKER, SIGIL_RELEASE), false);
+  b(BATTERY68, '#18829 ⭐ …and it is NAMED, as `leading-sigil`, with the sigil-and-decoration prefix a seat greps for', [miss68(SIGIL_RELEASE).form, miss68(SIGIL_RELEASE).prefix].join(' '), 'leading-sigil 🚨 **Release:');
+  b(BATTERY68, '#18829: the very line the sibling pinned as 「the SHARED reading does not strip a leading sigil」 is the same form on the claim side', miss68('🚨 Claim: PM loop round 1').form, 'leading-sigil');
+  b(BATTERY68, '#18829 control: take the sigil off by hand and the SAME line reads through `markerMatches` — the sigil was the only thing in the way', markerMatches(RELEASE_COMMENT_MARKER, SIGIL_RELEASE.replace('🚨 ', '')), true);
+  b(BATTERY68, '#18829 control: …and once read it is ⛔ not a near miss — reading and census stay complements', ownershipMarkerNearMisses(rows68(SIGIL_RELEASE.replace('🚨 ', ''))).length, 0);
+  b(BATTERY68, '#18829 control: the derived bare line really differs from the fixture', SIGIL_RELEASE === SIGIL_RELEASE.replace('🚨 ', ''), false);
+  b(BATTERY68, '#18829: the fleet\'s other openers — ⚠️ with its variation selector, ⇒, ⛔, ⭐ — are the same form, decorated or not', ['⚠️ Release: x', '⇒ Claim: x', '⛔ **Claimed:** x', '⭐ `Release:` x'].map((l) => miss68(l).form).join(','), 'leading-sigil,leading-sigil,leading-sigil,leading-sigil');
+  b(BATTERY68, '#18829: two sigils, a sigil under a bullet (「- ⚠️ 」, on #18373\'s own thread) and a sigil in a blockquote are named too', ['🚨 ⚠️ Release: x', '- ⚠️ Release: x', '> 🚨 Claim: x'].map((l) => miss68(l).form).join(','), 'leading-sigil,leading-sigil,leading-sigil');
+  b(BATTERY68, '#18829 control: a sigil AFTER the word is not in the way — the line reads, and is no near miss', [markerMatches(RELEASE_COMMENT_MARKER, 'Release: 🚨 session x'), ownershipMarkerNearMisses(rows68('Release: 🚨 session x')).length].join(','), 'true,0');
+  b(BATTERY68, '#18829 control: a sigil-led line WITHOUT the word is silent — 「⚠️ 本条读数…」 and 「⇒ …」 are prose', ownershipMarkerNearMisses(rows68('⚠️ 本条读数取自同一动作:2026-09-17T15:54Z。\n⇒ the next seat re-reads the card\n⭐ Claimed by nobody yet')).length, 0);
+  b(BATTERY68, '#18829 control: a sigil-led directive with NO record after it is silent — a census, ⛔ not a sigil count', ownershipMarkerNearMisses(rows68('🚨 Release:')).length, 0);
+  b(BATTERY68, '#18829 ⛔ the #18373 PROSE specimen itself — a sigil before 撤回, an act the protocol never declared — is named by NO form: reading the verb is the channel #18773 A retires (⛔ B), so here it is prose, and its thread is named by the cross-author row one file over', ownershipMarkerNearMisses(rows68(SIGIL_18373_PROSE)).length, 0);
+  b(BATTERY68, '#18829 ⛔ CONTROL: the specimen really opens with the sigil-and-bold the form reads — only the word is missing', SIGIL_18373_PROSE.startsWith('🚨 **') && SIGIL_RELEASE.startsWith('🚨 **'), true);
+  b(BATTERY68, '#18829 ordering: the form sits between `separator` and the two #18831 additions', OWNERSHIP_MARKER_NEAR_MISS_FORMS.map((f) => f.id).slice(4, 7).join(','), 'separator,leading-sigil,heading-bare');
+  b(BATTERY68, '#18829 ordering: …and steals no older form\'s fixture — every earlier member is still named by ITSELF', OWNERSHIP_MARKER_NEAR_MISS_FORMS.slice(0, 5).every((f) => miss68(f.example).form === f.id), true);
+  b(BATTERY68, '#18829 boundary: a heading AND a sigil is named by no form — unseen on any thread read, left unnamed rather than guessed', ownershipMarkerNearMisses(rows68('## 🚨 Release: x')).length, 0);
+
+  // SILENCE CONTROLS — a census that names prose is a census nobody reads, and
+  // every one of these is a line MEASURED on the open board.
+  b(BATTERY68, '#18831 control: ⛔ a heading naming a FILE is not a near miss — the word must END where the heading text does', ownershipMarkerNearMisses(rows68('### release-aftercare.md — rows RA1–RA6 (58 lines, ceiling 58, headroom 0)')).length, 0);
+  b(BATTERY68, '#18831 control ⭐ ⛔ the PROTOCOL\'s own imperative sentence is not a claim record — the reason `bare-word` carries the PARTICIPLES and ⛔ not the bare word', ownershipMarkerNearMisses(rows68('> **Claim the issue BEFORE you write any code.**')).length, 0);
+  b(BATTERY68, '#18831 control: ⛔ …nor a bare `Claim ` opening an ordinary sentence about claiming', ownershipMarkerNearMisses(rows68('Claim the card only after the ruling lands.')).length, 0);
+  b(BATTERY68, '#18831 control: ⛔ nor release-board PROSE, measured as the noisiest class on the board', ownershipMarkerNearMisses(rows68('**Release timing, for the maintainer.** This is the one input the release gate should see before the cut.')).length, 0);
+  b(BATTERY68, '#18831 control: ⛔ …nor the other three release-prose openings the corpus carries', ownershipMarkerNearMisses(rows68('**Release checklist, platform side:** #14599\n**Release board: 5 additions**, each against a named criterion\nRelease confirmed on two readings before acting')).length, 0);
+  b(BATTERY68, '#18831 control: the canonical spellings the reader DOES read are ⛔ never near misses, decorated or not', [ownershipMarkerNearMisses(rows68('Claim: seat, session `session_x`')).length, ownershipMarkerNearMisses(rows68('Claimed: seat, session `session_x`')).length, ownershipMarkerNearMisses(rows68('**Claim:** seat, session `session_x`')).length].join(','), '0,0,0');
+  b(BATTERY68, '#18831 control ⭐ the reading and this census are still COMPLEMENTS after the addition — the live #16529 record beside a canonical claim yields nothing', ownershipMarkerNearMisses(rows68(`${SPECIMEN_16529}\n**Claim:** seat, session \`session_x\``)).length, 0);
+  // ⚠️ RE-POINTED by #18926, ⛔ not deleted. This case's claim — the `heading-bare`
+  // form names the RELEASE side, not the claim side alone — is untouched and
+  // still floored. What moved is its FIXTURE: the line it used to carry was
+  // #17536's blocker-release heading, which #18926 rules is a delivery report and
+  // moves to the census's announcement channel, so a fixture left here would have
+  // pinned this branch through a line that no longer reaches it. The replacement
+  // is #16712 comment 5605768467, pasted from the REST read — a live release
+  // heading on a work card that is NOT an announcement (it names no PR and no
+  // transition), so it exercises the same form on the same side. Where the old
+  // fixture went is pinned in the #18926 block below, ⛔ never left implicit.
+  b(BATTERY68, '#18831: the release side of the HEADING form is named too, where the evidence is — a real release record written as a heading', miss68('## Release + seat ruling — the reported defect is DISPROVED; what survives is a different defect in a different lane').form, 'heading-bare');
+  b(BATTERY68, '#18831 ⭐ …and the fixture this case USED to carry is still named by the same form, on #18926\'s announcement channel', ownershipMarkerNearMissCensus(rows68('## Released — **PR #17517 merged.** `pm:blocked` → `pm:queue`')).announcements[0]?.form, 'heading-bare');
+  b(BATTERY68, '#18831: …and a `+`-suffixed CLAIMED heading, the fourth heading shape the corpus carries', miss68('## CLAIMED + dispatch order — #13457').form, 'heading-bare');
+
+  // THE READER — complements by construction, and the conservative half.
+  b(BATTERY68, 'near miss ⭐ a line the reading DOES read is ⛔ NEVER a near miss — the two are complements', ownershipMarkerNearMisses(rows68(SPECIMEN_16529)).length, 0);
+  b(BATTERY68, 'near miss: …nor is the bare spelling', ownershipMarkerNearMisses(rows68(SPECIMEN_16529_BARE)).length, 0);
+  b(BATTERY68, 'near miss: a directive with NO record after it is silent — a census, ⛔ not a heading count', ownershipMarkerNearMisses(rows68('## Release:')).length, 0);
+  b(BATTERY68, 'near miss: ordinary prose is silent', ownershipMarkerNearMisses(rows68('We will release: tomorrow\n- a list item\nnothing here')).length, 0);
+  b(BATTERY68, 'near miss: the SAME offending line twice in one comment is reported ONCE', ownershipMarkerNearMisses(rows68('__Release:__ x\n__Release:__ x')).length, 1);
+  b(BATTERY68, 'near miss: two DIFFERENT forms in one comment are both reported', ownershipMarkerNearMisses(rows68('__Release:__ x\n## Claim: y')).map((m) => m.form).join(','), 'underscore-emphasis,heading');
+  b(BATTERY68, 'near miss: a comment id that does not read comes back null, ⛔ never a fabricated one', (ownershipMarkerNearMisses([{ id: 'not-an-id', body: '__Release:__ x' }])[0] ?? { commentId: 'ABSENT' }).commentId, null);
+  b(BATTERY68, 'near miss: a non-array input is a real reading, ⛔ not a crash', ownershipMarkerNearMisses(undefined).length, 0);
+  b(BATTERY68, 'near miss: an empty thread too', ownershipMarkerNearMisses([]).length, 0);
+  b(BATTERY68, 'near miss: a row with no body at all is skipped rather than throwing', ownershipMarkerNearMisses([{ id: 1 }]).length, 0);
+  b(BATTERY68, 'near miss ⭐ the LIVE specimen would have been a near miss BEFORE the reading landed, and is not one after', [RELEASE_COMMENT_MARKER.test(SPECIMEN_16529), ownershipMarkerNearMisses(rows68(SPECIMEN_16529)).length].join(','), 'false,0');
+
+  // THE SUMMARY CLAUSE — the channel the census speaks on. UNCONDITIONAL, so a
+  // run that found nothing and a run that READ nothing cannot print alike.
+  const NEAR_MISS_COUNTS = { repo: 'o/r', issues: 1, unscoped: 0, prs: 0, merged: 0, markerNearMissLines: 3, markerNearMissCards: 2, markerNearMissJudged: 40, markerNearMissNamed: ['#16529 comment 5691473966 「__Release:__」 (underscore-emphasis)'] };
+  b(BATTERY68, 'summary: the clause states how many lines, on how many cards, out of how many threads READ', saidBy('markerNearMiss', summaryLine(NEAR_MISS_COUNTS, 0)).includes('3 line(s) on 2 of 40 thread(s)'), true);
+  b(BATTERY68, 'summary: …and names the card, the comment and the offending prefix', saidBy('markerNearMiss', summaryLine(NEAR_MISS_COUNTS, 0)).includes('#16529 comment 5691473966 「__Release:__」 (underscore-emphasis)'), true);
+  b(BATTERY68, 'summary: …and says how many further lines the naming cap held back', saidBy('markerNearMiss', summaryLine(NEAR_MISS_COUNTS, 0)).includes(`2 further line(s) NOT NAMED at the ${OWNERSHIP_MARKER_NEAR_MISS_NAME_CAP}-entry cap`), true);
+  b(BATTERY68, 'summary: …naming every declared form, so the vocabulary is visible from the report alone', OWNERSHIP_MARKER_NEAR_MISS_FORMS.every((f) => saidBy('markerNearMiss', summaryLine(NEAR_MISS_COUNTS, 0)).includes(f.id)), true);
+  b(BATTERY68, 'summary ⭐ the clause renders on EVERY run — a census that read nothing must not print as a clean board', saidBy('markerNearMiss', summaryLine({ repo: 'o/r', issues: 1, unscoped: 0, prs: 0, merged: 0 }, 0)).includes('0 line(s) on 0 of 0 thread(s)'), true);
+  b(BATTERY68, 'summary: …and an absent census renders NO cap clause, since nothing was held back', saidBy('markerNearMiss', summaryLine({ repo: 'o/r', issues: 1, unscoped: 0, prs: 0, merged: 0 }, 0)).includes('NOT NAMED'), false);
+  b(BATTERY68, 'summary: ⛔ report-only, and ⛔ never a half-state verdict by itself, in as many words', saidBy('markerNearMiss', summaryLine(NEAR_MISS_COUNTS, 0)).includes('⛔ NEVER a half-state verdict by itself'), true);
+  b(BATTERY68, 'summary: it names the ONE place decoration is handled, so the next reader finds it', saidBy('markerNearMiss', summaryLine(NEAR_MISS_COUNTS, 0)).includes('`markerMatches`'), true);
+  b(BATTERY68, 'summary: the clause is declared in RENDER order, before the report-only tail', SUMMARY_CLAUSE_ANCHORS.findIndex(([k]) => k === 'markerNearMiss') < SUMMARY_CLAUSE_ANCHORS.findIndex(([k]) => k === 'reportOnly'), true);
+  b(BATTERY68, 'summary: …and AFTER H67, whose declared loss it replaces', SUMMARY_CLAUSE_ANCHORS.findIndex(([k]) => k === 'markerNearMiss') > SUMMARY_CLAUSE_ANCHORS.findIndex(([k]) => k === 'h67QueueDelivery'), true);
+  b(BATTERY68, 'summary: every count key rides the enumerated forwarding contract', ['markerNearMissLines', 'markerNearMissCards', 'markerNearMissJudged', 'markerNearMissNamed'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
+  b(BATTERY68, 'summary: a non-array `markerNearMissNamed` renders a sentence rather than throwing', saidBy('markerNearMiss', summaryLine({ repo: 'o/r', issues: 1, unscoped: 0, prs: 0, merged: 0, markerNearMissNamed: null }, 0)).includes('0 line(s)'), true);
+  b(BATTERY68, 'summary: ⛔ the clause renders numbers, ⛔ never the string `undefined`', saidBy('markerNearMiss', summaryLine({}, 0)).includes('undefined'), false);
+
+  // H67's DECLARED LOSS is gone, and the row says so rather than going quiet.
+  b(BATTERY68, 'H67: the row no longer declares the decorated line as a blind spot', h67row(I16529, { number: 16529 }).includes('is invisible to `RELEASE_COMMENT_MARKER`'), false);
+  b(BATTERY68, 'H67: …it says the blind spot CLOSED, and names what replaced it', h67row(I16529, { number: 16529 }).includes('WAS a third way and is no longer'), true);
+  b(BATTERY68, 'H67: …and the remaining two lower bounds are still declared', h67row(I16529, { number: 16529 }).includes('LOWER BOUND, two ways'), true);
+  b(BATTERY68, 'H67 summary: the clause declares the closure too, ⛔ rather than keeping a stale loss', saidBy('h67QueueDelivery', summaryLine(NEAR_MISS_COUNTS, 0)).includes('WAS a second way and is no longer'), true);
+
+  // ⭐ THE CENSUS POPULATION AND THE ANNOUNCEMENT CHANNEL (#18926) -----------
+  //
+  // The card: five of #18914's sixteen 「no readable ownership record」 rows have
+  // NO record to normalise — four `pm:seat` posts whose comments are shift
+  // narration, and one blocker-release heading on a card nobody ever claimed.
+  //
+  // Every line below is PASTED from the REST read of its own comment
+  // (2026-09-18T12:5xZ–13:0xZ through the session proxy), ⛔ never retyped from
+  // the filing card's table. ⚠️ And the paste FALSIFIED the dispatch's
+  // assumption that the five rows' FIRST lines are the fixtures: on three of the
+  // five the census names a LATER narration line, and the heading the card's
+  // table quotes carries no near miss at all. The fixture is the line the census
+  // NAMES — pinned here — with the first lines beside them so the discrepancy is
+  // a reading rather than a silence.
+  const SEAT_6017 = 'Claimed and dispatched, batch refilled to 3:';
+  const SEAT_6017_FIRST = '## Seat correction — the lane stopped dispatching for ~4 hours and there was no gate holding it';
+  const SEAT_6021 = 'Claiming #15222 at 19:13Z I wrote, in the claim comment, a line-initial `Clause-②: yes` with its justification. The label write in the same claim was:';
+  const SEAT_6026 = '### Released clean';
+  const SEAT_6367 = '**Claimed and dispatched from this lane (round 1):**';
+  const RELEASE_17536 = '## Released — **PR #17517 merged.** `pm:blocked` → `pm:queue`; the blocker line is struck in the body.';
+  const SEAT_LINES = [SEAT_6017, SEAT_6021, SEAT_6026, SEAT_6367];
+
+  // The four seat lines ARE near misses as lines — the vocabulary is untouched,
+  // which is the ⛔ no-widening half of the ruling read from the other side.
+  for (const [where, line, form] of [
+    ['#6017 comment 5691995598', SEAT_6017, 'bare-word'],
+    ['#6021 comment 5625313119', SEAT_6021, 'bare-word'],
+    ['#6026 comment 5274500724', SEAT_6026, 'heading-bare'],
+    ['#6367 comment 5294956565', SEAT_6367, 'bare-word'],
+  ]) {
+    b(BATTERY68, `#18926 ${where}: the LINE is still named by the vocabulary — ⛔ nothing was widened or narrowed there`, miss68(line).form, form);
+  }
+  b(BATTERY68, '#18926 ⭐ …and the POPULATION is what excludes them: a `pm:seat` post is out of it', ownershipCensusSpeaksAbout(issue(['pm:seat'])), false);
+  b(BATTERY68, '#18926 ⭐ control: an ordinary work card is IN the population, so the filter is scoped to the carrier', ownershipCensusSpeaksAbout(issue(['pm:queue', 'domain:cli'])), true);
+  b(BATTERY68, '#18926: …a seat post carrying a LANE label too is still out — the sticker decides, ⛔ not the lane', ownershipCensusSpeaksAbout(issue(['pm:seat', 'domain:engine'])), false);
+  b(BATTERY68, '#18926: …and a card with no labels at all is IN, ⛔ never excluded by absence', ownershipCensusSpeaksAbout(issue([])), true);
+  b(BATTERY68, '#18926: the predicate reads a missing issue as IN rather than throwing', ownershipCensusSpeaksAbout(undefined), true);
+  b(BATTERY68, '#18926: …and tolerates the string-label REST shape `labelNames` accepts', ownershipCensusSpeaksAbout({ labels: ['pm:seat'] }), false);
+  b(BATTERY68, '#18926 ⭐ the paste FALSIFIED the first-line assumption: #6017\'s own first line carries NO near miss, so the fixture is the narration line', [ownershipMarkerNearMisses(rows68(SEAT_6017_FIRST)).length, miss68(SEAT_6017).prefix].join(','), '0,Claimed');
+  b(BATTERY68, '#18926: …and the four seat lines really differ from each other, so the roster is four fixtures and ⛔ not one repeated', new Set(SEAT_LINES).size, 4);
+
+  // THE ANNOUNCEMENT CHANNEL — the line leaves `misses` and lands in
+  // `announcements`, ⛔ counted rather than dropped.
+  b(BATTERY68, '#18926 ⭐ #17536 comment 5625672905: the blocker-release heading is ⛔ NO LONGER a near miss', ownershipMarkerNearMisses(rows68(RELEASE_17536)).length, 0);
+  b(BATTERY68, '#18926 ⭐ …it is COUNTED on the announcement channel instead, ⛔ never silently dropped', ownershipMarkerNearMissCensus(rows68(RELEASE_17536)).announcements.length, 1);
+  b(BATTERY68, '#18926 …naming BOTH things the line spells out, which is what makes it a delivery report', JSON.stringify(ownershipMarkerNearMissCensus(rows68(RELEASE_17536)).announcements[0]?.names), '{"pr":true,"transition":true}');
+  b(BATTERY68, '#18926 …and it keeps its card, comment and prefix, so a seat can still grep it', [ownershipMarkerNearMissCensus(rows68(RELEASE_17536)).announcements[0]?.commentId, ownershipMarkerNearMissCensus(rows68(RELEASE_17536)).announcements[0]?.prefix].join(' '), '5691473966 ## Released');
+  b(BATTERY68, '#18926 ⭐ the two channels PARTITION the line — it is on exactly one of them, so no number can be reconstructed wrong', [ownershipMarkerNearMissCensus(rows68(RELEASE_17536)).misses.length, ownershipMarkerNearMissCensus(rows68(RELEASE_17536)).announcements.length].join(','), '0,1');
+  b(BATTERY68, '#18926: the LINE is still read by NEITHER marker — the exclusion is the census\'s, ⛔ not the reader\'s', markerMatches(CLAIM_COMMENT_MARKER, RELEASE_17536) || markerMatches(RELEASE_COMMENT_MARKER, RELEASE_17536), false);
+  b(BATTERY68, '#18926 ⭐ ABLATION: under the vocabulary alone — the reading removed — the line IS a near miss, so this pin can FAIL', OWNERSHIP_MARKER_NEAR_MISS_FORMS.some((f) => { const h = f.re.exec(RELEASE_17536); return h !== null && RELEASE_17536.slice(h[0].length).trim() !== ''; }), true);
+  b(BATTERY68, '#18926: …and it was named `heading-bare` before the reading landed, which is the form the announcement rides', OWNERSHIP_MARKER_NEAR_MISS_FORMS.find((f) => { const h = f.re.exec(RELEASE_17536); return h !== null && RELEASE_17536.slice(h[0].length).trim() !== ''; })?.id, 'heading-bare');
+
+  // THE THREE NARROWINGS, each with the corpus line that forced it. Every one is
+  // a line that STAYS in the census: a narrowing whose controls can drift out of
+  // the suite is how a filter becomes a silencer.
+  b(BATTERY68, '#18926 narrowing ⭐ HEADING forms only: `Release-landed: … (PR #18852)` is a `separator` line and STAYS a near miss (#18740 comment 5723834336)', miss68('Release-landed: 八处(rest ×4 · spec ×4,含每包两份副本)= `18cc3b1df`(PR #18852)').form, 'separator');
+  b(BATTERY68, '#18926 narrowing: …and the roster of announcement-bearing forms is exactly the one heading form, FROZEN', [RELEASE_ANNOUNCEMENT_HEADING_FORMS.join(','), Object.isFrozen(RELEASE_ANNOUNCEMENT_HEADING_FORMS)].join(' '), 'heading-bare true');
+  b(BATTERY68, '#18926 narrowing: …every member of it is a DECLARED near-miss form, so the reading can never name a form the vocabulary dropped', RELEASE_ANNOUNCEMENT_HEADING_FORMS.every((id) => OWNERSHIP_MARKER_NEAR_MISS_FORMS.some((f) => f.id === id)), true);
+  b(BATTERY68, '#18926 narrowing ⭐ the PARTICIPLE only: `### Release: PR #18523 …` names a PR and STAYS a near miss (#16233 comment 5704218834)', miss68('### Release: PR #18523 落下了**普查与边界记录**;余下的是**路线选择**,⛔ 未落').form, 'heading');
+  b(BATTERY68, '#18926 narrowing: …and so does the bare-noun heading that names no PR at all (#16712 comment 5605768467)', miss68('## Release + seat ruling — the reported defect is DISPROVED; what survives is a different defect in a different lane').form, 'heading-bare');
+  b(BATTERY68, '#18926 narrowing: …`Releasing` is left UNNAMED — measured zero on the corpus, and a form arrives WITH its fixture', ownershipMarkerNearMissCensus(rows68('## Releasing — PR #17517 merged. `pm:blocked` → `pm:queue`')).announcements.length, 0);
+  b(BATTERY68, '#18926 narrowing ⭐ NO session token: #6023\'s participle heading names one and STAYS a near miss (comment 5552092492)', miss68('## Released tail — in flight under THIS session\'s process tree').form, 'heading-bare');
+  b(BATTERY68, '#18926 narrowing ⭐ …the assumption the dispatch asked to TEST: the SAME announcement line plus a session is ⛔ not swallowed', ownershipMarkerNearMissCensus(rows68(`${RELEASE_17536} session \`session_x\``)).announcements.length, 0);
+  b(BATTERY68, '#18926 narrowing: …and it stays a near miss on the other channel rather than vanishing between them', ownershipMarkerNearMisses(rows68(`${RELEASE_17536} session \`session_x\``)).length, 1);
+  b(BATTERY68, '#18926 narrowing: …the Chinese spelling 「会话」 holds the line back too, so a Chinese-written record is ⛔ never swallowed', ownershipMarkerNearMissCensus(rows68('## Released — **PR #17517 merged.** 会话 `session_x`')).announcements.length, 0);
+  b(BATTERY68, '#18926 narrowing: a participle heading naming NEITHER a PR nor a transition is an ordinary near miss', ownershipMarkerNearMissCensus(rows68('## Released — the lane is clear now')).announcements.length, 0);
+  b(BATTERY68, '#18926: …a transition ALONE is enough, which is the half the card\'s 「label transition」 names', ownershipMarkerNearMissCensus(rows68('## Released — `pm:blocked` → `pm:queue`')).announcements.length, 1);
+  b(BATTERY68, '#18926: …and a PR ALONE is too', ownershipMarkerNearMissCensus(rows68('## Released — **PR #17517 merged.**')).announcements.length, 1);
+  b(BATTERY68, '#18926: the predicate answers null for a form it does not carry, ⛔ never a truthy default', releaseAnnouncementHeading('bare-word', 'Released', RELEASE_17536), null);
+  b(BATTERY68, '#18926: …and for a prefix whose word is the bare noun', releaseAnnouncementHeading('heading-bare', '## Release', '## Release — PR #17517 merged. `pm:blocked` → `pm:queue`'), null);
+  b(BATTERY68, '#18926: …and it tolerates missing arguments rather than throwing', [releaseAnnouncementHeading(undefined, undefined, undefined), releaseAnnouncementHeading('heading-bare', '## Released', undefined)].join(','), ',');
+  b(BATTERY68, '#18926: a DECORATED participle heading reads too — the prefix is measured with its decoration stripped', ownershipMarkerNearMissCensus(rows68('## **Released** — **PR #17517 merged.**')).announcements.length, 1);
+  b(BATTERY68, '#18926: ⛔ no `g` flag on any of the three patterns — a shared regex carrying `lastIndex` is the state bug this file refuses', [RELEASE_ANNOUNCEMENT_PR_RE, RELEASE_ANNOUNCEMENT_TRANSITION_RE, OWNERSHIP_SESSION_TOKEN_RE].every((re) => re.global === false), true);
+
+  // ⭐ THE POSITIVE CONTROL — one of the OTHER ELEVEN, byte-identical. #14512's
+  // `Claiming` line is already a fixture in this battery (`M18831_14512`,
+  // pasted from comment 5523309738), so the control is the SAME bytes both
+  // halves read and ⛔ cannot drift from the thing it controls.
+  b(BATTERY68, '#18926 ⭐ control: a real near miss on a NON-seat card is still listed — #14512 comment 5523309738, unchanged', [miss68(M18831_14512).form, miss68(M18831_14512).prefix].join(' '), 'bare-word Claiming');
+  b(BATTERY68, '#18926 ⭐ control: …and it is on the NEAR-MISS channel, ⛔ not the announcement one', [ownershipMarkerNearMissCensus(rows68(M18831_14512)).misses.length, ownershipMarkerNearMissCensus(rows68(M18831_14512)).announcements.length].join(','), '1,0');
+  b(BATTERY68, '#18926 control: …and its card is IN the population', ownershipCensusSpeaksAbout(issue(['pm:queue', 'domain:spec'])), true);
+  b(BATTERY68, '#18926 control: the other three #18831 fixtures are untouched too, so the floor did not buy the filter with a survivor', M18831_ALL.every((line) => ownershipMarkerNearMisses(rows68(line)).length === 1), true);
+
+  // THE SUMMARY — both exclusions print UNCONDITIONALLY, because a narrowing
+  // nobody can see is the over-reading it replaced wearing a smaller number.
+  const EXCLUSION_COUNTS = { ...NEAR_MISS_COUNTS, markerNearMissSeatPosts: 5, markerNearMissSeatLines: 9, markerNearMissAnnouncements: 1, markerNearMissAnnounced: ['#17536 comment 5625672905 「## Released」 (names a PR, names a `pm:*` transition)'] };
+  b(BATTERY68, '#18926 summary ⭐ the population exclusion is stated with BOTH numbers, so the pre-filter census is reconstructible', saidBy('markerNearMiss', summaryLine(EXCLUSION_COUNTS, 0)).includes('5 `pm:seat` thread(s) are OUT of that population (9 near-miss line(s) not listed above)'), true);
+  b(BATTERY68, '#18926 summary: …and says WHY, in the protocol\'s own terms', saidBy('markerNearMiss', summaryLine(EXCLUSION_COUNTS, 0)).includes('a seat post\'s ownership is its BODY'), true);
+  b(BATTERY68, '#18926 summary: …and that it is counted rather than dropped, in as many words', saidBy('markerNearMiss', summaryLine(EXCLUSION_COUNTS, 0)).includes('⛔ COUNTED, never silently dropped'), true);
+  b(BATTERY68, '#18926 summary ⭐ the announcement channel is counted AND named', saidBy('markerNearMiss', summaryLine(EXCLUSION_COUNTS, 0)).includes('1 further line(s) are release ANNOUNCEMENTS') && saidBy('markerNearMiss', summaryLine(EXCLUSION_COUNTS, 0)).includes('#17536 comment 5625672905 「## Released」'), true);
+  b(BATTERY68, '#18926 summary: …and the three narrowings are declared on the line, so the next editor reads the scope rather than the code', ['HEADING forms only', 'PARTICIPLE only', 'NO session token'].every((phrase) => saidBy('markerNearMiss', summaryLine(EXCLUSION_COUNTS, 0)).includes(phrase)), true);
+  b(BATTERY68, '#18926 summary ⭐ both members render at ZERO too — a run with nothing excluded and a run where the exclusions stopped being applied must ⛔ not print alike', [saidBy('markerNearMiss', summaryLine(NEAR_MISS_COUNTS, 0)).includes('0 `pm:seat` thread(s) are OUT of that population (0 near-miss line(s) not listed above)'), saidBy('markerNearMiss', summaryLine(NEAR_MISS_COUNTS, 0)).includes('0 further line(s) are release ANNOUNCEMENTS')].join(','), 'true,true');
+  b(BATTERY68, '#18926 summary: an absent announcement list renders NO names clause', saidBy('markerNearMiss', summaryLine(NEAR_MISS_COUNTS, 0)).includes('comment 5625672905'), false);
+  b(BATTERY68, '#18926 summary: a non-array `markerNearMissAnnounced` renders a sentence rather than throwing', saidBy('markerNearMiss', summaryLine({ repo: 'o/r', issues: 1, unscoped: 0, prs: 0, merged: 0, markerNearMissAnnounced: null }, 0)).includes('0 further line(s) are release ANNOUNCEMENTS'), true);
+  b(BATTERY68, '#18926 summary: ⛔ the bare shape renders numbers, ⛔ never the string `undefined`', saidBy('markerNearMiss', summaryLine({}, 0)).includes('undefined'), false);
+  b(BATTERY68, '#18926 summary: all four new count keys ride the enumerated forwarding contract', ['markerNearMissSeatPosts', 'markerNearMissSeatLines', 'markerNearMissAnnouncements', 'markerNearMissAnnounced'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
+
+  // FLOOR — this battery is declared, pinned, and the roster grew with it.
+  b(BATTERY68, 'floor: this battery is DECLARED on the roster', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY68), true);
+  b(BATTERY68, 'floor: …with a positive pin, so an empty battery cannot satisfy it', SELF_TEST_BATTERIES[BATTERY68] > 0, true);
+  b(BATTERY68, 'floor: the roster now declares SEVEN batteries, and the floor rose with it', SELF_TEST_BATTERY_FLOOR, 7);
+  b(BATTERY68, 'floor: …including the four this battery landed BESIDE and the one that landed after it, so neither side of the base merge silently dropped one', ['H66 released queue card', 'H19 judged-set founding', 'H65 tier declaration spelling', 'H67 queued merged-delivery reading', 'ISSUE_BODY_LIMIT measured cap'].every((name) => Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, name)), true);
+  b(BATTERY68, 'floor: …and the roster really carries at least that many', Object.keys(SELF_TEST_BATTERIES).length >= SELF_TEST_BATTERY_FLOOR, true);
+
   // -- The `[::]` collapse (#12090): behaviour-preserving, asserted as such ---
   // The class held U+003A TWICE, never the fullwidth U+FF1A its shape implied.
   // These cases pin that the collapse changed nothing a reader could observe.
@@ -31595,6 +35929,32 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('proxy: …in NODE_OPTIONS, likewise', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://x', NODE_OPTIONS: `--enable-source-maps ${PROXY_FLAG}` } }).rearm, false);
   t('proxy: …and the env spelling NODE_USE_ENV_PROXY=1, likewise', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://x', NODE_USE_ENV_PROXY: '1' } }).rearm, false);
   t('proxy: the guard env stops an infinite re-exec loop', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://x', [PROXY_REARM_GUARD]: '1' } }).rearm, false);
+  // -- #18939: the guard is a NAME, and the plan reads the CALLER's. A sibling
+  // -- instrument's inherited guard answering "already re-armed" for a tool
+  // -- that never re-armed is how one variable replays the recorded
+  // -- "the credential is dead" hour: the suppressed run bypasses the proxy and
+  // -- answers 401 on every endpoint, and nothing is printed to say why.
+  t('proxy: the default guard is still THIS file\'s own name, so its own re-exec is unchanged', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://x', [PROXY_REARM_GUARD]: '1' } }).guarded, PROXY_REARM_GUARD);
+  t('proxy: a caller that names its OWN guard is suppressed by that one', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://x', OS_SIBLING_PROXY_REARMED: '1' }, guard: 'OS_SIBLING_PROXY_REARMED' }).rearm, false);
+  t('proxy: …and this file\'s name does NOT suppress it — the cross-suppression is gone', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://x', [PROXY_REARM_GUARD]: '1' }, guard: 'OS_SIBLING_PROXY_REARMED' }).rearm, true);
+  t('proxy: …reported machine-readably, so a caller can name the variable to unset', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://x', OS_SIBLING_PROXY_REARMED: '1' }, guard: 'OS_SIBLING_PROXY_REARMED' }).guarded, 'OS_SIBLING_PROXY_REARMED');
+  // The landed mapper shape (`check-single-claim-paths.mjs`, `check-expected-skips.mjs`,
+  // `check-prior-rulings.mjs`) folds its own name onto the default and passes no
+  // `guard`. Both of its directions are pinned here, because the DEFAULT is what
+  // it relies on.
+  t('proxy: a mapper that maps its own name onto the default still suppresses', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://x', [PROXY_REARM_GUARD]: '1' } }).rearm, false);
+  t('proxy: …and maps an UNSET own name to undefined, which suppresses nothing', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://x', [PROXY_REARM_GUARD]: undefined } }).rearm, true);
+  // Silence is the whole cost of this chain: `rearm:false, hint:false` prints
+  // nothing at any consumer. The guard branch HINTS, which every consumer
+  // already prints — the ones that pass no `guard` of their own included.
+  t('proxy: a guard that suppresses SPEAKS rather than closing the route silently', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://x', [PROXY_REARM_GUARD]: '1' } }).hint, true);
+  t('proxy: …the line names the variable a reader has to unset', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://x', [PROXY_REARM_GUARD]: '1' } }).reason.includes(PROXY_REARM_GUARD), true);
+  t('proxy: …and names the 401 the silence would otherwise be read as', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://x', [PROXY_REARM_GUARD]: '1' } }).reason.includes('401 Bad credentials'), true);
+  t('proxy: …and the proxy the request was supposed to take', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://127.0.0.1:40309', [PROXY_REARM_GUARD]: '1' } }).reason.includes('http://127.0.0.1:40309'), true);
+  // The runner leg, re-pinned ACROSS the new branch: a guard set where no proxy
+  // is configured must still spawn nothing, hint nothing and print nothing.
+  t('proxy: with no proxy configured the guard is inert (the Actions runner leg)', proxyRearmPlan({ env: { [PROXY_REARM_GUARD]: '1' } }).hint, false);
+  t('proxy: …and an already-routed run is answered by the ROUTE, not by the guard', Boolean(proxyRearmPlan({ env: { HTTPS_PROXY: 'http://x', [PROXY_REARM_GUARD]: '1' }, execArgv: [PROXY_FLAG] }).guarded), false);
   // An older node gets a printed hint, never a bad-option crash.
   t('proxy: an unsupported flag hints instead of re-execing', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://x' }, flagSupported: false }).hint, true);
   t('proxy: …and does not re-exec', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://x' }, flagSupported: false }).rearm, false);
@@ -31642,6 +36002,90 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('#13544 control: a genuinely unreachable host still refuses', classifyTransportProbe({ token: 'proxy-injected', authed: { networkError: 'ECONNREFUSED' }, transport: describeTransportRoute({ env: { HTTPS_PROXY: 'http://127.0.0.1:1' } }) }).kind, 'host-unreachable');
   t('#13544 control: …and the refusal exit code is still 3', EXIT_PREREQUISITE_NOT_MET, 3);
 
+  // -- CLI surface (#18369) --------------------------------------------------
+  //
+  // Two layers, because they fail separately: the PURE cases judge
+  // `refuseUnknownArgs` and `USAGE`; the SPAWNED ones below judge the ENTRY —
+  // which branch runs first, and whether anything reached the network before
+  // it. No in-process call can observe "no request was made", and the filed
+  // defect was exactly an ordering one.
+  t('#18369 the standing caller\'s own argv is honoured', refuseUnknownArgs(['--format=markdown', '--provenance=run 1 · commit abc']), null);
+  t('#18369 no argument at all is honoured (the default sweep)', refuseUnknownArgs([]), null);
+  t('#18369 --self-test is honoured', refuseUnknownArgs(['--self-test']), null);
+  t('#18369 --probe is honoured', refuseUnknownArgs(['--probe']), null);
+  t('#18369 --help/-h are honoured', refuseUnknownArgs(['--help']) === null && refuseUnknownArgs(['-h']) === null, true);
+  t('#18369 --provenance with an empty value is honoured', refuseUnknownArgs(['--provenance=']), null);
+  // ⚖️ The NAME is this layer's judgement; the VALUE stays `parseOutputOptions`'.
+  // A second format vocabulary here would be a second list to drift.
+  t('#18369 a bad --format VALUE is not this layer\'s refusal', refuseUnknownArgs(['--format=bogus']), null);
+  t('#18369 …and is still refused, by the layer that owns it', typeof parseOutputOptions(['--format=bogus']).error, 'string');
+  // The filer's positive control, and the card's headline case.
+  t('#18369 a flag that certainly does not exist is refused BY NAME', refuseUnknownArgs(['--totally-bogus-flag-xyz']), 'unknown option --totally-bogus-flag-xyz');
+  // The wrong-TARGET token: `--repo=` never existed here, was silently dropped,
+  // and the sweep then ran against the DEFAULT board.
+  t('#18369 a --repo= this tool never had is refused by name', refuseUnknownArgs(['--repo=objectstack-ai/objectui']), 'unknown option --repo');
+  t('#18369 a near-miss of a real option is refused by name', refuseUnknownArgs(['--formats=markdown']), 'unknown option --formats');
+  t('#18369 a value option spelled with a SPACE is refused, not silently defaulted', String(refuseUnknownArgs(['--format', 'markdown'])).startsWith('--format carries its value in the same token'), true);
+  t('#18369 a bare positional is refused and told where the board comes from', String(refuseUnknownArgs(['objectstack-ai/objectui'])).startsWith('unexpected argument "objectstack-ai/objectui"'), true);
+  // ⛔ Deliberate: the proxy flag is node's, read at process START, so after the
+  // script path it never did anything. Refusing it is how a caller finds out.
+  t('#18369 the proxy flag AFTER the script path is refused (it is node\'s, not ours)', refuseUnknownArgs([PROXY_FLAG]), `unknown option ${PROXY_FLAG}`);
+  t('#18369 the refusal names the FIRST offending token, not the last', refuseUnknownArgs(['--bogus-one', '--bogus-two']), 'unknown option --bogus-one');
+  // One roster, both halves: a flag documented and not honoured — or honoured
+  // and not documented — is a case here, never a code review.
+  t('#18369 USAGE documents every flag on the roster', CLI_FLAGS.filter((f) => !USAGE.includes(f)).join(','), '');
+  t('#18369 USAGE documents every value option on the roster', CLI_VALUE_OPTIONS.filter((o) => !USAGE.includes(`${o}=`)).join(','), '');
+  t('#18369 every format this tool renders is named in USAGE', OUTPUT_FORMATS.filter((f) => !USAGE.includes(f)).join(','), '');
+  t('#18369 USAGE names the env the board comes from, since no flag does', USAGE.includes('PM_SWEEP_REPO'), true);
+  t('#18369 USAGE opens with the word a caller greps for', USAGE.startsWith('usage:'), true);
+
+  // -- The entry, spawned — "zero requests" is not observable in-process ------
+  //
+  // `globalThis.fetch` is replaced in the child by one that exits 97, so a fetch
+  // ATTEMPT is a distinct exit code rather than a network result: offline and
+  // deterministic. ⛔ The proxy env is cleared for the child because
+  // `rearmThroughProxy` would else re-exec a GRANDCHILD without `--import`,
+  // where the trap is not installed — the case would then be answering about a
+  // process it never armed.
+  const FETCH_TRAP_EXIT = 97;
+  const FETCH_TRAP =
+    'data:text/javascript,globalThis.fetch=()=>{process.stderr.write("FETCH-ATTEMPTED\\n");' +
+    `process.exit(${FETCH_TRAP_EXIT})};`;
+  const runEntry = (args, env = {}) =>
+    spawnSync(process.execPath, ['--import', FETCH_TRAP, SELF_PATH, ...args], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        HTTPS_PROXY: '', https_proxy: '', NODE_OPTIONS: '', NODE_USE_ENV_PROXY: '',
+        GITHUB_TOKEN: '', GH_TOKEN: '', ...env,
+      },
+    });
+  // ⭐ THE CONTROL, and it is what gives every case below it meaning: a trap
+  // never installed would let `--help` "pass" with the sweep deleted, or with
+  // this whole battery deleted. The default invocation must still reach the
+  // network, in an exit code nothing else in this file uses.
+  const trapped = runEntry([]);
+  t('#18369 control: the default sweep still reaches fetch, so the trap is armed', trapped.status, FETCH_TRAP_EXIT);
+  t('#18369 control: …and the trap, not the sweep, is what said so', String(trapped.stderr).includes('FETCH-ATTEMPTED'), true);
+  const helped = runEntry(['--help']);
+  t('#18369 --help exits 0', helped.status, 0);
+  t('#18369 --help issues ZERO requests', String(helped.stderr).includes('FETCH-ATTEMPTED'), false);
+  t('#18369 --help prints the usage block on STDOUT, whole and untruncated', helped.stdout, `${USAGE}\n`);
+  const shortHelp = runEntry(['-h']);
+  t('#18369 -h answers identically', `${shortHelp.status}:${shortHelp.stdout}`, `0:${helped.stdout}`);
+  // ⭐ Answered BEFORE the `SWEEP_REPO` guard on purpose: a caller asking what
+  // the flags are must get them on the box whose environment is broken, which
+  // is exactly the box where they ask.
+  const helpedBroken = runEntry(['--help'], { PM_SWEEP_REPO: 'not a repository' });
+  t('#18369 --help answers even when the sweep target is malformed', helpedBroken.status, 0);
+  t('#18369 …and still issues zero requests', String(helpedBroken.stderr).includes('FETCH-ATTEMPTED'), false);
+  const refused = runEntry(['--totally-bogus-flag-xyz']);
+  t('#18369 an unknown option exits 2 — this file\'s bad-usage code, not a fourth one', refused.status, 2);
+  t('#18369 an unknown option issues ZERO requests', String(refused.stderr).includes('FETCH-ATTEMPTED'), false);
+  t('#18369 an unknown option is refused by name, in git-history.mjs\'s spelling', String(refused.stderr).startsWith('check-half-states: unknown option --totally-bogus-flag-xyz'), true);
+  t('#18369 …and the refusal carries the usage block with it', String(refused.stderr).includes('usage:'), true);
+  t('#18369 the refusal goes to STDERR, leaving stdout empty', refused.stdout, '');
+
   let failed = 0;
   for (const [name, actual, expected] of cases) {
     const ok = actual === expected;
@@ -31652,13 +36096,158 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
     console.error(`✗ check-half-states self-test: ${failed} of ${cases.length} case(s) failed.`);
     process.exit(1);
   }
-  console.log(`✓ check-half-states self-test: ${cases.length} cases pass.`);
+  // The FLOOR, evaluated after the cases and before the success line: a suite
+  // that ran every case it still has but lost a whole battery must not print a
+  // pass. Three conditions, each producing a real exit rather than a warning.
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  const floorFailures = [];
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorFailures.push(
+      `the roster declares ${declaredBatteries.length} batter(ies), below its floor of ` +
+        `${SELF_TEST_BATTERY_FLOOR}`,
+    );
+  }
+  for (const [battery, minimum] of Object.entries(SELF_TEST_BATTERIES)) {
+    const registered = batteryCounts.get(battery) ?? 0;
+    if (registered < minimum) {
+      floorFailures.push(
+        `battery 「${battery}」 registered ${registered} case(s), below its pin of ${minimum}`,
+      );
+    }
+  }
+  for (const battery of batteryCounts.keys()) {
+    if (!Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, battery)) {
+      floorFailures.push(`case(s) registered against 「${battery}」, which the roster does not declare`);
+    }
+  }
+  if (floorFailures.length > 0) {
+    console.error(
+      `✗ check-half-states self-test: the battery floor failed — ${floorFailures.join('; ')}. ` +
+        'Every case above may have passed; a battery that stops running is invisible in a total.',
+    );
+    process.exit(1);
+  }
+  const rosterLine = declaredBatteries
+    .map((name) => `${name} ${batteryCounts.get(name) ?? 0}/${SELF_TEST_BATTERIES[name]}`)
+    .join(', ');
+  console.log(`✓ check-half-states self-test: ${cases.length} cases pass. Batteries: ${rosterLine}.`);
 
   return SELF_TEST_VERDICT;
 }
 
+// ---------------------------------------------------------------------------
+// CLI surface — the roster, the usage text and the refusal (#18369)
+// ---------------------------------------------------------------------------
+//
+// argv was READ here but never VALIDATED: the only membership tests were
+// `includes('--self-test')` / `includes('--probe')`, and `parseOutputOptions`
+// matched two prefixes and dropped every other token silently. So `--help` and
+// a flag that certainly does not exist behaved IDENTICALLY — both fell through
+// into the full sweep, a multi-page, rate-limit-spending read of a live board,
+// and no usage string existed in this file to print instead.
+//
+// The unanswered `--help` is the cheap half. The expensive half is the mistyped
+// REAL flag: `--format markdown` with a space, or a `--repo=…` this tool has
+// never had, was IGNORED, and the sweep then ran with the DEFAULT format
+// against the DEFAULT board — a wrong-target reading indistinguishable from the
+// run the caller believes they asked for. Same failure direction the
+// `SWEEP_REPO` guard below already refuses to take, so argv gets the same
+// answer: refused by name, exit 2, before any request.
+//
+// Three things to know before editing this block:
+//
+//   · ONE roster feeds both the refusal and `USAGE`. A tool that refuses what
+//     its own usage documents is worse than one that documents nothing, and a
+//     second hand-typed list is how that drift arrives — `post-stamped.mjs`'s
+//     `KNOWN_FLAGS`/`KNOWN_OPTIONS` shape, reused rather than reinvented.
+//   · EXIT 2, not `git-history.mjs`'s 1. The refusal WORDING mirrors that file
+//     (`check-half-states: unknown option --foo`), but this file's exit
+//     vocabulary is pinned by its own header at 0/2/3 and all three of its
+//     pre-existing bad-usage exits are 2. A fourth code would make "bad usage"
+//     two numbers inside one tool.
+//   · `--use-env-proxy` is deliberately NOT on the roster (node's flag, read at
+//     process START) and neither is any positional — the board comes from
+//     `resolveSweepRepo`, so a bare `owner/name` here is precisely the
+//     wrong-target token this refusal exists to catch.
+
+/** The bare flags honoured in this file's OWN argv. ⛔ The refusal and `USAGE` read no other list. */
+export const CLI_FLAGS = Object.freeze(['--self-test', '--probe', '--help', '-h']);
+
+/** The `--name=value` options. This owns the NAME; `parseOutputOptions` owns what a VALUE may be. */
+export const CLI_VALUE_OPTIONS = Object.freeze(['--format', '--provenance']);
+
+/** The usage block — stdout under `--help`, and beneath every refusal on stderr. */
+export const USAGE = [
+  'usage:',
+  '  node scripts/pm/check-half-states.mjs                      sweep the live board (report-only)',
+  '  node scripts/pm/check-half-states.mjs --probe              can a live sweep run HERE? (no sweep)',
+  '  node scripts/pm/check-half-states.mjs --self-test          verify the predicates offline (no network)',
+  '  node scripts/pm/check-half-states.mjs --help               this text, before any board read',
+  '',
+  `  --format=FMT        render the sweep as one of: ${OUTPUT_FORMATS.join(', ')} (default ${OUTPUT_FORMATS[0]})`,
+  '  --provenance=TEXT   stamp the caller\'s run identity into a --format=markdown body',
+  '',
+  'the board is named by the ENVIRONMENT — there is no --repo and no positional argument:',
+  '  PM_SWEEP_REPO         `owner/name` to sweep; else GITHUB_REPOSITORY, else the built-in default',
+  '  PM_SWEEP_CHECKOUT     the checkout SERVING that board — `cwd` for the three local git reads; a foreign `origin` refuses (exit 3)',
+  '  PM_SWEEP_CLOSED_FLOOR YYYY-MM-DD floor for the closed-card pass',
+  '  GITHUB_TOKEN/GH_TOKEN the credential the sweep reads with',
+  '  NODE_OPTIONS=--use-env-proxy   node reads its proxy flag at process START, so it goes there or',
+  '                        before the script path — never in this argv',
+  '',
+  'exit 0 swept or answered (report-only: 0 findings and 40 findings both exit 0)',
+  '     2 bad usage, or a sweep that could not run for an unclassified reason',
+  '     3 transport prerequisite not met — NOTHING was swept, which is not a clean board',
+].join('\n');
+
+/**
+ * Refuse an argv this tool does not honour, by name. Pure, so the self-test
+ * pins every refusal offline — and so the entry can answer before it has spent
+ * a request, a child process, or a page of somebody's rate limit.
+ *
+ * @param {string[]} argv
+ * @returns {string|null} the refusal sentence, or `null` when every token is honoured
+ */
+export function refuseUnknownArgs(argv) {
+  for (const arg of argv ?? []) {
+    if (CLI_FLAGS.includes(arg)) continue;
+    const named = /^(--[A-Za-z0-9][A-Za-z0-9-]*)=/.exec(arg);
+    if (named && CLI_VALUE_OPTIONS.includes(named[1])) continue;
+    // Spelled with a SPACE is the silent one: the old parser matched neither
+    // token, kept the default format, and swept anyway.
+    if (CLI_VALUE_OPTIONS.includes(arg)) {
+      return `${arg} carries its value in the same token — spell it \`${arg}=…\`, not \`${arg} …\``;
+    }
+    if (arg.startsWith('-')) return `unknown option ${named ? named[1] : arg}`;
+    return `unexpected argument ${JSON.stringify(arg)} — this tool takes options only; the board it sweeps comes from PM_SWEEP_REPO/GITHUB_REPOSITORY, never from a positional`;
+  }
+  return null;
+}
+
 const isMain = isEntrypoint(import.meta.url);
 if (isMain) {
+  // ⚠️ argv is read INSIDE the guard, never at module scope: this file is
+  // imported by a dozen `scripts/pm/*` and `scripts/check-*` tools, several of
+  // which take a `--help` of their own, and an unguarded read would answer
+  // THEIR flag out of a module they imported for one predicate.
+  const argv = process.argv.slice(2);
+  // Answered FIRST — before the `SWEEP_REPO` / `CLOSED_FLOOR` guards below,
+  // before the proxy re-exec, before any request. Not merely "before the
+  // network": a caller asking what the flags ARE must get them on the box whose
+  // environment is broken, which is exactly the box where they ask.
+  // ⛔ `writeSync`, not `console.log`, because the next statement is
+  // `process.exit` and stdout to a PIPE is asynchronous on some platforms — the
+  // self-test reads this through one, and a truncated usage block would be a
+  // flaky case blaming the parser.
+  if (argv.includes('--help') || argv.includes('-h')) {
+    writeSync(1, `${USAGE}\n`);
+    process.exit(0);
+  }
+  const refusal = refuseUnknownArgs(argv);
+  if (refusal !== null) {
+    writeSync(2, `check-half-states: ${refusal}\n\n${USAGE}\n`);
+    process.exit(2);
+  }
   // A malformed sweep target is bad usage (exit 2), refused BEFORE any request
   // — including the probe's, whose second stage is a repo-scoped read of this
   // very string. Silently falling back to the default would sweep a board

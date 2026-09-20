@@ -621,6 +621,43 @@ describe('validatePresetComparands — arm 2, the FIELD-TYPED equality / members
     ])).map((f) => f.path)).toEqual(['views[0].sections[0].fields[0].publicPicker.filter[0].value']);
   });
 
+  // [#16403] The picker reader is entered by POSITION, not by key NAME.
+  // `scanForFilters` recognises a filter by key at ANY depth on all eight
+  // surfaces, so a reader keyed on the NAME `publicPicker` alone would be
+  // handed every future node that happens to spell it — and its unresolvable
+  // exit is `undefined`, which takes the whole filter subtree out of arm 2
+  // SILENTLY. That is not a violation of "under-report only"; it is that
+  // budget being spent where no invariant test can see it.
+  const outsidePosition = (picker: Record<string, unknown>) => ({
+    objects: [
+      { name: 'crm_opportunity', fields: { close_date: { type: 'date' } } },
+      { name: 'crm_contact', fields: { close_date: { type: 'date' } } },
+    ],
+    dashboards: [{
+      name: 'sales',
+      // A widget is NOT a form field: it declares no `field`, so nothing here
+      // is a `FormFieldPublicPickerSchema` block whatever the key is called.
+      widgets: [{ id: 'w', object: 'crm_opportunity', publicPicker: picker }],
+    }],
+  });
+
+  it('[#16403] a `publicPicker` key outside the declared form-field position is bound by the ordinary readers, not by the picker reader', () => {
+    // Before the position guard this returned [] — the picker reader claimed
+    // the node on its key, found no enclosing `field`, and left through the
+    // `undefined` exit.
+    expect(validatePresetComparands(outsidePosition({ filter: { close_date: 'last_30_days' } }))
+      .map((f) => f.path)).toEqual(['dashboards[0].widgets[0].publicPicker.filter.close_date']);
+    // An `object` on the node still names the bound object — the picker
+    // reader's override and the ordinary `r.object` reader agree, so this half
+    // is unchanged by the guard.
+    expect(validatePresetComparands(outsidePosition({ object: 'crm_contact', filter: { close_date: 'last_30_days' } }))
+      .map((f) => f.path)).toEqual(['dashboards[0].widgets[0].publicPicker.filter.close_date']);
+    // And the arm still says nothing where the bound object makes it silent —
+    // the guard restores ordinary binding, it does not force a finding.
+    expect(validatePresetComparands(outsidePosition({ object: 'no_such_object', filter: { close_date: 'last_30_days' } })))
+      .toEqual([]);
+  });
+
   it('keeps arm 1 field-agnostic: an ordering preset still fires with NO objects in the stack, and on a text column', () => {
     const findings = validatePresetComparands({
       objects: crmObjects,

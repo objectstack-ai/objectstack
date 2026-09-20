@@ -37,7 +37,7 @@ const result = DocumentSchema.parse(data);
 | **versioning** | `{ enabled: boolean; versions: object[]; majorVersion: number; minorVersion: number }` | optional | Version control |
 | **template** | `{ id: string; name: string; description?: string; fileUrl: string; … }` | optional | Document template |
 | **eSignature** | `{ provider: Enum<'docusign' \| 'adobe-sign' \| 'hellosign' \| 'custom'>; enabled: boolean; signers: object[] }` | optional | E-signature config |
-| **access** | `{ isPublic: boolean; sharedWith?: string[]; expiresAt?: number }` | optional | Access control |
+| **access** | `{ isPublic: boolean; sharedWith?: string[]; expiresAt?: integer }` | optional | Access control |
 | **metadata** | `Record<string, any>` | optional | Custom metadata |
 
 ### Nested Shape: `Document.versioning`
@@ -45,7 +45,7 @@ const result = DocumentSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | ✅ | Versioning enabled |
-| **versions** | `{ versionNumber: number; createdAt: number; createdBy: string; size: number; … }[]` | ✅ | Version history |
+| **versions** | `{ versionNumber: number; createdAt: integer; createdBy: string; size: number; … }[]` | ✅ | Version history |
 | **majorVersion** | `number` | ✅ | Major version |
 | **minorVersion** | `number` | ✅ | Minor version |
 
@@ -76,7 +76,7 @@ const result = DocumentSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **isPublic** | `boolean` | optional (default: `false`) | Public access |
 | **sharedWith** | `string[]` | optional | Shared with |
-| **expiresAt** | `number` | optional | Access expiration |
+| **expiresAt** | `integer` | optional | Access expiration |
 
 
 ---
@@ -113,7 +113,7 @@ const result = DocumentSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **versionNumber** | `number` | ✅ | Version number |
-| **createdAt** | `number` | ✅ | Creation timestamp |
+| **createdAt** | `integer` | ✅ | Creation timestamp |
 | **createdBy** | `string` | ✅ | Creator user ID |
 | **size** | `number` | ✅ | File size in bytes |
 | **checksum** | `string` | ✅ | File checksum |

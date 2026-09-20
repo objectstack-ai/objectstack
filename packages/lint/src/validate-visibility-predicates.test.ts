@@ -1247,32 +1247,58 @@ describe('visibility-predicate-unknown-function (#13594)', () => {
     });
   });
 
-  it('the objectui#4421 predicate is refused, and the call is what names it', () => {
-    // The authored predicate this ruling came from. `current_user` is a declared
-    // SCOPE_ROOT, so the bare-identifier rule cannot structurally reach `can` —
-    // it reports the rootless ARGUMENTS instead. Both findings are real and have
-    // different fixes, which is why they are not mutually exclusive.
-    const rules = validateVisibilityPredicates(formStack('current_user.can(object, verb)'))
+  it('an invented method on the canonical user root is refused, and the call is what names it', () => {
+    // RE-POINTED, not deleted (batch #147 item 5, letter A). The property is the
+    // rule PAIR, unchanged: `current_user` is a declared SCOPE_ROOT, so the
+    // bare-identifier rule cannot structurally reach the method name — it reports
+    // the rootless ARGUMENTS instead. Both findings are real and have different
+    // fixes, which is why they are not mutually exclusive. The example moved off
+    // `can`, which is registered now; `canApprove` is the same shape, still
+    // invented.
+    const rules = validateVisibilityPredicates(formStack('current_user.canApprove(object, verb)'))
       .map((f) => f.rule);
     expect(rules).toContain(VISIBILITY_PREDICATE_UNKNOWN_FUNCTION);
     expect(rules).toContain(VISIBILITY_BARE_IDENTIFIER);
-    expect(unknownFnFindings(formStack('current_user.can(object, verb)'))[0].message)
-      .toContain('`can`');
+    expect(unknownFnFindings(formStack('current_user.canApprove(object, verb)'))[0].message)
+      .toContain('`canApprove`');
+  });
+
+  it('…and the objectui#4421 predicate itself is NOT refused any more — `can` resolves', () => {
+    // The other half of the re-pointing, and the reading that makes it one: the
+    // existence arm narrowed by exactly one name. `current_user.can(object, verb)`
+    // no longer draws an unknown-function finding, because
+    // `@objectstack/formula` registers `can` receiver-only and answers it from
+    // `EvalContext.permissions` — publish acceptance and runtime evaluability
+    // moved together, which is the whole point of #13594's arm.
+    expect(unknownFnFindings(formStack('current_user.can(object, verb)'))).toEqual([]);
+    // The bare-identifier finding on the rootless ARGUMENTS is untouched: that
+    // rule's verdict is about `object` / `verb`, not about the call.
+    expect(validateVisibilityPredicates(formStack('current_user.can(object, verb)')).map((f) => f.rule))
+      .toContain(VISIBILITY_BARE_IDENTIFIER);
   });
 
   it('⛔ offers no "did you mean" suggestion, however close the typo (refinement 2)', () => {
-    // `nearestName('can', <the function set>)` answers `min`. The ruling ships
-    // the engine's own wording and nothing on top of it, so a one-edit typo gets
-    // the same treatment as a wholly invented name.
+    // The ruling ships the engine's own wording and nothing on top of it, so a
+    // one-edit typo gets the same treatment as a wholly invented name.
     const findings = unknownFnFindings(formStack('isBlnk(record.x)'));
     expect(findings).toHaveLength(1);
     expect(findings[0].message).not.toMatch(/did you mean/i);
     expect(findings[0].hint).not.toMatch(/did you mean/i);
     // …and the hazard itself, stated as a case: nothing anywhere in the finding
-    // proposes `isBlank` (or, for `can`, `min`).
+    // proposes `isBlank`.
     expect(findings[0].message).not.toContain('`isBlank`');
     expect(findings[0].hint).not.toContain('`isBlank`');
-    expect(JSON.stringify(unknownFnFindings(formStack('can(record.x)')))).not.toContain('`min`');
+    // The DISTANT-jump half. It used to be carried by `can(record.x)`, whose
+    // nearest catalog entry is `min` — two edits on a three-character name,
+    // across an unrelated namespace. `can` is registered now, so that source
+    // draws no finding at all and the assertion on it would be vacuous; the
+    // hazard is re-pointed onto a name that is still unknown, and the finding is
+    // asserted to EXIST before it is asserted to suggest nothing.
+    const distant = unknownFnFindings(formStack('cap(record.x)'));
+    expect(distant, 'the re-pointed source must still draw a finding, or this pins nothing')
+      .toHaveLength(1);
+    expect(JSON.stringify(distant)).not.toMatch(/did you mean/i);
+    expect(JSON.stringify(distant)).not.toContain('`max`');
   });
 
   it('the hint says NAME fault, not dialect — the #7073 / #13821 correction, kept', () => {

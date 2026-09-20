@@ -47,7 +47,9 @@
       "Bash(curl -sS -X GET https://api.github.com/repos/objectstack-ai/objectstack/commits/*/check-runs* *)",
       "Bash(curl -sS -X GET https://api.github.com/repos/objectstack-ai/objectui/commits/*/check-runs* *)",
       "Bash(curl -sS -X PATCH https://api.github.com/repos/objectstack-ai/objectstack/pulls/* *)",
-      "Bash(curl -sS -X PATCH https://api.github.com/repos/objectstack-ai/objectui/pulls/* *)"
+      "Bash(curl -sS -X PATCH https://api.github.com/repos/objectstack-ai/objectui/pulls/* *)",
+      "Bash(curl -sS -X POST https://api.github.com/repos/objectstack-ai/objectstack/pulls/*/ccr/ready_for_review *)",
+      "Bash(curl -sS -X PUT https://api.github.com/repos/objectstack-ai/objectstack/pulls/*/ccr/auto_merge *)"
     ],
     "deny": [
       "mcp__github__issue_write",
@@ -64,7 +66,9 @@
       "mcp__github__sub_issue_write",
       "mcp__github__merge_pull_request",
       "mcp__github__create_repository",
-      "mcp__github__fork_repository"
+      "mcp__github__fork_repository",
+      "mcp__github__enable_pr_auto_merge",
+      "mcp__github__disable_pr_auto_merge"
     ]
   },
   "hooks": {
@@ -79,15 +83,6 @@
         ]
       },
       {
-        "matcher": "mcp__github__enable_pr_auto_merge|mcp__github__merge_pull_request",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-governed-enqueue.sh\""
-          }
-        ]
-      },
-      {
         "matcher": "Bash",
         "hooks": [
           {
@@ -97,10 +92,6 @@
           {
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-process-kill.sh\""
-          },
-          {
-            "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-governed-enqueue.sh\""
           },
           {
             "type": "command",

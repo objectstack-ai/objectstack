@@ -4,6 +4,7 @@ Primary AI instruction file for this repo — and the human contributors' source
 Read natively by Claude Code, GitHub Copilot (coding agent + CLI), and other agents — no
 separate `.github/copilot-instructions.md` mirror needed. When any other instruction file
 in this repo (including `.claude/skills/**`) conflicts with this one, **AGENTS.md wins**.
+`docs/NORTH-STAR.md` (先做什么: goals, priority) outranks it; `content/docs/concepts/north-star.mdx` = architecture.
 
 > **v5.0 breaking rename: `project` → `environment`** everywhere (CLI `-e`, `/api/v1/environments/:id`, header `X-Environment-Id`, `OS_ENVIRONMENT_ID`, DB column `environment_id` [control-plane tables; on the metadata tables since deprecated in favour of `organization_id`, ADR-0006 v4]). No aliases. See ADR-0006. "Project" now only means the npm/monorepo sense.
 
@@ -19,7 +20,6 @@ script's own header is the authority on detail.
 ## Communication
 
 语言规则分两件事:**和维护者说话用什么语言**,与**留在 GitHub 上的产物用什么语言**。
-一条规则一个通道,互不重叠。
 
 - **在 Claude Code 中与维护者对话一律使用中文**(对话回复、轮次报告等聊天通道里的内容)。
 - **GitHub 产物一律使用英文**:issue 与 PR 的标题、正文、评论。
@@ -252,40 +252,40 @@ localStorage / auth gotchas.
     When a cloud decision's **mechanism half** governs open code here, this repo carries its own ADR — own number, a
     `## Provenance` section naming the cloud record and its date, the commercial half left in cloud — and the cloud
     record gains a one-line pointer. Files never move between registries and numbers are never reassigned.
-14. **⛔ A governed surface is confirmed and merged by the maintainer, by hand — or confirmed by an authorized
-    approval and then landed by the owning seat; before that approval no AI seat merges, queues, or arms auto-merge on a
-    PR whose diff touches one.** The governed surfaces are `docs/adr/**`, `.claude/**` (agents, hooks and settings —
-    not only skills), `skills/**`, `AGENTS.md` and `CLAUDE.md` — the file you are reading is one — and a mixed diff
-    is governed whole on a single path hit. The register is the `GOVERNED_SURFACES` table in
-    `scripts/pm/check-governed-merges.mjs`; adding a surface is an edit *there*, never here, and `pnpm
-    check:pm-governed-prose` reds per-PR when this paragraph names fewer surfaces than the register — or more. When it
-    reds, name the surface here.
+14. **⛔ A governed surface lands only the way its tier allows — Tier H by the maintainer's hand or by an authorized
+    approval, Tier S by the owning seat on a contract-tier review of record; before that record no AI seat merges,
+    queues, or arms auto-merge on a PR whose diff touches one.** The governed surfaces are `docs/adr/**`,
+    `docs/NORTH-STAR.md`, `.claude/**` (agents, hooks and settings — not only skills), `skills/**`, `AGENTS.md` and
+    `CLAUDE.md` — the file you are reading is one — and a mixed diff is governed whole on a single path hit. The
+    register is the `GOVERNED_SURFACES` table in `scripts/pm/check-governed-merges.mjs`, each row carrying its tier;
+    adding a surface is an edit *there*, never here, and `pnpm check:pm-governed-prose` reds per-PR when this
+    paragraph names fewer surfaces than the register — or more. When it reds, name the surface here.
 
     **Authoring stays open to every seat** — drafting, pushing, opening and revising the PR. What is reserved is the
     **landing**: on a PR whose diff touches a governed surface ⛔ never merge, ⛔ never queue, ⛔ never arm
     auto-merge, ⛔ never flip it out of draft to make any of those possible — judged on the PR's **file list**, not
     its description; a **mixed diff is not a proportion question**, one path hit is enough; to land the rest, split off
-    the governed files. **Those four lift only for an authorized APPROVED review** — by an account in
-    `GOVERNED_APPROVERS` (`scripts/pm/check-governed-queue-guard.mjs`), on ANY commit and not dismissed. That word is
-    spent once per PR: the OWNING seat then lands it, later pushes included, re-queuing after an ejection or a rebase on
-    its own pre-landing check; this gate does not re-review it. Hand-authored governed content needs that approval; a PR
-    whose only governed paths are register rows the queue leg regenerates byte-exact clears with zero approvals — an
-    uncertified recompute, drift or a hand-authored sibling keeps it governed. Unapproved, no seat lands it: the
-    ending is that approval, then the owning seat. **Landing is tiered**: a PR whose governed paths all lie under
-    `.claude/skills/pm-dispatch/references/` lands through the queue after the skills seat's contract-tier review; every
-    other governed path is the rules layer and waits for the maintainer's word, which the director seat requests as ONE
-    batch of at most five rows — the approval stays the maintainer's click. ⛔ **No agent seat submits an approving
-    review on a governed-surface PR, under any account** — an authorized account is agent-operated too; "CI is green"
-    carries no information about a governance change.
+    the governed files. **The landing is tiered by the register; one Tier H path makes the whole PR Tier H.** **Tier H**
+    (人合: `docs/adr/**`, `docs/NORTH-STAR.md`, `skills/**`, `AGENTS.md`, `CLAUDE.md`): those four lift only for an
+    authorized APPROVED review by an account in `GOVERNED_APPROVERS`, on ANY commit and not dismissed; that word is
+    spent once per PR — the OWNING seat then lands it, later pushes included; the director seat requests the word as
+    ONE batch of at most five rows, and the click stays the maintainer's. **Tier S** (席内达档复核落地: all of
+    `.claude/**`): those four lift once the PR thread or its card carries a `## Contract review` record for the PR's
+    current head with `Served-tier: CONTRACT_REVIEW_TIER` and a PASS verdict, `check-clause2-carriers.mjs --pair N`
+    reads 0 and every check is green — the owning seat then lands it through the queue; the post-merge audit is the
+    compensating control. A PR whose only governed paths are register rows the queue leg regenerates byte-exact clears
+    with zero approvals — an uncertified recompute, drift or a hand-authored sibling keeps it governed. ⛔ **No agent
+    seat submits an approving review on a governed-surface PR, under any account** — an authorized account is
+    agent-operated too; "CI is green" carries no information about a governance change.
 
     **Already armed or queued when you read this?** Convert it back to **draft** AND disable auto-merge — draft is
     what removes queue membership, disabling alone drops only the arming — then confirm from the remote that it is in
     neither the queue nor `origin/main`. **Draft is no barrier by itself — the barrier is this directive**, and a
-    spent approval IS the review record, ⛔ not a relaxation. Behind it: the queue guard refuses an unpinned governed
-    diff; CODEOWNERS routes review requests for `docs/adr/` only, so nothing summons the maintainer on the other four;
-    the post-merge audit (`scripts/pm/check-governed-merges.mjs`) lists every governed-surface merge with its approver
-    and merger — a merger the maintainer does not recognise, or any agent approval, is a seat violation, filed and
-    rolled back. The rule has no exception for a seat to judge.
+    spent approval or a standing record IS the review record, ⛔ not a relaxation. Behind it: the queue guard refuses a
+    governed diff without its tier's record; CODEOWNERS routes review requests for `docs/adr/` only, so nothing summons
+    the maintainer on the other Tier H surfaces; the post-merge audit (`scripts/pm/check-governed-merges.mjs`) lists
+    every governed-surface merge with its approver and merger — a merger the maintainer does not recognise, any agent
+    approval, or a Tier S merge without a PASS record is a seat violation, filed and rolled back. No seat judges this.
 
 15. **⛔ A version release is performed by the maintainer, by hand — no AI seat publishes, tags, cuts a Release, or
     triggers a release workflow, and none merges the Version Packages PR.** A rule that binds every seat lives here,
@@ -438,10 +438,10 @@ recognised and the whole block lands under it, leaving two; the session-URL form
 verbatim and a bare one lands under it, leaving two. ⛔ A tail bare footer on a comment is the
 platform's, not your form downgraded. Which layer does this is unknown; don't go establishing
 it. **Commit message:** an agent commit ends with the model-free trailer pair
-`Claude-Session: https://claude.ai/code/session_<id>` and `Co-authored-by: Claude <noreply@anthropic.com>`,
-and the pre-push hook refuses a model identifier in that pair; no model identifier lands in a PR title or body,
-a comment, a changeset, a doc or a code comment. The one exemption is a REPORTING one: a harness-written
-`Co-Authored-By` trailer is not declared a deviation; the pair stays model-free; landed history is not rewritten.
+`Claude-Session: https://claude.ai/code/session_<id>` and `Co-authored-by: Claude <noreply@anthropic.com>`, and the
+pre-push hook refuses a model identifier in that pair; no model identifier lands in a PR title or body, a comment, a
+changeset, a doc or a code comment. Two exemptions: a harness-written `Co-Authored-By` trailer (REPORTING: not declared
+a deviation; landed history is not rewritten) and a verbatim maintainer ruling preserved as a quotation block.
 
 **GitHub mutates body BYTES — spell poison-shaped tokens out in words, never literally.**
 Regex literals and script-tag-shaped tokens go in fenced code with the dangerous character
@@ -459,8 +459,9 @@ Even inside your own worktree, operate defensively:
 2. **One feature branch + one PR per task.** Branch off `main`. **Never commit task work
    straight to `main`.** Name the branch after the issue it fixes: `claude/issue-<n>-<slug>`.
    The issue number is what makes in-flight work *discoverable* — `git ls-remote --heads
-   origin | grep issue-<n>` is a one-command pre-check, and the Duplicate Fix Guard
-   workflow warns on fix PRs whose branch names no declared issue.
+   origin | grep -E 'issue-<n>(-|$)'` is a one-command pre-check, and the Duplicate Fix Guard
+   workflow warns on fix PRs whose branch names no declared issue. A hit is a hint, not a
+   claim — most heads carry no PR: ⛔ never skip a card on one, the `Claim:` comment decides.
 
    ⛔ **Off `main` is literal — a stacked series, each PR branched off the one below, is NOT a supported form.** No
    tooling represents it: squash landing destroys the ancestry link, so every descendant rewinds behind what landed and
@@ -470,8 +471,8 @@ Even inside your own worktree, operate defensively:
 3. **Never force-push a *shared* branch, and never push `main`.** A force-push can
    clobber a parallel agent's work; `main` is shared — land all via PR. A branch is
    unshared, and `--force-with-lease` allowed, only while ALL FIVE hold: ① it is named
-   `claude/issue-*`; ② this worktree created it; ③ nobody else has ever pushed it (the
-   author and committer sets of `git log origin/<branch>` are you alone); ④ no open PR
+   `claude/issue-*`; ② this worktree created it; ③ nobody else has ever pushed it (the author and
+   committer sets of its own commits, `git log origin/main..origin/<branch>`, are you alone); ④ no open PR
    on it carries a reviewer or an approval (one does ⇒ a new branch and a fresh PR
    instead); ⑤ the push spells `--force-with-lease=<branch>:<sha you last pushed>` —
    ⛔ never bare `--force`. One criterion failing ⇒ the branch is shared.
@@ -491,12 +492,12 @@ Even inside your own worktree, operate defensively:
    re-verification, done by the platform, race-free. **Arm only what is already green
    and accepted.**
 
-   ⛔ **Two classes of PR never enter this path on green alone:** (a) a diff touching any
-   **governed surface** (**Prime Directive #14**, which names them and holds the current
-   list — **this file and `CLAUDE.md` are on it**, so re-read it rather than recalling
-   it); (b) the **Version Packages** PR, or any PR whose merge performs a release
-   (**Prime Directive #15**). Read the PR's file list (`get_files`) **and its author**
-   before you arm anything.
+   ⛔ **Three classes of PR never enter this path on green alone:** (a) a diff touching any **governed surface**
+   (**Prime Directive #14**, which names them and holds the current list — **this file and `CLAUDE.md` are on it**,
+   so re-read it rather than recalling it); (b) the **Version Packages** PR, or any PR whose merge performs a
+   release (**Prime Directive #15**); (c) a PR whose **changed lines exceed 5,000** (`additions + deletions`,
+   generated files included) — it lands only by a human merge, which is its review record. Read the PR's file
+   list (`get_files`), **its author and its size** before you arm anything.
 
    **Green means the gate-carrying jobs' `conclusion` is `success`** — not "no failure
    yet"; `in_progress` is not a pass. Arming a red PR does not queue it, it hides it:
@@ -582,15 +583,15 @@ Even inside your own worktree, operate defensively:
    `pre-commit` refuses the commit until those artifacts check clean. Sequence after a
    merge unchanged from §9: rebuild, then `check:generated --fix`. Worth knowing:
    - **The MERGE commit itself is the one exemption, and it is a deferral, not a pass.**
-     `scripts/pm/os-regen-merge.sh` is the in-repo authority for landing one of these
-     branches, and its step 3 commits the merge **before** regenerating on purpose: the
-     driver exits 0 while silently dropping one side, so only a separate regeneration
-     commit on a known-good base lets a reviewer read "what main brought" apart from
-     "what the change produces". `pre-commit` records that merge as a deferral and then
-     holds you to it — the immediately following commit must discharge it (every commit
-     until then is refused, and a second merge cannot defer on top of an outstanding
-     one), and `.githooks/pre-push` refuses a push that still owes one. ⛔ So this step
-     never needs `--no-verify`, which skips *every* pre-commit check rather than this one.
+     `scripts/pm/os-regen-merge.sh` is the in-repo authority for landing one onto `main`,
+     and its step 3 commits the merge **before** regenerating on purpose: the driver exits
+     0 while silently dropping one side, and no diffstat or `git diff` shows the drop, so
+     only a separate regeneration commit on a known-good base lets a reviewer read "what
+     main brought" apart from "what the change produces". `pre-commit` records it as a
+     deferral and holds you to it — the next commit must discharge it (every commit until
+     then is refused, and a second merge cannot defer onto an outstanding one), and
+     `.githooks/pre-push` refuses a push that still owes one. ⛔ So this step never needs
+     `--no-verify`, which skips *every* pre-commit check, not this one.
    - **The driver is a LOCAL facility** — the merge queue rebuilds server-side where no
      custom driver runs, so the three hottest artifacts are **sharded** per category/entry
      (`authorable-surface/`, `json-schema.manifest/`, `api-surface/`) to keep parallel
@@ -603,9 +604,9 @@ Even inside your own worktree, operate defensively:
      clone that shares the object store and has no driver registered
      (`git clone --bare --shared . PROBE.git`, then
      `git --git-dir=PROBE.git merge-tree --write-tree --name-only BASE HEAD`), ⛔ never
-     with `-c merge.os-regen.driver=`, which does not disable the driver but leaves git
-     failing to run it and reporting a conflict for every routed path, including ones that
-     text-merge cleanly.
+     with `-c merge.os-regen.driver=` or `-c merge.os-regen.driver=false`, neither of
+     which disables the driver: git runs the configured program, it fails, and every
+     routed path is reported conflicted, including ones that text-merge cleanly.
    - **Registration is per clone** (`pnpm install` → `prepare` →
      `scripts/setup-git-hooks.mjs`); an unregistered clone falls back to git's default
      text merge — older behaviour, not breakage.
@@ -796,8 +797,7 @@ working in its domain — browse the directory, never a hand-written list here:
 - `.claude/skills/` — repo-internal agent playbooks; every entry must carry
   `metadata.internal: true`.
 
-⛔ **Both roots are governed surfaces** — human-merge only, or queued under **Prime Directive #14**'s pinned-approval
-path; no per-PR check holds it: the queue guard refuses an unpinned governed diff at queue time.
+⛔ **Both roots are governed surfaces** — `skills/` is Tier H, `.claude/skills/` Tier S (**Prime Directive #14**).
 
 ---
 
@@ -1026,6 +1026,30 @@ registry? Add it to `OPEN_CAPABILITY_REGISTRIES` in the same PR that fixes it.
 
 ---
 
+## Writing a `--self-test` — it must be capable of failing when it runs nothing
+
+**Floor — pin battery NAMES, never one total.** Declare a frozen roster of battery name → minimum
+case count, register every case against a battery, and fail when a declared battery registers fewer
+cases than its pin, when a registered case names no declared battery, or when the roster itself
+falls below its pinned battery count. ⛔ A printed case count is EVIDENCE, NOT PROOF — a battery
+falling 40 → 3 still prints a non-zero count — and one pinned TOTAL rots the moment a sibling grows.
+
+**Handshake — the verdict sets a module-level flag, and the dispatch refuses when it is unset.**
+Set the flag as the self-test's last statement, after its success line prints; the dispatch must
+SAY the self-test never reached its verdict. ⛔ An exit code is not a handshake. Without this a
+`return` above the verdict prints nothing and exits 0, and a perfect floor never runs either —
+the two holes are ORTHOGONAL, so close both.
+
+**Copy a landed one — ⛔ never import one.** `scripts/check-agent-model-declared.mjs` carries all
+three parts (`SELF_TEST_BATTERIES`, `SELF_TEST_BATTERY_FLOOR`, `selfTestReachedVerdict`); every
+self-test must keep running standalone as `node scripts/<x>.mjs --self-test`, so a shared assertion
+module is one point of failure for every instrument at once.
+
+Both non-handshake shapes, and how to classify and probe your own:
+`docs/audits/2026-09-self-test-shape-census.md` and the `scripts/measure-self-test-floor.mjs` docblock.
+
+---
+
 ## Post-Task Checklist
 
 1. `pnpm test` — verify nothing broke. Touched a type-check-covered package? `pnpm typecheck` too.
@@ -1035,13 +1059,13 @@ registry? Add it to `OPEN_CAPABILITY_REGISTRIES` in the same PR that fixes it.
    §7: never straight to `main`; never arm a PR that isn't green yet). A finished task
    = a merged PR, not a dirty working tree. ⛔ **Except a diff touching a governed
    surface** (Prime Directive #14 names them — more than ADRs): push it, open the PR, and stop
-   there; landing waits for the maintainer's word. For that class, a finished task = a PR
-   left visibly awaiting that word.
+   there; landing waits for its tier's record — the maintainer's word, or a seat's contract-tier
+   review. For that class, a finished task = a PR left visibly awaiting that record.
 3. **Add a changeset for anything that publishes.** Feature, functional improvement or fix — run `pnpm changeset`
    (or add a `.changeset/*.md` entry) describing it before committing. A bug fix in a released package takes a
    **`patch`** changeset — never none, and ⛔ never `skip-changeset`: that label is for a diff that publishes
-   nothing from any released package. A PR that declares `Clause-②: yes` takes at least **`minor`** instead —
-   the widening it declares is what makes it more than a patch, whatever else the diff fixes.
+   nothing from any released package. The declaration is `Clause-②: yes|no` plus at most one arm from the closed pair
+   `(widening)`/`(narrowing)`: `yes` takes at least **`minor`**, `(narrowing)` is BREAKING, `no (widening)` malformed.
    **Breaking changesets must carry their migration.** If the change removes or renames anything an author can write (a
    spec key, an export, a config field), the changeset body must state the FROM → TO mapping and the one-line fix —
    this text ships to consumers as `CHANGELOG.md` inside the npm package and is what an upgrading agent greps after the
@@ -1051,9 +1075,9 @@ registry? Add it to `OPEN_CAPABILITY_REGISTRIES` in the same PR that fixes it.
    schema is `.strict()`. The changeset is one of fourteen surfaces a retirement touches — follow the
    `spec-property-retirement` skill (`.claude/skills/`) rather than reconstructing the kit, and note the two routes
    imply **opposite** liveness-ledger dispositions.
-   **A breaking changeset must also state its ADR-0087 disposition, in writing** — exactly one marker in the
-   changeset body, enforced by `pnpm check:adr-0087-registration` (CI step *Require an ADR-0087 disposition on a
-   declared-breaking changeset*). ⛔ The categories are NOT copied here — the gate prints the full set when it fails.
+   **A breaking changeset must also state its ADR-0087 disposition, in writing** — exactly one marker in the changeset
+   body, which also carries the PR's `Clause-②` line: `pnpm check:adr-0087-registration` reads the arm there. ⛔ The
+   categories are NOT copied here — the gate prints the full set when it fails.
 4. **A removal that breaks the pinned sibling checkout ships together with the sibling fix and the pin bump — or it
    does not ship.** The `Console Pin Gate` job builds objectui at the pinned `.objectui-sha` against **current** `main`,
    so a removal or rename the pinned sibling still imports turns `main` red for every PR in the repo the moment it

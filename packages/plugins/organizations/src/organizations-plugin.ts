@@ -2,6 +2,7 @@
 
 import { Plugin, PluginContext } from '@objectstack/core';
 import { claimOrphanOrgRows } from './claim-orphan-org-rows.js';
+import type { OrgScopingEngine } from './org-scoping-engine.js';
 import { isDefaultOrganizationBootstrapTrigger } from '@objectstack/plugin-auth';
 import { ensureDefaultOrganization } from './ensure-default-organization.js';
 import { assertWalledMembershipPolicyDeclared } from './membership-policy-gate.js';
@@ -66,13 +67,18 @@ export interface OrganizationsPluginOptions {
  * repository types its lookups rather than inheriting a grandfather clause it is
  * not on. Structural rather than the engine's full contract for the same reason
  * `membership-policy-gate.ts` states about ITS probes: this plugin needs three
- * members, the `catch` arms below already treat every one of them as possibly
- * absent, and naming the whole engine interface here would claim a coupling the
- * runtime checks do not make.
+ * members, and the `catch` arms below already treat every one of them as
+ * possibly absent.
+ *
+ * It extends `OrgScopingEngine` because this plugin does not only CALL the slot,
+ * it FORWARDS it: `claimOrphanOrgRows(ql, ...)` below writes through this very
+ * value. While that parameter was `any` the forwarded doors were a coupling the
+ * types did not state and the tenant-audit census could not read. Naming them
+ * here is the narrow claim -- only the doors that are actually forwarded, not
+ * the engine's full contract.
  */
-interface OrgScopingQuerySlot {
+interface OrgScopingQuerySlot extends OrgScopingEngine {
   registerMiddleware(mw: (opCtx: any, next: () => Promise<void>) => Promise<void>): void;
-  find(object: string, query: unknown, options?: unknown): Promise<any>;
   getSchema?(object: string): any;
 }
 

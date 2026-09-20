@@ -62,6 +62,24 @@
  * `{{NOW}}` is never refused — so mixed alone would not have caught the
  * recorded failure, whose comments carried no token at all.
  *
+ * ## ⛔ Never pipe this tool, then `&&` the write that follows
+ *
+ * The exit register above is worth exactly what the caller reads. A pipeline's
+ * status is its LAST command's, so the habitual seat idiom
+ * `post-stamped … | tail -3 && label-write …` hands the `&&` tail's 0 and the
+ * refusal is gone: the audit comment is REFUSED, the label lands anyway, and the
+ * card is left graded with nothing on it saying why — the half-state the
+ * comment-before-label ordering exists to prevent, and the direction of it that
+ * nobody can recover from a later read. Measured on a live card, where the seat
+ * noticed eight seconds on; a turn that had ended there would have left it.
+ *
+ * So read the output without spending the code — redirect first, then capture:
+ *
+ *   node scripts/pm/post-stamped.mjs … > /tmp/p.log 2>&1; EXIT=$?; tail -3 /tmp/p.log
+ *
+ * or arm `set -o pipefail` before the pipeline. The rule is the caller's, not
+ * this tool's, so it covers every writer beside it — `label-write.mjs` included.
+ *
  * ## The quoted route has a DIRECTION, not only a shape (#17763)
  *
  * Checking that a `{{WAS:…}}` value is shaped like a stamp leaves the estimate
@@ -174,10 +192,174 @@
  * so the BARE-stamp scan underneath it is reading prose and not the inside of a
  * token nobody could parse.
  *
- * ⛔ And the scan opens no escape hatch. There has never been one — no
- * backslash form, no entity form — and a token inside backticks is still
- * substituted, because a fence is a rendering instruction and the substitution
- * runs on bytes. A body that must SHOW a token spells it some other way.
+ * ⛔ And the scan opens no escape hatch OUTSIDE a quoted span — no backslash
+ * form, no entity form, no flag. What it does open is the next section, which
+ * is not a spelling of the token contract at all.
+ *
+ * ## The contract is QUOTABLE: inside Markdown code, this tool renders text (#18543)
+ *
+ * The substitution used to run on bytes, so a passage QUOTING the token was
+ * rewritten like any other. Measured three times inside one hour, by two
+ * seats, on live artefacts:
+ *
+ *   ① #14251 carried a verbatim quote of this tool's OWN status line, in an
+ *      inline code span inside a blockquote. The token inside the quotation was
+ *      substituted and a sentence this tool never printed was published as a
+ *      quotation of it. The only signal was `substitutions: 2` where the author
+ *      meant 1 — a count, not a warning, and nothing compared it to intent.
+ *   ② The seat filing ① hit it again in the sentence DESCRIBING ①, and a third
+ *      time in the comment reporting ②. Care is not a remedy: every one of the
+ *      three was written by an author who was thinking about this exact defect.
+ *   ③ The dispatch claim for this card spelled both token forms inside
+ *      backticks and was REFUSED `[quoted-not-a-stamp]` — the quoted route read
+ *      its own documentation placeholder as a declaration. So the contract
+ *      could not be quoted through this tool, nor explained through it.
+ *
+ * ⛔ The remedy is NOT a third spelling, and ⛔ NOT a flag. Markdown already
+ * has one construct that means "this is text, not instructions", and it has it
+ * in two forms — a fenced code block and a backtick code span. So:
+ *
+ *   INSIDE A QUOTED SPAN THIS TOOL RENDERS TEXT, NOT TOKENS.
+ *
+ * A reader of the stored artefact sees the rule without knowing the tool
+ * exists: the backticks are right there, on the page, in the spelling every
+ * other quotation on the board already uses. Nothing was added to the token
+ * contract — it still has exactly two spellings — and no caller has to
+ * remember a magic word it would itself have to quote to document.
+ *
+ * What a quoted span suppresses is exactly the three rules that READ a token:
+ * substitution, the opener scan, and the quoted-stamp validation. An opener
+ * inside one is not refused, a `{{WAS:…}}` inside one is not judged against
+ * the calendar or the clock, and both are written out exactly as the author
+ * typed them.
+ *
+ * ⛔ And it suppresses NOTHING that judges a stamp a human typed. This is the
+ * load-bearing asymmetry, and it is the whole reason the rule is safe: quoting
+ * changes what is RENDERED, never what was AUTHORED. A stamp inside a fence is
+ * still digits on the board.
+ *
+ *   POSITIONAL  reads every line, code included. A bare stamp in a code span on
+ *               the opening line is refused exactly as in prose.
+ *   MIXED       triggers on the act-clock token appearing ANYWHERE in the body,
+ *               quoted or not. An author who spells the token knows it exists,
+ *               and a bare stamp elsewhere is ambiguous to a reader whatever
+ *               backticks sit around the other one. ⛔ Deliberately NOT made
+ *               quote-aware: that is the one direction this change could have
+ *               weakened a refusal, and it does not take it.
+ *   MASKING     `maskQuotedStamps` blanks a `{{WAS:…}}` only where it is a
+ *               TOKEN. Inside a quoted span it is text, so the digits it
+ *               carries stay visible to the bare-stamp scan — otherwise a
+ *               stamp could hide from the contract behind backticks, which is
+ *               the accident this rule must never buy.
+ *
+ * So the refusal surface is unchanged or STRICTER everywhere except the three
+ * token rules inside a quoted span, which is the deliverable. One body changes
+ * direction: `` `{{WAS:<a real stamp>}}` `` beside the act-clock token used to
+ * be accepted and rendered as bare digits — that acceptance WAS defect ① — and
+ * is now MIXED-refused, with the refusal saying that the stamp sits inside a
+ * quotation so neither spelling will render there.
+ *
+ * ⛔ The count is no longer the only signal. The status line reports how many
+ * openers were left VERBATIM inside quoted spans beside how many were
+ * substituted, so an author who meant to quote one and stamp one reads both
+ * numbers and can compare them to intent — which is what ① had no way to do.
+ *
+ * What a quoted span IS, exactly (`quotedSpans`), and what it deliberately is
+ * not:
+ *
+ *   FENCED      a line opening with three or more backticks or tildes (up to
+ *               three leading spaces), through its closing fence — or the end
+ *               of the body, the way CommonMark ends an unclosed one. Tracked
+ *               through blockquote markers, since a seat quoting a tool's
+ *               output inside a quote is the shape ① was written in.
+ *   CODE SPAN   a backtick run closed by a run of the SAME length, ⛔ searched
+ *               within one line only. CommonMark lets a span cross lines; this
+ *               does not, on purpose — under-detecting leaves today's
+ *               behaviour, and today's behaviour is what every existing caller
+ *               already has.
+ *   ⛔ NOT      a four-space indented block. Indentation is load-bearing in
+ *               lists and continuations, so reading it as a quotation would
+ *               make the rule fire where no reader sees a quotation.
+ *
+ * The two failure directions are not symmetric, which is why that scanner is
+ * conservative: under-detecting substitutes a token the author wanted verbatim
+ * — the state before this rule — while over-detecting leaves an artefact
+ * UNSTAMPED. The status line's verbatim count is what makes the second one
+ * visible in the same breath.
+ *
+ * ## A quoted token is not a stamp — the carve-out's PARTNER check (#19091)
+ *
+ * The rule above is right and this file said so, and it landed without its
+ * other half: nothing asked whether the artefact ended up STAMPED AT ALL. A
+ * body whose ONLY token sits inside a quoted span is substituted by nothing —
+ * correctly — and was then posted at exit 0 carrying the literal token and no
+ * time. Two facts at once, and they are the two the UNKNOWN refusal names by
+ * hand: the literal text on the card AND the artefact unstamped, which is the
+ * quiet direction. ⇒ the refusal table had a hole at the intersection of its
+ * own carve-out, reached by spelling the token CORRECTLY.
+ *
+ * ⚠️ Measured live, not only in a dry run. Three `Claim:` comments one act
+ * posted carried their round stamp as `` `Round: fire of {{NOW}}` `` and went
+ * out unstamped with the token visible (objectui#9871, #9880, #9874). The only
+ * signal the caller got was this file's own read-back line — "none substituted,
+ * this body carried no token, so there is no clock to check" — which was FALSE
+ * of the body: it carried one. A caller who redirected the log and read
+ * `exit=0`, which is the discipline this header prescribes, would have shipped
+ * three claims with no reading time, and the protocol treats an artefact with
+ * no reading time as 未取.
+ *
+ * ⛔ The criterion is NOT "0 substitutions AND ≥1 verbatim opener". A body may
+ * legitimately quote the token while stamping itself by DECLARATION, and the
+ * header you are reading is such a body. So the judgement is a PREDICATE over
+ * the counts the render already produces (`stampVerdict`), and the refusal is
+ * one of its four verdicts — ⛔ never a count read straight:
+ *
+ *   stamped-by-this-act      ≥1 `{{NOW}}` substituted: the clock THIS act read
+ *                            is in the artefact. The ordinary case, unchanged.
+ *   stamped-by-declaration   nothing substituted, ≥1 `{{WAS:…}}` rendered from
+ *                            its own declaration. ACCEPTED — the artefact is
+ *                            stamped, as a reading of something else the author
+ *                            declared. This seat's claim comments are this
+ *                            shape, and so is a body that quotes the token
+ *                            beside such a declaration.
+ *   unstamped-quoted-token   nothing substituted, nothing declared, and ≥1
+ *                            opener that IS one of the two spellings left
+ *                            verbatim inside a quotation. REFUSED,
+ *                            `EXIT_REFUSED`, nothing written.
+ *   no-token                 all three zero. Unchanged: the body spells no
+ *                            token, and it posts.
+ *
+ * ⛔ `no-token` is deliberately NOT named by the new refusal, and the reason is
+ * a population rather than a preference. Every filed instance CARRIED a token,
+ * quoted: the defect is the contradiction between what the body SAYS and what
+ * happened, and a body that never spells a token states nothing to contradict.
+ * #17314's rule binds a timestamp a seat WRITES, so a body that writes none
+ * breaks it nowhere. Refusing it would be a new required refusal over the whole
+ * population of untokened bodies — the older, separately measured shape — and
+ * this file's own rule is that a predicate tightened on one side must be
+ * re-measured on the other.
+ *
+ * ⛔ And the count the predicate reads is NOT the status line's `verbatim`.
+ * That one counts every opener left as written, a `{{` inside a quoted
+ * Handlebars example included; the predicate counts only the openers that ARE
+ * `{{NOW}}` or `{{WAS:…}}` (`verbatimTokens`). A body quoting a template that
+ * spells neither has quoted no stamp, and refusing it would refuse a shape
+ * nobody filed with a text naming a token it does not carry — which is why the
+ * two counts are two fields and not one.
+ *
+ * ⛔ A loud warning plus a distinct exit was the declared fallback and is NOT
+ * what landed, because no caller shape needs this body posted: the remedy costs
+ * one token OUTSIDE the quotation, every filed instance was repaired by hand
+ * afterwards, and a warning on stderr is exactly what the false read-back line
+ * already was. Refusing is also the only direction that keeps the register
+ * honest — `EXIT_REFUSED` already means "the body broke the stamp contract,
+ * nothing written", and this is that.
+ *
+ * The read-back line is corrected in the same edit, because the refusal cannot
+ * reach the two shapes that still get there: a declaration-stamped body carried
+ * no `{{NOW}}` and IS stamped, and a body that quoted one carried a token.
+ * The line now says which verdict it is standing on and what was quoted, so it
+ * is true of every body that reaches it.
  *
  * ## ⚖️ Why this ACTS by default, where `sweep-closed-cards.mjs` dry-runs
  *
@@ -224,12 +406,20 @@
  *                               body already ended in the footer block.
  *   footer-appended             stored is that body plus EXACTLY
  *                               `PLATFORM_COMMENT_FOOTER`, with or without the
- *                               strip above. ⛔ COMMENT MODE ONLY: whether the
- *                               platform synthesises a footer for a footer-less
- *                               ISSUE BODY is unmeasured, and an unmeasured
- *                               cell is not a cell this tool forgives — a
- *                               footer on a body read-back stays MUTATED until
- *                               somebody measures it.
+ *                               strip above. BOTH acts, since #18693: the
+ *                               issue-body cell is measured (the section
+ *                               below), so this class no longer asks which of
+ *                               the two writes put the bytes there.
+ *   footer-re-anchored          stored is that body with the trailing
+ *                               newline(s) it SENT removed and exactly one
+ *                               newline inserted before the block it already
+ *                               ended in — nothing added and nothing lost,
+ *                               which is why it is not the class above, whose
+ *                               word is "plus".
+ *   footer-blank-collapsed      stored is that body with the block's own blank
+ *                               line collapsed to one newline — sent N, stored
+ *                               N-1. The footer path DOES take a byte here, and
+ *                               the byte is its own separator (#19048).
  *   mutated                     anything else — the warning, kept whole, plus
  *                               the FIRST DIFFERING BYTE and what stands at it
  *                               on each side.
@@ -248,6 +438,245 @@
  * up to `SPAN_BYTES` bytes from each body starting AT that offset — every byte
  * before it is identical in both by construction, so a window spent on them
  * would print the one thing already known.
+ *
+ * ## The issue-body footer cell IS measured — and the variable that is not (#18693)
+ *
+ * This file used to declare that cell unmeasured and hold the body-mode append
+ * in `mutated` on that ground, with a pinned control keeping it there. The cell
+ * is measured, and the readings agree with one another:
+ *
+ *   the governed fact table  `.claude/skills/pm-dispatch/references/`
+ *                            `platform-readings.md` :410 — a card created
+ *                            through REST with no footer gets exactly one
+ *                            synthesised (+58) — and :411 — on
+ *                            `PATCH /issues/{n}`, the act `--body` performs,
+ *                            a body sending the whole block and a body
+ *                            sending no footer BOTH store back exactly one.
+ *   live, on this channel    the skills seat's three `--body=7623` refreshes
+ *                            of 2026-09-17, sent tail carrying no block:
+ *                            47699 → 47757, 49671 → 49729, 52030 → 52088 —
+ *                            +58 each, and that stored body ends in exactly
+ *                            this block, once.
+ *   a controlled contrast    two sends to one artefact the writing act owns,
+ *                            differing ONLY in whether the sent tail ends in
+ *                            the block, both read back byte-exact. The PR
+ *                            that moved this cell carries the table.
+ *
+ * ⛔ What is unmeasured is not the cell — it is the WRITE CHANNEL. The triage
+ * seat's two `--body=6015` refreshes the same day, tail likewise carrying no
+ * block, read back IDENTICAL, and that stored body holds no footer at all.
+ * Same endpoint, same shape of sent body, opposite outcome ⇒ what decides
+ * whether the block is synthesised is the channel, or the identity behind it,
+ * and no act here can vary that: a container holds one credential, and ⛔
+ * borrowing another seat's identity is not a measurement this fleet takes.
+ *
+ * ⭐ And this tool does not need to know which channel it is on, which is what
+ * lets the cell move at all. The read-back compares EXACT BYTES: a body that
+ * came back unchanged is `identical`, a body that came back with exactly the
+ * declared block appended is `footer-appended`, and the two cannot be confused
+ * for each other. A cell a tool cannot tell apart is a cell it must not
+ * forgive; this one it tells apart perfectly, every write, whichever way the
+ * channel goes.
+ *
+ * ## The read-back reaches the caller as an EXIT CODE, or it reaches nobody (#18663)
+ *
+ * That comparison is worth exactly what the caller reads, and until this rule
+ * it was printed and nothing else. Measured on a live card: a seat-post
+ * refresh sent 263,533 bytes, the platform stored 257,945 — the byte count of
+ * the version BEFORE that write — with the first difference at byte 6792,
+ * where the new block began. The old body had been kept whole and not one byte
+ * of the new one was there. The tool printed its MUTATED line and returned 0,
+ * and the seat walked on to post the comments that say the conclusion had
+ * already landed in the body.
+ *
+ * ⛔ That is NOT the pipeline trap two sections up. That one is about a caller
+ * throwing the code away; this was the tool HANDING OUT a zero. A caller that
+ * pipes nothing and checks `$?` — every discipline this header prescribes —
+ * was still told the write had landed.
+ *
+ * So the verdict carries an exit code, and ONE question decides it:
+ *
+ *   DID EVERY BYTE THIS ACT SENT REACH THE PLATFORM?
+ *
+ * ⛔ Not "did the bytes come back identical" — they never do, which is the
+ * whole point of the declared set above. All FIVE benign classes keep the sent
+ * body's CONTENT whole: `identical` by definition, `trailing-newline-stripped`
+ * gives up only newlines the platform does not keep, `footer-appended` adds
+ * without removing, `footer-re-anchored` moves a newline the act itself sent,
+ * and `footer-blank-collapsed` gives up one newline of the platform's OWN
+ * footer separator. Every one of them exits 0.
+ *
+ * `mutated` is the only class that answers no, and since #18693 it is also the
+ * only class that CAN: the two shapes the platform's own footer takes are
+ * classes of their own, named by the two arms `footerReAnchoring` spells out,
+ * so a difference this fleet has measured never reaches the word `mutated` in
+ * either act.
+ *
+ *   APPENDED     the sent body carried no footer and the stored body is it, or
+ *                its newline-trimmed form, followed by exactly the block. The
+ *                platform synthesised it. Class `footer-appended`, exit 0.
+ *   RE-ANCHORED  the sent body already ended in the block with trailing
+ *                newline(s) after it, and the stored body is that same body
+ *                with those newlines removed and exactly one newline inserted
+ *                immediately before the block. Class `footer-re-anchored`,
+ *                exit 0.
+ *   COLLAPSED    the sent body ended in the block with no trailing newline,
+ *                and the stored body is it with the block's blank line
+ *                collapsed. Class `footer-blank-collapsed`, exit 0 (#19048).
+ *   NOT STORED   `mutated`, and nothing else is: a byte this act sent is not
+ *                the byte the platform holds at that offset, or the stored
+ *                body stops before the sent one does. `EXIT_NOT_STORED`.
+ *
+ * ⛔ This is not a footer exemption sneaking into the classifier — it is the
+ * end of one. While the append was forgiven by `$?` and refused by the class,
+ * this tool said two things about one set of bytes: `everything sent is on the
+ * platform` in `$?` and `MUTATED` on stderr, with `--json` reporting
+ * `body_mutated: true` beside `body_landed: true`. Now the class is the
+ * measurement: `body_mutated` is false exactly when `body_landed` is true, and
+ * a reader who checks one has checked the other.
+ *
+ * ⛔ The second shape is NOT the first one widened for tidiness, and the
+ * distance between them is the whole reason this rule was filed twice. The
+ * first shape reached `main` alone, and from that moment EVERY artefact a seat
+ * wrote with its own attribution footer — the block the harness rule requires
+ * verbatim — exited 4: sent N, stored N, equal length, the sole difference one
+ * newline that had moved from after the footer to before its rule. The write
+ * had landed whole every time. A seat obeying the contract above ("exit 4 ⇒
+ * read the artefact, do not retry") stops on every write; a seat that stops
+ * believing exit 4 is the state this rule exists to end, and one that RETRIES
+ * writes the comment twice. ⭐ A predicate tightened on one side is a predicate
+ * that must be re-measured on the OTHER: the danger direction was closed and
+ * this one was opened in the same edit.
+ *
+ * ⛔ And the answer is NOT "equal length means it landed". Length answers a
+ * different question in both directions: a re-anchored footer over two trailing
+ * newlines is SHORTER, and any substitution of one byte for another is exactly
+ * as long as what it replaced. Both arms compare a candidate BUILT from the
+ * sent bytes with `===`, so a byte lost before the rule and a footer the
+ * sanitizer has chewed each still exit 4 — pinned as controls.
+ *
+ * This retires an interim reading, and the retirement is the point of writing
+ * it down: between the two landings a seat read every exit-4 artefact back by
+ * hand and judged "first difference at the trailing rule, equal length ⇒
+ * benign" for itself. That judgement is now the tool's, measured on exact
+ * bytes, so ⛔ nobody needs to make it by eye again — and nobody should, because
+ * by eye it cannot tell a moved newline from a substitution the same length.
+ *
+ * ⛔ The rule is a predicate over the VERDICT's own field — `readBack.class`,
+ * which is an exact-bytes measurement — and ⛔ never over the byte counts. The platform normalises blank lines around a
+ * trailing rule in BOTH directions, so a length comparison answers a different
+ * question: "stored is shorter" is neither necessary (a re-anchored footer is
+ * longer) nor sufficient (a substitution of equal length loses just as much).
+ *
+ * ⛔ And it does not need the PRE-WRITE body, which only `--body` ever holds.
+ * "The platform kept the old one" is one INSTANCE of the class, not its
+ * definition: whatever is stored, a byte that differs INSIDE the body this act
+ * sent is a byte this act did not get onto the platform. One predicate covers
+ * the filed hit, a truncation, a sanitizer substitution, and a `--comment`
+ * write the same way — `--comment` shares this verdict, so it is judged by it
+ * too, and its footer append is already clean a class earlier.
+ *
+ * What a caller does with a 4: RE-READ THE ARTEFACT. ⛔ Do not retry blindly.
+ * The measured hit was a size refusal the platform never reported, so an
+ * identical second write reproduces it exactly, and a retry loop on a body
+ * edit writes that failure into the card over and over. Read what is stored,
+ * work out what is missing, send a body that can land.
+ *
+ * ⛔ `unreadable` is deliberately NOT widened into this code. "The platform
+ * returned no readable body" is a failure to VERIFY, not a measured failure to
+ * store, and it keeps its UNVERIFIED line and its 0 until somebody measures
+ * what that cell means — the same reason a newline that came from NOWHERE is
+ * not forgiven: the platform inserting a byte the act never sent is a cell
+ * nobody has measured, whatever it looks like.
+ *
+ * ## A size refusal is a REFUSAL, not a missing route (#18843)
+ *
+ * The register above had four codes and no place for the fifth thing that
+ * actually happens: the platform reads the write, considers it, and refuses it
+ * because the body is over the surface's cap. `rest()` threw on every non-2xx,
+ * both call sites caught it as a PREREQUISITE, and a real HTTP 422 was reported
+ * as 「no route, no act at all」 with the remedy 「run this where node's fetch
+ * reaches api.github.com with a token that can write issues」.
+ *
+ * Every clause of that is wrong for this cause. The route existed — the write
+ * travelled it. The token was accepted. And the remedy sends the caller to
+ * another route with another token, where the same bytes are refused
+ * identically: this file's own header already has the word for that shape — a
+ * refusal text prescribing a refused remedy is a tool arguing with itself.
+ *
+ * Measured, twice, by the #18806 dev on probe objectstack#18826 (writes 5 and
+ * 6): a 262,145-byte comment through `--comment=18826` answered HTTP 422, and
+ * this tool exited 3. So the class is its own:
+ *
+ *   TRIGGER   HTTP 422, plus a refusal text that names the body's LENGTH. Both
+ *             halves are required and ⛔ the class is NOT every 422: the
+ *             issues listing answers 422 to deep pagination (page 99 stores,
+ *             page 100 refuses — measured 2026-08-31, `check-half-states.mjs`),
+ *             and that 422 is about a cursor, not a body. It keeps its 3.
+ *   TEXT      the bytes this act SENT, the measured cap for the surface it
+ *             sent them to, the overage between them, and the remedy that can
+ *             work: SHORTEN the body or SPLIT it. ⛔ Never a route remedy —
+ *             pinned held apart, in both directions, against the constant exit
+ *             3 prescribes with.
+ *   CODE      `EXIT_TOO_LARGE`. Nothing was written and nothing was read back,
+ *             which it shares with 3; what it does not share is what a caller
+ *             must DO, and the register exists to carry exactly that.
+ *
+ * ⛔ The cap in that text is never the number the platform's own message
+ * carries. GitHub says 「maximum is 65536 characters」 on all three write
+ * surfaces, and that string is false in unit AND value — objectstack#18826's
+ * write 4 stored a 262,144-byte comment, four times it, and #18793 bisected the
+ * issue-body surface to the same figure. It is the most likely provenance of
+ * the 65,536 folklore this fleet has already had to correct once, so the text
+ * quotes the platform's sentence (a reader needs to see what the platform said)
+ * and names it FALSE in the same breath, beside the bisected cap. A reader who
+ * re-derives a cap from a refusal's own text re-derives the false number.
+ *
+ * The two spellings are NOT one string, which is why the trigger is
+ * case-insensitive rather than an equality: `POST /issues/{n}/comments` answers
+ * `Body is too long (maximum is 65536 characters)` and
+ * `PATCH /issues/comments/{id}` answers the same sentence with a lower-case
+ * `body` (objectstack#18826's record, captured verbatim on both). An equality
+ * pinned to the create-side capital would have left the update side at 3.
+ *
+ * ⛔ And the trigger does not read the platform's number even to confirm
+ * itself. Keying on 「maximum is 65536」 would tie this class to a false clause,
+ * so the day GitHub corrects its own text the refusal would silently fall back
+ * to 3 — a gate that fails when its subject gets BETTER.
+ *
+ * The cap named is the cap of the surface this act wrote to, and the two are
+ * separate constants on purpose: `COMMENT_BODY_LIMIT` for `--comment`
+ * (`POST /issues/{n}/comments`, bisected on objectstack#18826) and
+ * `ISSUE_BODY_LIMIT` for `--body` (`PATCH /issues/{n}`, bisected on #18793).
+ * They hold the same number today, and ⛔ one constant for both would be a
+ * reading neither bisection took: two surfaces measured independently that
+ * agree is not one measurement, and the day one moves, a shared constant lies
+ * about the other.
+ *
+ * ⚠️ The two surfaces do not refuse the same WAY, so this class is mostly the
+ * comment one. On `PATCH /issues/{n}` the refusal is SILENT — 200, the old body
+ * kept, nothing reported (#18793) — and that is what `EXIT_NOT_STORED` exists
+ * for; a `--body` refresh over the cap still lands in 4, and only a 422 the
+ * platform actually answers reaches 5. Both surfaces carry a cap here anyway,
+ * because the classifier must name the cap of whatever surface it is standing
+ * on rather than the one it was written for.
+ *
+ * ⭐ And a refusal the cap does NOT explain is reported as exactly that. If the
+ * platform refuses a body at or under the measured cap, the text says the
+ * refusal CONTRADICTS the reading and asks for a re-measurement instead of
+ * printing an overage of zero: the cap is a measurement, and a measurement a
+ * live write disagrees with is the reading that is due to move, never the write.
+ *
+ * The register in full, one of which a caller reads:
+ *
+ *   0  written, and everything sent is on the platform.
+ *   1  usage — a flag or target this tool does not take. Nothing written.
+ *   2  the body broke the stamp contract, or a refresh would have voided an
+ *      unread knock. Nothing written.
+ *   3  PREREQUISITE NOT MET — no route, no token. No act at all.
+ *   4  written, and the platform did NOT store it. Go read the artefact.
+ *   5  the platform ANSWERED and refused the body for its SIZE. Nothing
+ *      written; shorten or split it. ⛔ Not a route problem.
  *
  * ## The unread-knock check on a body refresh (#17905)
  *
@@ -311,8 +740,10 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from '../invoked-as.mjs';
 import {
+  COMMENT_BODY_LIMIT,
   EXIT_PREREQUISITE_NOT_MET,
   H56_STAMP_TOLERANCE_MIN,
+  ISSUE_BODY_LIMIT,
   PROXY_FLAG,
   h56StampedReadings,
   protocolStamps,
@@ -329,6 +760,28 @@ const TOKEN = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? '';
 export const EXIT_OK = 0;
 export const EXIT_USAGE = 1;
 export const EXIT_REFUSED = 2;
+// 3 is EXIT_PREREQUISITE_NOT_MET, imported above: no route, no act at all.
+/**
+ * The write happened and the platform did NOT store what this act sent — the
+ * read-back caught it and the caller must not walk on. Its own value because
+ * the four outcomes tell a caller four different things to do: 1 fix the
+ * command line, 2 fix the body, 3 fix the route, 4 go READ the artefact. See
+ * the header's exit-register section for what a caller does with this one, and
+ * for why a retry is the wrong move.
+ */
+export const EXIT_NOT_STORED = 4;
+
+/**
+ * The platform ANSWERED this write and refused it: the body is over the cap for
+ * the surface it was sent to. Its own value because it is the one outcome the
+ * other four cannot carry — nothing was written (so it is not 0 or 4) and the
+ * body broke no contract of this tool's (so it is not 2), but a route existed
+ * and was used (so it is not 3, whose remedy would send a caller to another
+ * route to be refused identically). See the header's size-refusal section for
+ * the trigger, and for why the cap in the text is never the platform's own
+ * number.
+ */
+export const EXIT_TOO_LARGE = 5;
 
 /**
  * The re-exec guard, per script rather than shared with its neighbours: two
@@ -368,6 +821,175 @@ const TOKEN_CLOSER = '}}';
 
 /** How much of an offending span a refusal prints. */
 export const SPAN_BYTES = 60;
+
+// ---------------------------------------------------------------------------
+// The quoting spelling — Markdown's own "this is text, not instructions".
+// The header's quotable-contract section is the authority on why this is a
+// STRUCTURAL rule and not a third token.
+// ---------------------------------------------------------------------------
+
+/** The two constructs a quoted span can be, in the words a reader would use. */
+export const QUOTED_SPAN_KINDS = Object.freeze({
+  fenced: 'a fenced code block',
+  'code-span': 'a backtick code span',
+});
+
+/**
+ * A blockquote prefix, as CommonMark reads one: any number of `>` markers, each
+ * allowed up to three leading spaces and one trailing space. Returned as the
+ * DEPTH and the line that is left, because a fenced block inside a quote ends
+ * when the quote does — and a seat quoting a tool's output inside a blockquote
+ * is the exact shape the filed instance was written in.
+ */
+function blockquotePrefix(line) {
+  let i = 0;
+  let depth = 0;
+  for (;;) {
+    let j = i;
+    let spaces = 0;
+    while (j < line.length && line[j] === ' ' && spaces < 3) {
+      j += 1;
+      spaces += 1;
+    }
+    if (line[j] !== '>') break;
+    j += 1;
+    if (line[j] === ' ') j += 1;
+    depth += 1;
+    i = j;
+  }
+  return { depth, rest: line.slice(i) };
+}
+
+/**
+ * The fence this line opens, or null. A backtick fence's info string may not
+ * carry a backtick (CommonMark's rule, and the one that keeps `` `a` `` on a
+ * line of prose from reading as a fence); a tilde fence's may.
+ */
+function fenceOpenedBy(line) {
+  const m = /^ {0,3}(`{3,}|~{3,})(.*)$/u.exec(line);
+  if (!m) return null;
+  if (m[1][0] === '`' && m[2].includes('`')) return null;
+  return { char: m[1][0], length: m[1].length };
+}
+
+/** Whether this line is a closing fence for `open` — same character, at least as long, nothing else on it. */
+function fenceClosedBy(line, open) {
+  const m = /^ {0,3}(`{3,}|~{3,})[ \t]*$/u.exec(line);
+  return m !== null && m[1][0] === open.char && m[1].length >= open.length;
+}
+
+/**
+ * Every backtick code span on one line, as offsets into the whole body.
+ *
+ * A run of N backticks opens; the span ends at the next run of EXACTLY N. A run
+ * of a different length is content and is stepped over, and a run with no
+ * matching closer is literal backticks — so `` don't use `foo `` is prose, not
+ * an unterminated quotation swallowing the rest of the artefact.
+ */
+function codeSpansOnLine(line, base) {
+  const out = [];
+  let i = 0;
+  while (i < line.length) {
+    if (line[i] !== '`') {
+      i += 1;
+      continue;
+    }
+    let n = 0;
+    while (i + n < line.length && line[i + n] === '`') n += 1;
+    let j = i + n;
+    let found = -1;
+    while (j < line.length) {
+      if (line[j] !== '`') {
+        j += 1;
+        continue;
+      }
+      let m = 0;
+      while (j + m < line.length && line[j + m] === '`') m += 1;
+      if (m === n) {
+        found = j;
+        break;
+      }
+      j += m;
+    }
+    if (found === -1) {
+      i += n;
+      continue;
+    }
+    out.push({ from: base + i, to: base + found + n, kind: 'code-span' });
+    i = found + n;
+  }
+  return out;
+}
+
+/**
+ * Every quoted span in this body, in order and non-overlapping: the ranges
+ * inside which this tool renders text and reads no token at all.
+ *
+ * Fenced blocks are resolved first, at the line level, because Markdown parses
+ * block structure before inline structure — so a backtick run inside a fence is
+ * fence CONTENT and never opens a span of its own.
+ */
+export function quotedSpans(text) {
+  const raw = String(text ?? '');
+  const lines = raw.split('\n');
+  const fenced = [];
+  const fencedLines = new Set();
+  let open = null;
+  let offset = 0;
+
+  for (let n = 0; n < lines.length; n += 1) {
+    const line = lines[n];
+    const lineFrom = offset;
+    const lineTo = offset + line.length;
+    offset = lineTo + 1;
+    const { depth, rest } = blockquotePrefix(line);
+
+    if (open) {
+      if (depth < open.depth) {
+        // The blockquote holding the fence ended, so the block ended with it.
+        fenced.push({ from: open.from, to: lineFrom, kind: 'fenced' });
+        open = null;
+      } else {
+        fencedLines.add(n);
+        if (fenceClosedBy(rest, open)) {
+          fenced.push({ from: open.from, to: lineTo, kind: 'fenced' });
+          open = null;
+        }
+        continue;
+      }
+    }
+
+    const opened = fenceOpenedBy(rest);
+    if (opened) {
+      open = { ...opened, depth, from: lineFrom };
+      fencedLines.add(n);
+    }
+  }
+  if (open) fenced.push({ from: open.from, to: raw.length, kind: 'fenced' });
+
+  const spans = [...fenced];
+  offset = 0;
+  for (let n = 0; n < lines.length; n += 1) {
+    const line = lines[n];
+    const lineFrom = offset;
+    offset = lineFrom + line.length + 1;
+    if (fencedLines.has(n)) continue;
+    spans.push(...codeSpansOnLine(line, lineFrom));
+  }
+  return spans.sort((a, b) => a.from - b.from);
+}
+
+/**
+ * Whether the character at `at` is inside one of `spans`.
+ *
+ * An opener is judged by WHERE IT STARTS — a `{{` that begins inside a
+ * quotation is quoted, whatever happens to fall after it. One position, one
+ * answer, so the scan, the mask and the substitution cannot come to disagree
+ * about the same brace.
+ */
+export function insideQuotedSpan(spans, at) {
+  return (spans ?? []).some((s) => at >= s.from && at < s.to);
+}
 
 /**
  * The C0 controls that have a spelling everybody reads; the rest get `\xNN`.
@@ -422,8 +1044,13 @@ export const OPENER_REASONS = Object.freeze({
  * those same regexes would walk straight past it again. What the regexes are
  * still used for is recognition at a known position — anchored, so the one
  * definition of "a quoted token" serves both the scan and the substitution.
+ *
+ * An opener inside a QUOTED SPAN is skipped: there it is text the author is
+ * showing, and refusing it is how the contract became unquotable. It is still
+ * counted — `substituteTokens` reports it as verbatim — so a skip is never
+ * silent.
  */
-export function unrecognisedOpeners(text) {
+export function unrecognisedOpeners(text, spans = quotedSpans(text)) {
   const raw = String(text ?? '');
   const quotedHere = anchoredOf(QUOTED_TOKEN_RE);
   const anyHere = anchoredOf(ANY_TOKEN_RE);
@@ -433,6 +1060,11 @@ export function unrecognisedOpeners(text) {
     const at = raw.indexOf(TOKEN_OPENER, i);
     if (at === -1) return out;
     const rest = raw.slice(at);
+
+    if (insideQuotedSpan(spans, at)) {
+      i = at + TOKEN_OPENER.length;
+      continue;
+    }
 
     if (rest.startsWith(STAMP_TOKEN)) {
       i = at + STAMP_TOKEN.length;
@@ -496,17 +1128,31 @@ export function stampNow(ms = Date.now()) {
  * The text with every declared quoted stamp blanked to spaces of equal length,
  * so a scan for BARE stamps sees only the ones nobody declared — and so line
  * numbers, columns and the opening line are all still where they were.
+ *
+ * ⛔ A `{{WAS:…}}` inside a QUOTED SPAN is NOT blanked: there it is not a
+ * declaration, it is text showing what a declaration looks like, and the digits
+ * it carries are digits on the board like any others. Blanking them would let a
+ * hand-typed stamp hide from the bare-stamp scan behind a pair of backticks —
+ * the one accident this rule may never buy.
  */
-export function maskQuotedStamps(text) {
-  return String(text ?? '').replace(globalOf(QUOTED_TOKEN_RE), (m) => ' '.repeat(m.length));
+export function maskQuotedStamps(text, spans = quotedSpans(text)) {
+  return String(text ?? '').replace(globalOf(QUOTED_TOKEN_RE), (m, _inner, at) =>
+    insideQuotedSpan(spans, at) ? m : ' '.repeat(m.length),
+  );
 }
 
-/** The values inside every `{{WAS:…}}` in this text. */
-export function quotedStampValues(text) {
+/**
+ * The values inside every `{{WAS:…}}` in this text that is a TOKEN — so the
+ * ones inside a quoted span are left out, because the calendar and direction
+ * rules judge a declaration and there is none there.
+ */
+export function quotedStampValues(text, spans = quotedSpans(text)) {
   const re = globalOf(QUOTED_TOKEN_RE);
   const out = [];
   let m;
-  while ((m = re.exec(String(text ?? '')))) out.push(m[1]);
+  while ((m = re.exec(String(text ?? '')))) {
+    if (!insideQuotedSpan(spans, m.index)) out.push(m[1]);
+  }
   return out;
 }
 
@@ -582,6 +1228,31 @@ function quotedRouteClosed(stamp, nowMs) {
 }
 
 /**
+ * The clause a remedy appends when EVERY occurrence of the offending stamp sits
+ * inside a quoted span — empty when at least one of them does not.
+ *
+ * Without it the two remedies prescribe a route that cannot work there: inside
+ * a quotation neither spelling is substituted, so a seat that follows the text
+ * literally gets the token printed where it wanted a time and reads the same
+ * refusal again. A refusal text prescribing a refused remedy is a tool arguing
+ * with itself — the rule the `{{WAS:…}}` direction check already states, taken
+ * one step further now that a quotation can hold a stamp.
+ */
+function quotedSpanClause(raw, spans, stamp) {
+  const text = String(raw ?? '');
+  const hits = [];
+  for (let at = text.indexOf(stamp); at !== -1; at = text.indexOf(stamp, at + 1)) hits.push(at);
+  if (hits.length === 0 || !hits.every((at) => insideQuotedSpan(spans, at))) return '';
+  return (
+    ' ⚠️ Every occurrence of this stamp sits inside a QUOTED SPAN, where this tool renders text and ' +
+    'substitutes nothing — so writing either spelling there prints the token itself, not a time. Move ' +
+    'the stamp out of the quotation to declare it, or, if the quotation is an EXAMPLE, quote the ' +
+    'placeholder form (`YYYY-MM-DDThh:mmZ`) instead of digits: quoting changes what is rendered, never ' +
+    'what was typed onto the board.'
+  );
+}
+
+/**
  * Every reason this body may not be posted, in the order a reader should fix
  * them. An empty array is a body that may be written.
  *
@@ -589,13 +1260,13 @@ function quotedRouteClosed(stamp, nowMs) {
  * substitutes, passed through so the direction check judges against the instant
  * this body is being written at, never a second read taken later.
  */
-export function stampRefusals(text, nowMs = Date.now()) {
+export function stampRefusals(text, nowMs = Date.now(), spans = quotedSpans(text)) {
   const raw = String(text ?? '');
-  const masked = maskQuotedStamps(raw);
+  const masked = maskQuotedStamps(raw, spans);
   const refusals = [];
   const now = stampNow(nowMs);
 
-  for (const value of quotedStampValues(raw)) {
+  for (const value of quotedStampValues(raw, spans)) {
     if (protocolStamps(value).length !== 1 || protocolStamps(value)[0] !== value.trim()) {
       refusals.push({
         kind: 'quoted-not-a-stamp',
@@ -645,10 +1316,11 @@ export function stampRefusals(text, nowMs = Date.now()) {
     const closed = quotedRouteClosed(hit.stamp, nowMs);
     refusals.push({
       kind: 'positional',
-      detail: closed
-        ? `${opener}Write \`${STAMP_TOKEN}\` there. The quoted route is NOT open to this one: ${closed}.`
-        : `${opener}Write \`${STAMP_TOKEN}\` there, or \`{{WAS:${hit.stamp}}}\` if it ` +
-          'is genuinely a reading of something else.',
+      detail:
+        (closed
+          ? `${opener}Write \`${STAMP_TOKEN}\` there. The quoted route is NOT open to this one: ${closed}.`
+          : `${opener}Write \`${STAMP_TOKEN}\` there, or \`{{WAS:${hit.stamp}}}\` if it ` +
+            'is genuinely a reading of something else.') + quotedSpanClause(raw, spans, hit.stamp),
     });
   }
 
@@ -663,12 +1335,13 @@ export function stampRefusals(text, nowMs = Date.now()) {
       const closed = quotedRouteClosed(stamp, nowMs);
       refusals.push({
         kind: 'mixed',
-        detail: closed
-          ? `${opener}Make it \`${STAMP_TOKEN}\` if it is this act's own. The quoted route is NOT open to ` +
-            `it: ${closed}.`
-          : `${opener}Declare ` +
-            `it with \`{{WAS:${stamp}}}\` if it is a quoted reading, or make it \`${STAMP_TOKEN}\` if it ` +
-            'is this act\'s own.',
+        detail:
+          (closed
+            ? `${opener}Make it \`${STAMP_TOKEN}\` if it is this act's own. The quoted route is NOT open to ` +
+              `it: ${closed}.`
+            : `${opener}Declare ` +
+              `it with \`{{WAS:${stamp}}}\` if it is a quoted reading, or make it \`${STAMP_TOKEN}\` if it ` +
+              'is this act\'s own.') + quotedSpanClause(raw, spans, stamp),
       });
     }
   }
@@ -690,6 +1363,159 @@ export function refusalText(refusals) {
 }
 
 /**
+ * The body as it goes to the platform, and the counts a reader compares to
+ * intent: tokens SUBSTITUTED with this act's clock, quoted stamps RENDERED from
+ * their declaration, and openers left VERBATIM because they sit inside a quoted
+ * span.
+ *
+ * One left-to-right walk rather than two regex sweeps, so every brace in the
+ * body is judged against the same span map that `unrecognisedOpeners` and
+ * `maskQuotedStamps` were given — three passes disagreeing about which `{{` is
+ * quoted would be three spellings of one decision.
+ *
+ * ⛔ `verbatimTokens` is a SUBSET of `verbatim`, and the two are never the same
+ * question. `verbatim` is the status line's number: every opener left as
+ * written, a quoted `{{ handlebars }}` example included. `verbatimTokens`
+ * counts only the openers that ARE `{{NOW}}` or `{{WAS:…}}` — the ones whose
+ * literal text on the board makes a claim about a stamp — and it is what
+ * `stampVerdict` reads. A body quoting braces that spell neither token has
+ * quoted no stamp, and refusing it would be a refusal naming a token it does
+ * not carry. `verbatimTokenSpans` carries those same openers with the span kind
+ * that holds each one, because the refusal has to NAME the one it means.
+ */
+export function substituteTokens(raw, stamp, spans = quotedSpans(raw)) {
+  const text = String(raw ?? '');
+  const quotedHere = anchoredOf(QUOTED_TOKEN_RE);
+  const verbatimTokenSpans = [];
+  let out = '';
+  let i = 0;
+  let substituted = 0;
+  let quoted = 0;
+  let verbatim = 0;
+  // BYTES, the unit every offset this file prints is counted in — a character
+  // index would move the number a reader checks against `Buffer.byteLength`.
+  const byteAt = (at) => Buffer.byteLength(text.slice(0, at), 'utf8');
+  const spanKindAt = (at) => (spans ?? []).find((s) => at >= s.from && at < s.to)?.kind ?? null;
+  for (;;) {
+    const at = text.indexOf(TOKEN_OPENER, i);
+    if (at === -1) {
+      out += text.slice(i);
+      break;
+    }
+    out += text.slice(i, at);
+    const rest = text.slice(at);
+    const isQuoted = insideQuotedSpan(spans, at);
+    if (rest.startsWith(STAMP_TOKEN)) {
+      if (isQuoted) {
+        verbatim += 1;
+        verbatimTokenSpans.push({ span: STAMP_TOKEN, kind: spanKindAt(at), byteAt: byteAt(at) });
+        out += STAMP_TOKEN;
+      } else {
+        substituted += 1;
+        out += stamp;
+      }
+      i = at + STAMP_TOKEN.length;
+      continue;
+    }
+    const was = quotedHere.exec(rest);
+    if (was) {
+      if (isQuoted) {
+        verbatim += 1;
+        verbatimTokenSpans.push({ span: was[0], kind: spanKindAt(at), byteAt: byteAt(at) });
+        out += was[0];
+      } else {
+        quoted += 1;
+        out += was[1];
+      }
+      i = at + was[0].length;
+      continue;
+    }
+    // Not a token at all. Outside a quoted span `unrecognisedOpeners` has
+    // already refused the body, so this branch only ever runs inside one —
+    // where the braces are text and are counted as left-as-written. ⛔ NOT
+    // collected as a verbatim TOKEN: it spells neither spelling, so it makes no
+    // claim about a stamp and the predicate below must not read it as one.
+    if (isQuoted) verbatim += 1;
+    out += TOKEN_OPENER;
+    i = at + TOKEN_OPENER.length;
+  }
+  return { body: out, substituted, quoted, verbatim, verbatimTokens: verbatimTokenSpans.length, verbatimTokenSpans };
+}
+
+/**
+ * What the render PROVED about this artefact's stamp — the predicate the quoted
+ * span carve-out was missing (#19091), and the one place that decides it.
+ *
+ * ⛔ The counts are read through here and ⛔ never straight: "0 substitutions
+ * AND ≥1 verbatim opener" is the criterion the filing card excludes by name,
+ * because a body may quote the token and stamp itself by declaration in the
+ * same breath — this file's own header does. The header's partner-check section
+ * is the authority on why each verdict is the one it is, and on why `no-token`
+ * is not refused.
+ */
+export const STAMP_VERDICTS = Object.freeze({
+  'stamped-by-this-act': "a `{{NOW}}` was substituted, so the artefact carries the clock THIS act read",
+  'stamped-by-declaration':
+    'nothing was substituted and a `{{WAS:…}}` rendered from its own declaration, so the artefact is stamped as a reading of something else',
+  'unstamped-quoted-token':
+    'nothing stamped this artefact, and an opener that IS one of the two spellings was left verbatim inside a quotation — the literal token would go onto the board with no time behind it',
+  'no-token': 'the body spells no token at all, quoted or not, so there is no clock of this act\'s to check',
+});
+
+/**
+ * The one verdict that must not reach the board. Named so the refusal, the
+ * read-back line and the self-test read one constant rather than three copies
+ * of a string.
+ */
+export const REFUSED_STAMP_VERDICT = 'unstamped-quoted-token';
+
+/**
+ * Which of `STAMP_VERDICTS` this render is, from the counts alone.
+ *
+ * The order is the precedence: this act's own clock outranks a declaration
+ * (a body carrying both IS stamped by this act), a declaration outranks a
+ * quoted token (the docblock shape), and a quoted token outranks nothing at all
+ * — which is the whole finding, because those two used to be one outcome.
+ */
+export function stampVerdict({ substituted = 0, quoted = 0, verbatimTokens = 0 } = {}) {
+  if (substituted > 0) return 'stamped-by-this-act';
+  if (quoted > 0) return 'stamped-by-declaration';
+  if (verbatimTokens > 0) return REFUSED_STAMP_VERDICT;
+  return 'no-token';
+}
+
+/**
+ * The refusal a caller reads when the only token in the body is a quoted one —
+ * the same register as the unrecognised-opener refusal, because it is the same
+ * two facts: the literal text goes on the card and the artefact is unstamped.
+ *
+ * It names the quoted opener (every one of them, with the construct that holds
+ * it and the byte it starts at) AND the missing stamp (the counts, so a reader
+ * sees that nothing was substituted and nothing declared).
+ */
+export function unstampedRefusalText({ substituted = 0, quoted = 0, verbatim = 0, verbatimTokenSpans = [] } = {}) {
+  const rows = (verbatimTokenSpans ?? []).map(
+    (s, i) =>
+      `  ${i + 1}. \`${offendingSpan(s.span)}\` — left exactly as written inside ` +
+      `${QUOTED_SPAN_KINDS[s.kind] ?? 'a quoted span'}, starting at byte ${s.byteAt}`,
+  );
+  return (
+    `post-stamped: REFUSED — every token in this body sits inside a QUOTED SPAN and nothing stamped the\n` +
+    `  artefact: ${substitutionSummary({ substituted, quoted, verbatim })}. Nothing was written.\n` +
+    `${rows.join('\n')}\n\n` +
+    '  Posting it would put the literal token text on the card AND leave the artefact unstamped, which is\n' +
+    '  the quiet direction — the same two facts the unrecognised-opener refusal names, reached here by\n' +
+    '  spelling the token CORRECTLY. Quoting changes what is RENDERED, never whether a stamp was read: an\n' +
+    '  opener inside a quotation is text, so it is neither this act\'s clock nor a declaration of another\n' +
+    '  reading.\n' +
+    `  Keep the quotation AND stamp the artefact: write \`${STAMP_TOKEN}\` OUTSIDE the quotation where this\n` +
+    '  act\'s own time goes, or `{{WAS:YYYY-MM-DDThh:mmZ}}` outside it when the instant is a reading of\n' +
+    '  something else. A body that quotes the token beside such a declaration is ACCEPTED — that is this\n' +
+    '  tool\'s own header — and a body that spells no token at all is not this refusal.'
+  );
+}
+
+/**
  * The body as it will be written, or the refusal. Pure, so every branch that
  * decides whether a write happens at all is pinned offline.
  */
@@ -704,27 +1530,25 @@ export function renderBody(text, nowMs = Date.now()) {
         '  reader has to judge; supply a body with --file=PATH or on stdin.',
     };
   }
+  // ONE span map, read by the opener scan, the mask, the quoted-stamp
+  // validation and the substitution. Computed here rather than four times
+  // below so no two of them can come to disagree about which `{{` is quoted.
+  const spans = quotedSpans(raw);
+
   // ⛔ Ahead of `stampRefusals`, and not folded into it. Its bare-stamp scan
   // reads `maskQuotedStamps`, which is built out of the very regex an
   // unrecognised opener defeats — so until every opener is a token, what that
   // scan calls "a bare stamp in the opening line" may be the inside of a token
   // nobody could parse. One opener, one refusal: the shape first, alone.
-  const openers = unrecognisedOpeners(raw);
+  const openers = unrecognisedOpeners(raw, spans);
   if (openers.length > 0) {
     return { ok: false, kind: 'unknown-token', openers, error: unrecognisedOpenerText(openers) };
   }
 
-  const refusals = stampRefusals(raw, nowMs);
+  const refusals = stampRefusals(raw, nowMs, spans);
   if (refusals.length > 0) return { ok: false, kind: 'stamp-contract', refusals, error: refusalText(refusals) };
 
   const stamp = stampNow(nowMs);
-  let quoted = 0;
-  let body = raw.replace(globalOf(QUOTED_TOKEN_RE), (_m, inner) => {
-    quoted += 1;
-    return inner;
-  });
-  const substituted = body.split(STAMP_TOKEN).length - 1;
-  body = body.split(STAMP_TOKEN).join(stamp);
 
   // ⛔ No second leftover scan here. The one that used to sit at this line
   // matched `{{…}}` AFTER substitution, which is both too late and too narrow:
@@ -734,14 +1558,60 @@ export function renderBody(text, nowMs = Date.now()) {
   // instead, and the two stamps substituted here carry no braces — so a second
   // check at this line could never fire, and a check that cannot fire is a
   // check nobody maintains.
-  return { ok: true, body, stamp, substituted, quoted };
+  const counts = substituteTokens(raw, stamp, spans);
+  const { body, substituted, quoted, verbatim, verbatimTokens, verbatimTokenSpans } = counts;
+
+  // ⛔ The partner check the quoted-span carve-out shipped without, and the LAST
+  // refusal on purpose: the refusal ordering above is unchanged (positional /
+  // mixed / quoted / unknown first), and this one needs the counts, which exist
+  // only after the walk. A body that reaches here broke no other rule — its
+  // only fault is that nothing stamped it while a token went onto the board.
+  const verdict = stampVerdict(counts);
+  if (verdict === REFUSED_STAMP_VERDICT) {
+    return {
+      ok: false,
+      kind: 'unstamped',
+      verdict,
+      substituted,
+      quoted,
+      verbatim,
+      verbatimTokens,
+      verbatimTokenSpans,
+      error: unstampedRefusalText(counts),
+    };
+  }
+  return { ok: true, body, stamp, substituted, quoted, verbatim, verbatimTokens, verbatimTokenSpans, verdict };
 }
 
 /**
- * The block the platform appends to a COMMENT whose sent body does not already
- * carry one: a blank line, a rule, the bare attribution line — 58 bytes,
- * measured on every comment this seat's tooling posted through the REST proxy,
- * and the same 58 the register records for both comment channels.
+ * The three counts, in one spelling, so the DRY RUN line, the status line and
+ * `--json` cannot come to describe the same render three ways.
+ *
+ * The VERBATIM count is the half this file was missing: before it, a body that
+ * quoted the token and one that used it were distinguishable only by a
+ * substitution count nothing compared to intent — which is exactly how a false
+ * quotation reached #14251 at exit 0. An author who meant "stamp one, quote
+ * one" now reads both numbers and sees at a glance which happened.
+ */
+export function substitutionSummary({ substituted = 0, quoted = 0, verbatim = 0 } = {}) {
+  return (
+    `${substituted} ${STAMP_TOKEN}, ${quoted} quoted` +
+    ` · verbatim: ${verbatim} opener(s) inside a quoted span, left exactly as written` +
+    (verbatim === 0 ? ' (none)' : '')
+  );
+}
+
+/**
+ * The block the platform appends to an artefact whose sent body does not
+ * already carry one: a blank line, a rule, the bare attribution line — 58
+ * bytes, measured on every comment this seat's tooling posted through the REST
+ * proxy, the same 58 the register records for both comment channels, and the
+ * same 58 an ISSUE BODY comes back with on this seat's channel (#18693).
+ *
+ * ⛔ The name says COMMENT because that is the surface the block was first
+ * measured on and the surface the register calls it by, ⛔ never because the
+ * body cell is exempt from it: the bytes are one constant and the read-back
+ * asks one question of them.
  *
  * ⛔ The exact bytes, ⛔ never a regex and ⛔ never a trim. What a read-back
  * asks is whether the difference is EXACTLY a normalisation somebody measured;
@@ -752,6 +1622,14 @@ export function renderBody(text, nowMs = Date.now()) {
 export const PLATFORM_COMMENT_FOOTER = '\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_';
 
 /**
+ * The same block over ONE newline instead of two — what the platform stores
+ * when it collapses the blank line before the rule of a footer the body
+ * already carried. ⛔ Derived from the constant above, ⛔ never retyped: two
+ * spellings of one block are two things to keep in step.
+ */
+export const PLATFORM_COMMENT_FOOTER_COLLAPSED = PLATFORM_COMMENT_FOOTER.slice(1);
+
+/**
  * The vocabulary of what a stored body can show, and what each word means.
  * Declared so the line, the `--json` field and the self-test spell one set of
  * names rather than three.
@@ -760,9 +1638,18 @@ export const READ_BACK_CLASSES = Object.freeze({
   unreadable: 'the platform returned no readable body — the write is UNVERIFIED',
   identical: 'the bytes came back exactly as they went out',
   'trailing-newline-stripped': 'the stored body is the sent body minus its trailing newline(s)',
-  'footer-appended': "the stored body is that body plus exactly the platform's comment footer",
+  'footer-appended': "the stored body is that body plus exactly the platform's footer block",
+  'footer-re-anchored':
+    "the stored body is that body with the trailing newline(s) it sent moved to before the footer block's rule — nothing added, nothing lost",
+  'footer-blank-collapsed':
+    "the stored body is that body with the blank line immediately before the footer block's rule collapsed — one newline of the block's own separator gone, and no content byte touched",
   mutated: 'something nobody measured — the bytes disagree, and the offset says where',
 });
+
+// Which declared class each `footerReAnchoring` shape becomes — one map, so a
+// shape never reaches a reader under a word untrue of its bytes:
+// `footer-re-anchored` says "nothing lost" and the collapse loses one.
+const FOOTER_SHAPE_CLASSES = Object.freeze({ appended: 'footer-appended', 're-anchored': 'footer-re-anchored', collapsed: 'footer-blank-collapsed' });
 
 /**
  * The first byte at which two bodies disagree, or `-1` when they do not.
@@ -805,19 +1692,142 @@ function byteWindowFrom(text, from, limit = SPAN_BYTES) {
 }
 
 /**
+ * Whether the difference between the sent and the stored body is EXACTLY the
+ * platform moving `PLATFORM_COMMENT_FOOTER` around, and which of the TWO
+ * measured shapes it is. `null` when it is neither, which is every shape where
+ * a byte this act sent is missing or different from the byte stored in its
+ * place.
+ *
+ * The two shapes, each measured in this repository:
+ *
+ *   appended     the sent body carried NO footer of its own, and the stored
+ *                body is it — or its newline-trimmed form — followed by
+ *                exactly the footer. The platform synthesised the block.
+ *   re-anchored  the sent body ALREADY ENDED in the footer block, with
+ *                trailing newline(s) after it, and the stored body is that
+ *                same body with those newlines removed and exactly one
+ *                newline inserted immediately before the block. The bytes are
+ *                the same bytes, a newline moved from after the footer to
+ *                before its rule — at one trailing newline, equal length, one
+ *                byte MOVED and zero lost.
+ *   collapsed    the sent body ENDS in the block exactly, with no trailing
+ *                newline of its own, and the stored body is that same body
+ *                with the block's leading blank line collapsed to one
+ *                newline. Sent N, stored N-1: the platform really does take a
+ *                byte away here, and the byte is its OWN separator.
+ *
+ * ## THE CRITERION — which mutations are the footer's, and which the sanitizer's
+ *
+ * The footer path is POSITIONAL and touches ONE span: the newline(s) between
+ * the last content byte and the block's rule, plus the block itself when the
+ * platform synthesises one. Inside that span it appends the block, moves a
+ * trailing newline the act sent to the front of it, or collapses the blank
+ * line before the rule. It has never been measured adding, removing or
+ * substituting a byte anywhere else.
+ *
+ * The sanitizer's mutations are the other population, and they are what exit 4
+ * exists for: a tag-shaped fragment eaten out of the prose, a link rewritten
+ * inside the block, a size refusal the platform never reported that leaves the
+ * PREVIOUS body stored, a truncation. Those land anywhere in the body.
+ *
+ * ⛔ So the test is positional and EXACT, ⛔ never normalised: a "non-empty
+ * lines" comparison would answer clean for a whitespace-only truncation
+ * anywhere in the body, a loss with no line of its own.
+ *
+ * ⛔ Both arms are one exact `===` against a candidate BUILT from the sent
+ * bytes, ⛔ never a pattern and ⛔ never a length: a regex matching "a footer,
+ * roughly" forgives a footer the sanitizer has chewed, a 58-byte delta is
+ * satisfied by 58 bytes of anything at all, and "equal length" is satisfied by
+ * any substitution that swaps one byte for another. Everything before the
+ * block and every byte of the block itself is compared literally, so a loss
+ * before the rule and a chewed footer both still answer `null`.
+ *
+ * ⛔ The re-anchor arm requires the sent body to have carried trailing
+ * newline(s) of its own: the moved newline is one the act SENT. A stored body
+ * that gained a newline from nowhere is a cell nobody has measured, and an
+ * unmeasured cell is not one this tool forgives.
+ *
+ * ONE spelling of "the platform moved its own footer block around", read by
+ * ONE caller: `classifyReadBack`, which turns each shape into its own declared
+ * class through `FOOTER_SHAPE_CLASSES` — whichever act wrote the bytes.
+ * `sentBodyLanded` then reads that class and nothing else.
+ * Two places deciding what a footer is would be two spellings of one decision,
+ * which is the defect this file spends its length avoiding; until #18693 there
+ * were two, because the class gate asked which act had written the bytes while
+ * the exit code did not, and the tool said MUTATED and "everything sent is on
+ * the platform" about one set of bytes.
+ */
+export function footerReAnchoring(sent, stored) {
+  if (typeof stored !== 'string') return null;
+  const sentText = String(sent ?? '');
+  if (stored === `${sentText}${PLATFORM_COMMENT_FOOTER}`) return { strippedNewlines: 0, shape: 'appended' };
+  const trimmed = sentText.replace(/\n+$/u, '');
+  const strippedNewlines = sentText.length - trimmed.length;
+  if (strippedNewlines > 0 && stored === `${trimmed}${PLATFORM_COMMENT_FOOTER}`) return { strippedNewlines, shape: 'appended' };
+  if (strippedNewlines > 0 && trimmed.endsWith(PLATFORM_COMMENT_FOOTER)) {
+    const head = trimmed.slice(0, trimmed.length - PLATFORM_COMMENT_FOOTER.length);
+    if (stored === `${head}\n${PLATFORM_COMMENT_FOOTER}`) return { strippedNewlines, shape: 're-anchored' };
+  }
+  // ⛔ `strippedNewlines === 0` is load-bearing, ⛔ not tidiness: a sent body
+  // that carried trailing newlines AND came back collapsed is a cell nobody
+  // has measured, and an unmeasured cell is not one this tool forgives.
+  if (strippedNewlines === 0 && sentText.endsWith(PLATFORM_COMMENT_FOOTER)) {
+    const head = sentText.slice(0, sentText.length - PLATFORM_COMMENT_FOOTER.length);
+    if (stored === `${head}${PLATFORM_COMMENT_FOOTER_COLLAPSED}`) return { strippedNewlines: 0, shape: 'collapsed' };
+  }
+  return null;
+}
+
+/**
+ * Whether every byte this act sent is on the platform — the question `$?`
+ * answers — read off the verdict's own CLASS and nothing else.
+ *
+ * Every declared normalisation keeps the sent body's CONTENT whole:
+ * `identical` by definition, `trailing-newline-stripped` gives up only
+ * newlines the platform does not keep, `footer-appended` adds without
+ * removing, `footer-re-anchored` moves a newline the act itself sent, and
+ * `footer-blank-collapsed` drops one newline of the platform's own footer
+ * separator — the single byte the footer path has been measured taking, and
+ * never a byte of the body. So `mutated` — "something nobody
+ * measured" — is the one class that can answer no, and since #18693 ONE
+ * measurement decides both what the status line says and what `$?` says.
+ * ⛔ `unreadable` answers YES on purpose: nothing was measured there, which is
+ * a different verdict carrying a different line, and this rule does not widen
+ * into it. The header's exit-register section is the authority on both halves.
+ *
+ * ⛔ A predicate over the class, ⛔ never over the byte counts: the platform
+ * normalises blank lines around a trailing rule in both directions, so "stored
+ * is shorter" is neither necessary (a re-anchored footer over two newlines is)
+ * nor sufficient (a substitution of equal length loses just as much).
+ */
+export function sentBodyLanded(readBack) {
+  return !readBack || readBack.class !== 'mutated';
+}
+
+/**
  * Which of the platform's KNOWN normalisations the stored body shows, judged
  * exactly — the whole vocabulary is `READ_BACK_CLASSES` and the reasoning is
  * the header's read-back section.
  *
- * ⛔ `mode` defaults to `body`, the STRICT side, and the comment-only footer
- * rule must be asked for by name. A default that forgave a footer wherever it
- * appeared would be a second warning nobody can act on — the defect this
- * function was rewritten to close — and the issue-body cell is UNMEASURED: no
- * reading in this repository says whether the platform synthesises a footer for
- * a footer-less body, so that shape stays MUTATED with its offset until one
- * does.
+ * ⛔ There is no `mode` parameter, and its absence is the point (#18693). The
+ * footer rule was comment-only while the issue-body cell was unmeasured, and a
+ * caller naming no act got the strict reading. That cell is measured now — on
+ * the governed fact table, and live on this channel — and what this function
+ * reads is EXACT BYTES, which cannot tell one act's write from another's: a
+ * stored body that is the sent one plus exactly the block is `footer-appended`
+ * either way, and one that is the sent one with its own trailing newline moved
+ * before the block is `footer-re-anchored` either way. An act-shaped gate on
+ * top of an exact-bytes comparison was a second spelling of one decision, and
+ * it failed in the loud direction: the body cell printed MUTATED on nearly
+ * every write a seat made while `$?` said the write had landed whole.
+ *
+ * ⛔ The gate is gone, ⛔ not the strictness. Everything neither arm of
+ * `footerReAnchoring` matches is `mutated` and exits 4 — a footer the sanitizer
+ * chewed, a link rewritten inside the block, a newline that came from nowhere,
+ * a byte lost before the rule, a truncation that happens to end in the block.
+ * The one predicate is asked once, and it is asked about bytes.
  */
-export function classifyReadBack({ sent, stored, mode = 'body' } = {}) {
+export function classifyReadBack({ sent, stored } = {}) {
   if (typeof stored !== 'string') return { class: 'unreadable', offset: null, strippedNewlines: 0 };
   const sentText = String(sent ?? '');
   if (stored === sentText) return { class: 'identical', offset: null, strippedNewlines: 0 };
@@ -827,20 +1837,34 @@ export function classifyReadBack({ sent, stored, mode = 'body' } = {}) {
   if (strippedNewlines > 0 && stored === trimmed) {
     return { class: 'trailing-newline-stripped', offset: null, strippedNewlines };
   }
-  if (mode === 'comment') {
-    if (stored === `${sentText}${PLATFORM_COMMENT_FOOTER}`) {
-      return { class: 'footer-appended', offset: null, strippedNewlines: 0 };
-    }
-    if (strippedNewlines > 0 && stored === `${trimmed}${PLATFORM_COMMENT_FOOTER}`) {
-      return { class: 'footer-appended', offset: null, strippedNewlines };
-    }
+  // Each measured shape gets its OWN word, ⛔ never one word for both: a
+  // `footer-appended` that also covered the re-anchor would say "plus exactly
+  // the footer" about a body that gained nothing, and a vocabulary that says
+  // something untrue about the bytes is the thing this file exists to avoid.
+  // `footerReAnchored` stays on the result as the measurement it always was,
+  // so `--json` keeps reporting it beside the class.
+  const footer = footerReAnchoring(sentText, stored);
+  if (footer !== null) {
+    return {
+      class: FOOTER_SHAPE_CLASSES[footer.shape],
+      offset: null,
+      strippedNewlines: footer.strippedNewlines,
+      footerReAnchored: true,
+      footerShape: footer.shape,
+    };
   }
 
+  // Nothing anybody measured explains this difference, so the whole warning is
+  // kept and the offset is what a reader goes and looks at. `footerReAnchored`
+  // is false here by construction — the one predicate that could have answered
+  // yes was just asked — and `sentBodyLanded` reads the CLASS, not this field.
   const offset = firstDifferingByte(sentText, stored);
   return {
     class: 'mutated',
     offset,
     strippedNewlines: 0,
+    footerReAnchored: false,
+    footerShape: null,
     sentContext: byteWindowFrom(sentText, offset),
     storedContext: byteWindowFrom(stored, offset),
   };
@@ -849,16 +1873,46 @@ export function classifyReadBack({ sent, stored, mode = 'body' } = {}) {
 /**
  * What the read-back proves, as lines a transcript carries. `writtenAt` is the
  * platform's own clock for the write — `created_at` for a comment, `updated_at`
- * for a body edit, which is when that write actually happened. `mode` is the
- * act this verdict is about, and it is load-bearing: the footer rule is
- * comment-only, so a verdict that does not know which act it read cannot apply
- * it — and gets the strict reading rather than a guess.
+ * for a body edit, which is when that write actually happened.
+ *
+ * ⛔ It does not take the act it is about and does not need to: since #18693
+ * the classification is exact bytes alone. The word for the surface survives
+ * where it is actually read — `notStoredText` prints "comment" or "body" — and
+ * the CLI hands `options.mode` to THAT, never here.
+ *
+ * ⛔ The no-substitution line reads the VERDICT, never the substitution count
+ * alone (#19091). "This body carried no `{{NOW}}`" was printed over three
+ * shapes at once and was FALSE of two of them: a body stamped by declaration
+ * had a clock its author declared, and a body whose token was quoted carried
+ * one on the board. The refusal now closes the third shape before the write, so
+ * what reaches here is the first two — and the line says which, and what was
+ * quoted. A line that is the only signal a caller gets must be true of every
+ * body that can reach it.
  */
-export function readBackVerdict({ stamp, writtenAt, sent, stored, substituted = 0, mode = 'body' }) {
+export function readBackVerdict({ stamp, writtenAt, sent, stored, substituted = 0, quoted = 0, verbatim = 0, verbatimTokens = 0 }) {
   const lines = [];
   const drift = substituted > 0 ? stampDriftMinutes(stamp, writtenAt, writtenAt) : null;
-  if (substituted === 0) {
-    lines.push(`  stamp: none substituted — this body carried no ${STAMP_TOKEN}, so there is no clock to check`);
+  const verdict = stampVerdict({ substituted, quoted, verbatimTokens });
+  if (substituted === 0 && verdict === 'stamped-by-declaration') {
+    lines.push(
+      `  stamp: none substituted — nothing here is this act's own clock, so there is no drift to check; the` +
+        ` artefact is stamped by DECLARATION (${quoted} \`{{WAS:…}}\` rendered from its own value)` +
+        (verbatimTokens > 0 ? `, beside ${verbatimTokens} token(s) quoted as text` : ''),
+    );
+  } else if (substituted === 0 && verdict === REFUSED_STAMP_VERDICT) {
+    // Unreachable through the CLI — `renderBody` refuses this verdict before a
+    // write — and printed rather than omitted because this function is exported
+    // and pure: a caller that hands it these counts must not be told the body
+    // carried no token when it carried one.
+    lines.push(
+      `  ⚠️ stamp: none substituted, and this body DID carry ${verbatimTokens} token(s) — quoted as text, so` +
+        ` nothing stamped the artefact. A body in this state is REFUSED before the write (exit ${EXIT_REFUSED}).`,
+    );
+  } else if (substituted === 0) {
+    lines.push(
+      `  stamp: none substituted — this body carried no ${STAMP_TOKEN} and no \`{{WAS:…}}\` anywhere, quoted` +
+        ' or not, so there is no clock to check',
+    );
   } else if (drift === null) {
     lines.push(`  ⚠️ stamp: \`${stamp}\` substituted, but the platform returned no readable write time — NOT MEASURED`);
   } else if (drift === 0) {
@@ -873,7 +1927,7 @@ export function readBackVerdict({ stamp, writtenAt, sent, stored, substituted = 
   }
   const sentBytes = Buffer.byteLength(String(sent ?? ''), 'utf8');
   const storedBytes = typeof stored === 'string' ? Buffer.byteLength(stored, 'utf8') : null;
-  const readBack = classifyReadBack({ sent, stored, mode });
+  const readBack = classifyReadBack({ sent, stored });
   if (readBack.class === 'unreadable') {
     lines.push('  ⚠️ read-back: the stored body could not be read — the write is UNVERIFIED, not verified');
   } else if (readBack.class === 'identical') {
@@ -885,14 +1939,265 @@ export function readBackVerdict({ stamp, writtenAt, sent, stored, substituted = 
       `  read-back: clean — the platform appended its footer${readBack.strippedNewlines > 0 ? ', over the stripped trailing newline' : ''}` +
         ` (sent ${sentBytes}, stored ${storedBytes})`,
     );
+  } else if (readBack.class === 'footer-re-anchored') {
+    lines.push(
+      `  read-back: clean — the platform re-anchored its own footer block: the newline this act sent after it` +
+        ` moved to before its rule, and every byte sent IS stored (sent ${sentBytes}, stored ${storedBytes})`,
+    );
+  } else if (readBack.class === 'footer-blank-collapsed') {
+    lines.push(
+      `  read-back: clean — the platform re-anchored its own footer block: the blank line before its rule was` +
+        ` COLLAPSED, so the one byte short is that separator newline and every CONTENT byte sent IS stored` +
+        ` (sent ${sentBytes}, stored ${storedBytes})`,
+    );
   } else {
+    // `mutated` means one thing now, so it says one thing: nobody measured this
+    // difference, here is where it starts, and the write did not land. The
+    // prescription is back on the only population it was ever for — while the
+    // two footer shapes were classed `mutated`, "Read the artefact before
+    // trusting it" fired on nearly every write a seat made, which is how a
+    // reader learns to scroll past the one line that carries a real loss.
     lines.push(
       `  ⚠️ read-back: sent ${sentBytes} byte(s), stored ${storedBytes} — the platform ` +
         'MUTATED the body. Read the artefact before trusting it: the sanitizer eats tag-shaped fragments.',
     );
     lines.push(`     first difference at byte ${readBack.offset}: sent ${readBack.sentContext} | stored ${readBack.storedContext}`);
+    lines.push(`     ⛔ a byte this act sent is NOT the byte stored at that offset — the write did NOT land. Exit ${EXIT_NOT_STORED}.`);
   }
-  return { lines, drift, mutated: readBack.class === 'mutated', readBack };
+  // The exit code lives ON the verdict so exactly one place decides it: a
+  // caller that reads the lines and a caller that reads `$?` cannot come to
+  // disagree about the same write.
+  const landed = sentBodyLanded(readBack);
+  return { lines, drift, mutated: readBack.class === 'mutated', landed, exit: landed ? EXIT_OK : EXIT_NOT_STORED, readBack };
+}
+
+/**
+ * What a caller is told when the read-back proves the platform did not store
+ * what was sent — printed to stderr beside the verdict lines, because the
+ * decision it is asking for is "stop and go read", not "look at a warning".
+ */
+export function notStoredText(verdict, repo, target, mode = 'body') {
+  const offset = verdict?.readBack?.offset;
+  return (
+    `\npost-stamped: NOT STORED — the platform kept something other than the bytes this act sent.\n\n` +
+    `  The ${mode === 'comment' ? 'comment' : 'body'} was written to ${repo}#${target} and read back, and the stored bytes differ from the\n` +
+    `  sent ones at byte ${offset}, INSIDE the body this act sent. That is not the platform's footer\n` +
+    '  handling, which is three measured shapes and nothing else: it appends its block, it moves a\n' +
+    '  trailing newline this act sent to before the block\'s rule, or it COLLAPSES the blank line in\n' +
+    '  front of that rule. All three touch only the block\'s own separator — the collapse really does\n' +
+    '  take one newline away, and a content byte has never been measured going with it. Here one is:\n' +
+    '  something this act sent is not there.\n' +
+    '  The verdict lines above carry both sides at that offset.\n\n' +
+    '  Fix:  READ THE ARTEFACT before writing anything that depends on it having landed.\n' +
+    '        ⛔ Do not retry blindly: the one measured hit of this shape was a size refusal the\n' +
+    '        platform never reported, so an identical second write reproduces it exactly. Work out\n' +
+    '        what is missing from what IS stored, then send a body that can land.\n' +
+    `\n  (Exit code ${EXIT_NOT_STORED}, distinct from ${EXIT_REFUSED}'s "the body broke the stamp contract",\n` +
+    `  ${EXIT_PREREQUISITE_NOT_MET}'s "no act at all" and ${EXIT_TOO_LARGE}'s "the platform answered and refused it on size" —\n` +
+    '  this write HAPPENED. Capture it BEFORE any pipe:\n' +
+    '  `node scripts/pm/post-stamped.mjs … > /tmp/p.log 2>&1; echo "EXIT=$?"`.)'
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The size refusal — a 422 the platform ANSWERED, told apart from a route that
+// never existed. The header's size-refusal section is the authority on the
+// trigger, on why the class is not every 422, and on why the cap this text
+// names is never the number the platform's own message carries.
+// ---------------------------------------------------------------------------
+
+/**
+ * The status a size refusal arrives on, and the only one this class takes.
+ * Measured on objectstack#18826 (comment create and comment update) and on
+ * `POST /issues` (issue create) in the same run.
+ */
+export const SIZE_REFUSAL_STATUS = 422;
+
+/**
+ * The half of the platform's sentence this class keys on.
+ *
+ * ⛔ Case-INSENSITIVE because the two measured spellings are not one string:
+ * the create side says `Body is too long`, the update side the same sentence
+ * with a lower-case `body` (objectstack#18826, captured verbatim on both). An
+ * equality pinned to either one leaves the other at exit 3.
+ *
+ * ⛔ And it stops before the platform's number. `maximum is 65536 characters`
+ * is false in unit and value, so keying on it would tie this class to a false
+ * clause and un-classify the refusal the day GitHub corrects its own text.
+ *
+ * ⛔ NOT global, for `PROTOCOL_STAMP_RE`'s reason: a `g`-flagged exported regex
+ * carries `lastIndex` between callers.
+ */
+export const BODY_TOO_LONG_RE = /body is too long/i;
+
+/** How much of the platform's refusal text a report prints. */
+export const REFUSAL_TEXT_CHARS = 400;
+
+/**
+ * The surfaces this tool writes, each carrying the cap its OWN bisection
+ * measured, in the unit the platform refuses in.
+ *
+ * ⛔ Two constants, never one shared number. They hold the same value today —
+ * 256 KiB on both — and that agreement is two independent measurements
+ * agreeing, not one measurement: the day the platform moves one, a shared
+ * constant would lie about the other.
+ *
+ * ⚠️ The two do not refuse the same WAY. `POST /issues/{n}/comments` answers a
+ * real 422 and writes nothing; `PATCH /issues/{n}` refuses SILENTLY — 200, the
+ * old body kept, nothing reported (#18793) — which is `EXIT_NOT_STORED`'s
+ * population. A `--body` refresh over the cap therefore still lands in 4. The
+ * body surface carries its cap here anyway, because the classifier must name
+ * the cap of the surface it is standing on and never one it was written for.
+ */
+export const WRITE_SURFACES = Object.freeze({
+  comment: Object.freeze({
+    noun: 'a comment',
+    endpoint: 'POST /issues/{n}/comments',
+    cap: COMMENT_BODY_LIMIT,
+    measuredOn: 'objectstack#18826',
+  }),
+  body: Object.freeze({
+    noun: 'an issue body',
+    endpoint: 'PATCH /issues/{n}',
+    cap: ISSUE_BODY_LIMIT,
+    measuredOn: 'objectstack#18793',
+  }),
+});
+
+/**
+ * The remedy exit 3 prescribes, and the one a size refusal prescribes — each a
+ * single constant so the two texts can be pinned HELD APART in both directions.
+ * A route remedy inside a size refusal is the whole defect this class closes,
+ * and a pin on a retyped sentence goes green the first time either is reworded.
+ */
+export const ROUTE_REMEDY = "run this where node's fetch reaches api.github.com with a token that can write issues";
+export const SIZE_REMEDY = 'SHORTEN the body, or SPLIT it across more than one artefact';
+
+/** A byte count with thousands separators, the way every reading in this fleet is quoted. */
+function grouped(n) {
+  return String(n).replace(/\B(?=(\d{3})+(?!\d))/gu, ',');
+}
+
+/**
+ * What the platform SAID, out of the response body it said it in.
+ *
+ * GitHub's validation envelope carries a top-level `message` plus a `message`
+ * per entry in `errors`, and the sentence this class keys on arrived in an
+ * entry (objectstack#18826's record quotes that entry verbatim). Both levels
+ * are collected, in that order, so the text is read wherever the platform puts
+ * it; a payload that is not that envelope falls back to its own bytes rather
+ * than to silence — an unclassified refusal must still be able to say what it
+ * was told.
+ *
+ * ⛔ Never truncated here. The trigger reads this string, and a cut that landed
+ * mid-sentence would answer a question about the platform's text with a fact
+ * about this function's window. Clipping belongs to the printing.
+ */
+export function platformRefusalText(raw) {
+  const text = String(raw ?? '');
+  let payload = null;
+  try {
+    payload = JSON.parse(text);
+  } catch {
+    payload = null;
+  }
+  if (payload && typeof payload === 'object') {
+    const parts = [];
+    if (typeof payload.message === 'string' && payload.message !== '') parts.push(payload.message);
+    for (const entry of Array.isArray(payload.errors) ? payload.errors : []) {
+      if (entry && typeof entry.message === 'string' && entry.message !== '') parts.push(entry.message);
+    }
+    if (parts.length > 0) return parts.join(' · ');
+  }
+  return text.trim();
+}
+
+/**
+ * The refusal this answer IS, or null — one predicate, so the classification a
+ * caller reads and the text it reads cannot come to disagree.
+ *
+ * `null` means "not this class", which leaves the answer exactly where it was
+ * before this class existed: a 422 about anything other than a body's length —
+ * the issues listing's deep-pagination refusal is the measured one — keeps its
+ * PREREQUISITE reading, and so does every other status.
+ *
+ * `explained` is the honest half. It is false when the platform refused a body
+ * at or under the cap this file declares: that is a refusal the reading does
+ * not cover, and the text says so instead of printing an overage of zero. A
+ * live write disagreeing with a measurement moves the measurement, never the
+ * write.
+ */
+export function sizeRefusal({ status, refusalText, mode, sentBytes } = {}) {
+  if (Number(status) !== SIZE_REFUSAL_STATUS) return null;
+  // ⛔ The DECLARED regex, tested directly — never a copy rebuilt from its
+  // `.source` with flags retyped here. A rebuilt copy takes the pattern and
+  // leaves the flags behind, so the `i` that makes the two measured spellings
+  // one class would live in this line and not in the constant that documents
+  // it: an ablation dropping the flag from the declaration changed nothing and
+  // every case-insensitivity pin stayed green. Safe to test in place because
+  // this one is pinned non-global, so it carries no `lastIndex`.
+  if (!BODY_TOO_LONG_RE.test(String(refusalText ?? ''))) return null;
+  const surface = Object.prototype.hasOwnProperty.call(WRITE_SURFACES, String(mode)) ? WRITE_SURFACES[String(mode)] : null;
+  const cap = surface ? surface.cap : null;
+  const sent = Number.isFinite(sentBytes) ? Number(sentBytes) : null;
+  const explained = cap !== null && sent !== null && sent > cap;
+  return {
+    status: Number(status),
+    mode: String(mode),
+    surface,
+    cap,
+    sentBytes: sent,
+    over: explained ? sent - cap : null,
+    explained,
+    platformText: String(refusalText ?? ''),
+  };
+}
+
+/**
+ * What a caller is told when the platform refused the write for its size.
+ *
+ * Printed to stderr, in the shape the other two refusals use, and carrying the
+ * three things a caller needs and exit 3 could never give it: the bytes this
+ * act SENT, the measured cap for the surface it sent them to, and a remedy that
+ * can work. The platform's own sentence is quoted — a reader needs to see what
+ * the platform said — and named FALSE in the same breath, because that sentence
+ * is where the 65,536 folklore comes from.
+ */
+export function sizeRefusalText(refusal, repo, target) {
+  const surface = refusal?.surface ?? null;
+  const sent = refusal?.sentBytes;
+  const sentClause = Number.isFinite(sent) ? `${grouped(sent)} byte(s)` : 'a body of unrecorded size';
+  const head =
+    `\npost-stamped: TOO LARGE — the platform ANSWERED this write and REFUSED it: the body is over the cap\n` +
+    `for this surface. NOTHING WAS WRITTEN.\n\n` +
+    `  Sent to ${repo}#${target}: ${sentClause}` +
+    (surface ? ` as ${surface.noun} (\`${surface.endpoint}\`).\n` : '.\n');
+  const capLines = surface
+    ? `  The measured cap for ${surface.noun} is ${grouped(surface.cap)} bytes — UTF-8 BYTES, bisected on\n` +
+      `  ${surface.measuredOn}, one byte either side.\n` +
+      (refusal.explained
+        ? `  This body is ${grouped(refusal.over)} byte(s) over it.\n`
+        : '  ⚠️ …and this body is NOT over it. The platform refused a body the measured cap says stores, so\n' +
+          '  that reading is the thing due to move: RE-MEASURE the cap before trusting it again, and report\n' +
+          '  the refusal — a cap a live write contradicts is a cap nobody should be quoting.\n')
+    : '  ⚠️ This act wrote to a surface with no declared cap, so none is named here. ⛔ A cap invented at\n' +
+      '  the moment of a refusal is the folklore this class exists to end.\n';
+  return (
+    head +
+    capLines +
+    `\n  The platform said: ${String(refusal?.platformText ?? '').slice(0, REFUSAL_TEXT_CHARS)}\n` +
+    '  ⛔ Its number is FALSE in unit and value — the same fleet measured a 262,144-BYTE comment stored,\n' +
+    '     four times what that sentence claims as a maximum. The cap above is the bisected one; ⛔ never\n' +
+    "     re-derive a cap from a refusal's own text.\n" +
+    `\n  Fix:  ${SIZE_REMEDY}.\n` +
+    '        ⛔ This is NOT a transport problem and there is nothing to fix about the route: the write\n' +
+    '        reached the platform, was read and was refused, so the same bytes through another route with\n' +
+    '        another token are refused identically.\n' +
+    `\n  (Exit code ${EXIT_TOO_LARGE}, distinct from ${EXIT_PREREQUISITE_NOT_MET}'s "no route, no act at all" — this write WAS\n` +
+    `  routed and answered — from ${EXIT_REFUSED}'s "the body broke the stamp contract", which is this tool's own\n` +
+    `  rule and not the platform's, and from ${EXIT_NOT_STORED}'s "written but not stored", where a write HAPPENED.\n` +
+    '  Capture it BEFORE any pipe: `node scripts/pm/post-stamped.mjs … > /tmp/p.log 2>&1; echo "EXIT=$?"`.)'
+  );
 }
 
 /**
@@ -1145,8 +2450,14 @@ async function rest(path, { method = 'GET', body = null } = {}) {
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
   if (!res.ok) {
+    // ⛔ The platform's own sentence is not discarded here. Reading it is what
+    // lets a refusal it ANSWERED be told from a route that never existed, and
+    // the refusal reports carry it either way: a 3 that prints only a status
+    // code hides the one line that says what went wrong.
+    const said = platformRefusalText(await res.text().catch(() => ''));
     const err = new Error(`${method} ${path} -> HTTP ${res.status}`);
     err.status = res.status;
+    err.refusalText = said;
     throw err;
   }
   if (res.status === 204) return null;
@@ -1182,17 +2493,36 @@ async function writeArtefact(repo, options, body) {
   return { id: options.number, url: back?.html_url ?? patched?.html_url ?? null, writtenAt: back?.updated_at ?? patched?.updated_at ?? null, stored: back?.body };
 }
 
-function reportPrerequisiteNotMet(err) {
-  console.error(
-    `\npost-stamped: PREREQUISITE NOT MET — ${err.message}\n\n` +
-      `  Fix:  run this where node's fetch reaches api.github.com with a token that can write issues\n` +
+/**
+ * What a caller is told when there was no act at all — built as a string rather
+ * than printed, so the ONE thing this text must never say can be pinned: the
+ * remedy it prescribes and the remedy a size refusal prescribes are held apart
+ * in BOTH directions, and a pin that can only read one of the two goes green the
+ * day the other one starts saying it.
+ */
+export function prerequisiteNotMetText(err) {
+  const said = typeof err?.refusalText === 'string' && err.refusalText !== '' ? err.refusalText : null;
+  return (
+    `\npost-stamped: PREREQUISITE NOT MET — ${err?.message ?? 'no message'}\n\n` +
+      // What the platform said, when it said anything at all. An answer this
+      // class does not recognise is still an answer, and a report that prints
+      // only the status code makes the reader go and re-run the request to see
+      // the one sentence that was already in hand.
+      (said ? `  The platform said: ${said.slice(0, REFUSAL_TEXT_CHARS)}\n\n` : '') +
+      `  Fix:  ${ROUTE_REMEDY}\n` +
       `        (a GitHub Actions runner, or an agent container with ${PROXY_FLAG} — this script re-execs\n` +
       '        itself with that flag when HTTPS_PROXY is set).\n\n' +
       '  NOTHING WAS WRITTEN, and nothing was read back. This is not a failed post and not a successful\n' +
       '  one — it is no act at all.\n' +
       `\n  (Exit code ${EXIT_PREREQUISITE_NOT_MET}, distinct from ${EXIT_REFUSED}'s "the body broke the stamp\n` +
-      '  contract". Capture it BEFORE any pipe: `node scripts/pm/post-stamped.mjs … > /tmp/p.log 2>&1; echo "EXIT=$?"`.)',
+      `  contract" and from ${EXIT_TOO_LARGE}'s "the platform answered and refused the body for its size", where a\n` +
+      '  route existed and the remedy above cannot help. Capture it BEFORE any pipe:\n' +
+      '  `node scripts/pm/post-stamped.mjs … > /tmp/p.log 2>&1; echo "EXIT=$?"`.)'
   );
+}
+
+function reportPrerequisiteNotMet(err) {
+  console.error(prerequisiteNotMetText(err));
   return EXIT_PREREQUISITE_NOT_MET;
 }
 
@@ -1202,17 +2532,24 @@ function readInput(file) {
 }
 
 function rearmThroughProxy(args) {
+  // `guard` is THIS tool's own variable (#18939). Without it the plan read the
+  // patrol's shared name straight out of `process.env`, so a sibling
+  // instrument's inherited guard answered "already re-armed" here — silently —
+  // and the un-re-armed run then bypassed the proxy and answered 401 Bad
+  // credentials, a false story about the credential. The own-guard `if` that
+  // used to sit below was never reached for that case; the plan's own branch
+  // now covers it, and PRINTS the variable through `plan.hint`.
   const plan = proxyRearmPlan({
     env: process.env,
     execArgv: process.execArgv,
     flagSupported: process.allowedNodeEnvironmentFlags.has(PROXY_FLAG),
+    guard: PROXY_REARM_GUARD,
   });
   if (plan.hint) {
     console.error(`ℹ️  ${plan.reason}. A refusal below may be about the route, not this container.`);
     return null;
   }
   if (!plan.rearm) return null;
-  if (process.env[PROXY_REARM_GUARD] === '1') return null;
   console.error(`ℹ️  re-exec with ${plan.flag}: ${plan.reason}.`);
   const quiet = process.allowedNodeEnvironmentFlags.has('--disable-warning') ? ['--disable-warning=UNDICI-EHPA'] : [];
   const child = spawnSync(process.execPath, [plan.flag, ...quiet, SELF_PATH, ...args], {
@@ -1239,9 +2576,24 @@ const USAGE = [
   '  than the clock this run reads is REFUSED too — the future is not a thing anyone read — and so is',
   '  one whose digits name no instant the calendar has (month 13, 99:99, 31 April), whether it fails to',
   '  parse at all or rolls over silently to another date.',
+  '  To QUOTE the contract rather than use it, put it in Markdown code — a fenced block or a backtick',
+  '  span. Inside one this tool renders TEXT: nothing is substituted, no opener is refused, no quoted',
+  '  stamp is validated, and the status line reports how many openers were left verbatim beside how many',
+  '  were substituted. ⛔ A bare stamp is judged inside a quotation exactly as in prose — quoting changes',
+  '  what is rendered, never what was typed onto the board.',
+  '  A body whose ONLY token sits inside a quotation is REFUSED: the literal token would go onto the card',
+  '  with no time behind it. Quote the token AND stamp the artefact — a `{{WAS:…}}` outside the quotation',
+  '  is a stamp, so a body that quotes the contract beside a declaration is accepted. A body that spells',
+  '  no token at all is unchanged.',
   '  A body refresh is REFUSED while comments newer than the body\'s last write stamp exist and',
   '  --ack-through=ID does not name the newest of them — a refresh must not void an unread knock.',
   '  The attribution footer is the caller\'s: its form differs by channel and act, so this tool adds none.',
+  '',
+  `  Exit: 0 written and stored · ${EXIT_USAGE} usage · ${EXIT_REFUSED} refused, nothing written ·`,
+  `  ${EXIT_PREREQUISITE_NOT_MET} no route, no act at all · ${EXIT_NOT_STORED} WRITTEN BUT NOT STORED — go read the artefact,`,
+  `  ⛔ do not retry blindly · ${EXIT_TOO_LARGE} TOO LARGE — the platform answered and refused the body for its size;`,
+  '  it names the bytes sent and the measured cap for that surface, and the remedy is to shorten or split',
+  '  the body, ⛔ never another route. Capture the code BEFORE any pipe.',
 ].join('\n');
 
 async function main(argv) {
@@ -1282,8 +2634,9 @@ async function main(argv) {
 
   if (options.dryRun) {
     console.error(
-      `post-stamped: DRY RUN — nothing was written. ${rendered.substituted} token(s) substituted with ` +
-        `\`${rendered.stamp}\`, ${rendered.quoted} quoted stamp(s) rendered verbatim. Target would be ` +
+      `post-stamped: DRY RUN — nothing was written. Substituted with \`${rendered.stamp}\` — ` +
+        `${substitutionSummary(rendered)}. Stamp verdict: ${rendered.verdict} — ` +
+        `${STAMP_VERDICTS[rendered.verdict]}. Target would be ` +
         `${repoRes.repo}#${options.number} (${options.mode}).` +
         (options.mode === 'body' ? ' The unread-comment check reads the card and runs only on a live write.' : ''),
     );
@@ -1312,6 +2665,19 @@ async function main(argv) {
   try {
     written = await writeArtefact(repoRes.repo, options, rendered.body);
   } catch (err) {
+    // ⛔ Only the WRITE path is classified. A read sends no body, so a size
+    // refusal cannot be what it was answered with, and the pre-read above keeps
+    // its PREREQUISITE reading unchanged.
+    const refusal = sizeRefusal({
+      status: err?.status,
+      refusalText: err?.refusalText,
+      mode: options.mode,
+      sentBytes: Buffer.byteLength(rendered.body, 'utf8'),
+    });
+    if (refusal) {
+      console.error(sizeRefusalText(refusal, repoRes.repo, options.number));
+      return EXIT_TOO_LARGE;
+    }
     return reportPrerequisiteNotMet(err);
   }
 
@@ -1321,9 +2687,9 @@ async function main(argv) {
     sent: rendered.body,
     stored: written.stored,
     substituted: rendered.substituted,
-    // The act, not a guess: the footer rule is comment-only, and this is the
-    // one place that knows which of the two writes just happened.
-    mode: options.mode,
+    quoted: rendered.quoted,
+    verbatim: rendered.verbatim,
+    verbatimTokens: rendered.verbatimTokens,
   });
 
   if (options.json) {
@@ -1338,10 +2704,18 @@ async function main(argv) {
           stamp: rendered.stamp,
           substituted: rendered.substituted,
           quoted: rendered.quoted,
+          verbatim: rendered.verbatim,
+          verbatim_tokens: rendered.verbatimTokens,
+          stamp_verdict: rendered.verdict,
           written_at: written.writtenAt,
           drift_minutes: verdict.drift,
           body_mutated: verdict.mutated,
-          read_back: { class: verdict.readBack.class, first_difference_byte: verdict.readBack.offset },
+          body_landed: verdict.landed,
+          read_back: {
+            class: verdict.readBack.class,
+            first_difference_byte: verdict.readBack.offset,
+            footer_re_anchored: verdict.readBack.footerReAnchored ?? null,
+          },
           ...(unread
             ? {
                 unread_check: {
@@ -1357,19 +2731,24 @@ async function main(argv) {
         2,
       ),
     );
-    return EXIT_OK;
+  } else {
+    console.log(
+      [
+        `post-stamped: ${options.mode === 'comment' ? 'comment posted on' : 'body rewritten on'} ${repoRes.repo}#${options.number}`,
+        `  ${options.mode === 'comment' ? 'comment' : 'card'}: ${written.id} ${written.url ?? '(no url returned)'}`,
+        ...verdict.lines,
+        ...(unread ? [unreadPassText(unread)] : []),
+        `  substitutions: ${substitutionSummary(rendered)}`,
+      ].join('\n'),
+    );
   }
 
-  console.log(
-    [
-      `post-stamped: ${options.mode === 'comment' ? 'comment posted on' : 'body rewritten on'} ${repoRes.repo}#${options.number}`,
-      `  ${options.mode === 'comment' ? 'comment' : 'card'}: ${written.id} ${written.url ?? '(no url returned)'}`,
-      ...verdict.lines,
-      ...(unread ? [unreadPassText(unread)] : []),
-      `  substitutions: ${rendered.substituted} ${STAMP_TOKEN}, ${rendered.quoted} quoted`,
-    ].join('\n'),
-  );
-  return EXIT_OK;
+  // ⛔ The one thing a caller cannot be left to read out of prose: the write
+  // happened and the platform did not keep it. Reported after the lines above
+  // — they carry the offset this text sends the reader to — and on BOTH
+  // output shapes, because `--json` is the one a script reads.
+  if (!verdict.landed) console.error(notStoredText(verdict, repoRes.repo, options.number, options.mode));
+  return verdict.exit;
 }
 
 // ---------------------------------------------------------------------------
@@ -1383,18 +2762,25 @@ async function main(argv) {
 // ---------------------------------------------------------------------------
 
 const SELF_TEST_BATTERIES = Object.freeze({
+  'the re-exec guard: the name this tool sets, and the patrol name that must not silence it': 11,
   'the token contract: the two spellings, and nothing else': 9,
   'the refusals: every route that must not reach the board': 20,
   'the opener scan: every `{{` is a token this tool renders, or the body is refused': 35,
+  'the quoting spelling: Markdown code is a quotation, and a quotation is rendered as written': 52,
+  'the stamp verdict: a quoted token is not a stamp, and the carve-out has a partner check': 63,
   'the calendar rule: a stamp shaped like an instant the calendar does not have': 34,
   'the direction check: a stamp no act can have read': 22,
   'the substitution: one clock, read once, written everywhere': 9,
   'the read-back: what the transcript can actually prove': 33,
+  'the exit code: the read-back reaches `$?`, or it reaches nobody': 24,
+  'the re-anchored footer: a newline the platform MOVED is not a byte lost': 41,
+  "the collapsed blank: the footer block's own separator is not a content byte": 33,
   'the CLI: the one decision a typo must never make': 16,
   'the unread-knock check: a refresh cannot void what nobody read': 49,
+  'the size refusal: a 422 the platform answered is not a route that never existed': 53,
   'the shared rule: this tool and H56 cannot come to disagree': 6,
 });
-const SELF_TEST_BATTERY_FLOOR = 10;
+const SELF_TEST_BATTERY_FLOOR = 15;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 let selfTestReachedVerdict = false;
@@ -1414,6 +2800,31 @@ export function selfTest() {
 
   const NOW_MS = Date.parse('2026-09-10T06:37:48Z');
   const kinds = (text, ms) => stampRefusals(text, ms).map((r) => r.kind);
+
+  // ── the re-exec guard (#18939) ────────────────────────────────────────────
+  // The plan reads the guard name THIS file sets, never a shared one. A sibling
+  // instrument's inherited guard used to answer 'already re-armed' here, and the
+  // un-re-armed run then bypassed the proxy and answered 401 Bad credentials —
+  // a false story about the credential, printed nowhere at all.
+  battery('the re-exec guard: the name this tool sets, and the patrol name that must not silence it');
+  {
+    const PATROL_GUARD = 'OS_HALF_STATES_PROXY_REARMED';
+    const proxied = { HTTPS_PROXY: 'http://127.0.0.1:40309' };
+    const rearm = (env) => proxyRearmPlan({ env, guard: PROXY_REARM_GUARD, flagSupported: true });
+    const own = { ...proxied, [PROXY_REARM_GUARD]: '1' };
+    const ownSource = readFileSync(SELF_PATH, 'utf8');
+    t('this tool\'s guard is its own name, never the patrol\'s', PROXY_REARM_GUARD !== PATROL_GUARD);
+    t('…and the patrol name pinned here IS the plan\'s default, so a rename reds this battery', proxyRearmPlan({ env: { ...proxied, [PATROL_GUARD]: '1' } }).guarded === PATROL_GUARD);
+    t('a proxied run with no guard set re-execs', rearm(proxied).rearm === true);
+    t('…this tool\'s OWN guard is what stops the loop', rearm(own).rearm === false);
+    t('…while the patrol\'s inherited guard does NOT suppress it', rearm({ ...proxied, [PATROL_GUARD]: '1' }).rearm === true);
+    t('a suppressed run SPEAKS — silence is the whole cost of this chain', rearm(own).hint === true);
+    t('…naming the variable a reader has to unset', rearm(own).reason.includes(PROXY_REARM_GUARD));
+    t('…and naming the 401 the silence would otherwise be read as', rearm(own).reason.includes('401 Bad credentials'));
+    t('the Actions-runner leg is unchanged: no proxy, no re-exec, no extra line', rearm({ [PROXY_REARM_GUARD]: '1' }).rearm === false && rearm({ [PROXY_REARM_GUARD]: '1' }).hint === false);
+    t('structural: the dispatch really hands the plan THIS file\'s guard', /\n\s+guard: PROXY_REARM_GUARD,\n/.test(ownSource));
+    t('structural: the plan is imported, not restated here', /\bproxyRearmPlan\b/.test(ownSource) && !/function\s+proxyRearmPlan\b/.test(ownSource));
+  }
 
   battery('the token contract: the two spellings, and nothing else');
   t('the act-clock token is `{{NOW}}`', STAMP_TOKEN === '{{NOW}}');
@@ -1494,7 +2905,10 @@ export function selfTest() {
   t('⛔ …and the seconds grain still clears it', unrecognisedOpeners('read {{WAS:2026-09-08T14:00:30Z}}').length === 0);
   t('⛔ …and a bare stamp in prose is no opener\'s business', unrecognisedOpeners('The 2026-09-08T14:00Z ruling stands.').length === 0);
   t('⛔ the scan opens NO escape hatch: the entity spelling is not an opener, so it is prose', unrecognisedOpeners('the token &#123;&#123;NOW&#125;&#125;').length === 0);
-  t('⛔ …and a token inside backticks is STILL substituted — a fence is not an escape', renderBody('Write `{{NOW}}` there.', NOW_MS).body === 'Write `2026-09-10T06:37Z` there.');
+  // ⛔ The body carries a SECOND token in prose, because a body whose only token
+  // is the quoted one is now refused as unstamped (#19091) — the stamp-verdict
+  // battery owns that rule and pins this same body without the stamp.
+  t('⭐ a token inside backticks is a QUOTATION and is left as written — the next battery owns this rule', renderBody('Write `{{NOW}}` there, read {{NOW}}.', NOW_MS).body === 'Write `{{NOW}}` there, read 2026-09-10T06:37Z.');
 
   t('the span renderer escapes a newline', offendingSpan('a\nb') === 'a\\nb');
   t('…a carriage return and a tab too', offendingSpan('a\r\tb') === 'a\\r\\tb');
@@ -1503,6 +2917,217 @@ export function selfTest() {
   t(`a longer one is clipped to ${SPAN_BYTES} bytes and says so`, offendingSpan('x'.repeat(100)) === `${'x'.repeat(SPAN_BYTES)}…`);
   t('⛔ …and never cuts a multi-byte character in half', offendingSpan(`${'x'.repeat(SPAN_BYTES - 1)}€€`) === `${'x'.repeat(SPAN_BYTES - 1)}…`);
   t('the budget is counted in BYTES, which is the unit a dump arrives in', SPAN_BYTES === 60 && Buffer.byteLength(offendingSpan('€'.repeat(40)), 'utf8') <= SPAN_BYTES + 3);
+
+  // The filed instance, in kind: a seat quoted this tool's OWN status line
+  // verbatim — an inline code span inside a blockquote — and the token inside
+  // the quotation was substituted, publishing a sentence the tool never
+  // printed. Three live hits in one hour, by two seats, plus a claim the tool
+  // refused for spelling its own documentation placeholder.
+  battery('the quoting spelling: Markdown code is a quotation, and a quotation is rendered as written');
+  const CARD_QUOTE =
+    'Addendum.\n\n' +
+    '> `post-stamped` reported it faithfully: 「*stamp: none substituted — this body carried no `{{NOW}}`, so there is no clock to check*」\n\n' +
+    '<sub>read {{NOW}}.</sub>\n';
+  const cardQuote = renderBody(CARD_QUOTE, NOW_MS);
+  t('⭐ THE FILED INSTANCE: the quoted token inside an inline span inside a blockquote is left as written', cardQuote.ok === true && cardQuote.body.includes('carried no `{{NOW}}`'));
+  t('⭐ …so the quotation is no longer falsified — the stamp does not appear inside it', cardQuote.body.includes('carried no `2026-09-10T06:37Z`') === false);
+  t('⭐ …and the act\'s OWN token, outside the quotation, still gets the clock', cardQuote.body.includes('<sub>read 2026-09-10T06:37Z.</sub>'));
+  t('⭐ …the counts now separate the two: 1 substituted, 1 verbatim, where the filed run could only say 2', cardQuote.substituted === 1 && cardQuote.verbatim === 1, `sub=${cardQuote.substituted} verb=${cardQuote.verbatim}`);
+  t('⭐ …and the status line SAYS both, so a reader can compare them to intent', substitutionSummary(cardQuote).includes('1 {{NOW}}') && substitutionSummary(cardQuote).includes('verbatim: 1 opener(s)'));
+  t('⛔ THE BEFORE-READING, kept as a control: the same body with the backticks removed IS substituted', renderBody(CARD_QUOTE.replace(/`\{\{NOW\}\}`/u, '{{NOW}}'), NOW_MS).substituted === 2);
+
+  const FENCED = 'Re-check:\n\n```\nprintf \'{{NOW}}\' | node scripts/pm/post-stamped.mjs --dry-run\n```\n\n<sub>read {{NOW}}.</sub>\n';
+  const fenced = renderBody(FENCED, NOW_MS);
+  t('⭐ THE UNESTABLISHED POINT, measured: a FENCED block is a quotation too', fenced.ok === true && fenced.body.includes("printf '{{NOW}}'"));
+  t('…with the token outside it still substituted, so fencing quotes one and not the other', fenced.substituted === 1 && fenced.verbatim === 1);
+  t('⛔ …and the before-reading it replaces: the tree substituted inside a fence exactly like prose', quotedSpans('```\n{{NOW}}\n```').length === 1);
+  t('a tilde fence is a fence', quotedSpans('~~~\n{{NOW}}\n~~~\n').length === 1);
+  t('an info string does not stop a fence opening', renderBody('```bash\necho {{NOW}}\n```\n\nread {{NOW}}\n', NOW_MS).verbatim === 1);
+  t('⛔ a backtick fence whose info string carries a backtick is NOT a fence — CommonMark\'s own rule', renderBody('```a`b\n{{NOW}}\n', NOW_MS).substituted === 1);
+  t('an UNCLOSED fence quotes to the end of the body, the way CommonMark ends one', renderBody('read {{NOW}}\n\n```\ntail {{NOW}}\n', NOW_MS).verbatim === 1);
+  t('⭐ a fence INSIDE a blockquote is tracked through the quote marker — the shape a seat quotes tool output in', renderBody('Tool said:\n\n> ```\n> substitutions: 2 {{NOW}}, 0 quoted\n> ```\n\nread {{NOW}}\n', NOW_MS).verbatim === 1);
+  t('…and the quote ending ends the block with it, so prose after it is prose again', renderBody('> ```\n> {{NOW}}\n\nread {{NOW}}\n', NOW_MS).substituted === 1);
+  t('⛔ a four-space indented block is NOT the quoting spelling — indentation is load-bearing in lists', renderBody('read {{NOW}}\n\n    {{NOW}}\n', NOW_MS).substituted === 2);
+
+  const ELLIPSIS = 'Claim: PM loop round 1.\n\nFile surface: the tool substitutes `{{NOW}}`, and `{{WAS:...}}` cannot be quoted either.\n\n<sub>read {{NOW}}.</sub>\n';
+  const ellipsis = renderBody(ELLIPSIS, NOW_MS);
+  t('⭐ THE CLAIM\'S OWN REFUSAL, retired: an ellipsis payload inside backticks is quoted VERBATIM, not refused', ellipsis.ok === true && ellipsis.body.includes('`{{WAS:...}}`'));
+  t('…because the quoted-stamp validation reads a DECLARATION, and inside a quotation there is none', quotedStampValues('`{{WAS:...}}`').length === 0);
+  t('⛔ …the before-reading it replaces: the same payload in PROSE is still refused as not-a-stamp', kinds('the form is {{WAS:...}}', NOW_MS).join() === 'quoted-not-a-stamp');
+  t('⭐ the documentation placeholder is quotable now — which is what this file\'s own refusal text spells', renderBody('The quoted route is `{{WAS:YYYY-MM-DDThh:mmZ}}`.\n\nread {{NOW}}\n', NOW_MS).ok === true);
+  t('⛔ …and in prose it is still refused, so the contract did not widen by one case', kinds('The quoted route is {{WAS:YYYY-MM-DDThh:mmZ}}.', NOW_MS).join() === 'quoted-not-a-stamp');
+  // ⛔ Kept byte-identical, and read through `substituteTokens` rather than
+  // `renderBody`: a quoted WAS with real digits and NOTHING else is exactly the
+  // `unstamped-quoted-token` body the stamp-verdict battery refuses (#19091), so the
+  // three cases here stay about RENDERING and the acceptance decision is pinned
+  // where it is made. ⛔ Stamping this body with `{{NOW}}` is not the fix — the
+  // quoted digits are unmasked, so the MIXED refusal fires, as pinned below.
+  const QUOTED_WAS_DIGITS = 'Note on the contract.\n\nExample: `{{WAS:2026-09-08T14:00Z}}` is the form.\n';
+  const quotedWasDigits = substituteTokens(QUOTED_WAS_DIGITS, stampNow(NOW_MS));
+  t('a WAS token with REAL digits inside a quotation renders as the TOKEN, braces and all', quotedWasDigits.body.includes('`{{WAS:2026-09-08T14:00Z}}`'));
+  t('…and is counted verbatim rather than as a quoted stamp — it declared nothing', quotedWasDigits.quoted === 0 && quotedWasDigits.verbatim === 1);
+  t('⛔ …and the same body in PROSE still renders the stamp from its declaration, unchanged', substituteTokens(QUOTED_WAS_DIGITS.replace(/`/gu, ''), stampNow(NOW_MS)).quoted === 1);
+  t('⛔ …and in prose it is a DECLARATION, so `renderBody` takes it — the quoted one is what changed', renderBody(QUOTED_WAS_DIGITS.replace(/`/gu, ''), NOW_MS).ok === true);
+  t('an unknown token NAME inside a quotation is text, not a refusal', renderBody('The typo `{{now}}` is refused.\n\nread {{NOW}}\n', NOW_MS).ok === true);
+  t('…and an UNCLOSED opener inside one is text too', renderBody('Quoting `{{WAS:2026` mid-edit.\n\nread {{NOW}}\n', NOW_MS).ok === true);
+  t('⛔ both are still refused in prose — the opener scan narrowed nowhere else', renderBody('The typo {{now}} is refused.', NOW_MS).ok === false && renderBody('Quoting {{WAS:2026 mid-edit.', NOW_MS).ok === false);
+
+  // ⛔ The asymmetry this rule stands on: a quotation suppresses what RENDERS a
+  // token, never what judges a stamp a human typed. Quoting changes what is
+  // rendered, never what was authored — so nothing can hide a stamp behind
+  // backticks.
+  t('⭐ A BARE STAMP INSIDE THE QUOTING SPELLING IS REFUSED, exactly as in prose — the opening line', kinds('Claim: seat `2026-09-10T06:37Z` — dispatched.', NOW_MS).join() === 'positional');
+  t('⭐ …and inside a FENCE beside the act-clock token, the MIXED refusal still fires', kinds('Verdict {{NOW}}.\n\n```\nread 2026-09-08T14:00Z\n```\n', NOW_MS).join() === 'mixed');
+  t('⭐ …because `maskQuotedStamps` blanks a WAS token only where it IS a token', maskQuotedStamps('`{{WAS:2026-09-08T14:00Z}}`').includes('2026-09-08T14:00Z') && maskQuotedStamps('{{WAS:2026-09-08T14:00Z}}').includes('2026-09-08T14:00Z') === false);
+  t('⭐ …so a stamp cannot hide from the contract behind backticks, which is the accident this may never buy', kinds('Verdict {{NOW}} — write `{{WAS:2026-09-08T14:00Z}}` for a quoted reading.', NOW_MS).length > 0);
+  t('⛔ …and the body that refusal replaces used to be ACCEPTED and rendered as bare digits — the defect, not a feature', unrecognisedOpeners('Verdict {{NOW}} — write `{{WAS:2026-09-08T14:00Z}}` for a quoted reading.').length === 0);
+  const QUOTED_TOKEN_PLUS_STAMP = 'Here is the token: `{{NOW}}`.\n\nThe board was read at 2026-09-08T14:00Z.\n';
+  t('⛔ the MIXED trigger is deliberately NOT quote-aware: spelling the token anywhere means the author knows it', kinds(QUOTED_TOKEN_PLUS_STAMP, NOW_MS).join() === 'mixed');
+  t('…so this change weakened no refusal — it is the one direction it could have', stampRefusals(QUOTED_TOKEN_PLUS_STAMP, NOW_MS).length === 1);
+  const QUOTED_REMEDY = stampRefusals('Verdict {{NOW}}.\n\n```\nread 2026-09-08T14:00Z\n```\n', NOW_MS)[0].detail;
+  t('⭐ the remedy SAYS the stamp sits inside a quotation, rather than prescribing a route that cannot work there', QUOTED_REMEDY.includes('sits inside a QUOTED SPAN'));
+  t('…and names the placeholder as the way to quote an example', QUOTED_REMEDY.includes('YYYY-MM-DDThh:mmZ'));
+  t('⛔ …and a stamp with even ONE unquoted occurrence gets the ordinary remedy, with no such clause', stampRefusals('Verdict {{NOW}}.\n\nread 2026-09-08T14:00Z and `2026-09-08T14:00Z`.\n', NOW_MS)[0].detail.includes('QUOTED SPAN') === false);
+
+  const UNMATCHED = 'Write `{{NOW}} there.';
+  t('⛔ an unmatched backtick opens NO span — the run needs a closer of the same length on the line', renderBody(UNMATCHED, NOW_MS).body === 'Write `2026-09-10T06:37Z there.');
+  t('a double-backtick run closes on a double-backtick run', quotedSpans('``{{NOW}}``').length === 1);
+  t('…and a single run inside a double one is content, not a closer', renderBody('``a `b` {{NOW}}`` read {{NOW}}', NOW_MS).substituted === 1);
+  t('⛔ a code span is searched within ONE line only — conservative on purpose, so under-detection is today\'s behaviour', renderBody('`{{NOW}}\n{{NOW}}`', NOW_MS).substituted === 2);
+  t('two spans on one line are two spans', quotedSpans('`a` and `b`').length === 2);
+  t('a backtick run inside a FENCE is fence content, never a span of its own', quotedSpans('```\n`a` `b`\n```').length === 1);
+  t('the span kinds are declared, so a reader and the code share one vocabulary', Object.keys(QUOTED_SPAN_KINDS).join() === 'fenced,code-span');
+  t('an opener is judged by where it STARTS — one position, one answer for every rule', insideQuotedSpan([{ from: 0, to: 5 }], 4) === true && insideQuotedSpan([{ from: 0, to: 5 }], 5) === false);
+
+  const PROSE_CONTROL = 'Verdict {{NOW}} — on the board read {{WAS:2026-09-08T14:00Z}}.';
+  t('⭐ THE CONTROL: prose substitution is byte-identical — the whole point of a structural rule', renderBody(PROSE_CONTROL, NOW_MS).body === 'Verdict 2026-09-10T06:37Z — on the board read 2026-09-08T14:00Z.');
+  t('…with no opener left verbatim, because no quotation is there', renderBody(PROSE_CONTROL, NOW_MS).verbatim === 0);
+  t('…and the summary says so in words rather than leaving a bare zero to read', substitutionSummary(renderBody(PROSE_CONTROL, NOW_MS)).endsWith('(none)'));
+  t('a body with no backtick at all has no span, so `quotedSpans` costs it nothing', quotedSpans('Claim: seat, {{NOW}} — dispatched.').length === 0);
+  t('⛔ NO THIRD SPELLING was added: the tokens are still exactly two', STAMP_TOKEN === '{{NOW}}' && QUOTED_TOKEN_RE.source === '\\{\\{WAS:([^{}]*)\\}\\}');
+  t('⛔ and NO flag turns substitution off — the quoting spelling lives in the body, where a reader sees it', KNOWN_FLAGS.includes('--no-substitute') === false && KNOWN_OPTIONS.includes('expect-now') === false);
+
+  // ── the stamp verdict: the carve-out's PARTNER check (#19091) ─────────────
+  // The filed defect: three live `Claim:` comments carried their round stamp as
+  // a quoted `{{NOW}}`, were substituted by nothing — correctly — and posted at
+  // exit 0 with the literal token on the board and no time. The carve-out above
+  // is right; what it shipped without is a check that the artefact ended up
+  // stamped AT ALL. ⛔ The criterion is NOT "0 substitutions and a verbatim
+  // opener": this tool's own docblock is a body that quotes the token and stamps
+  // itself by declaration, so the judgement is a PREDICATE over the counts.
+  battery('the stamp verdict: a quoted token is not a stamp, and the carve-out has a partner check');
+  const LEG_A = 'A claim whose only stamp lives inside a code span.\n\n`Round: fire of {{NOW}}`\n';
+  const LEG_B = 'A claim whose stamp is in prose.\n\nRound: fire of {{NOW}}\n';
+  const legA = renderBody(LEG_A, NOW_MS);
+  const legB = renderBody(LEG_B, NOW_MS);
+  t('⭐ LEG A, THE FILED SHAPE: a body whose ONLY token is quoted is REFUSED', legA.ok === false);
+  t('⭐ …and nothing is rendered from it, so no literal token can reach the board', legA.body === undefined);
+  t('…under its own refusal kind, which stands apart from the three it joins', legA.kind === 'unstamped' && ['empty', 'unknown-token', 'stamp-contract'].includes(legA.kind) === false);
+  t('…and the verdict on the result names what was wrong with it', legA.verdict === REFUSED_STAMP_VERDICT);
+  t('⛔ LEG B, THE CONTROL: the same body with the backticks removed is substituted exactly as before', legB.ok === true && legB.body === 'A claim whose stamp is in prose.\n\nRound: fire of 2026-09-10T06:37Z\n');
+  t('…with the counts it always had', legB.substituted === 1 && legB.quoted === 0 && legB.verbatim === 0);
+  t('⭐ …so the difference between the two is three backticks, and the EXIT now differs with it', legA.ok !== legB.ok);
+
+  // The three live artefacts, replayed from the card's text: one act, one shape,
+  // three cards, each posted unstamped with the token visible and repaired by
+  // hand afterwards — a seat's own catch, which is what a tool exists to remove.
+  const filedSpecimen = (card) => `Claim: skills seat, dispatch on ${card}\n\n\`Round: fire of {{NOW}}\`\n`;
+  const SPECIMENS = ['objectui#9871', 'objectui#9880', 'objectui#9874'];
+  t('⭐ THE FILED SPECIMENS: objectui#9871\'s shape is refused', renderBody(filedSpecimen(SPECIMENS[0]), NOW_MS).ok === false);
+  t('⭐ …objectui#9880\'s too', renderBody(filedSpecimen(SPECIMENS[1]), NOW_MS).ok === false);
+  t('⭐ …and objectui#9874\'s', renderBody(filedSpecimen(SPECIMENS[2]), NOW_MS).ok === false);
+  t('⭐ …each under the ONE verdict, so the three are one finding and not three', SPECIMENS.every((c) => renderBody(filedSpecimen(c), NOW_MS).verdict === REFUSED_STAMP_VERDICT));
+  t('a FENCED body of the same shape is refused too — the construct is not the rule', renderBody('Claim: skills seat.\n\n```\nRound: fire of {{NOW}}\n```\n', NOW_MS).verdict === REFUSED_STAMP_VERDICT);
+
+  // ⭐ The two shapes that MUST stay accepted, which is why the naive criterion
+  // is excluded by name. The first is this seat's own claim comment.
+  const SEAT_CLAIM =
+    'Claim: PM loop round 1 (skills seat)\n' +
+    'Branch: `claude/issue-19091-post-stamped-unstamped-artefact`\n' +
+    'File surface: `scripts/pm/post-stamped.mjs`\n\n' +
+    'Serial constraints cleared: this file last landed {{WAS:2026-09-08T14:00Z}}.\n';
+  const seatClaim = renderBody(SEAT_CLAIM, NOW_MS);
+  t('⭐ THE SEAT\'S OWN CLAIM SHAPE: a `{{WAS:…}}` in prose beside backticked names, no `{{NOW}}`, is ACCEPTED', seatClaim.ok === true);
+  t('…stamped by DECLARATION rather than by this act\'s clock', seatClaim.verdict === 'stamped-by-declaration');
+  t('…and the declared stamp is what reaches the board', String(seatClaim.body).includes('this file last landed 2026-09-08T14:00Z.'));
+  const DOCBLOCK_SHAPED =
+    'The contract has two spellings: `{{NOW}}` is the clock this act reads, and\n' +
+    '`{{WAS:YYYY-MM-DDThh:mmZ}}` declares a reading of something else.\n\n' +
+    'Measured on this channel {{WAS:2026-09-08T14:00Z}}.\n';
+  const docblockShaped = renderBody(DOCBLOCK_SHAPED, NOW_MS);
+  t('⭐ THIS TOOL\'S OWN DOCBLOCK SHAPE: a body that QUOTES both tokens and declares a stamp is ACCEPTED', docblockShaped.ok === true);
+  t('⭐ …and it is exactly the body the excluded criterion would have refused: 0 substituted, 2 verbatim', docblockShaped.substituted === 0 && docblockShaped.verbatim === 2);
+  t('…both quotations reach the board as written', String(docblockShaped.body).includes('`{{NOW}}`') && String(docblockShaped.body).includes('`{{WAS:YYYY-MM-DDThh:mmZ}}`'));
+  t('…while the declaration OUTSIDE them renders its own value', String(docblockShaped.body).includes('Measured on this channel 2026-09-08T14:00Z.'));
+
+  // The predicate itself, over the counts alone — the deliverable this card
+  // asked for FIRST, and the one place the decision is made.
+  t('the predicate answers from the counts, with no body to read', stampVerdict({ substituted: 1 }) === 'stamped-by-this-act');
+  t('⭐ this act\'s own clock outranks everything: a body carrying both IS stamped by this act', stampVerdict({ substituted: 1, quoted: 1, verbatimTokens: 3 }) === 'stamped-by-this-act');
+  t('a declaration with nothing substituted is stamped by declaration', stampVerdict({ quoted: 1 }) === 'stamped-by-declaration');
+  t('⭐ …and it outranks a quoted token, which is the docblock shape above', stampVerdict({ quoted: 1, verbatimTokens: 3 }) === 'stamped-by-declaration');
+  t('⭐ a quoted token with nothing else is the one verdict that is refused', stampVerdict({ verbatimTokens: 1 }) === REFUSED_STAMP_VERDICT);
+  t('all three counts zero is `no-token` — the pre-existing shape, still posted', stampVerdict({}) === 'no-token');
+  t('…and no argument at all answers the same, never `undefined`', stampVerdict() === 'no-token');
+  t('every verdict the predicate can return is DECLARED, so a reader and the code share one vocabulary', [{ substituted: 1 }, { quoted: 1 }, { verbatimTokens: 1 }, {}].every((c) => stampVerdict(c) in STAMP_VERDICTS));
+  t('…and the declared set is exactly those four, so a fifth cannot arrive undocumented', Object.keys(STAMP_VERDICTS).join() === 'stamped-by-this-act,stamped-by-declaration,unstamped-quoted-token,no-token');
+  t('the refused verdict is read from ONE constant rather than retyped at each site', REFUSED_STAMP_VERDICT in STAMP_VERDICTS && REFUSED_STAMP_VERDICT === 'unstamped-quoted-token');
+  t('⛔ THE EXCLUDED CRITERION, pinned as excluded: 0 substitutions AND a verbatim opener is NOT the rule', stampVerdict({ substituted: 0, quoted: 1, verbatimTokens: 1 }) !== REFUSED_STAMP_VERDICT);
+
+  // ⛔ The count the predicate reads is the TOKEN subset, never the status
+  // line's `verbatim`: a quoted `{{` that spells neither token makes no claim
+  // about a stamp, and refusing it would name a token the body does not carry.
+  const QUOTED_HANDLEBARS = 'The template is:\n\n```\n{{ user.name }}\n```\n\nand it renders the name.\n';
+  const handlebars = renderBody(QUOTED_HANDLEBARS, NOW_MS);
+  t('⭐ a quoted `{{` that is NEITHER token is counted verbatim but is NOT a verbatim TOKEN', handlebars.verbatim === 1 && handlebars.verbatimTokens === 0);
+  t('⭐ …so a body quoting a template and stamping nothing still posts, unrefused', handlebars.ok === true && handlebars.verdict === 'no-token');
+  t('⛔ …which is why the two counts are two fields: `verbatimTokens` is a SUBSET of `verbatim`', legA.verbatimTokens <= legA.verbatim && handlebars.verbatimTokens < handlebars.verbatim);
+  t('the count and the spans it is taken from cannot drift — one IS the other\'s length', docblockShaped.verbatimTokens === docblockShaped.verbatimTokenSpans.length && legA.verbatimTokens === legA.verbatimTokenSpans.length);
+  t('…and each span carries the construct that holds it, so the refusal can name that', legA.verbatimTokenSpans[0].kind === 'code-span' && legA.verbatimTokenSpans[0].span === STAMP_TOKEN);
+  t('…with a BYTE offset, the unit every other offset this file prints is counted in', legA.verbatimTokenSpans[0].byteAt === Buffer.byteLength(LEG_A.slice(0, LEG_A.indexOf(STAMP_TOKEN)), 'utf8'));
+
+  // The refusal text: the same register as the unrecognised-opener refusal,
+  // because it reports the same two facts.
+  t('the refusal NAMES the quoted opener it means', String(legA.error).includes('`{{NOW}}`'));
+  t('…and the construct that holds it, in the words a reader would use', String(legA.error).includes(QUOTED_SPAN_KINDS['code-span']));
+  t('…and the MISSING STAMP, as the counts nothing had compared to intent before', String(legA.error).includes('0 {{NOW}}, 0 quoted'));
+  t('…and that nothing was written', String(legA.error).includes('Nothing was written'));
+  t('⭐ …and the quiet direction by name, in the UNKNOWN refusal\'s own words', String(legA.error).includes('the quiet direction') && unrecognisedOpenerText([{ kind: 'unknown-token-name', at: 0, span: '{{now}}' }]).includes('the quiet direction'));
+  t('…the remedy is a token OUTSIDE the quotation, never a route that cannot work there', String(legA.error).includes('OUTSIDE the quotation'));
+  t('…offering BOTH legal spellings, never only the act-clock one', String(legA.error).includes(STAMP_TOKEN) && String(legA.error).includes('{{WAS:YYYY-MM-DDThh:mmZ}}'));
+  t('⭐ …and saying what is NOT refused, so a reader cannot over-read it', String(legA.error).includes('spells no token at all is not this refusal'));
+  t('a FENCED offender is named as a fence rather than as a span', String(renderBody('Claim: seat.\n\n```\n{{NOW}}\n```\n', NOW_MS).error).includes(QUOTED_SPAN_KINDS.fenced));
+  t('EVERY quoted token is listed, not just the first', String(renderBody('Claim: seat.\n\nRead `{{NOW}}` and `{{WAS:YYYY-MM-DDThh:mmZ}}`.\n', NOW_MS).error).split('\n').filter((l) => /^ {2}\d+\. /u.test(l)).length === 2);
+
+  // ⛔ The refusal ORDERING is unchanged: this rule is LAST, and every refusal
+  // that used to fire still fires first on a body that breaks both.
+  t('⛔ an unrecognised opener in PROSE still wins, so a typo is still reported as a typo', renderBody('Claim: {{now}} — read `{{NOW}}`.', NOW_MS).kind === 'unknown-token');
+  t('⛔ a bare stamp on the opening line still wins, so the positional refusal is untouched', renderBody('Claim: seat 2026-09-08T14:00Z\n\n`{{NOW}}`\n', NOW_MS).kind === 'stamp-contract');
+  t('⛔ the MIXED refusal still wins, and is still not quote-aware', renderBody('Here is the token: `{{NOW}}`.\n\nThe board was read at 2026-09-08T14:00Z.\n', NOW_MS).kind === 'stamp-contract');
+  t('⛔ …and an empty body is still empty, ahead of every token rule', renderBody('   \n\n', NOW_MS).kind === 'empty');
+
+  // ⛔ THE FALSE STATUS LINE, retired. It was printed over three shapes and was
+  // true of one: a declaration-stamped body HAS a clock its author declared, and
+  // a body whose token was quoted DID carry one. The refusal closes the third
+  // before any write; the other two now read the verdict.
+  const rbLine = (counts) => readBackVerdict({ stamp: '2026-09-10T06:37Z', writtenAt: '2026-09-10T06:37:48Z', sent: 'x', stored: 'x', ...counts }).lines[0];
+  t('⭐ THE FALSE LINE, on a declaration-stamped body: it no longer says the body carried no token', rbLine({ substituted: 0, quoted: 1, verbatim: 2, verbatimTokens: 2 }).includes('carried no') === false);
+  t('⭐ …it says the artefact is stamped by DECLARATION instead', rbLine({ substituted: 0, quoted: 1 }).includes('stamped by DECLARATION'));
+  t('⭐ …and it SAYS WHAT WAS QUOTED, which is the half the old sentence could not', rbLine({ substituted: 0, quoted: 1, verbatim: 2, verbatimTokens: 2 }).includes('2 token(s) quoted as text'));
+  t('…with no such clause when nothing was quoted, so the number means something', rbLine({ substituted: 0, quoted: 1 }).includes('quoted as text') === false);
+  t('⭐ on a body whose token was QUOTED the line says it carried one, and names the exit that refuses it', rbLine({ substituted: 0, verbatim: 1, verbatimTokens: 1 }).includes('DID carry 1 token(s)') && rbLine({ substituted: 0, verbatimTokens: 1 }).includes(`exit ${EXIT_REFUSED}`));
+  t('⛔ THE ONE SHAPE THE OLD SENTENCE WAS TRUE OF, kept: a body with no token at all still reads that way', rbLine({ substituted: 0 }).includes(`carried no ${STAMP_TOKEN}`));
+  t('…and now says "quoted or not", so it cannot be read as true of a quoted one', rbLine({ substituted: 0 }).includes('quoted or not'));
+  t('⛔ a substituted body\'s line is untouched — drift is still what it reports', rbLine({ substituted: 1 }).includes('drift 0 — one clock, one act'));
+
+  // Structural: a predicate nobody is told about is a predicate nobody can act
+  // on, so the verdict reaches `$?`, the dry run, `--json` and the read-back.
+  const stampSource = readFileSync(SELF_PATH, 'utf8');
+  t('structural: a refused render returns EXIT_REFUSED from the CLI, with nothing written', /if \(!rendered\.ok\) \{\n\s+console\.error\(rendered\.error\);\n\s+return EXIT_REFUSED;/u.test(stampSource));
+  t('structural: the DRY RUN line names the verdict, so a caller reads it BEFORE a write', /Stamp verdict: \$\{rendered\.verdict\}/u.test(stampSource));
+  t('structural: `--json` carries the verdict and the token count for a script to read', /stamp_verdict: rendered\.verdict,/u.test(stampSource) && /verbatim_tokens: rendered\.verbatimTokens,/u.test(stampSource));
+  t('structural: the read-back is HANDED the counts its line needs, never left to guess', /verbatimTokens: rendered\.verbatimTokens,/u.test(stampSource));
+  t('structural: the usage register tells a caller this body is refused', USAGE.includes('ONLY token sits inside a quotation is REFUSED'));
 
   // The filed repro: the protocol's own digit shape, filled with an instant no
   // calendar has. `Date.parse` answers NaN, the span is null, and a null span
@@ -1621,46 +3246,244 @@ export function selfTest() {
   // below pin the MEASURED normalisations as clean and named, and pin that
   // everything else keeps the warning and gains an offset a reader can chase.
   const rb = (extra) => readBackVerdict({ stamp: '2026-09-10T06:37Z', writtenAt: '2026-09-10T06:37:48Z', substituted: 1, ...extra });
-  const FIVE = [
+  const CLASS_PROBE = [
     classifyReadBack({ sent: 'x', stored: undefined }),
     classifyReadBack({ sent: 'x', stored: 'x' }),
     classifyReadBack({ sent: 'x\n', stored: 'x' }),
-    classifyReadBack({ sent: 'x', stored: `x${PLATFORM_COMMENT_FOOTER}`, mode: 'comment' }),
+    classifyReadBack({ sent: 'x', stored: `x${PLATFORM_COMMENT_FOOTER}` }),
+    classifyReadBack({ sent: `x${PLATFORM_COMMENT_FOOTER}\n`, stored: `x\n${PLATFORM_COMMENT_FOOTER}` }),
     classifyReadBack({ sent: 'x', stored: 'y' }),
   ];
   t('the platform comment footer is declared as the 58 bytes measured, never a pattern', Buffer.byteLength(PLATFORM_COMMENT_FOOTER, 'utf8') === 58, `bytes=${Buffer.byteLength(PLATFORM_COMMENT_FOOTER, 'utf8')}`);
-  t('every class the classifier answers with has a declared meaning', FIVE.every((r) => r.class in READ_BACK_CLASSES), FIVE.map((r) => r.class).join());
-  t('…and those five inputs are five DIFFERENT classes, not one word repeated', new Set(FIVE.map((r) => r.class)).size === 5);
+  t('every class the classifier answers with has a declared meaning', CLASS_PROBE.every((r) => r.class in READ_BACK_CLASSES), CLASS_PROBE.map((r) => r.class).join());
+  t('…and those six inputs are six DIFFERENT classes, not one word repeated', new Set(CLASS_PROBE.map((r) => r.class)).size === 6, CLASS_PROBE.map((r) => r.class).join());
 
   const STRIPPED_SENT = `${SENT}\n`;
-  const STRIPPED = rb({ sent: STRIPPED_SENT, stored: SENT, mode: 'body' });
+  const STRIPPED = rb({ sent: STRIPPED_SENT, stored: SENT });
   t('⭐ THE FILED READING: a body stored one trailing newline short is CLEAN, not MUTATED', STRIPPED.mutated === false && STRIPPED.readBack.class === 'trailing-newline-stripped');
   t('…and the line NAMES the strip rather than warning about the sanitizer', STRIPPED.lines[1].includes('clean — the platform stripped the trailing newline') && STRIPPED.lines[1].includes('⚠️') === false);
   t('…carrying both byte counts, so a reader reads the delta instead of recomputing it', STRIPPED.lines[1].includes(`sent ${Buffer.byteLength(STRIPPED_SENT, 'utf8')}, stored ${Buffer.byteLength(SENT, 'utf8')}`), STRIPPED.lines[1]);
 
-  const APPENDED = rb({ sent: SENT, stored: `${SENT}${PLATFORM_COMMENT_FOOTER}`, mode: 'comment' });
-  t('⭐ a COMMENT stored with the platform footer appended is CLEAN', APPENDED.mutated === false && APPENDED.readBack.class === 'footer-appended');
+  const APPENDED = rb({ sent: SENT, stored: `${SENT}${PLATFORM_COMMENT_FOOTER}` });
+  t('⭐ an artefact stored with the platform footer appended is CLEAN', APPENDED.mutated === false && APPENDED.readBack.class === 'footer-appended');
   t('…and the line names the footer as the thing that was added', APPENDED.lines[1].includes('clean — the platform appended its footer'));
-  t('⭐ THE CONTROL: the same append in BODY mode stays MUTATED — an unmeasured cell is not forgiven', rb({ sent: SENT, stored: `${SENT}${PLATFORM_COMMENT_FOOTER}`, mode: 'body' }).mutated === true);
-  t('…and a caller naming NO mode gets that strict reading, never the lenient one', rb({ sent: SENT, stored: `${SENT}${PLATFORM_COMMENT_FOOTER}` }).mutated === true);
+  t('⭐ THE MOVED CELL: those same bytes from a BODY write are CLEAN too — a MEASURED cell is not warned about', APPENDED.readBack.class === 'footer-appended' && APPENDED.mutated === false);
+  t('⭐ …and the two answers about one set of bytes are now ONE: not-mutated exactly where it landed', APPENDED.mutated === false && APPENDED.landed === true && APPENDED.exit === EXIT_OK);
 
-  const BOTH = rb({ sent: STRIPPED_SENT, stored: `${SENT}${PLATFORM_COMMENT_FOOTER}`, mode: 'comment' });
+  const BOTH = rb({ sent: STRIPPED_SENT, stored: `${SENT}${PLATFORM_COMMENT_FOOTER}` });
   t('⭐ a strip AND the footer on one comment is clean, named by the footer', BOTH.mutated === false && BOTH.readBack.class === 'footer-appended' && BOTH.lines[1].includes('appended its footer'));
   t('…and the strip is said too, rather than one normalisation hiding the other', BOTH.lines[1].includes('over the stripped trailing newline'), BOTH.lines[1]);
 
-  const UNDER = rb({ sent: 'a [b] c\n', stored: `a b c${PLATFORM_COMMENT_FOOTER}`, mode: 'comment' });
+  const UNDER = rb({ sent: 'a [b] c\n', stored: `a b c${PLATFORM_COMMENT_FOOTER}` });
   t('⭐ a real mutation UNDERNEATH an appended footer is still MUTATED', UNDER.mutated === true && UNDER.readBack.class === 'mutated');
   t('…at an offset INSIDE the body, not at the tail where the footer starts', UNDER.readBack.offset === 2, `offset=${UNDER.readBack.offset}`);
   t('…and the added line shows both sides at that byte', UNDER.lines[2].includes('first difference at byte 2') && UNDER.lines[2].includes('| stored'), UNDER.lines[2]);
 
-  const WIDE = rb({ sent: '维护者 [x] 的裁决', stored: '维护者 x 的裁决', mode: 'comment' });
+  const WIDE = rb({ sent: '维护者 [x] 的裁决', stored: '维护者 x 的裁决' });
   t('⭐ a multi-byte character ahead of the difference gives a BYTE offset, never a character one', WIDE.readBack.offset === Buffer.byteLength('维护者 ', 'utf8'), `offset=${WIDE.readBack.offset}`);
   t('…and the context window opens ON the difference, not on the prefix both bodies share', WIDE.readBack.sentContext.includes('[x]'), WIDE.readBack.sentContext);
-  t('…with control characters escaped, the way a refusal prints a span', rb({ sent: 'line one\nline two', stored: 'line one line two', mode: 'comment' }).readBack.sentContext.includes('\\n'));
+  t('…with control characters escaped, the way a refusal prints a span', rb({ sent: 'line one\nline two', stored: 'line one line two' }).readBack.sentContext.includes('\\n'));
 
   t('two identical bodies have no first differing byte at all', firstDifferingByte('x', 'x') === -1);
   t('…and where one is a PREFIX of the other the seam is the shorter one\'s end', firstDifferingByte('abc', 'ab') === 2);
   t('an unreadable stored body reports no offset to chase', rb({ sent: SENT, stored: undefined }).readBack.offset === null);
+
+  // The filed hit: a seat-post refresh sent 263,533 bytes and the platform
+  // stored 257,945 — the byte count of the version BEFORE that write — with
+  // the first difference at byte 6792, where the new block began. The old body
+  // was kept whole, the MUTATED line said exactly that, and the tool exited 0.
+  // These cases pin the SPLIT inside `mutated`: the append that lost nothing
+  // keeps its 0, everything else reaches `$?`.
+  battery('the exit code: the read-back reaches `$?`, or it reaches nobody');
+  const PREVIOUS_BODY = '**Seat post.**\n\nR+271 · the board as it stood.\n';
+  const REFRESH_SENT = '**Seat post.**\n\nR+272 · the board as it stands now.\n';
+  const KEPT_OLD = rb({ sent: REFRESH_SENT, stored: PREVIOUS_BODY });
+  t('⭐ THE FILED SHAPE: the platform kept the PREVIOUS body, so the sent bytes did NOT land', KEPT_OLD.landed === false);
+  t('⭐ …and the exit code is the not-stored one, never OK', KEPT_OLD.exit === EXIT_NOT_STORED);
+  t('⛔ …while the CLASS is untouched — still MUTATED with its offset, exactly as pinned above', KEPT_OLD.mutated === true && KEPT_OLD.readBack.class === 'mutated');
+  t('…the first difference sits INSIDE the body this act sent, not at its end', KEPT_OLD.readBack.offset < Buffer.byteLength(REFRESH_SENT, 'utf8'), `offset=${KEPT_OLD.readBack.offset}`);
+  t('…and the verdict says the write did not land, in the same breath as the offset', KEPT_OLD.lines[3].includes('did NOT land'), KEPT_OLD.lines[3]);
+  t('the report names the offset a reader has to go look at', notStoredText(KEPT_OLD, 'o/n', 6015).includes(`byte ${KEPT_OLD.readBack.offset}`));
+  t('…and tells the caller to READ the artefact', notStoredText(KEPT_OLD, 'o/n', 6015).includes('READ THE ARTEFACT'));
+  t('⛔ …not to retry, because an identical second write reproduces it', notStoredText(KEPT_OLD, 'o/n', 6015).includes('Do not retry blindly'));
+  t('⭐ the exit register carries five distinct values — a caller reads exactly one', new Set([EXIT_OK, EXIT_USAGE, EXIT_REFUSED, EXIT_PREREQUISITE_NOT_MET, EXIT_NOT_STORED]).size === 5);
+  t('⛔ …and the new one stands apart from BOTH the contract refusal and the transport failure', EXIT_NOT_STORED !== EXIT_REFUSED && EXIT_NOT_STORED !== EXIT_PREREQUISITE_NOT_MET);
+
+  // The shape the seat hits on EVERY seat-post refresh: sent N, stored N+58.
+  // The cell is measured (#18693), so it is a CLASS now — and the exit code it
+  // always carried and the word the line uses finally say the same thing.
+  const BODY_APPEND = rb({ sent: SENT, stored: `${SENT}${PLATFORM_COMMENT_FOOTER}` });
+  t('⭐ THE MOVED CELL: the seat-post refresh shape is `footer-appended`, ⛔ no longer MUTATED…', BODY_APPEND.mutated === false && BODY_APPEND.readBack.class === 'footer-appended');
+  t('⭐ …and still exits 0 — every byte this act sent is on the platform', BODY_APPEND.landed === true && BODY_APPEND.exit === EXIT_OK);
+  t('⛔ …measured as EXACTLY the declared footer, never as a 58-byte delta', BODY_APPEND.readBack.footerReAnchored === true && footerReAnchoring(SENT, `${SENT}${'x'.repeat(58)}`) === null);
+  t('…and the line names the append and carries both counts, rather than leaving a warning', BODY_APPEND.lines[1].includes('clean — the platform appended its footer') && BODY_APPEND.lines[1].includes(`sent ${Buffer.byteLength(SENT, 'utf8')}, stored ${Buffer.byteLength(SENT + PLATFORM_COMMENT_FOOTER, 'utf8')}`), BODY_APPEND.lines[1]);
+  t('⭐ …over a stripped trailing newline too, which is the shape a seat post actually sends', rb({ sent: STRIPPED_SENT, stored: `${SENT}${PLATFORM_COMMENT_FOOTER}` }).exit === EXIT_OK);
+  t('⭐ THE CONTROL: a trailing-newline strip was never MUTATED and still exits 0', STRIPPED.landed === true && STRIPPED.exit === EXIT_OK);
+  t('⭐ …and an IDENTICAL read-back likewise', ON_TIME.landed === true && ON_TIME.exit === EXIT_OK);
+  t('⭐ a real mutation UNDERNEATH an appended footer still exits non-zero — a footer masks no loss', UNDER.landed === false && UNDER.exit === EXIT_NOT_STORED);
+  t('⭐ the `--comment` read-back SHARES this verdict and is judged by it: a chewed comment does not exit 0', rb({ sent: 'a [b] c', stored: 'a b c' }).exit === EXIT_NOT_STORED);
+  t('⭐ …while the comment footer append it forgives a class earlier still exits 0', APPENDED.landed === true && APPENDED.exit === EXIT_OK);
+  t('⛔ an UNREADABLE read-back is NOT widened into this code — UNVERIFIED is a different question', rb({ sent: SENT, stored: undefined }).exit === EXIT_OK);
+  t('⭐ the rule is a predicate over the verdict\'s own CLASS, ⛔ never over the byte counts or a side field', sentBodyLanded({ class: 'mutated' }) === false && sentBodyLanded({ class: 'mutated', footerReAnchored: true }) === false);
+  t('…and every non-mutated class lands by construction, whatever its byte counts say', ['unreadable', 'identical', 'trailing-newline-stripped', 'footer-appended', 'footer-re-anchored'].every((c) => sentBodyLanded({ class: c }) === true));
+  t('⛔ a TRUNCATION is a loss too: a stored body that stops short of the sent one does not exit 0', rb({ sent: `${SENT} and more`, stored: SENT }).exit === EXIT_NOT_STORED);
+
+  // The SECOND re-anchor shape, filed after the first one landed: a body that
+  // already ends in the footer block gets its trailing newline moved to before
+  // the rule. Equal length, one byte moved, zero lost — and until these cases
+  // it exited 4 on every artefact a seat wrote with its own footer.
+  //
+  // The fixtures are the LIVE read-backs. Each carries the artefact's own byte
+  // count, its own bytes at and around the difference — the last 24 bytes
+  // before the block, taken from the fetched artefact rather than retyped — and
+  // the offset that read-back recorded. The shared head is filler because every
+  // byte of it is identical on both sides by construction; `firstDifferingByte`
+  // walks all of it, and the pinned offset is what proves it did.
+  battery('the re-anchored footer: a newline the platform MOVED is not a byte lost');
+  const FOOTER_BYTES = Buffer.byteLength(PLATFORM_COMMENT_FOOTER, 'utf8');
+  const liveReAnchor = ({ bytes, tail }) => {
+    const head = `${'x'.repeat(bytes - Buffer.byteLength(tail, 'utf8') - 1 - FOOTER_BYTES)}${tail}`;
+    return { sent: `${head}${PLATFORM_COMMENT_FOOTER}\n`, stored: `${head}\n${PLATFORM_COMMENT_FOOTER}` };
+  };
+  const LIVE_RE_ANCHORS = [
+    { what: 'comment 5717446818 on #18426', surface: 'comment', bytes: 1591, offset: 1534, tail: 'tripped in the same act.' },
+    { what: 'comment 5718507419 on #6023', surface: 'comment', bytes: 3633, offset: 3576, tail: '状,趁进场修掉)。' },
+    { what: 'the body of #18739', surface: 'body', bytes: 6255, offset: 6198, tail: 'r verbatim 「同意」)' },
+    { what: 'the body of #18740', surface: 'body', bytes: 5155, offset: 5098, tail: 'r verbatim 「同意」)' },
+  ];
+  for (const live of LIVE_RE_ANCHORS) {
+    const { sent, stored } = liveReAnchor(live);
+    const v = rb({ sent, stored });
+    t(`⭐ THE FILED READING — ${live.what} (${live.surface}): the read-back reproduces the recorded ${live.bytes} bytes on BOTH sides`,
+      Buffer.byteLength(sent, 'utf8') === live.bytes && Buffer.byteLength(stored, 'utf8') === live.bytes,
+      `sent=${Buffer.byteLength(sent, 'utf8')} stored=${Buffer.byteLength(stored, 'utf8')}`);
+    t(`…and its recorded first difference at byte ${live.offset}, which is where the rule stands`,
+      firstDifferingByte(sent, stored) === live.offset, `offset=${firstDifferingByte(sent, stored)}`);
+    t('…and it LANDED: exit 0, not the not-stored code it used to answer', v.landed === true && v.exit === EXIT_OK);
+    t('…measured as the re-anchor by name, never as "equal length so probably fine"', v.readBack.class === 'footer-re-anchored' && v.readBack.footerShape === 're-anchored');
+  }
+
+  const LIVE = liveReAnchor(LIVE_RE_ANCHORS[0]);
+  t('⛔ …and the CLASS is its OWN word — `footer-re-anchored`, ⛔ never `footer-appended`, whose word is "plus"',
+    classifyReadBack({ ...LIVE }).class === 'footer-re-anchored' && READ_BACK_CLASSES['footer-re-anchored'].includes('nothing added, nothing lost'));
+  t('⭐ ONE predicate, ⛔ no act to name: the same bytes answer the same exit code whichever write made them',
+    rb({ ...LIVE }).exit === EXIT_OK && classifyReadBack({ sent: LIVE.sent, stored: LIVE.stored }).class === classifyReadBack({ ...LIVE }).class);
+  t('…and the classifier takes no `mode` at all, so a caller cannot declare one that decides nothing',
+    /^function classifyReadBack\(\{ sent, stored \} = \{\}\)/u.test(String(classifyReadBack)), String(classifyReadBack).slice(0, 60));
+  t('⭐ the line names the re-anchor rather than sending the reader to the artefact', rb({ ...LIVE }).lines[1].includes('re-anchored its own footer block'), rb({ ...LIVE }).lines[1]);
+  t('⛔ …and drops the prescription that sent a seat to re-read every write by hand', rb({ ...LIVE }).lines[1].includes('Read the artefact before trusting it') === false);
+  t('…while still saying what it proves, in the words the not-stored line answers', rb({ ...LIVE }).lines[1].includes('every byte sent IS stored'), rb({ ...LIVE }).lines[1]);
+  t('…and it is ONE line now: a measured normalisation sends nobody to an offset', rb({ ...LIVE }).lines.length === 2 && rb({ ...LIVE }).readBack.offset === null, String(rb({ ...LIVE }).lines.length));
+
+  t('⭐ THE CONTROL: the APPENDED arm is untouched and still names itself', footerReAnchoring(SENT, `${SENT}${PLATFORM_COMMENT_FOOTER}`)?.shape === 'appended');
+  t('…and the `footer-appended` CLASS answers to that arm alone, whichever act wrote it', APPENDED.readBack.class === 'footer-appended' && APPENDED.readBack.footerShape === 'appended');
+  t('…and the body-mode append exits 0 with its warning GONE — one answer, ⛔ not two', BODY_APPEND.exit === EXIT_OK && BODY_APPEND.mutated === false);
+  t('…and the appended line still says "appended", never the re-anchor\'s words', BODY_APPEND.lines[1].includes('appended its footer') && BODY_APPEND.lines[1].includes('re-anchored') === false);
+
+  // ⛔ The exit-4 contract does not loosen by one case. Everything before the
+  // block and every byte of the block itself is compared literally, so each of
+  // these still answers 4 — the re-anchor masks nothing.
+  const RE_HEAD = 'the seat wrote this line';
+  const RE_SENT = `${RE_HEAD}${PLATFORM_COMMENT_FOOTER}\n`;
+  t('⛔ THE CONTROL — a byte LOST before the rule still exits 4, re-anchored tail or not',
+    rb({ sent: RE_SENT, stored: `${RE_HEAD.replace('wrote', 'wrot')}\n${PLATFORM_COMMENT_FOOTER}` }).exit === EXIT_NOT_STORED);
+  t('⛔ …and a byte CHANGED before the rule, equal length on both sides, exits 4 too',
+    rb({ sent: RE_SENT, stored: `${RE_HEAD.replace('this', 'that')}\n${PLATFORM_COMMENT_FOOTER}` }).exit === EXIT_NOT_STORED);
+  t('⛔ …so "equal length" is NOT the test and never became one',
+    Buffer.byteLength(RE_SENT, 'utf8') === Buffer.byteLength(`${RE_HEAD.replace('this', 'that')}\n${PLATFORM_COMMENT_FOOTER}`, 'utf8'));
+  t('⛔ a loss INSIDE the footer block exits 4 — a chewed footer is the mutation this verdict exists to show',
+    rb({ sent: RE_SENT, stored: `${RE_HEAD}\n${PLATFORM_COMMENT_FOOTER.replace('---', '--')}` }).exit === EXIT_NOT_STORED);
+  t('⛔ …and a footer whose LINK was rewritten exits 4, however footer-shaped it reads',
+    rb({ sent: RE_SENT, stored: `${RE_HEAD}\n${PLATFORM_COMMENT_FOOTER.replace('claude.ai/code', 'example.invalid')}` }).exit === EXIT_NOT_STORED);
+  t('⭐ the re-anchor masks NO mutation elsewhere: the sanitizer chew under a moved newline still exits 4',
+    rb({ sent: `a [b] c${PLATFORM_COMMENT_FOOTER}\n`, stored: `a b c\n${PLATFORM_COMMENT_FOOTER}` }).exit === EXIT_NOT_STORED);
+  t('⛔ a newline that came from NOWHERE is an unmeasured cell, not a move — it exits 4',
+    rb({ sent: `${RE_HEAD}${PLATFORM_COMMENT_FOOTER}`, stored: `${RE_HEAD}\n${PLATFORM_COMMENT_FOOTER}` }).exit === EXIT_NOT_STORED);
+  t('⛔ …and so does a newline inserted somewhere OTHER than immediately before the block',
+    rb({ sent: RE_SENT, stored: `${RE_HEAD.replace(' wrote', '\nwrote')}${PLATFORM_COMMENT_FOOTER}` }).exit === EXIT_NOT_STORED);
+  t('⛔ a TRUNCATION that happens to end in the footer block exits 4 — the head is compared literally',
+    rb({ sent: `${RE_HEAD} and more${PLATFORM_COMMENT_FOOTER}\n`, stored: `${RE_HEAD}\n${PLATFORM_COMMENT_FOOTER}` }).exit === EXIT_NOT_STORED);
+  t('⛔ `unreadable` is still exit 0 and still UNVERIFIED — this rule did not widen into it',
+    rb({ sent: RE_SENT, stored: undefined }).exit === EXIT_OK && rb({ sent: RE_SENT, stored: undefined }).lines[1].includes('UNVERIFIED'));
+  t('⭐ the predicate answers the SHAPE, so a caller cannot read a re-anchor as an append or the reverse',
+    footerReAnchoring(RE_SENT, `${RE_HEAD}\n${PLATFORM_COMMENT_FOOTER}`)?.shape === 're-anchored' && footerReAnchoring(RE_HEAD, `${RE_HEAD}${PLATFORM_COMMENT_FOOTER}`)?.shape === 'appended');
+  t('⛔ …and `null` stays the one answer for everything neither shape covers', footerReAnchoring(RE_SENT, `${RE_HEAD}\n\n${PLATFORM_COMMENT_FOOTER}`) === null);
+  // ⛔ The exit-4 report draws the boundary in prose, so it names BOTH shapes or
+  // it sends the reader who hit a real loss looking for the wrong exemption.
+  const LOST = rb({ sent: RE_SENT, stored: `${RE_HEAD.replace('this', 'that')}\n${PLATFORM_COMMENT_FOOTER}` });
+  t('⭐ the NOT STORED report names every footer shape, not just the append it used to',
+    notStoredText(LOST, 'o/n', 18709).includes('appends its block') && notStoredText(LOST, 'o/n', 18709).includes('moves a\n  trailing newline this act sent to before the block\'s rule'));
+  t('…and still says the thing that decides it: something this act sent is not there',
+    notStoredText(LOST, 'o/n', 18709).includes('something this act sent is not there') && notStoredText(LOST, 'o/n', 18709).includes('READ THE ARTEFACT'));
+
+  // The THIRD footer shape (#19048), and the one that really does take a byte:
+  // a body already ending in the block comes back with the blank line before its
+  // rule collapsed — sent N, stored N-1, the loss INSIDE the block this act sent
+  // and never in the body. Measured 5 of 5 by the triage seat and on
+  // objectui#9771; every one exited 4. Each fixture reproduces ONE reading: the
+  // head is filler because every byte of it is identical on both sides by
+  // construction, and the two RECORDED offsets are what prove the shape — both
+  // fall OUT of the fixture, neither was computed into it.
+  battery('the collapsed blank: the footer block\'s own separator is not a content byte');
+  const liveCollapse = (bytes) => {
+    const head = 'x'.repeat(bytes - FOOTER_BYTES);
+    return { sent: `${head}${PLATFORM_COMMENT_FOOTER}`, stored: `${head}${PLATFORM_COMMENT_FOOTER_COLLAPSED}` };
+  };
+  const LIVE_COLLAPSES = [
+    { what: 'the body of objectstack#19104', bytes: 6395, offset: 6338 },
+    { what: 'the body of objectui#9771', bytes: 54579, offset: 54522 },
+    { what: 'the body of objectstack#19120', bytes: 4720, offset: null },
+    { what: 'the body of objectstack#18572', bytes: 5282, offset: null },
+  ];
+  for (const live of LIVE_COLLAPSES) {
+    const { sent, stored } = liveCollapse(live.bytes);
+    const v = rb({ sent, stored });
+    t(`⭐ THE FILED READING — ${live.what}: the read-back reproduces the recorded sent ${live.bytes} / stored ${live.bytes - 1}`,
+      Buffer.byteLength(sent, 'utf8') === live.bytes && Buffer.byteLength(stored, 'utf8') === live.bytes - 1, `stored=${Buffer.byteLength(stored, 'utf8')}`);
+    t('…and it LANDED: exit 0, ⛔ not the 4 this exact shape answered on every one of them', v.landed === true && v.exit === EXIT_OK);
+    t('…named by its OWN word, ⛔ never the re-anchor\'s, which says nothing was lost', v.readBack.class === 'footer-blank-collapsed' && v.readBack.footerShape === 'collapsed');
+    if (live.offset !== null) t(`…and the RECORDED first difference at byte ${live.offset} falls out of the fixture, ⛔ not into it`, firstDifferingByte(sent, stored) === live.offset, `offset=${firstDifferingByte(sent, stored)}`);
+  }
+  // #19143 and #19151 recorded only the delta — one byte short, substance
+  // identical — so they are pinned as the DELTA and ⛔ not as a byte count
+  // nobody wrote down.
+  for (const card of [19143, 19151]) {
+    const { sent, stored } = liveCollapse(4096);
+    t(`⭐ THE FILED READING — the body of objectstack#${card}, recorded as "−1 byte": the delta is exactly one, and it lands`,
+      Buffer.byteLength(sent, 'utf8') - Buffer.byteLength(stored, 'utf8') === 1 && rb({ sent, stored }).exit === EXIT_OK);
+  }
+
+  const COLLAPSE = liveCollapse(LIVE_COLLAPSES[0].bytes);
+  t('⭐ the collapsed block IS the declared footer over one newline — ONE constant, ⛔ never a second spelling',
+    `\n${PLATFORM_COMMENT_FOOTER_COLLAPSED}` === PLATFORM_COMMENT_FOOTER && Buffer.byteLength(PLATFORM_COMMENT_FOOTER_COLLAPSED, 'utf8') === FOOTER_BYTES - 1);
+  t('⭐ every shape the predicate answers with maps to exactly one DECLARED class',
+    Object.values(FOOTER_SHAPE_CLASSES).every((c) => c in READ_BACK_CLASSES) && new Set(Object.values(FOOTER_SHAPE_CLASSES)).size === 3);
+  t('⛔ …and the collapse\'s class says a byte of the BLOCK went, never "nothing lost"',
+    READ_BACK_CLASSES['footer-blank-collapsed'].includes('no content byte touched') && READ_BACK_CLASSES['footer-blank-collapsed'].includes('nothing lost') === false);
+  t('⭐ the line says WHAT was tolerated — the blank line before the rule — and why: the content is whole',
+    rb({ ...COLLAPSE }).lines[1].includes('blank line before its rule was COLLAPSED') && rb({ ...COLLAPSE }).lines[1].includes('every CONTENT byte sent IS stored'), rb({ ...COLLAPSE }).lines[1]);
+  t('…with both byte counts, ⛔ no warning glyph and ⛔ no offset to chase', rb({ ...COLLAPSE }).lines.length === 2 && rb({ ...COLLAPSE }).lines[1].includes('⚠️') === false && rb({ ...COLLAPSE }).readBack.offset === null);
+
+  // ⛔ The exit-4 contract does not loosen by one case: the head is compared
+  // literally, so every loss the sanitizer makes still reaches `$?`.
+  const C_HEAD = 'the seat wrote this line';
+  const C_SENT = `${C_HEAD}${PLATFORM_COMMENT_FOOTER}`;
+  const collapsedAfter = (head) => `${head}${PLATFORM_COMMENT_FOOTER_COLLAPSED}`;
+  t('⛔ THE CONTROL — ONE byte CHANGED anywhere else still exits 4, collapsed tail or not', rb({ sent: C_SENT, stored: collapsedAfter(C_HEAD.replace('this', 'that')) }).exit === EXIT_NOT_STORED);
+  t('⛔ …and ONE byte LOST before the rule exits 4 too', rb({ sent: C_SENT, stored: collapsedAfter(C_HEAD.replace('wrote', 'wrot')) }).exit === EXIT_NOT_STORED);
+  t('⛔ a TAG-SHAPED fragment the sanitizer ate still exits 4 under a collapsed blank', rb({ sent: `a [b] c${PLATFORM_COMMENT_FOOTER}`, stored: collapsedAfter('a b c') }).exit === EXIT_NOT_STORED);
+  t('⛔ a SHORTER body — a truncation that happens to end in the block — still exits 4', rb({ sent: `${C_HEAD} and more${PLATFORM_COMMENT_FOOTER}`, stored: collapsedAfter(C_HEAD) }).exit === EXIT_NOT_STORED);
+  t('⛔ a loss INSIDE the block is the sanitizer\'s, ⛔ not the footer\'s, and exits 4', rb({ sent: C_SENT, stored: `${C_HEAD}${PLATFORM_COMMENT_FOOTER_COLLAPSED.replace('---', '--')}` }).exit === EXIT_NOT_STORED);
+  t('⛔ BOTH newlines gone is a cell nobody measured, ⛔ not a collapse this tool forgives', rb({ sent: C_SENT, stored: `${C_HEAD}${PLATFORM_COMMENT_FOOTER.slice(2)}` }).exit === EXIT_NOT_STORED);
+  t('⛔ …and the arm requires the act to have SENT the block: no footer, no collapse', footerReAnchoring(C_HEAD, collapsedAfter(C_HEAD)) === null);
+  t('⛔ …and requires it to have sent NO trailing newline: a strip AND a collapse is unmeasured', footerReAnchoring(`${C_SENT}\n`, collapsedAfter(C_HEAD)) === null);
+  t('⭐ SHAPE B IS NOT WHAT LANDED: a whitespace-only truncation in the CONTENT still exits 4', rb({ sent: `${C_HEAD}\n\n${PLATFORM_COMMENT_FOOTER}`, stored: collapsedAfter(C_HEAD) }).exit === EXIT_NOT_STORED);
+  const C_LOST = rb({ sent: C_SENT, stored: collapsedAfter(C_HEAD.replace('this', 'that')) });
+  // ⛔ The falsified claim is ASSEMBLED, ⛔ never written out: `git grep` for
+  // that sentence must read 0 in this file, and a pin that spells it reads 1.
+  t('⛔ THE FALSIFIED SENTENCE IS GONE: the report no longer asserts the footer path removes nothing', notStoredText(C_LOST, 'o/n', 19048).includes(['takes', 'nothing', 'away'].join(' ')) === false);
+  t('⭐ …and names all THREE measured shapes instead, the collapse included', notStoredText(C_LOST, 'o/n', 19048).includes('appends its block') && notStoredText(C_LOST, 'o/n', 19048).includes('moves a') && notStoredText(C_LOST, 'o/n', 19048).includes('COLLAPSES the blank line'));
+  t('…while still saying the thing that decides it: something this act sent is not there', notStoredText(C_LOST, 'o/n', 19048).includes('something this act sent is not there') && notStoredText(C_LOST, 'o/n', 19048).includes('READ THE ARTEFACT'));
 
   battery('the CLI: the one decision a typo must never make');
   t('a comment target parses', parseOptions(['--comment=17314']).options.mode === 'comment');
@@ -1763,6 +3586,107 @@ export function selfTest() {
   t('⭐ THE CONTROL, UNCHANGED: an ordinary later-SECOND comment is after the acknowledged one exactly as before', stale.kind === 'ack-not-newest' && stale.after.length === 1 && stale.after[0].id === 5648793698);
   t('⭐ same second, the ack naming the HIGHER id ⇒ cleared, it IS the newest', unreadComments({ storedBody: SEAT_BODY, comments: [PAIR_LOW, PAIR_HIGH], ackThrough: 5679000101 }).kind === 'acknowledged');
   t('…and the ack naming the newest still clears in the ordinary case too', unreadComments({ storedBody: SEAT_BODY, comments: [OLDER, KNOCK], ackThrough: 5646143629 }).ok === true);
+
+  // -- #18843: a size refusal is a REFUSAL, and its text may not prescribe a
+  // remedy the platform has already refused.
+  //
+  // The fixtures are the verbatim platform texts recorded on probe
+  // objectstack#18826 (writes 5, 6, 8, 10 and 12) — ⛔ no new oversized write is
+  // made to reproduce this, here or anywhere. What this battery floors is the
+  // TRIGGER's two sides (the sentence it keys on, and every answer it must
+  // leave alone), the CAP it names per surface, and the two remedies HELD APART
+  // in both directions — a pin that only reads the size text goes green the day
+  // exit 3's sentence creeps into it.
+  battery('the size refusal: a 422 the platform answered is not a route that never existed');
+  // Verbatim from objectstack#18826: the create side capitalises `Body`, the
+  // update side does not, and `POST /issues` carries the sentence twice.
+  const CREATE_422 = JSON.stringify({
+    message: 'Validation Failed',
+    errors: [{ resource: 'IssueComment', code: 'unprocessable', field: 'data', message: 'Body is too long (maximum is 65536 characters)' }],
+    documentation_url: 'https://docs.github.com/rest',
+  });
+  const UPDATE_422 = JSON.stringify({
+    message: 'Validation Failed',
+    errors: [{ resource: 'IssueComment', code: 'unprocessable', field: 'data', message: 'body is too long (maximum is 65536 characters)' }],
+  });
+  const TWICE_422 = JSON.stringify({
+    message: 'Validation Failed',
+    errors: [
+      { resource: 'Issue', code: 'unprocessable', field: 'data', message: 'Body is too long (maximum is 65536 characters)' },
+      { resource: 'Issue', code: 'unprocessable', field: 'data', message: 'Body is too long (maximum is 65536 characters)' },
+    ],
+  });
+  // The other 422 this tool can actually be answered with: the issues listing
+  // refuses deep pagination (page 99 stores, page 100 refuses — measured
+  // 2026-08-31). It is about a cursor and must keep its 3.
+  const PAGINATION_422 = JSON.stringify({
+    message: 'In order to keep the API fast for everyone, pagination is limited for this resource.',
+    documentation_url: 'https://docs.github.com/rest',
+  });
+  const refuse = (raw, mode, sentBytes, status = 422) => sizeRefusal({ status, refusalText: platformRefusalText(raw), mode, sentBytes });
+  const OVER_COMMENT = refuse(CREATE_422, 'comment', COMMENT_BODY_LIMIT + 1);
+  const OVER_BODY = refuse(CREATE_422, 'body', ISSUE_BODY_LIMIT + 1);
+
+  t('⭐ THE FILED READING: the create-side 422 is a size refusal, not a missing route', OVER_COMMENT !== null);
+  t('⭐ …and the update-side spelling is the SAME class, though it is NOT the same string', refuse(UPDATE_422, 'comment', COMMENT_BODY_LIMIT + 1) !== null);
+  t('⛔ …which is why the trigger is case-insensitive: the two measured sentences differ by one letter', CREATE_422.includes('Body is too long') && UPDATE_422.includes('body is too long'));
+  t('the sentence said twice (the issue-create surface) is read the same way', refuse(TWICE_422, 'body', ISSUE_BODY_LIMIT + 1) !== null);
+  t('⛔ THE CONTROL: the deep-pagination 422 is NOT this class — it keeps the prerequisite reading', refuse(PAGINATION_422, 'comment', 500) === null);
+  t('⛔ …and neither is a 422 with no text at all', refuse('', 'comment', 500) === null);
+  t('⛔ the same sentence on a 403 is not this class — the trigger needs BOTH halves', refuse(CREATE_422, 'comment', COMMENT_BODY_LIMIT + 1, 403) === null);
+  t('⛔ …nor on a 500', refuse(CREATE_422, 'comment', COMMENT_BODY_LIMIT + 1, 500) === null);
+  t('⛔ …nor on a 200, which no caller reaches through this path anyway', refuse(CREATE_422, 'comment', COMMENT_BODY_LIMIT + 1, 200) === null);
+  t('the trigger reads the SENTENCE, so a text carrying no `maximum is` clause still classifies', sizeRefusal({ status: 422, refusalText: 'Body is too long', mode: 'comment', sentBytes: 300000 }) !== null);
+  t("⛔ …and the platform's false clause ALONE does not classify — the class is never keyed on that number", sizeRefusal({ status: 422, refusalText: 'maximum is 65536 characters', mode: 'comment', sentBytes: 300000 }) === null);
+  t('⛔ the exported trigger regex is not global — a `g` regex carries a cursor between callers', BODY_TOO_LONG_RE.global === false);
+  t('⛔ …and the case-insensitivity lives on the DECLARATION, not retyped at the call site', BODY_TOO_LONG_RE.flags.includes('i'));
+
+  t("the envelope's per-error message is read, which is where the sentence arrived", platformRefusalText(CREATE_422).includes('Body is too long (maximum is 65536 characters)'));
+  t('…and the top-level one beside it, in that order', platformRefusalText(CREATE_422).startsWith('Validation Failed · Body is too long'));
+  t('a body that is not that envelope falls back to its own bytes, never to silence', platformRefusalText('502 Bad Gateway') === '502 Bad Gateway');
+  t('…and an empty answer is an empty string, never a throw', platformRefusalText('') === '' && platformRefusalText(undefined) === '');
+  t('⛔ …and the text is never truncated where the trigger reads it', platformRefusalText(JSON.stringify({ message: `${'x'.repeat(REFUSAL_TEXT_CHARS * 2)} Body is too long` })).endsWith('Body is too long'));
+
+  t('the comment surface names the comment cap', OVER_COMMENT?.cap === COMMENT_BODY_LIMIT);
+  t('the issue-body surface names the issue-body cap', OVER_BODY?.cap === ISSUE_BODY_LIMIT);
+  t('the two caps agree today — two bisections, one number', COMMENT_BODY_LIMIT === ISSUE_BODY_LIMIT);
+  t('⛔ …and they are two constants, so the day one moves the other does not lie', WRITE_SURFACES.comment.cap === COMMENT_BODY_LIMIT && WRITE_SURFACES.body.cap === ISSUE_BODY_LIMIT);
+  t("⛔ the cap is never the platform's own number", OVER_COMMENT?.cap !== undefined && OVER_COMMENT.cap !== 65536);
+  t('…it is four times it, which is what was measured stored', OVER_COMMENT?.cap === 65536 * 4);
+  t('⛔ a surface with no declared cap names none rather than inventing one', refuse(CREATE_422, 'reaction', 300000)?.cap === null);
+  t('the surface table is frozen, so no caller edits a measurement in place', Object.isFrozen(WRITE_SURFACES) && Object.isFrozen(WRITE_SURFACES.comment));
+
+  const OVER_TEXT = sizeRefusalText(refuse(CREATE_422, 'comment', 307200), 'objectstack-ai/objectstack', 18843);
+  t('⭐ THE READER TEST: a 300 KB comment reads the bytes it SENT', OVER_TEXT.includes('307,200 byte(s)'));
+  t('⭐ …the measured cap for THAT surface', OVER_TEXT.includes('262,144 bytes') && OVER_TEXT.includes('a comment'));
+  t('⭐ …the overage between them', OVER_TEXT.includes('45,056 byte(s) over it'));
+  t('⭐ …the remedy that can work', OVER_TEXT.includes(SIZE_REMEDY));
+  t('⛔ …and NOT the remedy exit 3 prescribes, which this write already proved cannot work', OVER_TEXT.includes(ROUTE_REMEDY) === false);
+  t('⛔ THE OTHER DIRECTION, so that pin cannot pass by the remedy drifting: exit 3 still prescribes it', prerequisiteNotMetText({ message: 'x' }).includes(ROUTE_REMEDY));
+  t('⛔ …and exit 3 never prescribes the size one', prerequisiteNotMetText({ message: 'x' }).includes(SIZE_REMEDY) === false);
+  t('the text names the endpoint the bytes went to', OVER_TEXT.includes('POST /issues/{n}/comments'));
+  t('…and the bisection the cap came from', OVER_TEXT.includes('objectstack#18826'));
+  t("…and quotes what the platform said, named FALSE in the same breath", OVER_TEXT.includes('maximum is 65536 characters') && OVER_TEXT.includes('FALSE in unit and value'));
+  t('the size text keeps the other four codes apart by name', [EXIT_REFUSED, EXIT_PREREQUISITE_NOT_MET, EXIT_NOT_STORED].every((code) => OVER_TEXT.includes(`${code}'s`)));
+  t('⭐ a reader of a 3 is told the fifth code exists, or the misclassification just moves', prerequisiteNotMetText({ message: 'x' }).includes(`${EXIT_TOO_LARGE}'s`));
+  t('…and a reader of a 4 too', notStoredText({ readBack: { offset: 7 } }, 'o/r', 1).includes(`${EXIT_TOO_LARGE}'s`));
+  t('the usage register carries the fifth code', USAGE.includes(`${EXIT_TOO_LARGE} TOO LARGE`));
+  t('⛔ …and the prerequisite report prints what the platform said, when it said anything', prerequisiteNotMetText({ message: 'x', refusalText: 'Resource not accessible by integration' }).includes('The platform said: Resource not accessible by integration'));
+  t('⛔ …and prints no such line for a throw that carries none, so the line means something', prerequisiteNotMetText({ message: 'fetch failed' }).includes('The platform said') === false);
+
+  const AT_CAP = refuse(CREATE_422, 'comment', COMMENT_BODY_LIMIT);
+  t('⭐ a refusal AT the measured cap is this class but is NOT explained by it', AT_CAP !== null && AT_CAP.explained === false);
+  t('…and the overage is null rather than 0 — there is no overage to print', AT_CAP?.over === null);
+  t('…so the text asks for a RE-MEASUREMENT instead of reporting a body over a cap it is not over', sizeRefusalText(AT_CAP, 'o/r', 1).includes('RE-MEASURE the cap'));
+  t('⛔ THE CONTROL: the ordinary over-cap text carries no re-measurement sentence', OVER_TEXT.includes('RE-MEASURE the cap') === false);
+  t('a refusal well UNDER the cap is unexplained the same way', refuse(CREATE_422, 'comment', 10)?.explained === false);
+  t('…and an unrecorded size does not read as zero bytes sent', sizeRefusalText(refuse(CREATE_422, 'comment', null), 'o/r', 1).includes('a body of unrecorded size'));
+
+  t('⭐ the exit register carries SIX distinct values — a caller reads exactly one', new Set([EXIT_OK, EXIT_USAGE, EXIT_REFUSED, EXIT_PREREQUISITE_NOT_MET, EXIT_NOT_STORED, EXIT_TOO_LARGE]).size === 6);
+  t('…and the size refusal is the fifth code', EXIT_TOO_LARGE === 5);
+  t('⛔ …standing apart from the transport failure it used to be reported as', EXIT_TOO_LARGE !== EXIT_PREREQUISITE_NOT_MET);
+  t('⛔ …from the contract refusal, which is this tool\'s rule and not the platform\'s', EXIT_TOO_LARGE !== EXIT_REFUSED);
+  t('⛔ …and from the write that HAPPENED and was not stored', EXIT_TOO_LARGE !== EXIT_NOT_STORED);
 
   battery('the shared rule: this tool and H56 cannot come to disagree');
   t('⭐ the positions this tool refuses are the ones H56 reads — one imported reader, never two', h56StampedReadings(maskQuotedStamps(OPENING)).length === 1);

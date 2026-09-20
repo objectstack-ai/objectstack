@@ -42,7 +42,7 @@ const result = AccountSchema.parse(data);
 | **providerAccountId** | `string` | ✅ | Provider account ID |
 | **refreshToken** | `string` | optional | OAuth refresh token |
 | **accessToken** | `string` | optional | OAuth access token |
-| **expiresAt** | `number` | optional | Token expiry timestamp (Unix) |
+| **expiresAt** | `integer` | optional | Token expiry timestamp (Unix milliseconds) |
 | **tokenType** | `string` | optional | OAuth token type |
 | **scope** | `string` | optional | OAuth scope |
 | **idToken** | `string` | optional | OAuth ID token |
@@ -63,7 +63,7 @@ const result = AccountSchema.parse(data);
 | **email** | `string` | ✅ | User email address |
 | **emailVerified** | `boolean` | optional (default: `false`) | Whether email is verified |
 | **name** | `string` | optional | User display name |
-| **image** | `string` | optional | Profile image URL |
+| **image** | `string \| null` | optional | Profile image URL |
 | **createdAt** | `string` | ✅ | Account creation timestamp |
 | **updatedAt** | `string` | ✅ | Last update timestamp |
 

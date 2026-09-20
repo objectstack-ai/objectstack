@@ -215,10 +215,10 @@ export const objectForm = defineForm({
               helpText: 'Available choices',
               visibleWhen: "data.type in ['select','multiselect','radio','checkboxes']",
               fields: [
-                { field: 'label', type: 'text', required: true },
-                { field: 'value', type: 'text', required: true },
-                { field: 'color', type: 'color' },
-                { field: 'description', type: 'text' },
+                { field: 'label', label: 'Label', type: 'text', required: true },
+                { field: 'value', label: 'Value', type: 'text', required: true },
+                { field: 'color', label: 'Color', type: 'color' },
+                { field: 'description', label: 'Description', type: 'text' },
               ],
             },
 
@@ -357,6 +357,44 @@ export const objectForm = defineForm({
       collapsible: true,
       collapsed: true,
       fields: [
+        // #19085 — `validations` gets the row its declaration always implied.
+        // The served schema DECLARED the key and no form offered it, so an
+        // author's only door was the Source tab's free-text JSON. This section
+        // already advertises "State machines" in its description, and a state
+        // machine IS a `validations` member (ADR-0020) — the row was missing,
+        // not the section.
+        //
+        // The face is the `json` control rather than a schema-derived
+        // repeater, and that is a measurement, not a preference. The served
+        // node is an array whose items are a DOUBLE-HOP pointer
+        // (`items.$ref` → `$defs/__schema1` → `$defs/__schema2`) landing on a
+        // `oneOf` over the six ValidationRule members. A repeater would have
+        // to resolve both hops AND pick a union branch before it could render
+        // a row; neither half is measured for this node, and a repeater that
+        // resolves neither renders an empty row whose values never land — the
+        // offer-vs-door defect the reconciliation gate beside this file
+        // exists to catch. The Zod parse still refuses a malformed rule loudly
+        // at publish. Same treatment as the sibling structured-array rows
+        // `permission.rowLevelSecurity` and `email_template.variables`.
+        //
+        // ⚠ Precisely: `json` is in the metadata-admin renderer's passthrough
+        // set, but that set is consulted AFTER the structural fallbacks, ⛔ not
+        // instead of them — `resolveFieldFace` tries the widget registry, then
+        // an object form, then an array-of-objects, and only then the
+        // passthrough check. So this row reaches the raw-JSON editor today
+        // because the unresolved double-hop pointer derives nothing, ⛔ not
+        // because the hint suppresses derivation. Once the pin moves past
+        // objectui's pointer resolution the same hint on this node derives an
+        // `object-rows` repeater over the FIRST `oneOf` branch (`script`) —
+        // that is the renderer's precedence, not this repo's contract, and
+        // whoever bumps the pin owns re-measuring this row and its two
+        // shape-siblings named above.
+        //
+        // Upgrading this to a structured control is a form-face addition — the
+        // same boundary the reconciliation ledger draws for the
+        // `lifecycle.*.onlyWhen` rows — ⛔ not a reconciliation, and not this
+        // row's price of admission.
+        { field: 'validations', widget: 'json', helpText: 'Object-level validation rules — an array of rule objects, e.g. [{ "type": "script", "name": "amount_positive", "condition": "amount > 0", "message": "Amount must be positive" }]. State-machine transition tables are declared here too (ADR-0020)' },
         { field: 'datasource', type: 'text', helpText: 'Target datasource ID (default: "default")' },
         {
           field: 'lifecycle',

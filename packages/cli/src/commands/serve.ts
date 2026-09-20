@@ -2639,10 +2639,21 @@ export default class Serve extends Command {
       // them and an artifact boot serves them. Mirror compile's collection so
       // docs render under /docs/<name> in dev exactly as from a built artifact.
       // Collection only (no lint-fail): docs are additive; never block boot.
+      //
+      // [#18431] The same mirroring, one level down: a `src/<pkg>/docs/`
+      // directory naming one of this config's `packages[]` entries is collected
+      // onto THAT package's body (ADR-0130 D4 option B), exactly where
+      // `os build` puts it. `AppPlugin` REGISTERS each body — it hands the
+      // whole artifact to `getService('manifest').register()`, which runs
+      // `resolveArtifactPackageOrder` and `registerApp(body)` per body, and
+      // `registerMetadataCollections` enumerates `docs` — so dev serves them as
+      // an artifact boot does. Leaving this half out would re-open the asymmetry
+      // the paragraph above exists to close — `os build` producing docs that
+      // `os dev` cannot show.
       if (!useArtifactFallback) {
         try {
-          const { collectDocsFromSrc } = await import('../utils/collect-docs.js');
-          const collected = collectDocsFromSrc(absolutePath);
+          const { collectDocsFromSrc, attachPackageDocs } = await import('../utils/collect-docs.js');
+          const collected = collectDocsFromSrc(absolutePath, (config as any)?.packages);
           if (collected.docs.length > 0) {
             const byName = new Map<string, any>();
             for (const d of (Array.isArray((config as any).docs) ? (config as any).docs : [])) {
@@ -2650,6 +2661,10 @@ export default class Serve extends Command {
             }
             for (const d of collected.docs) byName.set(d.name, d);
             config = { ...config, docs: Array.from(byName.values()) };
+          }
+          if (collected.packageDocs.length > 0) {
+            const packages = attachPackageDocs((config as any).packages, collected.packageDocs);
+            if (packages !== (config as any).packages) config = { ...config, packages };
           }
         } catch {
           /* docs are additive — never block boot on collection */
@@ -5222,6 +5237,14 @@ export default class Serve extends Command {
         // owns that refusal now, and this row just reports what it decided.
         tenancyPosture,
         seededAdmin,
+        // #17556 — read straight off the definition this process booted, the
+        // same object `config.devPlugins` is read from twenty lines up. The
+        // platform describes the account it seeded; only the APPLICATION knows
+        // which of its audiences shows something, and these two keys are how it
+        // says so. `printServerReady` gates them on `isDev` and scrubs them —
+        // they are author-controlled text reaching a terminal.
+        devLogins: Array.isArray((config as any)?.devLogins) ? (config as any).devLogins : undefined,
+        devHint: typeof (config as any)?.devHint === 'string' ? (config as any).devHint : undefined,
         automation: automationSummary,
         seeds: seedSummary,
         // #17329 — read HERE, inside the banner thunk, so it is the tally as of

@@ -40,6 +40,14 @@ export { SCOPE_ROOTS } from './cel-engine';
 // answer across build, lint and runtime. Building a private `new Environment()`
 // instead silently opts out of the platform's rewrite AND its bounds.
 export { parseCelToAst } from './cel-engine';
+
+/**
+ * Print a CEL AST back to surface syntax — the inverse of `parseCelToAst`, and
+ * the lossless recovery path for an `ast`-only envelope that #15811's
+ * evaluated-slot narrowing refuses. `null` when the value is not a CEL AST this
+ * platform can round-trip.
+ */
+export { printCelAst } from './cel-engine';
 export type { CelAstNode } from './cel-engine';
 // #6132 — the reason-carrying sister entrance. Same front end, same verdict,
 // but it says WHICH of the platform's bounds a source blew instead of
@@ -55,7 +63,15 @@ export type {
 } from './cel-engine';
 export { cronEngine } from './cron-engine';
 export { templateEngine, TEMPLATE_FORMATTERS, formatValue } from './template-engine';
-export { registerStdLib, buildScope } from './stdlib';
+export { registerStdLib, buildScope, registerPermissionPredicate } from './stdlib';
+export type { PermissionBinding } from './stdlib';
+// objectui#4421 / batch #147 — the permission predicate's data door. `can` reads
+// `EvalContext.permissions` and nothing else, and this is how that map is built
+// from the published `/auth/me/permissions` response. Exported rather than left
+// to each caller because the conversion looks trivial enough to hand-roll, and a
+// hand-rolled permission map has no shape of its own to be wrong against: it
+// parses, `can` answers from it, and the answer is a confident silent denial.
+export { toEvalPermissions } from './eval-permissions';
 export { resolveSeed, resolveSeedRecord } from './seed-eval';
 export { normalizeExpression, normalizeExpressionTree } from './normalize';
 // ADR-0058 — canonical CEL → FilterCondition pushdown compiler (one AST,
@@ -95,4 +111,4 @@ export type { UnknownFunctionCall } from './unknown-function';
 export { validateExpression, introspectScope, expectedDialect, inferExpressionType, nearestName, CEL_STDLIB_FUNCTIONS } from './validate';
 export type { FieldRole, ExprInput, ExprSchemaHint, ExprValidationError, ExprValidationResult, InferredValueType } from './validate';
 export type { SeedValue, SeedPrimitive } from './seed-eval';
-export type { DialectEngine, EvalContext, EvalResult, EvalError } from './types';
+export type { DialectEngine, EvalContext, EvalResult, EvalError, EvalPermissions } from './types';

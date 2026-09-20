@@ -761,3 +761,186 @@ describe('runtime authoring gate on OBJECT writes (#4716)', () => {
         expect(objectRows(rows)).toHaveLength(1);
     });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #17936 — the PERMISSION write door, advisory tier.
+//
+// #17425's ruling D named a population: authors who write permission metadata
+// as JSON through Studio / REST `/meta` / MCP and never run `os lint`. For that
+// population `validateRetiredPermissionResidue` was registered CLI_ONLY, so the
+// one door they have gave no signal at all — `allowRestore: false` parsed
+// clean, the residue stage swallowed it in silence, and the line they wrote had
+// no effect and nothing said so.
+//
+// THE MEASUREMENT THIS BLOCK EXISTS TO TAKE. The entry's `surfaceReason` held
+// the crossing back on an open question: does the gate's `body` reach the rule
+// BEFORE the per-type `safeParse`, whose residue stage strips the only evidence
+// the rule reads? It does — and not by luck. `saveMetaItem` keeps the AUTHORED
+// body verbatim on purpose (`parsed.data` would strip the Studio-only auxiliary
+// fields an overlay rides with) and grafts back exactly two normalizations,
+// each a walk over the authored keys that adds nothing and drops nothing else.
+// So the residue is still there at the gate call, and the persisted row proves
+// it from the other side. Post-parse the rule would indeed be structurally
+// silent — which is why this is pinned end to end at the door rather than
+// argued from the registry.
+//
+// The severity is ruling D's: an advisory on the 2xx the write earns. A residue
+// key must NEVER refuse a publish.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('runtime authoring gate on PERMISSION writes — retired lifecycle residue (#17936)', () => {
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+    afterEach(() => {
+        warn.mockRestore();
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+
+    const RESIDUE_RULE = 'permission-retired-lifecycle-residue';
+
+    const permissionRows = (rows: Map<string, Row>) =>
+        Array.from(rows.values()).filter((r) => r.type === 'permission');
+
+    /** A permission set carrying the ONE value the tombstone's residue stage swallows. */
+    const residuePermissionSet = () => ({
+        name: 'sales_team',
+        label: 'Sales Team',
+        objects: {
+            // `readScope` is authored on purpose: without it `validateSecurityPosture`
+            // adds its own `security-private-no-readscope` info advisory to every
+            // one of these writes, and the DARK reading below would then be "one
+            // advisory instead of two" rather than a true zero.
+            leave_request: { allowRead: true, allowEdit: true, readScope: 'own', allowRestore: false },
+        },
+    });
+
+    /** The same set with the retired key removed — the document the hint asks for. */
+    const cleanPermissionSet = () => ({
+        name: 'sales_team',
+        label: 'Sales Team',
+        objects: {
+            leave_request: { allowRead: true, allowEdit: true, readScope: 'own' },
+        },
+    });
+
+    const savePermission = (protocol: any, item: unknown, extra: Record<string, unknown> = {}) =>
+        protocol.saveMetaItem({ type: 'permission', name: 'sales_team', item, ...extra });
+
+    it('advises on a residue write, in the door\'s existing envelope, and STILL PUBLISHES', async () => {
+        const { protocol, rows } = makeProtocol();
+
+        const result = await savePermission(protocol, residuePermissionSet());
+
+        // Ruling D: advisory, never a refusal. The write lands.
+        expect(result.success).toBe(true);
+        expect(permissionRows(rows)).toHaveLength(1);
+
+        const advisory = (result.advisories ?? []).find((a: any) => a.rule === RESIDUE_RULE);
+        expect(
+            advisory,
+            `advisories: ${JSON.stringify(result.advisories)} — this is the #17425 ruling D population's ONLY door`,
+        ).toBeDefined();
+        // A true reading, not a filtered one: with `readScope` authored the
+        // residue advisory is the ONLY thing this write earns.
+        expect((result.advisories ?? []).map((a: any) => a.rule)).toEqual([RESIDUE_RULE]);
+        expect(advisory.severity).toBe('warning');
+        // The key, the site and the remedy — the three things the author needs
+        // to act, in the same six-key shape Studio and MCP already render for
+        // the 422's `issues[]`.
+        expect(advisory.message).toContain('allowRestore');
+        expect(advisory.where).toContain('sales_team');
+        expect(advisory.where).toContain('leave_request');
+        expect(advisory.path).toBe('permissions.sales_team.objects.leave_request.allowRestore');
+        expect(advisory.hint.length, 'the prescription is read from the tombstone, not retyped')
+            .toBeGreaterThan(10);
+    });
+
+    it('THE MEASUREMENT: the residue survives the per-type safeParse to reach the gate', async () => {
+        // The premise the crossing rests on, read off the persisted row: the
+        // body `saveMetaItem` hands the gate is the AUTHORED one, so the key
+        // the parse would have stripped is still present where the rule reads.
+        // Were it otherwise the advisory above could not exist, and wiring the
+        // rule here would have published a phantom check.
+        const { protocol, rows } = makeProtocol();
+        await savePermission(protocol, residuePermissionSet());
+
+        const row = permissionRows(rows)[0]!;
+        const stored = JSON.parse(row.metadata);
+        expect(
+            stored.objects.leave_request,
+            'the door persists the authored body verbatim — `parsed.data` would have stripped this',
+        ).toHaveProperty('allowRestore', false);
+    });
+
+    it('`allowPurge` is the second arm, and both keys together advise twice', async () => {
+        const { protocol } = makeProtocol();
+        const result = await savePermission(protocol, {
+            name: 'sales_team',
+            objects: {
+                leave_request: { allowRead: true, readScope: 'own', allowRestore: false, allowPurge: false },
+            },
+        });
+
+        expect(result.success).toBe(true);
+        const paths = (result.advisories ?? [])
+            .filter((a: any) => a.rule === RESIDUE_RULE)
+            .map((a: any) => a.path)
+            .sort();
+        expect(paths).toEqual([
+            'permissions.sales_team.objects.leave_request.allowPurge',
+            'permissions.sales_team.objects.leave_request.allowRestore',
+        ]);
+    });
+
+    it('a CLEAN permission write carries no advisories key at all', async () => {
+        const { protocol, rows } = makeProtocol();
+        const result = await savePermission(protocol, cleanPermissionSet());
+
+        expect(result.success).toBe(true);
+        expect(
+            'advisories' in result,
+            `advisories leaked on a clean write: ${JSON.stringify(result.advisories)}`,
+        ).toBe(false);
+        expect(permissionRows(rows)).toHaveLength(1);
+    });
+
+    it('a DRAFT save of the same body is not judged (D1 unchanged)', async () => {
+        const { protocol } = makeProtocol();
+        const result = await savePermission(protocol, residuePermissionSet(), { mode: 'draft' });
+
+        expect(result.success).toBe(true);
+        expect(
+            'advisories' in result,
+            `a draft is allowed to be half-finished: ${JSON.stringify(result.advisories)}`,
+        ).toBe(false);
+    });
+
+    it('the advisory reaches the operator log once, deduped per type|name|rule|path', async () => {
+        // The gate's own operator channel, unchanged by this crossing — kept
+        // because the wire advisory is the AUTHOR's channel and the log is the
+        // operator's, and Studio republishes the same body a lot.
+        //
+        // ⚠️ A NAME OF ITS OWN, and that is a correctness property of this case
+        // rather than tidiness: `_advisoryWarned` is a module-level Set keyed
+        // `type|name|rule|path` for the whole PROCESS, so reusing `sales_team`
+        // here would read 0 lines because an earlier case in this file already
+        // spent that key — a dedupe working exactly as designed, misread as a
+        // missing log.
+        const { protocol } = makeProtocol();
+        await protocol.saveMetaItem({
+            type: 'permission',
+            name: 'audit_team',
+            item: { ...residuePermissionSet(), name: 'audit_team' },
+        });
+
+        const lines = (warn.mock.calls as unknown[][])
+            .map((c) => String(c[0]))
+            .filter((m) => m.includes(RESIDUE_RULE));
+        expect(lines.length).toBe(1);
+        expect(lines[0]).toContain('audit_team');
+        expect(lines[0]).toContain('allowRestore');
+    });
+});

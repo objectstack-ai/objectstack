@@ -722,3 +722,160 @@ describe('metrics JSDoc-only durations carry their unit (#15939, #14478)', () =>
     }).period.durationSeconds).toBe(2592000);
   });
 });
+// #18124 — step 3 of ruling A on #18115. Two metrics rows declare their unit
+// through `DurationSeconds`:
+//
+//   - `MetricAggregationConfig.window.slideInterval` — seconds, from the
+//     `durationSeconds` sibling it slides across in the same object literal.
+//   - `MetricsConfig.retention.downsampling[].resolution` — seconds, stated in its
+//     JSDoc and by its `afterSeconds` sibling, and in NEITHER published channel
+//     until now (the #14519 shape: the reader of the reference page could not
+//     reach the unit at all).
+//
+// Both keep the `.positive()` floor they already declared, so the accepted set
+// narrows only by the integer requirement `DurationSeconds` carries.
+describe('metrics duration rows declare seconds through the type (#18124)', () => {
+  const window = { durationSeconds: 300, sliding: true };
+
+  it('slideInterval refuses a fractional second count', () => {
+    const result = MetricAggregationConfigSchema.safeParse({
+      type: 'avg',
+      window: { ...window, slideInterval: 60.5 },
+    });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'window.slideInterval');
+    expect(issue).toBeDefined();
+    expect(issue!.code).toBe('invalid_type');
+  });
+
+  it('slideInterval keeps its positive floor — zero and negatives still refused', () => {
+    for (const bad of [0, -60]) {
+      const result = MetricAggregationConfigSchema.safeParse({
+        type: 'avg',
+        window: { ...window, slideInterval: bad },
+      });
+      expect(result.success).toBe(false);
+      const issue = result.error!.issues.find((i) => i.path.join('.') === 'window.slideInterval');
+      expect(issue).toBeDefined();
+      expect(issue!.code).toBe('too_small');
+    }
+  });
+
+  it('slideInterval still accepts the whole-second value it always did', () => {
+    const parsed = MetricAggregationConfigSchema.parse({
+      type: 'avg',
+      window: { ...window, slideInterval: 60 },
+    });
+    expect(parsed.window?.slideInterval).toBe(60);
+  });
+
+  it('downsampling resolution refuses a fractional second count and keeps its floor', () => {
+    const config = (resolution: number) => ({
+      name: 'test_metrics',
+      label: 'Test Metrics',
+      retention: { downsampling: [{ afterSeconds: 3600, resolution }] },
+    });
+    const fractional = MetricsConfigSchema.safeParse(config(60.5));
+    expect(fractional.success).toBe(false);
+    expect(fractional.error!.issues.some((i) => i.code === 'invalid_type')).toBe(true);
+
+    const zero = MetricsConfigSchema.safeParse(config(0));
+    expect(zero.success).toBe(false);
+    expect(zero.error!.issues.some((i) => i.code === 'too_small')).toBe(true);
+
+    expect(MetricsConfigSchema.parse(config(60)).retention?.downsampling?.[0]?.resolution).toBe(60);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// #18118 — ServiceLevelIndicator.successCriteria
+// ---------------------------------------------------------------------------
+
+/**
+ * The slot whose CEL arm was RETIRED, and the structured rule that survived it.
+ *
+ * The union was `z.union([{ threshold, operator, percentile? }, <the evaluated
+ * expression schema>])`. Nothing anywhere evaluated the expression arm, so a
+ * criterion authored as a predicate parsed, registered and read back while
+ * deciding nothing (ADR-0049 enforce-or-remove, ruled A). The arm is gone; the
+ * structured object is untouched.
+ *
+ * Three facts, and any one alone is a green that proves nothing:
+ *
+ *  - ACCEPT SET, the surviving half. The structured rule parses exactly as it
+ *    did before, `percentile` included. Without this control a table of
+ *    `false`s below would be a schema that refuses everything.
+ *  - ACCEPT SET, the retired half. The bare-string spelling and the
+ *    `{ dialect, source }` envelope were accepted before and are refused now —
+ *    that pair IS the retirement.
+ *  - MESSAGES, INCLUDING WHERE THEY DO NOT REACH. The prescription answers the
+ *    STRING spelling, which is the one the reference page advertised and the
+ *    one the ruling names (`successCriteria: 'p95 < 300ms'`). It does NOT
+ *    answer the envelope spelling: zod 4.4 consults a schema's `error` map for
+ *    the top-level `invalid_type` a non-object raises and NOT for the child
+ *    issues a wrong-shaped OBJECT raises, so an envelope is refused by the
+ *    structured arm's own missing-key issues. Both directions are pinned. ⛔ The
+ *    second pin is not a wish — it is the measured cell, and a future change
+ *    that makes the prescription reach the envelope must move it rather than
+ *    delete it, because the day it silently stops being true is the day the
+ *    retirement stops being audible in one of its two spellings.
+ */
+describe('#18118 ServiceLevelIndicator.successCriteria — the retired CEL arm', () => {
+  const sli = (successCriteria: unknown) => ServiceLevelIndicatorSchema.safeParse({
+    name: 'api_latency',
+    label: 'API Latency',
+    metric: 'http_request_duration_seconds',
+    type: 'latency' as const,
+    successCriteria,
+    window: { durationSeconds: 2592000 },
+  });
+  const issuesAt = (successCriteria: unknown) => {
+    const r = sli(successCriteria);
+    expect(r.success, `expected a refusal for ${JSON.stringify(successCriteria)}`).toBe(false);
+    return r.success ? [] : r.error.issues;
+  };
+  const PRESCRIPTION = /`metrics\.slis\[\]\.successCriteria` no longer accepts a CEL predicate.*removed in @objectstack\/spec 17\.5\.0 \(ADR-0049 enforce-or-remove\).*threshold: 300/s;
+
+  it('CONTROL — the structured rule is accepted, as before', () => {
+    expect(sli({ threshold: 99.9, operator: 'gte' }).success).toBe(true);
+    expect(sli({ threshold: 300, operator: 'lt', percentile: 0.95 }).success).toBe(true);
+  });
+
+  it.each([
+    ['a bare CEL predicate', 'p95 < 300ms'],
+    ['an empty bare string', ''],
+    ['a blank bare string', '   '],
+  ] as const)('REFUSES %s with the retirement prescription — it parsed before this card', (_label, criteria) => {
+    const issues = issuesAt(criteria);
+    const own = issues.filter((i) => i.path.join('.') === 'successCriteria');
+    expect(own).toHaveLength(1);
+    expect(own[0].code).toBe('invalid_type');
+    expect(own[0].message).toMatch(PRESCRIPTION);
+  });
+
+  it.each([
+    ["a HEALTHY { dialect: 'cel', source } envelope", { dialect: 'cel', source: 'p95 < 300ms' }],
+    ["{ dialect: 'cel' }", { dialect: 'cel' }],
+  ] as const)('REFUSES %s — but by the structured arm\'s own missing keys, NOT the prescription (measured limit)', (_label, criteria) => {
+    const issues = issuesAt(criteria);
+    expect(issues.map((i) => i.path.join('.'))).toEqual(
+      expect.arrayContaining(['successCriteria.threshold', 'successCriteria.operator']),
+    );
+    expect(issues.map((i) => i.message).join('\n')).not.toMatch(PRESCRIPTION);
+  });
+
+  it('does NOT borrow the retirement sentence for a refusal that is not the retirement', () => {
+    // A number is not an expression attempt in any spelling; zod's own
+    // `expected object` message is the honest answer and must stand.
+    const issues = issuesAt(5);
+    expect(issues.map((i) => i.message).join('\n')).not.toMatch(PRESCRIPTION);
+    expect(issues.some((i) => /expected object/.test(i.message))).toBe(true);
+  });
+
+  it('publishes the retirement in the `describe()` the reference page renders', () => {
+    const successCriteria = (ServiceLevelIndicatorSchema as any).shape.successCriteria as { description?: string };
+    expect(successCriteria.description).toBeTypeOf('string');
+    expect(successCriteria.description).toContain('A CEL predicate is NOT accepted here');
+  });
+});

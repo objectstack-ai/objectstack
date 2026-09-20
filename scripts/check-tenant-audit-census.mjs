@@ -45,7 +45,7 @@
  *   no case where it must guess. That is the property the anchor scheme cannot
  *   have, and it is why this gate is not a port of its sibling.
  *
- * ## The two checks
+ * ## The checks
  *
  *   A  DRIFT       both generated artefacts equal what the generator produces
  *                  from the tree right now, byte-for-byte: the page's generated
@@ -64,6 +64,15 @@
  *                  are hand-written, and a hand-written number is exactly the
  *                  thing that goes stale first. Its corpus-scale counterpart is
  *                  `UNENFORCED_PROSE_COUNTS`: required to be said, not to be right.
+ *   C  CENSUS       the census this gate just ran placed every write call site it
+ *                  found, and every `UNTYPED_RECEIVERS` row still matches a call.
+ *                  Those are facts about the TREE rather than about the artefacts
+ *                  and they arrive on the census object itself, as `unledgered`
+ *                  and `staleLedgerRows`. CI runs THIS gate and never the
+ *                  generator, so until check C existed the generator's own exit 1
+ *                  on an unplaceable receiver reached nobody: the census could
+ *                  find one, say so to no one, and `Lint & Repo Gates` stayed
+ *                  green. See `censusRefusals`.
  *
  * ## ⭐ What is enforced, and what is deliberately not
  *
@@ -89,7 +98,9 @@
  * A page that cannot be read, a missing marker pair, a census with zero sites, a
  * prose pattern that matches nothing, and any refusal the generator itself
  * raises (an unplaceable receiver, a stale ledger row, an unparseable source)
- * are all exit 1 naming what could not be read.
+ * are all exit 1 naming what could not be read. The first two of those reach the
+ * exit code through `censusRefusals` (check C); the third throws out of
+ * `runCensus()` before any check runs.
  */
 
 import { readFileSync } from 'node:fs';
@@ -125,12 +136,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'A DRIFT': 5,
   'B PROSE': 4,
   '⭐ THE SPLIT': 9,
+  'census refusals': 7,
   'refusals': 1,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 4;
+const SELF_TEST_BATTERY_FLOOR = 5;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -210,6 +222,7 @@ import {
   END_MARKER,
   PAGE,
   corpusScaleRows,
+  notRoundTrippableSites,
   renderCountsFile,
   renderGeneratedRegion,
   runCensus,
@@ -573,7 +586,84 @@ function firstDifference(committed, expected) {
 }
 
 /**
- * Run both checks against a census and a page text.
+ * ⭐ Check C -- the refusals the CENSUS raises, given an exit.
+ *
+ * `runCensus()` reports three failures about the RUN rather than about the
+ * artefacts: a write call site whose receiver is erased and that none of the
+ * three placement rules reaches (`census.unledgered`), an `UNTYPED_RECEIVERS`
+ * row that no longer matches any call in the corpus (`census.staleLedgerRows`),
+ * and a receiver whose declared type the census stored whitespace-collapsed and
+ * cannot read back ({@link notRoundTrippableSites}).
+ *
+ * ⭐ The third one is why this function is load-bearing rather than tidy. That
+ * class used to end the whole process inside `runCensus` -- `parseSourceFile`
+ * refuses by `process.exit`, so this gate died with it and CI went red. It is now
+ * localised to the one site, which is the repair; but a localisation that let CI
+ * go GREEN would have traded a loud takedown for a quiet subtraction, and the
+ * subtraction is the thing the census exists not to do in silence. ⇒ the site is
+ * declared in both artefacts AND refused here. ⛔ Neither half alone is the
+ * repair.
+ *
+ * The generator's own `main()` prints both and exits 1 -- but `lint.yml` invokes
+ * THIS gate and never the generator, so until this function existed those two
+ * fields were read by nothing on the way to a CI verdict. The census could find
+ * an unplaceable receiver, print nothing anyone runs, and the job stayed green:
+ * a defect arriving as COMPLIANCE, which is the one direction the census says it
+ * cannot survive being wrong in (`tenant-audit-census.mjs`, the rule the page
+ * publishes verbatim: *"An unreadable receiver that none of the three place is an
+ * ERROR, never a default."*).
+ *
+ * ⛔ The repair is NOT to add `node scripts/tenant-audit-census.mjs` beside this
+ * gate in the workflow: that walks the same corpus and builds the same AST a
+ * second time for one verdict this gate already holds in its hand. What was
+ * missing is the READ, and the read costs nothing.
+ *
+ * ⚠️ Deliberately NOT folded into `checkPage`. That function certifies the two
+ * ARTEFACTS against a census and takes its page as text so the self-test can feed
+ * it adversarial fixtures; this one certifies the CENSUS, and its fixtures are
+ * synthetic censuses. Keeping them apart is what lets the self-test instrument
+ * check C in both directions no matter what today's tree happens to hold -- a
+ * tree with an unplaceable receiver would otherwise turn `--self-test` red on its
+ * "the committed artefacts are clean" case and take every other case's verdict
+ * with it.
+ *
+ * @returns {string[]} problems, empty when the census placed every site it found.
+ */
+export function censusRefusals(census) {
+  const problems = [];
+  for (const u of census.unledgered ?? []) {
+    problems.push(
+      `[untyped-receiver] ${u.file}:${u.line} \`${u.receiver}\`.${u.verb}() -- receiver type `
+      + `unreadable [${u.how}] and the object name is not a literal declared object. Nothing `
+      + 'places this site, so the census cannot say whether it is an engine write at all and the '
+      + 'page certifies a population with a hole in it. Rule on what the receiver is, then add an '
+      + '`UNTYPED_RECEIVERS` row in `scripts/tenant-audit-census.mjs` saying so.',
+    );
+  }
+  for (const u of notRoundTrippableSites(census)) {
+    problems.push(
+      `[type-text-not-round-trippable] ${u.file}:${u.line} \`${u.receiver}\`.${u.verb}() -- the census `
+      + `stored this receiver's declared type whitespace-collapsed and cannot re-parse it as a type `
+      + `alias, so the door rule could not be read off it and the census cannot say whether this site `
+      + `is an engine write at all: \`${u.type}\`. The SOURCE parsed -- what did not is the census's own `
+      + 're-serialisation of a fragment of it, so this is a fault in the tool and not a fact about the '
+      + 'corpus. Give the receiver a NAMED type the engine type index can be keyed on, or spell the '
+      + "literal's members with `;` separators so the stored text round-trips.",
+    );
+  }
+  for (const r of census.staleLedgerRows ?? []) {
+    problems.push(
+      `[stale-ledger-row] UNTYPED_RECEIVERS names ${r.file} (receiver \`${r.receiver}\`) but no `
+      + 'such write call exists -- delete the row. A row that matches nothing still EXCUSES the '
+      + 'next site that grows into its (file, receiver) pair, so a stale row is an exemption '
+      + 'nobody can see.',
+    );
+  }
+  return problems;
+}
+
+/**
+ * Run both artefact checks against a census and a page text.
  *
  * Takes the page as TEXT rather than reading it, so the self-test can feed
  * adversarial pages through the same code path the production run uses.
@@ -863,6 +953,74 @@ export function selfTest() {
     check(page.replace(declaredObjectsSentence, 'Across the declared objects'))
       .some((p) => p.startsWith('[unenforced-prose-missing]')));
 
+  // ── census refusals (check C) ──────────────────────────────────────────────
+  // ⭐ The direction the ARTEFACTS cannot show at all: these two fields are facts
+  // about the TREE, and a gate that never reads them prints a success line while
+  // the census it just ran says it could not place a site. Driven with SYNTHETIC
+  // censuses, so the rule stays instrumented whatever today's tree holds -- and
+  // in BOTH directions, because a `censusRefusals` that always returned `[]`
+  // would look identical to this self-test on a census that happens to be clean.
+  battery('census refusals');
+  const unplaceableSite = {
+    file: 'packages/services/service-fixture/src/seed.ts',
+    line: 42,
+    receiver: 'ql',
+    verb: 'update',
+    how: 'ql:any',
+    detail: 'any',
+    ledgered: false,
+  };
+  const orphanedRow = {
+    file: 'packages/plugins/plugin-fixture/src/departed.ts',
+    receiver: 'engine',
+    engine: true,
+    what: 'a ledger row whose write call left the tree',
+  };
+  const refuse = (unledgered, staleLedgerRows) =>
+    censusRefusals({ ...census, unledgered, staleLedgerRows });
+
+  t('a census that could not place a receiver is a finding',
+    refuse([unplaceableSite], []).some((p) => p.startsWith('[untyped-receiver]')));
+  t('the unplaceable-receiver refusal names the site it could not place',
+    refuse([unplaceableSite], []).some((p) => p.includes(`${unplaceableSite.file}:${unplaceableSite.line}`)));
+  t('a ledger row matching nothing in the tree is a finding',
+    refuse([], [orphanedRow]).some((p) => p.startsWith('[stale-ledger-row]')));
+  t('the stale-row refusal names the row it could not match',
+    refuse([], [orphanedRow]).some((p) => p.includes(orphanedRow.file) && p.includes(orphanedRow.receiver)));
+
+  // ⭐ The third class (#19077): a receiver whose stored type text the census
+  // cannot read back. Localising it is the repair; letting CI go green on it
+  // would be the same floor drop in a different costume, so it is refused HERE
+  // as well as declared in both artefacts.
+  const notRoundTrippable = {
+    file: 'packages/services/service-fixture/src/seed.ts',
+    line: 71,
+    receiver: 'engine',
+    verb: 'insert',
+    reason: 'type-text-not-round-trippable',
+    type: '{ insert(object: string, data: unknown): Promise<void> find(object: string): Promise<void> }',
+    names: [],
+    doorShaped: false,
+  };
+  const refuseUndefended = (undefendedSubtractions) =>
+    censusRefusals({ ...census, unledgered: [], staleLedgerRows: [], undefendedSubtractions });
+
+  t('⭐ a receiver whose stored type text does not round-trip is a finding, not a silent subtraction',
+    refuseUndefended([notRoundTrippable]).some((p) => p.startsWith('[type-text-not-round-trippable]')));
+  t('the round-trip refusal names the site AND the text that could not be read back',
+    refuseUndefended([notRoundTrippable]).some(
+      (p) => p.includes(`${notRoundTrippable.file}:${notRoundTrippable.line}`) && p.includes(notRoundTrippable.type)));
+  t('⛔ CONTROL: a subtraction on a DIFFERENT undefended arm is declared but NOT refused',
+    refuseUndefended([{ ...notRoundTrippable, reason: 'type-not-in-corpus' }]).length === 0,
+    refuseUndefended([{ ...notRoundTrippable, reason: 'type-not-in-corpus' }]).join(' | '));
+
+  // ⛔ ...and the control, without which all four cases above are equally passed
+  // by a function that simply reports everything it is handed: a census that
+  // placed every site and matched every row is clean.
+  t('⭐ CONTROL: a census with neither an unplaceable site nor a stale row is NOT a finding',
+    refuse([], []).length === 0,
+    refuse([], []).join(' | '));
+
   // ── refusals ───────────────────────────────────────────────────────────────
   battery('refusals');
   t('an empty census refuses rather than certifying the artefacts',
@@ -933,7 +1091,9 @@ function main(argv) {
   }
 
   const census = runCensus();
-  const problems = checkPage(census, page, counts);
+  // ⭐ Check C first: `checkPage` certifies the artefacts AGAINST this census, so
+  // a census that could not place one of its own sites is the prior question.
+  const problems = [...censusRefusals(census), ...checkPage(census, page, counts)];
   for (const p of problems) console.error(`::error::${p}`);
 
   if (problems.length > 0) {
@@ -945,7 +1105,8 @@ function main(argv) {
     `✓ check-tenant-audit-census: OK -- ${t.writeCallSites} write call sites certified `
     + `(${t.staticallyDecidableObjectName} decidable; ${t.tenancyEnabledProvablyNoContext} tenancy-enabled `
     + `sites PROVABLY carry no tenant context, ${t.tenancyEnabledContextUnreadable} more unreadable), `
-    + `${PROSE_COUNTS.length} prose figures held to the census.`,
+    + `${PROSE_COUNTS.length} prose figures held to the census, `
+    + 'every write call site placed and every `UNTYPED_RECEIVERS` row matched.',
   );
   return 0;
 }

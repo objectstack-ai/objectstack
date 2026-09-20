@@ -15,6 +15,11 @@ import { postureEnforcesWall } from '@objectstack/spec/security';
 import { resolveDiscoveryVersion } from './discovery-version.js';
 import type { MetadataHostEngine } from './host-engine.js';
 import { omitInternalFieldsFromWriteResponse } from './write-response-internal-fields.js';
+// [#17502] The served JSON Schema publishes what an author MAY write, so a
+// property no instance can satisfy — a `retiredKey()` tombstone, rendered
+// `{ not: {} }` — is dropped from it. See the module header for the channels
+// that keep carrying the retirement's prescription.
+import { stripUnauthorableProperties } from './unauthorable-nodes.js';
 import {
     evaluateRuntimeAuthoringGate,
     CLOSURE_CONTEXT_KEY_BY_TYPE,
@@ -85,8 +90,9 @@ import {
     SEARCHABLE_TEXTUAL_TYPES, SEARCHABLE_ENUM_TYPES, SEARCH_AUTO_EXCLUDED_FIELDS,
     isVirtualSearchField,
     classifyDottedFilterHead,
-    RPC_QUERY_ALIAS_SLOTS, foldQueryAliasSlots,
-    type QueryAliasConflict, type QueryAliasSlot,
+    foldQueryAliasSlots,
+    QUERY_TRANSPORT_ALIAS_SLOTS, QUERY_TRANSPORT_DOLLAR_ALIASES, QUERY_TRANSPORT_DOLLAR_PARAMS,
+    type QueryAliasConflict,
     type DroppedFieldsEvent, type QueryAST, type EngineQueryOptionsParsed,
 } from '@objectstack/spec/data';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSpellingRefusal, unrecognisedMetaTypeRefusal, METADATA_ITEM_NAME_PATTERN } from '@objectstack/spec/shared';
@@ -476,8 +482,9 @@ function toJsonSchemaSafe(schema: z.ZodTypeAny, typeLabel?: string): Record<stri
     }
 
     if (!isDegenerateDerivation(output)) {
-        _jsonSchemaCache.set(schema, output);
-        return output;
+        const authorable = stripUnauthorableProperties(output);
+        _jsonSchemaCache.set(schema, authorable);
+        return authorable;
     }
 
     // The default derivation produced a husk. Retry in the authoring shape
@@ -486,8 +493,9 @@ function toJsonSchemaSafe(schema: z.ZodTypeAny, typeLabel?: string): Record<stri
     try {
         const authoring = z.toJSONSchema(schema, { unrepresentable: 'any', io: 'input' }) as Record<string, unknown>;
         if (!isDegenerateDerivation(authoring)) {
-            _jsonSchemaCache.set(schema, authoring);
-            return authoring;
+            const authorable = stripUnauthorableProperties(authoring);
+            _jsonSchemaCache.set(schema, authorable);
+            return authorable;
         }
     } catch {
         // Fall through to the loud arm below.
@@ -3021,45 +3029,16 @@ const ODATA_SPELLING: Readonly<Record<string, string>> = {
     filter: '$filter', select: '$select', expand: '$expand',
 };
 
-/**
- * [#3795] The spec's alias table ({@link RPC_QUERY_ALIAS_SLOTS}) extended with
- * the wire-only spellings no schema declares: `filters` (documented plural
- * alias of the `filter` transport param) and the OData `$filter` / `$expand`.
- * Every spelling of one QueryAST slot resolves through ONE fold — the four
- * slots that used to resolve backwards (canonical consulted last), each in its
- * own open-coded way, are the reason the table lives in the spec and not here.
- */
-const WIRE_QUERY_ALIAS_SLOTS: readonly QueryAliasSlot[] = (() => {
-    const extra: Record<string, readonly string[]> = {
-        where: ['filters', '$filter'],
-        expand: ['$expand'],
-    };
-    return RPC_QUERY_ALIAS_SLOTS.map((slot) => ({
-        canonical: slot.canonical,
-        aliases: [...slot.aliases, ...(extra[slot.canonical] ?? [])],
-    }));
-})();
-
-/**
- * The OData `$`-prefixed spelling of each bare wire parameter this normalizer
- * consumes, hoisted out of the loop in `findData` that used to own it so the
- * arity survey below and that loop read ONE table (#7321). Adding a `$` alias
- * in one place and not the other is exactly how a parameter ends up folded but
- * unchecked.
- *
- * `$filter` / `$expand` are deliberately absent: they are declared as slot
- * aliases on {@link WIRE_QUERY_ALIAS_SLOTS} instead, because they fold straight
- * to a canonical key rather than to a bare wire spelling.
- */
-const WIRE_DOLLAR_ALIASES: readonly (readonly [string, string])[] = [
-    ['$top', 'top'],
-    ['$skip', 'skip'],
-    ['$orderby', 'orderBy'],
-    ['$select', 'select'],
-    ['$count', 'count'],
-    ['$search', 'search'],
-    ['$searchFields', 'searchFields'],
-];
+// [#16066] The transport alias tables this normalizer folds by are DECLARED,
+// and they are declared in the spec — `QUERY_TRANSPORT_ALIAS_SLOTS` and
+// `QUERY_TRANSPORT_DOLLAR_ALIASES` (`@objectstack/spec/data`), imported above.
+//
+// They used to live here as module-private `WIRE_QUERY_ALIAS_SLOTS` /
+// `WIRE_DOLLAR_ALIASES`: the spec's own table extended, in this file, with
+// spellings no schema named. That extension is what made the `findData` door
+// accept a second vocabulary through a slot declaring only the first — two
+// dialects, one slot, one of them declared. Folding by the spec's export is
+// the single source that closes it; ⛔ do not re-extend a table here.
 
 /**
  * [#7321] The list-query slots whose DECLARED value type admits an array, by
@@ -3114,18 +3093,18 @@ const ARRAY_VALUED_QUERY_SLOTS: readonly string[] = [
 ];
 
 /**
- * [#7321] {@link ARRAY_VALUED_QUERY_SLOTS} expanded to every WIRE spelling that
+ * [#7321] {@link ARRAY_VALUED_QUERY_SLOTS} expanded to every TRANSPORT spelling that
  * reaches it, derived from the same two tables the fold uses so a new alias
  * cannot silently lose its array arm — the failure mode would be `?$select=a&
  * $select=b` starting to 400, i.e. the damage case this card exists to avoid.
  */
 const ARRAY_VALUED_LIST_QUERY_PARAMS: ReadonlySet<string> = (() => {
     const names = new Set<string>(ARRAY_VALUED_QUERY_SLOTS);
-    for (const slot of WIRE_QUERY_ALIAS_SLOTS) {
+    for (const slot of QUERY_TRANSPORT_ALIAS_SLOTS) {
         if (!names.has(slot.canonical)) continue;
         for (const alias of slot.aliases) names.add(alias);
     }
-    for (const [dollar, bare] of WIRE_DOLLAR_ALIASES) {
+    for (const [dollar, bare] of QUERY_TRANSPORT_DOLLAR_ALIASES) {
         if (names.has(bare)) names.add(dollar);
     }
     return names;
@@ -6344,14 +6323,32 @@ export class ObjectStackProtocolImplementation implements
             // Atomic cross-object batch (#3298 / #1604 / ADR-0034 item 4): the
             // REST /batch endpoint runs its ops inside `engine.transaction()`,
             // which only opens a real (all-or-nothing) transaction when the
-            // engine exposes one — otherwise it degrades to a non-atomic
-            // passthrough. Advertise the capability iff the runtime engine can
-            // honour a transaction, so `declared === enforced` (Prime Directive
-            // #10). The rest-server producer ANDs this with `api.enableBatch` so
-            // a server that doesn't mount the route reports `false` at its layer.
-            // (ADR-0119 D1: `transaction` is contract-declared, so this probe
-            // no longer needs a structural cast to ask the question.)
-            transactionalBatch: typeof this.engine?.transaction === 'function',
+            // DEFAULT DRIVER can carry one — otherwise it takes its declared
+            // non-transactional path (ADR-0119 D1) and the batch degrades to a
+            // non-atomic passthrough. Advertise the capability iff the runtime
+            // can actually roll back, so `declared === enforced` (Prime
+            // Directive #10). The rest-server producer ANDs this with
+            // `api.enableBatch` so a server that doesn't mount the route reports
+            // `false` at its layer.
+            //
+            // [#18997] `engineCanRollBack`, NOT `typeof this.engine?.transaction
+            // === 'function'`. The refusal this advertisement exists to help a
+            // caller avoid — `runAtomicBatch`'s `501 NOT_IMPLEMENTED`, whose own
+            // remedy text says to probe `capabilities.transactionalBatch` on
+            // /discovery first — already asks `engineCanRollBack`, which asks the
+            // DRIVER as well as the engine. `engine.transaction` is a function on
+            // every real engine, so the engine-only probe answered `true` for the
+            // two compositions that 501: a default driver with no
+            // `beginTransaction` at all, and one that INHERITED it and declared
+            // `supports.transactionsUnsupported` (#18063). An advertised
+            // capability must answer the same question the refusal path asks,
+            // from the same predicate — two derivations of one capability is how
+            // these drifted. Narrowing only: this predicate is the engine probe
+            // AND a driver clause, so no composition newly advertises `true`
+            // (`protocol.discovery-transactional-batch-honesty.test.ts` pins both
+            // directions, and the driver clause is skipped where the registry is
+            // not inspectable, so a test double keeps its old answer).
+            transactionalBatch: engineCanRollBack(this.engine),
 
             // ── Joined the vocabulary with ruling A (#5672) ───────────────────
             // These six used to be the runtime dispatcher's half of the split.
@@ -10602,10 +10599,10 @@ export class ObjectStackProtocolImplementation implements
         // "'orderBy' is invalid" names a parameter absent from their request.
         //
         // [#7321] The table itself now lives at module scope
-        // ({@link WIRE_DOLLAR_ALIASES}) so the arity survey above and this fold
+        // ({@link QUERY_TRANSPORT_DOLLAR_ALIASES}) so the arity survey above and this fold
         // cannot drift apart on which `$` spellings exist.
         const wireSpelling: Record<string, string> = {};
-        for (const [dollar, bare] of WIRE_DOLLAR_ALIASES) {
+        for (const [dollar, bare] of QUERY_TRANSPORT_DOLLAR_ALIASES) {
             if (options[dollar] != null && options[bare] == null) {
                 options[bare] = options[dollar];
                 wireSpelling[bare] = dollar;
@@ -10628,7 +10625,7 @@ export class ObjectStackProtocolImplementation implements
         // composed with `wireSpelling` it names the parameter the caller
         // actually wrote in every rejection below (#4226).
         const spellingFor = (name: string): string => wireSpelling[name] ?? name;
-        const arrivedAs = foldQueryAliasSlots(options, WIRE_QUERY_ALIAS_SLOTS, (conflict) => {
+        const arrivedAs = foldQueryAliasSlots(options, QUERY_TRANSPORT_ALIAS_SLOTS, (conflict) => {
             throw conflictingQueryParamsError(conflict, spellingFor);
         });
         const slotParam = (canonical: string): string => spellingFor(arrivedAs[canonical] ?? canonical);
@@ -10823,9 +10820,13 @@ export class ObjectStackProtocolImplementation implements
         // UNFILTERED page — a footgun for scripts resolving ids by name).
         const unsupportedDollarParams = Object.keys(options).filter((k) => k.startsWith('$'));
         if (unsupportedDollarParams.length > 0) {
+            // [#16066] The supported set is QUOTED from the declaration, never
+            // re-typed here: a spelling added to the spec table used to leave
+            // this sentence naming a set the door no longer had, so the caller
+            // was told to use a parameter list that was already wrong.
             const err: any = new Error(
                 `Unsupported query parameter(s): ${unsupportedDollarParams.join(', ')}. ` +
-                'Supported $-prefixed parameters: $top, $skip, $orderby, $select, $count, $search, $searchFields, $filter, $expand.',
+                `Supported $-prefixed parameters: ${QUERY_TRANSPORT_DOLLAR_PARAMS.join(', ')}.`,
             );
             err.status = 400;
             err.code = 'UNSUPPORTED_QUERY_PARAM';
@@ -10972,7 +10973,7 @@ export class ObjectStackProtocolImplementation implements
         // it, because the strip is what kept it from ever being honoured: the
         // parameter has been declared (`ODataQuerySchema.$count`,
         // `packages/spec/src/api/odata.zod.ts`), aliased (`$count` → `count`,
-        // {@link WIRE_DOLLAR_ALIASES}), reserved from the implicit-field-filter
+        // {@link QUERY_TRANSPORT_DOLLAR_ALIASES}), reserved from the implicit-field-filter
         // bucket ({@link RESERVED_LIST_QUERY_PARAMS}), arity-checked and boolean-
         // coerced — and then deleted unread, so every list request paid for the
         // COUNT query below whether or not the caller wanted a `total`.
@@ -22326,6 +22327,13 @@ export class ObjectStackProtocolImplementation implements
      * The DB write is best-effort and non-fatal: when the `package` service is
      * absent (e.g. the `marketplace` capability is off) the package is still
      * registered in-memory and visible for the lifetime of the process.
+     *
+     * [#19277] `request.enableOnInstall` is HONOURED here, under the same rule
+     * the HTTP door implements — 「缺省 = 保持，有旗 = 设置」: `true` enables,
+     * `false` disables, and an ABSENT key makes no lifecycle call at all. The
+     * durable disabled-package FILE is not this seam's to write (it is keyed by
+     * environment, which this request does not carry); see the comment on the
+     * flag arms below.
      */
     async installPackage(request: InstallPackageRequest): Promise<InstallPackageResponse> {
         // #2532 — runtime-created base packages routinely arrive versionless
@@ -22362,7 +22370,63 @@ export class ObjectStackProtocolImplementation implements
         // only); an unparsed range never causes a false rejection.
         assertProtocolCompat(manifest);
 
-        const pkg = this.engine.registry.installPackage(manifest as any, request.settings);
+        let pkg = this.engine.registry.installPackage(manifest as any, request.settings);
+
+        // [#19277] HONOUR `enableOnInstall` — the key THIS request contract
+        // declares and this primitive read past. `InstallPackageRequestSchema`
+        // (`packages/spec/src/kernel/package-registry.zod.ts`) has carried the
+        // key since it was written, and the implementation here read
+        // `request.manifest` and `request.settings` and nothing else: a caller
+        // that switched the option off got an ENABLED install, with no refusal
+        // and no warning. That is «declared but not enforced» on a published
+        // option — what ADR-0049 (enforce-or-remove) and Prime Directive #10
+        // refuse outright. Ruling batch #153 item 5 letter 1 (#18605) kept the
+        // kernel declaration as a COPY of the HTTP request key with the SAME
+        // meaning, so the disposition is ENFORCE, not retire.
+        //
+        // ⭐ The contract is 「缺省 = 保持，有旗 = 设置」 — maintainer ruling batch
+        // #157 item 5 letter C, the same rule the HTTP door implements
+        // (`packages/runtime/src/domains/packages.ts`). Three states, three
+        // outcomes, through the SAME registry verbs `PATCH /packages/:id/enable`
+        // and `PATCH /packages/:id/disable` use:
+        //
+        //   true    ⇒ enablePackage
+        //   false   ⇒ disablePackage
+        //   absent  ⇒ nothing at all; the row the registry returned stands
+        //
+        // ⚠️ The `true` arm is not decoration. `SchemaRegistry.installPackage`
+        // has preserved an existing row's `enabled` / `status` /
+        // `statusChangedAt` since #18877, so on a re-install nothing else will
+        // clear a disable any more — dropping this arm would silently stop
+        // honouring `true` on exactly the path an upgrade takes.
+        //
+        // ⚠️ `=== true` / `=== false`, never a truthiness test and never a `??`
+        // default: the THREE states of this key are the contract, and
+        // collapsing absent into either one is the defect. The declaration's own
+        // `.default(true)` never reaches here — nothing parses an install
+        // request through `InstallPackageRequestSchema` on this path — so
+        // absence arrives intact and is read as absence.
+        //
+        // ⛔ What this seam does NOT write, recorded so it is not mistaken for
+        // an oversight: the runtime's durable disabled-package file. That record
+        // is keyed by ENVIRONMENT (`setPackageDisabled(environmentId, id,
+        // disabled)`, `packages/runtime/src/package-state-store.ts`) and this
+        // request carries no environment, so the key cannot even be formed here;
+        // the module also lives in `@objectstack/runtime`, which depends on this
+        // package and not the other way round. The HTTP door owns that half and
+        // writes it from the row it returned. So `enableOnInstall` through this
+        // primitive moves the registry row — what every in-process reader serves
+        // from — for the life of the process, and a caller that needs the choice
+        // to survive a restart goes through the door that owns the durable
+        // record.
+        const requestedEnabled = request.enableOnInstall;
+        if (requestedEnabled === true) {
+            const enabled = this.engine.registry.enablePackage(manifest.id);
+            if (enabled) pkg = enabled;
+        } else if (requestedEnabled === false) {
+            const disabled = this.engine.registry.disablePackage(manifest.id);
+            if (disabled) pkg = disabled;
+        }
 
         // Best-effort durable persistence to `sys_packages` (non-fatal by
         // design — without the `package` service the install stays visible

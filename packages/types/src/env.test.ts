@@ -1,18 +1,26 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
+// [#18378] The live control below asserts the two axes are independent, which
+// needs the wall predicate beside the policy.
+import { postureEnforcesWall } from '@objectstack/spec/security';
 import {
   _resetEnvDeprecationWarnings,
   collectConfiguredLocales,
   readEnvWithDeprecation,
   resolveAllowDegradedTenancy,
   resolveAllowDevPlugin,
+  resolveMultiOrgEnabled,
+  resolveScheduledWorkEnabled,
+  resolveScheduledWorkPolicy,
   resolveSearchPinyinEnabled,
   resolveSandboxTimeoutMs,
   resolveOrgMembershipLimit,
   isMcpServerEnabled,
   resolveMcpStdioAutoStart,
   stampSearchPinyinEnabled,
+  SCHEDULED_WORK_DISABLED_REASON,
+  SCHEDULED_WORK_ENV,
 } from './env.js';
 
 describe('readEnvWithDeprecation', () => {
@@ -417,5 +425,217 @@ describe('resolveOrgMembershipLimit (OS_ORG_MEMBERSHIP_LIMIT)', () => {
     delete process.env[KEY];
     expect(resolveOrgMembershipLimit()).toBeUndefined();
     delete process.env.OS_ORG_LIMIT;
+  });
+});
+
+/**
+ * [#17396] The deployment switch for PACKAGE-AUTHORED SCHEDULED WORK, pinned in
+ * the package that owns it.
+ *
+ * Its accept set is stated in three places an operator reads — the docblock on
+ * `resolveScheduledWorkEnabled`, `content/docs/deployment/environment-variables.mdx`
+ * and `content/docs/automation/flows.mdx` — and every consumer (both time
+ * triggers, the automation engine's binding audit, the AppPlugin job loop,
+ * `os doctor`) reads the deployment through these two functions. Pinned here so
+ * the vocabulary is a contract of THIS package rather than a side effect
+ * observable only from a trigger suite.
+ *
+ * Shape deliberately COPIED from the sibling switches above
+ * (`resolveAllowDegradedTenancy`, `resolveAllowDevPlugin`): defaults off /
+ * truthy case-insensitively / anything else off. A third dialect for a fourth
+ * switch is how the three drift apart.
+ */
+describe('resolveScheduledWorkEnabled (#17396, ruling G items 1-2)', () => {
+  const original = process.env[SCHEDULED_WORK_ENV];
+  const originalMultiOrg = process.env.OS_MULTI_ORG_ENABLED;
+  afterEach(() => {
+    if (original === undefined) delete process.env[SCHEDULED_WORK_ENV];
+    else process.env[SCHEDULED_WORK_ENV] = original;
+    if (originalMultiOrg === undefined) delete process.env.OS_MULTI_ORG_ENABLED;
+    else process.env.OS_MULTI_ORG_ENABLED = originalMultiOrg;
+  });
+
+  it('is the variable the docs and `os doctor` name', () => {
+    // The constant exists so one spelling reaches every surface; a test that
+    // only ever indexes `process.env` BY that constant would pass on a typo.
+    expect(SCHEDULED_WORK_ENV).toBe('OS_AUTOMATION_SCHEDULED_WORK_ENABLED');
+  });
+
+  it('defaults OFF (unset -> no time trigger arms, no packaged job schedules)', () => {
+    delete process.env[SCHEDULED_WORK_ENV];
+    expect(resolveScheduledWorkEnabled()).toBe(false);
+  });
+
+  it('accepts the documented opt-in vocabulary case-insensitively', () => {
+    for (const v of ['1', 'true', 'TRUE', 'True', 'on', 'ON', 'yes', 'Yes', ' true ', ' 1 ']) {
+      process.env[SCHEDULED_WORK_ENV] = v;
+      expect(resolveScheduledWorkEnabled(), `${JSON.stringify(v)} is documented as truthy`).toBe(true);
+    }
+  });
+
+  it('treats anything else as off, empty string included', () => {
+    for (const v of ['0', 'false', 'FALSE', 'off', 'no', '', '   ', 'maybe', 'enabled', 't', 'y']) {
+      process.env[SCHEDULED_WORK_ENV] = v;
+      expect(
+        resolveScheduledWorkEnabled(),
+        `${JSON.stringify(v)} is outside the opt-in vocabulary`,
+      ).toBe(false);
+    }
+  });
+
+  it('is opt-IN, where `resolveMultiOrgEnabled` is opt-OUT — a typo must not arm the workload', () => {
+    // The two shapes disagree on exactly this input, and the disagreement is
+    // the point: `!== 'false'` reads a typo as ON, which for this switch would
+    // arm the clock-driven load the operator meant to refuse.
+    process.env[SCHEDULED_WORK_ENV] = 'ture';
+    process.env.OS_MULTI_ORG_ENABLED = 'ture';
+    expect(resolveScheduledWorkEnabled()).toBe(false);
+    expect(resolveMultiOrgEnabled(), 'control: the opt-OUT sibling really does read this as on').toBe(true);
+  });
+
+  it('the OFF reason is a deployment-policy sentence, never a binding failure', () => {
+    // Ruled item 6 in the package that owns the sentence: it must name the
+    // switch the operator has to set, and must NOT read as "binding failed".
+    expect(SCHEDULED_WORK_DISABLED_REASON).toContain(SCHEDULED_WORK_ENV);
+    expect(SCHEDULED_WORK_DISABLED_REASON).not.toMatch(/binding failed/i);
+  });
+});
+
+/**
+ * [#17396] The three bind states, as one reading.
+ *
+ * `resolveScheduledWorkPolicy` exists so both time triggers, the binding audit
+ * and the packaged-job loop cannot disagree about which of the three a
+ * deployment is in; this is the table its docblock states.
+ */
+describe('resolveScheduledWorkPolicy (#17396 ruling G, #18378 ruling A′ — the four bind states)', () => {
+  const originalSwitch = process.env[SCHEDULED_WORK_ENV];
+  const originalPosture = process.env.OS_TENANCY_POSTURE;
+  const originalMultiOrg = process.env.OS_MULTI_ORG_ENABLED;
+  afterEach(() => {
+    if (originalSwitch === undefined) delete process.env[SCHEDULED_WORK_ENV];
+    else process.env[SCHEDULED_WORK_ENV] = originalSwitch;
+    if (originalPosture === undefined) delete process.env.OS_TENANCY_POSTURE;
+    else process.env.OS_TENANCY_POSTURE = originalPosture;
+    if (originalMultiOrg === undefined) delete process.env.OS_MULTI_ORG_ENABLED;
+    else process.env.OS_MULTI_ORG_ENABLED = originalMultiOrg;
+  });
+
+  /** The default deployment: nothing set at all. */
+  const clean = (): void => {
+    delete process.env[SCHEDULED_WORK_ENV];
+    delete process.env.OS_TENANCY_POSTURE;
+    delete process.env.OS_MULTI_ORG_ENABLED;
+  };
+
+  it('row 1 — OFF (the default): nothing binds, and no declaration is demanded either', () => {
+    clean();
+    expect(resolveScheduledWorkPolicy()).toEqual({
+      enabled: false,
+      posture: 'single',
+      requiresActingOrganization: false,
+      runOwnership: 'unscoped',
+    });
+  });
+
+  it('row 1 holds under a WALL too — the OFF reason is the one to report, not an authoring remedy', () => {
+    clean();
+    // ⚠️ `runOwnership` still reports the posture's rule while the switch is
+    // OFF — it is a fact about the posture, not about the switch — but nothing
+    // binds, so no run can reach it. `enabled` is the discriminator, and the
+    // pin asserts both rather than letting the pair drift.
+    for (const [posture, runOwnership] of [
+      ['group', 'per-record'],
+      ['isolated', 'declared'],
+    ] as const) {
+      process.env.OS_TENANCY_POSTURE = posture;
+      expect(resolveScheduledWorkPolicy()).toEqual({
+        enabled: false,
+        posture,
+        requiresActingOrganization: false,
+        runOwnership,
+      });
+    }
+  });
+
+  it('row 2 — ON under `single`: binds, and requires NO acting organization', () => {
+    clean();
+    process.env[SCHEDULED_WORK_ENV] = 'true';
+    process.env.OS_TENANCY_POSTURE = 'single';
+    expect(resolveScheduledWorkPolicy()).toEqual({
+      enabled: true,
+      posture: 'single',
+      requiresActingOrganization: false,
+      runOwnership: 'unscoped',
+    });
+  });
+
+  // [#18378, ruling A′] The row that used to pair `group` with `isolated`.
+  //
+  // ⚠️ THE DISCRIMINATING ASSERTION IS THAT THE TWO POSTURES DISAGREE. A pin
+  // that looped over both and expected one shape is exactly what this card
+  // retired, so these are deliberately two cases with two different
+  // expectations rather than one parameterised case — a future edit that
+  // re-merges them has to delete an assertion to do it.
+  it('row 3 — ON under `group`: binds WITHOUT a declaration, owning its writes per record', () => {
+    clean();
+    process.env[SCHEDULED_WORK_ENV] = 'true';
+    process.env.OS_TENANCY_POSTURE = 'group';
+    expect(resolveScheduledWorkPolicy()).toEqual({
+      enabled: true,
+      posture: 'group',
+      requiresActingOrganization: false,
+      runOwnership: 'per-record',
+    });
+  });
+
+  it('row 4 — ON under `isolated`: the declaration is required, unchanged', () => {
+    clean();
+    process.env[SCHEDULED_WORK_ENV] = 'true';
+    process.env.OS_TENANCY_POSTURE = 'isolated';
+    expect(resolveScheduledWorkPolicy()).toEqual({
+      enabled: true,
+      posture: 'isolated',
+      requiresActingOrganization: true,
+      runOwnership: 'declared',
+    });
+  });
+
+  it('`group` enforces a wall and STILL does not require the declaration — the two axes are independent', () => {
+    // The live control for the finding that motivated A′: the separating
+    // predicate is read reach (`postureUsesUnionScope`), not the wall
+    // (`postureEnforcesWall`), and `group` answers true to BOTH. A resolver
+    // that regressed to `enabled && postureEnforcesWall(posture)` passes every
+    // other case in this block and fails only here.
+    clean();
+    process.env[SCHEDULED_WORK_ENV] = 'true';
+    process.env.OS_TENANCY_POSTURE = 'group';
+    expect(postureEnforcesWall('group')).toBe(true);
+    expect(resolveScheduledWorkPolicy().requiresActingOrganization).toBe(false);
+  });
+
+  it('reports the REQUESTED posture, derived from the legacy boolean when unset', () => {
+    clean();
+    process.env[SCHEDULED_WORK_ENV] = 'true';
+    process.env.OS_MULTI_ORG_ENABLED = 'true';
+    expect(resolveScheduledWorkPolicy()).toEqual({
+      enabled: true,
+      posture: 'isolated',
+      requiresActingOrganization: true,
+      runOwnership: 'declared',
+    });
+  });
+
+  it('throws on a bogus posture rather than resolving to `single` and dropping the requirement', () => {
+    // A typo'd posture that fell back to `single` would silently remove the
+    // declaration requirement with it — the deployment-layer form of the
+    // "declared but unenforced" defect. It throws in BOTH switch states,
+    // because the posture is resolved before the switch is consulted.
+    clean();
+    process.env.OS_TENANCY_POSTURE = 'mutli';
+    process.env[SCHEDULED_WORK_ENV] = 'true';
+    expect(() => resolveScheduledWorkPolicy()).toThrow(/Invalid OS_TENANCY_POSTURE/);
+    delete process.env[SCHEDULED_WORK_ENV];
+    expect(() => resolveScheduledWorkPolicy()).toThrow(/Invalid OS_TENANCY_POSTURE/);
   });
 });

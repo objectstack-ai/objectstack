@@ -2,7 +2,7 @@
 
 /**
  * CloudConnectionPlugin — the runtime-side client surface for a cloud
- * control plane (ADR-0008 Phase 1).
+ * control plane (cloud ADR-0008 Phase 1).
  *
  * Mounts the same-origin `/api/v1/cloud-connection/*` routes the Console
  * marketplace depends on:
@@ -18,10 +18,10 @@
  * History: these routes started as app-level wiring in
  * `apps/objectos/cloud-runtime-plugins.ts` (two ad-hoc plugins; every
  * `apps/` path named in this paragraph lives in the separate
- * `objectstack-ai/cloud` repo, never in this one). ADR-0008 Phase 1
+ * `objectstack-ai/cloud` repo, never in this one). cloud ADR-0008 Phase 1
  * consolidates them here as ONE plugin so both deployment shapes —
  * `apps/objectos` (multi-tenant) and `apps/objectos-ee` (single-environment)
- * — wire the same canonical implementation. ADR-0008 Phase 2 moves this
+ * — wire the same canonical implementation. cloud ADR-0008 Phase 2 moves this
  * surface into the open `@objectstack/cloud-connection` package; keep this
  * file dependency-light (structural Plugin types, no @objectstack/core) so
  * the move is mechanical.
@@ -51,7 +51,7 @@
  */
 
 // Minimal structural plugin contract — keep this module independent of
-// @objectstack/core so the ADR-0008 Phase 2 move to the open package stays
+// @objectstack/core so the cloud ADR-0008 Phase 2 move to the open package stays
 // mechanical (mirrors the other plugins in this package).
 interface PluginContext {
     hook(event: string, handler: (...args: any[]) => any): void;
@@ -588,7 +588,7 @@ export class CloudConnectionPlugin implements Plugin {
             // GET /installed — env's FULL installed set from the control
             // plane's `sys_package_installation`, so the Console "Installed"
             // view reflects packages installed via ANY path (CLI, marketplace,
-            // REST) — ADR-0007 step ①. Degrades to an empty list when the
+            // REST) — cloud ADR-0007 step ①. Degrades to an empty list when the
             // runtime is not cloud-connected or the control plane is
             // unreachable (never hard-fails the page).
             rawApp.get(`${CLOUD_CONNECTION_PREFIX}/installed`, async (c: any) => {
@@ -628,7 +628,7 @@ export class CloudConnectionPlugin implements Plugin {
             });
 
             // GET /org-packages — org-scoped catalog for the in-env
-            // Marketplace's "Your organization" layer (ADR-0007 step ②): the
+            // Marketplace's "Your organization" layer (cloud ADR-0007 step ②): the
             // env's owning org's own packages (visibility org/private), so a
             // publisher can discover + install their private apps from inside
             // the environment. Forwards (service-key) to the control plane,

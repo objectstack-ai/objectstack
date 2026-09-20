@@ -189,6 +189,30 @@ The react `<ObjectChart>` block is **object-bound** (`objectName` + an inline
 gate below against a different rule — its result rows are keyed by the raw field
 names, exactly the opposite of the dataset case.
 
+One level down from the axis, the measure itself is checked against the field it
+aggregates. A measure pairs an `aggregate` with a `field`, and
+`AGGREGATE_FIELD_TYPE_COMPATIBILITY` (`@objectstack/spec`) declares which pairs
+every backend answers the same way. A pair outside it is refused
+(`measure-aggregate-field-type-refused`) naming the aggregate, the field, its
+declared type and the accepted set:
+
+```ts
+// object declares `closed_at` as `datetime`
+measures: [{ name: 'avg_closed', aggregate: 'avg', field: 'closed_at' }]
+//                                          ↑ refused: the answer would be the dialect's, not the data's
+```
+
+`avg` over a temporal column is where this bites hardest: one SQL family coerces
+the stored text and returns a plausible number (the average *year*), another has
+no such function and fails at query time. `min`/`max` over the same field are
+**accepted** — they return a real instant of the field's own type — and
+`count`/`count_distinct` are accepted over every type, because they read no
+arithmetic off the value. The analytics service refuses the same pair with
+`400 DATASET_INVALID` when a query is built; this is the identical verdict,
+from the identical table, one door earlier. The rule stays silent wherever the
+field's type cannot be resolved (an object this stack does not define, a
+dangling field path, an untyped field) rather than guessing.
+
 ### 7. Navigation exposing objects nobody can read
 
 Navigation and permissions are separate metadata, each valid on its own — so an
@@ -382,6 +406,12 @@ For someone authoring in Studio that door is not one of four — it is the **onl
 one. `sys_metadata` overlay rows are not in any config file, so there is no
 `os lint` they could have run instead.
 
+The table below has exactly two axes: its **rows** are rule **families**, its
+**columns** are the four doors. A `✓` means that door runs that family — it does
+not say what that door hands the family to judge. That input is a third thing,
+orthogonal to both, and no cell here can carry it; it is written out in
+[What each door hands the rule table](#what-each-door-hands-the-rule-table).
+
 | | `os validate` | `os build` | `os lint` | runtime publish |
 |---|---|---|---|---|
 | Protocol schema (Zod) | ✓ | ✓ | — | ✓ |
@@ -390,6 +420,7 @@ one. `sys_metadata` overlay rows are not in any config file, so there is no
 | Zod-valid but functionally inert declarations — a `summary` with no operations (ADR-0078), a managed object advertising an API method its affordances refuse (#7521) | ✓ | ✓ | ✓ | ✓ᵒ |
 | View container shape | ✓ | ✓ | ✓ | — |
 | Widget-binding integrity (ADR-0021) | ✓ | ✓ | ✓ | ✓ᵈ |
+| Dataset measure `aggregate` × the field's declared type — a pair the spec's compatibility table refuses, e.g. `avg` over a `datetime` field (#16354) | ✓ | ✓ | ✓ | — |
 | Dashboard action/route references (ADR-0049) | ✓ | ✓ | ✓ | — |
 | Filter placeholder resolvability (#3574) | ✓ | ✓ | ✓ | — |
 | Ordering comparands naming a date-range preset — `last_30_days` in a `>=` position (#8793) | ✓ | ✓ | ✓ | ✓ᵈᵛᵒᵖᶠ |
@@ -522,6 +553,14 @@ rubric — snake_case names, missing labels, the best-practice data-model sweep 
 is a lint verdict, not a publish gate. `os build` has never rejected a camelCase
 object name.
 
+Read that parenthetical at the scope it is written at. It is a claim about these
+**rows**: no row is `✓` at one door and `—` at another in a direction that lets a
+stack through. The same sentence about the **input** each door hands the table is
+a *different* claim, it has been false three times, and the two read identically
+in prose — so the input claim is stated
+[separately below](#what-each-door-hands-the-rule-table) rather than folded in
+here.
+
 The declared-unique row is the one that looks like that rubric and is not. Its
 ADR-0120 D5 rules register for `os validate` and `os build` only, because
 `os lint` reaches them through its own data-model sweep and a second
@@ -546,6 +585,68 @@ artifact for stacks the other two refuse. A flow whose expression approver did
 not parse built and published green; only `os lint` stopped it, and CI usually
 runs the other two.
 
+### What each door hands the rule table
+
+Everything above this heading is one axis: which rule **family** runs at which
+**door**. This is the other one — the **input** each door hands those families to
+judge. They are independent: a door can run every rule in the registry and still
+certify a project clean, if what it hands them is an empty stack. A `✓` in the
+matrix answers the first question only.
+
+**The three CLI commands run the whole table twice on every run.**
+
+1. **The union fold.** One stack, every package's collections seen together.
+   Under the ADR-0130 D4 artifact shape a project's definitions may live entirely
+   in `packages[]` with nothing at the top level, so the fold fills only the
+   collections the top level does not carry, and returns a stack that already
+   carries them unchanged. This is the only pass that can see a finding which
+   **spans** packages. Until it was wired at all three doors (#17069, #17528),
+   such a project was judged as if it declared nothing — `os validate` and
+   `os lint` exited 0 on a stack `os build` refused.
+2. **The per-package walk.** The same table again, once per entry of `packages[]`:
+   each package's body re-read as the stack it was assembled from, handed the
+   artifact's own `packages[]` as **resolution context** so a sibling package's
+   object still resolves, while the collections being judged stay that package's
+   alone. It is de-duplicated against the union run, so what it reports is the
+   set of per-package findings no union finding already carried under the same
+   rule, `where`, message and non-top-level position — the leading
+   `collection[N]` index is neutralised, because a package body re-bases its
+   collections from 0 and one finding would otherwise get two keys. Every
+   finding it raises carries a `package '<id>' —` prefix in its `where`. That
+   key is position-insensitive, not collision-proof: two entries that render the
+   same `where` share one, so the bound is what the key can tell apart and no
+   wider — `packages/cli/src/utils/artifact-packages.ts` states it, and why. A
+   project with no `packages[]` skips it: one package by definition, already
+   judged whole by the union run.
+
+The second pass is not the first one in a stricter mood — it is a different
+question. A rule asking *"does this stack's app navigation point at an object
+this stack defines?"* is satisfied by the union for a package that carries
+neither half; per package it is not. Because the artifact registers **per
+package** (ADR-0130 D4/D5), the per-package answer is the one the runtime will
+live with.
+
+**That pass reached the three doors one at a time, and every gap was false-clean
+in the author's favour.** `os build` has run it since #16611, `os validate` since
+#18677 and `os lint` since #18778; until each of those landed, the door in
+question ran the union fold and stopped. Symbol presence is not coverage here:
+`os lint` imported the per-package seams for two cards before it ran this pass,
+because it walks `packages[]` for a duplicate-name advisory of its own — and that
+advisory is `os lint`'s own rubric, not this table.
+
+**The fourth door is on neither pass, and the package narrowing it does have is a
+third thing again.** A runtime write is one *item*, not a stack, so the publish
+gate builds a per-write snapshot — the written item plus the live registry's
+objects as resolution context — and runs the table twice over it: once on the
+context alone, once with the item grafted in, attributing to the write only the
+findings the item **added** (#4463). Its package dimension narrows that context to
+the written item's **package closure** — the written package, its declared
+dependencies, and unconditionally both platform/system objects and rows carrying
+no package provenance (#9612); a provenance it cannot read narrows nothing at all.
+That changes what a rule can **resolve**, never what it judges, and nothing at
+this door walks `packages[]`. So "runs per package" names one thing at the three
+CLI doors and another one here, and the `runtime publish` column says neither.
+
 A clean run walks the registry and reports timing:
 
 ```text transcript=os-validate
@@ -555,7 +656,7 @@ A clean run walks the registry and reports timing:
   Config: /path/to/support-desk/objectstack.config.ts
   Load time: 21ms
   → Validating against ObjectStack Protocol...
-  → Running author-time rules (45)...
+  → Running author-time rules (46)...
   → Checking capability providers (#3366)...
   → Checking package docs (ADR-0046)...
 

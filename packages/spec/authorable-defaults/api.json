@@ -92,7 +92,6 @@
     "api/ListFlowsRequest:limit = 50",
     "api/ListImportJobsRequest:limit = 50",
     "api/ListImportJobsRequest:offset = 0",
-    "api/ListInstalledPackagesRequest:limit = 50",
     "api/ListRunsRequest:limit = 20",
     "api/LoginRequest:type = \"email\"",
     "api/MetadataBulkRegisterRequest:continueOnError = false",

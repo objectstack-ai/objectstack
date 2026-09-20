@@ -47,6 +47,34 @@
  *     must clean up; none of them is evidence that anything reads the field.
  *     A seeded value nothing reads is precisely the shape being hunted.
  *
+ * ## Two consumers that name the field nowhere
+ *
+ * A metadata reference is not the only way a field is read, and the first real
+ * app to take this rule reported 12 fields that were all on screen or
+ * load-bearing. Both paths are read off the SPEC, not off a hand-kept list:
+ *
+ *   - **The synthesized layout** ({@link deriveFieldGroupLayout}, ADR-0085 §5).
+ *     An object's `fieldGroups` plus a field's `group` membership are what the
+ *     form, detail, drawer and designer surfaces all render when no `*.page.ts`
+ *     names the field. The author DID place the field; the placement is spelled
+ *     as a group key, so no `fields: [...]` array anywhere mentions it. The
+ *     derivation is the platform's own, so this rule credits exactly what a
+ *     renderer draws — including the hidden-field exclusion, which is why a
+ *     `hidden` field earns nothing here. Only a KEYED section counts: the
+ *     derivation's trailing untitled bucket is the flat fallback that collects
+ *     everything the author did NOT place, so crediting it would credit every
+ *     visible field on every object and leave the rule judging nothing.
+ *   - **A seed's or an import mapping's upsert identity**
+ *     ({@link CARRIER_IDENTITY_SEGMENTS}). A carrier root is where written and
+ *     carried values live, but `externalId` / `upsertKey` names the column the
+ *     loader MATCHES ON — it reads every row's value to decide insert from
+ *     update (`SeedSchema.externalId`: "Field (or composite list of fields)
+ *     matched for the uniqueness check"). A seeder-only identity column is
+ *     therefore consumed BY BEING an identity: it is `hidden` and `readonly`
+ *     precisely so no real row can acquire one, and a consumer anywhere else
+ *     would defeat it. Nothing here exempts `hidden` as such — a `hidden` field
+ *     that no upsert matches on and nothing reads is still reported.
+ *
  * A field with at least one behaviour OR display site is consumed and gets no
  * finding — a field that is only drawn is the ordinary state of most fields
  * (`phone` on a contact), not a defect; HotCRM's ledger listed `display-only`
@@ -91,8 +119,9 @@
  * maintainer's call, not this rule's.
  */
 
-import { resolveDisplayField } from '@objectstack/spec/data';
+import { deriveFieldGroupLayout, resolveDisplayField } from '@objectstack/spec/data';
 import type { DisplayNameObjectMeta } from '@objectstack/spec/data';
+import { referenceCarrierOf } from '@objectstack/spec/data';
 import { collectionEntries } from './collection-entries.js';
 import { recordsOf } from './object-graph.js';
 import { injectedColumnsFor } from './system-fields.js';
@@ -174,6 +203,23 @@ export const CONSUMER_ROOTS: readonly string[] = [
  * customer-facing surfaces a removal must clean, not evidence of a reader.
  */
 export const CARRIER_ROOTS: readonly string[] = ['translations', 'data', 'mappings', 'permissions'];
+
+/**
+ * The one thing inside a carrier root that is a READ: the column an upsert
+ * MATCHES ON. `externalId` is the canonical spelling on a seed
+ * (`SeedSchema.externalId`, "Field (or composite list of fields) matched for
+ * the uniqueness check") and `upsertKey` the canonical spelling on an import
+ * mapping (`MappingSchema`, which aliases `externalId`/`matchOn`/`key` onto
+ * it). Both are already in {@link BEHAVIOUR_SEGMENTS}; a carrier root just
+ * never got to ask, because the root decided the bucket first.
+ *
+ * A seeded VALUE is still a carrier — the loader writes it and nothing reads
+ * it back. The identity is the opposite: every replay reads the column on
+ * every row to decide insert from update. That is what makes a seeder-only
+ * identity column consumed while being invisible: it has exactly one reader,
+ * and the reader is the loader.
+ */
+const CARRIER_IDENTITY_SEGMENTS: ReadonlySet<string> = new Set(['externalId', 'upsertKey']);
 
 /** Roots whose sites are display by default; `BEHAVIOUR_SEGMENTS` earn behaviour back. */
 const DISPLAY_ROOTS: ReadonlySet<string> = new Set(['views', 'pages', 'apps']);
@@ -345,7 +391,12 @@ class ConsumerLedger {
 }
 
 function bucketFor(root: string, segments: readonly string[], leafKey: string): SiteKind {
-  if (CARRIER_ROOTS.includes(root)) return 'carrier';
+  // An upsert identity inside a carrier root is the one read there: the loader
+  // matches rows on that column. Everything else a carrier root holds is a
+  // value it writes or a label it carries.
+  if (CARRIER_ROOTS.includes(root)) {
+    return segments.some((s) => CARRIER_IDENTITY_SEGMENTS.has(s)) ? 'behaviour' : 'carrier';
+  }
   if (PROSE_KEYS.has(leafKey)) return 'carrier';
   if (segments.some((s) => BEHAVIOUR_SEGMENTS.has(s))) return 'behaviour';
   if (DISPLAY_ROOTS.has(root)) return 'display';
@@ -499,7 +550,14 @@ function walkObject(ledger: ConsumerLedger, obj: AnyRec, objectName: string, obj
     walk(ledger, value, objectName, 'objects', `${objPath}.${key}`, [key], key);
   }
   for (const { rec: field, path: fieldPath } of collectionEntries(obj.fields, fieldsPath)) {
-    const reference = strName(field.reference);
+    // [#18550] The carrier through the ONE arbiter: `strName` answered
+    // `undefined` for an unreadable one exactly as it does for an absent one,
+    // so the `displayField` consumer edge below was never recorded and the
+    // ledger under-reported — a field a lookup DOES display read as unused.
+    // Absence still answers `undefined` and records nothing.
+    // Same form as the sibling lint readers: the literal `.reference` read
+    // stays at the site, only the shape judgment moves to the arbiter.
+    const reference = referenceCarrierOf({ reference: field.reference }, 'validate-field-consumers walkObject');
     const displayField = strName(field.displayField);
     if (reference && displayField && ledger.declares(reference, displayField)) {
       ledger.record(reference, displayField, { root: 'objects', path: `${fieldPath}.displayField`, kind: 'display' });
@@ -511,14 +569,61 @@ function walkObject(ledger: ConsumerLedger, obj: AnyRec, objectName: string, obj
   }
 }
 
-/** Build the display-name meta the spec's ladder reads, whatever shape `fields` was authored in. */
-function displayMetaOf(obj: AnyRec, fields: { rec: AnyRec; path: string }[]): DisplayNameObjectMeta {
+/** The field map the spec helpers read, whatever shape `fields` was authored in. */
+function fieldMapOf(fields: readonly { rec: AnyRec; path: string }[]): Record<string, AnyRec> {
   const map: Record<string, AnyRec> = {};
   for (const { rec } of fields) {
     const n = strName(rec.name);
     if (n) map[n] = rec;
   }
-  return { nameField: strName(obj.nameField), displayNameField: strName(obj.displayNameField), fields: map };
+  return map;
+}
+
+/** Build the display-name meta the spec's ladder reads, whatever shape `fields` was authored in. */
+function displayMetaOf(obj: AnyRec, fields: { rec: AnyRec; path: string }[]): DisplayNameObjectMeta {
+  return {
+    nameField: strName(obj.nameField),
+    displayNameField: strName(obj.displayNameField),
+    fields: fieldMapOf(fields),
+  };
+}
+
+/**
+ * Credit every field the SYNTHESIZED layout places in a declared group.
+ *
+ * `deriveFieldGroupLayout` is the platform's own derivation (ADR-0085 §5) — the
+ * one implementation every renderer applies — so what it returns is what a form
+ * or detail surface draws when no authored page names the field. Running it
+ * here rather than re-reading `fieldGroups` by hand is the same discipline the
+ * other two exemptions follow: the verdict moves when the renderer moves.
+ *
+ * Only a KEYED section is a site. The derivation's trailing untitled bucket
+ * collects what the author did NOT place — every visible field that named no
+ * group, plus, on an object declaring no groups at all, every field there is.
+ * Crediting it would hand the display verdict to every visible field in every
+ * app and leave this rule able to report `hidden` fields only.
+ */
+function creditFieldGroupLayout(
+  ledger: ConsumerLedger,
+  obj: AnyRec,
+  objectName: string,
+  fields: readonly { rec: AnyRec; path: string }[],
+): void {
+  const sections = deriveFieldGroupLayout({ fieldGroups: obj.fieldGroups, fields: fieldMapOf(fields) });
+  if (sections === null) return;
+  const pathOf = new Map<string, string>();
+  for (const { rec, path } of fields) {
+    const n = strName(rec.name);
+    if (n !== undefined) pathOf.set(n, path);
+  }
+  for (const section of sections) {
+    if (section.key === undefined) continue;
+    for (const field of section.fields) {
+      const path = pathOf.get(field);
+      if (path === undefined) continue;
+      ledger.record(objectName, field, { root: 'objects', path: `${path}.group`, kind: 'display' });
+    }
+  }
 }
 
 function listPaths(paths: readonly string[]): string {
@@ -547,6 +652,7 @@ export function validateFieldConsumers(stack: AnyRec): FieldConsumerFinding[] {
     const fields = collectionEntries(obj.fields, `${objPath}.fields`);
     const injected = injectedColumnsFor(obj);
     const titleField = resolveDisplayField(displayMetaOf(obj, fields));
+    creditFieldGroupLayout(ledger, obj, objectName, fields);
     for (const { rec: field, path: fieldPath } of fields) {
       const fieldName = strName(field.name);
       if (!fieldName) continue;
@@ -603,11 +709,14 @@ export function validateFieldConsumers(stack: AnyRec): FieldConsumerFinding[] {
       message:
         `field "${field}" on object "${object}" is declared but nothing in this stack reads or displays ` +
         `it: no view column, form section, page binding, flow node, dataset, widget, formula, validation, ` +
-        `hook or action names it. A translation label, a seed value, an import mapping, a permission grant ` +
-        `or a flow that only WRITES it is a carrier, not a consumer. ${verdictClause}${sharedClause}`,
+        `hook or action names it, no declared field group places it on the synthesized layout, and no ` +
+        `seed or import mapping matches on it. A translation label, a seed value, an import-mapping ` +
+        `target, a permission grant or a flow that only WRITES it is a carrier, not a consumer. ` +
+        `${verdictClause}${sharedClause}`,
       hint:
         `Give "${field}" a consumer — a view column, a form section, a page binding, a formula, a ` +
-        `validation, a flow node, a dataset dimension — or remove the declaration` +
+        `validation, a flow node, a dataset dimension, or a \`group\` naming one of this object's ` +
+        `declared \`fieldGroups\` so the synthesized layout draws it — or remove the declaration` +
         (carriers.length > 0 ? ` together with its ${carriers.length} carrier site(s) listed above` : '') +
         `. Ignore this if the field is read only by an API client, by a hook or package this stack does not ` +
         `carry, or by a Studio-authored view. Roots scanned: ${CONSUMER_ROOTS.join(', ')} (consumers) · ` +

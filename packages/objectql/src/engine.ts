@@ -26,7 +26,7 @@ import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
 // engine is what `metadata-protocol.validateData` returns, so letting the two
 // drift would put a translation layer between a verdict and its contract.
 import type { ValidateDataIssue, ValidateDataResponse } from '@objectstack/spec/api';
-import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readAutonumberCounter, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY, isCurrentUserDefaultToken, isNowDefaultToken } from '@objectstack/spec/data';
+import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readAutonumberCounter, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, referenceCarrierOf, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY, isCurrentUserDefaultToken, isNowDefaultToken, isMultiValueField, driverSupportsTransactions } from '@objectstack/spec/data';
 // [#5158] Door 2's lowering sink — the SAME pair the protocol face (Door 1)
 // runs, so `FilterArray` has exactly one lowering in the product.
 import {
@@ -1014,6 +1014,37 @@ function formulaRoundingScale(def: { scale?: unknown } | undefined): number | un
   const scale = def?.scale;
   if (typeof scale !== 'number' || !Number.isInteger(scale) || scale < 0) return undefined;
   return scale <= MAX_FORMULA_SCALE ? scale : undefined;
+}
+
+/**
+ * [#18408] Is this field's value MULTI-VALUED — the one question, asked of the
+ * one predicate `@objectstack/spec` publishes, and the single local seam every
+ * site in this file goes through.
+ *
+ * Maintainer ruling 2026-09-13 (decision batch #128 item 5, option 1′): there
+ * is ONE definition of "is this field multi-valued", `isMultiValueField`, and
+ * storage follows it. The sites below used to read `field.multiple` raw, which
+ * answers `true` on types the spec predicate calls single-valued (`text`,
+ * `master_detail`, `tree` …) and `false` on the inherently-multi option types
+ * (`multiselect` / `checkboxes` / `tags`) that carry no flag at all. Both
+ * directions put this engine on a different list from the storage it writes
+ * through: `driver-sql` (#17469) and `os generate migration` (#18199) both ask
+ * the predicate now.
+ *
+ * Takes the field rather than a resolved type because — unlike driver-sql and
+ * the CLI generator — no caller in this file applies a type default of its own;
+ * a non-string `type` is answered `false` here, the same verdict those two
+ * reach through their `field.type || 'string'` resolution.
+ *
+ * ⛔ The predicate is called, never re-spelled. `MULTI_CAPABLE_TYPES` /
+ * `MULTI_OPTION_TYPES` membership written out at a site would be a second
+ * answer to a question the ruling gave exactly one.
+ */
+function declaredMultiValued(field: { type?: unknown; multiple?: unknown } | null | undefined): boolean {
+  return isMultiValueField({
+    type: typeof field?.type === 'string' ? field.type : '',
+    multiple: field?.multiple === true,
+  });
 }
 
 function planFormulaProjection(
@@ -3445,10 +3476,15 @@ export class ObjectQL implements IObjectQLEngine {
    * its dispatch — that write-back is what makes "accumulate in dispatch order"
    * true for both spellings rather than only the first.
    *
-   * A rewrite CONDITIONED on the row (`ctx.previous`, `ctx.input.id`) is
-   * outside the contract: it does not scope itself to the row it was decided
-   * on, it widens to every matched row. Per-row `previous` is supplied so a
-   * guard can REFUSE the write (throw), not so a rewrite can be aimed.
+   * A rewrite CONDITIONED on the row (`ctx.previous`, `ctx.input.id`) cannot
+   * scope itself to the row it was decided on: it widens to every matched row.
+   * Per-row `previous` is supplied so a guard can REFUSE the write (throw),
+   * and — ruled on #16074 — so a hook can make a ROW-INVARIANT-IN-EFFECT
+   * rewrite: one whose written KEY SET is the same on every matched row AND is
+   * assigned IN PLACE (`ctx.input.data.x = 1`, never `ctx.input.data = {…}`,
+   * which the recording below cannot attribute). A rewrite AIMED at one row
+   * stays outside the contract, and what makes the admitted shape safe is that
+   * enforcement rather than the hook's good faith.
    *
    * ## D3, ENFORCED — divergent key sets refuse the batch [#14099]
    *
@@ -4100,14 +4136,27 @@ export class ObjectQL implements IObjectQLEngine {
    * triggered it must reach the audit writer WITHOUT appearing in `session` —
    * where every caller-gating hook would read them as the caller. Attribution
    * here, authorization in `session`/`isSystem`, never the two mixed.
+   *
+   * `performedByClientId` rides it for the THIRD time on the same reasoning
+   * (#17022, ADR-0090 D10 rule 4): an MCP OAuth agent's write authorizes as
+   * the human it acts for, so the acting client can only reach the audit
+   * writer through a channel that is not `session` — putting it there would
+   * make every caller-gating hook read the client as the caller, which is the
+   * opposite of what the delegation means. This copy list is the whole reason
+   * the field is not inert: `HookContext` is built from a CLOSED literal whose
+   * `provenance` value is exactly what this function returns, so a key
+   * declared on `hook.zod.ts` and missing here is declared and never
+   * populated (ADR-0049).
    */
   private buildProvenance(execCtx?: ExecutionContext): HookContext['provenance'] {
     const flowRunId = (execCtx as any)?.flowRunId;
     const attributedUserId = (execCtx as any)?.attributedUserId;
-    if (!flowRunId && !attributedUserId) return undefined;
+    const performedByClientId = (execCtx as any)?.performedBy?.clientId;
+    if (!flowRunId && !attributedUserId && !performedByClientId) return undefined;
     return {
       ...(flowRunId ? { flowRunId: String(flowRunId) } : {}),
       ...(attributedUserId ? { attributedUserId: String(attributedUserId) } : {}),
+      ...(performedByClientId ? { performedByClientId: String(performedByClientId) } : {}),
     };
   }
 
@@ -4697,12 +4746,19 @@ export class ObjectQL implements IObjectQLEngine {
    *    two sides honest BY CONSTRUCTION: there is no field the lint calls
    *    always-valued that this method leaves empty.
    *
-   *  - **`multiple: true` assembles an ARRAY.** That field stores an
-   *    Array/JSON (`FieldSchema.multiple`: "Stores as Array/JSON"), so the
-   *    shape of its default follows the field, not the number of marked
-   *    options — one marked option on a multi-select defaults to a
-   *    one-element array, never a bare scalar that the driver would then store
-   *    with the wrong shape. Refusing (throwing) was rejected: the metadata is
+   *  - **A MULTI-VALUED field assembles an ARRAY.** That field stores an
+   *    Array/JSON, so the shape of its default follows the field, not the
+   *    number of marked options — one marked option on a multi-select defaults
+   *    to a one-element array, never a bare scalar that the driver would then
+   *    store with the wrong shape. [#18408] Multi-valued is
+   *    {@link declaredMultiValued}, ⛔ not a raw `field.multiple`: the flag is
+   *    inert on a type outside the two multi sets and redundant on a
+   *    `multiselect` / `checkboxes` / `tags`, which stores an array with or
+   *    without it — so reading the flag made this method disagree with the
+   *    validator one frame later (`normalizeMultiValueFields` has asked the
+   *    predicate all along) and with the column the driver builds.
+   *
+   *    Refusing (throwing) was rejected: the metadata is
    *    spec-valid, and a runtime throw on spec-valid input is a worse answer
    *    than a well-defined value. Ignoring it was rejected too — it would
    *    preserve, for multi-selects only, precisely the inertness this change
@@ -4723,7 +4779,7 @@ export class ObjectQL implements IObjectQLEngine {
    *    make the engine honour raw shapes lint calls nullable — the two would
    *    disagree in the direction that produces a false "always-valued".
    */
-  private resolveOptionDefault(field: { options?: unknown; multiple?: unknown }): unknown {
+  private resolveOptionDefault(field: { type?: unknown; options?: unknown; multiple?: unknown }): unknown {
     const options = field.options;
     if (!Array.isArray(options)) return undefined;
     const marked: unknown[] = [];
@@ -4738,7 +4794,8 @@ export class ObjectQL implements IObjectQLEngine {
       marked.push(value);
     }
     if (marked.length === 0) return undefined;
-    return field.multiple === true ? marked : marked[0];
+    // [#18408] Was `field.multiple === true`. See {@link declaredMultiValued}.
+    return declaredMultiValued(field) ? marked : marked[0];
   }
 
   /**
@@ -8948,7 +9005,24 @@ export class ObjectQL implements IObjectQLEngine {
    *  — which returns `undefined` on every failure branch it models — over a
    *  fold that is spreads and comparisons. No I/O, no driver, no `throw` on the
    *  measured path. The pin lives in
-   *  `engine-summary-index-registry-read-failure.test.ts`. */
+   *  `engine-summary-index-registry-read-failure.test.ts`.
+   *
+   *  [#19082] The SECOND way this one function invented *"nothing to
+   *  recompute"* — a different input, the same outcome. The child→parent FK
+   *  was resolved by comparing the child field's `reference` carrier to the
+   *  parent's name, so a carrier no reader can read (a non-string where
+   *  `FieldSchema.reference` declares an optional string) compared false
+   *  against every name, `fkField` stayed unset, and the `continue` below
+   *  dropped a DECLARED roll-up out of both indexes with nothing logged.
+   *
+   *  ⛔ The fix is NOT a looser comparison — that would trade a silent
+   *  stall for a MIS-MATCHED foreign key, which is more expensive. The
+   *  carrier is read through the one arbiter and the skip now SAYS SO, at
+   *  `error` (a persisted summary silently stops tracking its children while
+   *  every write keeps reporting success — the durability class). Absence and
+   *  every readable carrier behave exactly as before; the resolution rule
+   *  itself is deliberately left where PR #18503's C2 boundary put it. Pinned
+   *  in `engine-summary-index-unreadable-carrier.test.ts`, both directions. */
   private buildSummaryIndex(): {
     byChild: Map<string, SummaryDescriptor[]>;
     byParent: Map<string, SummaryDescriptor[]>;
@@ -8968,18 +9042,92 @@ export class ObjectQL implements IObjectQLEngine {
         if (!childObject || !fn) continue;
         // Resolve the FK on the child pointing back to this parent.
         let fkField: string | undefined = so.relationshipField;
+        // [#19082] Candidate relation fields on the child whose `reference`
+        // carrier no reader can read, spelled `<child>.<field>`. Collected
+        // rather than thrown on — see the two comments below.
+        const unreadableCarriers: string[] = [];
         if (!fkField) {
           const child = this._registry.getObject(childObject) as any;
           const cfields = child?.fields || {};
           for (const [cfName, cdef] of Object.entries(cfields)) {
             const cd: any = cdef;
-            if ((cd?.type === 'master_detail' || cd?.type === 'lookup') && cd?.reference === parent.name) {
+            if (cd?.type !== 'master_detail' && cd?.type !== 'lookup') continue;
+            // [#19082] The carrier is read through the ONE arbiter, the same
+            // one {@link ObjectQL.planCascadeAtomicity} and
+            // {@link ObjectQL.cascadeDeleteRelations} were routed through —
+            // but its refusal is CAUGHT here instead of propagated, for a
+            // reason those two seams do not have: this is a SCAN over every
+            // relation field on the child, looking for the one that points
+            // back. Letting the first unreadable carrier throw would hide a
+            // perfectly readable sibling that IS the foreign key, turning a
+            // roll-up that works today into a hard failure of every write.
+            // The three answers stay distinct:
+            //
+            //  - ABSENCE (`undefined` / `null` / `''`) is unchanged and still
+            //    silent — `referenceCarrierOf` answers `undefined` for all
+            //    three, this `continue` skips the field, and a field that
+            //    names no target is a legal thing to declare.
+            //  - A READABLE carrier compares exactly as `cd.reference ===
+            //    parent.name` compared it, so every roll-up that resolved
+            //    before resolves now.
+            //  - UNREADABILITY is recorded, and it is what the skip below
+            //    stops being silent about.
+            let carrier: string | undefined;
+            try {
+              carrier = referenceCarrierOf(cd, 'ObjectQL.buildSummaryIndex');
+            } catch {
+              unreadableCarriers.push(`${childObject}.${cfName}`);
+              continue;
+            }
+            if (carrier === parent.name) {
               fkField = cfName;
               break;
             }
           }
         }
-        if (!fkField) continue; // can't resolve the relationship — skip
+        if (!fkField) {
+          // [#19082] The skip is unchanged; its SILENCE is what ends here.
+          //
+          // An unreadable carrier compares false against every name, so
+          // `fkField` stayed unset and this `continue` dropped a DECLARED
+          // roll-up out of both indexes with no diagnostic anywhere — the
+          // second way this one function invents "nothing to recompute" (the
+          // first, the registry read, is #9154 above). It is a durability
+          // degradation by the repo's own test: every write keeps reporting
+          // success while a persisted summary value silently stops tracking
+          // its children, so it is an `error`, not a `warn`, and it owes both
+          // the consequence and the fix in the line it prints.
+          //
+          // Said once per INDEX BUILD, never once per write:
+          // {@link ensureSummaryIndexes} memoises the result against the
+          // registry's `objectRevision`, which moves only on a metadata
+          // mutation. And only the unreadable case speaks — a roll-up whose
+          // child genuinely declares no relation field at all is a different
+          // (and much louder at authoring time) condition, left exactly as it
+          // was rather than widened into here.
+          if (unreadableCarriers.length > 0) {
+            const msg =
+              `[summary-index] ${parent.name}.${summaryField} is NOT indexed and will NOT recompute: `
+              + `its roll-up over '${childObject}' has no resolvable foreign key, because `
+              + `${unreadableCarriers.length} candidate relation field(s) on '${childObject}' carry a `
+              + `\`reference\` no reader can read (${unreadableCarriers.join(', ')}). `
+              + `\`FieldSchema.reference\` is an optional STRING — the target object's name — and a `
+              + `non-string carrier is refused by \`ObjectSchema.safeParse\`, so such a definition `
+              + `reached this registry around the parse seam (a raw \`registerObject\`, or a metadata `
+              + `row stored before that tightening). CONSEQUENCE: ${parent.name}.${summaryField} keeps `
+              + `whatever value it holds now through EVERY insert / update / delete of '${childObject}', `
+              + `while every one of those writes reports success and nothing else reports this. FIX: `
+              + `spell the carrier as the target object name (reference: '${parent.name}') on the `
+              + `child's master_detail/lookup field, or name the foreign key explicitly with `
+              + `summaryOperations.relationshipField on ${parent.name}.${summaryField}.`;
+            // Sanctioned logger shape (PR #9750): reach for `error`, fall back
+            // to `warn` — ⛔ never an optional call like `logger.error?.()`,
+            // which emits nothing against a sink that has no `error`.
+            if (typeof this.logger.error === 'function') this.logger.error(msg);
+            else this.logger.warn(msg);
+          }
+          continue; // can't resolve the relationship — skip
+        }
         // Optional per-summary predicate: only child rows matching it are
         // aggregated (e.g. sum receipts where { status: 'received' }). ANDed with
         // the parent-FK match at recompute time. Ignore a non-object filter.
@@ -13036,7 +13184,24 @@ export class ObjectQL implements IObjectQLEngine {
         if (!childName || !fields) continue;
         for (const fdef of Object.values(fields)) {
           if (!fdef || (fdef.type !== 'master_detail' && fdef.type !== 'lookup')) continue;
-          const ref = fdef.reference;
+          // [#18550] The carrier is read through the ONE arbiter, so a
+          // `reference` no reader can read REFUSES here instead of reading as
+          // "this child does not reference `name`". The two answers stay
+          // different on purpose:
+          //
+          //  - ABSENCE (`undefined` / `null` / `''`) is unchanged and still
+          //    silent. `referenceCarrierOf` answers `undefined` for all three
+          //    and this `continue` skips the field, which is what a field that
+          //    names no target legitimately means (`FieldSchema.reference` is
+          //    `.optional()`, `StrictField` declares it nullable).
+          //  - UNREADABILITY is the loud one. An object- or array-valued
+          //    carrier was TRUTHY here and then failed both name comparisons
+          //    below, so the relation was dropped from the set silently — and
+          //    this function's `'none'` is, by its own docblock above, the one
+          //    verdict that asserts something POSITIVE about the schema
+          //    ("nothing references this object"). An unreadable carrier can
+          //    no more support that claim than an unreadable registry can.
+          const ref = referenceCarrierOf(fdef, 'ObjectQL.planCascadeAtomicity');
           if (!ref) continue;
           let resolvedRef: string | undefined;
           try { resolvedRef = this.resolveObjectName(ref); } catch { resolvedRef = undefined; }
@@ -13104,10 +13269,16 @@ export class ObjectQL implements IObjectQLEngine {
    * field it is aimed at.
    *
    * A single-valued `lookup` / `master_detail` stores a scalar foreign key, and
-   * bare equality is the right question about it. A field declaring
-   * `multiple: true` stores an ARRAY — "Stores as Array/JSON"
-   * (`FieldSchema.multiple`) — and every SQL backend in this repo puts that
-   * array in a JSON TEXT column. Aiming bare equality at THAT column compares
+   * bare equality is the right question about it. A MULTI-VALUED reference
+   * field stores an ARRAY, and every SQL backend in this repo puts that array
+   * in a JSON TEXT column. [#18408] Which of the two a field is, is
+   * {@link declaredMultiValued} — the one predicate the storage side asks
+   * (#17469) — ⛔ never a raw `field.multiple`: `master_detail` and `tree` are
+   * outside `MULTI_CAPABLE_TYPES`, so the flag on one of those buys a JSON
+   * column from nobody, and aiming `$contains` at the scalar column the driver
+   * really built is the mirror image of the defect below.
+   *
+   * Aiming bare equality at a multi-valued column compares
    * the whole serialization (`["a","b"]`) against one id, which can never hold;
    * `driver-sql` refuses the spelling outright (`INVALID_FILTER` / 400, #7398),
    * and that refusal is correct and stays. Until this method existed the probe
@@ -13144,10 +13315,11 @@ export class ObjectQL implements IObjectQLEngine {
    */
   private referenceProbeFilter(
     fieldName: string,
-    fdef: { multiple?: unknown },
+    fdef: { type?: unknown; multiple?: unknown },
     id: string | number,
   ): Record<string, unknown> {
-    if (fdef?.multiple !== true) return { [fieldName]: id };
+    // [#18408] Was `fdef?.multiple !== true`. See {@link declaredMultiValued}.
+    if (!declaredMultiValued(fdef)) return { [fieldName]: id };
     const raw = String(id);
     // The BODY of the JSON string form — `JSON.stringify('a"b')` is `"a\"b"`,
     // and the quotes are the serialization's, not the id's.
@@ -13418,9 +13590,11 @@ export class ObjectQL implements IObjectQLEngine {
    * or `lookup` field referencing `object`, honor the field's `deleteBehavior`:
    *   - `cascade`  → delete the dependent rows (recursively, so grandchildren
    *                  are handled by each child's own delete),
-   *   - `set_null` → clear the foreign key. On a `multiple: true` field the
-   *                  FK is a SET, so "clear" means remove the deleted MEMBER
-   *                  and keep the rest; an emptied set is written as `[]`,
+   *   - `set_null` → clear the foreign key. On a MULTI-VALUED field
+   *                  ([#18408] {@link declaredMultiValued}, ⛔ not the raw
+   *                  flag) the FK is a SET, so "clear" means remove the
+   *                  deleted MEMBER and keep the rest; an emptied set is
+   *                  written as `[]`,
    *                  never `null` — the representation `FieldSchema` pins
    *                  (`packages/spec/src/data/field.zod.ts`, the `multiple`
    *                  doc block, #9447 maintainer ruling 2026-08-18),
@@ -13475,7 +13649,14 @@ export class ObjectQL implements IObjectQLEngine {
       if (!childName || !fields) continue;
       for (const [fieldName, fdef] of Object.entries(fields)) {
         if (!fdef || (fdef.type !== 'master_detail' && fdef.type !== 'lookup')) continue;
-        const ref = fdef.reference;
+        // [#18550] Same arbiter, same absence-vs-unreadability split as
+        // {@link ObjectQL.planCascadeAtomicity} states above — and this is the
+        // seam where the silence was measurable end to end: an unreadable
+        // carrier made the relation invisible to the cascade, so `delete()`
+        // removed the parent, left a `master_detail` child behind, and
+        // reported success. No `restrict` refusal, no `set_null`, nothing
+        // logged. Absence still `continue`s here exactly as before.
+        const ref = referenceCarrierOf(fdef, 'ObjectQL.cascadeDeleteRelations');
         if (!ref) continue;
         // Match the target object by raw or resolved name.
         let resolvedRef: string | undefined;
@@ -13581,7 +13762,8 @@ export class ObjectQL implements IObjectQLEngine {
         // [#9362] `multiValued` is declared here rather than at the probe
         // because the probe's filter spelling, the set_null write below and
         // — since #9688 — this escalation all turn on it.
-        const multiValued = fdef.multiple === true;
+        // [#18408] Was `fdef.multiple === true`. See {@link declaredMultiValued}.
+        const multiValued = declaredMultiValued(fdef);
         const requiredSetNull = behavior === 'set_null' && fdef.required === true;
         if (requiredSetNull && !multiValued) {
           behavior = 'restrict';
@@ -14764,7 +14946,10 @@ export class ObjectQL implements IObjectQLEngine {
    * `OperationContext.context.transaction` and the SQL driver's per-builder
    * `.transacting(trx)` call.
    *
-   * - If the default driver does not support `beginTransaction`, the callback
+   * - If the default driver does not support transactions — no
+   *   `beginTransaction` method, or `supports.transactionsUnsupported: true`
+   *   from a transport that inherited one it cannot honour (#18063) — the
+   *   callback
    *   runs directly with the supplied base context (no rollback). This keeps
    *   the API safe to call on drivers without ACID support (e.g. the
    *   in-memory driver in tests). It is DECLARED behaviour (ADR-0119 D1), not
@@ -14821,7 +15006,14 @@ export class ObjectQL implements IObjectQLEngine {
     }
     const driver = this.defaultDriver ? this.drivers.get(this.defaultDriver) : undefined;
     const drv = driver as any;
-    if (!drv?.beginTransaction) {
+    // [#18063] The gate is the DECLARATION, not bare method presence. A
+    // subclass inherits `beginTransaction` from a base whose transport has
+    // transactions while its own has none — it cannot opt out of a door it did
+    // not open, so presence alone routed it down the transactional path and the
+    // handle it produced covered nothing. `driverSupportsTransactions` is the
+    // one definition (`@objectstack/spec`), shared with the ScopedContext trio
+    // below so the engine's transaction entrances cannot drift apart.
+    if (!driverSupportsTransactions(drv)) {
       const datasource = this.defaultDriver ?? drv?.name;
       if (opts?.require === true) {
         // Fail CLOSED (#5696 point 1): the caller declared it cannot tolerate
@@ -14832,7 +15024,7 @@ export class ObjectQL implements IObjectQLEngine {
       }
       // Declared degrade (ADR-0119 D1) — behaviour unchanged, but no longer
       // mute: the caller asked for atomicity and is not getting it (#4619).
-      this.warnTransactionUnsupported(datasource);
+      this.warnTransactionUnsupported(datasource, drv?.supports?.transactionsUnsupported === true);
       // `owned: false` — honest: there is no transaction here to own, and no
       // rollback the callback may promise on the strength of it.
       return callback(baseContext, { owned: false });
@@ -14894,6 +15086,14 @@ export class ObjectQL implements IObjectQLEngine {
    * The behaviour is unchanged and DECLARED (ADR-0119 D1: "when that driver has
    * no `beginTransaction` the callback runs with NO transaction and NO
    * rollback"). What was missing is that a caller had no way to find out —
+   *
+   * [#18063] TWO reasons now reach this degrade and the message says which.
+   * The second is a transport that DECLARED it cannot honour a handle while
+   * inheriting `beginTransaction` from a base class that can. Before the
+   * declaration existed such a driver was indistinguishable from a working one
+   * here, so the engine opened a transaction against it and the degrade — the
+   * honest answer — was unreachable.
+   *
    * the same shape as `batchData`'s `atomic` flag being a lie for as long as it
    * was (ADR-0119 D4). Tightening this into a throw would change the declared
    * contract and is deliberately NOT done here.
@@ -14909,19 +15109,32 @@ export class ObjectQL implements IObjectQLEngine {
    * Once per engine instance per driver: the drivers that reach this path (test
    * doubles, foreign engines) reach it on EVERY call.
    */
-  private warnTransactionUnsupported(datasource: string | undefined): void {
+  private warnTransactionUnsupported(datasource: string | undefined, declaredUnsupported = false): void {
     const name = datasource ?? '<no default datasource>';
     if (this.transactionUnsupportedReported.has(name)) return;
     this.transactionUnsupportedReported.add(name);
+    // [#18063] The two reasons reach the same degrade and must not read the
+    // same. Telling an operator a Turso REMOTE datasource "has no
+    // beginTransaction" sends them looking for a missing method on a class that
+    // publishes one; the fix for that reason is a different transport, not a
+    // different driver.
+    const cause = declaredUnsupported
+      ? `driver '${name}' declares supports.transactionsUnsupported — its transport cannot carry a ` +
+        'transaction handle even though it inherits beginTransaction'
+      : `driver '${name}' has no beginTransaction`;
+    const remedy = declaredUnsupported
+      ? 'Point this datasource at a transport that honours transactions (for libSQL: the local or ' +
+        'embedded-replica mode rather than the remote one), or have the caller fail '
+      : 'Register a driver that implements beginTransaction for this datasource, or have the caller fail ';
     this.logger.warn(
-      `transaction() requested a transaction but driver '${name}' has no beginTransaction — ` +
+      `transaction() requested a transaction but ${cause} — ` +
         'running WITHOUT transaction or rollback. Every write the callback makes commits as it executes, ' +
         'so a later throw leaves the earlier ones PERSISTED even though the call rejects as if the whole ' +
         'unit of work had been undone; no caller is told, and the records stay behind. ' +
-        'Register a driver that implements beginTransaction for this datasource, or have the caller fail ' +
+        remedy +
         "closed itself when it cannot tolerate losing atomicity (batchData's atomic gate, ADR-0119 D4, is " +
         'the pattern). Reported once per driver per engine instance.',
-      { datasource: name },
+      { datasource: name, declaredUnsupported },
     );
   }
 
@@ -15688,7 +15901,9 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
       ? engine.drivers?.get(engine.defaultDriver)
       : undefined;
 
-    if (!driver?.beginTransaction) {
+    // [#18063] Declaration, not bare method presence — see the engine surface's
+    // gate; one predicate serves both so they cannot answer differently.
+    if (!driverSupportsTransactions(driver)) {
       const datasource = engine.defaultDriver ?? driver?.name;
       if (opts?.require === true) {
         // Same fail-closed refusal as the engine surface (#5696 point 1).
@@ -15697,7 +15912,7 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
       // No transaction support — execute directly. Declared (ADR-0119 D1), but
       // said out loud since #4619: the caller asked for atomicity and the
       // callback is about to run without any.
-      engine.warnTransactionUnsupported?.(datasource);
+      engine.warnTransactionUnsupported?.(datasource, driver?.supports?.transactionsUnsupported === true);
       return callback(this, { owned: false });
     }
 
@@ -15778,7 +15993,11 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
     const driver = engine.defaultDriver
       ? engine.drivers?.get(engine.defaultDriver)
       : undefined;
-    return driver?.beginTransaction ? driver : undefined;
+    // [#18063] Declaration, not bare method presence — the trio's `begin`
+    // returns `null` and `commit`/`rollback` abstain for a transport that
+    // declared it cannot honour a handle, which is the same graceful degrade a
+    // driver with no `beginTransaction` already gets.
+    return driverSupportsTransactions(driver) ? driver : undefined;
   }
 
   /**

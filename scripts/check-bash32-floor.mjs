@@ -40,6 +40,47 @@
  * depth over the class, at the price of a regex — and the blind spot named
  * under "Known limit" below is exactly the half the simulation harness holds.
  *
+ * ## The BOUNDARY: the axis is the bash INTERPRETER, not the userland binaries
+ *
+ * A gate that states its class but not its boundary can be widened by a
+ * well-meaning row, so the boundary is written here rather than left to be
+ * re-derived. This gate's axis is the VERSION OF BASH THAT RUNS A SCRIPT, and
+ * the row schema says so by construction, not by convention: every
+ * `CONSTRUCTS` row carries a `since:` that is a bash version, and every `kind`
+ * is a bash category — a builtin, a piece of syntax, a variable. There is no
+ * value for "an external binary", and a row about one has nowhere to put it.
+ *
+ * So a difference between the GNU and BSD USERLAND BINARIES a script calls —
+ * `mktemp` and where it will accept the `XXXXXX`, `sed -i` and whether it
+ * demands a suffix argument, `readlink -f`, `date` and its flags — is a
+ * DIFFERENT AXIS, and ⛔ it is not a row here. Such a row could not be written
+ * honestly: `mktemp` has no bash version, so its `since:` would have to be a
+ * lie or a special case, and the verdict line this gate prints ends
+ * "constructs checked, floor bash 3.2" — which becomes false advertising the
+ * moment a coreutils-vs-BSD rule joins the table it counts. Widening here
+ * would silently convert a gate that means "this script needs bash 4" into one
+ * that means "this script behaves differently on a Mac": a strictly larger
+ * claim, made by adding a row.
+ *
+ * ⇒ That class wants a SIBLING gate, not a row here — and ⛔ not yet. The
+ * measured population of real userland defects in this repo is ONE: an
+ * `mktemp` template whose `XXXXXX` was not last. It is already fixed and
+ * guarded by a per-script pin, which ⛔ stays — nothing here replaces it. A
+ * shared gate for a population of one is not warranted, and the evidence that
+ * would change that is a SECOND real instance; the place to land it is the
+ * boundary card this paragraph came from (#17141).
+ *
+ * ⚠️ The basis is written out and not just the verdict, on purpose: a boundary
+ * stated without its basis gets re-litigated by the next person who
+ * provisionally leans yes. That is not hypothetical. This exact question —
+ * should this gate grow a BSD/portability rule, so the `mktemp` class is
+ * caught by a shared gate instead of a per-script pin — was asked, was
+ * answered NO, and the seat that answered it had leaned the other way first
+ * and put that on the record: *"measuring is what produced it — I had
+ * provisionally leaned yes."* ⇒ Measuring is the part that is reproducible.
+ * Read any row's `since:` and `kind:` before re-opening this; ⛔ do not
+ * re-litigate it from intuition.
+ *
  * ## The exemption rule: telling a HUNTER from a USER
  *
  * The hard part of a repo-wide scan is that the files which document this floor
@@ -133,6 +174,35 @@
  * Discovery reads the git index, so an ignored or generated file is never
  * scanned and a newly tracked script is scanned the moment it is staged.
  * An empty population is a REFUSAL, not a quiet pass (#4690).
+ *
+ * ## The census is enumerated from the INDEX and judged from the DISK (#18465)
+ *
+ * Those are two different trees, and the gap between them is a HOLE in the
+ * census rather than a smaller population. A sparse checkout, a partially
+ * materialised worktree, a `--root` pointed at one, or a deletion that is not
+ * staged yet all leave paths the index lists and the disk cannot supply.
+ * Skipping one is CORRECT — a deleted-but-indexed path is genuinely not a
+ * script to judge — so the skip stays. What is not correct is doing it
+ * quietly.
+ *
+ * The green line prints the census as a VERDICT, so a silently shrunken count
+ * is an assertion a reader acts on, and it is strictly more dangerous than the
+ * empty population the paragraph above refuses: an empty census is visibly
+ * absurd, a plausible smaller one reads as a fact. Measured on a 7-file
+ * fixture with four paths removed from the disk alone, the gate printed
+ * `3 tracked shell file(s) ... census: 2 by .sh extension, 1 by shebang alone`
+ * at exit 0 while `git ls-files` still listed 7. It has already cost time: a
+ * 33 to 29 to 33 swing sat unreconciled for six days, because the run that
+ * read 29 had no way to say what it had not read.
+ *
+ * So an unreadable indexed path is a REFUSAL carrying its reason, PER PATH —
+ * the same disposition `unsupportedConstructs` takes toward a skip above, and
+ * ⛔ never a count, which is the silent skip with a number attached.
+ *
+ * ⚠️ Refusing rather than merely warning is safe because the skip is
+ * measurably ZERO on a complete checkout: every path the index lists under
+ * these roots is a regular blob — no symlink, no gitlink, and this repo
+ * declares no submodule — so nothing but an incomplete tree produces one.
  */
 
 import { spawnSync } from 'node:child_process';
@@ -142,6 +212,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 
+import { gitFreeEnv } from './git-env.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
 const REPO_ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
@@ -624,12 +695,164 @@ export function isShell(relPath, text) {
 }
 
 /**
+ * ## What the `bash` on PATH can actually do — MEASURED, never inferred
+ *
+ * Two `--self-test` harnesses in this repo drive a real shell, and both
+ * assumed the interpreter they spawn is bash 4+. On macOS `/bin/bash` is
+ * 3.2.57 — the very floor this gate defends — so both went red on the one
+ * platform whose support is the whole point of the floor, while CI's bash 5
+ * stayed green. This is the ONE detection both harnesses now share. The
+ * DISPOSITIONS they take from it are deliberately NOT shared, and each is
+ * argued where it is taken: a harness that replays a bash-4 workflow block
+ * verbatim cannot run at all under the floor and says so out loud, while the
+ * simulated-3.2 leg below wants the opposite and reads a native absence as a
+ * BETTER instrument than the one it manufactures.
+ *
+ * Two readings, and the split between them is not cosmetic:
+ *
+ *   `major`/`minor`   from `BASH_VERSINFO`, set by every bash since 2.0. It is
+ *                     the only instrument that can speak about SYNTAX and about
+ *                     new FLAGS on old builtins — `declare -A`, `shopt -s
+ *                     globstar`, `${x^^}` — because on 3.2 the command itself
+ *                     still exists and only the flag or the expansion is new,
+ *                     so there is nothing for `type` to be asked about.
+ *
+ *   `builtins`        `type -t <name>`, per name, for the rows whose construct
+ *                     IS the command. Exactly two names are probed and the
+ *                     narrowness is the whole point: `type -t declare` answers
+ *                     `builtin` on 3.2 as loudly as on 5.2, so probing there
+ *                     would report a capability the host does not have. It is
+ *                     also the only reading that survives `enable -n mapfile
+ *                     readarray` — the manufactured floor this file's own
+ *                     instrument leg builds, where the version still reads 5.x
+ *                     while the builtin is gone.
+ *
+ * ⚠️ `CONSTRUCTS[].since` is NOT consulted here and must not be. The header
+ * above states it is documentation and not a predicate; a capability inferred
+ * from a table is not a measurement, and the table would then be certifying
+ * itself.
+ *
+ * ⛔ `answered: false` is a REFUSAL, not a default. A caller that cannot read
+ * the host's capabilities knows nothing, and "knows nothing" must fail loudly
+ * rather than fall through to the permissive branch (#4690).
+ */
+export const PROBED_BUILTINS = Object.freeze(['mapfile', 'readarray']);
+
+/**
+ * The pure half: turn one probe transcript into a capability reading.
+ *
+ * Split out from the spawning half on purpose — it is what lets BOTH branches
+ * of every disposition below be pinned from fixtures on any host, including the
+ * bash-4+ hosts where a native 3.2 reading cannot be produced at all.
+ *
+ * @param {string} stdout the probe's output
+ * @param {number|null} status the probe's exit status
+ */
+export function readBashCapabilities(stdout, status) {
+  const lines = String(stdout ?? '')
+    .split('\n')
+    .map((l) => l.trimEnd())
+    .filter((l) => l.length > 0);
+  const version = lines[0] ?? '';
+  const m = /^(\d+)\.(\d+)$/.exec(version);
+  /** @type {Record<string, boolean|null>} */
+  const builtins = {};
+  for (const name of PROBED_BUILTINS) builtins[name] = null;
+  for (const line of lines.slice(1)) {
+    const [name, kind] = line.split(' ');
+    if (!PROBED_BUILTINS.includes(name)) continue;
+    // `type -t` prints `builtin` for a live builtin and NOTHING once
+    // `enable -n` has removed it — which is also what a host that never had it
+    // prints. Those two are the same fact about this shell, and this reading
+    // deliberately does not try to tell them apart: the callers that care do it
+    // by argument, not by probe.
+    builtins[name] = kind === 'builtin' || kind === 'function' || kind === 'file';
+  }
+  const answered = status === 0 && m !== null && PROBED_BUILTINS.every((b) => builtins[b] !== null);
+  return {
+    answered,
+    version: m ? version : null,
+    major: m ? Number(m[1]) : null,
+    minor: m ? Number(m[2]) : null,
+    builtins,
+  };
+}
+
+/** The probe script, kept beside its reader so the two cannot drift. */
+const CAPABILITY_PROBE =
+  'printf \'%s.%s\\n\' "${BASH_VERSINFO[0]:-0}" "${BASH_VERSINFO[1]:-0}"\n' +
+  PROBED_BUILTINS.map((b) => `printf '%s %s\\n' '${b}' "$(type -t ${b} 2> /dev/null || true)"`).join('\n') +
+  '\n';
+
+/** Measure the `bash` this process would spawn. Resolved through `PATH`, like every other spawn here. */
+export function probeBashCapabilities() {
+  const out = spawnSync('bash', ['-c', CAPABILITY_PROBE], { encoding: 'utf8' });
+  return readBashCapabilities(out.stdout ?? '', out.status);
+}
+
+/**
+ * The rows whose construct is a COMMAND, so `type -t` can answer for them.
+ * Every other row is a flag, an option, an expansion or an operator on
+ * something 3.2 already has, and only the version reading speaks to those.
+ */
+const ROW_PROBED_BUILTINS = Object.freeze({ mapfile: PROBED_BUILTINS });
+
+/**
+ * Which constructs in one block of shell this host's `bash` cannot run.
+ *
+ * Returns `scanText` findings, so a caller reporting a skip can name the line,
+ * the spelling and what it BREAKS — the same sentence this gate prints when it
+ * flags the same construct in a tracked file. A skip carrying that is a skip
+ * with a reason; one carrying a count is the quiet pass #4690 refuses.
+ *
+ * @param {string} label a name for the block, used only in the findings
+ * @param {string} text the block, verbatim
+ * @param {ReturnType<typeof readBashCapabilities>} caps
+ */
+export function unsupportedConstructs(label, text, caps) {
+  if (!caps.answered) throw new Error('unsupportedConstructs: capabilities were never read — refuse, do not guess');
+  return scanText(label, text).filter((finding) => {
+    const probed = ROW_PROBED_BUILTINS[finding.id];
+    const named = probed ? probed.filter((name) => finding.text.includes(name)) : [];
+    if (named.length > 0) return named.some((name) => caps.builtins[name] === false);
+    return typeof caps.major === 'number' && caps.major < 4;
+  });
+}
+
+/**
+ * Why one indexed path could not be read, in the terms the OS gave.
+ *
+ * Node's `fs` message already opens with the errno and ends with the path
+ * (`ENOENT: no such file or directory, open '...'`), which is the whole reason
+ * this is carried rather than summarised: the shapes a reader must tell apart
+ * — absent (a sparse checkout or an unstaged deletion), a directory here, a
+ * mode this process cannot read — differ only in that code.
+ *
+ * @param {unknown} err
+ */
+function unreadableReason(err) {
+  const code = err && typeof err === 'object' && 'code' in err ? String(err.code) : null;
+  const reason = err instanceof Error && err.message ? err.message : String(err);
+  return { code, reason };
+}
+
+/**
  * The population, read from the git index under the derived walk roots.
+ *
+ * Also returns `unreadable`: the paths the index listed and the disk could not
+ * supply, each with its reason (#18465). The skip is kept — a deleted-but-
+ * indexed path is not a script to judge — but it leaves a hole in the census,
+ * so the caller can refuse instead of printing a shrunken number as a verdict.
  *
  * @param {string} root
  */
 export function listPopulation(root) {
   const out = spawnSync('git', ['-C', root, 'ls-files', '-z', '--', ...WALK_ROOTS], {
+    // #16644: `-C root` is the ONLY thing that may decide which index is read. An
+    // inherited GIT_DIR outranks it, and this function is called with a mkdtemp fixture
+    // as `root` in every end-to-end leg below -- under a hook those legs would census
+    // the real repository and report a number about the wrong tree.
+    env: gitFreeEnv(),
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
   });
@@ -637,14 +860,20 @@ export function listPopulation(root) {
     throw new Error(`git ls-files failed under ${root}: ${(out.stderr || '').trim()}`);
   }
   const population = [];
+  /** @type {{ rel: string, code: string|null, reason: string }[]} */
+  const unreadable = [];
   let byExtension = 0;
   let byShebang = 0;
   for (const rel of out.stdout.split('\0').filter(Boolean)) {
     let text;
     try {
       text = readFileSync(join(root, rel), 'utf8');
-    } catch {
-      continue; // a deleted-but-indexed path is not a script to judge
+    } catch (err) {
+      // Still skipped: a deleted-but-indexed path is not a script to judge.
+      // But RECORDED, because the population was enumerated from the index and
+      // this path is in it — the silence, not the skip, was the defect (#18465).
+      unreadable.push({ rel, ...unreadableReason(err) });
+      continue;
     }
     const verdict = isShell(rel, text);
     if (!verdict.shell) continue;
@@ -652,15 +881,15 @@ export function listPopulation(root) {
     else byShebang += 1;
     population.push({ rel, text, by: verdict.by });
   }
-  return { population, byExtension, byShebang };
+  return { population, byExtension, byShebang, unreadable };
 }
 
 /** Scan a whole tree. Returns findings plus the census the green line prints. */
 export function scanTree(root) {
-  const { population, byExtension, byShebang } = listPopulation(root);
+  const { population, byExtension, byShebang, unreadable } = listPopulation(root);
   const findings = [];
   for (const { rel, text } of population) findings.push(...scanText(rel, text));
-  return { findings, population, byExtension, byShebang };
+  return { findings, population, byExtension, byShebang, unreadable };
 }
 
 function report(findings) {
@@ -680,6 +909,48 @@ function report(findings) {
   );
 }
 
+/**
+ * The census has a HOLE in it: name every path, and why each one (#18465).
+ *
+ * ⛔ Per path with its reason, never a count. A count is the silent skip with
+ * a number attached, and the defect was precisely that the number was
+ * plausible — `report()` above names a file, a line and a spelling for the
+ * same reason.
+ *
+ * @param {{ rel: string, code: string|null, reason: string }[]} unreadable
+ * @param {{ rel: string }[]} population what the readable remainder came to
+ * @param {{ file: string }[]} findings the remainder's findings, if any
+ */
+function reportUnreadable(unreadable, population, findings) {
+  console.error(
+    '✗ check-bash32-floor: ' + unreadable.length + ' path(s) under ' + POPULATION_ROOTS.join(', ')
+    + ' are listed in the\n  git index but could not be read from disk, so this census has a hole in '
+    + 'it and is not a verdict.\n',
+  );
+  for (const u of unreadable) {
+    console.error('  ' + u.rel);
+    console.error('      ' + u.reason + '\n');
+  }
+  console.error(
+    'The population is enumerated from the INDEX and judged from the DISK. Skipping a path that\n'
+    + 'cannot be read is correct — a deleted-but-indexed path is not a script to judge — but doing it\n'
+    + 'quietly would have printed "' + population.length + ' tracked shell file(s)" as a verdict while '
+    + unreadable.length + ' path(s) the index\nlists were never read at all; an unread path cannot even be '
+    + 'classified as shell, so the census\ncannot say whether it belonged in the count. A plausible smaller '
+    + 'number reads as a fact where\nan empty one would read as absurd — this is the neighbouring refusal '
+    + 'completed (#4690).\n\n'
+    + 'Usual causes, in the order they occur: a deletion that is not staged yet (git add -A, or\n'
+    + 'git rm), a sparse or partially materialised checkout (git sparse-checkout disable), or a\n'
+    + '--root pointed at one. Re-run against a complete tree.',
+  );
+  if (findings.length > 0) {
+    console.error(
+      '\nThe readable remainder also carries ' + findings.length + ' finding(s), reported below. That is a\n'
+      + 'reading of the REMAINDER, never of the population.\n',
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------
 
 /**
@@ -688,12 +959,15 @@ function report(findings) {
  */
 function fixtureRepo(files) {
   const dir = mkdtempSync(join(tmpdir(), 'bash32-floor-'));
-  spawnSync('git', ['-C', dir, 'init', '-q'], { encoding: 'utf8' });
+  // #16644: `init` and `add -A` are the two commands the measured incident ran. With an
+  // inherited GIT_DIR the `init` writes core.bare into the SHARED .git/config and the
+  // `add -A` stages the real tree as deleted, both silently.
+  spawnSync('git', ['-C', dir, 'init', '-q'], { encoding: 'utf8', env: gitFreeEnv() });
   for (const [rel, body] of Object.entries(files)) {
     mkdirSync(join(dir, dirname(rel)), { recursive: true });
     writeFileSync(join(dir, rel), body);
   }
-  spawnSync('git', ['-C', dir, 'add', '-A'], { encoding: 'utf8' });
+  spawnSync('git', ['-C', dir, 'add', '-A'], { encoding: 'utf8', env: gitFreeEnv() });
   return dir;
 }
 
@@ -736,13 +1010,15 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'population membership': 5,
   '⭐ the declaration, and the two obligations it makes unreachable': 5,
   '⭐ end to end, through the real discovery path': 5,
-  '⭐ the instrument is real: the flagged construct really does break': 4,
+  '⭐ an indexed path the DISK cannot supply is a REFUSAL': 11,
+  '⭐ the bash-4 capability reading, pinned in BOTH directions': 12,
+  '⭐ the instrument is real: the flagged construct really does break': 5,
   'the real tree': 2,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 17;
+const SELF_TEST_BATTERY_FLOOR = 19;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1109,24 +1385,257 @@ function selfTest() {
     `${emptyRun.stdout}${emptyRun.stderr}`.slice(0, 300),
   );
 
+  // --- ⭐ an indexed path the DISK cannot supply is a REFUSAL (#18465) -----
+  //
+  // The population is enumerated from the INDEX and judged from the DISK, so a
+  // path the index lists and the disk cannot supply is a HOLE in the census
+  // rather than a smaller population. Before this battery the gate dropped it
+  // in a silent `continue` and printed the shrunken number as its verdict at
+  // exit 0 — measured on a 7-file fixture with four paths removed from the disk
+  // alone: `3 tracked shell file(s) ... census: 2 by .sh extension, 1 by
+  // shebang alone`, while `git ls-files` still listed 7.
+  //
+  // ⚠️ Both directions are pinned and the DARK half is the load-bearing one: a
+  // refusal that also fired on a COMPLETE checkout would redden every normal
+  // run, and it would pass every lit case below while doing it.
+  battery('⭐ an indexed path the DISK cannot supply is a REFUSAL');
+  const holed = {
+    'scripts/present.sh': '#!/usr/bin/env bash\necho present\n',
+    'scripts/absent.sh': '#!/usr/bin/env bash\necho absent\n',
+    '.githooks/pre-push': '#!/bin/sh\nnow="${EPOCHSECONDS:-$(date +%s)}"\n',
+  };
+  const completeRepo = fixtureRepo(holed);
+  const partialRepo = fixtureRepo(holed);
+  // Removed from the DISK only. The index is never touched, which is the whole
+  // shape — and the first case proves the fixture really is that shape, because
+  // a fixture whose index also lost the path would make every case below pass
+  // by testing nothing.
+  rmSync(join(partialRepo, 'scripts/absent.sh'));
+  const stillIndexed = spawnSync('git', ['-C', partialRepo, 'ls-files', '--', ...WALK_ROOTS], { encoding: 'utf8', env: gitFreeEnv() });
+  t(
+    'the fixture really is INDEX-vs-DISK: the index still lists the removed path',
+    stillIndexed.stdout.includes('scripts/absent.sh'),
+    stillIndexed.stdout.trim(),
+  );
+  const partial = listPopulation(partialRepo);
+  // ⛔ Read through an optional binding, never `partial.unreadable[0].code`
+  // directly. An assertion that THROWS instead of returning false takes every
+  // later case in this battery with it — including both DARK legs, which are
+  // the load-bearing half — and it dies before the battery floor and the
+  // verdict handshake can speak. Measured: ablating the reporting half crashed
+  // this battery at its third case, so the remaining eight never ran.
+  const hole = partial.unreadable[0] ?? null;
+  t(
+    'an unreadable indexed path is REPORTED, not dropped in silence',
+    partial.unreadable.length === 1 && hole?.rel === 'scripts/absent.sh',
+    JSON.stringify(partial.unreadable),
+  );
+  t(
+    'and it carries its REASON — a count is the silent skip with a number attached',
+    hole?.code === 'ENOENT' && /no such file/i.test(hole?.reason ?? ''),
+    JSON.stringify(hole),
+  );
+  t(
+    'the SKIP itself is kept: a deleted-but-indexed path is still not a script to judge',
+    partial.population.every((p) => p.rel !== 'scripts/absent.sh') && partial.population.length === 2,
+    JSON.stringify(partial.population.map((p) => p.rel)),
+  );
+  const partialRun = spawnSync(process.execPath, [SELF, '--root', partialRepo], { encoding: 'utf8' });
+  const partialOut = `${partialRun.stdout}${partialRun.stderr}`;
+  t(
+    'end to end, the gate REFUSES rather than printing a shrunken census at exit 0',
+    partialRun.status === 1,
+    partialOut.slice(0, 400),
+  );
+  t(
+    'and the refusal NAMES the path it could not read',
+    partialOut.includes('scripts/absent.sh'),
+    partialOut.slice(0, 400),
+  );
+  t(
+    '⛔ and the green census line is never printed — that line IS the shrunken verdict',
+    !/tracked shell file\(s\) under/.test(partialRun.stdout),
+    JSON.stringify(partialRun.stdout.slice(0, 300)),
+  );
+  // A tree whose whole population is unreadable found PLENTY and read NONE, so
+  // #4690's "the walk found nothing" would be a false sentence about it. The
+  // two refusals are different answers with different remedies.
+  const allAbsentRepo = fixtureRepo(holed);
+  for (const rel of Object.keys(holed)) rmSync(join(allAbsentRepo, rel));
+  const allAbsentRun = spawnSync(process.execPath, [SELF, '--root', allAbsentRepo], { encoding: 'utf8' });
+  const allAbsentOut = `${allAbsentRun.stdout}${allAbsentRun.stderr}`;
+  t(
+    'a wholly unreadable population refuses AS UNREADABLE, not as empty',
+    allAbsentRun.status === 1
+      && /could not be read from disk/.test(allAbsentOut)
+      && !/found no shell files/.test(allAbsentOut),
+    allAbsentOut.slice(0, 400),
+  );
+  // ⭐ DARK. Everything above would pass just as well if the refusal fired on
+  // every tree; these three are what say it does not.
+  const completeRun = spawnSync(process.execPath, [SELF, '--root', completeRepo], { encoding: 'utf8' });
+  const completeOut = `${completeRun.stdout}${completeRun.stderr}`;
+  t(
+    '⭐ DARK: the SAME fixture, complete on disk, stays GREEN',
+    completeRun.status === 0,
+    completeOut.slice(0, 400),
+  );
+  t(
+    '⭐ DARK: …and reads ZERO unreadable paths, so the new report is not decoration',
+    listPopulation(completeRepo).unreadable.length === 0,
+    JSON.stringify(listPopulation(completeRepo).unreadable),
+  );
+  t(
+    '⭐ DARK: …and its census is the FULL one the partial run shrank',
+    /3 tracked shell file\(s\)/.test(completeRun.stdout) && /census: 2 by \.sh extension, 1 by shebang alone/.test(completeRun.stdout),
+    completeRun.stdout,
+  );
+
+  // --- ⭐ the capability reading, pinned in BOTH directions (#17458) ---------
+  //
+  // The disposition every harness takes from `probeBashCapabilities()` branches
+  // on a reading that a bash-4+ host can only ever produce ONE value of. Pin the
+  // pure reader against transcripts instead, so the 3.2 branch — the branch that
+  // only ever executes on the platform this gate defends — is verified on every
+  // run, on every host, including the CI runner that can never take it.
+  //
+  // ⛔ These are fixtures of a REAL transcript shape: the probe's own output,
+  // `BASH_VERSINFO` major.minor then one `<name> <type -t>` line per probed
+  // builtin, with `type -t` printing nothing for a builtin that is not there.
+  battery('⭐ the bash-4 capability reading, pinned in BOTH directions');
+  const capsOf = (text, status = 0) => readBashCapabilities(text, status);
+  const BASH52 = '5.2\nmapfile builtin\nreadarray builtin\n';
+  const BASH32 = '3.2\nmapfile \nreadarray \n';
+  const MANUFACTURED = '5.2\nmapfile \nreadarray \n';
+  t('a bash 5.2 transcript reads as answered, 5.2, builtins present', (() => {
+    const c = capsOf(BASH52);
+    return c.answered && c.major === 5 && c.minor === 2 && c.builtins.mapfile === true;
+  })());
+  t("a bash 3.2 transcript — macOS's `/bin/bash`, unreachable from CI — reads as 3.2 with the builtin ABSENT", (() => {
+    const c = capsOf(BASH32);
+    return c.answered && c.major === 3 && c.builtins.mapfile === false && c.builtins.readarray === false;
+  })());
+  t('the two readings are INDEPENDENT: a manufactured floor is 5.2 with the builtin gone', (() => {
+    const c = capsOf(MANUFACTURED);
+    return c.answered && c.major === 5 && c.builtins.mapfile === false;
+  })());
+  t('a truncated transcript is a REFUSAL, never a permissive default (#4690)', capsOf('5.2\n').answered === false);
+  t('an unreadable version line is a refusal too', capsOf('GNU bash, version 3.2.57\nmapfile \n').answered === false);
+  t('a non-zero probe status is a refusal even when the output parses', capsOf(BASH52, 1).answered === false);
+  const MAPFILE_BLOCK = "mapfile -t selftests < <(find .claude/hooks -type f -name '*.selftest.sh' | sort)\n";
+  const ASSOC_BLOCK = 'declare -A seen\n';
+  t(
+    'a `mapfile` block is UNRUNNABLE against the 3.2 reading, and the finding names the line',
+    (() => {
+      const u = unsupportedConstructs('block.sh', MAPFILE_BLOCK, capsOf(BASH32));
+      return u.length === 1 && u[0].id === 'mapfile' && u[0].line === 1;
+    })(),
+  );
+  t(
+    'the SAME block is runnable against the 5.2 reading — so nothing is skipped on CI',
+    unsupportedConstructs('block.sh', MAPFILE_BLOCK, capsOf(BASH52)).length === 0,
+  );
+  t(
+    'and it is unrunnable against the MANUFACTURED reading too, which is how this is provable off 3.2',
+    unsupportedConstructs('block.sh', MAPFILE_BLOCK, capsOf(MANUFACTURED)).length === 1,
+  );
+  t(
+    '`declare -A` is decided by the VERSION leg — `type -t declare` answers `builtin` on 3.2, so it cannot be probed',
+    unsupportedConstructs('block.sh', ASSOC_BLOCK, capsOf(BASH32)).length === 1 &&
+      unsupportedConstructs('block.sh', ASSOC_BLOCK, capsOf(BASH52)).length === 0 &&
+      unsupportedConstructs('block.sh', ASSOC_BLOCK, capsOf(MANUFACTURED)).length === 0,
+  );
+  t(
+    'E1 carries through: a full-line comment NAMING the builtin is not a reason to skip anything',
+    unsupportedConstructs('block.sh', '# no mapfile in this block\n', capsOf(BASH32)).length === 0,
+  );
+  t('and an unread capability THROWS rather than guessing a disposition', (() => {
+    try {
+      unsupportedConstructs('block.sh', MAPFILE_BLOCK, capsOf('', 1));
+      return false;
+    } catch {
+      return true;
+    }
+  })());
+
   // --- ⭐ the instrument is real: the flagged construct really does break ---
   //
   // R7a's shape, and for R7a's reason: without this the leg below could pass by
   // proving nothing. `BASH_ENV` is sourced by every non-interactive bash, so the
   // child inherits the disabling — measured BOTH ways on a probe first.
+  //
+  // ⭐ ON A HOST THAT IS ALREADY THE FLOOR, THE MANUFACTURE IS THE WRONG
+  // INSTRUMENT, AND THE READING IS STRONGER WITHOUT IT (#17458).
+  //
+  // The claim this section owes the leg after it is ONE sentence: *the shell
+  // the next leg measures really has no `mapfile`, and really does run shell
+  // otherwise*. On bash 4+ the only way to establish that is to manufacture the
+  // absence and read it BOTH ways — present before, gone after. On a host where
+  // `mapfile` was never there, that before-probe is empty because the host is
+  // bash 3.2, and the assertion written for the manufacture reports the floor
+  // itself as a broken harness. That is the shape the gate defending the 3.2
+  // floor failed on 3.2.
+  //
+  // ⛔ The repair is NOT to relax the assertion — an `||` admitting an empty
+  // before-probe would also admit a harness that never ran, which is the #4690
+  // reading this whole file refuses. The repair is that a native absence is a
+  // DIFFERENT and better instrument, and is asserted as one: the shell is asked
+  // for `mapfile` and refuses it BY NAME at status 127, and a positive control
+  // written in 3.2-only shell runs to completion in the same interpreter — so
+  // "the builtin is gone" is told apart from "nothing here runs", which is
+  // exactly the discrimination the before-probe buys on bash 4+. The floor is
+  // then not simulated at all; it is the host, which is the strongest reading
+  // of the two and the one no CI runner can produce.
   battery('⭐ the instrument is real: the flagged construct really does break');
+  const caps = probeBashCapabilities();
+  t(
+    'the host\'s bash capabilities were MEASURED, not assumed (a reading that failed is a refusal)',
+    caps.answered === true,
+    `caps=${JSON.stringify(caps)}`,
+  );
   const simDir = mkdtempSync(join(tmpdir(), 'bash32-sim-'));
   const noBash4 = join(simDir, 'no-bash4-builtins.sh');
   writeFileSync(noBash4, 'enable -n mapfile readarray 2> /dev/null\n');
   const probe = join(simDir, 'probe.sh');
   writeFileSync(probe, 'mapfile -t x < /dev/null && echo MAPFILE-WORKS\n');
+  // 3.2-only shell, and the control that separates "the builtin is gone" from
+  // "this interpreter runs nothing". `while IFS= read -r` is the very
+  // replacement the `mapfile` row points at, so a host that cannot run THIS is
+  // a host on which the gate's own advice is wrong.
+  const control = join(simDir, 'control.sh');
+  writeFileSync(control, 'while IFS= read -r l; do :; done < /dev/null\necho CONTROL-SHELL-OK\n');
   const plain = spawnSync('bash', [probe], { encoding: 'utf8' });
   const sim = spawnSync('bash', [probe], { encoding: 'utf8', env: { ...process.env, BASH_ENV: noBash4 } });
-  t(
-    'the simulated-3.2 harness really removes the builtin (else the next leg proves nothing)',
-    plain.stdout.includes('MAPFILE-WORKS') && !sim.stdout.includes('MAPFILE-WORKS') && /mapfile/.test(sim.stderr),
-    `plain=${plain.stdout.trim()} sim.out=${sim.stdout.trim()} sim.err=${sim.stderr.trim()}`,
+  const nativelyAbsent = caps.answered && caps.builtins.mapfile === false;
+  console.log(
+    `    · instrument: ${nativelyAbsent ? 'NATIVE' : 'MANUFACTURED'} — bash ${caps.version ?? '(unreadable)'}, ` +
+      `mapfile ${caps.builtins.mapfile === false ? 'absent' : 'present'} before `
+      + `${nativelyAbsent ? 'anything is disabled' : '`enable -n`'}`,
   );
+  if (nativelyAbsent) {
+    const plainControl = spawnSync('bash', [control], { encoding: 'utf8' });
+    t(
+      'the host IS the floor: its own bash refuses `mapfile` BY NAME, so nothing has to be simulated',
+      plain.status === 127 && /mapfile/.test(plain.stderr) && !plain.stdout.includes('MAPFILE-WORKS'),
+      `status=${plain.status} out=${plain.stdout.trim()} err=${plain.stderr.trim()}`,
+    );
+    t(
+      'and the positive control proves that is about the BUILTIN, not about a shell that runs nothing',
+      plainControl.status === 0 && plainControl.stdout.includes('CONTROL-SHELL-OK'),
+      `status=${plainControl.status} out=${plainControl.stdout.trim()} err=${plainControl.stderr.trim()}`,
+    );
+    t(
+      'and `enable -n` over a builtin that is already gone changes nothing, so the next leg reads the same shell',
+      !sim.stdout.includes('MAPFILE-WORKS') && /mapfile/.test(sim.stderr),
+      `sim.out=${sim.stdout.trim()} sim.err=${sim.stderr.trim()}`,
+    );
+  } else {
+    t(
+      'the simulated-3.2 harness really removes the builtin (else the next leg proves nothing)',
+      plain.stdout.includes('MAPFILE-WORKS') && !sim.stdout.includes('MAPFILE-WORKS') && /mapfile/.test(sim.stderr),
+      `plain=${plain.stdout.trim()} sim.out=${sim.stdout.trim()} sim.err=${sim.stderr.trim()}`,
+    );
+  }
   t(
     'and a script this gate flags really does die at 127 under it',
     sim.status === 127,
@@ -1155,7 +1664,9 @@ function selfTest() {
     `status=${guardedSim.status} out=${guardedSim.stdout.trim()} err=${guardedSim.stderr.trim()}`,
   );
 
-  for (const d of [badRepo, cleanRepo, emptyRepo, simDir]) rmSync(d, { recursive: true, force: true });
+  for (const d of [badRepo, cleanRepo, emptyRepo, completeRepo, partialRepo, allAbsentRepo, simDir]) {
+    rmSync(d, { recursive: true, force: true });
+  }
 
   // --- the real tree -------------------------------------------------------
   battery('the real tree');
@@ -1248,7 +1759,17 @@ function main() {
   const rootFlag = process.argv.indexOf('--root');
   const root = rootFlag === -1 ? REPO_ROOT : process.argv[rootFlag + 1];
 
-  const { findings, population, byExtension, byShebang } = scanTree(root);
+  const { findings, population, byExtension, byShebang, unreadable } = scanTree(root);
+
+  // ⛔ Ordered BEFORE the empty-population refusal, deliberately: when every
+  // indexed path is unreadable the population is empty too, and #4690's message
+  // — "the walk found nothing" — would then be false. The walk found plenty and
+  // read none. Two different answers, two different remedies (#18465).
+  if (unreadable.length > 0) {
+    reportUnreadable(unreadable, population, findings);
+    if (findings.length > 0) report(findings);
+    process.exit(1);
+  }
 
   if (population.length === 0) {
     console.error(

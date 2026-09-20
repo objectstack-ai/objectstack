@@ -21,10 +21,16 @@ import { P } from '@objectstack/spec';
  *    UX, not a security boundary.
  *
  *  - `tier` carries one ROLE-GATED option: `restricted` is offered only when
- *    `'admin' in current_user.positions`. The same rule-validator rejects a
- *    non-admin who submits it anyway; it fails open only when `current_user` is
- *    unbound (a system write) — the acting user is bound from the request on
- *    authenticated writes (engine `buildEvalUser`).
+ *    `'org_admin' in current_user.positions`. `org_admin` is the BUILT-IN
+ *    identity name, and it is the only spelling that ever reaches the axis: a
+ *    membership row's `sys_member.role = 'admin'` is normalized by
+ *    `mapMembershipRole` (`@objectstack/spec`) into `org_admin` before it is
+ *    pushed onto `positions`, so the raw membership word `admin` is never on
+ *    that axis and a predicate naming it is false for everyone. The same
+ *    rule-validator rejects a non-admin who submits `restricted` anyway; it
+ *    fails open only when `current_user` is unbound (a system write) — the
+ *    acting user is bound from the request on authenticated writes (engine
+ *    `buildEvalUser`).
  *
  * `sharingModel: 'public_read_write'` is the RECORD baseline (gate ②) — no
  * sharing rule is needed for one persona to see another's row. It is NOT what
@@ -91,7 +97,7 @@ export const CascadingSelect = ObjectSchema.create({
       label: 'Tier',
       options: [
         { label: 'Standard', value: 'standard', default: true },
-        { label: 'Restricted (admin only)', value: 'restricted', visibleWhen: P`'admin' in current_user.positions` },
+        { label: 'Restricted (admin only)', value: 'restricted', visibleWhen: P`'org_admin' in current_user.positions` },
       ],
     }),
   },

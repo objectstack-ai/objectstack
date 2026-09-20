@@ -44,6 +44,8 @@ import {
   ViewItemSchema,
   ViewMetadataSchema,
   VIEW_METADATA_MEMBERS,
+  TreeConfigSchema,
+  DEFAULT_VIEW_ROW_LIMIT,
 } from './view.zod';
 
 import {
@@ -57,6 +59,9 @@ import {
 // schemas deliberately leave open — imported so the two-door split is asserted
 // from the side that can see both.
 import { checkViewCompleteness } from '../kernel/functional-completeness';
+// [#19088] The object-field `scale` site #18972 bounded — read only, to pin
+// that this row's refusal text and that one's are the same platform fact.
+import { FieldSchema } from '../data/field.zod';
 describe('HttpMethodSubsetSchema', () => {
   it('should accept valid HTTP methods', () => {
     const methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
@@ -181,6 +186,45 @@ describe('KanbanConfigSchema', () => {
     };
 
     expect(() => KanbanConfigSchema.parse(config)).not.toThrow();
+  });
+
+  // [#16894] Director seat, decision batch #87 (objectstack-ai/objectui#8367,
+  // maintainer 「批 #87 同意」): `titleField` joins this schema as optional
+  // `z.string()`. The legs below are the card's executable acceptance
+  // criterion — BOTH controls fire on the same call shape, so the PROBE's flip
+  // is evidence about the NAME and not about a parser that stopped refusing.
+  it('ACCEPTS `titleField` as a member, with both controls firing on the same shape', () => {
+    const canonical = {
+      groupByField: 'status',
+      columns: ['name', 'owner'],
+    };
+
+    // CONTROL-1 — the parser CAN refuse, on the named surface.
+    const control1 = KanbanConfigSchema.safeParse({ ...canonical, zzUnlikelyBogusKey__: true });
+    expect(control1.success).toBe(false);
+    const issues = JSON.stringify(control1.error?.issues);
+    expect(issues).toContain('unrecognized_keys');
+    expect(issues).toContain('zzUnlikelyBogusKey__');
+    expect(issues).toContain('this kanban configuration');
+
+    // CONTROL-2 — a refusal is about the name: the canonical block is accepted.
+    expect(KanbanConfigSchema.safeParse(canonical).success).toBe(true);
+
+    // PROBE — before this card: `ok=false unrecognized_keys=["titleField"]`.
+    const probe = KanbanConfigSchema.safeParse({ ...canonical, titleField: 'subject' });
+    expect(probe.success).toBe(true);
+    // Accepted as a MEMBER, not merely tolerated: the value survives the parse.
+    expect(KanbanConfigSchema.parse({ ...canonical, titleField: 'subject' }))
+      .toMatchObject({ titleField: 'subject' });
+  });
+
+  // ⛔ NOT required. `TimelineConfigSchema` and `GanttConfigSchema` spell
+  // `titleField` required and are the two siblings this declaration does not
+  // copy: absence resolves through the ADR-0079 record display-name chain, so
+  // requiring it would demand more than the renderer reads (#13748).
+  it('leaves `titleField` OPTIONAL — a board that omits it is a complete config', () => {
+    const parsed = KanbanConfigSchema.parse({ groupByField: 'status', columns: ['name'] });
+    expect('titleField' in parsed).toBe(false);
   });
 });
 
@@ -1748,6 +1792,131 @@ describe('FormFieldSchema', () => {
       }
     });
   });
+
+  /**
+   * #19088 (the third site of #18972 / objectui#9808) — this row's `scale` also
+   * needs an UPPER bound, and the number is the PLATFORM's, not a policy.
+   *
+   * The block above bounds the *bottom* of the range (#8321: a digit count is a
+   * non-negative integer). The top was open: `scale: 101` parsed clean here
+   * while every renderer that turns it into fraction digits throws. The route
+   * from this row to those renderers, measured at the `.objectui-sha` pin
+   * `53ded82bf7`: plugin-form copies the row's constraint keys onto the runtime
+   * field (`packages/plugin-form/src/sectionFields.ts:220`) and the number cell
+   * renderer passes that value into `Intl.NumberFormat`'s
+   * `maximumFractionDigits` (`packages/fields/src/index.tsx:661-667`). So a
+   * spec-valid declaration published clean and arrived as a `RangeError` in
+   * someone else's repository, with no signal to its author. ⛔ The spec-bridge
+   * half of the #12174 citation above is retired at that pin; the plugin-form
+   * leg carries the premise on its own.
+   *
+   * The refusal is pinned on its SUBSTANCE, not just its code: it has to say
+   * WHY (the renderer ceiling), because "too big" alone leaves an author
+   * guessing at a cap somebody chose.
+   *
+   * The malformed-declaration refusals in the #12174 block above are this
+   * change's dark control — narrowing the top of the range must not restate the
+   * bottom of it — and they are re-asserted here against the same probe so the
+   * before/after reading is one test's worth of evidence.
+   */
+  describe('an unrenderable scale is refused at authoring (#19088)', () => {
+    const parseScale = (scale: number) => FormFieldSchema.safeParse({ field: 'amount', scale });
+
+    /** Did `fn` throw a RangeError? (Probing the platform, not the schema.) */
+    const throwsRangeError = (fn: () => unknown): boolean => {
+      try { fn(); return false; } catch (e) { return e instanceof RangeError; }
+    };
+
+    it('accepts the ceiling itself — 100 is renderable and round-trips', () => {
+      const result = parseScale(100);
+      expect(result.success).toBe(true);
+      if (result.success) expect((result.data as Record<string, unknown>).scale).toBe(100);
+    });
+
+    it('refuses 101 with a too_big issue at [scale]', () => {
+      const result = parseScale(101);
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const issue = result.error.issues.find((i) => i.path[0] === 'scale');
+        expect(issue?.code).toBe('too_big');
+      }
+    });
+
+    it('the refusal says WHY — it names the renderer ceiling, not just the size', () => {
+      const result = parseScale(101);
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const message = result.error.issues.find((i) => i.path[0] === 'scale')?.message ?? '';
+        // Both primitives, the failure mode, and the legal maximum: an author
+        // can verify the claim without leaving the message.
+        expect(message).toMatch(/toFixed/);
+        expect(message).toMatch(/maximumFractionDigits/);
+        expect(message).toMatch(/RangeError/);
+        expect(message).toMatch(/100/);
+      }
+    });
+
+    it('the bound IS the platform ceiling, measured here rather than asserted', () => {
+      // If a future runtime moves either limit, this goes red and the
+      // declaration is re-argued — the number is not ours to keep by habit.
+      expect(throwsRangeError(() => (1.5).toFixed(100))).toBe(false);
+      expect(throwsRangeError(() => (1.5).toFixed(101))).toBe(true);
+      expect(throwsRangeError(() => new Intl.NumberFormat(undefined, { maximumFractionDigits: 100 }))).toBe(false);
+      expect(throwsRangeError(() => new Intl.NumberFormat(undefined, { maximumFractionDigits: 101 }))).toBe(true);
+      // ... and the schema's own accept/refuse boundary sits exactly there.
+      expect(parseScale(100).success).toBe(true);
+      expect(parseScale(101).success).toBe(false);
+    });
+
+    it('refuses with the SAME text as the object-field site — one fact, not two dialects', () => {
+      // #19088's shared-constant half, pinned from the consuming end. This row
+      // reads `shared/scale-ceiling.ts`; `data/field.zod.ts` still carries the
+      // module-private copy #18972 minted, because that file belongs to another
+      // card's declared surface. Byte-identity is what keeps the two copies one
+      // platform fact: if either drifts, this goes red instead of shipping two
+      // different explanations of the same limit. When that file adopts the
+      // shared module the assertion simply keeps holding.
+      const here = parseScale(101);
+      const there = FieldSchema.safeParse({ name: 'amount', label: 'Amount', type: 'number', scale: 101 });
+      expect(here.success).toBe(false);
+      expect(there.success).toBe(false);
+      if (!here.success && !there.success) {
+        const hereMessage = here.error.issues.find((i) => i.path[0] === 'scale')?.message;
+        const thereMessage = there.error.issues.find((i) => i.path[0] === 'scale')?.message;
+        expect(hereMessage).toBeDefined();
+        expect(hereMessage).toBe(thereMessage);
+      }
+    });
+
+    it('leaves the malformed-declaration refusals (#8321/#12174) reading exactly as before', () => {
+      // The dark control, in one place: the codes and the wording below are the
+      // readings taken on this same probe BEFORE the upper bound was added.
+      const negative = parseScale(-1);
+      expect(negative.success).toBe(false);
+      if (!negative.success) {
+        const issue = negative.error.issues.find((i) => i.path[0] === 'scale');
+        expect(issue?.code).toBe('too_small');
+        expect(issue?.message).toBe('Too small: expected number to be >=0');
+      }
+      const fractional = parseScale(2.5);
+      expect(fractional.success).toBe(false);
+      if (!fractional.success) {
+        const issue = fractional.error.issues.find((i) => i.path[0] === 'scale');
+        expect(issue?.code).toBe('invalid_type');
+        expect(issue?.message).toBe('Invalid input: expected int, received number');
+      }
+    });
+
+    it('does NOT bound `precision` — a different key this card does not claim', () => {
+      // Recorded so the next reader knows the omission was measured, not
+      // missed: `precision` is a TOTAL digit count and reaches no `toFixed` /
+      // `Intl` argument, so the renderer-ceiling argument does not carry to it.
+      // #18972 measured the same on the object-field surface and left it alone;
+      // whether the three `precision` arms should agree is its own judgement.
+      const result = FormFieldSchema.safeParse({ field: 'amount', precision: 101 });
+      expect(result.success).toBe(true);
+    });
+  });
 });
 
 describe('Enhanced FormSectionSchema', () => {
@@ -2254,8 +2423,10 @@ describe('GalleryConfigSchema', () => {
 
 describe('ListMapConfigSchema (#9340 — the eighth visualization block)', () => {
   it('accepts the full documented renderer surface — every key plugin-map reads, no extras', () => {
-    // Mirrors objectui plugin-map's own MapConfigSchema (ObjectMap.tsx): the
-    // spec block and the renderer's read set are the same seven keys.
+    // Mirrors objectui's own `ObjectMapConfigSchema` (`@object-ui/types`,
+    // imported by `ObjectMap.tsx`): the spec block and the renderer's read set
+    // are the same EIGHT keys. `style` was the eighth and was missing here
+    // until #18406 — see the pin below, which is this test's own repro.
     const map = {
       latitudeField: 'lat',
       longitudeField: 'lng',
@@ -2264,9 +2435,33 @@ describe('ListMapConfigSchema (#9340 — the eighth visualization block)', () =>
       descriptionField: 'address',
       zoom: 12,
       center: [37.7749, -122.4194] as [number, number],
+      style: 'https://tiles.example/style.json',
     };
 
     expect(() => ListMapConfigSchema.parse(map)).not.toThrow();
+    // Every key survives the parse — a declaration that silently dropped one
+    // would still satisfy `not.toThrow()`.
+    expect(ListMapConfigSchema.parse(map)).toEqual(map);
+  });
+
+  it('accepts `style` — the card repro that used to fail, and the key the renderer reads', () => {
+    // #18406, director decision batch #153 item 4 letter 1. The card's repro
+    // verbatim: `getMapConfig` reads `schema.mapStyle || schema.map?.style`
+    // (`ObjectMap.tsx:365` at the `.objectui-sha` pin `53ded82b`) and
+    // objectui's `ObjectMapConfigSchema` declares `style`, so this strict block
+    // refusing it meant a map style could not be declared through the spec's
+    // list-view face at all.
+    expect(ListMapConfigSchema.safeParse({ style: 'https://tiles.example/style.json' }).success).toBe(true);
+    // A style URL alone is enough — the key is independent of the coordinate
+    // binding, exactly as it is on the renderer's own schema.
+    expect(ListMapConfigSchema.parse({ style: 'https://tiles.example/style.json' }))
+      .toEqual({ style: 'https://tiles.example/style.json' });
+    // Still a string, and still NOT the node-level inline CSS record: the
+    // object form `BaseSchema.style` takes is refused here.
+    expect(ListMapConfigSchema.safeParse({ style: { color: 'red' } }).success).toBe(false);
+    // And the neighbouring misspelling stays loud — `style` did not open the block.
+    expect(ListMapConfigSchema.safeParse({ styl: 'https://tiles.example/style.json' }).success).toBe(false);
+    expect(ListMapConfigSchema.safeParse({ mapStyle: 'https://tiles.example/style.json' }).success).toBe(false);
   });
 
   it('accepts the showcase task shape — the exact declaration #9340 exists to make legal', () => {
@@ -2383,6 +2578,153 @@ describe('TimelineConfigSchema', () => {
   });
 });
 
+// ============================================================================
+// [#17499] `groupByField` refuses a padded field name — kanban / gantt / timeline
+// ============================================================================
+//
+// The sibling axis of #17360 / PR #17498 (`grouping.fields[].field`, landed as
+// `f8e5790593`), which scoped this one out by name. All three keys were bare
+// `z.string()`, so `' stage'` was valid authored metadata handed to a consumer
+// that looks the name up on every row: objectui (`dda8f3815`) resolves the
+// kanban lane as `groupByField || groupField || detectStatusField(objectDef)`
+// and buckets cards by `card[laneField]`; `ObjectGantt`'s `groupByAccessor`
+// splits the name on `.` and walks the backing record. The server answers
+// under the unpadded name, so the padded spelling reads `undefined` on every
+// row and the board shows one `Uncategorized` lane / the gantt and timeline
+// one ungrouped bucket holding every record — a wrong answer that reads as a
+// true statement about the data.
+//
+// `KanbanConfigSchema.groupByField` is the site that makes this its own card:
+// it is REQUIRED, so the padded value cannot be withdrawn by omitting the key.
+describe('groupByField — a padded field name is refused (#17499)', () => {
+  /**
+   * Per schema: the minimal valid block MINUS `groupByField`, and the sibling
+   * `z.string()` keys on that same schema the DARK control probes.
+   */
+  const SCHEMAS: Array<[string, z.ZodTypeAny, Record<string, unknown>, string[]]> = [
+    ['kanban', KanbanConfigSchema as unknown as z.ZodTypeAny,
+      { columns: ['name'] }, ['summarizeField', 'titleField']],
+    ['gantt', GanttConfigSchema as unknown as z.ZodTypeAny,
+      { startDateField: 'starts_at', endDateField: 'ends_at', titleField: 'name' },
+      ['startDateField', 'endDateField', 'titleField', 'progressField']],
+    ['timeline', TimelineConfigSchema as unknown as z.ZodTypeAny,
+      { startDateField: 'starts_at', titleField: 'name' },
+      ['startDateField', 'titleField', 'endDateField', 'colorField']],
+  ];
+
+  const PADDED: Array<[string, string]> = [
+    ['leading', ' stage'],
+    ['trailing', 'stage '],
+    ['both', '  stage  '],
+    ['a tab', '\tstage'],
+    ['a newline', 'stage\n'],
+    ['whitespace only', ' '],
+  ];
+
+  // Every DISTINCT `groupByField` spelling this repo carries, harvested from
+  // every `.ts` / `.tsx` / `.mdx` / `.json` / `.mjs` outside `node_modules`
+  // (14 distinct literals; `'warning'` / `'error'` are severity-map VALUES in
+  // `packages/lint` and `'<select_or_status_field>'` is prose inside a
+  // completeness hint, so neither is an authored name and neither is listed).
+  // `owner.name` is the load-bearing member: these keys hold a field
+  // REFERENCE, and a dotted relationship path is an in-tree spelling of one —
+  // which is why this is NOT the snake_case machine-name grammar
+  // `/^[a-z_][a-z0-9_]*$/` (`owner.name` measured `false` against it, while
+  // `packages/lint`'s `validate-list-view-field-refs.test.ts` carries
+  // `kanban: { groupByField: 'owner.name' }` in a case asserting no findings).
+  const IN_TREE_GROUP_BY_FIELD_SPELLINGS = [
+    'status', 'stage', 'team', 'workshop', 'due_date', 'owner', 'owner.name',
+    'business_unit', 'A9_no_such_field', 'statuss', 'zzzzzzzzzzzzzzzz',
+  ];
+
+  describe.each(SCHEMAS)('%s.groupByField', (view, schema, rest, siblings) => {
+    it.each(PADDED)('refuses %s whitespace', (_label, spelling) => {
+      expect(schema.safeParse({ ...rest, groupByField: spelling }).success).toBe(false);
+    });
+
+    it('addresses the refusal to `groupByField` BY NAME and quotes the spelling', () => {
+      const result = schema.safeParse({ ...rest, groupByField: ' stage' });
+      expect(result.success).toBe(false);
+
+      const issue = result.error!.issues.find((i) => i.path.join('.') === 'groupByField');
+      expect(issue).toBeDefined();
+      // The whitespace an author cannot see in an editor is visible here...
+      expect(issue!.message).toContain('" stage"');
+      // ...next to the name to write instead, and the key that is wrong.
+      expect(issue!.message).toContain('Write "stage".');
+      expect(issue!.message).toContain(`\`${view}.groupByField\``);
+    });
+
+    // ⛔ NOT a `.trim()`. A trimming schema would make `' stage'` and `'stage'`
+    // silently equivalent — the consumer-tolerance direction AGENTS.md #0.1
+    // refuses, and on the REQUIRED kanban key the author cannot withdraw the
+    // value instead. This arm is what tells the two designs apart: it pins
+    // that an accepted name arrives byte-identical, so a schema that
+    // normalised on the way through would fail here even though it would also
+    // stop the silent miss.
+    it('does not trim — an accepted name arrives byte-identical', () => {
+      const parsed = schema.parse({ ...rest, groupByField: 'stage' }) as { groupByField?: string };
+      expect(parsed.groupByField).toBe('stage');
+    });
+
+    // LIT — the narrowing must not over-reach: every in-tree spelling is still
+    // accepted, on all three schemas.
+    it.each(IN_TREE_GROUP_BY_FIELD_SPELLINGS)('still accepts the in-tree spelling %s', (spelling) => {
+      expect(schema.safeParse({ ...rest, groupByField: spelling }).success).toBe(true);
+    });
+
+    // DARK — must read 0. The narrowing lands on `groupByField` and on nothing
+    // else: every sibling `z.string()` key on the SAME schema still accepts a
+    // padded value. A leak into a neighbour shows up here as a refusal.
+    it('leaves every sibling string key on the same schema untouched', () => {
+      expect(siblings.length).toBeGreaterThan(0); // non-vacuous: the table is populated
+
+      for (const key of siblings) {
+        const probe = { ...rest, groupByField: 'stage', [key]: ' padded_sibling ' };
+        expect(schema.safeParse(probe).success).toBe(true);
+      }
+    });
+  });
+
+  // The kanban key is REQUIRED — the difference from the precedent that earns
+  // this card. Omitting it is refused for absence (as before); supplying it
+  // padded is refused for the padding (new). Both doors, one call shape.
+  it('kanban.groupByField is required AND non-padded — both doors refuse', () => {
+    expect(KanbanConfigSchema.safeParse({ columns: ['name'] }).success).toBe(false);
+    expect(KanbanConfigSchema.safeParse({ columns: ['name'], groupByField: ' stage' }).success).toBe(false);
+    expect(KanbanConfigSchema.safeParse({ columns: ['name'], groupByField: 'stage' }).success).toBe(true);
+  });
+
+  // The refusal survives nesting: a padded name inside a whole list view is
+  // addressed to the block's own key, not to the view.
+  it('refuses a padded name through ListViewSchema, addressed to `kanban.groupByField`', () => {
+    const result = ListViewSchema.safeParse({
+      type: 'kanban',
+      columns: ['name'],
+      kanban: { groupByField: ' stage', columns: ['name'] },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error!.issues.map((i) => i.path.join('.'))).toContain('kanban.groupByField');
+  });
+
+  // The empty string is deliberately NOT narrowed here — the precedent decided
+  // that for the sibling axis and nothing about these three keys changes it.
+  // Widening the pattern to catch `''` would be a second, undeclared narrowing
+  // riding on this card.
+  it('still accepts the empty string — this card narrows padding only', () => {
+    expect(KanbanConfigSchema.safeParse({ columns: ['name'], groupByField: '' }).success).toBe(true);
+  });
+
+  // The whole block is a reading only if this schema is genuinely NARROWER
+  // than the one it replaces: every accepting arm above would pass just as
+  // well against the old bare `z.string()`.
+  it('is a narrowing — the discriminator the old schema would fail', () => {
+    expect(z.string().safeParse(' stage').success).toBe(true);
+    expect(KanbanConfigSchema.safeParse({ columns: ['name'], groupByField: ' stage' }).success).toBe(false);
+  });
+});
+
 describe('ViewSharingSchema', () => {
   it('should default to collaborative', () => {
     const sharing = {};
@@ -2427,11 +2769,55 @@ describe('RowColorConfigSchema', () => {
       },
     };
 
+    // ⚠️ #18791 — this ASSERTION is correct and is deliberately left alone: the
+    // accept set really is `z.record(z.string(), z.string())`, and hexes really
+    // do parse. What is wrong is believing a parse means a colour. None of
+    // these three values resolves — objectui `useRowColor.ts`'s `colorToClass`
+    // returns `undefined` for every one of them — so this map parses,
+    // publishes, and paints nothing. The schema is not the enforcement point
+    // for that; the author-time diagnostic
+    // `view/row-color-unresolvable-value` (`kernel/functional-completeness.ts`)
+    // is, and it reports exactly this fixture.
     expect(() => RowColorConfigSchema.parse(rowColor)).not.toThrow();
   });
 
   it('should require field', () => {
     expect(() => RowColorConfigSchema.parse({})).toThrow();
+  });
+
+  // #18791 — the describe read `Map of field value to color (hex/token)`, and a
+  // hex is the one spelling the only renderer cannot resolve. The schema told
+  // an author to write the value that silently does nothing; the diagnostic
+  // that would have caught it checks presence only, so the hex map turned it
+  // GREEN. This pins the two properties that made the old sentence a trap,
+  // rather than the wording that replaced it.
+  it('⛔ the `colors` describe never offers a hex — it names what actually resolves (#18791)', () => {
+    const description = (RowColorConfigSchema as unknown as {
+      shape: { colors: { description?: string } };
+    }).shape.colors.description ?? '';
+
+    // ⛔ The trap literal, verbatim from the sentence this replaced.
+    expect(description).not.toContain('hex/token');
+    // ⚠️ `token` went with it. Read as the renderer's colour NAMES it was still
+    // standing beside hex as an equal alternative, and putting a bad option
+    // first is as harmful as offering only the bad option.
+    expect(description).not.toMatch(/\btokens?\b/i);
+
+    // ⭐ The property, not the wording: hex must still be NAMED — an author who
+    // comes here asking "can I paste the option colours in?" has to find the
+    // answer — but only ever in the same sentence as the consequence. Deleting
+    // the word would pass a bare `not.toMatch(/hex/)` and leave that reader
+    // with nothing, which is how the old sentence got written in the first
+    // place.
+    expect(description, 'the describe answers the hex question nowhere').toMatch(/hex/i);
+    for (const sentence of description.split('. ')) {
+      if (/hex/i.test(sentence)) expect(sentence).toContain('colours no row');
+    }
+
+    // And it names a spelling that DOES reach a class, plus the rule that
+    // reports the ones that do not.
+    expect(description).toContain('bg-red-200');
+    expect(description).toContain('view/row-color-unresolvable-value');
   });
 });
 
@@ -2561,13 +2947,18 @@ describe('Airtable-style ListView enhancements', () => {
   it('should accept list view with row color', () => {
     const listView: ListView = {
       columns: ['name', 'priority'],
+      // #18791 — colour NAMES, not hexes. The assertion below only says the
+      // shape parses, and a hex parses just as well; what changed is that a
+      // fixture is read as an example, and this corpus was demonstrating the
+      // one spelling `colorToClass` resolves to `undefined`. The deliberate
+      // "a hex does parse" pin is kept, once, in `RowColorConfigSchema` above.
       rowColor: {
         field: 'priority',
         colors: {
-          critical: '#ff0000',
-          high: '#ff8800',
-          medium: '#ffcc00',
-          low: '#00cc00',
+          critical: 'red',
+          high: 'orange',
+          medium: 'amber',
+          low: 'green',
         },
       },
     };
@@ -2653,12 +3044,14 @@ describe('Airtable-style ListView enhancements', () => {
         ],
       },
       rowHeight: 'medium',
+      // #18791 — colour NAMES: this is the "realistic, fully-loaded view"
+      // fixture, so it is the one most likely to be copied as a template.
       rowColor: {
         field: 'status',
         colors: {
-          on_track: '#22c55e',
-          at_risk: '#f59e0b',
-          blocked: '#ef4444',
+          on_track: 'emerald',
+          at_risk: 'amber',
+          blocked: 'red',
         },
       },
       hiddenFields: ['internal_id', 'sys_updated_at'],
@@ -4116,6 +4509,101 @@ const flattenUnionIssues = (issues: z.ZodIssue[]): z.ZodIssue[] =>
       : [i];
   });
 
+// ============================================================================
+// [#16885] The RETIRED `navigation.view` binding — declared, consumed, wrong
+// ============================================================================
+
+/**
+ * `navigation.view` promised "the form view to use for details", and nothing
+ * from spec to console ever resolved a view BY NAME: its one read in the
+ * shipped console put the value in the SECOND argument of `onNavigate` — the
+ * slot that otherwise carries the navigation-MODE token — so an authored name
+ * substituted for the mode instead of selecting a view. Retired under ADR-0049
+ * enforce-or-remove by maintainer ruling 2026-09-13 (director decision batch
+ * #126 item 4, option B).
+ *
+ * The refusal is pinned at all three doors, and the five surviving keys of the
+ * same block are pinned ACCEPTING beside it — separately and together. That
+ * second half is not ceremony: a tombstone that also broke its live siblings
+ * would satisfy every refusal assertion above while being a different and
+ * larger bug, and `navigation` is one `strictObject`, so the blast radius of a
+ * mistake here is the whole block.
+ */
+describe('ListViewSchema — the RETIRED `navigation.view` binding (#16885)', () => {
+  describe.each(viewDoorsCarryingObjectLevelChecks)('%s', (_label, parse) => {
+    it('REFUSES `navigation.view` with the tombstone prescription, not a bare unknown-key report', () => {
+      const r = parse({ type: 'grid', columns: ['name'], navigation: { view: 'summary_view' } });
+      expect(r.success).toBe(false);
+      // Select the TOMBSTONE issue by the SHAPE `retiredKey()` raises rather
+      // than by its text — the overlay door also carries that text on the union
+      // WRAPPER (path `[]`), so a text-only find is satisfied by either, and
+      // this pin's subject is that the refusal is raised AT THE KEY the author
+      // wrote, which needs the issue that has a path.
+      const issue = flattenUnionIssues((r as { error: z.ZodError }).error.issues)
+        .find((i) => (i as { expected?: string }).expected === 'never');
+      expect(issue, JSON.stringify((r as { error: z.ZodError }).error.issues)).toBeDefined();
+      expect(issue!.message).toContain('`view.list.navigation.view` was removed');
+      // The prescription must name the ROUTE, not merely the removal: a bare
+      // "this key is gone" leaves the author with the want that made them write
+      // it. Page assignment is where a chosen detail layout belongs.
+      expect(issue!.message).toContain('`record` page');
+      expect(issue!.message).toContain('`isDefault`');
+      expect(issue!.path.join('.')).toBe('navigation.view');
+    });
+
+    it("still ACCEPTS `navigation: { mode: 'page' }` — the lit control for the refusal above", () => {
+      expect(parse({ type: 'grid', columns: ['name'], navigation: { mode: 'page' } }).success).toBe(true);
+    });
+
+    it('still ACCEPTS every surviving key of the same block, one at a time and all together', () => {
+      const survivors = {
+        mode: 'drawer',
+        preventNavigation: false,
+        openNewTab: false,
+        size: 'lg',
+        width: '600px',
+      } as const;
+      for (const [key, value] of Object.entries(survivors)) {
+        const r = parse({ type: 'grid', columns: ['name'], navigation: { [key]: value } });
+        expect(r.success, `${key}: ${JSON.stringify(r.success ? null : (r as { error: z.ZodError }).error.issues)}`)
+          .toBe(true);
+      }
+      expect(parse({ type: 'grid', columns: ['name'], navigation: { ...survivors } }).success).toBe(true);
+    });
+  });
+
+  // The tombstone must not become the answer for every navigation typo. An
+  // unrelated unknown key keeps the ordinary closed-shape report, which is what
+  // tells the author it is unrecognised rather than retired — the failure mode
+  // `acceptsNothing()` exists for, one message over.
+  it('does not hand the removal prescription to an unrelated unknown navigation key', () => {
+    const r = ListViewSchema.safeParse({ type: 'grid', columns: ['name'], navigation: { placement: 'right' } });
+    expect(r.success).toBe(false);
+    const messages = flattenUnionIssues((r as { error: z.ZodError }).error.issues)
+      .map((i) => i.message).join('\n');
+    expect(messages).not.toContain('`view.list.navigation.view` was removed');
+    // ...and it must not SUGGEST the tombstoned key either: `view` is still in
+    // `Object.keys(shape)` and is 4 edits from `placement`, so the guard that
+    // keeps a dead key out of the suggester is load-bearing here.
+    expect(messages).not.toMatch(/Did you mean[^\n]*`view`/);
+  });
+
+  // A `navigation` block that carries only live keys parses byte-for-byte as it
+  // did before the retirement — the property the semantic TODO promises.
+  it('leaves a live-only navigation block byte-identical after parse', () => {
+    const r = ListViewSchema.safeParse({
+      type: 'grid',
+      columns: ['name'],
+      navigation: { mode: 'drawer', size: 'lg' },
+    });
+    expect(r.success).toBe(true);
+    expect((r as { data: { navigation?: Record<string, unknown> } }).data.navigation)
+      .toMatchObject({ mode: 'drawer', size: 'lg' });
+    expect((r as { data: { navigation?: Record<string, unknown> } }).data.navigation)
+      .not.toHaveProperty('view');
+  });
+});
+
 describe("ListViewSchema — calendar in `appearance.allowedVisualizations` requires the `calendar:` block (#13817)", () => {
   // The same three doors, and since #17063 this is the ONLY object-level check
   // they carry — it is attached at three separate points for the zod-4 reason,
@@ -4300,5 +4788,120 @@ describe('ListViewSchema — `viewType` is not a spelling of `type` (#16577)', (
     expect(r.success).toBe(true);
     expect((r as { data: Record<string, unknown> }).data).not.toHaveProperty('viewType');
     expect((r as { data: { type?: unknown } }).data.type).toBe('grid');
+  });
+});
+
+
+// ============================================================================
+// [#17393] The author-settable row ceiling on the page-shaped view configs.
+//
+// A protocol-first card: objectui caps kanban and timeline by author choice off
+// a key `@objectstack/spec` never declared (`$top: schema.limit ?? DEFAULT_*_LIMIT`),
+// and the gallery — the third page-shaped view — caps not at all. These pins
+// hold the new declaration to the three things a ceiling has to be: APPLIED
+// (the default the prose states is the default the parse produces), BOUNDED
+// (a value that could not cap a fetch is refused by name), and SCOPED (the
+// non-grid four keep objectui#7210's platform ceiling and do not gain an
+// authorable one).
+// ============================================================================
+
+describe('view row ceiling — `limit` on the page-shaped view configs (#17393)', () => {
+  /**
+   * One minimal, parse-clean block per page-shaped config, so every verdict
+   * below is about `limit` alone rather than about a missing sibling key.
+   */
+  const PAGE_SHAPED = [
+    ['gallery', GalleryConfigSchema as unknown as z.ZodTypeAny, {}],
+    ['kanban', KanbanConfigSchema as unknown as z.ZodTypeAny, { groupByField: 'status', columns: ['name'] }],
+    ['timeline', TimelineConfigSchema as unknown as z.ZodTypeAny, { startDateField: 'start_date', titleField: 'name' }],
+  ] as const;
+
+  /** The `limit` member's own `.describe()` text, off the built shape. */
+  const describeOf = (schema: z.ZodTypeAny): string =>
+    (schema as unknown as { shape: Record<string, { description?: string }> }).shape.limit?.description ?? '';
+
+  it('applies the ceiling it declares when the author writes none', () => {
+    for (const [label, schema, minimal] of PAGE_SHAPED) {
+      const parsed = schema.parse({ ...minimal }) as { limit?: unknown };
+      expect(parsed.limit, label).toBe(DEFAULT_VIEW_ROW_LIMIT);
+    }
+  });
+
+  it('accepts an authored ceiling as a MEMBER, with both controls firing on the same shape', () => {
+    for (const [label, schema, minimal] of PAGE_SHAPED) {
+      // CONTROL-1 — this surface CAN refuse a key, so acceptance below means something.
+      const control = schema.safeParse({ ...minimal, zzUnlikelyBogusKey__: 7 });
+      expect(control.success, label).toBe(false);
+      expect(JSON.stringify((control as { error?: z.ZodError }).error?.issues), label)
+        .toContain('unrecognized_keys');
+
+      // CONTROL-2 — the refusal is about the NAME: the same block without it parses.
+      expect(schema.safeParse({ ...minimal }).success, label).toBe(true);
+
+      // PROBE — the authored value SURVIVES the parse; it is not merely tolerated.
+      const probe = schema.safeParse({ ...minimal, limit: 25 });
+      expect(probe.success, label).toBe(true);
+      expect(((probe as { data?: { limit?: unknown } }).data)?.limit, label).toBe(25);
+    }
+  });
+
+  it('refuses a value that could not bound a fetch — and refuses it BY NAME', () => {
+    for (const [label, schema, minimal] of PAGE_SHAPED) {
+      for (const bad of [0, -1, 2.5, '100', null] as const) {
+        const at = `${label} limit=${JSON.stringify(bad)}`;
+        const result = schema.safeParse({ ...minimal, limit: bad });
+        expect(result.success, at).toBe(false);
+        const issues = (result as { error?: z.ZodError }).error?.issues ?? [];
+        expect(issues.some((issue) => issue.path[0] === 'limit'), `${at}: ${JSON.stringify(issues)}`)
+          .toBe(true);
+      }
+    }
+  });
+
+  it('states the default it ACTUALLY applies — prose and schema pinned to each other', () => {
+    for (const [label, schema, minimal] of PAGE_SHAPED) {
+      const description = describeOf(schema);
+      const stated = /default (\d+)/.exec(description);
+      expect(stated, `${label}: ${description}`).not.toBeNull();
+      const applied = (schema.parse({ ...minimal }) as { limit: number }).limit;
+      expect(Number(stated?.[1]), `${label}: ${description}`).toBe(applied);
+    }
+  });
+
+  it('tells the author the renderer owes a VISIBLE truncation signal', () => {
+    // ⛔ The signal itself is the renderer's half and cannot be enforced from a
+    // schema. What the protocol can do — and what objectui#7390's ruling turns
+    // on — is say the cap is owed a signal, so that "bounded and silent" is
+    // never read as the finished job.
+    for (const [label, schema] of PAGE_SHAPED) {
+      expect(describeOf(schema), label).toContain('visible truncation signal');
+    }
+  });
+
+  it('leaves the non-grid four WITHOUT an authorable ceiling (objectui#7210 keeps theirs)', () => {
+    // The card scopes those four out by name: their rows are capped by a
+    // platform constant the renderer owns, because a gantt range, a map camera
+    // fit and a tree parent chain are computed over the whole set. An
+    // authorable ceiling there would be surface no renderer reads.
+    const NON_GRID_FOUR = [
+      ['gantt', GanttConfigSchema as unknown as z.ZodTypeAny],
+      ['calendar', CalendarConfigSchema as unknown as z.ZodTypeAny],
+      ['map', ListMapConfigSchema as unknown as z.ZodTypeAny],
+      ['tree', TreeConfigSchema as unknown as z.ZodTypeAny],
+    ] as const;
+
+    for (const [label, schema] of NON_GRID_FOUR) {
+      const result = schema.safeParse({ limit: 10 });
+      expect(result.success, label).toBe(false);
+      // Asserted on the REFUSED KEY LIST rather than on a stringified issue:
+      // when the key is accepted there is no issue to stringify, and the red
+      // then reads as an argument-type complaint instead of as a statement
+      // about this view type. Measured — it is how this case first reddened.
+      const refused = ((result as { error?: z.ZodError }).error?.issues ?? [])
+        .filter((issue) => issue.code === 'unrecognized_keys')
+        .flatMap((issue) => (issue as unknown as { keys?: string[] }).keys ?? []);
+      expect(refused, `${label} accepts an authorable row ceiling it should not declare`)
+        .toContain('limit');
+    }
   });
 });

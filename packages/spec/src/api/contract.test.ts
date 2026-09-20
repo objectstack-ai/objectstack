@@ -797,3 +797,55 @@ describe('DataLoaderConfig.cacheTtl \u2192 cacheTtlSeconds (#15677)', () => {
     expect(DataLoaderConfigSchema.safeParse({ cacheTtlSeconds: -1 }).success).toBe(false);
   });
 });
+// #18124 — step 3 of ruling A on #18115. `BaseResponse.meta.duration` declares
+// its unit through the closed `DurationMs` type (`src/shared/duration.zod.ts`)
+// rather than through a rename, so the unit rides the contract and the published
+// JSON Schema instead of only the key name.
+//
+// The unit was MEASURED, not read off the name, and the measurement is worth
+// recording because it came back EMPTY: nothing in this repo writes this `meta`
+// block — `packages/rest/src` contains no `timestamp:` writer at all, and the
+// repo-wide sweep for `duration:` assignments finds only `Date.now() - start`
+// call sites (the CLI's `timer.elapsed()`, the QA runner). With no producer to
+// contradict, the declaration is taken from the sibling channel that does speak:
+// every key in this spec that spells the unit for a processing time spells
+// milliseconds (`tracing.durationMs`, `worker.durationMs`, `worker.avgExecutionMs`).
+describe('BaseResponse.meta.duration declares milliseconds (#18124)', () => {
+  it('refuses a fractional millisecond count', () => {
+    const result = BaseResponseSchema.safeParse({
+      success: true,
+      meta: { timestamp: '2024-01-01T00:00:00Z', duration: 150.5 },
+    });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'meta.duration');
+    expect(issue).toBeDefined();
+    expect(issue!.code).toBe('invalid_type');
+  });
+
+  it('refuses a negative span', () => {
+    const result = BaseResponseSchema.safeParse({
+      success: true,
+      meta: { timestamp: '2024-01-01T00:00:00Z', duration: -1 },
+    });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'meta.duration');
+    expect(issue).toBeDefined();
+    expect(issue!.code).toBe('too_small');
+  });
+
+  it('still accepts a whole, non-negative count — including zero', () => {
+    const base = { timestamp: '2024-01-01T00:00:00Z' };
+    expect(BaseResponseSchema.parse({ success: true, meta: { ...base, duration: 150 } }).meta?.duration).toBe(150);
+    expect(BaseResponseSchema.parse({ success: true, meta: { ...base, duration: 0 } }).meta?.duration).toBe(0);
+  });
+
+  it('publishes the unit in the describe the reference page renders', () => {
+    const json = z.toJSONSchema(BaseResponseSchema, {
+      target: 'draft-2020-12',
+      io: 'input',
+      unrepresentable: 'any',
+    }) as { properties?: { meta?: { properties?: { duration?: { description?: unknown } } } } };
+    expect(json.properties?.meta?.properties?.duration?.description)
+      .toBe('Server-side processing duration in milliseconds');
+  });
+});

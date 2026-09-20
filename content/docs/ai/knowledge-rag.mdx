@@ -34,7 +34,7 @@ kernel.use(new KnowledgeServicePlugin({
       label: 'Product docs',
       adapter: 'ragflow',
       source: { kind: 'http', urls: ['https://docs.example.com/sitemap.xml'] },
-      options: { datasetId: 'rgf_doc_dataset' },
+      adapterConfig: { datasetId: 'rgf_doc_dataset' },
     },
   ],
 }));

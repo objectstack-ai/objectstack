@@ -54,6 +54,17 @@
  *    card into the uncolumned bucket; a `gantt` / `calendar` / `timeline`
  *    required date field leaves the renderer nothing to place, so the chart is
  *    blank; a map with no resolvable coordinate field plots no marker.
+ *    [#18835] A third consequence belongs to this tier and the two sentences
+ *    above did not name it: a binding whose job is to RESTRICT or to ROUTE,
+ *    where the miss is read as "no restriction" / "no route" on every row.
+ *    Nothing is missing from the picture — which is exactly why it gates: a
+ *    `gantt.lockField` that resolves to nothing unfreezes every row the author
+ *    declared view-only, and a `gantt.objectField` that resolves to nothing
+ *    makes every row answer the renderer's synthetic-row test, so no bar in
+ *    the chart opens anything. Both are the shape Prime Directive #10 names —
+ *    a capability advertised in the metadata and not delivered by the runtime
+ *    — and both are worse DECLARED than omitted, because each renderer guards
+ *    its behaviour on the key's mere presence.
  *  - **`warning`** — the renderer drops one decoration and renders the rest:
  *    an optional colour / title / tooltip / cover binding, a stale
  *    `hiddenFields` entry that hides nothing, a stale `fieldOrder` entry that
@@ -322,7 +333,21 @@ const POSITIONS: Record<string, BlockPositions> = {
   kanban: {
     // `columns` here are the fields shown ON a card, not the board's columns:
     // a stale entry leaves one blank line on the card and the board renders.
-    scalars: { groupByField: 'error', summarizeField: 'warning' },
+    //
+    // [#18565] `titleField` takes CALENDAR's level, not the level of the two
+    // siblings that spell the key required. `KanbanConfigSchema` declares it
+    // OPTIONAL (#16894, which copied `CalendarConfigSchema` for this exact key
+    // and names `TimelineConfigSchema` / `GanttConfigSchema` — the two whose
+    // rows below read `error` — as the siblings it deliberately does NOT
+    // copy), and the board resolves a name no record carries through the
+    // ADR-0079 display-name chain: measured in objectui `dda8f3815`,
+    // `resolveKanbanTitleField` returns the written name, the card reads
+    // `rec[titleField]`, finds nothing and falls to `getRecordDisplayName`.
+    // Every card still renders, titled from a value the author did not ask
+    // for — the warning tier's own case (one decoration dropped, the rest
+    // rendered), where `groupByField` above is the error tier's (every card
+    // collapses into one uncolumned lane).
+    scalars: { groupByField: 'error', summarizeField: 'warning', titleField: 'warning' },
     lists: { columns: 'warning' },
   },
   calendar: {
@@ -331,6 +356,19 @@ const POSITIONS: Record<string, BlockPositions> = {
       endDateField: 'warning',
       titleField: 'warning',
       colorField: 'warning',
+      // [#18835] `allDayField` names a BOOLEAN field, and a declared one is
+      // ABSOLUTE — the spec's own `⛔ No default field name` note. Measured in
+      // objectui `dda8f3815`: `ObjectCalendar` maps every event with
+      // `allDay: allDayField ? Boolean(record[allDayField]) : !endDate`, so a
+      // name no record carries reads `undefined` on every row, `Boolean()`
+      // answers false for all of them, AND the `!endDate` inference that would
+      // have banded a dateless event is switched off by the key's mere
+      // presence. Every event still renders and is still placed at its start:
+      // what is lost is the all-day BAND, one decoration, which is this tier
+      // and not `startDateField`'s (nothing to place at all). Not the error
+      // tier's third consequence either — no restriction and no route rides on
+      // it; a wrongly-banded event is still an event the user can click.
+      allDayField: 'warning',
     },
   },
   gantt: {
@@ -348,6 +386,34 @@ const POSITIONS: Record<string, BlockPositions> = {
       groupByField: 'warning',
       assigneeField: 'warning',
       effortField: 'warning',
+      // ── [#18835] Three of the ten objectui-lifted members (#15469) are
+      // field bindings, and they share only their `.optional()`. Each is tiered
+      // by what its own renderer does with a name no record carries, measured
+      // in objectui `dda8f3815` (`plugin-gantt/src/ObjectGantt.tsx`).
+      //
+      // The stroke is opt-in and exceptional, and the renderer says so:
+      // `borderColorRaw = borderColorField ? record[borderColorField] :
+      // undefined` leaves `borderColor` undefined for every task, so every bar
+      // keeps its fill and renders without an outline. `colorField`'s case,
+      // eight rows up — one decoration dropped, the chart intact.
+      borderColorField: 'warning',
+      // ⛔ NOT a decoration: a declared WRITE GUARD that fails OPEN.
+      // `locked: lockField ? !!record[lockField] : undefined` reads `undefined`
+      // on every row and the drawer's `recLocked` falls the same way, so every
+      // row the author froze becomes draggable, resizable, progress-draggable,
+      // link-able, inline-editable and deletable — and the drag PERSISTS. The
+      // chart looks perfect and the restriction the author declared is simply
+      // not in force, which is the error tier's third consequence above.
+      lockField: 'error',
+      // The row's OWN object api name, and a miss takes the whole detail
+      // surface with it: `isSyntheticRow` is `!!objectField &&
+      // !String(rec[objectField] ?? '').trim()`, so a name no record carries
+      // answers TRUE for every row. `onTaskClick` then never calls
+      // `navigation.handleClick` and `renderRecordOverlay` returns null — no
+      // bar in the chart opens a drawer or a detail page, uniformly and
+      // silently. Strictly worse than omitting the key, which is what the
+      // `!!objectField &&` guard exists to make safe.
+      objectField: 'error',
     },
     // A quick filter is a FILTER: a stale one filters on a column that does
     // not exist and empties the chart.
@@ -415,6 +481,65 @@ const COLUMN_ENTRY_POSITIONS: Array<{ block: string; key: string; severity: Sev 
   { block: 'summary', key: 'field', severity: 'error' },
   { block: 'prefix', key: 'field', severity: 'warning' },
 ];
+
+/**
+ * [#18836] Every field-naming position the two declarative tables above make
+ * this rule walk, as `block.key` — a bare key for the list view's own top
+ * level, and `columns.<block>.<key>` for a position nested inside a `columns[]`
+ * entry.
+ *
+ * DERIVED, never hand-written: `validate-list-view-field-refs.test.ts` asserts
+ * that its own case tables cover exactly this set, so a position added to
+ * {@link POSITIONS} with no row over there fails that assertion on the commit
+ * that adds it. The floor it replaced counted the test table's own rows, which
+ * a position added HERE never moves — the direction #18565 came in through.
+ *
+ * Deliberately NOT re-exported from the package barrel, and deliberately a
+ * FUNCTION rather than a frozen const. Both halves were measured on this
+ * branch, `pnpm --filter @objectstack/lint build`, grepping `dist/` with
+ * `validateListViewFieldRefs` as the bright control:
+ *
+ *  - Barrel: `src/index.ts` re-exports this module by NAME (no `export *`), so
+ *    an export added here reaches no published entry — 0 occurrences in the
+ *    `export {}` clause of `dist/index.js`, 0 in the `__export` map of
+ *    `dist/index.cjs`, and 0 in all six `.d.ts`/`.d.cts` files, against 1, 1
+ *    and 2 for the control (whose own 0 in the four `runtime*.d.*` files is
+ *    what those entries declare, not a dead instrument).
+ *  - Const vs function: as `const X = Object.freeze([...])` esbuild kept the
+ *    initializer as dead weight — 1 occurrence in each of `dist/index.js`,
+ *    `dist/runtime.js` and both `.cjs` siblings. As the function below it is
+ *    tree-shaken: 0 occurrences in all 14 `dist/` artifacts, and 10 of the 14
+ *    are byte-identical to a build of this package from the pre-export source
+ *    — the four JS bundles and all six type files.
+ *  - ⛔ The other 4 DO move, and `files[]` ships `dist` whole, so the honest
+ *    statement is not "nothing in dist changed": `index.js.map`,
+ *    `index.cjs.map`, `runtime.js.map` and `runtime.cjs.map` differ in
+ *    `mappings` and `names` only, with `sources` equal and this symbol absent
+ *    from `names`. A line offset, not a surface — but a measured one.
+ *
+ * It names positions only — no severity, no shape — so reading it can never
+ * stand in for reading the tables.
+ *
+ * The three filter walks further down (`listView.filter`, `tabs[].filter`,
+ * `userFilters.tabs[].filter`) are deliberately absent: they are open code, not
+ * table rows, so there is nothing HERE to derive them from. ⛔ Absent from this
+ * list is not absent from the test's account of itself — the test declares those
+ * three as an explicit list and asserts it exactly, because a row of theirs
+ * deleted in silence is the one thing the row-counting floor this replaced did
+ * cover.
+ */
+export function listViewWalkedPositions(): string[] {
+  return [
+    ...Object.entries(POSITIONS).flatMap(([block, spec]) =>
+      [
+        ...Object.keys(spec.scalars ?? {}),
+        ...Object.keys(spec.lists ?? {}),
+        ...Object.keys(spec.entries ?? {}),
+      ].map((key) => (block === '' ? key : `${block}.${key}`)),
+    ),
+    ...COLUMN_ENTRY_POSITIONS.map(({ block, key }) => `columns.${block}.${key}`),
+  ];
+}
 
 /** Filter positions on a list view, as `[key path from the view, where suffix]`. */
 const SILENT_EMPTY =

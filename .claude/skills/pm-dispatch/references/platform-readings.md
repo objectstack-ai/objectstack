@@ -7,9 +7,9 @@
 - 本仓是否强制队列是仓库 ruleset 事实;`grep merge_group` 答的是队列内是否重跑 CI,两者独立。
 - 缺席不构成反证:有仓 ruleset 强制而无 trigger,队列照收 PR;新仓靠实测,⛔ 不由缺席推断。
 - 权威读数 = 合并尝试本身(回 405 `Changes must be made through the merge queue`)或 rulesets API。
-- 判在不在合并队列的决断读数是 timeline 事件 `added_to_merge_queue` / `removed_from_merge_queue`。
-- 拼写 `GET /repos/{o}/{r}/issues/{pr}/timeline`:可按需重查、一次调用双向答。
-- 它分得开从未入队与入队后被踢;`pull_request.enqueued` webhook 推送式不可重读,只作旁证。
+- 判在不在队列的决断读数是 timeline 事件 `added_to_merge_queue` / `removed_from_merge_queue`,可重查。
+- 拼写 `GET /repos/{o}/{r}/issues/{pr}/timeline`:一次双向答,分得开未入队与被踢;webhook 不可重读。
+- 入队行通常即时可读,曾实测 +75 s 缺席 ⇒ 短窗缺席非读数,复读;`pull_request.enqueued` 旁证。
 - `auto_merge` 字段不只是空,是不稳定:同一 PR 一分钟内先 set 后 None,入队后又回落 off。
 - ⛔ 永不据它判没挂上而重挂 —— 重挂踢队重排。
 - 推送重折已挂 auto-merge 的 PR 可静默掉挂,无字段说明 ⇒ 重折后重发,再按队列 ref 探。
@@ -25,6 +25,8 @@
 - `dirty` 即入队否决(冲突对象是当前 main);draft PR 照答 `clean`/`blocked`/`unknown`,不答 `draft`。
 - `needs:contract-review` 是合并闸:实测 `blocked` 而 `mergeable: true`,无标签同形兄弟回 `clean`。
 - ready 翻转实测两序列 `clean→blocked→clean` 与 `blocked→unstable→clean`;`unstable` 瞬态非失败。
+- `unstable` 可源自 check-runs 看不见的 commit STATUS(如 `Vercel`)⇒ ③ 另读 `/commits/{sha}/status`。
+- 零 legacy status 的仓恒答空集默认值 `pending`+`total_count: 0`,⛔ 非门禁读数,门禁读 check-runs。
 - 判头脏走零配额本地试合并:fetch PR ref 后 `git merge-tree --write-tree origin/main <ref>`。
 - 它直接列出冲突文件;读数随 fetch 老化,重跑先 fetch。
 - 它跑 `git merge` 的 merge-ort ⇒ 注册 `merge=os-regen` 的克隆照用驱动,未注册的退回文本合并。
@@ -38,16 +40,16 @@
 - 按名定位失败才拉全表;订阅来的 `check_suite.completed` 是唤醒不是放行读数。
 - 转 draft 不是可靠的踢队手段:两向相反读数并存,处置按最坏走。
 - 本仓转 draft 同时掉 auto-merge 与队列成员资格,不自动恢复,转正后重挂;姊妹仓曾保位照合。
-- 补救:转 draft 与 `disable_pr_auto_merge` 都做 —— 本仓 disable 单独不踢队。
+- 补救:转 draft 与卸载 auto-merge 都做 —— 本仓卸载 auto-merge 单独不踢队。
 - 出队按队列 ref 阳性探针答不在队向,加未落地;ref 缺席只作旁证,⛔ 永不承载结论。
 - `update_pull_request` 单字段调用也发送 `draft` 位,曾把治理面 draft 发进队列 ⇒ 锁 1 已拒。
 - 请审专用路 = REST `POST /pulls/{n}/requested_reviewers`,载荷只有 reviewers/team_reviewers。
 - 它不碰 draft 位 ⇒ 请审恒走它;MCP 兜底已拒。
-- undraft 单通道:席位凭据走 `POST .../pulls/{n}/ccr/ready_for_review`;MCP 兜底已拒。
-- 2026-09-12 两席实调:裸 GraphQL 会话内被拒,建议的 REST 正是 ccr 路 ⇒ 池 0 不再只能等重置。
+- undraft 单通道:席位凭据走 `POST .../pulls/{n}/ccr/ready_for_review`;MCP 兜底与裸 GraphQL 均已拒。
+- 2026-09-17 单席实测:该路吃会话凭据的 GraphQL 小时池,尽则 429 且零字节写入,`draft` 未动。
+- 唯一可读信号是该 429 体自报的 `resets at` 时刻;体自带指令 ⛔ 重置前不重试。
 - ⛔ 裸 `PATCH /pulls/{n}` 传 `draft: false` 回 200 而无操作(2026-09-11);读回才作数:`GET /pulls/{n}`。
-- `enable_pr_auto_merge` 恒显式传 `mergeMethod: "SQUASH"`;不传静默退回被禁的 merge-commit = 无操作。
-- 它存的方法恒为 `merge`,不论请求了什么;REST `auto_merge.merge_method` 读回 `merge`。
+- auto-merge 回读 `merge_method` 不恒定:同 `SQUASH` 载荷 `merge`/`squash` 皆现,⛔ 非落地方法判据。
 - 仓库 `allow_merge_commit:false` 时同样读回 `merge`;无 REST 端点设该方法。
 - 设方法的 GraphQL mutation 不服务 agent 会话 ⇒ 席位既设不了也纠不了。
 - 它在本仓无实效:`main` 的合并队列规则带 `merge_method: SQUASH`,合并由队列执行。
@@ -55,9 +57,7 @@
 - `auto_merge_enabled` webhook 载荷同报 `merge` ⇒ 三个载体一致也不作数,判据是落地提交的父数。
 - squash 落地重写署名 trailer:作者行按提交作者身份改拼,`Claude-Session:` 原样存活。
 - squash 的 committer date 是入队时刻,快进不改 ⇒ 落地时刻读 `merged_at`/`merged`,不读 `git log`。
-- `enable_pr_auto_merge` 对已 `mergeable_state: clean` 的 PR 照样成功,与工具描述的优雅失败相反。
-- 回显两向不可靠,空回显不等于未挂上 ⇒ ⛔ 不拿它当任何方向的证据、不为它空转。
-- 配额枯竭时 `enable_pr_auto_merge` 回成功而挂载根本没发生 ⇒ 验效果,不验回应。
+- 回显两向不可靠:全绿加 `clean` 即吞进队列不存记录 ⇒ 空回显是成功常态,⛔ 不空转。
 - 回读 `auto_merge` 非空本接口给不了:`pull_request_read` 与 `fields` 枚举都无该成员。
 - 效果读数 = 下列阳性探针、timeline 入队事件、最终落地;队列分支仅在场时算。
 - 队列 ref 答 BUILD 不答成员资格:`gh-readonly-queue/*` 只在存在时有意义,即有 build 在跑。
@@ -84,6 +84,7 @@
 - 入队事件与队列 ref 迟 1–3 分钟才出现 ⇒ 轮询预算按 3 分钟,⛔ 不按 1 分钟判没挂上。
 - 队列窗口有界:满窗条目 ref 与 `merge_group` run 双缺席,ref 随前一条落地才现,不按计时器。
 - ready 翻转触发检查重跑 ⇒ 入队落在翻转之后约一分钟,那段空窗不是挂载失败。
+- 摘标签与翻 ready 是状态写,同 head 重起标签敏感检查 ⇒ ③ 在入队前末次状态写之后读。
 - 检查全部完成的 PR 挂 auto-merge 即入队,本仓 28–60 秒 ⇒ 挂载与落地之间无窗口。
 - `mergeable_state` 未落定时挂上的是经典 auto-merge、不入队,落定后再挂才入队。
 - `behind` 的 PR 照常入队:落后于 main 不是入队否决,⛔ 不为它先跑 update-branch。
@@ -92,7 +93,7 @@
 
 ## API 配额
 
-- 配额按账户计,不跨席共享:各席位跑在不同 GitHub 账户下。
+- 配额按账户计,不跨席共享:各席位跑在不同 GitHub 账户下;换身份即清零燃烧。
 - 所有 agent 共用一个身份只在席位内部成立,故认领必须在评论里写 session ID。
 - ⛔ 不据限流报文里的 user ID 推池子跨席共用;本席额度完全由本席做法决定。
 - 计费按查询复杂度、按节点数,不按调用次数 ⇒ 优化方向是每次少拿,不是少调用。
@@ -126,10 +127,15 @@
 - ⇒ MCP 限流先 `GET /user` 比 ID:同 ID 的 REST 满额不是退路,写排队到重置;异 ID 才是。
 - MCP 的读限流与写限流彼此独立,两向各有实测 ⇒ 一侧被拒 ⛔ 不推另一侧也不可用。
 - REST 档以本班 repo-scoped 探针绿为前提;403 会话改按降级梯读。
-- 容器 curl 的 REST 通道令牌按会话定:installation(`claude[bot]`)或 user-to-server(用户),core 15,000/时。
-- 令牌类只认自写回读的 `user.type`/`user.login`;`performed_via_github_app` 与 `GET /user` 两类同答。
+- 容器 curl 的 REST 通道令牌两类:installation(`claude[bot]`)与 user-to-server(用户),core 均 15,000/时。
+- 类按 Claude Code 账号定,⛔ 不按会话定:一会话内两次写之间可无席位动作地翻转。
+- 两次实测:分诊席 2026-09-15 `claude[bot]`→`os-sam`;技能席 2026-09-15→16 `claude[bot]`→`os-zhuang`。
+- 类只认每次写回读的 `user.login`/`user.type`,⛔ 不从开轮标记沿用:标记读数带日期、不站住。
+- `performed_via_github_app`、`GET /user` 与 core 限流头对两类同答 ⇒ 三者都不是判别式。
+- 用户类写绑作者:封号则其评论与卡按作者 404,标签/状态/标题/正文存活。
+- ⇒ 耐久算按令牌类重算,⛔ 不假定署名恒 `claude[bot]`;用户类下请 PR 作者复审回 422。
 - GraphQL 池 5000/时,只留给没有 REST 对应物的几件。
-- 那几件 = draft 翻转、auto-merge 挂载、语义 `/search/*`、Projects field_values、`issue transfer`。
+- 那几件 = `rest-channel.md`〈不可迁移〉那三件;draft 翻转与 auto-merge 挂载有 ccr 路、不在内。
 - 逐操作通道归属、写侧配方与队列路由三读法见 `rest-channel.md`,⛔ 不在本表复述。
 - MCP list/search 家族整个走 GraphQL 稀缺池,`issue_write` 连查找半边都吃。
 - 配额红时认领类动作排队,评论走 REST 桶先行把结论发出去。
@@ -137,8 +143,8 @@
 - porcelain 家族(`gh issue view` / `gh pr list`)与 `gh pr create` 走 GraphQL,当场回限流。
 - 同批事实改走 `gh api` 的 REST 路径照常返回,含开 draft PR;容器无 `gh`,本条只对本机席适用。
 - 红窗调度:守候只给上面那几件 GraphQL-only 的,⛔ 其余一切不为配额空等。
-- 走队列的仓落地必经 auto-merge ⇒ 红窗里无退路;直合仓有,合并本身有 REST 端点。
-- MCP 侧限流下,draft 翻转与 auto-merge 挂载整窗不可得。
+- 走队列的仓落地仍必经 auto-merge,红窗里照样走 ccr REST 挂载;直合仓合并本身有 REST 端点。
+- 红窗里 draft 翻转与 auto-merge 挂载照常走 ccr REST,⛔ 不为它们守候。
 - 被挡住的翻转是在等窗口,不是关于该 PR 的信号 ⇒ ⛔ 不据它重挂、不据它改判状态。
 - 其余动作(评论、标签、请审、读、timeline)照常走 REST。
 - 报文里的 user ID 只是报文:据它推 MCP 池跨席共享与本节首条冲突,⛔ 未裁不写成事实。
@@ -155,7 +161,7 @@
 - ②:是否落地 `git log --format='%H %s' -40 origin/main` 按 PR 号 grep。
 - ③:squash 验证 `git rev-list --parents -n1` 数父提交。④:`git ls-remote origin 'refs/heads/*<key>*'`。
 - 开轮先读配额:`curl` 带 Bearer `$GH_TOKEN` 打 `/rate_limit`,免费。
-- 它答不了通道在不在,repo-scoped 探针另跑;graphql remaining < 1000 ⇒ 本轮走 git 加 REST。
+- graphql remaining < 1000 ⇒ 本轮走 git 加 REST;⛔ 满余额不放行 undraft:同分钟满额而 ccr 路 429。
 - 中途撞限流的 dev 完不成强制查重,只能把发现交回 PM 代为归档,⛔ 不盲目开卡。
 - 打满时待执行写排成有序清单挂进巡逻词,不靠记忆;恢复窗口按序连清。
 - 重试对齐整点(REST core 整点重置)优于指数退避,⛔ 绝不忙轮询。
@@ -165,8 +171,7 @@
 - 被销毁的 PR 仍占分支名:API 答 404,同名开新 PR 仍被拒 ⇒ 同批 commit 推新分支名再开。
 - 本地对象库是最后备份:复核时 fetch 过的每条分支,其 head 在停用后仍在本地可推。
 - 重建 PR 正文自报四件:head 逐字节同、无 rebase/amend/squash、数字出自旧基底、CI 为准。
-- 文档载明未实测:条件请求答 `304` 不计 core 池。
-- 公开仓零配额读法两档,payload 档优先 —— 只有 body 精确。
+- 文档载明未实测:条件请求答 `304` 不计 core 池;公开仓零配额读法两档,payload 档优先。
 - 网页档可达性逐会话逐 URL 形状分叉:一处容器 `/actions/**` 与 api. 回 403,另一处网页全 200。
 - ⇒ 要用哪个形状先探哪个;本地权限分类器在网络之前的拒绝是第三种机制,⛔ 不记 403。
 - 单卡页 `/issues/N` 内嵌 JSON 载原始 body:取含 `bodyHTML` 的 `script[type="application/json"]` 块。
@@ -179,8 +184,7 @@
 - 自己刚写的按原写入通道回读;失效方向是空转与重发。
 - 成因:本档经 CDN 缓存,专对最新内容失效且绕不掉,cache-busting 查询串与 no-cache 头都无效。
 - 内容可滞后数分钟到数十分钟;它没有位置性对照 —— 更早内容全在,只有最新几条缺席。
-- ⇒ 前 15 项那条判别式在此不成立,唯一出路是第二通道。
-- 失效方向是据它对别人的工作下没有认领的判词。
+- ⇒ 前 15 项判别式在此不成立,唯一出路是第二通道;失效方向是据它判他人工作无认领。
 - PR 页把正文与每条评论的原始 markdown 放进 `clipboard-copy` 的 value 属性,是另一条零配额读。
 - issue 页无此载体,且盲态与好态的提及计数相同 ⇒ 卡片评论只走 API,⛔ 不套 PR 页读法。
 - 边界:⛔ 只因仓库公开成立;⛔ 覆盖单卡读,搜索页只给锚点不给正文。
@@ -197,17 +201,15 @@
 - ⛔ 不是可疑时才验:归零下空结果与真无重复逐字节同形,读作搜过了没有。
 - 后果是重复卡照开、空车道照停;控制词回 0 ⇒ 本会话 search 已坏,立刻换通道,⛔ 不重试。
 - 控制词命中只证通道活着:同一文档换个词即回零,故障按词形不按文档,零仍不是读数。
-- 换道:探针绿走 REST 列表端点 `GET /repos/{o}/{r}/issues?state=open&labels=a,b&per_page=N`。
-- 它走 core 桶且 `labels` 是真 AND;⛔ 完整性自证靠 `&page=N` 加总数核对。
+- 换道:探针绿走 REST 列表端点列卡,走 core 桶且 `labels` 真 AND;拼写与自证见 `rest-channel.md`。
 - 翻页在偏移 ~9,900 硬拒:422 Pagination with the page parameter is not supported for large datasets。
 - 该拒绝与规模、`per_page` 无关:小结果集同样在 `page=100` 拒,`per_page=1` 拒在 `page=9000`。
 - ⇒ 总体超过它就按 `sort=created` 拆成 `asc` 加 `desc` 两趟、各 ≤99 页。
-- `created` 序承重:新卡只追加到尾,页不在脚下重排。
-- 以两趟的重叠证覆盖、对号码线闭合、缺号逐个直取核实。
+- `created` 序承重:新卡只追加到尾、页不重排;两趟重叠证覆盖、号码线闭合、缺号直取。
 - 403 走降级梯 MCP 档:单标签读全加本地求交;⛔ 不是翻页手扫,不完整枚举比零结果更险。
 - 会话代理只服务 repo-scoped 路径,`/search/*` 的 403 体解析成净零。
 - 代理回 403 加体 sessions are bound to their configured repositories,而那是合法 JSON。
-- 读 `total_count` 得 None、打印成 total: None,与真空集只差一个字符,而请求根本没跑。
+- 读 `total_count` 得 None、打印成 total: None,与空集只差一字符;缺键即拒绝,判别式是状态码。
 - `/search` 类问题的仪器是 MCP search 工具,repo-scoped 枚举不受影响。
 - 推论:阳性对照先跑 —— 合乎预期的零是永不复检的那个。
 - `search_issues` 不可靠地返回分钟级新卡:同轮发现的查重另按创建时间列近期 issue。
@@ -220,7 +222,6 @@
 - 只有新会话重绑 ⇒ 轮换前提醒维护者:在飞席位丢整条 GitHub 通道。
 - 文档载明未实测:`.claude/settings.json` 的 `permissions.deny` 云会话照读,deny 在任一层先于 allow。
 - 被拒的 MCP 工具从工具表整个消失:工具缺席读作 deny 生效,⛔ 不读作 MCP 服务器坏。
-- 配额池按身份计,换身份即清零燃烧,共享身份结构不变。
 - 组织侧授权变更后仓库访问逐步传播,同一端点数分钟内 403 转 200。
 - 该 403 体解析成净零 ⇒ 空车道先对 `open_issues_count` 反查再信,零命中纪律覆盖 list 读。
 - 满页首页零命中是截断不是缺席:`GET /branches?per_page=100` 回满 100 行无目标 ⇒ 翻完再判。
@@ -246,6 +247,7 @@
 - `list_issues` 永不返回 assignees:`fields` 枚举无此成员,不传也没有。
 - 已认领卡与空闲卡响应逐字节相同,清单只是候选名单 ⇒ 认领前必须过完整 `issue_read`。
 - `comments` 计数会多读:实测 1 而列表与 timeline 双 0 ⇒ 线程空否读那两条,⛔ 不读计数。
+- `comments` 与枚举不等是瞬态旗:计数收敛后记录已失而差值归零 ⇒ ⛔ 不作唯一防线。
 - 可指派性是仓+账号属性且会话中可变:`GET /repos/{o}/{r}/assignees/USER` 204/404,指派后回读。
 - MCP `issue_read` 的 body 实体转义是纯读侧伪影,撇号与引号与尖括号成数字实体,comments 原样。
 - 存储体是明文,先解码实体再写回往返安全;腐蚀 body 的恰是把转义读数原样回写。
@@ -269,10 +271,13 @@
 - ⛔ 永不读作交集;判据 = 结果比任一输入都宽:两标签的交集回 135 张而一道只有 132 张。
 - 正典解法:逐标签单独计数,按容斥推交集;负数或不合理的隐含交集 = 模型坏了。
 - 结果良构、失效全静默,混入别车道同状态卡与本车道全状态卡。
+- 多标签页还静默截断:`totalCount` 231 而 `returned` 30,单标签同车道 24/24 ⇒ 求交读成空车道。
 - 正确读法 = 整车道单标签一次读全加本地对 labels 求交,或改走 REST。
 - 两个通道的 `labels` 语义相反:REST 列表端点的 `labels=a,b` 是真 AND ⇒ ⛔ 不无条件改走 REST。
 - 被拦的下载不是缺席证明:出口策略 403 只说取不来,不说没有,先找产物再下结论。
 - 读数:Chromium 预装、`PLAYWRIGHT_BROWSERS_PATH` 已设,而 `cdn.playwright.dev` 回 403。
+- zod v4 的 parse 方法挂 schema 实例不挂原型 ⇒ 在原型上 spy 抛属性未定义。
+- 可行接缝是逐个包裹 barrel 导出体(实测 211 导出 408 方法);函数体内现造的不在半径内。
 - 读数六坑 ①:`cd X && cmd` 短路 —— 路径不存在时命令在当前仓执行,跨仓恒 `git -C <path>`。
 - ②:`git grep -c <pat> | wc -l` 数的是文件数不是命中数。
 - ③:裸名 grep 被幸存家族当子串命中 —— 退役核验带引号精确名。
@@ -283,9 +288,9 @@
 - ⑤:容器里没有 `gh`,于是 `gh … || echo "none"` 是不可证伪的否定。
 - 127 命令不存在与 grep 没命中输出同值 ⇒ 回退分支照打印安心结论而一次都没检查。
 - 安全拼写:先 `command -v <cmd>` 确认存在,或在 `||` 之前捕获状态。
-- ⛔ 一般规则:任何可能不存在的命令上挂回退都是不可证伪的否定。
-- PR 与查重类核验改走 MCP GitHub 工具或 git。
+- ⛔ 通则:可能不存在的命令上挂回退即不可证伪的否定;PR 与查重核验改走 MCP 工具或 git。
 - ⑥:只存在于拼接后的短语,单行 grep 对主体与控制词双零:先合并再搜,两个方向都要读。
+- `-z` 下模式内字面换行即分隔符 ⇒ 换行短语只命中一侧,假阳性;`grep -Pz` 加 `\n` 才判别。
 - auto 档判定随命令形状变,不随能力变 ⇒ 被拒的复合命令拆成裸动作重试再报 blocked。
 - 读数:带链接与管道的 `git push` 被拒,裸 `git push origin <分支>` 放行,拒绝文案不点名元素。
 - 判定跨天翻面 ⇒ ⛔ 一次拒绝不是能力边界;`permissions.allow` 条目才是仓库侧确定性通道。
@@ -297,8 +302,7 @@
 - cancel-in-progress 窗口只罩得住慢载体 ⇒ 先比对 run `head_sha` 与 PR 当前 head,不开调查。
 - 两仓 CI 并发组都按 PR 号不按 head:重跑过期 head 取消当前 head 的 run ⇒ 重跑是写不是读。
 - CI 红了先取完整日志归档再下结论:断言文本只在归档里,直读工具拿不到。
-- `get_check_run` 对本仓 CI job 回空 `output.text`。
-- `get_job_logs` 无论 `tail_lines` 只回占满日志尾部的 post-step service-container teardown。
+- `get_check_run` 回空 `output.text`;`get_job_logs` 无论 `tail_lines` 只回尾部的 service-container teardown。
 - ⇒ 两者都答不了到底挂在哪;`GET /actions/jobs/{id}/logs` 被出口代理拒绝,CONNECT 403。
 - 失败 step 名免下载即得:`actions_get method=get_workflow_job`。
 - check-run annotations 端点带退出码与失败命令,是免归档的第二条便宜读。
@@ -313,8 +317,7 @@
 - 读侧有确定性触发:正文含字面 script 开标记形状 token 时,API 与 MCP 读回在该处静默截断。
 - doctype 开标记与 object 标签形状同触发;网页全文完好,⛔ 不修复只在 API 读短的卡。
 - 同坑第三条读路径:MCP `issue_read` 与 PR 读路径把行内反引号里的尖括号片段整个吃掉。
-- GitHub 存储字节完好,raw REST 取回一字不差。
-- ⇒ ⛔ 永不单凭 MCP 读判截断,先取 raw REST 或 WebFetch 渲染页核对再判。
+- GitHub 存储字节完好、raw REST 一字不差 ⇒ ⛔ 不单凭 MCP 读判截断,先取 raw 或渲染页核对。
 - 否则 repair-first 被正确地应用到完好的卡上,重写毁掉的是正确内容。
 - 唤醒中继渲染会把 `{` `}` `<` 转义 ⇒ 判已发布产物按 `GET` 取存储体,⛔ 永不按中继正文。
 - 判据 = 数空的行内代码跨度:一个空跨度恰是短尖括号片段被吃掉的签名。
@@ -327,8 +330,7 @@
 - 写侧 · issue body:落库删字节,网页同显;sanitizer 按 tag 形状删,不按尖括号。
 - 行内反引号里的 tag 形状 token 整个被删,含注释标记、占位符、泛型这些未知标签形。
 - HTML 注释形状标记裸写被整删留空行;孤立的行内尖括号与非 tag 形状带尖括号正则存活。
-- ⛔ 围栏不防护:照删、留空围栏。
-- 另一坑:感叹号紧跟左方括号即触发(TS 非空断言下标),无需尖括号。
+- ⛔ 围栏不防护,照删留空围栏;另一坑:感叹号紧跟左方括号即触发(非空断言),无需尖括号。
 - 围栏与行内代码同样丢字符,幸存文本仍像代码但意义已变;感叹号不接左方括号则存活。
 - 作者侧:运算符用词拼出,或占位词定义一次。
 - 写侧 · 评论是截断不是删片段:sanitizer 从首个命名 HTML 元素的尖括号片段起吃到结尾。
@@ -339,20 +341,23 @@
 - 写侧 · PR 正文:尾部横线与其后的署名页脚一并被吃,而写调用照报成功。
 - 去掉横线只写页脚则原样存活;评论不受影响,两种拼法都活。
 - ⇒ 失效既依拼写又依载体:评论里验过页脚对 PR 正文什么都没证明。
-- ⇒ PR 正文页脚不带前置横线,且写后回读正文 —— 那是唯一检测手段;评论两形皆可。
-- 署名页脚的写侧变异按通道与输入双重定域,⛔ 不是一条定律。
+- ⇒ 处方按动作分裂:建侧送全块(横线加页脚),改侧不送页脚;⛔ 无一形两动作通吃。
 - MCP `update_pull_request` 包装器删掉 PR 正文的页脚块;该通道锁 1 已拒,读作历史。
-- 裸 REST `PATCH /pulls` 追加一个裸页脚并保留既有 session-URL 页脚,差恰 58 字节。
+- 改侧 · 裸 REST `PATCH /pulls` 恒追加一条裸页脚并保留既有页脚,差恰 58 字节,与尾部无关。
+- 尾部已是 `---` 加页脚块也照追加,重送复现 ⇒ 建侧的不追加判据 ⛔ 不外推到改侧。
 - 同路送无页脚正文存回恰一条(平台裸形)⇒ 该格处方是不送页脚,⛔ 不是不重送正文。
+- 页脚两拼写:裸版与 session-URL 版都要剥,漏剥的卡在正文中段,而 58 字节差照常。
+- ⇒ 代价是归属:裸形无 session id,按此剥净的 PR 正文不载明哪个会话写的;另置见 AGENTS.md。
 - 第四形:建 PR 两通道同判 —— 送出体尾部不是 `---` 加页脚块时,追加一条同形页脚。
-- 该追加带前置横线、恰 90 字节,送出体是存储体的严格前缀。
+- 该追加是横线加一条 session-URL 形页脚,送出体是存储体的严格前缀;字节数非常量(90/91)。
 - 尾部已是该块则一字不追加,两通道各实测两向 ⇒ 建侧通道不是变量,判据是送出体尾部。
-- ⛔ 无受控对照(同通道只差该块两送)⇒ 是拟合不是定论,⛔ 不外推到别的动作。
+- 受控对照已补齐:同通道同动作只差该块两送,尾部为无横线页脚时照追加成两条。
+- ⛔ 该对照只在裸 REST 建侧成立,MCP 建侧同一输入未测 ⇒ ⛔ 不外推到该通道。
 - 调用不带 `body` 参数则页脚状态不动:`draft` 或 `title` 单字段更新既不删也不合成。
-- 删页脚那条读数是唯一不合此判据的观察,通道已拒 ⇒ 活通道无反例,写后仍必回读。
 - 正文把 harness 两行块叠在页脚之上,存回是三条署名块;单块形态才复现成一条。
 - ⇒ 形态随动作与送出体尾部变,改侧还随通道变;⛔ 不由任一条推其余,写后必回读。
 - 平台在尾部 `---` 前后正反两向归一空行:比对正文只按首个差异偏移,⛔ 不按长度。
+- 送全块即触发该归一 ⇒ `post-stamped` 的 `body` 档把这点空白判 `mutated`,净零字节良性告警。
 - 评论创建两通道都追加 58 字节 ⇒ 严格解析 `os-dev-report` 必须停在最后一个右花括号。
 - 评论 `PATCH` 重送含尾部页脚块的存储体是幂等的:逐字节一条页脚,与创建的追加相反。
 - PR 正文的 `Check Changeset` 门读 clause-② 声明宽容:其失败文案自述 `- `、`> `、`**` 前缀照读。
@@ -369,10 +374,11 @@
 - 有的现场 regen 一件没跑,推送前先跑生成物门禁别赌。
 - ③:死在源码编辑中途 ⇒ 先读 diff 判完整性:docblock 写全动机与判据的可代跑终验后提交。
 - 写一半意图不明的 ⛔ 不代提交,记交接;dev 临时目录(`.os-scratch/` 一类)清掉,⛔ 不进 PR。
-- 零提交的探针分支不是在飞工作:容器发不出分支删除 refspec。
-- `git push origin --delete <b>` 回 send-pack: unexpected disconnect,三次退避全败,同会话普通 push 正常。
-- ⇒ 测量型派发留下的探针分支永久堆在 origin 上。
+- 零提交的探针分支不是在飞工作:容器建得出远端分支却删不掉,两会话两分支实测。
+- 两道皆 403:`git push --delete` 回 RPC failed,`DELETE /git/refs/heads/…` 回 not permitted,⛔ 不重试。
+- ⇒ 探针分支永久堆在 origin 上,只有带删权的手(维护者)清得掉,本闭环内无人有该权。
 - 判据两读:`git rev-list --count origin/main..origin/<b>` 为 0,且分支名下无 open PR。
+- 「分支在」不是「卡已认领」:认领是 `Claim:` 评论,分支只是线索;291 个头里 257 个无 PR。
 - ⛔ 不据 `ls-remote | grep issue-` 正命中回避该卡:失效方向是活卡被读成已认领,无红信号。
 - 会话从上下文检测不到自己的静默降档:横幅只在 UI 侧渲染,上下文零信号。
 - 服役档的权威读数是 `get_session`(claude-code-remote MCP,无参)的 `external_metadata.last_served_model`。
@@ -388,6 +394,7 @@
 - 强制档不得因不可用而降档 —— 那正是降档保险丝要拒的替换。
 - 本车道强制多是过宽的回忆:`dispatch-gates.mjs --tier PATH` 逐路径现推,路径线是下限非放行。
 - 该脚本只答自己那棵树:姊妹仓路径回 absent from this tree,姊妹仓的档位与条款②只能手推。
+- `os-verify-lock.sh` 只住 objectstack:objectui 无它,跑本仓副本读的是容器级锁,非该仓深度。
 - required checks 的名单是每仓事实,objectstack 七个:
   `TypeScript Type Check` · `Lint & Repo Gates` · `Test Core` · `Dogfood Regression Gate` ·
   `Build Core` · `Temporal Conformance (live PG + MySQL)` · `Governed Surface Queue Guard`。
@@ -404,7 +411,7 @@
 - ⛔ 别处写下的计数值一律先复测再用。
 - MCP `issue_write create` 落库丢掉正文尾部的署名页脚块,正文其余部分完好。
 - MCP `issue_write` update 送尾部横线加页脚块则两者同被吃掉,而调用照常回 id 与 url。
-- 建卡改走 REST `POST /issues` 页脚存活;回读后 `PATCH /issues/{n}` 重送正文逐字节存下。
+- 建卡走 REST `POST /issues`:带页脚存活,无页脚合成恰一条(+58);回读后 `PATCH` 重送逐字节存下。
 - issue 正文 `PATCH` 识别按整块:送全块或不送页脚都存回恰一条,已有页脚归一末尾不复制。
 - 无横线的裸页脚不算页脚:它被保留而整块另追加,总数二 ⇒ 恒一条只对上行两输入成立。
 - 该格两空:MCP 送裸页脚、`title`/`labels` 单字段 `issue_write` 是否动页脚,均未实测。
@@ -422,10 +429,10 @@
 - `check-governed-merges` 浅克隆上拒答而非少报,并报未审计仓数;补救 `git fetch --shallow-since=`。
 - ⛔ 不越过该拒答自行枚举:短清单读作合规;加深日期取窗口起点之前,不猜深度。
 - 前台 `sleep` 被 harness 拒 ⇒ 等待写成带 until 条件的前台阻塞等待,⛔ 不写 sleep 轮询循环。
-- `check:pm-dispatch-gates` 单机 430–450 秒贴调用方容器上限 ⇒ detach 加 `tail --pid`;超时非读数。
+- `check:pm-dispatch-gates` 单机 430–450 秒贴容器上限 ⇒ detach 加 `tail --pid=$!`;超时非读数。
 - `check-half-states.mjs` 连 `--help` 都跑整仓 I/O ⇒ 早读到的输出文件是空的,不是干净的。
 - 后台工具调用里再 `nohup … &` 会让包装器报假 `exit 0`,而真活还在跑。
-- 分支删除被拒有第二形态:代理回 403,与既有 send-pack 断连同处置 ⇒ 不可删,⛔ 不重试。
+- harness 按内容拒写:同会话派发 PR 上 PASS 拒为 `[Self-Approval]`;同通道建卡、ACCEPT 照过。
 
 ## 闭合关键词解析(PR 正文写侧)
 
@@ -444,8 +451,7 @@
 
 - 原则、定时器选型与恢复 playbook 在主文件;本节只放事实补遗。
 - `npx ccusage blocks` 容器内可用,读本地会话记录,报当前 5 小时窗口边界、剩余与燃烧率。
-- 盲区:窗口起点是本地推断的近似值。
-- 撞墙报文形如 `limit reached, resets at HH:MM`,重置时刻只在此刻可得。
+- 盲区:窗口起点是本地推断值;撞墙报文 `limit reached, resets at HH:MM`,重置时刻只此刻可得。
 - agent 建的 Routine 起的会话不带 `mcp__github__*` 工具 ⇒ 对以 GitHub 读写为工作的席位不可用。
 - 创建端现有 `connectors` 参数,声明起的会话可用哪些连接器 ⇒ 成因有了参数级解法。
 - ⛔ 未实测,⛔ 不据参数在场推现在能用了。

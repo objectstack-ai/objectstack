@@ -30,6 +30,7 @@ import type { AutomationContext } from '@objectstack/spec/contracts';
 import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { withScheduledWorkOn } from './deployment-switch.test-support.js';
 
 function createTestLogger(): any {
     const l: any = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
@@ -93,6 +94,12 @@ function engineWithLedger() {
 // ─────────────────────────────────────────────────────────────────────────────
 // §4 — absence of a row means ACTIVE
 // ─────────────────────────────────────────────────────────────────────────────
+
+// [#17396] Time-triggered flows arm only where the deployment runs
+// package-authored scheduled work, and the switch is OFF by default in every
+// posture. Without this, every trigger-wiring assertion below fails for a
+// reason that has nothing to do with wiring.
+withScheduledWorkOn();
 
 describe('ADR-0126 §4 — absence of a row = active (an empty ledger changes nothing)', () => {
     it('a stock boot with an EMPTY ledger arms and runs every flow', async () => {

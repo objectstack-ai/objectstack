@@ -421,7 +421,16 @@ export const CEILINGS = new Map([
   // NEW FILE (#14296 item 1 = A, condition (b)): the entry's Security & Access
   // Control block moved here whole. Pinned at its landed count — no headroom,
   // because a split that arrives with budget is a raise wearing a new path.
-  ['skills/objectstack-data/rules/security.md', 2480],
+  // 2480 -> 2543 (#17359, PR #18531): one three-line bullet after the RBAC
+  // section's `Source:` line — `isDefault: true` is the `everyone` baseline
+  // (ADR-0090 D5); it may carry app capabilities declared under `capabilities:`
+  // and granted via `systemPermissions`; lint and boot refuse a platform
+  // capability or an undeclared name there. The DECLARE/GRANT pair was taught
+  // nowhere in the bundle, so an author writing `systemPermissions` from the
+  // schema alone writes the refused shape. +63 tokens, zero headroom to absorb
+  // any of it, ceiling +63. Maintainer ruling 2026-09-17 (recorded on #17359 as
+  // comment 5710537499), verbatim and untranslated: 「security.md 允许增加到 2543」.
+  ['skills/objectstack-data/rules/security.md', 2543],
   // 3024 -> 3109 (2026-08-31 app-repo-principles raise, see the block above).
   // Severity Levels listed the three values and left the CHOICE unstated: a
   // block rests on a judgement a person made, so a machine-inferred signal — a

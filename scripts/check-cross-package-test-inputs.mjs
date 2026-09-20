@@ -179,6 +179,13 @@
 // package's manifest) -- which it answers with the trade `walkLiteral` already
 // makes for an unreadable argument: keep the escape verdict, invent no name.
 //
+// An anchor is recognised by its SPELLING and not by its behaviour, so a
+// hand-rolled root walk -- a `for (;;)` loop to the same marker file, named
+// anything, bound anywhere -- resolves to nothing here and takes every read
+// built on it with it: seed a repo root with `findUp` (#18871 reseeded the two
+// live instances of that and keeps the class on record; a third one is the
+// evidence for widening this recogniser instead).
+//
 // ── The fourth way to be invisible: the LINE BREAK (#11093) ────────────────
 //
 // Every section above widened the set of recognised SHAPES. This one is not a
@@ -302,6 +309,61 @@
 //              variable -- which is what distinguishes this limb from a leg
 //              that reds on directory walks in general.
 //
+// ── The limb's OWN blind spot: the WORKING TREE (#18348) ─────────────────
+//
+// The limb above asks its question of a directory, and it asked it of the
+// WORKING TREE: a candidate root was admitted when `statSync` said it was a
+// directory RIGHT NOW. A build output directory is a directory right now and is
+// no part of the source, so the verdict moved with build state. Measured on this
+// tree, diff held constant, nothing else varied:
+//
+//   no spec build output          EXIT 0
+//   the same directory, EMPTY     EXIT 1   <- one `mkdir` is the whole trigger
+//   removed again                 EXIT 0   <- `git status` reads 0 lines throughout
+//
+// ⇒ a BUILT worktree reds and a fresh checkout greens on the same commit, and CI
+// greens only because the gate step runs in a job that builds nothing: this
+// limb's CI verdict was a function of job ordering. Six independent seats paid
+// the diagnosis, four of them editing documentation and none of them near this
+// gate's subject.
+//
+// THE CRITERION, and it is a CONTRACT rather than a heuristic. This limb offers
+// two remedies -- narrow the walk, or declare the root -- and declaring routes a
+// glob into turbo.json's `inputs`, where turbo hashes what git knows about. A
+// path git does not track hashes NOTHING, so a glob declared for it closes
+// nothing, and the walk it is supposed to re-run does not exist. Both remedies
+// void ⇒ the question is void. So the root admission asks the SOURCE tree:
+//
+//   A walk root is a directory git TRACKS content under. The repo root always
+//   is; every other name is judged from the INDEX, never from `statSync`.
+//
+// TRACKED, not "not ignored", and that difference is the card's own point: the
+// index is what CI checks out, so the local verdict and the CI verdict became
+// the same function of the same commit. The `git check-ignore` spelling was
+// measured and refused on its own evidence -- it answers NOT IGNORED for a
+// directory named without a trailing separator, because the pattern that ignores
+// it ends in one and so matches directories only. That is an on-disk-shaped
+// answer to the very question being taken off disk.
+//
+// MEASURED, because the card asked how many same-shaped artefact directories can
+// trigger this and recorded that it had NOT enumerated them. Every candidate root
+// the scan produces repo-wide was enumerated ahead of the admission filter: 24
+// candidates, 23 of them tracked paths whose verdict does not move, and exactly
+// ONE an artefact -- the spec package's build output directory, proposed as a
+// root at all only because a path handed to `JSON.stringify` inside a template
+// literal is read as a descent entry. That misread is left standing and filed
+// separately: it now costs a candidate the admission filter refuses, and
+// narrowing the descent detector is another card's subject on this same file.
+//
+// The OTHER filesystem read in this limb -- `uncoveredWalkRadius` -- is measured
+// rather than assumed, and deliberately left alone. Of the 13 walked roots judged
+// on this tree, 10 are answered by the `**` shortcut without touching the
+// filesystem at all, and the 3 that do descend are exactly the three
+// `ACCEPTED_WALK_RADII` rows, whose radius is already non-empty by dozens of
+// directories: an untracked directory appearing under one of them can only
+// lengthen a list that is already accepted, never flip a verdict. It also skips
+// `SKIP_DIRS` and dot-directories, which is where build output lands.
+//
 // Usage:
 //   node scripts/check-cross-package-test-inputs.mjs --verify
 //   node scripts/check-cross-package-test-inputs.mjs --union-into <turbo-ls.json> --changed <file>
@@ -357,11 +419,23 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the SPLIT test:repo task (#16466)': 16,
   'the node_modules REACH rule (#16555)': 18,
   'the TREE-SCOPED WALK (#15565)': 24,
+  'the DOTTED NAMESPACE callee (#18643)': 15,
+  'the WORKING-TREE blind spot (#18348)': 10,
+  "the BARE SPECIFIER's PREMISE (#18236)": 20,
+  // Two of this battery's limbs are DERIVED -- one case per top-level directory
+  // turbo.json declares, one per recognised name -- so the pin moves when either
+  // set does. That is the point: a directory dropping out of turbo.json is a
+  // declaration disappearing, which is worth a red.
+  'the TOP-LEVEL WHITELIST, reconciled against turbo.json (#18342)': 26,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
-// zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 9;
+// zeroing it, so the roster's own size is pinned too. Raised 11 -> 12 with the
+// #18643 battery, keeping the same one-row slack the roster has always carried:
+// a floor left behind while the roster grows stops pinning the newest battery,
+// which is the one nothing else has learned to expect yet. Raised 12 -> 13 with
+// the #18342 battery, keeping that same one-row slack.
+const SELF_TEST_BATTERY_FLOOR = 13;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -579,6 +653,12 @@ export const RECOGNISED_PATH_SPELLINGS = [
  * glob can name it, and collecting them would put every package's suite on every
  * workspace sibling. A relative specifier that ESCAPES is the opposite case: it
  * names a repo source file a glob can hash, and nothing else was seeing it.
+ *
+ * ⚠️ That boundary is a CONDITIONAL, and the condition is checked rather than
+ * assumed (#18236): "an installed dependency" is true of a bare workspace
+ * specifier only while the importing package declares it, and that declaration
+ * is the edge both CI layers follow. `bareWorkspaceImportCensus()` holds the
+ * premise; the measured reason collecting them is refused is in its header.
  */
 export const RECOGNISED_IMPORT_SPELLINGS = [
   "import { x } from '../<rel>';     // static — `import type` counts too, it",
@@ -589,6 +669,11 @@ export const RECOGNISED_IMPORT_SPELLINGS = [
   "require('../<rel>');              // cjs (no test spells it this way today)",
   '  ⛔ NOT `@objectstack/<pkg>`     // a BARE specifier is an installed',
   '                                  // dependency, never a repo source input',
+  '',
+  '// A bare workspace specifier is off the ROSTER and still judged, on the one',
+  '// thing that ground rests on: the importing package must DECLARE it (#18236).',
+  '// The manifest edge is what `turbo ls --affected` walks and what folds the',
+  '// target`s build hash into `<pkg>#test`; undeclared, the read has neither.',
 ];
 
 /**
@@ -1241,7 +1326,9 @@ function scanPathExpressions(src, hereDepth, fileSegs = null, ownPackageName = n
   // everything else here is shared.
   for (const spec of importSpecifiers(src)) {
     // ⚠️ The boundary. Anything not starting `.` is a bare specifier: an
-    // installed dependency, which no declared glob can name.
+    // installed dependency, which no declared glob can name. It leaves the
+    // ROSTER here and is judged by `bareWorkspaceImportCensus()` instead, on
+    // whether the manifest edge that claim rests on actually exists (#18236).
     if (!spec.startsWith('.')) continue;
     const info = walkLiteral(hereDepth, spec, dirSegs);
     report(`import '${spec}'`, info);
@@ -1287,15 +1374,125 @@ export function walkRootsOf(src, hereDepth, fileSegs = null, ownPackageName = nu
  * of #9763 and the only one that is a DATA defect rather than a collector one:
  * `skills/` was simply missing from the alternation, so `@objectstack/formula`'s
  * read of the published formula skill was invisible twice over — once here and
- * once in the reconstruction. The list below is every top-level directory a
- * declared glob can name; a new one added to the tree belongs here too.
+ * once in the reconstruction. `RECOGNISED_TOP_LEVEL_DIRECTORIES` is that list.
+ * It is no longer only a promise: `turboRootTopLevelNames()` reads back what
+ * `turbo.json` actually declares and the #18342 battery holds the two equal, so
+ * a top-level directory that enters the tree with a `$TURBO_ROOT$` input reds
+ * this gate until it is named here. `docs/` had been declared on three inputs
+ * and unrecognised here the whole time, which is what a promise buys.
+ *
+ * Scope, stated because that sentence has an edge. This is every top-level
+ * DIRECTORY, and deliberately NOT a repo-root FILE. A directory anchors the
+ * match on its own name followed by `/`, which is what separates `docs/x.md`
+ * from prose; a repo-root file's whole repo-relative path is a BARE FILENAME,
+ * which nothing distinguishes from any other quoted string. The cheapest rule
+ * that would reach `sdui.manifest.json` -- collect a quoted dotted word -- also
+ * collects `package.json`, and `statSync` then confirms the repo-root manifest
+ * as a real file, so the over-collection this collector calls harmless stops
+ * being harmless: it would force a declaration on a file nothing reads.
+ * `TURBO_ROOT_FILE_INPUTS` pins the repo-root files `turbo.json` declares today
+ * so a SECOND one reds here rather than arriving unnoticed.
  */
+const TURBO_ROOT_PREFIX = '$TURBO_ROOT$/';
+
+export const RECOGNISED_TOP_LEVEL_DIRECTORIES = Object.freeze([
+  'packages',
+  'apps',
+  'examples',
+  'content',
+  'scripts',
+  'skills',
+  // #18342. Three `docs/` inputs are declared on `test`, and
+  // `@objectstack/plugin-auth` names a checklist area file as one quoted whole
+  // -- rostered only once this entry landed.
+  'docs',
+  // #18342. `.claude/skills/spec-property-retirement/SKILL.md` is a declared
+  // input. No test names it flat today; the entry closes the hole the sentence
+  // above promises rather than waiting for one to be written.
+  '.claude',
+]);
+
+/**
+ * Top-level directories a `$TURBO_ROOT$` input declares that this collector does
+ * NOT recognise yet, each with the reason. An entry here is a MEASURED blocker,
+ * never a convenience: the #18342 battery pins this map's exact keys, so adding
+ * one and removing one are both edits a reviewer sees.
+ *
+ * `.github`: recognising it flat rosters two paths that are over-collection
+ * rather than reads. `packages/cli/test/scaffold-ci-script-parity.test.ts` names
+ * `.github/workflows/ci.yml` inside a BLOCK COMMENT, and
+ * `packages/create-objectstack/src/template-consistency.test.ts` asserts that the
+ * SCAFFOLDED project contains that path. Neither opens this repo's workflow;
+ * both literals collide with it because a scaffolded project's CI file has the
+ * same repo-relative spelling. The declaration this gate would then demand folds
+ * every edit of our CI workflow into two packages' test hashes, to hash a file
+ * neither one reads. Note the directory is NOT invisible meanwhile: the
+ * reconstruction half already rosters
+ * `.github/workflows/scaffold-e2e.yml` for `create-objectstack`, declared at
+ * `turbo.json`'s `test` task -- so what is deferred is the FLAT spelling alone.
+ */
+export const TOP_LEVEL_DIRECTORIES_PENDING = Object.freeze({
+  '.github': 'over-collection census (#18342): two literals, both non-reads; disposition reserved to the seat',
+});
+
+/** Repo-root FILES declared as `$TURBO_ROOT$` inputs -- the fourth shape, pinned, not collected. */
+export const TURBO_ROOT_FILE_INPUTS = Object.freeze(['sdui.manifest.json']);
+
+/** `.` is the only regex metacharacter these names carry today; escape the class anyway. */
+const TOP_LEVEL_ALTERNATION = RECOGNISED_TOP_LEVEL_DIRECTORIES
+  .map((d) => d.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  .join('|');
+
+// Built from the list rather than written out, so the list is the single place a
+// directory is added. `matchAll` reads `lastIndex` off a COPY of the regex, so a
+// module-scope global carries no state between callers.
+const REPO_RELATIVE_LITERAL = new RegExp(
+  "(['\"`])((?:" + TOP_LEVEL_ALTERNATION + ')/[A-Za-z0-9._/-]+)\\1',
+  'g',
+);
+
 export function repoRelativeLiterals(src) {
   const out = new Set();
-  for (const m of src.matchAll(/(['"`])((?:packages|apps|examples|content|scripts|skills)\/[A-Za-z0-9._/-]+)\1/g)) {
+  for (const m of src.matchAll(REPO_RELATIVE_LITERAL)) {
     out.add(m[2]);
   }
   return out;
+}
+
+/**
+ * What `turbo.json` ACTUALLY declares, split the way this collector must treat
+ * it: `directories` are the names `repoRelativeLiterals` has to recognise, and
+ * `files` are repo-root files, which it deliberately does not.
+ *
+ * The split is judged against the INDEX through `trackedDirectories()`, the same
+ * authority the walk-root limb uses -- so `sdui.manifest.json` lands in `files`
+ * because git tracks it as a file, never because its name carries a dot. A name
+ * git tracks as neither is returned in `unknown`, where the battery fails on it
+ * instead of it being dropped quietly into one of the two buckets.
+ */
+export function turboRootTopLevelNames(turbo = null, rootDir = REPO_ROOT) {
+  const doc = turbo ?? JSON.parse(readFileSync(join(rootDir, 'turbo.json'), 'utf8'));
+  const tracked = trackedDirectories(rootDir);
+  const directories = new Set();
+  const files = new Set();
+  const unknown = new Set();
+  for (const task of Object.values(doc.tasks ?? {})) {
+    for (const input of task.inputs ?? []) {
+      if (typeof input !== 'string') continue;
+      if (!input.startsWith(TURBO_ROOT_PREFIX)) continue;
+      const rest = input.slice(TURBO_ROOT_PREFIX.length);
+      // A negated glob reaches turbo.json as `$TURBO_ROOT$/!...`; it still NAMES
+      // the directory it excludes, so strip the marker rather than the entry.
+      const bare = rest.startsWith('!') ? rest.slice(1) : rest;
+      const head = bare.split('/')[0];
+      // A leading wildcard segment names no directory to reconcile.
+      if (!head || head.includes('*')) continue;
+      if (tracked.has(head)) directories.add(head);
+      else if (existsSync(join(rootDir, head))) files.add(head);
+      else unknown.add(head);
+    }
+  }
+  return { directories, files, unknown };
 }
 
 /**
@@ -1317,6 +1514,71 @@ function packageNameOf(pkgRoot) {
   }
   packageNameCache.set(pkgRoot, name);
   return name;
+}
+
+/** Memoised per root: one `git ls-files` per process, however many roots are judged. */
+const trackedDirectoryCache = new Map();
+
+/**
+ * The repo-relative directories git TRACKS content under — the source tree as CI
+ * checks it out, rather than the working tree as a build left it.
+ *
+ * A name is in the set when the INDEX holds at least one file below it, so a
+ * build output directory is absent however real it is on disk, and a brand-new
+ * directory enters the moment it is staged — the same moment CI could see it.
+ * The repo root (the empty name) is always in the set. A tracked FILE is not: the
+ * caller is asking which DIRECTORIES exist, and that half is unchanged.
+ *
+ * ⛔ Deliberately not `git check-ignore`: measured on this tree, it answers NOT
+ * IGNORED for a directory named without a trailing separator, because the pattern
+ * that ignores it ends in one and therefore matches directories only. The verdict
+ * would have depended on the spelling — the shape this is removing.
+ *
+ * @param {string} rootDir
+ * @returns {Set<string>} repo-relative names, `/`-joined; throws if git cannot be asked
+ */
+export function trackedDirectories(rootDir = REPO_ROOT) {
+  const cached = trackedDirectoryCache.get(rootDir);
+  if (cached) return cached;
+  const res = spawnSync('git', ['ls-files', '-z', '--cached'], { cwd: rootDir, maxBuffer: 1 << 28 });
+  if (res.error) throw new Error(`git ls-files could not be run in ${rootDir}: ${res.error.message}`);
+  if (res.status !== 0)
+    throw new Error(`git ls-files exited ${res.status} in ${rootDir}: ${String(res.stderr ?? '').trim()}`);
+  const dirs = new Set(['']);
+  for (const file of String(res.stdout).split('\0')) {
+    if (file === '') continue;
+    const segs = file.split(SEGMENT_JOIN);
+    segs.pop();
+    let acc = '';
+    for (const seg of segs) {
+      acc = acc === '' ? seg : `${acc}${SEGMENT_JOIN}${seg}`;
+      dirs.add(acc);
+    }
+  }
+  trackedDirectoryCache.set(rootDir, dirs);
+  return dirs;
+}
+
+/**
+ * `trackedDirectories()`, or a FAIL naming why git could not be asked.
+ *
+ * ⛔ No fallback to `statSync`: falling back restores the build-state verdict
+ * silently, in exactly the environment nobody is watching. A limb that cannot ask
+ * its question says so and reds.
+ *
+ * @returns {Set<string>}
+ */
+function trackedWalkRootDirectories() {
+  try {
+    return trackedDirectories();
+  } catch (e) {
+    console.error(
+      `FAIL: this gate judges walk roots against the SOURCE tree, and git could not be asked.\n` +
+        `    ${e.message}\n` +
+        `    Run it from inside a git checkout of this repository.`,
+    );
+    process.exit(1);
+  }
 }
 
 /** Every package with at least one test that reads outside its own directory. */
@@ -1369,11 +1631,12 @@ export function findEscapingPackages() {
       // keeps a synthetic fixture path off the roster.
       for (const root of scan.walkRoots) {
         if (root === own || root.startsWith(`${own}/`)) continue;
-        try {
-          if (!statSync(join(REPO_ROOT, root)).isDirectory()) continue;
-        } catch {
-          continue;
-        }
+        // Judged against the INDEX, never against the working tree (#18348): a
+        // build output directory is a directory on disk and no part of the
+        // source, and a glob declared for one would hash nothing, so the limb's
+        // question has no answer there. See the header section on the working
+        // tree for the criterion and the census behind it.
+        if (!trackedWalkRootDirectories().has(root)) continue;
         if (!entry.walkRoots.has(root)) entry.walkRoots.set(root, rel);
       }
       // Two rosters, one filter. The flat literals are what an author WROTE in
@@ -1414,6 +1677,223 @@ export function findEscapingPackages() {
     }
   }
   return found;
+}
+
+// ── The SIXTH way to be invisible: the BARE SPECIFIER'S PREMISE (#18236) ────
+//
+// The import boundary above excludes a BARE specifier on a stated ground: it is
+// "an installed dependency resolved through `node_modules`", which no declared
+// glob can hash. That ground is real, and #18236 asked whether it is also a
+// BLIND SPOT -- a test consuming a workspace sibling's schema through
+// `@objectstack/<pkg>` looks, to this scan, exactly like a test importing
+// `vitest`.
+//
+// MEASURED on this tree, over all 3714 test sources under `packages/`, `apps/`
+// and `examples/`, rather than reasoned:
+//
+//   test files importing a workspace sibling by BARE specifier   2010
+//   bare workspace specifier occurrences                          3692
+//   distinct (importer -> imported) package pairs                  349
+//   distinct importing packages / imported packages             66 / 55
+//   pairs NOT backed by an edge on the importer's manifest            0
+//
+// The last row is the whole answer, and it is why collecting them is REFUSED
+// rather than merely expensive. A bare specifier RESOLVES only because the
+// importing package declares the target -- that is what pnpm's strict linking
+// means -- and the declaration is an edge on the very graph both CI layers
+// already follow:
+//
+//   Layer A  `turbo ls --affected` walks the dependency GRAPH. Measured on
+//            turbo 2.10.10, a diff touching ONLY `packages/spec/src/ui/view.zod.ts`:
+//            76 of 81 packages affected, `@objectstack/cli` among them, and
+//            `--union-into` adds nothing because nothing needs adding.
+//   Layer B  `<pkg>#test` dependsOn its own `build`, which dependsOn `^build`,
+//            so the dependency task's hash is folded into the test task's.
+//            Measured with a firing control on the same commit:
+//              view.zod.ts mutated       `@objectstack/cli#test` 09d6dde83abb1ddf -> 2d8ebbbb4202c0e5
+//              an unrelated package      the same hash, unmoved
+//
+// So collecting the 349 pairs would write `packages/<x>/src/**` onto 66
+// packages pointing at 55 siblings -- "every package's suite on every workspace
+// sibling", the explosion this boundary exists to prevent -- and buy nothing,
+// because the graph already carries every one of them.
+//
+// What is NOT safe is asserting the conclusion while nothing checks the
+// premise. A bare specifier that names a workspace package the importer does
+// NOT declare resolves anyway whenever something else supplies it -- a vitest
+// `resolve.alias`, a hoisted `node_modules`, a tsconfig path -- and then there
+// is no manifest edge, no graph edge, no glob, and NO FLAG: #7802 by a sixth
+// spelling, arriving through the one door this file had declared safe on
+// reasoning alone. So the exclusion is made CONDITIONAL and the condition is
+// checked on every run:
+//
+//   A bare specifier is excluded from the radius roster BECAUSE it is an
+//   installed dependency. Every bare specifier naming a workspace package
+//   must therefore be declared as one by the package importing it.
+//
+// Live population 0, which is the point: this lands with no gate turning red,
+// and its red is pinned by `--self-test` cases plus the ablation in its PR --
+// removing `@objectstack/spec` from `packages/cli/package.json` reds this gate
+// naming `packages/cli/test/format-zod-union.test.ts`, the incident file, on
+// the incident import.
+
+/**
+ * The package a module specifier names, or `null` when it names none.
+ *
+ * `null` for the shapes that are not a package at all: a relative specifier
+ * (the roster half's business), an absolute path, a subpath import (`#x`), and
+ * every URL-ish scheme -- `node:` first among them, which is the one an author
+ * is most likely to reach for beside a workspace import.
+ *
+ * A scoped specifier keeps TWO segments and an unscoped one keeps ONE, so
+ * `@objectstack/spec/shared` and `vitest/config` both answer with the package
+ * that would be installed, never with the subpath. A lone `@scope` answers
+ * `null`: it names no package.
+ */
+export function bareSpecifierPackage(spec) {
+  if (typeof spec !== 'string' || spec === '') return null;
+  if (spec.startsWith('.') || spec.startsWith('/') || spec.startsWith('#')) return null;
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(spec)) return null;
+  const parts = spec.split('/');
+  if (spec.startsWith('@')) return parts.length >= 2 && parts[1] ? `${parts[0]}/${parts[1]}` : null;
+  return parts[0] || null;
+}
+
+/** Memoised: one walk of the three workspace roots per process. */
+let workspacePackageNameCache = null;
+
+function collectWorkspaceNames(dir, into) {
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const e of entries) {
+    if (SKIP_DIRS.has(e.name)) continue;
+    if (e.isDirectory()) collectWorkspaceNames(join(dir, e.name), into);
+    else if (e.name === 'package.json') {
+      const name = packageNameOf(dir);
+      if (name) into.add(name);
+    }
+  }
+}
+
+/**
+ * Every package name this workspace publishes, read from the manifests under
+ * the same three roots this gate already walks.
+ *
+ * Read from the tree rather than from `pnpm-workspace.yaml` for the reason the
+ * whole detector is a source scan: this gate has no dependencies, so it cannot
+ * itself fail to resolve in CI, and a YAML parse is the first thing that would
+ * put one here. The roots are the workspace's own (`packages/*` and its six
+ * nested groups, `apps/*`, `examples/*`), so the two answers agree -- and a
+ * name the walk misses costs a CHECK, never produces a wrong flag: an unknown
+ * name is read as third-party and skipped.
+ */
+export function workspacePackageNames() {
+  if (workspacePackageNameCache) return workspacePackageNameCache;
+  const names = new Set();
+  for (const top of ['packages', 'apps', 'examples']) {
+    const dir = join(REPO_ROOT, top);
+    if (!existsSync(dir)) continue;
+    collectWorkspaceNames(dir, names);
+  }
+  workspacePackageNameCache = names;
+  return names;
+}
+
+/** Memoised per package root: the manifest edges a bare specifier can rest on. */
+const declaredDependencyCache = new Map();
+
+/**
+ * Every name the manifest at `pkgRoot` declares as a dependency, in any field.
+ *
+ * All four fields count because all four put the package in `node_modules` or
+ * assert that the host does: what this predicate is asking is whether the edge
+ * EXISTS for turbo's graph to follow, not which lifecycle it belongs to.
+ */
+export function declaredDependenciesOf(pkgRoot) {
+  if (declaredDependencyCache.has(pkgRoot)) return declaredDependencyCache.get(pkgRoot);
+  const names = new Set();
+  try {
+    const manifest = JSON.parse(readFileSync(join(pkgRoot, 'package.json'), 'utf8'));
+    for (const field of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
+      for (const dep of Object.keys(manifest?.[field] ?? {})) names.add(dep);
+    }
+  } catch {
+    // An unreadable manifest declares nothing; the caller's own package root
+    // came from a `package.json` that parsed, so this is the target's problem.
+  }
+  declaredDependencyCache.set(pkgRoot, names);
+  return names;
+}
+
+/**
+ * The bare specifiers in `src` that name a WORKSPACE sibling, deduplicated and
+ * sorted. A self-import by package name is not a sibling and is dropped here.
+ *
+ * Pure, so `--self-test` drives it against synthetic workspaces with no place
+ * in the tree -- the same trade every other half of this detector makes.
+ */
+export function workspaceImportsOf(src, ownName, workspaceNames) {
+  const seen = new Map();
+  for (const spec of importSpecifiers(src)) {
+    const pkg = bareSpecifierPackage(spec);
+    if (pkg === null) continue;
+    if (pkg === ownName) continue;
+    if (!workspaceNames.has(pkg)) continue;
+    if (!seen.has(spec)) seen.set(spec, pkg);
+  }
+  return [...seen].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)).map(([spec, pkg]) => ({ spec, pkg }));
+}
+
+/**
+ * The workspace imports in `src` whose PREMISE fails: no edge on the importing
+ * package's manifest, so neither CI layer has anything to follow.
+ */
+export function undeclaredWorkspaceImports(src, ownName, declared, workspaceNames) {
+  return workspaceImportsOf(src, ownName, workspaceNames).filter(({ pkg }) => !declared.has(pkg));
+}
+
+/**
+ * The live census the limb reports on, over the same test corpus as
+ * `findEscapingPackages()`.
+ *
+ * Its own walk rather than a second output of that one, deliberately: that walk
+ * opens with a pre-filter (`FS_READ` or an ascending literal) that a file
+ * importing ONLY bare specifiers never passes, which is precisely the file this
+ * question is about.
+ *
+ * `files` and `pairs` are returned so the verdict line can PRINT them: a limb
+ * whose corpus silently emptied would otherwise print the same "all declared"
+ * as one that judged 2010 files (#13489's lesson, applied to a live corpus).
+ */
+export function bareWorkspaceImportCensus() {
+  const workspaceNames = workspacePackageNames();
+  const undeclared = [];
+  const pairs = new Set();
+  let files = 0;
+  for (const top of ['packages', 'apps', 'examples']) {
+    const dir = join(REPO_ROOT, top);
+    if (!existsSync(dir)) continue;
+    for (const file of walkTests(dir)) {
+      const pkgRoot = packageRootOf(file);
+      if (!pkgRoot) continue;
+      const ownName = packageNameOf(pkgRoot);
+      if (!ownName) continue;
+      const imports = workspaceImportsOf(readFileSync(file, 'utf8'), ownName, workspaceNames);
+      if (!imports.length) continue;
+      files += 1;
+      const declared = declaredDependenciesOf(pkgRoot);
+      for (const { spec, pkg } of imports) {
+        pairs.add(`${ownName} -> ${pkg}`);
+        if (declared.has(pkg)) continue;
+        undeclared.push({ owner: ownName, ownerDir: relative(REPO_ROOT, pkgRoot), test: relative(REPO_ROOT, file), spec, target: pkg });
+      }
+    }
+  }
+  return { undeclared, files, pairs: pairs.size };
 }
 
 /**
@@ -1744,6 +2224,10 @@ function expandLiteralSets(expr, sets) {
  * ⚠️ An unlisted callee is TREATED AS A DESCENT, which is the safe direction
  * here for the same reason the flat literal collector takes quoted paths without
  * parsing: it can only force a declaration nobody needed, never withdraw one.
+ *
+ * ⚠️ This roster is matched against the callee's LAST dotted segment, so it holds
+ * METHOD names only. An OBJECT name needs the receiver roster below it — see
+ * `NON_DESCENT_NAMESPACES` for why the two questions are both asked.
  */
 const NON_DESCENT_CALLEES = new Set([
   ...PATH_ARG_READS,
@@ -1754,6 +2238,41 @@ const NON_DESCENT_CALLEES = new Set([
   'if', 'for', 'while', 'switch', 'catch', 'return', 'function', 'typeof', 'await', 'new', 'do', 'else',
   'describe', 'it', 'test', 'expect', 'vi', 'beforeAll', 'afterAll', 'beforeEach', 'afterEach',
   'String', 'Number', 'Boolean', 'Set', 'Map', 'Array', 'Object', 'JSON', 'require', 'import',
+]);
+
+/**
+ * Receivers whose MEMBERS cannot be a descent entry either — the other half of
+ * the roster above, asked of the callee's FIRST dotted segment.
+ *
+ * One roster matched one way was blind in a shape it looked like it covered. The
+ * match takes the callee's LAST dotted segment, which is the right question for a
+ * method name — `path.join(...)` pops to `join`, `fs.readdirSync(...)` to
+ * `readdirSync` — and the wrong one for an object name: `JSON.stringify(<path>)`
+ * pops to `stringify`, so the `'JSON'` row could only ever match a bare `JSON(...)`
+ * call. Measured over the 3733 test files this gate scans (this repo at
+ * 8904880601): `JSON` was reached 8 times, every one of them the word inside a
+ * comment or a message, while 3220 `JSON.<member>(` call sites passed the guard and
+ * entered as descents; `Object` 4 (all prose) against 4451, `vi` 0 against 10835.
+ * Those rows were not narrow, they were DEAD, and the first argument of every
+ * missed call became a candidate walk root — which is how a `JSON.stringify(...)`
+ * of a path inside a generated shell script came to propose `packages/spec/dist`
+ * as a tree this gate walks.
+ *
+ * So a dotted callee is asked both questions: its last segment against
+ * NON_DESCENT_CALLEES, its receiver against this set. Every name here is already a
+ * row above, and the receiver leg is asked of DOTTED callees only, so a bare call
+ * keeps exactly the verdict it had.
+ *
+ * ⚠️ The safe direction is unchanged — an unlisted name is still TREATED AS A
+ * DESCENT — so a row here has to earn it: no member of these namespaces can hand a
+ * directory to a walker. The built-in globals' statics are data operations, and
+ * the vitest namespaces' members take mock factories, matchers and case tables.
+ * ⛔ A namespace any member of which reads the filesystem does not belong here;
+ * `fs` and `path` are deliberately absent, and their methods are rows above.
+ */
+const NON_DESCENT_NAMESPACES = new Set([
+  'String', 'Number', 'Boolean', 'Set', 'Map', 'Array', 'Object', 'JSON', 'URL', 'require', 'import',
+  'describe', 'it', 'test', 'expect', 'vi',
 ]);
 
 /**
@@ -1789,7 +2308,14 @@ export function descentRoots(src, hereDepth, fileSegs, known) {
   };
   const sets = literalStringSets(src);
   for (const m of src.matchAll(/\b([A-Za-z_$][\w$.]*)\s*\(/g)) {
-    if (NON_DESCENT_CALLEES.has(m[1].split('.').pop())) continue;
+    const segs = m[1].split('.');
+    // Two questions, one per kind of name the roster holds: a METHOD is
+    // recognised wherever it sits, a NAMESPACE only in the one position it can
+    // occupy. The receiver leg reads `segs[0]` and not any middle segment, so the
+    // roster's reach is exactly one receiver deep and `x.JSON.stringify(dir)`
+    // stays a descent.
+    if (NON_DESCENT_CALLEES.has(segs[segs.length - 1])) continue;
+    if (segs.length > 1 && NON_DESCENT_NAMESPACES.has(segs[0])) continue;
     const args = balancedArgs(src, m.index + m[0].length);
     if (args === null) continue;
     // The entry argument, by position: a walker takes the directory first.
@@ -1808,6 +2334,28 @@ function verify() {
   const escaping = findEscapingPackages();
   const declared = new Set(Object.keys(CROSS_PACKAGE_TEST_INPUTS));
   const problems = [];
+
+  // The BARE SPECIFIER'S PREMISE (#18236). Asked FIRST because it is the one
+  // limb whose failure means a read is invisible to this gate's other four: an
+  // undeclared workspace import is carried by no manifest edge, so no glob is
+  // owed, no package is named as escaping, and every limb below is satisfied.
+  const bare = bareWorkspaceImportCensus();
+  for (const u of bare.undeclared) {
+    problems.push(
+      `${u.owner} imports the workspace package \`${u.target}\` from a test and does not declare it.\n` +
+        `      ${u.test}\n` +
+        `        ${u.spec}\n` +
+        `    A bare specifier is excluded from the radius roster BECAUSE it is an installed\n` +
+        `    dependency, and that exclusion is safe only while the manifest says so: the\n` +
+        `    dependency edge is what \`turbo ls --affected\` walks and what folds the target's\n` +
+        `    build hash into \`${u.owner}#test\`. With no edge there is no graph, no glob and no\n` +
+        `    flag — this read is invisible to CI exactly as #7802 was.\n` +
+        `    Declare \`${u.target}\` in ${u.ownerDir}/package.json — that single edge is what both\n` +
+        `    CI layers follow — or drop the import if it is not really a dependency.\n` +
+        `    ⛔ Do NOT answer this with a CROSS_PACKAGE_TEST_INPUTS glob: a glob hashes the\n` +
+        `    target's files without restoring the graph edge the affected-set filter needs.`,
+    );
+  }
 
   for (const [name, info] of [...escaping].sort()) {
     if (declared.has(name)) continue;
@@ -2010,7 +2558,12 @@ function verify() {
       // absence: a run in which the descent scan stopped resolving prints 0
       // walked roots instead of the same "all declared" line it printed while
       // it was working. The #13489 lesson, applied to the limb's live corpus.
-      `; ${walkRootCount} walked root(s) judged, ${acceptedSeen.size} on ACCEPTED_WALK_RADII.`,
+      `; ${walkRootCount} walked root(s) judged, ${acceptedSeen.size} on ACCEPTED_WALK_RADII` +
+      // Same rule for the bare-specifier premise (#18236): its steady state is
+      // ZERO findings, so its counts are what distinguish "every workspace
+      // import is declared" from "the census stopped seeing any".
+      `; ${bare.files} test file(s) import a workspace sibling by bare specifier over ` +
+      `${bare.pairs} package pair(s), every one declared.`,
   );
 }
 
@@ -3353,6 +3906,140 @@ function selfTest() {
     );
   }
 
+  // ── the DOTTED NAMESPACE callee (#18643) ─────────────────────────────────
+  //
+  // The roster is matched against the callee's LAST dotted segment, so an
+  // OBJECT-named row only ever matched a BARE call: `JSON.stringify(<path>)`
+  // popped to `stringify`, entered as a descent, and its first argument became a
+  // candidate walk root -- which is how a path inside a generated shell script
+  // came to name `packages/spec/dist` as a tree this gate walks.
+  //
+  // Both halves are pinned, because either alone is satisfiable by a scan that
+  // simply stopped answering: the LIT legs assert a namespace member is no longer
+  // a descent, and the two controls above them assert that an unrostered callee
+  // handed the SAME argument in the SAME position still is. The DARK legs hold
+  // the rows that were live -- a bare `String(...)` or `require(...)` -- to the
+  // verdict they already had.
+  battery('the DOTTED NAMESPACE callee (#18643)');
+  {
+    const SEGS = ['packages', 'pkg', 'src', 'x.test.ts'];
+    const SEED =
+      'const HERE = dirname(fileURLToPath(import.meta.url));\n' + "const REPO = resolve(HERE, '../../..');\n";
+    // The anonymous descent the walk limb needs before it engages at all: without
+    // it every sample below yields nothing and every leg is green for the wrong
+    // reason. The positive controls are what prove it is engaged.
+    const WALKER = 'const walk = (dir) => { for (const e of readdirSync(dir)) walk(join(dir, e)); };\n';
+    const ARG = "join(REPO, 'content')";
+    const isRoot = (src) => walkRootsOf(SEED + WALKER + src, 1, SEGS).includes('content');
+
+    ok(
+      'POSITIVE CONTROL: an unrostered BARE callee handed the argument is a descent',
+      isRoot(`const s = stringify(${ARG});`),
+    );
+    ok(
+      'POSITIVE CONTROL: an unrostered DOTTED callee is one too -- the receiver leg suppresses by ROSTER, not by the dot',
+      isRoot(`helper.crawl(${ARG});`),
+    );
+    ok('LIT: `JSON.stringify(<path>)` is not a descent -- the reported shape', !isRoot(`const s = JSON.stringify(${ARG});`));
+    ok('LIT: `Object.keys(<path>)` is not a descent', !isRoot(`const k = Object.keys(${ARG});`));
+    ok('LIT: `Array.from(<path>)` is not a descent', !isRoot(`const a = Array.from(${ARG});`));
+    ok('LIT: `vi.mock(<path>)` is not a descent -- the `vi` row reached nothing at all before', !isRoot(`vi.mock(${ARG});`));
+    ok('LIT: `expect.any(<path>)` is not a descent', !isRoot(`expect.any(${ARG});`));
+    ok('DARK: bare `String(<path>)` keeps its verdict', !isRoot(`const s = String(${ARG});`));
+    ok('DARK: bare `require(<path>)` keeps its verdict', !isRoot(`const m = require(${ARG});`));
+    ok('DARK: bare `Number(<path>)` keeps its verdict', !isRoot(`const n = Number(${ARG});`));
+    ok('DARK: `new Set(<path>)` keeps its verdict', !isRoot(`const s = new Set(${ARG});`));
+    ok('a rostered METHOD still suppresses when dotted: `fs.readdirSync(<path>)`', !isRoot(`fs.readdirSync(${ARG});`));
+    ok('and when bare: `readdirSync(<path>)` -- what the last-segment match buys', !isRoot(`readdirSync(${ARG});`));
+    ok(
+      'REACH: the receiver leg reads the FIRST segment only, so `x.JSON.stringify(<path>)` is still a descent',
+      isRoot(`x.JSON.stringify(${ARG});`),
+    );
+    ok(
+      'every namespace row is also a callee row, so no BARE call changed hands with this limb',
+      [...NON_DESCENT_NAMESPACES].every((n) => NON_DESCENT_CALLEES.has(n)),
+    );
+  }
+
+  // ── the WORKING-TREE blind spot (#18348) ──────────────────────────
+  //
+  // The three legs the card demands, driven on a REAL git tree rather than
+  // argued: an artefact directory absent ⇒ not a root; the same directory
+  // present and EMPTY ⇒ still not a root; a tracked tree ⇒ still a root, so the
+  // #15565 red survives. Each leg carries its own control, because a predicate
+  // answering "not a root" to everything would satisfy the first two alone.
+  //
+  // ⛔ And the criterion is pinned as a CRITERION, not as a name pattern: the
+  // same directory NAME, with a file git tracks inside it, IS a judgeable root.
+  // A regex on the name would pass every leg above and fail that one.
+  battery('the WORKING-TREE blind spot (#18348)');
+  {
+    const P = (...segments) => segments.join('/');
+    const ARTEFACT = P('packages', 'spec', 'dist');
+    const TRACKED_SAME_NAME = P('packages', 'other', 'dist');
+    const TRACKED_TREE = 'docs';
+    const TRACKED_FILE = P('docs', 'adr', 'y.md');
+
+    const tree = mkdtempSync(join(tmpdir(), 'xpkg-tracked-'));
+    try {
+      const git = (...args) => spawnSync('git', args, { cwd: tree, encoding: 'utf8' });
+      git('init', '-q');
+      mkdirSync(join(tree, 'docs', 'adr'), { recursive: true });
+      mkdirSync(join(tree, 'packages', 'other', 'dist'), { recursive: true });
+      writeFileSync(join(tree, TRACKED_FILE), '');
+      writeFileSync(join(tree, P(TRACKED_SAME_NAME, 'kept.json')), '{}');
+      const added = git('add', '-A');
+      ok('CONTROL: the fixture tree really is a git checkout with an index', added.status === 0);
+
+      // LEG 1 -- the artefact directory is not on disk at all.
+      ok(
+        'LEG 1: an artefact directory that does not exist is not a walk root',
+        !trackedDirectories(tree).has(ARTEFACT),
+      );
+
+      // LEG 2 -- the same name, now a real EMPTY directory on disk. That `mkdir`,
+      // and nothing else, is the whole regression.
+      mkdirSync(join(tree, ARTEFACT), { recursive: true });
+      trackedDirectoryCache.delete(tree);
+      ok(
+        'CONTROL: and the on-disk predicate this replaced WOULD have admitted it',
+        statSync(join(tree, ARTEFACT)).isDirectory(),
+      );
+      ok(
+        'LEG 2: an EMPTY untracked directory on disk is still not a walk root',
+        !trackedDirectories(tree).has(ARTEFACT),
+      );
+
+      // LEG 3 -- the thing that must keep working: a tracked tree is a root, so
+      // an undeclared descent into one still reds through `uncoveredWalkRadius`.
+      ok('LEG 3: a tracked tree IS a walk root', trackedDirectories(tree).has(TRACKED_TREE));
+      ok(
+        'LEG 3: and its radius is still reported when no declared glob reaches it',
+        uncoveredWalkRadius(TRACKED_TREE, [P('packages', '**', '*.ts')], tree).join(',') === TRACKED_TREE,
+      );
+
+      // The criterion, not a name pattern.
+      ok(
+        'the SAME directory name, with tracked content inside it, IS a walk root',
+        trackedDirectories(tree).has(TRACKED_SAME_NAME),
+      );
+      // The repo root is always judgeable, and a tracked FILE never is.
+      ok('the repo root is always a walk root', trackedDirectories(tree).has(''));
+      ok('a tracked FILE is not a directory and not a walk root', !trackedDirectories(tree).has(TRACKED_FILE));
+    } finally {
+      trackedDirectoryCache.delete(tree);
+      rmSync(tree, { recursive: true, force: true });
+    }
+
+    // LIVE controls, on this repository rather than on a fixture.
+    const live = trackedDirectories();
+    ok(
+      'LIVE: every root this scan judges on this tree is a tracked directory',
+      [...findEscapingPackages().values()].every((info) => [...info.walkRoots.keys()].every((r) => live.has(r))),
+    );
+    ok('LIVE: and the artefact directory the regression fired on is not one of them', !live.has(ARTEFACT));
+  }
+
   // ── the node_modules REACH rule (#16555) ─────────────────────────────────
   //
   // Layer B asks whether turbo hashes the declared globs. This battery is the
@@ -3560,6 +4247,150 @@ function selfTest() {
     } finally {
       rmSync(guardDir, { recursive: true, force: true });
     }
+  }
+
+  // ── the BARE SPECIFIER's PREMISE (#18236) ──────────────────────────────
+  //
+  // Three separable things, and the battery keeps them apart because getting
+  // any one of them wrong fails silently rather than loudly:
+  //
+  //   the NAME    — what package a specifier names (`bareSpecifierPackage`),
+  //                 where a subpath, a scope and a URL scheme all read wrong
+  //                 in the same direction: as a package that is not in the
+  //                 workspace, hence skipped, hence no flag;
+  //   the DARK    — a third-party specifier must read ZERO. This is the half
+  //     CONTROL     the #10452 boundary exists for, and the half that would
+  //                 put every package's suite on every workspace sibling if
+  //                 it ever started collecting;
+  //   the RED     — an undeclared workspace import must FLAG. The live
+  //                 population is 0 by design, so without these cases the
+  //                 limb would be indistinguishable from one that never runs.
+  //
+  // The predicates are pure and take the workspace and the manifest edges as
+  // arguments, so every case here is a synthetic workspace with no place in
+  // the tree -- the same trade the rest of this self-test makes.
+  battery("the BARE SPECIFIER's PREMISE (#18236)");
+  const WS = new Set(['@objectstack/spec', '@objectstack/cli', 'create-objectstack']);
+  const DECLARED = new Set(['@objectstack/spec', 'vitest']);
+  const undeclaredOf = (src, own = '@objectstack/cli') =>
+    undeclaredWorkspaceImports(src, own, DECLARED, WS).map((h) => h.spec);
+
+  ok('names the package a scoped specifier belongs to', bareSpecifierPackage('@objectstack/spec') === '@objectstack/spec');
+  ok(
+    'a SUBPATH keeps the package, never the subpath',
+    bareSpecifierPackage('@objectstack/spec/shared') === '@objectstack/spec',
+  );
+  ok('an unscoped specifier is its own package', bareSpecifierPackage('create-objectstack') === 'create-objectstack');
+  ok('an unscoped SUBPATH keeps the package', bareSpecifierPackage('vitest/config') === 'vitest');
+  ok('a relative specifier names no package', bareSpecifierPackage('../../spec/src/x.ts') === null);
+  ok('a same-directory relative specifier names no package', bareSpecifierPackage('./helper.js') === null);
+  ok('a `node:` builtin names no package', bareSpecifierPackage('node:fs') === null);
+  ok('a URL specifier names no package', bareSpecifierPackage('file:///tmp/x.mjs') === null);
+  ok('an absolute path names no package', bareSpecifierPackage('/tmp/x.mjs') === null);
+  ok('a subpath import (`#x`) names no package', bareSpecifierPackage('#internal/x') === null);
+  ok('a lone scope names no package', bareSpecifierPackage('@objectstack') === null);
+  ok('the empty specifier names no package', bareSpecifierPackage('') === null);
+
+  // ⛔ THE DARK CONTROL. Each of these must read ZERO, and they are pinned one
+  // per shape rather than trusting a single case to stand for the class --
+  // the same posture the #10452 boundary cases take beside them.
+  ok('third-party `vitest` is not a workspace import', undeclaredOf("import { it } from 'vitest';").length === 0);
+  ok('third-party `zod` is not a workspace import', undeclaredOf("import { z } from 'zod';").length === 0);
+  ok('a `node:` builtin is not a workspace import', undeclaredOf("import { readFileSync } from 'node:fs';").length === 0);
+  ok(
+    'a relative import is not a workspace import — that half stays on the ROSTER',
+    undeclaredOf("import { formatZodErrors } from '../src/utils/format';").length === 0,
+  );
+  ok(
+    'a package importing ITSELF by name is not a sibling',
+    undeclaredOf("import { run } from '@objectstack/cli';").length === 0,
+  );
+
+  // The premise HOLDING, and the premise FAILING — the same specifier, the
+  // same workspace, one manifest edge apart. This pair is what makes the
+  // limb's live silence a measurement rather than an absence.
+  ok(
+    'a DECLARED workspace import is not flagged — the manifest edge is what CI follows',
+    undeclaredOf("import { ObjectStackDefinitionSchema } from '@objectstack/spec';").length === 0,
+  );
+  ok(
+    'RED: an UNDECLARED workspace import is flagged',
+    undeclaredOf("import { x } from '@objectstack/cli';", '@objectstack/spec').join() === '@objectstack/cli',
+  );
+  ok(
+    'RED: an undeclared workspace import is flagged through a SUBPATH too',
+    undeclaredOf("import { x } from '@objectstack/cli/dist/x.js';", '@objectstack/spec').join()
+      === '@objectstack/cli/dist/x.js',
+  );
+  ok(
+    'the census reports the same population an independent count of the tree does',
+    (() => {
+      const live = bareWorkspaceImportCensus();
+      return live.undeclared.length === 0 && live.files > 0 && live.pairs > 0;
+    })(),
+  );
+  ok(
+    'every workspace root this gate walks contributes package names',
+    workspacePackageNames().has('@objectstack/spec') && workspacePackageNames().has('@objectstack/cli'),
+  );
+  ok(
+    'the manifest edges come from all four dependency fields',
+    declaredDependenciesOf(join(REPO_ROOT, 'packages', 'cli')).has('@objectstack/spec')
+      && declaredDependenciesOf(join(REPO_ROOT, 'packages', 'cli')).has('vitest'),
+  );
+
+  battery('the TOP-LEVEL WHITELIST, reconciled against turbo.json (#18342)');
+  {
+    // The header note promises the alternation names every top-level directory a
+    // declared glob can name. Until this battery that sentence was prose, and
+    // false: `docs/` sat declared on three inputs and unrecognised. So DERIVE
+    // the claim from turbo.json -- a transcribed list goes stale exactly the way
+    // the sentence did.
+    const live = turboRootTopLevelNames();
+    const recognised = new Set(RECOGNISED_TOP_LEVEL_DIRECTORIES);
+    const pending = new Set(Object.keys(TOP_LEVEL_DIRECTORIES_PENDING));
+
+    // Non-vacuity first: a reading of zero would green every per-directory case
+    // below by having none of them run.
+    ok('turbo.json still declares $TURBO_ROOT$ inputs at all', live.directories.size > 0);
+    ok('no declared top-level segment is tracked as neither file nor directory', live.unknown.size === 0);
+    for (const dir of [...live.directories].sort()) {
+      ok(
+        `turbo.json declares "${dir}/" and the collector accounts for it (recognised, or pending with a reason)`,
+        recognised.has(dir) || pending.has(dir),
+      );
+    }
+    // Accounted-for is a weaker claim than SEEN: assert the collector really
+    // collects under each recognised name, so an entry added to the list but
+    // mis-escaped into the alternation still fails here.
+    for (const dir of RECOGNISED_TOP_LEVEL_DIRECTORIES) {
+      ok(
+        `the flat collector sees a path under "${dir}/"`,
+        repoRelativeLiterals(`const P = '${dir}/probe-18342/x.md';`).has(`${dir}/probe-18342/x.md`),
+      );
+    }
+    // DARK. The alternation is anchored on the quote, so neither an unknown name
+    // nor one that merely CONTAINS a recognised one is collected.
+    ok('an unrecognised top-level directory is still not collected', !repoRelativeLiterals("const P = 'zzqq/nope.md';").size);
+    ok('an unrecognised DOT-directory is not collected', !repoRelativeLiterals("const P = '.zzqq/nope.md';").size);
+    ok('a name merely CONTAINING a recognised one is not collected', !repoRelativeLiterals("const P = 'notdocs/x.md';").size);
+    // The pending map is pinned by its exact keys, so relaxing the sentence above
+    // cannot happen quietly.
+    ok('the pending map holds exactly the measured blockers', [...pending].sort().join() === '.github');
+    ok(
+      'every pending entry carries a reason',
+      Object.values(TOP_LEVEL_DIRECTORIES_PENDING).every((r) => typeof r === 'string' && r.length > 0),
+    );
+    // The FOURTH shape -- a repo-root file, deliberately outside the alternation.
+    ok(
+      'the repo-root file inputs turbo.json declares are exactly the pinned set',
+      [...live.files].sort().join() === [...TURBO_ROOT_FILE_INPUTS].sort().join(),
+    );
+    ok('a bare repo-root filename is NOT collected', !repoRelativeLiterals("const P = 'sdui.manifest.json';").size);
+    ok(
+      'nor the repo-root manifest a bare-filename rule would have swept in with it',
+      !repoRelativeLiterals("const P = 'package.json';").size,
+    );
   }
 
   // The floor runs BEFORE the verdict below, so a success line can only be

@@ -3,18 +3,21 @@
 
 /**
  * git-history.mjs — answer a "how many commits on <ref> in <window>" question,
- * or REFUSE, so a churn number can never be quoted from truncated history
- * (#9878).
+ * or a "which commit last touched <path> on <ref>" question, or REFUSE, so
+ * neither a churn number nor a provenance sha can ever be quoted from
+ * truncated history (#9878).
  *
  *   node scripts/pm/git-history.mjs count  --since=2026-07-19 [--until=2026-08-19]
  *   node scripts/pm/git-history.mjs count  --days=30 [--ref=origin/main] [--path=packages/core]
  *   node scripts/pm/git-history.mjs log    --since=2026-07-19 [--format=%H%x09%s]
  *   node scripts/pm/git-history.mjs ensure --since=2026-07-19   # deepen + prove, answer nothing
+ *   node scripts/pm/git-history.mjs touch  --path=<file> [--ref=origin/main] [--format=%H]
+ *                                          # the last commit on <ref> that touched <file>, PROVEN
  *   node scripts/pm/git-history.mjs --self-test
  *
  * Exit codes: **0** answered, and the answer is provable · **2** refused — the
- * window is not fully present locally and could not be made so · **1** usage or
- * environment.
+ * window (or the touch) is not provably present locally and could not be made
+ * so · **1** usage or environment.
  *
  * On success the ANSWER alone goes to stdout (so `$(...)` capture works) and a
  * one-line method receipt goes to stderr, ready to paste beside the number.
@@ -62,6 +65,63 @@
  * the window sits entirely ABOVE the shallow floor, so that is what is checked:
  * the newest boundary commit reachable from the ref must predate `--since`.
  *
+ * ## The second trap, same root: `git log -1 <ref> -- <path>` on a shallow clone
+ *
+ * The windowed guard covers COUNTS. A provenance lookup — "which commit last
+ * touched <path>" — is broken by the same graft in a worse way, because the
+ * answer is a single real sha with nothing beside it to look wrong. Measured
+ * 2026-09-15 on a constructed 40-commit repo whose `charter.md` was last
+ * touched at c2, cloned at two depths:
+ *
+ *   | clone        | `git log -1 origin/main -- charter.md` | its parent          | `git show --stat <sha> -- charter.md` |
+ *   |--------------|----------------------------------------|---------------------|---------------------------------------|
+ *   | `--depth=5`  | c35 — the graft boundary                | named, NOT present  | ` charter.md | 1 +`  (non-empty)      |
+ *   | `--depth=20` | c20 — the graft boundary                | named, NOT present  | ` charter.md | 1 +`  (non-empty)      |
+ *   | deepened     | c2 — correct                            | present             | ` charter.md | 2 +-`                  |
+ *
+ * Mechanism, established rather than inferred: the boundary commit's OBJECT
+ * still names its parent, but the graft hides that parent from traversal, so
+ * git diffs the boundary against the EMPTY tree — every path in its tree reads
+ * as "added here", the pathspec walk stops, and `-1` prints the boundary as a
+ * real, plausible sha at exit 0 with no warning. Two depths name two different
+ * shas for one reason. And the natural verification leg — `git show --stat
+ * <sha> -- <path>` printing a line — is fooled by the SAME empty-tree diff: the
+ * whole file reads as an insertion. So `touch` proves an answer two ways before
+ * printing it: the commit is not GRAFTED — every parent its object names is
+ * present locally AND git's traversal still uses them (a real root names none
+ * and passes on both counts) — and the diff against those parents touches the
+ * path. Unprovable ⇒ `fetch --deepen=N` (additive by definition — it counts
+ * from the current boundary, never from the tip — doubling from 64), then
+ * `--unshallow`, then REFUSE with exit 2 and empty stdout. The predicate is the
+ * COMMIT's graft state, never the repo's shallow flag: a clone that is still
+ * shallow answers the moment the commit it names is not itself grafted.
+ *
+ * ## The third trap, same graft: the parent arrives, the registration stays
+ *
+ * "Every parent the object names is present" was the first spelling of leg 1,
+ * and a fetch breaks it in the direction that looks harmless. Measured
+ * 2026-09-16 on the shared checkout (#18355) and reproduced in this file's
+ * self-test on a constructed fixture: a boundary stayed registered in the
+ * shallow list while a LATER fetch — of another ref, or of one sha — brought
+ * its parent OBJECT into the store. Leg 1 then passed, the graft was still
+ * applied at traversal, and `diff-tree` diffed the commit against its EMPTY
+ * grafted parent list and printed nothing. That read back as `{provable:
+ * false, boundary: false, reason: "<sha> has its parent(s) locally but its
+ * diff does not touch <path>"}` — the refusal still correct, the flag and the
+ * sentence beside it both wrong: an operator was told the file was simply
+ * untouched, when a grafted walk is what answered. Which of the two sentences
+ * came out depended on when the last fetch ran.
+ *
+ * So the graft is read as git applies it, per sha: `git rev-parse <sha>^@`
+ * lists the parents the TRAVERSAL uses — the `--max-parents=0` reading asked
+ * of ONE commit — and an object naming a parent that list does not carry is
+ * grafted, whether or not that parent is in the object store. Measured here at
+ * 2.6 ms per call against 15 ms for `rev-list --max-parents=0 <sha>` (20 runs
+ * each, this checkout): the ancestry walk costs more the more history it can
+ * see, `^@` costs the same on every clone. It also reads the graft rather than
+ * the shallow FILE, so it needs no common-dir resolution from a linked
+ * worktree, and it catches a graft from any source.
+ *
  * ## Cost, measured — because a tool nobody runs fixes nothing
  *
  *   | case                                            | wall  |
@@ -75,7 +135,7 @@
  */
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { isEntrypoint } from '../invoked-as.mjs';
@@ -100,11 +160,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'pure decisions': 10,
   'real repos': 15,
   'historyHorizon: the read-only reading the #9902 adopters call': 12,
+  'touch: the provenance reading a shallow clone fabricates': 26,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 3;
+const SELF_TEST_BATTERY_FLOOR = 4;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -332,6 +393,231 @@ export function historyHorizon({ cwd, ref, sinceMs, marginDays }) {
   };
 }
 
+// ── touch: the provenance reading ────────────────────────────────────────────
+
+const DEFAULT_DEEPEN_STEP = 64;
+/** Deepen steps double from DEFAULT_DEEPEN_STEP up to this before `--unshallow`. */
+const MAX_DEEPEN_STEP = 4096;
+
+/**
+ * The parents a commit OBJECT names, each with whether it is present locally.
+ * Read from the object rather than from `rev-list --parents`, because a
+ * shallow graft is applied at traversal and never rewrites the object: the
+ * boundary commit still says `parent <sha>`, and `<sha>` is simply not here.
+ * That is what tells a boundary (names a parent this clone lacks) from a real
+ * root (names none) — the shallow flag cannot, and neither can `--max-parents=0`,
+ * which lists both.
+ *
+ * PRESENCE IS HALF THE READING. A fetch can bring the parent object in while
+ * the graft stays registered, and the walk goes on ignoring it (#18355), so
+ * `isGraftBoundary()` reads the traversal side and `touchIsProvable()` requires
+ * both.
+ *
+ * @returns {Array<{sha: string, present: boolean}>|null} null when `sha` is not readable here.
+ */
+export function objectParents(cwd, sha) {
+  const raw = git(['cat-file', '-p', sha], { cwd, allowFail: true });
+  if (raw === null) return null;
+  const parents = [];
+  for (const line of raw.split('\n')) {
+    if (line === '') break; // the commit header ends at the first blank line
+    if (line.startsWith('parent ')) parents.push(line.slice('parent '.length).trim());
+  }
+  return parents.map((p) => ({
+    sha: p,
+    present: git(['cat-file', '-e', `${p}^{commit}`], { cwd, allowFail: true }) !== null,
+  }));
+}
+
+/**
+ * The parents git's TRAVERSAL uses for `sha`: the list AFTER any graft is
+ * applied, which is the list every walk diffs against — `log`, `diff-tree`,
+ * `rev-list` alike. `<sha>^@` is the `--max-parents=0` question asked of ONE
+ * commit, and it answers without walking, so it costs the same on a complete
+ * clone as on a shallow one.
+ *
+ * @returns {string[]|null} null when `sha` does not resolve here.
+ */
+function traversalParents(cwd, sha) {
+  const out = git(['rev-parse', `${sha}^@`], { cwd, allowFail: true });
+  if (out === null) return null;
+  return out.split('\n').map((l) => l.trim()).filter(Boolean);
+}
+
+/**
+ * Is `sha` GRAFTED here — does its object name a parent that git's traversal
+ * does not use? True for a shallow boundary WHETHER OR NOT the parent object is
+ * present, which is the whole point of reading it this way: a later fetch can
+ * bring the parent into the store without moving the boundary, the graft goes
+ * on being applied, and the commit keeps reading as parentless in every walk
+ * while the parent sits right there (#18355). False for a real root, whose
+ * traversal list is empty because its object names no parent rather than
+ * because anything was cut — the one case a `--max-parents=0` reading on its
+ * own cannot tell apart, and the reason this compares the two lists instead of
+ * counting one.
+ *
+ * @param {string} cwd
+ * @param {string} sha
+ * @param {Array<{sha: string, present: boolean}>|null} [parents] object parents, when already read
+ * @returns {boolean} false when `sha` is unreadable here — that is refused on its own leg in
+ *                    `touchIsProvable()`, never reported as a graft.
+ */
+export function isGraftBoundary(cwd, sha, parents = objectParents(cwd, sha)) {
+  if (parents === null) return false;
+  const traversal = traversalParents(cwd, sha);
+  if (traversal === null) return false;
+  const named = parents.map((p) => p.sha).sort().join(' ');
+  const used = [...traversal].sort().join(' ');
+  return named !== used;
+}
+
+/**
+ * Is `sha` a PROVABLE answer to "the last commit on the ref that touched
+ * `path`"? Two legs, both required, both pure reads:
+ *
+ *   1. the commit is not grafted — every parent its object names is present
+ *      locally AND git's traversal still uses them. A graft boundary fails the
+ *      first half while its parent is missing and the SECOND half ever after,
+ *      because a fetch that brings the parent in does not move the boundary
+ *      (#18355); either way git diffs the commit against the empty tree, so
+ *      every path in its tree reads as touched there;
+ *   2. the diff against those parents (against the empty tree for a real
+ *      root) touches `path` — the `git show --stat <sha> -- <path>` leg in its
+ *      machine form, which is only meaningful once leg 1 holds.
+ *
+ * @returns {{provable: boolean, boundary: boolean, parents: Array<{sha: string, present: boolean}>|null,
+ *            touched: string[], reason: string|null}}
+ */
+export function touchIsProvable({ cwd, sha, path }) {
+  const parents = objectParents(cwd, sha);
+  if (parents === null) {
+    return { provable: false, boundary: false, parents, touched: [], reason: `commit ${sha} is not readable in this checkout` };
+  }
+  const missing = parents.filter((p) => !p.present);
+  if (missing.length > 0) {
+    return {
+      provable: false,
+      boundary: true,
+      parents,
+      touched: [],
+      reason:
+        `${sha.slice(0, 9)} is a shallow graft boundary — its object names parent ${missing[0].sha.slice(0, 9)}, ` +
+        'which this clone does not have, so git diffed it against the EMPTY tree and every path in its tree ' +
+        `reads as touched there; nothing says whether ${path} was really changed by it`,
+    };
+  }
+  if (isGraftBoundary(cwd, sha, parents)) {
+    return {
+      provable: false,
+      boundary: true,
+      parents,
+      touched: [],
+      reason:
+        `${sha.slice(0, 9)} is a graft boundary whose registration OUTLIVED the fetch that brought its ` +
+        `parent(s) ${parents.map((p) => p.sha.slice(0, 9)).join(' ')} in — they are present locally, and git's ` +
+        `traversal still treats ${sha.slice(0, 9)} as parentless, so it diffed the commit against the EMPTY tree ` +
+        `and an empty diff here says nothing about whether ${path} was changed by it`,
+    };
+  }
+  const rootArgs = parents.length === 0 ? ['--root'] : [];
+  const out = git(['diff-tree', '-r', '-m', '--no-commit-id', '--name-only', ...rootArgs, sha, '--', path], { cwd, allowFail: true });
+  const touched = (out || '').split('\n').filter(Boolean);
+  if (touched.length === 0) {
+    return {
+      provable: false,
+      boundary: false,
+      parents,
+      touched,
+      reason: `${sha.slice(0, 9)} has its parent(s) locally but its diff does not touch ${path}`,
+    };
+  }
+  return { provable: true, boundary: false, parents, touched, reason: null };
+}
+
+/**
+ * `git log -1 <ref> -- <path>`, raw. null when the ref does not resolve; the
+ * empty string when no commit visible on the ref touches the path — which on
+ * a shallow clone means nothing yet.
+ */
+export function lastTouch(cwd, ref, path) {
+  const out = git(['log', '-1', '--format=%H', ref, '--', path], { cwd, allowFail: true });
+  return out === null ? null : out.trim();
+}
+
+/**
+ * Take the provenance reading, deepening only as far as proving it needs.
+ * Deepens with `--deepen=N` (counted from the current boundary, so it can only
+ * ADD history — the `--shallow-since` hazard in the header does not arise),
+ * N doubling from `deepenStep`, then `--unshallow`. Fetching also refreshes
+ * the remote-tracking ref, so a deepened answer is read at the fetched tip.
+ *
+ * @returns {{answered: boolean, sha: string|null, verdict: object, steps: string[], reason: string|null}}
+ */
+export function ensureTouchProvable({
+  cwd, ref, path, allowFetch = true, allowUnshallow = true, deepenStep = DEFAULT_DEEPEN_STEP,
+}) {
+  const steps = [];
+  const attempt = () => {
+    const sha = lastTouch(cwd, ref, path);
+    if (sha === null) {
+      return { sha, verdict: { provable: false, boundary: false, reason: `ref '${ref}' does not resolve in this checkout` } };
+    }
+    if (sha === '') {
+      const shallow = isShallow(cwd);
+      // A complete clone with no touch is an answer about the path (there is
+      // none); a shallow one may simply be hiding it below the floor.
+      return {
+        sha,
+        verdict: {
+          provable: !shallow,
+          boundary: shallow,
+          reason: shallow
+            ? `no commit visible on '${ref}' touches ${path}, and the clone is shallow — the touch may sit below the floor`
+            : `no commit on '${ref}' touches ${path}`,
+        },
+      };
+    }
+    return { sha, verdict: touchIsProvable({ cwd, sha, path }) };
+  };
+
+  let r = attempt();
+  if (r.verdict.provable) {
+    steps.push(isShallow(cwd) ? 'proved without fetching (the touch and its parent sit above the shallow floor)' : 'complete clone (no fetch)');
+    return { answered: true, sha: r.sha, verdict: r.verdict, steps, reason: null };
+  }
+  if (r.sha === null) return { answered: false, sha: null, verdict: r.verdict, steps, reason: r.verdict.reason };
+  if (!allowFetch) {
+    return { answered: false, sha: r.sha, verdict: r.verdict, steps, reason: `${r.verdict.reason}; --no-fetch was given` };
+  }
+  const remotes = (git(['remote'], { cwd, allowFail: true }) || '').split('\n').filter(Boolean);
+  const target = splitRemoteRef(ref, remotes);
+  if (!target) {
+    return {
+      answered: false,
+      sha: r.sha,
+      verdict: r.verdict,
+      steps,
+      reason:
+        `${r.verdict.reason}; '${ref}' names no remote to deepen from ` +
+        `(remotes here: ${remotes.length ? remotes.join(', ') : 'none'})`,
+    };
+  }
+  for (let n = deepenStep; n <= MAX_DEEPEN_STEP && isShallow(cwd); n *= 2) {
+    const fetched = git(['fetch', `--deepen=${n}`, target.remote, target.branch], { cwd, allowFail: true });
+    steps.push(`fetch --deepen=${n} ${target.remote} ${target.branch}${fetched === null ? ' (failed)' : ''}`);
+    if (fetched === null) break;
+    r = attempt();
+    if (r.verdict.provable) return { answered: true, sha: r.sha, verdict: r.verdict, steps, reason: null };
+  }
+  if (allowUnshallow && isShallow(cwd)) {
+    const un = git(['fetch', '--unshallow', target.remote], { cwd, allowFail: true });
+    steps.push(`fetch --unshallow ${target.remote}${un === null ? ' (failed)' : ''}`);
+    r = attempt();
+    if (r.verdict.provable) return { answered: true, sha: r.sha, verdict: r.verdict, steps, reason: null };
+  }
+  return { answered: false, sha: r.sha, verdict: r.verdict, steps, reason: r.verdict.reason };
+}
+
 // ── CLI ──────────────────────────────────────────────────────────────────────
 
 function usage(msg) {
@@ -342,8 +628,10 @@ function usage(msg) {
       '                                         [--path=<p>]... [--no-first-parent] [--no-fetch] [--no-unshallow]\n' +
       '  node scripts/pm/git-history.mjs log    --since=<date>|--days=<n> [--format=<fmt>] [...]\n' +
       '  node scripts/pm/git-history.mjs ensure --since=<date>|--days=<n> [--ref=<ref>]\n' +
+      '  node scripts/pm/git-history.mjs touch  --path=<file> [--ref=<ref>] [--format=%H] [--deepen=<n>]\n' +
+      '                                         [--no-fetch] [--no-unshallow]\n' +
       '  node scripts/pm/git-history.mjs --self-test\n\n' +
-      'exit 0 answered · 2 refused (window not provably complete) · 1 usage/environment\n',
+      'exit 0 answered · 2 refused (window or touch not provably complete) · 1 usage/environment\n',
   );
   process.exit(1);
 }
@@ -361,7 +649,8 @@ function parseArgs(argv) {
       case '--days': opts.days = Number(v); break;
       case '--ref': opts.ref = v; break;
       case '--path': opts.paths.push(v); break;
-      case '--format': opts.format = v; break;
+      case '--format': opts.format = v; opts.formatGiven = true; break;
+      case '--deepen': opts.deepen = Number(v); break;
       case '--margin-days': opts.marginDays = Number(v); break;
       case '--no-first-parent': opts.firstParent = false; break;
       case '--no-fetch': opts.fetch = false; break;
@@ -403,7 +692,8 @@ function main(argv) {
   }
   const { cmd, opts } = parseArgs(argv);
   if (cmd === null) usage('a command is required');
-  if (!['count', 'log', 'ensure'].includes(cmd)) usage(`unknown command '${cmd}'`);
+  if (!['count', 'log', 'ensure', 'touch'].includes(cmd)) usage(`unknown command '${cmd}'`);
+  if (cmd === 'touch') return touchMain(opts);
 
   const since = resolveSince(opts);
   const sinceMs = Date.parse(since);
@@ -452,6 +742,65 @@ function main(argv) {
       : git(['log', ...fp, `--format=${opts.format}`, ...windowArgs({ since, until: opts.until }), opts.ref, ...pathArgs], { cwd });
 
   process.stdout.write(out.endsWith('\n') ? out : `${out}\n`);
+  process.stderr.write(`${receipt}\n`);
+  return 0;
+}
+
+/**
+ * `touch`: print the proven last-touch sha of `--path` on `--ref`, or refuse.
+ * Same contract as the windowed commands — the answer alone on stdout, a
+ * one-line method receipt on stderr, exit 2 with EMPTY stdout on refusal.
+ */
+function touchMain(opts) {
+  if (opts.since !== undefined || opts.days !== undefined) usage('touch takes no window — drop --since/--days');
+  if (opts.paths.length !== 1) usage('touch needs exactly one --path=<file>');
+  if (opts.deepen !== undefined && (!Number.isInteger(opts.deepen) || opts.deepen <= 0)) usage('--deepen must be a positive integer');
+  const path = opts.paths[0];
+  const cwd = opts.cwd || process.cwd();
+  const format = opts.formatGiven ? opts.format : '%H';
+
+  const r = ensureTouchProvable({
+    cwd,
+    ref: opts.ref,
+    path,
+    allowFetch: opts.fetch,
+    allowUnshallow: opts.unshallow,
+    deepenStep: opts.deepen,
+  });
+
+  if (r.answered && r.sha === '') {
+    // Provably nothing: a complete clone in which no commit on the ref touches
+    // the path. That is about the question, not the history — usage.
+    process.stderr.write(`git-history touch: ${r.verdict.reason} (ref: ${opts.ref}; ${r.steps.join(' · ')}).\n`);
+    return 1;
+  }
+  if (!r.answered) {
+    const remote = splitRemoteRef(opts.ref, ['origin']) ? 'origin' : '<remote>';
+    process.stderr.write(
+      `⛔ git-history REFUSES to name a last-touch sha — ${r.reason}.\n` +
+        `   ref: ${opts.ref}   path: ${path}` +
+        `${r.sha ? `   raw git log -1 said: ${r.sha.slice(0, 9)} (NOT a reading of the path)` : ''}\n` +
+        `${r.steps.length ? `   tried: ${r.steps.join(' · ')}\n` : ''}` +
+        '   The sha raw git prints here is real, plausible and WRONG — a shallow graft boundary is diffed\n' +
+        '   against the empty tree, so every path in its tree reads as touched there, at exit 0 (#9878).\n' +
+        `   Remedy: git -C ${cwd} fetch --deepen=${opts.deepen ?? DEFAULT_DEEPEN_STEP} ${remote} ${opts.ref.replace(/^[^/]+\//, '')}` +
+        `   # or: git -C ${cwd} fetch --unshallow ${remote}\n`,
+    );
+    return 2;
+  }
+
+  const answer = git(['log', '-1', `--format=${format}`, r.sha], { cwd }).trim();
+  const when = git(['log', '-1', '--format=%cI', r.sha], { cwd }).trim();
+  const stat = (git(['show', '--stat', '--format=', r.sha, '--', path], { cwd, allowFail: true }) || '')
+    .split('\n').map((l) => l.trim()).filter(Boolean)[0] ?? '';
+  const parentsNote = r.verdict.parents.length === 0
+    ? 'a real root (its object names no parent)'
+    : `${r.verdict.parents.length} parent(s) present locally`;
+  const receipt =
+    `method: git log -1 ${opts.ref} -- ${path} · touch ${r.sha.slice(0, 9)} ${when}` +
+    ` · proof: ${parentsNote}, diff-tree touches ${r.verdict.touched.join(' ')}${stat ? ` (${stat})` : ''}` +
+    ` · tip ${refTip(cwd, opts.ref)} · ${r.steps.join(' · ')}`;
+  process.stdout.write(`${answer}\n`);
   process.stderr.write(`${receipt}\n`);
   return 0;
 }
@@ -562,11 +911,16 @@ function selfTest() {
     g(['init', '--quiet', '--initial-branch=main', '.'], up);
     g(['config', 'user.email', 'selftest@objectstack.ai'], up);
     g(['config', 'user.name', 'selftest'], up);
-    // 40 commits, one per day, oldest first: 2026-06-01 .. 2026-07-10.
+    // 40 commits, one per day, oldest first: 2026-06-01 .. 2026-07-10. `f.txt`
+    // moves in every commit; `charter.md` only in c0..c2 (its last touch, c2,
+    // sits below every shallow floor the touch battery cuts); `root.txt` only
+    // in c0 (a real root, which names no parent and must still be provable).
     for (let i = 0; i < FIXTURE_COMMITS; i += 1) {
       const d = new Date(Date.parse(FIXTURE_EPOCH) + i * day).toISOString();
       writeFileSync(join(up, 'f.txt'), `commit ${i}\n`);
       g(['add', 'f.txt'], up);
+      if (i <= 2) { writeFileSync(join(up, 'charter.md'), `charter ${i}\n`); g(['add', 'charter.md'], up); }
+      if (i === 0) { writeFileSync(join(up, 'root.txt'), 'root\n'); g(['add', 'root.txt'], up); }
       execFileSync('git', ['commit', '--quiet', '-m', `c${i}`], {
         cwd: up,
         encoding: 'utf8',
@@ -682,6 +1036,162 @@ function selfTest() {
     const ens = runCliAllowFail(['ensure', `--since=${NARROW_SINCE}`], shallowDeep);
     t('ensure proves coverage and prints no number', ens.code === 0 && ens.stdout.trim() === '',
       JSON.stringify(ens));
+
+    // ── touch: the provenance reading a shallow clone fabricates ────────────
+    // The fixture's `charter.md` was last touched at c2; every shallow clone
+    // cut below floors above it. Measured on real history the same way: a
+    // 50-deep container clone named its own boundary as the last touch of a
+    // lane charter whose true touch sat a day below the floor.
+    battery('touch: the provenance reading a shallow clone fabricates');
+    const trueTouch = g(['log', '-1', '--format=%H', 'origin/main', '--', 'charter.md'], full).trim();
+    const trueRoot = g(['log', '-1', '--format=%H', 'origin/main', '--', 'root.txt'], full).trim();
+    const tipSha = g(['rev-parse', 'origin/main'], full).trim();
+    const boundaryOf = (cwd) => g(['rev-list', '--max-parents=0', 'origin/main'], cwd).trim();
+    const rawTouch = (cwd, p) => g(['log', '-1', '--format=%H', 'origin/main', '--', p], cwd).trim();
+    const short = (sha) => sha.slice(0, 9);
+
+    const touch5 = join(root, 'touch5');
+    g(['clone', '--quiet', '--depth=5', `file://${up}`, touch5], root);
+    const b5 = boundaryOf(touch5);
+    const raw5 = rawTouch(touch5, 'charter.md');
+    t('BASELINE — on a depth-5 clone raw git names the graft boundary as the last touch of a file '
+      + 'the boundary never changed (the defect, reproduced: a real sha, exit 0, no warning)',
+      raw5 === b5 && raw5 !== trueTouch, `raw ${short(raw5)} boundary ${short(b5)} true ${short(trueTouch)}`);
+    const boundaryParents = objectParents(touch5, b5);
+    t('the boundary OBJECT still names one parent and that parent is absent — the graft hides it '
+      + 'from traversal, not from the object, which is what tells a boundary from a real root',
+      boundaryParents !== null && boundaryParents.length === 1 && boundaryParents[0].present === false,
+      JSON.stringify(boundaryParents));
+    t('the naive verification leg is fooled: `git show --stat <boundary> -- charter.md` prints a line '
+      + '(the whole file as an insertion against the empty tree), so a non-empty stat proves nothing',
+      g(['show', '--stat', '--format=', b5, '--', 'charter.md'], touch5).trim() !== '');
+
+    const touch20 = join(root, 'touch20');
+    g(['clone', '--quiet', '--depth=20', `file://${up}`, touch20], root);
+    const b20 = boundaryOf(touch20);
+    const raw20 = rawTouch(touch20, 'charter.md');
+    t('a second depth names a second, different sha — its own boundary: one mechanism, seen from two depths',
+      raw20 === b20 && raw20 !== raw5 && raw20 !== trueTouch, `raw ${short(raw20)} boundary ${short(b20)}`);
+
+    const vBoundary = touchIsProvable({ cwd: touch5, sha: b5, path: 'charter.md' });
+    t('touchIsProvable refuses the boundary and says it is one', vBoundary.provable === false && vBoundary.boundary === true,
+      JSON.stringify(vBoundary));
+    const vTrue = touchIsProvable({ cwd: full, sha: trueTouch, path: 'charter.md' });
+    t('and accepts the true touch on the complete clone, listing the path its diff touches',
+      vTrue.provable === true && vTrue.touched.join() === 'charter.md', JSON.stringify(vTrue));
+
+    const refusedTouch = runCliAllowFail(['touch', '--path=charter.md', '--no-fetch'], touch5);
+    t('the CLI REFUSES the shallow reading with exit 2', refusedTouch.code === 2, JSON.stringify(refusedTouch));
+    t('and stdout stays EMPTY — a captured sha is empty rather than plausible', refusedTouch.stdout.trim() === '',
+      JSON.stringify(refusedTouch.stdout));
+    t('and the refusal names the boundary mechanism, the raw sha it is NOT printing, and a --deepen remedy',
+      /graft boundary/.test(refusedTouch.stderr) && refusedTouch.stderr.includes(short(b5)) && /--deepen=/.test(refusedTouch.stderr),
+      refusedTouch.stderr);
+
+    // --deepen=34 from c35 lands the boundary on c1: c2's parent is present, the clone is still shallow.
+    const answeredTouch = runCliAllowFail(['touch', '--path=charter.md', '--deepen=34'], touch5);
+    t('with fetching allowed it deepens and answers the TRUE touch, exit 0',
+      answeredTouch.code === 0 && answeredTouch.stdout.trim() === trueTouch, JSON.stringify(answeredTouch));
+    t('while the clone is STILL shallow — the predicate is the COMMIT\'s graft state, never the repo\'s shallow flag',
+      isShallow(touch5) === true && /fetch --deepen=34/.test(answeredTouch.stderr) && /proof: 1 parent\(s\) present/.test(answeredTouch.stderr),
+      answeredTouch.stderr);
+
+    // The worst case: --deepen=33 lands the boundary exactly ON c2 — the right sha for the wrong reason.
+    const touch5c = join(root, 'touch5c');
+    g(['clone', '--quiet', '--depth=5', `file://${up}`, touch5c], root);
+    const onBoundary = runCliAllowFail(['touch', '--path=charter.md', '--deepen=33'], touch5c);
+    t('a deepen that lands the boundary exactly ON the true touch is not accepted at that step — the tool '
+      + 'deepens again and only then answers the same sha, now with its parent present',
+      onBoundary.code === 0 && onBoundary.stdout.trim() === trueTouch && /--deepen=33 .*--deepen=66/.test(onBoundary.stderr),
+      onBoundary.stderr);
+
+    // The state a LATER fetch leaves behind: the parent in the store, the graft
+    // still registered (#18355). Constructed rather than described — clone
+    // shallow, then fetch the boundary's OWN parent sha, a plain fetch with no
+    // --deepen, so nothing rewrites the shallow list. Object-parent presence
+    // then passes while the walk is still grafted, which is exactly the reading
+    // that used to come back `boundary: false` with "its diff does not touch".
+    const stale = join(root, 'touch-stale');
+    g(['clone', '--quiet', '--depth=5', `file://${up}`, stale], root);
+    g(['config', 'uploadpack.allowAnySHA1InWant', 'true'], up);
+    const bStale = boundaryOf(stale);
+    g(['fetch', '--quiet', 'origin', objectParents(stale, bStale)[0].sha], stale);
+    const readShallowList = (cwd) => {
+      try {
+        return readFileSync(join(g(['rev-parse', '--path-format=absolute', '--git-common-dir'], cwd).trim(), 'shallow'), 'utf8');
+      } catch { return '(no shallow list readable)'; }
+    };
+    const staleParents = objectParents(stale, bStale);
+    t('FIXTURE — fetching the boundary\'s own parent sha puts that parent in the object store and leaves the '
+      + 'graft REGISTERED: the shallow list still names the boundary, the walk still roots there, the clone is '
+      + 'still shallow. Read first, because a case asserting on a state that did not form proves nothing',
+      readShallowList(stale).includes(bStale) && staleParents.length === 1 && staleParents[0].present === true
+        && boundaryOf(stale) === bStale && isShallow(stale) === true,
+      `shallow list ${JSON.stringify(readShallowList(stale))} parents ${JSON.stringify(staleParents)}`);
+    t('BASELINE — raw git STILL names that boundary as the last touch of charter.md in this state: the defect '
+      + 'is the graft, not the absent object, and fetching the parent did not un-graft the walk',
+      rawTouch(stale, 'charter.md') === bStale,
+      `raw ${short(rawTouch(stale, 'charter.md'))} boundary ${short(bStale)} true ${short(trueTouch)}`);
+
+    const vStale = touchIsProvable({ cwd: stale, sha: bStale, path: 'charter.md' });
+    t('touchIsProvable calls it a BOUNDARY although every parent its object names is present — the flag follows '
+      + 'the graft, not the timing of the last fetch, which is what made this a false negative',
+      vStale.provable === false && vStale.boundary === true && vStale.parents.every((p) => p.present),
+      JSON.stringify(vStale));
+    t('and the reason names the outlived registration instead of telling an operator the commit simply did not '
+      + 'touch the path — the refusal was always right; this is the sentence printed beside it',
+      /graft boundary/.test(vStale.reason ?? '') && !/does not touch/.test(vStale.reason ?? ''),
+      String(vStale.reason));
+    t('isGraftBoundary is the discriminator, and it fires on BOTH graft shapes: parent present here, parent '
+      + 'absent on the untouched depth-20 clone',
+      isGraftBoundary(stale, bStale) === true && isGraftBoundary(touch20, b20) === true);
+    t('and it is FALSE for an ordinary commit and for a real root — a leg that fired on either would refuse '
+      + 'provable answers, the failure mode a bare is-shallow guard has',
+      isGraftBoundary(stale, tipSha) === false && isGraftBoundary(full, trueRoot) === false);
+    const staleControl = runCliAllowFail(['touch', '--path=f.txt', '--no-fetch'], stale);
+    t('FIRING CONTROL — the same clone still ANSWERS for a path its tip really touched, so the new leg '
+      + 'discriminates rather than refusing everything in a repo that carries a graft anywhere',
+      staleControl.code === 0 && staleControl.stdout.trim() === tipSha, JSON.stringify(staleControl));
+    const staleRefusal = runCliAllowFail(['touch', '--path=charter.md', '--no-fetch'], stale);
+    t('and the CLI refuses charter.md there with exit 2, EMPTY stdout, and the REASON line carries the '
+      + 'outlived registration rather than "its diff does not touch". The first spelling of this case tested '
+      + 'the stderr for `graft boundary` and stayed green under ablation — the refusal boilerplate says that '
+      + 'phrase on every refusal, so the case was pinning a constant',
+      staleRefusal.code === 2 && staleRefusal.stdout.trim() === ''
+        && /OUTLIVED the fetch/.test(staleRefusal.stderr) && !/its diff does not touch/.test(staleRefusal.stderr),
+      JSON.stringify(staleRefusal));
+
+    // Last on this clone, because it deepens it: the refusal has to be a step
+    // rather than a dead end. A remedy that cannot clear the state it is
+    // printed for would make the refusal correct and useless at once.
+    const staleRecovered = runCliAllowFail(['touch', '--path=charter.md'], stale);
+    t('and with fetching allowed the SAME clone deepens out of the registered graft and answers the TRUE touch: '
+      + 'the printed remedy clears the state it is printed for',
+      staleRecovered.code === 0 && staleRecovered.stdout.trim() === trueTouch
+        && /fetch --deepen=/.test(staleRecovered.stderr), JSON.stringify(staleRecovered));
+
+    const touch5b = join(root, 'touch5b');
+    g(['clone', '--quiet', '--depth=5', `file://${up}`, touch5b], root);
+    const control = runCliAllowFail(['touch', '--path=f.txt', '--no-fetch'], touch5b);
+    t('FIRING CONTROL — a sha that did touch the path answers on the same shallow clone without any fetch: '
+      + 'the check discriminates rather than always refusing',
+      control.code === 0 && control.stdout.trim() === tipSha && /without fetching/.test(control.stderr), JSON.stringify(control));
+    const rootAnswer = runCliAllowFail(['touch', '--path=root.txt'], touch5b);
+    t('a real root is provable once reached: the deepen dissolves the graft and the answer is the root '
+      + 'commit, whose object names no parent',
+      rootAnswer.code === 0 && rootAnswer.stdout.trim() === trueRoot && isShallow(touch5b) === false && /a real root/.test(rootAnswer.stderr),
+      JSON.stringify(rootAnswer));
+
+    const fullTouch = runCliAllowFail(['touch', '--path=charter.md', '--format=%h'], full);
+    t('a complete clone answers without fetching and honours --format',
+      fullTouch.code === 0 && fullTouch.stdout.trim() === g(['rev-parse', '--short', trueTouch], full).trim()
+        && /complete clone \(no fetch\)/.test(fullTouch.stderr),
+      JSON.stringify(fullTouch));
+    const never = runCliAllowFail(['touch', '--path=never.txt'], full);
+    t('a path no commit on the ref ever touched is usage (exit 1) with empty stdout — neither a refusal nor an answer',
+      never.code === 1 && never.stdout.trim() === '' && /no commit on/.test(never.stderr), JSON.stringify(never));
+    const noPath = runCliAllowFail(['touch'], full);
+    t('touch without --path is usage', noPath.code === 1 && noPath.stdout.trim() === '', JSON.stringify(noPath));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -12,8 +12,8 @@ description: Dashboard protocol schemas
 ## TypeScript Usage
 
 ```typescript
-import { DashboardSchema, DashboardHeaderSchema, DashboardHeaderActionSchema, DashboardWidgetSchema, DashboardWidgetOptionsSchema, GlobalFilterSchema, GlobalFilterOptionsFromSchema, WidgetActionTypeSchema, WidgetColorVariantSchema } from '@objectstack/spec/ui';
-import type { Dashboard, DashboardHeader, DashboardHeaderAction, DashboardWidget, DashboardWidgetOptions, GlobalFilter, GlobalFilterOptionsFrom, WidgetActionType, WidgetColorVariant } from '@objectstack/spec/ui';
+import { DashboardSchema, DashboardHeaderSchema, DashboardHeaderActionSchema, DashboardWidgetSchema, DashboardWidgetChartConfigSchema, DashboardWidgetOptionsSchema, GlobalFilterSchema, GlobalFilterOptionsFromSchema, WidgetActionTypeSchema, WidgetColorVariantSchema } from '@objectstack/spec/ui';
+import type { Dashboard, DashboardHeader, DashboardHeaderAction, DashboardWidget, DashboardWidgetChartConfig, DashboardWidgetOptions, GlobalFilter, GlobalFilterOptionsFrom, WidgetActionType, WidgetColorVariant } from '@objectstack/spec/ui';
 
 // Validate data
 const result = DashboardSchema.parse(data);
@@ -65,7 +65,7 @@ const result = DashboardSchema.parse(data);
 | **title** | `string \| Record<string, string>` | optional | Widget title |
 | **description** | `string \| Record<string, string>` | optional | Widget description text below the header |
 | **type** | `Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| …>` | optional (default: `"metric"`) | Visualization type |
-| **chartConfig** | `{ type: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| …>; title?: string \| Record<string, string>; subtitle?: string \| Record<string, string>; description?: string \| Record<string, string>; … }` | optional | Chart visualization configuration |
+| **chartConfig** | `{ title?: string \| Record<string, string>; subtitle?: string \| Record<string, string>; description?: string \| Record<string, string>; colors?: string[] \| Record<string, string>; … }` | optional | Chart appearance: title, subtitle, description, colors, height, legend, data labels, annotations, interaction. The bound dataset decides which series exist and which column each one reads (ADR-0021), so `type` (the widget's own `type` wins), `xAxis`, `yAxis` and `series` are refused here — select `dimensions` / `values` instead. |
 | **colorVariant** | `Enum<'default' \| 'blue' \| 'teal' \| 'orange' \| 'purple' \| 'success' \| 'warning' \| 'danger'>` | optional | Widget color variant for theming |
 | **requiresObject** | `string` | optional | Hide the widget unless the named object is registered |
 | **requiresService** | `string` | optional | Hide the widget unless the named kernel service is registered |
@@ -76,7 +76,7 @@ const result = DashboardSchema.parse(data);
 | **compareTo** | `{ kind: Enum<'previousPeriod' \| 'previousYear'>; dimension?: string }` | optional | Period-over-period comparison window (`{ kind, dimension? }`) |
 | **dataset** | `string` | ✅ | Dataset name to bind (ADR-0021) |
 | **dimensions** | `string[]` | optional | Dimension names — X/group/split |
-| **values** | `string[]` | ✅ | Measure names — Y (at least one) |
+| **values** | `string[]` | ✅ | Measure names — Y (at least one; exactly one on the metric/kpi/gauge/solid-gauge/bullet family) |
 | **layout** | `{ x: number; y: number; w: number; h: number }` | optional | Grid layout position (auto-flowed when omitted) |
 | **options** | `{ dateGranularity?: Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>; sortBy?: string; sortOrder?: Enum<'asc' \| 'desc'>; limit?: integer; … } & Record<string, any>` | optional | Widget specific configuration |
 | **filterBindings** | `Record<string, string \| false>` | optional | Per-widget dashboard-filter bindings: filter name → this widget's field, or false to opt out |
@@ -170,7 +170,7 @@ Dashboard header action
 | **title** | `string \| Record<string, string>` | optional | Widget title |
 | **description** | `string \| Record<string, string>` | optional | Widget description text below the header |
 | **type** | `Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| 'funnel' \| 'scatter' \| 'treemap' \| 'sankey' \| 'combo' \| 'gauge' \| 'solid-gauge' \| … +6 more>` | optional (default: `"metric"`) | Visualization type |
-| **chartConfig** | `{ type: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| …>; title?: string \| Record<string, string>; subtitle?: string \| Record<string, string>; description?: string \| Record<string, string>; … }` | optional | Chart visualization configuration |
+| **chartConfig** | `{ title?: string \| Record<string, string>; subtitle?: string \| Record<string, string>; description?: string \| Record<string, string>; colors?: string[] \| Record<string, string>; … }` | optional | Chart appearance: title, subtitle, description, colors, height, legend, data labels, annotations, interaction. The bound dataset decides which series exist and which column each one reads (ADR-0021), so `type` (the widget's own `type` wins), `xAxis`, `yAxis` and `series` are refused here — select `dimensions` / `values` instead. |
 | **colorVariant** | `Enum<'default' \| 'blue' \| 'teal' \| 'orange' \| 'purple' \| 'success' \| 'warning' \| 'danger'>` | optional | Widget color variant for theming |
 | **requiresObject** | `string` | optional | Hide the widget unless the named object is registered |
 | **requiresService** | `string` | optional | Hide the widget unless the named kernel service is registered |
@@ -181,7 +181,7 @@ Dashboard header action
 | **compareTo** | `{ kind: Enum<'previousPeriod' \| 'previousYear'>; dimension?: string }` | optional | Period-over-period comparison window (`{ kind, dimension? }`) |
 | **dataset** | `string` | ✅ | Dataset name to bind (ADR-0021) |
 | **dimensions** | `string[]` | optional | Dimension names — X/group/split |
-| **values** | `string[]` | ✅ | Measure names — Y (at least one) |
+| **values** | `string[]` | ✅ | Measure names — Y (at least one; exactly one on the metric/kpi/gauge/solid-gauge/bullet family) |
 | **layout** | `{ x: number; y: number; w: number; h: number }` | optional | Grid layout position (auto-flowed when omitted) |
 | **options** | `{ dateGranularity?: Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>; sortBy?: string; sortOrder?: Enum<'asc' \| 'desc'>; limit?: integer; … } & Record<string, any>` | optional | Widget specific configuration |
 | **filterBindings** | `Record<string, string \| false>` | optional | Per-widget dashboard-filter bindings: filter name → this widget's field, or false to opt out |
@@ -216,13 +216,13 @@ Dashboard header action
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| …>` | ✅ |  |
+| **type** | `never` | optional | [REMOVED] `dashboard.widgets[].chartConfig.type` was removed in @objectstack/spec 17.5.0 (ADR-0021 · ADR-0049 D2) — on a dataset-bound widget the dataset already decides nothing about the chart family — the WIDGET's own `type` does, and it always won: the dashboard renderer maps the widget type to the chart family and never reads this key, so the authored value could only agree with the dataset selection or silently disagree with it. Delete the key. Write the family on the widget instead: `type: 'line'` beside `dataset`, not inside `chartConfig`. The key is NOT gone from the chart config itself: it stays authorable on the react `<ObjectChart>` tier, where the chart is bound to inline `data` and there is no dataset to derive it from. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **title** | `string \| Record<string, string>` | optional | Chart title |
 | **subtitle** | `string \| Record<string, string>` | optional | Chart subtitle |
 | **description** | `string \| Record<string, string>` | optional | Accessibility description — announced to screen readers as the chart’s label |
-| **xAxis** | `{ field: string; title?: string \| Record<string, string>; format?: string; min?: number; … }` | optional | X-Axis configuration |
-| **yAxis** | `{ field: string; title?: string \| Record<string, string>; format?: string; min?: number; … }[]` | optional | Y-Axis configuration (support dual axis) |
-| **series** | `{ name: string; label?: string \| Record<string, string>; type?: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| …>; color?: string; … }[]` | optional | Defined series configuration |
+| **xAxis** | `never` | optional | [REMOVED] `dashboard.widgets[].chartConfig.xAxis` was removed in @objectstack/spec 17.5.0 (ADR-0021 · ADR-0049 D2) — on a dataset-bound widget the dataset already decides which column the category axis plots — it is the dataset DIMENSION the widget selects, so the authored value could only agree with the dataset selection or silently disagree with it. Delete the key. Select the dimension instead: `dimensions: ['stage']` on the widget. Axis APPEARANCE (title, number format, min/max, grid lines, log scale) has no home on a dataset-bound widget — the dataset's dimension declaration is what labels and formats the axis. The key is NOT gone from the chart config itself: it stays authorable on the react `<ObjectChart>` tier, where the chart is bound to inline `data` and there is no dataset to derive it from. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
+| **yAxis** | `never` | optional | [REMOVED] `dashboard.widgets[].chartConfig.yAxis` was removed in @objectstack/spec 17.5.0 (ADR-0021 · ADR-0049 D2) — on a dataset-bound widget the dataset already decides which columns the value axis plots — they are the dataset MEASURES the widget selects, so the authored value could only agree with the dataset selection or silently disagree with it. Delete the key. Select the measures instead: `values: ['amount']` on the widget, one entry per mark. A second axis is a second measure, not a second axis declaration. The key is NOT gone from the chart config itself: it stays authorable on the react `<ObjectChart>` tier, where the chart is bound to inline `data` and there is no dataset to derive it from. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
+| **series** | `never` | optional | [REMOVED] `dashboard.widgets[].chartConfig.series` was removed in @objectstack/spec 17.5.0 (ADR-0021 · ADR-0049 D2) — on a dataset-bound widget the dataset already decides which series exist and which column each one reads — series membership follows from the measures in `values` and the split in `dimensions`, so the authored value could only agree with the dataset selection or silently disagree with it. Delete the key. Select the measures and the split instead: `values` declares one series per measure and a second `dimensions` entry splits them. Per-series appearance (label, colour, mark type, stacking) is not authorable on a dataset-bound widget; `colors` on this same chart config is the palette channel that remains. The key is NOT gone from the chart config itself: it stays authorable on the react `<ObjectChart>` tier, where the chart is bound to inline `data` and there is no dataset to derive it from. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **colors** | `string[] \| Record<string, string>` | optional | Color palette (string[]) or value→color map (`{ value: color }`) |
 | **height** | `number` | optional | Fixed plot height in pixels (overrides the container default) |
 | **showLegend** | `boolean` | optional (default: `true`) | Display legend |
@@ -247,6 +247,51 @@ Dashboard header action
 | **sortOrder** | `Enum<'asc' \| 'desc'>` | optional | Sort direction for sortBy |
 | **limit** | `integer` | optional | Max rows (applied after ordering) |
 | **stageOrder** | `(string \| number \| boolean)[]` | optional | Explicit stage order for a funnel widget, as the dimension's stored values. `funnel` is the only widget type that reads it, and the schema refuses it on any other type rather than accepting an order nothing consults — order those with sortBy/sortOrder instead. There is no `pyramid` widget type — write `funnel`. |
+
+
+---
+
+## DashboardWidgetChartConfig
+
+Chart APPEARANCE for a dataset-bound widget (ADR-0021): title, subtitle, description, colors, height, legend, data labels, annotations and interaction. The dataset decides which series exist and which column each one reads, so `type`, `xAxis`, `yAxis` and `series` are refused here — write them as the widget's own `type` and its `dimensions` / `values` selection.
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `never` | optional | [REMOVED] `dashboard.widgets[].chartConfig.type` was removed in @objectstack/spec 17.5.0 (ADR-0021 · ADR-0049 D2) — on a dataset-bound widget the dataset already decides nothing about the chart family — the WIDGET's own `type` does, and it always won: the dashboard renderer maps the widget type to the chart family and never reads this key, so the authored value could only agree with the dataset selection or silently disagree with it. Delete the key. Write the family on the widget instead: `type: 'line'` beside `dataset`, not inside `chartConfig`. The key is NOT gone from the chart config itself: it stays authorable on the react `<ObjectChart>` tier, where the chart is bound to inline `data` and there is no dataset to derive it from. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
+| **title** | `string \| Record<string, string>` | optional | Chart title |
+| **subtitle** | `string \| Record<string, string>` | optional | Chart subtitle |
+| **description** | `string \| Record<string, string>` | optional | Accessibility description — announced to screen readers as the chart’s label |
+| **xAxis** | `never` | optional | [REMOVED] `dashboard.widgets[].chartConfig.xAxis` was removed in @objectstack/spec 17.5.0 (ADR-0021 · ADR-0049 D2) — on a dataset-bound widget the dataset already decides which column the category axis plots — it is the dataset DIMENSION the widget selects, so the authored value could only agree with the dataset selection or silently disagree with it. Delete the key. Select the dimension instead: `dimensions: ['stage']` on the widget. Axis APPEARANCE (title, number format, min/max, grid lines, log scale) has no home on a dataset-bound widget — the dataset's dimension declaration is what labels and formats the axis. The key is NOT gone from the chart config itself: it stays authorable on the react `<ObjectChart>` tier, where the chart is bound to inline `data` and there is no dataset to derive it from. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
+| **yAxis** | `never` | optional | [REMOVED] `dashboard.widgets[].chartConfig.yAxis` was removed in @objectstack/spec 17.5.0 (ADR-0021 · ADR-0049 D2) — on a dataset-bound widget the dataset already decides which columns the value axis plots — they are the dataset MEASURES the widget selects, so the authored value could only agree with the dataset selection or silently disagree with it. Delete the key. Select the measures instead: `values: ['amount']` on the widget, one entry per mark. A second axis is a second measure, not a second axis declaration. The key is NOT gone from the chart config itself: it stays authorable on the react `<ObjectChart>` tier, where the chart is bound to inline `data` and there is no dataset to derive it from. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
+| **series** | `never` | optional | [REMOVED] `dashboard.widgets[].chartConfig.series` was removed in @objectstack/spec 17.5.0 (ADR-0021 · ADR-0049 D2) — on a dataset-bound widget the dataset already decides which series exist and which column each one reads — series membership follows from the measures in `values` and the split in `dimensions`, so the authored value could only agree with the dataset selection or silently disagree with it. Delete the key. Select the measures and the split instead: `values` declares one series per measure and a second `dimensions` entry splits them. Per-series appearance (label, colour, mark type, stacking) is not authorable on a dataset-bound widget; `colors` on this same chart config is the palette channel that remains. The key is NOT gone from the chart config itself: it stays authorable on the react `<ObjectChart>` tier, where the chart is bound to inline `data` and there is no dataset to derive it from. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
+| **colors** | `string[] \| Record<string, string>` | optional | Color palette (string[]) or value→color map (`{ value: color }`) |
+| **height** | `number` | optional | Fixed plot height in pixels (overrides the container default) |
+| **showLegend** | `boolean` | optional (default: `true`) | Display legend |
+| **showDataLabels** | `boolean` | optional (default: `false`) | Display data labels |
+| **annotations** | `{ type: Enum<'line' \| 'region'>; axis: Enum<'x' \| 'y'>; value: number \| string; endValue?: number \| string; … }[]` | optional | Reference lines/bands drawn over the plot: `{ type: "line" \| "region", axis: "x" \| "y", value, endValue?, color?, label?, style? }` |
+| **interaction** | `{ tooltips: boolean; brush: boolean }` | optional | Interaction toggles: `{ tooltips?, brush? }` |
+| **aria** | `never` | optional | [REMOVED] `ChartConfig.aria` — authored as `dashboard.widgets[].chartConfig.aria`, `report.chart.aria` and `report.blocks[].chart.aria` — was removed in @objectstack/spec 17 (ADR-0049 D2). No chart renderer ever applied it: the chart implementation declares no `aria` prop, the presentation lowering names it nowhere, and the react `<ObjectChart>` block never published it, so ARIA attributes declared here parsed and then silently did not reach the DOM. Delete the key. The accessible name that IS applied on this same chart config is its sibling `description`, which the chart renderer lowers onto the chart graphic as `role="img"` plus `aria-label`. The shared `AriaProps` shape is NOT gone — `ariaLabel` / `ariaDescribedBy` / `role` stay live in the `aria` block on `page.aria`, `page.components[].aria` and the list view `aria`. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
+
+### Nested Shape: `DashboardWidgetChartConfig.annotations[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'line' \| 'region'>` | optional (default: `"line"`) |  |
+| **axis** | `Enum<'x' \| 'y'>` | optional (default: `"y"`) |  |
+| **value** | `number \| string` | ✅ | Start value |
+| **endValue** | `number \| string` | optional | End value for regions |
+| **color** | `string` | optional |  |
+| **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
+| **style** | `Enum<'solid' \| 'dashed' \| 'dotted'>` | optional (default: `"dashed"`) |  |
+
+### Nested Shape: `DashboardWidgetChartConfig.interaction`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **tooltips** | `boolean` | optional (default: `true`) | Show the hover tooltip |
+| **brush** | `boolean` | optional (default: `false`) | Show the range selector under the plot |
 
 
 ---

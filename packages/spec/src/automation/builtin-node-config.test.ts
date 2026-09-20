@@ -346,17 +346,13 @@ describe('ScreenFieldConfigSchema — the bound pair, help text and lookup targe
   // A lookup target is the target object's NAME, so every non-string SHAPE has to
   // be refused, not just the array this once spelled inline. Tabled for two
   // reasons. It widens the pin — `{ object: 'x' }` is the exact carrier shape
-  // #13053 was filed for, and it was untested here. And it is the only spelling
-  // available: `check:reference-carrier-shape` judges a `reference` whose value
-  // is a LITERAL, and it could place THIS holder under neither of its readings
-  // (`{ ...BASE, reference: … }` is a spread plus one key that `data/Field`
-  // does declare), so it refused rather than guess. Its three site remedies all
-  // make the refusal WORSE here: giving the holder a FieldType `type` or a
-  // `fields:` parent turns a rejection fixture into a reported finding, and
-  // `ScreenFieldConfig`'s twelve keys are every one of them `data/Field` keys,
-  // so none can prove the holder is not a field definition. Reaching the value
-  // through a name puts it in the population the gate documents as unjudged —
-  // it judges literals — while the assertion below gets STRICTER, not weaker.
+  // #13053 was filed for, and it was untested here. And the table was, at the
+  // time, the only spelling available: `check:reference-carrier-shape` judged a
+  // `reference` whose value was a LITERAL and could place THIS holder under
+  // neither of its readings, so it refused rather than guess. That gate has since
+  // been RETIRED by maintainer ruling, so the table is no longer forced — it is
+  // kept because it is the stricter assertion, which is why it was written this
+  // way in the first place.
   const NON_STRING_LOOKUP_TARGETS: readonly unknown[] = [['a'], { object: 'crm_account' }, 42, true];
 
   it('refuses help text and a lookup target that are not strings', () => {
@@ -612,5 +608,60 @@ describe('assignment value envelope — an evaluated slot requires what the engi
   it('CONTROL — `ExpressionSchema`, the persistence contract, still ACCEPTS both shapes', () => {
     expect(ExpressionSchema.safeParse(AST_ONLY).success).toBe(true);
     expect(ExpressionSchema.safeParse(BLANK_SOURCE).success).toBe(true);
+  });
+});
+
+/**
+ * `AssignmentConfigSchema.assignments` — the `__proto__` half of #17852,
+ * filed on its own as #18847 and folded back into this ruling once PR #18688
+ * released this file (maintainer ruling A/narrow, comment 5725370319).
+ *
+ * `__proto__` ONLY. This slot's key type is `z.string().min(1)` — no
+ * grammar — so unlike `ObjectSchema.fields` there is no key-refusal half to
+ * add: `constructor` and `prototype` are legal flow-VARIABLE names today and
+ * this ruling does not narrow that accept set. `__proto__` is refused for the
+ * same structural reason as the sibling slot: `z.record()`'s open-key branch
+ * skips it before any key schema — including `.min(1)` — ever runs.
+ */
+describe('AssignmentConfigSchema.assignments — __proto__ pre-parse guard, constructor/prototype UNCHANGED (#17852 / #18847)', () => {
+  it('refuses `assignments` carrying a `__proto__` own key, named at `assignments.__proto__`', () => {
+    // `JSON.parse` is what makes `__proto__` an OWN enumerable key — an
+    // object literal's `{ __proto__: ... }` sets the actual prototype
+    // instead, and would never reach `z.record()`'s open-key loop as a key
+    // at all.
+    const config = JSON.parse('{"assignments":{"total":"{amount}","__proto__":"{evil}"}}');
+    const result = AssignmentConfigSchema.safeParse(config);
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    const issue = result.error.issues.find((i) => i.path.join('.') === 'assignments.__proto__');
+    expect(issue).toBeDefined();
+    expect(issue?.code).toBe('custom');
+    expect(issue?.message).toMatch(/__proto__/);
+  });
+
+  it('refuses `assignments` that is `__proto__` ALONE — no sibling key masks the drop', () => {
+    const config = JSON.parse('{"assignments":{"__proto__":"{evil}"}}');
+    const result = AssignmentConfigSchema.safeParse(config);
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.some((i) => i.path.join('.') === 'assignments.__proto__')).toBe(true);
+  });
+
+  it.each(['constructor', 'prototype'])(
+    'PRESERVATION: `%s` remains a legal flow-variable name — no ruling narrowed this slot\'s accept set',
+    (name) => {
+      const result = AssignmentConfigSchema.safeParse({ assignments: { [name]: '{x}' } });
+      expect(result.success).toBe(true);
+      if (!result.success) return;
+      expect((result.data.assignments as Record<string, unknown> | undefined)?.[name]).toBe('{x}');
+    },
+  );
+
+  it('an absent `assignments` key still parses (the slot stays optional)', () => {
+    expect(AssignmentConfigSchema.safeParse({}).success).toBe(true);
+  });
+
+  it('an ordinary `assignments` map with no reserved names still parses', () => {
+    expect(AssignmentConfigSchema.safeParse({ assignments: { total: '{amount}' } }).success).toBe(true);
   });
 });

@@ -30,6 +30,7 @@ import { Cron, scheduledJobs } from 'croner';
 import type { AutomationContext, JobSchedule, JobHandler } from '@objectstack/spec/contracts';
 import { ScheduleTrigger, type FlowTriggerBinding, type JobServiceSurface, type TriggerLogger } from './schedule-trigger.js';
 import { TimeRelativeTrigger, type TimeRelativeDataEngine } from './time-relative-trigger.js';
+import { withScheduledWorkOn } from './deployment-switch.test-support.js';
 
 const flush = () => new Promise<void>((r) => setTimeout(r, 0));
 
@@ -97,6 +98,12 @@ function oneRowEngine(): TimeRelativeDataEngine {
         getObject: (name: string) => ({ name }),
     };
 }
+
+// [#17396] Every assertion in this file is about a deployment that RUNS
+// package-authored scheduled work. The switch is OFF by default in every
+// posture, so without this line nothing here binds and every case below
+// would fail for a reason that has nothing to do with what it pins.
+withScheduledWorkOn('single');
 
 describe('#8362 — a rebuilt kernel re-binds scheduled flows (both triggers)', () => {
     it('ScheduleTrigger: bind -> evict -> re-bind is scheduled exactly once and fires the NEW kernel', async () => {

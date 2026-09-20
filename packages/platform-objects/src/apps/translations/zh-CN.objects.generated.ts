@@ -218,6 +218,17 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         confirmText: "要为该用户启动模拟会话吗？仅限合法支持场景使用——所有操作都会被记录。",
         successMessage: "已开始模拟该用户"
       },
+      set_user_manager: {
+        label: "设置经理",
+        description: "设置该用户的经理。汇报链决定审批路由与 own_and_reports 记录范围。",
+        successMessage: "已更新经理",
+        params: {
+          managerId: {
+            label: "经理",
+            helpText: "该用户的直接汇报对象。服务端会拒绝不在同一组织的经理、把用户指派给自己,以及会形成环路或超出汇报链深度上限的关系。"
+          }
+        }
+      },
       update_my_profile: {
         label: "更新资料",
         successMessage: "已更新资料"

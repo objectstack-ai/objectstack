@@ -115,6 +115,150 @@ describe('OrganizationSchema', () => {
   });
 });
 
+/**
+ * [#18509] `OrganizationSchema.logo` accepts `null` — the shape better-auth
+ * serves.
+ *
+ * `logo` is one of better-auth's own `sys_organization` columns, declared
+ * `Field.url({ required: false })` and reaching SQLite as `logo varchar(255)`
+ * with `notnull=0`. `/auth/organization/create`, `/auth/organization/list` and
+ * `/auth/organization/get-full-organization` all serve `"logo": null` for an
+ * organization created without one. Measured on a real `AuthManager` over
+ * ObjectQL + driver-sqlite-wasm; evidence and controls in PR #18718's body.
+ *
+ * The whole accept set is pinned, not just the row that moved — see the sibling
+ * block in `identity.test.ts` for why.
+ */
+describe('[#18509] OrganizationSchema.logo accept set', () => {
+  const base = {
+    id: 'org_123',
+    name: 'Acme Corporation',
+    slug: 'acme-corp',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  };
+  const failedPaths = (value: unknown, present = true) => {
+    const input = present ? { ...base, logo: value } : { ...base };
+    const result = OrganizationSchema.safeParse(input);
+    return result.success ? [] : result.error.issues.map((i) => i.path.join('.'));
+  };
+
+  it('accepts `null` — the value every organization body carries', () => {
+    expect(failedPaths(null)).toEqual([]);
+  });
+
+  it('still accepts the key being ABSENT — `.nullish()`, not `.nullable()`', () => {
+    expect(failedPaths(undefined, false)).toEqual([]);
+  });
+
+  it('still accepts a well-formed URL', () => {
+    expect(failedPaths('https://example.com/logo.png')).toEqual([]);
+  });
+
+  it('still refuses a malformed URL — `.url()` keeps its force on the string branch', () => {
+    expect(failedPaths('not-a-url')).toEqual(['logo']);
+  });
+
+  it('still refuses the empty string', () => {
+    expect(failedPaths('')).toEqual(['logo']);
+  });
+
+  it('still refuses a non-string, non-null value', () => {
+    expect(failedPaths(42)).toEqual(['logo']);
+  });
+
+  it('lit control: the instrument reports a neighbour when a neighbour is wrong', () => {
+    const { slug: _dropped, ...withoutSlug } = base;
+    const result = OrganizationSchema.safeParse({ ...withoutSlug, logo: null });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.map((i) => i.path.join('.'))).toEqual(['slug']);
+    }
+  });
+
+  /**
+   * ⭐ [#18728] The scope fence this block used to pin is DOWN, and #18509's own
+   * pin asked whoever took it down to come here and say so. Saying so:
+   *
+   * The fence pinned two refusals as current behaviour — `metadata` served
+   * present-and-null, and `updatedAt` absent while declared required — and
+   * maintainer ruling C (batch #158 item 4) closed each at a different end:
+   *
+   *  - `updatedAt` is now `.optional()` on this schema, which is the ruling's
+   *    own fallback A: the wire is better-auth's serializer and its documented
+   *    organization model declares no such field, so the schema aligns to the
+   *    documented wire rather than the producer inventing a value.
+   *  - `metadata` was fixed at the PRODUCER, not here. plugin-auth's data
+   *    adapter decodes `sys_organization.metadata` from its stored JSON text on
+   *    its read verbs and OMITS the key when the column is unset, so the served
+   *    body now carries an object or nothing — never `null`.
+   *
+   * So a served body parses whole, and the `null` this schema still refuses is
+   * a shape nothing sends any more. Both halves are pinned below, because
+   * "accepts the served body" and "stopped checking" are otherwise the same
+   * green.
+   */
+  it('[#18728] accepts a served read-route body WHOLE — updatedAt absent, metadata decoded', () => {
+    const served = {
+      id: 'org_123',
+      name: 'Acme Corporation',
+      slug: 'acme-corp',
+      logo: null,
+      metadata: { plan: 'pro' },
+      createdAt: '2026-01-01T00:00:00.000Z',
+      // `updatedAt` absent, exactly as every route of this family serves it
+    };
+    const result = OrganizationSchema.safeParse(served);
+    expect(result.error?.issues.map((i) => i.path.join('.')) ?? []).toEqual([]);
+    expect(result.success).toBe(true);
+  });
+
+  it('[#18728] accepts the same body with metadata OMITTED — an unset column', () => {
+    const { metadata: _unset, ...withoutMetadata } = {
+      id: 'org_123',
+      name: 'Acme Corporation',
+      slug: 'acme-corp',
+      logo: null,
+      metadata: { plan: 'pro' },
+      createdAt: '2026-01-01T00:00:00.000Z',
+    };
+    const result = OrganizationSchema.safeParse(withoutMetadata);
+    expect(result.success).toBe(true);
+  });
+
+  it('⭐ [#18728] still REFUSES metadata as null or as the stored JSON text', () => {
+    // The producer omits an unset column and decodes a set one, so neither of
+    // these is a shape any route sends. They must stay refused: if either ever
+    // parses, the producer has regressed or this schema has been loosened to
+    // hide the regression.
+    for (const wrong of [null, '{"plan":"pro"}']) {
+      const result = OrganizationSchema.safeParse({
+        id: 'org_123',
+        name: 'Acme Corporation',
+        slug: 'acme-corp',
+        logo: null,
+        metadata: wrong,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      expect(result.success).toBe(false);
+      expect(result.error?.issues.map((i) => i.path.join('.'))).toEqual(['metadata']);
+    }
+  });
+
+  it('⭐ [#18728] `.optional()` widened updatedAt by ABSENCE only — a present value is still a datetime', () => {
+    const result = OrganizationSchema.safeParse({
+      id: 'org_123',
+      name: 'Acme Corporation',
+      slug: 'acme-corp',
+      logo: null,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: 'whenever',
+    });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.map((i) => i.path.join('.'))).toEqual(['updatedAt']);
+  });
+});
+
 describe('MemberSchema', () => {
   it('should accept valid member data', () => {
     const member: Member = {

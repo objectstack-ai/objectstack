@@ -1098,14 +1098,24 @@
   > that is blank after trimming, would validate and register and then fault at
   > run time. Write `{ dialect: 'cel', source: '…' }`.
   
+  That blockquote is `EVALUATED_EXPRESSION_SOURCE_REQUIRED` as 17.4.0 shipped it,
+  and the parenthetical inside it now reads "(the canonical persisted form)" —
+  the phase clause is gone from the constant and nothing else in the sentence
+  moved. The rule, the slot it reports at and the prescription it carries are
+  unchanged.
+  
   - **`ExpressionSchema` is NOT narrowed.** It is the persistence contract —
-    `source` OR `ast` — and its docblock declares that `ast` becomes required in
-    build output at phase M9.2. The new export `EvaluatedExpressionSchema` (and
+    `source` OR `ast`. As published, that sentence continued "and its docblock
+    declares that `ast` becomes required in build output at phase M9.2"; the
+    promise is retired — `ast` is accepted as an optional opaque structured
+    value and carries none. The new export `EvaluatedExpressionSchema` (and
     its type `EvaluatedExpression`) is a sibling: the same envelope with `source`
     required and non-blank, spelled once and composed by every evaluated slot, so
-    when AST-only evaluation lands the flip is one edit there rather than a
-    per-slot unwinding. The rule is worded as "an evaluated slot requires whatever
-    the engine can actually evaluate"; what that is today is `source`.
+    if AST-only evaluation is ever chartered the flip is one edit there rather
+    than a per-slot unwinding. (As published that clause read "when AST-only
+    evaluation lands", which carries the same retired promise.) The rule is
+    worded as "an evaluated slot requires whatever the engine can actually
+    evaluate"; what that is today is `source`.
   - **The notion of blank is the engine's own** — `.trim()`, which
     `cel-engine.ts`'s helpers already apply — not a third one beside the shape
     rule's `min(1)` and `validateExpression`'s trim.
@@ -1116,17 +1126,20 @@
     grew a rule of its own.
   
   **What an author does with a refused envelope.** An assignment value that
-  carried only `ast` has no evaluable form under M9.1: author its `source`. A
-  whitespace-only `source` was never an expression: delete the entry, or write
-  the expression. Every envelope with a non-blank `source` is unchanged, and
-  nothing is renamed, retired or rewritten — the refusal itself carries the
-  prescription.
+  carried only `ast` has no evaluable form: author its `source`. (As published
+  that clause read "no evaluable form under M9.1"; the phase id is retired, the
+  prescription is not.) A whitespace-only `source` was never an expression:
+  delete the entry, or write the expression. Every envelope with a non-blank
+  `source` is unchanged, and nothing is renamed, retired or rewritten — the
+  refusal itself carries the prescription.
   
   Not touched here: the `predicate` half of the same seam — `evaluateCondition`'s
   silent `false` on an envelope without a `source` — is a behaviour change on a
   live path with its own card, and the edge-condition schema that carries that
   envelope is narrowed in a follow-up once the in-flight change to
   `automation/flow.zod.ts` lands.
+  
+  *Erratum, 2026-09-17 — the M9.1 / M9.2 phase promise this entry restated was retired by the ruling on #17323 (2026-09-12), which found a two-phase roadmap chartered by no ADR: `ast` is an accepted optional structured value with no promise of becoming required. Three passages above are corrected in place; the blockquote is left as shipped and nothing this release published is changed. (Corrected after publication, #17849.)*
 - 68d5dfd: feat(spec): `ExecutionStepMetrics` gains an optional `failures` slot, and `FlowRunSummary.failed` is declared as the fold INCLUDING what a delegating node rolled up from its child (maintainer ruling 2026-09-06 on #15617, spec half)
   
   Additive. Nothing an author writes is renamed, retired or narrowed; no accept
@@ -27458,9 +27471,9 @@ object:'task', function:'count', filter:{ status:'completed' } } }` lost that
   request, where before it was one statement that mostly failed anyway.
 
   **The cap moved to the routes, and the schemas gave it up.** Batch size is
-  deployment policy — `RestServerConfig.batch.maxBatchSize`, 1..1000, default 200
+  embedder policy — `RestServerConfig.batch.maxBatchSize`, 1..1000, default 200
   — so a hardcoded bound in the spec could only ever be a second, wrong answer
-  (a deployment raising the limit to 500 would still have been refused at 200).
+  (a host raising the limit to 500 would still have been refused at 200).
   All five bulk routes now call one `enforceBatchSize` helper with the configured
   value and answer with one envelope:
 
@@ -27496,9 +27509,10 @@ object:'task', function:'count', filter:{ status:'completed' } } }` lost that
   **Behaviour changes.**
 
   - A bulk request over the configured cap is `400 BATCH_TOO_LARGE` instead of
-    being executed. Deployments that were quietly relying on unbounded batches
-    should raise `batch.maxBatchSize` (up to 1000) rather than discover the cap in
-    production.
+    being executed. A deployment that was quietly relying on unbounded batches
+    meets the cap at whatever value the host embedding the server passed for
+    `batch.maxBatchSize` — 200 unless it passed one, which no shipped boot path
+    does.
   - `.min(1)` is gone with `.max(200)`: an empty batch is a no-op returning
     `total: 0`, which is what these routes already did, rather than a validation
     error the schema claimed but nothing raised.
@@ -27507,6 +27521,8 @@ object:'task', function:'count', filter:{ status:'completed' } } }` lost that
     that — the route has validated the strict shape since #3933 — but the declared
     type was looser.
   - New export: `UpdateManyRecordSchema` / `UpdateManyRecord`.
+
+  *Erratum, 2026-09-18 — this entry called the batch cap "deployment policy" and told operators that deployments relying on unbounded batches "should raise `batch.maxBatchSize` (up to 1000)". The cap is embedder policy: `RestServerConfig.batch.maxBatchSize` is the argument a host passes when it constructs the server, and neither shipped boot path passes it — `os serve` forwards exactly two keys out of the stack config's `api:` block (`api.enableProjectScoping`, `api.projectResolution`) and the dev plugin calls `createRestApiPlugin()` with no config at all — so a CLI-started deployment always gets the 200 default and no flag, config file or CLI option moves it. Two passages above are corrected in place; the 1..1000 range, the 200 default and the enforcement this release shipped are unchanged. (Corrected after publication, #18740.)*
 
 - f2445c9: feat(spec,objectql,client,plugin-webhooks): predicate writes get an honest bulk event contract (#4639)
 
@@ -69633,9 +69649,9 @@ schedule }`), not on the flow.
   request, where before it was one statement that mostly failed anyway.
 
   **The cap moved to the routes, and the schemas gave it up.** Batch size is
-  deployment policy — `RestServerConfig.batch.maxBatchSize`, 1..1000, default 200
+  embedder policy — `RestServerConfig.batch.maxBatchSize`, 1..1000, default 200
   — so a hardcoded bound in the spec could only ever be a second, wrong answer
-  (a deployment raising the limit to 500 would still have been refused at 200).
+  (a host raising the limit to 500 would still have been refused at 200).
   All five bulk routes now call one `enforceBatchSize` helper with the configured
   value and answer with one envelope:
 
@@ -69671,9 +69687,10 @@ schedule }`), not on the flow.
   **Behaviour changes.**
 
   - A bulk request over the configured cap is `400 BATCH_TOO_LARGE` instead of
-    being executed. Deployments that were quietly relying on unbounded batches
-    should raise `batch.maxBatchSize` (up to 1000) rather than discover the cap in
-    production.
+    being executed. A deployment that was quietly relying on unbounded batches
+    meets the cap at whatever value the host embedding the server passed for
+    `batch.maxBatchSize` — 200 unless it passed one, which no shipped boot path
+    does.
   - `.min(1)` is gone with `.max(200)`: an empty batch is a no-op returning
     `total: 0`, which is what these routes already did, rather than a validation
     error the schema claimed but nothing raised.
@@ -69682,6 +69699,8 @@ schedule }`), not on the flow.
     that — the route has validated the strict shape since #3933 — but the declared
     type was looser.
   - New export: `UpdateManyRecordSchema` / `UpdateManyRecord`.
+
+  *Erratum, 2026-09-18 — this entry called the batch cap "deployment policy" and told operators that deployments relying on unbounded batches "should raise `batch.maxBatchSize` (up to 1000)". The cap is embedder policy: `RestServerConfig.batch.maxBatchSize` is the argument a host passes when it constructs the server, and neither shipped boot path passes it — `os serve` forwards exactly two keys out of the stack config's `api:` block (`api.enableProjectScoping`, `api.projectResolution`) and the dev plugin calls `createRestApiPlugin()` with no config at all — so a CLI-started deployment always gets the 200 default and no flag, config file or CLI option moves it. Two passages above are corrected in place; the 1..1000 range, the 200 default and the enforcement this release shipped are unchanged. (Corrected after publication, #18740.)*
 
 - 2af1988: fix(formula,spec,core): the RLS write-side `check` evaluator honours calendar-day upper bounds (ADR-0053 D-D)
 

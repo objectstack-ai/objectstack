@@ -49,7 +49,7 @@ export const AIUsageRecordSchema = lazySchema(() => z.object({
   /** Computed USD cost (promptTokens × promptCostPer1K/1000 + …). */
   costUsd: z.number().nonnegative().describe('Computed cost in USD'),
   /** Wall-clock latency in milliseconds. */
-  latencyMs: z.number().nonnegative().optional(),
+  latencyMs: z.number().nonnegative().optional().describe('Wall-clock latency in milliseconds'),
   /** ISO-8601 timestamp of the call. */
   timestamp: z.string().datetime().optional(),
 }));

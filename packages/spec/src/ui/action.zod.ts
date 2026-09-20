@@ -21,7 +21,8 @@ import { isActionParamValuePresent } from './action-params.zod';
 // reaches only `shared/` + `data/`, so it cannot close a cycle back to `ui/`.
 import { BulkActionExecutionSchema } from './bulk-action.zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
-import { ExpressionInputSchema } from '../shared/expression.zod';
+import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
+import { evaluatedExpressionUnionRefusal } from '../shared/evaluated-slot-union';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 import { HookBodySchema } from '../data/hook-body.zod';
 // Imported file-directly (not via the kernel barrel): the module is
@@ -247,8 +248,8 @@ export const ActionParamSchema = lazySchema(() => strictObject(
    *   metadata), and `SelectField` / `MultiSelectField` / `RadioField` /
    *   `CheckboxesField` all narrow the offered set through
    *   `useCascadingOptions` → `resolveCascadingOptions`, which reads this key
-   *   and accepts the `{ dialect, source }` envelope `ExpressionInputSchema`
-   *   emits. The spec door was the ONLY thing between an author and a working
+   *   and accepts the `{ dialect, source }` envelope
+   *   `EvaluatedExpressionInputSchema` emits. The spec door was the ONLY thing between an author and a working
    *   per-option gate.
    * - **`color` / `default` — not opened**, and `icon` / `disabled` not added to
    *   `SelectOptionSchema` either (#5016's option C). None has a reader an
@@ -333,7 +334,7 @@ export const ActionParamSchema = lazySchema(() => strictObject(
      * action's own body or a permission check. Hiding it in the dropdown is
      * bypassable.
      */
-    visibleWhen: ExpressionInputSchema.optional().describe("Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Same env as the field-level per-option visibleWhen (record + current_user). e.g. P`record.tier == 'gold'`"),
+    visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Same env as the field-level per-option visibleWhen (record + current_user). e.g. P`record.tier == 'gold'`"),
   })).optional().meta({ title: 'Options' }),
   /** Placeholder override. */
   placeholder: z.string().optional().meta({ title: 'Placeholder' }),
@@ -427,7 +428,7 @@ export const ActionParamSchema = lazySchema(() => strictObject(
    * param gated on `features.phoneNumber` so the form never offers a field the
    * default backend rejects. Absent = always visible.
    */
-  visible: ExpressionInputSchema.optional().describe('Param visibility predicate (CEL); omits the param when false.').meta({ title: 'Visible When' }),
+  visible: EvaluatedExpressionInputSchema.optional().describe('Param visibility predicate (CEL); omits the param when false.').meta({ title: 'Visible When' }),
   /**
    * Declarative capability gate (#2874): name a public auth feature flag
    * (see `PUBLIC_AUTH_FEATURES` in `@objectstack/spec/kernel`) and the schema
@@ -829,7 +830,9 @@ export type ActionAiParsed = z.infer<typeof ActionAiSchema>;
  * source:'true'}`: a literal survives as a literal, so a renderer can branch on
  * it without standing up an evaluator, and `false` stays statically greppable.
  */
-const ActionConditionInputSchema = z.union([z.boolean(), ExpressionInputSchema]);
+const ActionConditionInputSchema = z.union([z.boolean(), EvaluatedExpressionInputSchema], {
+  error: (issue) => evaluatedExpressionUnionRefusal(issue.input),
+});
 
 /**
  * The object half of {@link ActionSchema}, before its refinements.
@@ -1304,10 +1307,17 @@ const actionObject = () => strictObject({
   // Single-record update actions only. When true, the runtime captures the
   // record's prior field values and offers an "Undo" affordance on the success
   // toast (backed by the client UndoManager) to restore them. `operation:
-  // 'update'` is the DECLARED form of such an action (#14092): its `patch`
-  // names exactly the fields written, so the capture is exact rather than
-  // inferred from a handler's side effects — the anchor this flag lacked.
-  undoable: z.boolean().optional().describe("Offer an Undo affordance after this single-record update action succeeds. `operation: 'update'` is the declared form of that action — its `patch` names exactly the fields whose prior values are captured."),
+  // 'update'` is the DECLARED form of such an action (#14092), and it is the
+  // ONE member the operation enum carries — so there is one capture rule, not
+  // one per operation. The set is the write bag `{ ...patch, ...params }`
+  // (contract point 4, `patch` UNDER `params`), which is what the executor
+  // reads back: `executeDeclarativeUpdateAction` keys `undoData` off
+  // `Object.keys(data)`, `data` being that merged bag — NOT `patch` alone.
+  // Naming `patch` alone here is what let a consumer build a half-restore and
+  // report it as a full undo. Without `operation` nothing declares a write
+  // set, so the capture is inferred from a handler's side effects — the
+  // un-anchored case this flag started in.
+  undoable: z.boolean().optional().describe("Offer an Undo affordance after this single-record update action succeeds. `operation: 'update'` is the one declared operation and the declared form of that action: what the undo captures is the prior value of EVERY field the action writes — the merged write bag, `patch` UNDER the collected `params`, not `patch` alone. An action with no `operation` declares no write set, so nothing anchors the capture there."),
 
   /**
    * Result Dialog — describe how to render the API response on success.

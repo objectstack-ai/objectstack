@@ -15,6 +15,11 @@
 import type { Client, InStatement, ResultSet } from '@libsql/client';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import { FILTER_OPERATORS, LOGICAL_OPERATORS, RETIRED_FILTER_OPERATORS } from '@objectstack/spec/data';
+// [#18408] The ONE definition of "is this field multi-valued" (#17469, decision
+// batch #128 item 5, option 1′) — the same predicate `SqlDriver` asks on this
+// driver's local transport, so the two cannot declare one field's column
+// differently. See {@link RemoteTransport.mapFieldTypeToSQL}.
+import { isMultiValueField } from '@objectstack/spec/data';
 // [#7872] The shared comparand-type door. `serializeComparand`'s allow-list and
 // `driver-sql`'s reached the identical six types twice independently — the
 // measured fact the door was ruled from — so the SET and the sentence the
@@ -1829,26 +1834,31 @@ export class RemoteTransport {
   }
 
   // ===================================
-  // Transactions
+  // Transactions — none. Deliberately.
   // ===================================
-
-  // [#17690] The contract's own type. It was `Promise<any>` — the one door of
-  // this family on `RemoteTransport`, whose `find`/`upsert`/`bulkUpdate` were
-  // already honest and are the counter-control showing the census that found
-  // this discriminates rather than flagging everything. Pinned both halves in
-  // `turso-driver-doors-declared-types.test.ts`.
-  async beginTransaction(): Promise<unknown> {
-    await this.ensureConnected();
-    return this.client!.transaction();
-  }
-
-  async commit(transaction: any): Promise<void> {
-    await transaction.commit();
-  }
-
-  async rollback(transaction: any): Promise<void> {
-    await transaction.rollback();
-  }
+  //
+  // ⛔ [#18063] This transport declares NO transaction members, and re-adding
+  // one is the defect, not the fix.
+  //
+  // It carried three — `beginTransaction()`, `commit(t)`, `rollback(t)` — and
+  // they were decorative from the day they were written: not one data method on
+  // this class takes an `options` argument (9 data methods present, 0 with
+  // `options`), so a handle this transport issued could never reach a statement
+  // built on it. A write between `beginTransaction()` and `rollback()` executed
+  // on the plain connection and was ALREADY DURABLE; the rollback resolved and
+  // undid nothing, reporting success at every step.
+  //
+  // [#18616] closed the paths into them — `TursoDriver` refuses
+  // `beginTransaction()` / `commit()` / `rollback()` and any `options.transaction`
+  // on the remote arm — which left these three unreachable from every caller in
+  // the repository. [#18063] removes them, and adds the declaration that keeps
+  // them unreachable by design rather than by audit:
+  // `TursoDriver.supports.transactionsUnsupported` is true on this arm, and the
+  // engine gates the transactional path on that declaration.
+  //
+  // Implementing transactions here is a separate piece of work and a much
+  // larger one: it needs every data method to accept and thread a handle, which
+  // means a libSQL transport that can carry one at all.
 
   // ===================================
   // Schema Management
@@ -2432,9 +2442,25 @@ export class RemoteTransport {
    * edit its expectations to match new output.
    */
   private mapFieldTypeToSQL(field: any): string {
-    if (field.multiple) return 'TEXT'; // JSON array stored as text
-
     const type = field.type || 'string';
+    // [#18408] The multi-value short-circuit — a JSON array stored as text.
+    //
+    // Was `if (field.multiple)`. Maintainer ruling 2026-09-13 (decision batch
+    // #128 item 5, option 1′): there is ONE definition of "is this field
+    // multi-valued", `@objectstack/spec`'s `isMultiValueField`, and storage
+    // follows it. The raw flag answered `true` on types that predicate calls
+    // single-valued, so this transport declared `TEXT` for a `number` /
+    // `integer` / `boolean` field carrying the flag while THIS SAME DRIVER's
+    // local transport — `SqlDriver`, aligned by #17469 — declared `float` /
+    // `boolean` for it: one declaration, two storage classes, chosen by which
+    // URL the deployment happens to hold. The flag is redundant rather than
+    // decisive on the inherently-multi option types, which the predicate
+    // answers `true` for with or without it.
+    //
+    // Resolved `type` first, so the one predicate and the switch below read the
+    // same type — the driver-internal `|| 'string'` default is applied once.
+    if (isMultiValueField({ type, multiple: field.multiple === true })) return 'TEXT';
+
     switch (type) {
       case 'string':
       case 'email':

@@ -36,6 +36,7 @@
     "automation/ApprovalNodeConfig:behavior",
     "automation/ApprovalNodeConfig:decisionOutputs",
     "automation/ApprovalNodeConfig:escalation",
+    "automation/ApprovalNodeConfig:fallbackApprovers",
     "automation/ApprovalNodeConfig:lockRecord",
     "automation/ApprovalNodeConfig:maxRevisions",
     "automation/ApprovalNodeConfig:minApprovals",

@@ -383,7 +383,7 @@ const result = ApiErrorSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 
 ### Nested Shape: `BaseResponse.error`
 
@@ -398,6 +398,15 @@ const result = ApiErrorSchema.parse(data);
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `BaseResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
 
 
 ---
@@ -436,7 +445,7 @@ const result = ApiErrorSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ id?: string; success: boolean; errors?: object[]; index?: number; … }[]` | ✅ | Results for each item in the batch |
 
 ### Nested Shape: `BulkResponse.error`
@@ -452,6 +461,15 @@ const result = ApiErrorSchema.parse(data);
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `BulkResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
 
 ### Nested Shape: `BulkResponse.data[number]`
 
@@ -503,7 +521,7 @@ const result = ApiErrorSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **id** | `string` | ✅ | ID of the deleted record |
 
 ### Nested Shape: `DeleteResponse.error`
@@ -519,6 +537,15 @@ const result = ApiErrorSchema.parse(data);
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `DeleteResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
 
 
 ---
@@ -622,7 +649,7 @@ const result = ApiErrorSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `Record<string, any>[]` | ✅ | Array of matching records |
 | **pagination** | `{ total?: number; limit?: number; offset?: number; cursor?: string; … }` | ✅ | Pagination info |
 
@@ -639,6 +666,15 @@ const result = ApiErrorSchema.parse(data);
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `ListRecordResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
 
 ### Nested Shape: `ListRecordResponse.pagination`
 
@@ -738,7 +774,7 @@ Key-value map of record data
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `Record<string, any>` | ✅ | The requested or modified record |
 
 ### Nested Shape: `SingleRecordResponse.error`
@@ -754,6 +790,15 @@ Key-value map of record data
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `SingleRecordResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
 
 
 ---

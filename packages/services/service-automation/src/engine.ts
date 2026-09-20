@@ -25,6 +25,10 @@ import { FlowSchema, FLOW_STRUCTURAL_NODE_TYPES, validateControlFlow, collectFlo
 // `validate-flow-trigger-readiness`, so the runtime cannot drift from what
 // authoring accepted. See `resolveTriggerBinding`.
 import { resolveFlowTriggerKind, resolveScheduleOrganization } from '@objectstack/spec/automation';
+import {
+    resolveScheduledWorkPolicy,
+    SCHEDULED_WORK_DISABLED_REASON,
+} from '@objectstack/types';
 import { predicateSlotRefusal, resolveFlowNodeExpressions, structuralConditionRefusal } from '@objectstack/spec/automation';
 // [#15137] The `value`-role half of the ledger. Both halves of "is this envelope
 // well-formed?" are IMPORTED, never re-spelled here: the shape rule is
@@ -207,6 +211,7 @@ const FLOW_NODE_UNKNOWN_KEY_GUIDANCE: Record<string, Record<string, string>> = {
 import { runIsUnscopedUserMode, flowTouchesData } from './runtime-identity.js';
 import { isGuardRefusal, refuseNode } from './guard-refusal.js';
 import { readPartialSteps } from './partial-steps.js';
+import { isRegionSuspensionRefusal, refuseRegionSuspension } from './region-suspension-refusal.js';
 import { summarizeRun, formatRunSummaryLine } from './run-summary.js';
 // #5660 — the degrade registration reports a FOREIGN failure (a third-party
 // provider factory's text), so it renders it as structured `meta` rather than
@@ -388,6 +393,69 @@ export interface NodeExecutionResult {
      * the form and `resume()` with the values.
      */
     screen?: ScreenSpec;
+    /**
+     * [#18110 / #18555] Terminal REFUSAL. When `true`, the node evaluated
+     * successfully and the answer is *no*: the engine stops traversal here and
+     * the run finishes as a TERMINAL `refused` (a member of
+     * {@link TERMINAL_RUN_STATUSES} since #15788 — ⛔ no new status value),
+     * carrying {@link NodeExecutionResult.refusalMessage} onto the result and
+     * the run-history row.
+     *
+     * **The twin of {@link NodeExecutionResult.suspend}, deliberately.** Both
+     * are executor-facing flags asking {@link AutomationEngine.executeNode} to
+     * throw an internal unwinding signal, and both are read at the same point:
+     * AFTER the node's success step is pushed, after its `childSteps` are
+     * folded and after its output is written back. That position is the whole
+     * design — it is what keeps a refusing node's own #4354 `metrics`
+     * (`selected` / `acted` / `unmeasuredEffect`) in the run log and therefore
+     * in the run summary, instead of losing them to an unwind that began
+     * earlier. ⛔ Not a second unwinding protocol: `FlowRefusalSignal` already
+     * reuses `FlowSuspendSignal`'s, and this member is that protocol's
+     * executor-facing half, exactly as `suspend` is the pause's.
+     *
+     * ⚠️ `refused` here is the run OUTCOME — *a refusal is a successful
+     * evaluation that says no* — ⛔ NOT this package's other `refused`, the
+     * GUARD refusal (`refuseNode`, `guard-refusal.ts`, the resume-authority
+     * gate), which is a kind of FAILURE. A node that failed says so with
+     * `success: false`, and this flag is read only past the failure arm: on a
+     * failing result it changes nothing, which is the right answer rather than
+     * an oversight.
+     *
+     * **Precedence over `suspend`**: a refusal is terminal and a pause is a
+     * promise to come back, so a result carrying both REFUSES. Persisting a
+     * continuation for a decision the author already made would drop the
+     * refusal on the floor — the same fail-open direction this channel exists
+     * to close. No first-party executor sets both (`subflow` / `map` read one
+     * child status); one that does has declared a contradiction.
+     *
+     * ⚠️ With ONE exception, and it is FAIL-CLOSED. The #6667
+     * undeclared-suspension guard runs ahead of all of this and reads
+     * {@link NodeExecutionResult.suspend} alone: when the node type resolves to
+     * an action descriptor that does not declare `supportsPause: true`, that
+     * guard REPLACES the whole result with a guard refusal, the failure arm
+     * answers it, and `refuse` is never read at all — the run ends `failed`,
+     * not `refused`. That is the correct end for a declaration defect (⛔ no
+     * `fault` edge may route it, and re-running the flow unchanged can never
+     * fix it), so ⛔ do not reorder the guard to let this member through. The
+     * paragraph above describes the case the guard has nothing to say about:
+     * a type with no descriptor, or one that declares the pause it uses.
+     *
+     * Set today by `subflow` (#18110) and `map` (#18555) when their child run
+     * returned `status: 'refused'`: a refusal an author wrote inside a child
+     * flow must not roll up to the parent as an ordinary success.
+     */
+    refuse?: boolean;
+    /**
+     * The rendered reason for {@link NodeExecutionResult.refuse}, surfaced as
+     * `AutomationResult.refusalMessage` and on the terminal run-history row.
+     *
+     * For `subflow` / `map` this is the CHILD run's own `refusalMessage`,
+     * already interpolated against the child's live variables — passed through,
+     * ⛔ never re-rendered and ⛔ never replaced with text this node invented.
+     * `undefined` only when the refusal carried none, recorded honestly rather
+     * than filled in.
+     */
+    refusalMessage?: string;
     /**
      * #1479: step logs produced inside the node's structured region(s). A
      * container node (`loop` / `parallel` / `try_catch`) collects the
@@ -1091,7 +1159,10 @@ function isSuspendSignal(err: unknown): err is FlowSuspendSignal {
 
 /**
  * [#15788] Internal sentinel thrown by {@link AutomationEngine.executeNode}
- * when an `end` node declares `outcome: 'refused'` (#14945 ruling 2′, lane 2).
+ * when a node REFUSES (#14945 ruling 2′, lane 2). Two producers, one signal:
+ * an `end` node declaring `outcome: 'refused'` (#15788), and any executor that
+ * returns {@link NodeExecutionResult.refuse} — `subflow` (#18110) and `map`
+ * (#18555) do, when their child run refused.
  * The twin of {@link FlowSuspendSignal}: it unwinds the synchronous DAG
  * recursion up to `execute()` / `resume()` / `executeWithoutRetry`, which
  * convert it into a TERMINAL `refused` run rather than a failed one.
@@ -1114,13 +1185,19 @@ function isSuspendSignal(err: unknown): err is FlowSuspendSignal {
 class FlowRefusalSignal {
     readonly __flowRefused = true as const;
     constructor(
-        /** The `end` node that refused — the last node the run reached. */
+        /**
+         * The node that carried the refusal — the last node the run reached.
+         * The refusing `end` itself, or the `subflow` / `map` whose child run
+         * refused.
+         */
         readonly nodeId: string,
         /**
-         * The author's `message`, already interpolated against the run's live
-         * variables. `undefined` only when the config carried none, which
-         * `EndConfigSchema`'s refinement refuses at the flow parse — recorded
-         * honestly rather than filled in with invented text.
+         * The rendered reason, already interpolated against the live variables
+         * of the run that produced it — the author's `end` `message`, or the
+         * child run's own `refusalMessage` passed through. `undefined` only
+         * when the refusal carried none, which `EndConfigSchema`'s refinement
+         * refuses at the flow parse — recorded honestly rather than filled in
+         * with invented text.
          */
         readonly message?: string,
     ) {}
@@ -1128,6 +1205,39 @@ class FlowRefusalSignal {
 
 function isRefusalSignal(err: unknown): err is FlowRefusalSignal {
     return typeof err === 'object' && err !== null && (err as FlowRefusalSignal).__flowRefused === true;
+}
+
+/**
+ * [#18714] "The child run this frame is parked on finished `refused`" — the
+ * RESUMED-leg counterpart of the synchronous `subflow` / `map` executors'
+ * `refuse` result (#18110 / #18555).
+ *
+ * Those two executors read `child.status === 'refused'` off the value
+ * `engine.execute` returned to them. A run that PAUSES first never returns
+ * through that call at all: the child's outcome reaches its parent on one of
+ * the two resumed legs instead — the delegated resume
+ * ({@link AutomationEngine.resumeInternal}'s `subflow:` block, which drives the
+ * child itself) and the up-bubble ({@link AutomationEngine.bubbleToParent},
+ * where the child's own frame drives the parent). Neither leg had an arm for
+ * `refused`, so the two failed differently and both fail-open in their own way:
+ * the delegated leg read the refusal as an ordinary success and walked the
+ * parent's out-edges, and the up-bubble leg never resumed the parent at all,
+ * leaving it `paused` in `listSuspendedRuns()` forever.
+ *
+ * ⛔ Not an error and ⛔ not an error CODE. A refusal is a successful
+ * evaluation that says no, so the only thing this carries is the rendered
+ * reason — exactly what {@link FlowRefusalSignal} already carries, and the
+ * reason both legs converge on that one signal rather than growing a second
+ * terminal exit apiece.
+ */
+interface ChildRunRefusal {
+    /**
+     * The child run's own `refusalMessage`, passed through verbatim.
+     * `undefined` only when the child carried none — recorded honestly rather
+     * than filled in with invented text, exactly as `FlowRefusalSignal.message`
+     * is.
+     */
+    readonly message?: string;
 }
 
 /**
@@ -2064,6 +2174,26 @@ export interface FlowShadowingRecord {
     shadowed: FlowContender[];
 }
 
+/**
+ * [#17396] The two trigger kinds the deployment's scheduled-work switch
+ * governs: the ones launched by a CLOCK rather than by a caller.
+ *
+ * `record_change` and `api` are deliberately absent and the line is not
+ * arbitrary — both are fired by a request that already exists and already
+ * carries an identity, so neither is the unbounded background load the switch
+ * exists to bound. A kind added to `FlowTriggerKind` later is OUTSIDE the
+ * switch until someone decides otherwise, which is the safe default: a new kind
+ * silently falling under a default-OFF switch would be a capability that
+ * disappears on arrival.
+ *
+ * Module-local: the same two tokens are the trigger package's own subject by
+ * construction (it implements exactly these two), so publishing a shared
+ * predicate would add a public name with one caller.
+ */
+function isTimeTriggeredKind(triggerType: string): boolean {
+    return triggerType === 'schedule' || triggerType === 'time_relative';
+}
+
 export class AutomationEngine implements IAutomationService {
     /**
      * ADR-0044: maximum times a single node may be (re-)entered at the top
@@ -2198,6 +2328,35 @@ export class AutomationEngine implements IAutomationService {
      * which trigger to `stop()` when a flow is unregistered/disabled.
      */
     private boundFlowTriggers = new Map<string, string>();
+    /**
+     * [#17396] Flows {@link activateFlowTrigger} refused to arm because
+     * package-authored scheduled work is switched off on this deployment.
+     *
+     * ## Why a record and not a re-read
+     *
+     * `getTriggerBindingAudit()` runs long after the bind — at
+     * `kernel:bootstrapped` and in the CLI startup summary, its only two
+     * callers — and the switch is an ENVIRONMENT value that can move in
+     * between. Asking
+     * the environment again at read time was the first spelling and it is
+     * measurably wrong: a flow the engine never even offered to its trigger was
+     * reported as `binding failed — see earlier warnings`, which is the one
+     * thing ruled item 6 forbids this state from reading as, and it pointed at
+     * warnings that do not exist. The record answers the question the audit
+     * actually asks — *why is this flow not armed* — with what happened.
+     *
+     * ## Why this is not a recorded startup verdict (AGENTS.md)
+     *
+     * The repo's rule forbids recording a conclusion drawn from a registry that
+     * is still filling, because a provider registering a moment later cannot
+     * undo the record. None of that applies: the input is an environment
+     * variable, not a registry, and the record is not terminal —
+     * {@link activateFlowTrigger} DELETES the entry the moment a flow gets past
+     * the gate, and {@link unregisterFlow} drops it with the flow. A later
+     * registration under a switched-on deployment clears it by the ordinary
+     * path.
+     */
+    private readonly policyDisabledFlows = new Set<string>();
     /** Connectors registered by integration plugins, keyed by connector name (ADR-0018 §Addendum). */
     private connectors = new Map<string, RegisteredConnector>();
     /** Connector provider factories keyed by provider name (ADR-0097 §2 — `openapi`/`mcp`/`rest`/…). */
@@ -3334,6 +3493,51 @@ export class AutomationEngine implements IAutomationService {
         if (this.boundFlowTriggers.has(flowName)) return;
         const resolved = this.resolveTriggerBinding(flowName);
         if (!resolved) return;
+        // [#17396] The deployment gate, read HERE rather than only inside the
+        // trigger. The trigger has its own copy of this gate and throws, which
+        // is what protects a host that binds without this engine — but a
+        // refusal that arrives as a THROW can only be reported through this
+        // method's catch, and that catch says "Failed to bind", which is the
+        // one thing ruled item 6 forbids this state from reading as. Asking the
+        // policy before `start()` keeps the two apart at the source: nothing is
+        // called, nothing throws, nothing is logged as a failure.
+        //
+        // ⚠️ AHEAD of the trigger lookup, deliberately. With the switch off,
+        // registering the missing trigger would change nothing, so reporting
+        // "no 'schedule' trigger is registered — add requires: ['triggers']"
+        // hands the operator a remedy that cannot work. The switch outranks it
+        // because it is the fact that decides the outcome.
+        //
+        // ⛔ The POLICY is not cached — the resolver reads `process.env` live,
+        // so a host that rebinds after changing the environment (the CLI's
+        // `--fresh` harness, a test flipping the switch between kernels in one
+        // process) sees the value current at the bind. What IS recorded is the
+        // REFUSAL, on {@link policyDisabledFlows}, and that is the difference
+        // between the two: see its own docblock for why the audit must read
+        // what happened rather than re-derive it from an environment that may
+        // have moved since.
+        if (isTimeTriggeredKind(resolved.triggerType) && !resolveScheduledWorkPolicy().enabled) {
+            if (!this.policyDisabledFlows.has(flowName)) {
+                this.policyDisabledFlows.add(flowName);
+                // Said once per flow while it stays refused, at `info`, for the
+                // reason the trigger's own refusal records: this is the DEFAULT
+                // state of every deployment and the deployment declared it, so
+                // nothing is wrong and nothing looks normal-but-broken. The
+                // structured channel is the audit below, which the
+                // `kernel:bootstrapped` hook and the CLI startup summary read.
+                this.logger.info(
+                    `Flow '${flowName}' is not armed on trigger '${resolved.triggerType}' — ${SCHEDULED_WORK_DISABLED_REASON}`,
+                );
+            }
+            return;
+        }
+        // Past the gate the refusal no longer describes this flow: either it
+        // binds below, or it fails/waits for its trigger with a reason of its
+        // own. Cleared BEFORE the trigger lookup so a flow whose trigger has
+        // not arrived yet is reported as waiting for a trigger, not as
+        // policy-disabled — with the switch on, the missing trigger really is
+        // the reason.
+        this.policyDisabledFlows.delete(flowName);
         const trigger = this.triggers.get(resolved.triggerType);
         if (!trigger) return;
         try {
@@ -3968,6 +4172,10 @@ export class AutomationEngine implements IAutomationService {
         // of names; a genuinely deleted flow leaves one harmless string.
         this.flowStatusDisabled.delete(name);
         this.flowVersionHistory.delete(name);
+        // [#17396] Dropped with the flow, unlike `flowLedgerDisabled` above:
+        // that one mirrors a DURABLE row and must survive, while this records
+        // an in-process bind attempt that no longer has a subject.
+        this.policyDisabledFlows.delete(name);
         this.logger.info(`Flow unregistered: ${name}`);
     }
 
@@ -3981,6 +4189,12 @@ export class AutomationEngine implements IAutomationService {
      * registered trigger. `triggerType`/`object` expose the flow's declared
      * binding so hosts (CLI startup summary, kernel:bootstrapped audit) can say
      * WHY an unbound flow is unbound; `status` is the persisted deployment status.
+     *
+     * [#18235, ruling G item 6] `reason` carries that WHY on the row itself, for
+     * the one host that cannot ask a second question: Studio's only status door
+     * is `GET /automation/_status`, which passes these rows through verbatim and
+     * has no access to {@link getTriggerBindingAudit}. Same sentence, same
+     * eligibility, one computation — see {@link describeUnboundReason}.
      */
     getFlowRuntimeStates(): Array<{
         name: string;
@@ -3989,6 +4203,7 @@ export class AutomationEngine implements IAutomationService {
         status?: string;
         triggerType?: string;
         object?: string;
+        reason?: string;
         armedFrom?: FlowContender;
         shadowed?: FlowContender[];
     }> {
@@ -3998,6 +4213,7 @@ export class AutomationEngine implements IAutomationService {
             // reads. This map holds ONE entry per bare name, so without these
             // two fields a displaced contender leaves no trace on this surface.
             const shadowing = this.flowShadowing.get(name);
+            const reason = this.describeUnboundReason(name, resolved);
             return {
                 name,
                 enabled: this.isFlowEnabled(name),
@@ -4005,11 +4221,56 @@ export class AutomationEngine implements IAutomationService {
                 status: (this.flows.get(name) as { status?: string } | undefined)?.status,
                 triggerType: resolved?.triggerType,
                 object: resolved?.binding.object,
+                // Absent, not `undefined`-valued: a row that is bound, disabled
+                // or trigger-less has no reason to carry, and `reason: null` on
+                // the wire would read as "we looked and found nothing".
+                ...(reason === undefined ? {} : { reason }),
                 ...(shadowing
                     ? { armedFrom: shadowing.armed, shadowed: shadowing.shadowed }
                     : {}),
             };
         });
+    }
+
+    /**
+     * [#17396 ruled item 6, #18235] The ONE place that decides why a registered
+     * flow is not armed — both the status door ({@link getFlowRuntimeStates})
+     * and the boot-time audit ({@link getTriggerBindingAudit}) read it, so the
+     * sentence an operator sees in Studio and the one the CLI prints cannot
+     * drift apart. `undefined` means this flow has no unbound reason to report:
+     * it is bound, it is disabled, or it declares no trigger at all.
+     *
+     * The POLICY branch outranks both binding branches, and deliberately so.
+     * When package-authored scheduled work is off, neither of the other two
+     * reasons is true in any useful sense: the trigger was never called, so
+     * nothing "failed", and registering the missing trigger would change
+     * nothing, so "add requires: ['triggers']" is a remedy that does not work.
+     * ⛔ Never reported as "binding failed" — a binding failure is a defect with
+     * an engineering remedy, while this is a deployment policy with an operator
+     * remedy, and the two send the reader to different places.
+     *
+     * ⛔ Read from the RECORD, never re-derived from the environment here.
+     * Re-deriving was the first spelling and it was measured wrong: both
+     * callers run long after the bind, so an environment that moved in
+     * between — an operator setting the switch, a test restoring it — makes
+     * this report *binding failed* for a flow whose trigger was never called.
+     * The record says what HAPPENED; `activateFlowTrigger` clears it the moment
+     * the flow gets past the gate.
+     *
+     * @param resolved the caller's already-resolved binding, so neither door
+     *   pays for a second {@link resolveTriggerBinding} on the same row.
+     */
+    private describeUnboundReason(
+        name: string,
+        resolved: { triggerType: string } | undefined,
+    ): string | undefined {
+        if (!resolved) return undefined; // manual / screen flow — nothing to bind
+        if (!this.isFlowEnabled(name)) return undefined;
+        if (this.boundFlowTriggers.has(name)) return undefined;
+        if (this.policyDisabledFlows.has(name)) return SCHEDULED_WORK_DISABLED_REASON;
+        return this.triggers.has(resolved.triggerType)
+            ? `trigger '${resolved.triggerType}' is registered but binding failed — see earlier warnings`
+            : `no '${resolved.triggerType}' trigger is registered — add requires: ['triggers'] (record_change/schedule/time_relative/api ship in @objectstack/trigger-*)`;
     }
 
     /**
@@ -4024,13 +4285,13 @@ export class AutomationEngine implements IAutomationService {
     getTriggerBindingAudit(): Array<{ flowName: string; triggerType: string; reason: string }> {
         const audit: Array<{ flowName: string; triggerType: string; reason: string }> = [];
         for (const name of this.flows.keys()) {
-            if (!this.isFlowEnabled(name)) continue;
-            if (this.boundFlowTriggers.has(name)) continue;
             const resolved = this.resolveTriggerBinding(name);
-            if (!resolved) continue; // manual / screen flow — nothing to bind
-            const reason = this.triggers.has(resolved.triggerType)
-                ? `trigger '${resolved.triggerType}' is registered but binding failed — see earlier warnings`
-                : `no '${resolved.triggerType}' trigger is registered — add requires: ['triggers'] (record_change/schedule/time_relative/api ship in @objectstack/trigger-*)`;
+            // [#18235] The eligibility rules (enabled, unbound, declares a
+            // trigger) and the three-branch vocabulary both live in
+            // `describeUnboundReason` now, so this audit and the status door
+            // report the SAME sentence for the same flow by construction.
+            const reason = this.describeUnboundReason(name, resolved);
+            if (reason === undefined || !resolved) continue;
             audit.push({ flowName: name, triggerType: resolved.triggerType, reason });
         }
         return audit;
@@ -5121,8 +5382,9 @@ export class AutomationEngine implements IAutomationService {
                 summary,
             };
         } catch (err: unknown) {
-            // [#15788] The run reached an `end` node declaring
-            // `outcome: 'refused'` (#14945 ruling 2′). Tested FIRST, beside the
+            // [#15788] The run REFUSED — an `end` node declaring
+            // `outcome: 'refused'`, or (#18110 / #18555) a node whose own child
+            // run refused. Tested FIRST, beside the
             // pause and for the same reason: this is NOT a failure either, and
             // a signal recognised only by the arm below would be recorded as
             // one. The shape is `finishRefusedRun`'s — one method, all three
@@ -5925,6 +6187,13 @@ export class AutomationEngine implements IAutomationService {
      *   child's own up-bubble must stay off so the parent isn't resumed twice.
      * @param childSummary - #4354: totals of the child run whose completion
      *   triggered this resume (the up-bubble path), credited to the awaiting step.
+     * @param childRefusal - [#18714] Set ONLY by {@link bubbleToParent}'s
+     *   refusal arm: the child this run is parked on finished `refused`, so
+     *   this run must refuse too instead of continuing past its `subflow` /
+     *   `map` node. Carried as a parameter rather than on the resume signal
+     *   because it is engine-internal control flow, not data the parent's
+     *   variable map should ever see — the reserved-name guard
+     *   (`applyResumeSignal`) polices that map, and a refusal is not a variable.
      */
     private async resumeInternal(
         runId: string,
@@ -5936,6 +6205,7 @@ export class AutomationEngine implements IAutomationService {
         signal: ResumeSignal,
         skipBubble: boolean,
         childSummary?: FlowRunSummary,
+        childRefusal?: ChildRunRefusal,
     ): Promise<AutomationResult> {
         // Idempotency guard (set synchronously, before any await): reject a
         // concurrent duplicate resume of the same run so side effects can't run
@@ -6033,6 +6303,16 @@ export class AutomationEngine implements IAutomationService {
             // it, before traversal appends anything further.
             this.creditChildRun(run.steps, run.nodeId, childSummary);
 
+            // [#18714] The refusal this run must end on instead of continuing
+            // past its `subflow` / `map` node, if any. Seeded from the UP-BUBBLE
+            // leg (the child's own frame drove this resume and already knows),
+            // and set below by the DELEGATED leg (this frame drives the child
+            // and reads its answer). Both legs hand it to the ONE throw site
+            // inside the traversal `try` further down, so a refusal leaves this
+            // method through the same `finishRefusedRun` chokepoint every other
+            // producer uses — see `ChildRunRefusal`.
+            let pendingChildRefusal: ChildRunRefusal | undefined = childRefusal;
+
             // ── Subflow delegation (nested pause): this run is paused at a
             // `subflow` node whose child run itself suspended. The caller's
             // signal is meant for the node the CHILD paused on (its screen /
@@ -6122,6 +6402,46 @@ export class AutomationEngine implements IAutomationService {
                             this.consumedSuspensions.has(childRunId) ? childRunId : undefined,
                         );
                         return { success: false, error, durationMs: Date.now() - run.startTime };
+                    }
+                    // [#18714] DELEGATED-LEG REFUSAL. The child ran to a
+                    // refusing terminal — an `end` declaring
+                    // `outcome: 'refused'`, or a node of its own whose child
+                    // refused — and answered `{ success: true, status:
+                    // 'refused' }`, because *a refusal is a successful
+                    // evaluation that says no*. The branch set above tests only
+                    // `paused` and `!success`, so until this arm existed a
+                    // refused child was neither and fell straight through the
+                    // ordinary success exit below: measured, the parent
+                    // returned `{ success: true, successMessage: … }`, its run
+                    // row recorded `completed`, and the node downstream of the
+                    // `subflow` RAN. That is the identical fail-open shape
+                    // #18110 / #18555 closed on the synchronous leg, still open
+                    // on the leg 「the one a screen flow actually takes」.
+                    //
+                    // ⛔ NOT folded into the `!childRes.success` arm above. That
+                    // arm calls `failSuspendedRun` and records the parent
+                    // `failed`; a refusal is not a failure — it must not be
+                    // routable by a `fault` edge, must not consume retry budget
+                    // and must not be counted in `nodes[].failures`, all of
+                    // which the failure arm would confer. The parent's terminal
+                    // row must read `refused`, the same word the child's does.
+                    //
+                    // Recorded, ⛔ not thrown here. The pause is not consumed
+                    // yet — `claimAdvance` / `forgetSuspendedRun` are still
+                    // below — and a refusal that unwound from this position
+                    // would leave the parent's own suspension live while its
+                    // run row said terminal. The throw site inside the
+                    // traversal `try` is past the consumption, which is why
+                    // both legs converge there.
+                    //
+                    // The mapping below still runs, deliberately: the child's
+                    // declared outputs really were produced and the nodes
+                    // before its refusal really ran, so the parent's answer
+                    // must not depend on HOW the child ended — the same call
+                    // the synchronous `subflow` arm makes when it returns the
+                    // success envelope PLUS `refuse`.
+                    if (childRes.status === 'refused') {
+                        pendingChildRefusal = { message: childRes.refusalMessage };
                     }
                     // Child completed — continue below with its output as the
                     // resume signal (replaces the caller's signal, which the
@@ -6348,6 +6668,32 @@ export class AutomationEngine implements IAutomationService {
             const context = run.context;
 
             try {
+                // [#18714] The child this run is parked on REFUSED — on either
+                // resumed leg (see `ChildRunRefusal`). Thrown HERE, and the
+                // position is the point:
+                //
+                //  - Past the consumption. `claimAdvance` and
+                //    `forgetSuspendedRun` have run, so the parent's own pause is
+                //    gone exactly as it is for every other way this resume can
+                //    end. A refusal raised before them would record a terminal
+                //    run while leaving its suspension live in
+                //    `listSuspendedRuns()` — the very leak the up-bubble leg is
+                //    filed for, moved one frame up.
+                //  - Before the traversal. Nothing downstream of the awaiting
+                //    node runs, which is the whole content of "a refusal stops
+                //    the run".
+                //  - As `FlowRefusalSignal`, so the `catch` below converts it
+                //    through `finishRefusedRun` — ONE terminal shape, whichever
+                //    producer raised it. ⛔ Deliberately not a second terminal
+                //    exit of its own: this file's own history is a list of
+                //    outcomes that became a function of WHICH ROUTE a run took.
+                //
+                // `run.nodeId` is the node that was awaiting the child — the
+                // `subflow` / `map` this frame is parked on, the same node the
+                // synchronous leg names on its `FlowRefusalSignal`.
+                if (pendingChildRefusal) {
+                    throw new FlowRefusalSignal(run.nodeId, pendingChildRefusal.message);
+                }
                 // ── Map re-entry (sequential multi-instance, ADR-0037 A2).
                 // A run paused at a `map` node (correlation `map:<childRunId>`)
                 // does NOT continue past the node on resume — it RE-RUNS the
@@ -6478,7 +6824,7 @@ export class AutomationEngine implements IAutomationService {
                 // here, never through `execute()`'s exit. Tested first, beside
                 // the re-suspend, for the same reason it is tested first there.
                 if (isRefusalSignal(err)) {
-                    return this.finishRefusedRun({
+                    const refused = this.finishRefusedRun({
                         runId,
                         flowName: run.flowName,
                         flowVersion: run.flowVersion,
@@ -6487,6 +6833,47 @@ export class AutomationEngine implements IAutomationService {
                         steps, flow, variables,
                         refusalMessage: err.message, context,
                     });
+                    // [#18714] UP-BUBBLE LEG. This run is terminal and the
+                    // caller holds ITS id — but if it was a subflow CHILD, some
+                    // ancestor is still parked at the `subflow` / `map` node
+                    // that started it, and nothing else in the engine will ever
+                    // move that ancestor: `bubbleToParent` was called on the
+                    // completion path alone, so a child resumed to a refusal
+                    // returned from here having resolved exactly one of the two
+                    // runs it is responsible for. Measured: the child row read
+                    // `refused` while its parent stayed `paused` and stayed in
+                    // `listSuspendedRuns()` indefinitely — a leaked run, not a
+                    // wrong answer, which is why it fails DIFFERENTLY from the
+                    // delegated leg above and needs its own arm.
+                    //
+                    // The same call the completion path makes, with the refusal
+                    // attached: the parent is genuinely resumed — it consumes
+                    // its pause, records its own terminal row and bubbles to
+                    // ITS parent in turn, so a chain of any depth resolves by
+                    // the same induction completions already rely on. ⛔ Not a
+                    // direct walk like `failAncestors`: that verb exists for a
+                    // cascade in which no ancestor can be resumed at all, and
+                    // it records them `failed` — the wrong word here.
+                    //
+                    // `output` and `summary` are the refused run's own, for the
+                    // reason `finishRefusedRun` collects them: the nodes before
+                    // the refusal really ran, and a parent that refuses must
+                    // still be able to report what its child did.
+                    //
+                    // `skipBubble` is honoured exactly as on the completion
+                    // path — under the DELEGATED leg the parent's frame is the
+                    // caller, and it raises its own refusal at the throw site
+                    // above. Bubbling here as well would resume the parent
+                    // twice.
+                    if (!skipBubble) {
+                        await this.bubbleToParent(
+                            run,
+                            (refused.output ?? {}) as Record<string, unknown>,
+                            refused.summary,
+                            { message: err.message },
+                        );
+                    }
+                    return refused;
                 }
                 // Re-suspended at a downstream node: persist a fresh continuation.
                 if (isSuspendSignal(err)) {
@@ -6818,11 +7205,18 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
-     * Up-bubble for the subflow chain: when a completed run carries
+     * Up-bubble for the subflow chain: when a TERMINAL run carries
      * `$parentRunId`, resume that parent with this run's output. Recursion via
-     * the parent's own completion bubbles multi-level chains. Best-effort —
+     * the parent's own terminal exit bubbles multi-level chains. Best-effort —
      * a failed parent continuation is logged, never thrown back at the
      * caller who resumed the child.
+     *
+     * [#18714] "Terminal" is two outcomes, not one. The completion path was the
+     * only caller until this card, so a child that resumed to a REFUSAL left
+     * its parent parked at the awaiting node forever — visible in
+     * `listSuspendedRuns()`, resumable by nobody, because the child it waits on
+     * no longer exists. The refusal arm calls this with `refusal` set; every
+     * other thing this method does is identical on both outcomes.
      *
      * [#15556] Best-effort at the ENGINE layer only, since this call never
      * throws either way: on the `'stranded'` exit — the one #15556's ruling
@@ -6840,6 +7234,17 @@ export class AutomationEngine implements IAutomationService {
         output: Record<string, unknown>,
         /** #4354 — this child's totals, credited to the parent's awaiting step. */
         summary?: FlowRunSummary,
+        /**
+         * [#18714] Set when this child finished `refused` rather than
+         * `completed`. Everything about the bubble is unchanged — the same
+         * mapped signal, the same best-effort contract, the same per-outcome
+         * #4632 grading below — except that the parent ends on the child's
+         * refusal instead of continuing past its awaiting node. Carried to
+         * {@link resumeInternal} as its own argument, ⛔ never folded into
+         * `sig`: the signal is the parent's variable map, and a refusal is
+         * control flow, not a variable.
+         */
+        refusal?: ChildRunRefusal,
     ): Promise<void> {
         const ctx = run.context as Record<string, unknown> | undefined;
         const parentRunId = ctx?.$parentRunId;
@@ -6854,7 +7259,7 @@ export class AutomationEngine implements IAutomationService {
                 // the one writer allowed to set them (#3853 follow-up).
                 ? engineBuilt({ variables: { [`${mapNode}.$mapItemOutput`]: output ?? null, [`${mapNode}.$mapItemDone`]: true } })
                 : this.buildSubflowResumeSignal(run.context, output);
-            const parentRes = await this.resumeInternal(parentRunId, sig, false, summary);
+            const parentRes = await this.resumeInternal(parentRunId, sig, false, summary, refusal);
             if (!parentRes.success) {
                 // #6499 — `parentRes.error` is the envelope field that carries
                 // a failing node's / driver's text VERBATIM (#5912 left it
@@ -8338,9 +8743,11 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
-     * [#15788] Finish a run that reached an `end` node declaring
-     * `outcome: 'refused'` — record the terminal row and build the caller's
-     * result (#14945 ruling 2′, lane 2).
+     * [#15788] Finish a REFUSED run — record the terminal row and build the
+     * caller's result (#14945 ruling 2′, lane 2). Reached from either producer
+     * of {@link FlowRefusalSignal}: an `end` node declaring
+     * `outcome: 'refused'`, or a node returning
+     * {@link NodeExecutionResult.refuse} (#18110 / #18555).
      *
      * **ONE method, three producers.** `execute()`, `resumeInternal` and
      * `executeWithoutRetry` each own a terminal exit, and this file's own
@@ -8425,7 +8832,8 @@ export class AutomationEngine implements IAutomationService {
             // meta?)`; the `Error` slot stays empty on purpose (#5575).
             this.logger.error(
                 `[Automation] run '${args.runId}' of flow '${args.flowName}' REFUSED (an 'end' node with ` +
-                    `outcome: 'refused') but its run-history bookkeeping threw, so its terminal history row ` +
+                    `outcome: 'refused', or a node whose child run refused) but its run-history bookkeeping ` +
+                    `threw, so its terminal history row ` +
                     `never landed — nothing retries it, the caller is told the run refused, and after the next ` +
                     `restart this run is invisible to the Runs surfaces while the approvals sweeps read it as ` +
                     `never-finished. The run itself is TERMINAL and must NOT be re-run, retried or resumed. ` +
@@ -9276,15 +9684,35 @@ export class AutomationEngine implements IAutomationService {
                 }
             } catch (execErr: unknown) {
                 const errMsg = execErr instanceof Error ? execErr.message : String(execErr);
-                steps.push({
-                    nodeId: node.id,
-                    nodeType: node.type,
-                    status: 'failure',
-                    startedAt: stepStartedAt,
-                    completedAt: new Date().toISOString(),
-                    durationMs: Date.now() - stepStart,
-                    error: { code: 'EXECUTION_ERROR', message: errMsg },
-                });
+                // [#18881] ONE region refusal is ONE failure. The refusal names
+                // the region node whose body could not carry the pause, and
+                // that node's own frame records it exactly as any other thrown
+                // failure does. Every ENCLOSING container the unwind passes
+                // through — the `loop` around the `try_catch` in the card's
+                // reproduction — records nothing: it did not fail, it is the
+                // frame a failure is travelling out through, and a step for it
+                // would make `summary.failed` count the NESTING DEPTH rather
+                // than the fault. `summary.failed` is `Σ nodes[].failures`
+                // (#14456), so a second step here reads as a second lost row to
+                // every operator and every #4354 reader.
+                //
+                // Keyed on the refusal's OWN `regionNodeId` rather than on a
+                // mutable "already reported" flag: the identity is decided once
+                // at the boundary that raised it and cannot drift as the error
+                // travels.
+                const enclosingFrameOfRegionRefusal =
+                    isRegionSuspensionRefusal(execErr) && execErr.regionNodeId !== node.id;
+                if (!enclosingFrameOfRegionRefusal) {
+                    steps.push({
+                        nodeId: node.id,
+                        nodeType: node.type,
+                        status: 'failure',
+                        startedAt: stepStartedAt,
+                        completedAt: new Date().toISOString(),
+                        durationMs: Date.now() - stepStart,
+                        error: { code: 'EXECUTION_ERROR', message: errMsg },
+                    });
+                }
 
                 // #13803 — a structured container that DIED mid-body still did
                 // whatever its completed iterations did, and those writes are
@@ -9342,8 +9770,17 @@ export class AutomationEngine implements IAutomationService {
                 // untouched and still decides, alone, which failures a `fault`
                 // edge may carry. Nor is the thrown value touched — `execErr` is
                 // rethrown below exactly as caught.
-                variables.set('$error', { nodeId: node.id, message: errMsg });
-                this.setNodeError(variables, node.id, errMsg);
+                //
+                // [#18881] …and it is published for the SAME frames that record
+                // a step, for the same reason: an enclosing container the
+                // region refusal is travelling out through did not fail, so
+                // `{$error}` naming it would be a false sentence about which
+                // node produced the run's failure. The region node's own frame
+                // publishes, as any failing node does.
+                if (!enclosingFrameOfRegionRefusal) {
+                    variables.set('$error', { nodeId: node.id, message: errMsg });
+                    this.setNodeError(variables, node.id, errMsg);
+                }
 
                 // #3863 — a guard that THROWS is as un-routable as one that
                 // returns: `UnscopedRunDataAccessError` (ADR-0049/#1888) reports
@@ -9483,6 +9920,30 @@ export class AutomationEngine implements IAutomationService {
                 for (const [key, value] of Object.entries(result.output)) {
                     variables.set(`${node.id}.${key}`, value);
                 }
+            }
+
+            // [#18110 / #18555] Terminal refusal: the node evaluated and the
+            // answer is no. Thrown from HERE — the position the suspend signal
+            // below is thrown from — and that position is the point of the
+            // design, not a convenience: the node's success step is already
+            // pushed, its `childSteps` are already folded and its output is
+            // already written back, so a refusing `subflow` / `map` keeps the
+            // child's #4354 rollup (`selected` / `acted` / `unmeasuredEffect`)
+            // in the run summary. An unwind that began any earlier would drop
+            // exactly those counts — a refusing child really can have written
+            // rows before it said no.
+            //
+            // The step stays a SUCCESS on purpose: the node did evaluate, and
+            // what it evaluated to is the run's outcome, not this step's. The
+            // three terminal exits (`execute` / `resumeInternal` /
+            // `executeWithoutRetry`) already convert the signal into a
+            // `refused` run through the one `finishRefusedRun` chokepoint, so
+            // nothing downstream of here needed a second arm.
+            //
+            // Ahead of `suspend` deliberately — see `NodeExecutionResult.refuse`
+            // for why a result carrying both refuses rather than pausing.
+            if (result.refuse) {
+                throw new FlowRefusalSignal(node.id, result.refusalMessage);
             }
 
             // ADR-0019 durable pause: the node did its on-entry work and asked to
@@ -9742,9 +10203,15 @@ export class AutomationEngine implements IAutomationService {
      * larger seams than an out-parameter the two callers that want it opt into.
      * Callers that do not pass a sink (`loop`, `parallel`) are unaffected.
      *
-     * Durable pause (`suspend`) inside a region is not supported in this
-     * iteration — it is converted into a clear error (mirrors the `subflow`
-     * nested-pause guard).
+     * [#18881] Durable pause (`suspend`) inside a region is not supported —
+     * #3267 ruled that limit 禁, and this boundary is where the run meets it.
+     * The conversion is a NAMED refusal
+     * ({@link FlowRegionSuspensionRefusalError}) carrying the region node, the
+     * suspending node and the sub-flow, ⛔ not the plain `Error` it used to
+     * raise: an enclosing `try_catch` read that one as an ordinary region
+     * failure, ran its catch handler, and the run reported success over a sweep
+     * that had processed nothing. The container executors test for the named
+     * type and re-throw, so no region can contain it.
      */
     async runRegion(
         region: FlowRegionParsed,
@@ -9810,10 +10277,35 @@ export class AutomationEngine implements IAutomationService {
             // this path's contract is (still) to throw.
             tag();
             partialSteps?.push(...regionSteps);
+            // [#18881] A refusal raised at an INNER region boundary is already
+            // the named one, and it is re-thrown untouched. Re-wrapping it here
+            // would rename the region: for `loop { try_catch { map } }` the
+            // author's fault is the try region, and the loop is only the frame
+            // the unwind passes through. Tested before the suspend arm because
+            // this error is not a suspend signal and must not reach the generic
+            // rethrow below with an enclosing region's identity stamped on it.
+            if (isRegionSuspensionRefusal(err)) throw err;
+            // [#18881] The runtime half of #15646's ruling D: a region body
+            // cannot carry a durable pause, and the refusal is now NAMED
+            // (region node, suspending node, sub-flow) instead of a plain
+            // `Error` that an enclosing `try_catch` read as an ordinary region
+            // failure and handed to its catch handler. See
+            // `region-suspension-refusal.ts` for the measurement that is.
+            //
+            // The sub-flow is read off the suspending node's own `config`
+            // (`map` / `subflow` name their child there). The node is looked up
+            // in THIS region's `nodes` because this is the innermost boundary
+            // the signal crosses — a deeper suspension was already converted by
+            // the arm above, so `err.nodeId` always names a node of this body.
             if (isSuspendSignal(err)) {
-                throw new Error(
-                    `durable pause inside a structured region (node '${err.nodeId}') is not supported`,
-                );
+                const suspended = region.nodes.find(n => n.id === err.nodeId);
+                const flowName = (suspended?.config as { flowName?: unknown } | undefined)?.flowName;
+                throw refuseRegionSuspension({
+                    regionNodeId: grouping?.parentNodeId ?? entryId,
+                    regionKind: grouping?.regionKind ?? 'region',
+                    suspendedNodeId: err.nodeId,
+                    ...(typeof flowName === 'string' && flowName ? { subFlowName: flowName } : {}),
+                });
             }
             // [#15788] The refusing `end` node's signal, converted at exactly
             // the same boundary and for the same reason: a control signal must
@@ -9831,11 +10323,23 @@ export class AutomationEngine implements IAutomationService {
             // question and ⛔ not one this lane rules on — the #14945 ruling
             // says nothing about regions, and "prefer failing to falling back"
             // decides the interim.
+            //
+            // [#18110 / #18555] The sentence NAMES the node that carried the
+            // refusal and nothing more, because there are now two producers: an
+            // `end` declaring the refusal itself, and a `subflow` / `map` whose
+            // CHILD run refused. Hard-wired to the first, it told an author
+            // inside a region to go find an `end` node that is not in their
+            // region at all, and handed them a prescription they could not
+            // follow. ⛔ TEXT only — region SEMANTICS are untouched (#18112's
+            // option B is not implemented, no container is taught to rethrow),
+            // and the authoring-time half of this boundary is #15646's, ⛔ not
+            // this change's.
             if (isRefusalSignal(err)) {
                 throw new Error(
-                    `an 'end' node declaring outcome: 'refused' inside a structured region (node ` +
-                    `'${err.nodeId}') is not supported — a refusal terminates the RUN, and a region ` +
-                    `body cannot end one. Put the refusing 'end' on the top-level graph and route the ` +
+                    `a refusal inside a structured region (node '${err.nodeId}') is not supported — a ` +
+                    `refusal terminates the RUN, and a region body cannot end one. The refusing node is ` +
+                    `either an 'end' declaring outcome: 'refused', or a node whose own child run refused ` +
+                    `(a 'subflow' / 'map'). Move that node onto the top-level graph and route the ` +
                     `region's exit to it.`,
                 );
             }

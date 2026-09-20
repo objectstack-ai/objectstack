@@ -31,8 +31,23 @@ function coerceRecord(v: unknown): Record<string, unknown> | undefined {
  * The predicates are pure and synchronous — they read one permission-set
  * definition and nothing else — so the one fact they cannot discover for
  * themselves is which capability names this stack DECLARED. The caller holds
- * it: at boot from the `sys_capability` rows carrying `managed_by: 'package'`
- * provenance, at authoring time from the stack's own `capabilities` array.
+ * it: at boot from the stack's own `capabilities:` DECLARATIONS — and from
+ * the `sys_capability` rows carrying `managed_by: 'package'` provenance only
+ * ONCE THE SEEDER HAS WRITTEN THEM — at authoring time from the stack's own
+ * `capabilities` array.
+ *
+ * ⚠️ [#18603] Why the boot half names the DECLARATIONS and not the rows: the
+ * ADR-0090 D5 anchor binding (`bindBaselineToEveryone` in
+ * `@objectstack/plugin-security`) runs BEFORE `bootstrapDeclaredCapabilities`,
+ * the seeder that WRITES those `managed_by: 'package'` rows, and that order is
+ * fixed by two other constraints — the binding must follow the seeding of the
+ * `everyone` anchor it binds to, and precede the audience-binding suggestion
+ * reconciliation. On a first boot the table is therefore EMPTY at the bind
+ * moment, and "omission refuses" below turns that emptiness into a silent
+ * refusal of every declared token. A boot caller reads the declarations
+ * through the seeder's own two-step — the ObjectQL registry first, the
+ * metadata service as the fallback — as `readDeclaredCapabilityContext`
+ * (`@objectstack/plugin-security`) does.
  *
  * ⛔ Never synthesize this from the set under test. The point of the input is
  * that a set cannot vouch for its own tokens; a "declared" list derived from

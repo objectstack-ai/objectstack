@@ -13,7 +13,7 @@ import type {
   SeedLoadResultParsed,
   Seed,
 } from '@objectstack/spec/data';
-import { SeedLoaderConfigSchema, isMultiValueField } from '@objectstack/spec/data';
+import { SeedLoaderConfigSchema, isMultiValueField, referenceCarrierOf } from '@objectstack/spec/data';
 import { SEED_WRITE_EXECUTION_CONTEXT } from '@objectstack/spec/kernel';
 import { resolveSeedRecord } from '@objectstack/formula';
 import { bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteRowResult, runWithAdvisoryAggregation, type AdvisoryGroup } from '@objectstack/core';
@@ -696,11 +696,21 @@ export class SeedLoaderService implements ISeedLoaderService {
       if (objDef && objDef.fields) {
         const fields = objDef.fields as Record<string, any>;
         for (const [fieldName, fieldDef] of Object.entries(fields)) {
-          if (
-            (fieldDef.type === 'lookup' || fieldDef.type === 'master_detail' || fieldDef.type === 'user') &&
-            fieldDef.reference
-          ) {
-            const targetObject = fieldDef.reference as string;
+          if (fieldDef.type === 'lookup' || fieldDef.type === 'master_detail' || fieldDef.type === 'user') {
+            // [#18550] The carrier goes through the ONE arbiter, which also
+            // retires the `as string` cast this read used to carry — the cast
+            // asserted exactly what the truthiness test had not checked, so an
+            // object-valued carrier became a `targetObject` that matched no
+            // name in `objectSet`, contributed no `dependsOn` edge, and was
+            // then pushed onto `references` for resolution to make of what it
+            // could. ABSENCE is unchanged: `undefined` / `null` / `''` answer
+            // `undefined` and the field is skipped, which is what a relational
+            // field naming no target means. The type gate stays FIRST so the
+            // set of fields whose carrier is read here is byte-identical to
+            // before — a `text` field carrying a stray `reference` is still
+            // never read, and so still never refused.
+            const targetObject = referenceCarrierOf(fieldDef, 'SeedLoader.buildDependencyGraph');
+            if (!targetObject) continue;
 
             // Track dependency ordering only for objects within the graph
             if (objectSet.has(targetObject) && !dependsOn.includes(targetObject)) {

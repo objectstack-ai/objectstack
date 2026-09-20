@@ -123,6 +123,20 @@ import {
   PackageExportManifest,
   ReassignOrphanedMetadataResponse,
   DuplicatePackageResponse,
+  // [#17536] The element the two `/packages` READ doors are declared to serve.
+  // `ListInstalledPackagesResponseSchema.packages` is
+  // `z.array(InstalledPackageAtEitherStageSchema)` and
+  // `GetInstalledPackageResponseSchema.data` is that same schema
+  // (`spec/src/api/package-api.zod.ts`) — a union over the two manifest stages,
+  // authoring (`InstalledPackageSchema`) and assembled
+  // (`AssembledInstalledPackageSchema`), each a closed RUNTIME declaration. The
+  // client is a CONSUMER of that contract, so the widest value those doors are
+  // declared to answer is what they are declared to return here. ⚠️ What the
+  // published TYPE admits is wider than what the runtime parse accepts — the
+  // measurement, and what a caller does about it, are on `packages.list` below
+  // (#19324). The WRITE methods on the same object keep `InstalledPackage`:
+  // PR #17517 moved the read doors alone.
+  InstalledPackageAtEitherStage,
 } from '@objectstack/spec/api';
 import type {
   ApprovalRequestRow,
@@ -171,7 +185,13 @@ import type { InstalledPackage } from '@objectstack/spec/kernel';
 import type { ResolvedBook } from '@objectstack/spec/system';
 import type { ConnectorDescriptor } from '@objectstack/spec/integration';
 import type { ExplainDecision } from '@objectstack/spec/security';
-import type { InvitationStatus } from '@objectstack/spec/identity';
+// [#18728] The identity wires are RELAYED from the spec, not re-declared here
+// (maintainer ruling C, batch #158 item 4). `Invitation` / `Member` /
+// `Organization` are `z.input` of the three published schemas; the schemas
+// themselves are imported as VALUES by `identity-wire-relay.test.ts`, which
+// parses the measured wire bodies through them and pins the refusal of a body
+// missing a required field.
+import type { Invitation, InvitationStatus, Member, Organization } from '@objectstack/spec/identity';
 import { Logger, createLogger } from '@objectstack/core/logger';
 import { RealtimeAPI } from './realtime-api';
 
@@ -1190,11 +1210,28 @@ export interface AuthSetInitialPasswordResult {
 
 /**
  * The columns every organization answer of the `organizations.*` family
- * carries — exactly better-auth's organization schema (`id`, `name`, `slug`,
- * `logo`, `metadata`, `createdAt`), served BARE (no `{ success, data }`
- * envelope). The adapter's output transform walks that schema and nothing
- * else, so `sys_organization`'s `updated_at` and every other ObjectStack column
- * stay off the wire — measured against a real server on a real SQL driver.
+ * carries, served BARE (no `{ success, data }` envelope).
+ *
+ * ⭐ **This IS `@objectstack/spec/identity`'s `Organization`** — relayed, not
+ * transcribed (#18728, maintainer ruling C batch #158 item 4). The two
+ * divergences that used to make the published schema unable to parse a served
+ * body are closed at their own ends:
+ *
+ *  - **`metadata` is DECODED.** plugin-auth's data adapter decodes
+ *    `sys_organization.metadata` from its stored JSON text into an object on
+ *    every route that reads the row back (`setActive`, `get`, `delete`,
+ *    `list`), and omits the key when the column is unset — so the object the
+ *    spec declares is what arrives. Previously only the two write echoes
+ *    decoded it; see `organization-metadata-decode.ts` in plugin-auth for why
+ *    the seam is the adapter's read verbs and why it must not touch the write
+ *    ones.
+ *  - **`updatedAt` is OPTIONAL in the spec**, which is the ruling's own
+ *    fallback A: the wire is better-auth's own serializer and its documented
+ *    organization shape declares no `updatedAt`, so the schema aligns to the
+ *    documented wire. In practice the key is ABSENT on every route of this
+ *    family — the vendor's `transformOutput` emits declared fields only, so
+ *    `sys_organization.updated_at` never reaches it even though the column
+ *    exists. Read it as "may be absent", and expect absent.
  *
  * ⚠️ **`createdAt` is an ISO-8601 string, never `Date`** (maintainer ruling on
  * #12104): the adapter is declared `supportsDates: false`, better-auth revives
@@ -1202,35 +1239,23 @@ export interface AuthSetInitialPasswordResult {
  * ISO string back on the wire — measured `"createdAt":"2026-09-07T09:27:01.545Z"`.
  * There is no revival layer in this SDK; `new Date(x)` is the caller's step.
  *
- * ⚠️ **`metadata` arrives as the stored JSON TEXT, not an object**, on every
- * route that reads the row back (`setActive`, `get`, `delete`, `list`): better-auth
- * stores it `JSON.stringify`-ed in a text column and only the two write routes
- * decode it — see {@link OrganizationEchoWire}. `JSON.parse(metadata)` is the
- * caller's step here. `null` (SQL) or absent (a store that does not
- * materialise an unset column) when never set; same for `logo`.
- *
- * `@objectstack/spec/identity`'s `Organization` is NOT relayed: it declares
- * `updatedAt` required and `metadata` as an object, and neither is what this
- * wire carries.
+ * ⚠️ `logo` is `null` (SQL) or absent (a store that does not materialise an
+ * unset column) when never set — the `.nullish()` arm PR #18718 landed.
  */
-export interface OrganizationWire {
-    id: string;
-    name: string;
-    slug: string;
-    /** `null` (SQL) or absent (document store) when unset. */
-    logo?: string | null;
-    /** ISO-8601. */
-    createdAt: string;
-    /** The stored JSON text (`'{"plan":"pro"}'`), undecoded; `null`/absent when unset. */
-    metadata?: string | null;
-}
+export type OrganizationWire = Organization;
 
 /**
  * The organization as the two WRITE routes echo it back — `create` and
- * `update` — which are the only two that decode `metadata` before answering
- * (`JSON.parse` in the create handler, `parseJSON` in the update adapter).
- * An unset `metadata` is ABSENT here (the handlers fold it to `undefined`),
- * never `null`. Every other column is {@link OrganizationWire}'s.
+ * `update`. An unset `metadata` is ABSENT here (the handlers fold it to
+ * `undefined`), never `null`.
+ *
+ * ⭐ Since #18728 this is the SAME shape as {@link OrganizationWire}: the read
+ * routes decode `metadata` too and omit it when unset, so the two used to
+ * differ only in that one member and no longer differ at all. The name is kept
+ * — it is published SDK surface, and it still records WHICH routes these are
+ * (the write echoes decode in better-auth's own organization adapter,
+ * `JSON.parse` on create and `parseJSON` on update, independently of the
+ * producer fix on the read side).
  */
 export interface OrganizationEchoWire extends Omit<OrganizationWire, 'metadata'> {
     /** Decoded object; absent when unset. */
@@ -1239,23 +1264,24 @@ export interface OrganizationEchoWire extends Omit<OrganizationWire, 'metadata'>
 
 /**
  * A membership row as better-auth serves it — its own member schema, nothing
- * of ObjectStack's `sys_member` beyond it (no `updatedAt`). `role` is one of
- * the closed ADR-0108 vocabulary (`owner` / `admin` / `delegated_admin` /
- * `member`), typed `string` because the wire mirrors the vendor's column, not
- * because the set is open; the platform refuses a multi-role
- * (`'admin,member'`) at the door with `400 VALIDATION_FAILED`.
+ * of ObjectStack's `sys_member` beyond it.
  *
- * `@objectstack/spec/identity`'s `Member` is not relayed: it declares
- * `updatedAt` required and the wire never carries it.
+ * ⭐ **This IS `@objectstack/spec/identity`'s `Member`** — relayed, not
+ * transcribed (#18728, ruling C's fallback A). `updatedAt` is optional in the
+ * spec and absent on this wire, for two reasons that stack: better-auth's
+ * `member` model declares no such field, and `sys_member` provisions no
+ * `updated_at` column to serve from either (it is `managedBy: 'better-auth'`,
+ * so the audit family is not injected).
+ *
+ * `role` is one of the closed ADR-0108 vocabulary (`owner` / `admin` /
+ * `delegated_admin` / `member`), typed `string` because the wire mirrors the
+ * vendor's column, not because the set is open; the platform refuses a
+ * multi-role (`'admin,member'`) at the door with `400 VALIDATION_FAILED`.
+ *
+ * ⚠️ `createdAt` is an ISO-8601 string, never `Date` — see
+ * {@link OrganizationWire}.
  */
-export interface OrganizationMemberWire {
-    id: string;
-    organizationId: string;
-    userId: string;
-    role: string;
-    /** ISO-8601. */
-    createdAt: string;
-}
+export type OrganizationMemberWire = Member;
 
 /**
  * The four-column user projection better-auth hand-picks onto a member on the
@@ -1331,31 +1357,32 @@ export interface OrganizationFullTeamWire extends Omit<OrganizationTeamWire, 'up
  * An invitation row as better-auth serves it: its invitation schema plus the
  * two `additionalFields` ObjectStack declares on it (`businessUnitId`,
  * `positions` — the ADR-0105 D8 placement intent), which arrive `null` on
- * SQL and absent on a document store when unset. No `updatedAt`, so
- * `@objectstack/spec/identity`'s `Invitation` is not relayed; its
- * {@link InvitationStatus} vocabulary is (#7781), narrowed per route by the
- * `Status` parameter where the handler pins it.
+ * SQL and absent on a document store when unset.
+ *
+ * ⭐ **`@objectstack/spec/identity`'s `Invitation` IS relayed** — every column
+ * the spec declares comes from it (#18728, ruling C's fallback A), with
+ * `status` narrowed per route by the `Status` parameter where the handler pins
+ * it and the three platform-side members added on top. A served body parses
+ * through `InvitationSchema` clean: the schema is a plain (non-strict) object,
+ * so the three extra keys are stripped rather than refused.
+ *
+ * `updatedAt` is optional in the spec and absent on this wire for the same two
+ * stacking reasons as {@link OrganizationMemberWire}: better-auth's
+ * `invitation` model declares no such field, and `sys_invitation` provisions no
+ * `updated_at` column.
  *
  * `teamId` is the comma-joined list of team ids the invitee joins on accept,
  * `null` when none (the handler writes the `null` explicitly).
  */
-export interface OrganizationInvitationWire<Status extends InvitationStatus = InvitationStatus> {
-    id: string;
-    organizationId: string;
-    email: string;
-    role: string;
-    status: Status;
-    teamId: string | null;
-    inviterId: string;
-    /** ISO-8601. */
-    expiresAt: string;
-    /** ISO-8601. */
-    createdAt: string;
-    /** ADR-0105 D8 placement: `null` (SQL) or absent when the invitation carries none. */
-    businessUnitId?: string | null;
-    /** ADR-0105 D8 placement: `null` (SQL) or absent when the invitation carries none. */
-    positions?: string[] | null;
-}
+export type OrganizationInvitationWire<Status extends InvitationStatus = InvitationStatus> =
+    Omit<Invitation, 'status'> & {
+        status: Status;
+        teamId: string | null;
+        /** ADR-0105 D8 placement: `null` (SQL) or absent when the invitation carries none. */
+        businessUnitId?: string | null;
+        /** ADR-0105 D8 placement: `null` (SQL) or absent when the invitation carries none. */
+        positions?: string[] | null;
+    };
 
 /** What `POST /organization/accept-invitation` answers. */
 export interface OrganizationInvitationAcceptResult {
@@ -1393,10 +1420,10 @@ export interface OrganizationRemoveMemberResult {
 
 /**
  * What `GET /organization/get-full-organization` answers: the row (metadata
- * as stored JSON text, see {@link OrganizationWire}) plus every invitation of
- * any status, every member with its user joined, and — because this platform
- * mounts the organization plugin with `teams: { enabled: true }`
- * unconditionally — the organization's teams.
+ * decoded, see {@link OrganizationWire}) plus every invitation of any status,
+ * every member with its user joined, and — because this platform mounts the
+ * organization plugin with `teams: { enabled: true }` unconditionally — the
+ * organization's teams.
  */
 export interface OrganizationFullWire extends OrganizationWire {
     invitations: OrganizationInvitationWire[];
@@ -1471,10 +1498,22 @@ const SET_AUTH_TOKEN_HEADER = 'set-auth-token';
  *
  * ```
  * GET  /api/v1/auth/get-session   (signed in) -> 200 {"user":{…},"session":{…,"token":"…"}}
- * GET  /api/v1/auth/get-session   (anonymous) -> 200 null
  * POST /api/v1/auth/sign-up/email             -> 200 {"token":"…","user":{…}}
  * POST /api/v1/auth/sign-in/email             -> 200 {"redirect":false,"token":"…","user":{…}}
  * ```
+ *
+ * ⚠️ The ANONYMOUS `/get-session` answer is not a fourth body this helper is
+ * handed, and has not been since #17881 (`374d9d3afa`). `plugin-auth`'s
+ * `refuseAnonymousSession` converts better-auth's `200` + literal `null` into
+ * the declared ADR-0112 refusal on the way out (#17238):
+ *
+ * ```
+ * GET  /api/v1/auth/get-session   (anonymous) -> 401 {"success":false,"error":{"code":"UNAUTHENTICATED",…}}
+ * ```
+ *
+ * The SDK's shared `fetch` wrapper throws on any non-2xx, so that answer
+ * reaches a caller as a REJECTION carrying `code: 'UNAUTHENTICATED'` and
+ * `httpStatus: 401` and never arrives at this lift at all.
  *
  * The two families carry DISJOINT payload members — `/get-session` has the
  * session and no top-level token, the two credential routes have the token and
@@ -1511,18 +1550,23 @@ const SET_AUTH_TOKEN_HEADER = 'set-auth-token';
  * reads the row `internalAdapter.createSession` already committed, back by
  * the response's OWN token — the same seam `/get-session` uses — and attaches
  * it, rather than this lift inventing one. So `login` and `register` now
- * parse as the full declared `SessionResponse`, with one gap that is NOT
- * this: `data.user.image` served `null` against a declared
- * `string | undefined` (#17235, tracked separately). This does not touch the
- * `data.token` rule above: `session.token` is the SAME unsigned string the
- * body's own `token` already carried, not a second credential, and
+ * parse as the full declared `SessionResponse`. The one gap that remained
+ * when this was written — `data.user.image` served `null` against a declared
+ * `string | undefined` — closed with #17235, which widened that declaration
+ * to `z.string().nullish()`; the residue list those two routes are pinned
+ * against (`auth-login-register-envelope.test.ts` ②) is now empty. This does
+ * not touch the `data.token` rule above: `session.token` is the SAME unsigned
+ * string the body's own `token` already carried, not a second credential, and
  * `data.token` is still never synthesized FROM a session.
  *
- * The `!body` guard is what carries the anonymous answer: `null` is falsy and
- * is returned untouched rather than wrapped into a signed-in-looking envelope
- * that no session backs. That answer stays outside `SessionResponse`, and
- * closing it needs the published return annotation to widen, which is a
- * different card.
+ * The `!body` guard no longer carries the anonymous answer — since #17881 that
+ * answer is a rejection and never reaches this lift. The guard stays as the
+ * defensive branch it always was: a 2xx body that is `null`, or not an object,
+ * is handed back untouched rather than wrapped into a signed-in-looking
+ * envelope that no session backs. The anonymous case is closed at the
+ * PRODUCER, which is what #17238 ruled — `SessionResponseSchema` and every
+ * published return annotation in this family are UNTOUCHED, rather than
+ * widened to grow an arm meaning "nobody is signed in".
  */
 const normalizeSessionResponse = (raw: unknown): SessionResponse => {
   const body = raw as
@@ -2423,8 +2467,61 @@ export class ObjectStackClient {
      * deliberately NOT declared here — the dispatcher rows have no such key, so
      * declaring it would be false on that surface. #8140 bound the identical
      * scoped sibling (`ScopedEnvironmentClient.packages.list`) the same way.
+     *
+     * ⚠️ [#17536] The ROW type moved, the envelope did not. #11925 bound the
+     * element to `InstalledPackage` — the AUTHORING stage — and PR #17517 then
+     * declared the door at EITHER stage:
+     * `ListInstalledPackagesResponseSchema.packages` is
+     * `z.array(InstalledPackageAtEitherStageSchema)`. That left two declarations
+     * one layer apart disagreeing, with this one under-declaring: a row a
+     * `defineStack()` host installed carries the ASSEMBLED body, the door is
+     * declared able to serve it, and this SDK's own types said it could not
+     * arrive. The contract is `packages/spec` and this is a consumer of it
+     * (Prime Directive #12), so the consumer's declaration is what moves.
+     *
+     * ⚠️ Clause-② widening, and what it costs a caller: the element is a union
+     * of two stages that differ in ONE key, `manifest`. Every other member of
+     * the row — `id`, `name`, `version`, `status`, `enabled`, … — is common to
+     * both branches and reads exactly as before, so a caller that reads only
+     * those members needs no change at all. No runtime behaviour changes; the
+     * values were always these.
+     *
+     * ⚠️ Reaching INTO `manifest` is where the cost is, and the TYPE will not
+     * do the narrowing for you. On the assembled branch `manifest` is declared
+     * `Record<string, unknown>`, so a member read off the union —
+     * `pkg.manifest.objects` — is `unknown` (measured with `tsc` against the
+     * published declarations, not inferred from the schemas). Narrow by PARSING
+     * the row with a `packages/spec` schema and reading the parse's output:
+     *
+     * ```ts
+     * const parsed = AssembledInstalledPackageSchema.safeParse(pkg); // spec/api
+     * if (parsed.success) {
+     *   // parsed.data.manifest — the ASSEMBLED stage, object definitions
+     * } else {
+     *   const authoring = InstalledPackageSchema.parse(pkg);         // spec/kernel
+     *   // authoring.manifest.objects — the AUTHORING stage, glob strings
+     * }
+     * ```
+     *
+     * ⛔ Do NOT narrow with `Array.isArray(pkg.manifest.objects)`, or with any
+     * other structural guess. It separates the stages on NEITHER level: at the
+     * type level `pkg.manifest` is the same union inside both branches of that
+     * `if`, and at runtime BOTH stages' `objects` are arrays —
+     * `z.array(z.string())` at the authoring stage against `z.array(ObjectSchema)`
+     * at the assembled one. (Measured: a row carrying no `objects` at all parses
+     * as either stage, which is the right answer for it — the key such a guess
+     * would read is not there.)
+     *
+     * ⚠️ The RUNTIME half is the strict one, and the asymmetry is a KNOWN GAP
+     * rather than a design: `InstalledPackageAtEitherStageSchema.safeParse()`
+     * refuses a `manifest` belonging to neither stage, while that same row
+     * COMPILES against this declaration. Tracked as #19324, whose root cause is
+     * the deliberate `z.ZodType<Record<string, unknown>, …>` annotation at
+     * `packages/spec/src/stack.zod.ts:1283` (#14513 — TS7056 and a
+     * declaration-chunk ceiling); ⛔ not something this declaration can fix, and
+     * ⛔ not a licence to relax either runtime branch to match the type.
      */
-    list: async (filters?: { status?: string; type?: string; enabled?: boolean }): Promise<{ packages: InstalledPackage[]; total: number }> => {
+    list: async (filters?: { status?: string; type?: string; enabled?: boolean }): Promise<{ packages: InstalledPackageAtEitherStage[]; total: number }> => {
         const route = this.getRoute('packages');
         const params = new URLSearchParams();
         if (filters?.status) params.set('status', filters.status);
@@ -2433,7 +2530,7 @@ export class ObjectStackClient {
         const qs = params.toString();
         const url = `${this.baseUrl}${route}${qs ? '?' + qs : ''}`;
         const res = await this.fetch(url);
-        return this.unwrapResponse<{ packages: InstalledPackage[]; total: number }>(res);
+        return this.unwrapResponse<{ packages: InstalledPackageAtEitherStage[]; total: number }>(res);
     },
 
     /**
@@ -2459,29 +2556,44 @@ export class ObjectStackClient {
      *
      * That is the SAME projection its `list` neighbour maps over every row
      * (`packages/runtime/src/domains/packages.ts` — one expression, two
-     * doors), and `list` is already declared `InstalledPackage[]` directly
-     * above. This binding therefore makes two doors of one domain agree
-     * rather than making a new claim about either. `packages/spec` has
-     * declared the same thing all along and was never the fork's casualty:
-     * `GetInstalledPackageResponseSchema` is `data: InstalledPackageSchema`,
-     * the bare row.
+     * doors), and `list` carries the identical element type directly above.
+     * This binding therefore makes two doors of one domain agree rather than
+     * making a new claim about either.
+     *
+     * ⚠️ [#17536] The sentence that closed this paragraph was measured STALE
+     * and is corrected rather than deleted, because what it claimed is what
+     * made the authoring-stage binding below look settled. It read:
+     * «`packages/spec` has declared the same thing all along and was never the
+     * fork's casualty: `GetInstalledPackageResponseSchema` is `data:
+     * InstalledPackageSchema`, the bare row.» The first half still holds — the
+     * door has always answered the BARE row, no envelope. The second half
+     * stopped being true when PR #17517 landed: that schema's `data` now reads
+     * `InstalledPackageAtEitherStageSchema`, the union of the two closed
+     * manifest stages. It was a COMMENT and never a binding, which is why the
+     * disagreement it describes could sit here unread by any gate.
      *
      * `source` stays undeclared because there is no longer anything that
      * emits it on this route; `writable` stays undeclared for the reason
      * `list` leaves it undeclared.
      *
-     * ⚠️ Clause-② narrowing. `{ package: any }` is what let
+     * ⚠️ Clause-② narrowing (#12034). `{ package: any }` is what let
      * `(await client.packages.get(id)).package` compile, and on the only
      * surface that has served this route since #16628 it was `undefined` at
      * runtime — the falsehood was invisible precisely because the member was
      * `any`. Callers read the row itself. Pinned in
      * `return-type-precision.test.ts`, which is the only place it CAN be
      * pinned: a runtime test cannot observe a return-type narrowing at all.
+     *
+     * ⚠️ Clause-② widening (#17536), the LATER and opposite move on the same
+     * member: the row is declared at whichever stage it was installed at, for
+     * the reason and at the cost written out on `list` above. Both directions
+     * are pinned in the same file, and for the same reason — only a
+     * compile-time assertion can observe either.
      */
-    get: async (id: string): Promise<InstalledPackage> => {
+    get: async (id: string): Promise<InstalledPackageAtEitherStage> => {
         const route = this.getRoute('packages');
         const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}`);
-        return this.unwrapResponse<InstalledPackage>(res);
+        return this.unwrapResponse<InstalledPackageAtEitherStage>(res);
     },
 
     /**
@@ -2955,8 +3067,9 @@ export class ObjectStackClient {
      * - `visibility` — server-owned, `private` today. The control plane forces
      *   it at create time and refuses the column here; a write entry arrives
      *   with the public-listing feature, on its OWN endpoint rather than this
-     *   generic update (2026-09-12 maintainer ruling). See `updateVisibility`
-     *   below, which is subject to exactly this refusal.
+     *   generic update (2026-09-12 maintainer ruling). This SDK carries no
+     *   method for that write: `updateVisibility` was RETIRED with exactly this
+     *   refusal as its reason — see the retirement note below.
      *
      * ⚠️ That 400 is an INHERITED reading, not one measured from this repo:
      * `/api/v1/cloud/*` is served by `objectstack-ai/cloud`, which is not
@@ -3080,35 +3193,35 @@ export class ObjectStackClient {
       return this.unwrapResponse<{ environment: any }>(res);
     },
 
-    /**
-     * Update the visibility of this environment ('private' | 'public').
-     * `private` (default) hides the environment from /pub/v1 enumeration but
-     * still allows anonymous artifact downloads when the URL includes an
-     * exact `?commit=<id>` (share-by-link). `public` lists the environment and
-     * freely exposes all revisions.
-     *
-     * ⛔ CURRENT STATE — this call is refused today, so the paragraph above
-     * describes a capability that does not exist yet. It PATCHes the generic
-     * `/api/v1/cloud/environments/:id` route with `{ visibility }`, and
-     * `visibility` is one of the server-owned columns that route rejects with
-     * a 400 (see `update` above). The 2026-09-12 maintainer ruling keeps
-     * `visibility` server-owned and forced to `private` until the
-     * public-listing feature ships, at which point it gets its OWN endpoint
-     * rather than this generic update.
-     *
-     * ⚠️ Note only. The signature and body below are deliberately untouched:
-     * retiring this method, re-signing it, or making it throw is a breaking
-     * change to a published SDK method and is the maintainer's ruling to make.
-     * ⚠️ The refusal is an INHERITED reading — see the provenance note on
-     * `update` above. It was NOT measured from this repo.
-     */
-    updateVisibility: async (id: string, visibility: 'private' | 'public') => {
-      const res = await this.fetch(`${this.baseUrl}/api/v1/cloud/environments/${encodeURIComponent(id)}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ visibility }),
-      });
-      return this.unwrapResponse<{ environment: any }>(res);
-    },
+    // ⛔ RETIRED — `updateVisibility(id, visibility)` was REMOVED from this
+    // namespace under ADR-0049 enforce-or-remove (#17964; director-seat decision
+    // batch #132 item 1, maintainer 「同意」 2026-09-13). It PATCHed the generic
+    // `/api/v1/cloud/environments/:id` route with `{ visibility }`, and
+    // `visibility` is one of the server-owned columns that route refuses (see
+    // `update` above): a published method whose only behaviour was a write the
+    // control plane rejects. Declared-but-unfulfillable, so it is removed rather
+    // than left throwing forever.
+    //
+    // ADR-0087 structured TODO. A CALL SITE HAS NO CONVERSION — `objectstack
+    // migrate meta` rewrites stored metadata and an SDK call site is not stored
+    // metadata — so the TODO, not a conversion entry, is the channel that exists:
+    //
+    //   surface      `ObjectStackClient.environments.updateVisibility(id, visibility)`
+    //   reason       the capability its docblock described does not exist. The
+    //                2026-09-12 maintainer ruling keeps `visibility` server-owned
+    //                and forced to `private` until the public-listing feature
+    //                ships, at which point it arrives on its OWN endpoint rather
+    //                than on this generic update — so this method was never going
+    //                to be the carrier, even once the capability lands.
+    //   acceptance   when that endpoint ships, a NEW method is written here
+    //                against it. ⛔ Do not restore this one: restoring it
+    //                re-declares the generic-update write the control plane
+    //                refuses.
+    //
+    // There is no rewrite for a caller to apply — delete the call; the compiler
+    // is the channel that reaches every TypeScript consumer. Nothing in this repo
+    // called it, measured at retirement with a positive control on the sibling
+    // `updateHostname`.
 
     /**
      * List published artifact revisions for an environment. Each revision has
@@ -3613,8 +3726,8 @@ export class ObjectStackClient {
      *
      * POST /api/v1/auth/organization/set-active
      *
-     * Answers the organization row as STORED (`metadata` is the JSON text,
-     * see {@link OrganizationWire}). Answers `null` — measured, a 4-byte body
+     * Answers the organization row with `metadata` DECODED (see
+     * {@link OrganizationWire}). Answers `null` — measured, a 4-byte body
      * — when `organizationId` is the empty string and the session has no
      * active organization to fall back to; a non-member is a thrown 403.
      */
@@ -3631,7 +3744,7 @@ export class ObjectStackClient {
      * Get full organization detail (members, invitations, teams).
      * GET /api/v1/auth/organization/get-full-organization?organizationId=...
      *
-     * `metadata` is the stored JSON text here (see {@link OrganizationWire}).
+     * `metadata` is decoded here (see {@link OrganizationWire}).
      * Answers `null` (measured) when `organizationId` is the empty string and
      * the session has no active organization; an unknown id is a thrown 400.
      */
@@ -3671,19 +3784,57 @@ export class ObjectStackClient {
      * ```
      *
      * The default is `'member'` because {@link ObjectStackClient.organizations}
-     * `.invitations.resend` already substitutes exactly that over the same
-     * vendor endpoint: one family, one behaviour. It is also the least
-     * privileged name in the closed membership vocabulary (ADR-0108 D1 —
-     * `orgRoleGrade` floors at `member` and raises only for `owner`/`admin`),
-     * so the implicit choice cannot confer more reach than the caller asked
-     * for. Declaring `role` required instead would narrow a published request
-     * type to restate the vendor's requirement, and buy nothing.
+     * `.invitations.resend` has always substituted exactly that over the same
+     * vendor endpoint: one family, one behaviour. Since [#17274] `resend`
+     * takes the default FROM HERE instead of spelling a second copy of it, so
+     * the two cannot drift. It is also the least privileged name in the closed
+     * membership vocabulary (ADR-0108 D1 — `orgRoleGrade` floors at `member`
+     * and raises only for `owner`/`admin`), so the implicit choice cannot
+     * confer more reach than the caller asked for. Declaring `role` required
+     * instead would narrow a published request type to restate the vendor's
+     * requirement, and buy nothing.
+     *
+     * ## `teamId` — declared here, and DELIVERED [#17274]
+     *
+     * better-auth's `invite-member` body schema carries `teamId`, and the
+     * handler validates it against the organisation's own teams before
+     * storing the placement on the invitation row. Measured against a real
+     * `AuthManager` (better-auth 1.7.3, organization plugin,
+     * `teams: { enabled: true }` — the posture `auth-manager.ts` hard-wires)
+     * over a real `SqliteWasmDriver`:
+     *
+     * ```
+     * { …, teamId: 'team_abc' }   -> 200  invitation.teamId === 'team_abc'
+     * { …, teamId: 'nope' }       -> 400  Team not found            (TEAM_NOT_FOUND)
+     * { …, teamId: null }         -> 400  [body.teamId] Invalid input (VALIDATION_ERROR)
+     * { … }            (omitted)  -> 200  invitation.teamId === null
+     * ```
+     *
+     * The last two rows are why this member is NOT forwarded verbatim. `null`
+     * is the SDK's own spelling of "no team" — `invitations.list` answers
+     * `teamId: string | null` and a caller round-trips that object straight
+     * back into `resend` — while the vendor's spelling of the same fact is
+     * ABSENCE. So a `null` (or an omitted member) sends no `teamId` at all,
+     * and a string is forwarded unchanged. ⛔ Nothing else is normalised: an
+     * unknown id must keep reaching the vendor, because `TEAM_NOT_FOUND` is
+     * the loud refusal that replaces the silent drop this member used to be.
      */
-    invite: async (req: { email: string; role?: string; organizationId?: string }): Promise<OrganizationInvitationWire<'pending'>> => {
+    invite: async (
+      req: { email: string; role?: string; organizationId?: string; teamId?: string | null },
+    ): Promise<OrganizationInvitationWire<'pending'>> => {
       const route = this.getRoute('auth');
+      // `teamId` is lifted out of the spread so the two spellings of "no team"
+      // — `null` and absent — collapse to the ONE the vendor accepts. Every
+      // other member keeps its position, which is what the byte pins in
+      // `organization-invite-role-default.test.ts` assert.
+      const { teamId, ...rest } = req;
       const res = await this.fetch(`${this.baseUrl}${route}/organization/invite-member`, {
         method: 'POST',
-        body: JSON.stringify({ ...req, role: req.role ?? 'member' }),
+        body: JSON.stringify({
+          ...rest,
+          role: req.role ?? 'member',
+          ...(teamId == null ? {} : { teamId }),
+        }),
       });
       return res.json();
     },
@@ -3705,7 +3856,8 @@ export class ObjectStackClient {
      *
      * POST /api/v1/auth/organization/delete
      *
-     * Answers the deleted organization's row as it was stored (measured) —
+     * Answers the deleted organization's row as it stood immediately before
+     * deletion (measured; `metadata` decoded, see {@link OrganizationWire}) —
      * NOT the bare id string the vendor's OpenAPI stub declares.
      *
      * better-auth removes the organization row, all members, and all
@@ -3775,11 +3927,18 @@ export class ObjectStackClient {
      * Two requests, because no single better-auth route answers this question:
      *
      *   1. `GET /get-session` — who is calling. The body is the bare
-     *      `{ user, session }` envelope for a signed-in caller and the literal
-     *      `null` for an anonymous one (measured).
+     *      `{ user, session }` envelope for a signed-in caller (measured).
      *   2. `GET /organization/list-members?organizationId=…&filterField=userId`
      *      `&filterValue=<the caller>&limit=1` — the row, unwrapped from the
      *      one-entry page.
+     *
+     * ⚠️ An ANONYMOUS caller never gets a second request. Since #17881
+     * (`374d9d3afa`) `plugin-auth`'s `refuseAnonymousSession` answers
+     * `/get-session` the declared ADR-0112 envelope at `401` —
+     * `code: 'UNAUTHENTICATED'` — instead of better-auth's `200` + the literal
+     * `null`, and the SDK's shared `fetch` wrapper throws on the non-2xx. So
+     * step 1 is TERMINAL for such a caller: this method rejects with that code
+     * and `httpStatus: 401`, and step 2 never reaches the wire (#17238).
      *
      * ⚠️ It is deliberately NOT `GET /organization/get-active-member`, which
      * this method used to call. That handler reads only the session's
@@ -3805,9 +3964,13 @@ export class ObjectStackClient {
      *   - a caller with no active organisation gets their row rather than
      *     `400 NO_ACTIVE_ORGANIZATION` — `setActive` is no longer a
      *     precondition, which is the point of naming the organisation;
-     *   - an anonymous caller still gets `401 UNAUTHORIZED`, thrown from the
-     *     `list-members` request by the same session middleware that guarded
-     *     `get-active-member`;
+     *   - an anonymous caller was unchanged BY THIS MOVE: both routes sat
+     *     behind the same better-auth session middleware, which answered
+     *     `401 UNAUTHORIZED` either way. ⚠️ That row is RE-ANCHORED rather
+     *     than restamped — it is no longer what such a caller reaches. Since
+     *     #17881 the refusal arrives one request EARLIER, from `/get-session`
+     *     as `401 UNAUTHENTICATED` (see above), so `list-members` is never
+     *     asked and its `UNAUTHORIZED` is unreachable through this method;
      *   - a FALSY `organizationId` is refused here, before the wire. It used to
      *     answer the ACTIVE organisation's row at 200: better-auth resolves
      *     `ctx.query.organizationId || session.activeOrganizationId`, so an
@@ -3838,9 +4001,13 @@ export class ObjectStackClient {
         headers: { Origin: this.baseUrl },
       });
       const session = (await sessionRes.json()) as { user?: { id?: string } } | null;
-      // Anonymous → `null`, and the request below is then refused 401 by the
-      // session middleware before the filter is ever read. The refusal stays
-      // the SERVER's; nothing is invented here to stand in for it.
+      // An anonymous caller never reaches this line: since #17881 the request
+      // above answers `401 UNAUTHENTICATED` and the shared `fetch` wrapper
+      // throws on that non-2xx, so the refusal is delivered before any filter
+      // is built. The `| null` above and the `?? ''` here stay as the
+      // defensive branch they always were — a 2xx body this SDK cannot read a
+      // user out of yields an EMPTY filter rather than a fabricated one. The
+      // refusal stays the SERVER's; nothing is invented here to stand in for it.
       const userId = session?.user?.id ?? '';
       const res = await this.fetch(
         `${this.baseUrl}${route}/organization/list-members`
@@ -3962,6 +4129,21 @@ export class ObjectStackClient {
        *
        * If `cancel()` fails (e.g. invite already accepted) the error is
        * re-thrown without re-inviting.
+       *
+       * ## [#17274] `teamId` reaches the wire
+       *
+       * This member has been declared since the family's first commit and was
+       * never forwarded: the re-invite carried `email`, `role` and
+       * `organizationId` only, so resending a TEAM invitation quietly landed
+       * it with no team — nothing refused, nothing warned, and the placement
+       * was simply gone. It is forwarded now. `null` and an omitted member
+       * both mean "no team" and both send no `teamId`; see
+       * {@link ObjectStackClient.organizations}`.invite` for the measured
+       * vendor behaviour that fixes those spellings.
+       *
+       * The `role` default is likewise {@link ObjectStackClient.organizations}
+       * `.invite`'s, not a second copy spelled here: an undeclared `role`
+       * reaches the wire as `'member'` exactly as before, from one place.
        */
       resend: async (
         invitation: { id?: string; email: string; role?: string; organizationId: string; teamId?: string | null },
@@ -3976,8 +4158,9 @@ export class ObjectStackClient {
         }
         return this.organizations.invite({
           email: invitation.email,
-          role: invitation.role ?? 'member',
+          role: invitation.role,
           organizationId: invitation.organizationId,
+          teamId: invitation.teamId,
         });
       },
     },
@@ -4436,9 +4619,14 @@ export class ObjectStackClient {
      * `.user` / `.session` keys are kept alongside for callers written against
      * the wire while the declared shape was unreachable.
      *
-     * ⚠️ Anonymous is the one answer still outside the declared type: the route
-     * serves the literal `null` at 200 and it is returned as-is, because there
-     * is no `SessionResponse` value that means "nobody is signed in".
+     * ⚠️ Anonymous REJECTS — it does not resolve. There is no `SessionResponse`
+     * value that means "nobody is signed in", so since #17881 (`374d9d3afa`)
+     * the route answers an anonymous caller the declared ADR-0112 envelope at
+     * `401` instead of the literal `null` at 200, and the shared `fetch`
+     * wrapper turns that into a thrown error carrying `code: 'UNAUTHENTICATED'`
+     * and `httpStatus: 401`. Every value this method RESOLVES with is inside
+     * its declared type; a logged-out caller is a `catch`, not a `null` check
+     * (#17238).
      */
     me: async (): Promise<SessionResponse> => {
         const route = this.getRoute('auth');
@@ -7790,9 +7978,19 @@ export class ScopedEnvironmentClient {
    * package tests.
    */
   packages = {
-    list: async (): Promise<{ packages: InstalledPackage[]; total: number }> => {
+    /**
+     * ⚠️ [#17536] Clause-② widening, in step with the global twin
+     * `client.packages.list`. This path and that one reach the SAME door: the
+     * `@objectstack/hono` catch-all hands `dispatch()` the still-scoped path,
+     * `dispatch()` strips the `/environments/:environmentId` prefix, and the
+     * `/packages` domain answers. One door cannot be declared at two different
+     * element types by two SDK members, so both move together — see
+     * `ObjectStackClient.packages.list` for the door reading, the Prime
+     * Directive #12 argument and what the union costs a caller.
+     */
+    list: async (): Promise<{ packages: InstalledPackageAtEitherStage[]; total: number }> => {
       const res = await this.parent._fetch(this.url('/packages'));
-      return this.parent._unwrap<{ packages: InstalledPackage[]; total: number }>(res);
+      return this.parent._unwrap<{ packages: InstalledPackageAtEitherStage[]; total: number }>(res);
     },
     /**
      * [#11925 bound it · #12034 corrected the shape] The BARE row, no
@@ -7820,22 +8018,29 @@ export class ScopedEnvironmentClient {
      * site) — and the `/packages` domain answers
      * `success(withWritableVerdict(qlService, toPackageResponse(pkg)))`. That
      * is the identical projection its `list` neighbour above maps over, which
-     * is why `list` already declares `InstalledPackage[]` and needed no
+     * is why `list` carries the identical element type and needed no
      * correction here.
      *
-     * ⚠️ Clause-② narrowing, and the sharper of the two: this member was
-     * `InstalledPackage`, not `any`, so `(await scoped.packages.get(id))
+     * ⚠️ Clause-② narrowing (#12034), and the sharper of the two: this member
+     * was `InstalledPackage`, not `any`, so `(await scoped.packages.get(id))
      * .package` compiled with a REAL type behind it and was `undefined` at
      * runtime.
+     *
+     * ⚠️ Clause-② widening (#17536), the later and opposite move: the row is
+     * declared at whichever manifest stage it was installed at, because that is
+     * what `GetInstalledPackageResponseSchema.data` has been declared as since
+     * PR #17517. Same door as the global twin, same element type, same cost to
+     * a caller that reaches into `manifest` — written out once on
+     * `ObjectStackClient.packages.list`.
      *
      * `version` is unchanged and deliberately not touched by this card — it
      * is a request-side question, and it is a live one: see the acceptance
      * notes on #12034.
      */
-    get: async (id: string, version?: string): Promise<InstalledPackage> => {
+    get: async (id: string, version?: string): Promise<InstalledPackageAtEitherStage> => {
       const qs = version ? `?version=${encodeURIComponent(version)}` : '';
       const res = await this.parent._fetch(this.url(`/packages/${encodeURIComponent(id)}${qs}`));
-      return this.parent._unwrap<InstalledPackage>(res);
+      return this.parent._unwrap<InstalledPackageAtEitherStage>(res);
     },
   };
 

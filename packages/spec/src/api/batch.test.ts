@@ -107,9 +107,19 @@ describe('BatchUpdateRequestSchema', () => {
 
   // [#3939] The count bounds moved OUT of the schema. They were a second source
   // of truth that never matched reality: the schema said 1..200 while the routes
-  // enforced nothing, and the one route that did cap read the deployment's
-  // configured `batch.maxBatchSize` (1..1000) instead. The cap is now enforced
-  // at the route from that config, and the schema carries shape only.
+  // enforced nothing, and the one route that did cap read the constructed
+  // `RestServerConfig.batch.maxBatchSize` (1..1000, default 200) instead. The
+  // cap is now enforced at the route from that config, and the schema carries
+  // shape only.
+  //
+  // Reachability: EMBEDDER-ONLY (#15543, #16801). ⛔ That config is NOT
+  // deployment policy: it is written only by a host that constructs the
+  // `RestServerConfig` itself, never by `os serve` or the dev plugin, so a
+  // CLI-started deployment always gets the default of 200 and no flag, config
+  // file or CLI option moves it. Same posture as the schema this file pins
+  // (`BatchUpdateRequestSchema` in `batch.zod.ts`) and
+  // `RestServer#enforceBatchSize`; the per-key record is the REACHABILITY row
+  // in `packages/spec/liveness/batch_endpoints.json`.
   it('accepts an empty record list — an empty batch is a no-op, not a client error', () => {
     expect(() =>
       BatchUpdateRequestSchema.parse({

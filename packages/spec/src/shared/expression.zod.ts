@@ -1,6 +1,10 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
+// The closed list of refinements that reach the published JSON Schema (#18670
+// item 2). Both rules below are DECLARED through it, so `json-schema/**` states
+// them instead of being silently wider than this file.
+import { NON_BLANK_STRING, requiredOneOf } from './refinement-projection';
 
 /**
  * # Expression Protocol
@@ -77,13 +81,14 @@ export type ExpressionMeta = z.input<typeof ExpressionMetaSchema>;
 /**
  * Canonical Expression envelope.
  *
- * Phase 1 (M9.1): `source` is the canonical persisted form. `ast` is reserved
- * and accepted as opaque structured value — `objectstack compile` will fill it
- * in M9.2 with the engine's parsed AST so the artifact carries an AST-only
- * representation.
+ * `source` is the canonical persisted form: it is what the expression engine
+ * evaluates. `ast` is accepted beside it as an optional opaque structured
+ * value — `objectstack compile` fills it with the engine's parsed AST, and
+ * each engine validates its own shape — and it carries no promise of becoming
+ * required.
  *
- * Phase 2 (M9.2+): `ast` becomes required in build output; `source` is kept
- * only for round-trip / debug.
+ * A slot whose value the engine RUNS requires `source`; the envelope that
+ * spells that out is {@link EvaluatedExpressionSchema}.
  */
 export const ExpressionSchema = z.object({
   /** Which engine evaluates `source` / `ast`. */
@@ -97,7 +102,7 @@ export const ExpressionSchema = z.object({
   ast: z.unknown().optional(),
   /** Optional authorship metadata. */
   meta: ExpressionMetaSchema.optional(),
-}).refine(e => e.source !== undefined || e.ast !== undefined, {
+}).refine(requiredOneOf(['source', 'ast']), {
   message: 'Expression requires at least one of `source` or `ast`',
 });
 export type Expression = z.input<typeof ExpressionSchema>;
@@ -111,7 +116,7 @@ export type Expression = z.input<typeof ExpressionSchema>;
  */
 export const EVALUATED_EXPRESSION_SOURCE_REQUIRED =
   'An expression in an evaluated slot needs a non-blank `source`: the expression engine evaluates `source` '
-  + '(the canonical persisted form of phase M9.1) and cannot evaluate `ast` alone, so an envelope carrying only '
+  + '(the canonical persisted form) and cannot evaluate `ast` alone, so an envelope carrying only '
   + '`ast`, or a `source` that is blank after trimming, would validate and register and then fault at run time. '
   + 'Write `{ dialect: \'cel\', source: \'…\' }`.';
 
@@ -134,11 +139,12 @@ export const EVALUATED_EXPRESSION_SOURCE_REQUIRED =
  * parses it untrimmed and faults).
  *
  * `ExpressionSchema` itself is NOT narrowed: it is the persistence contract,
- * and its docblock declares that `ast` becomes required in build output at
- * phase M9.2. When AST-only evaluation lands, this schema is the one place to
- * revisit — relax `source` and require "`source` or `ast`, whichever the
- * engine evaluates" — and every evaluated slot composes it, so that flip is
- * one edit rather than a per-slot unwinding.
+ * and its docblock declares `ast` an optional opaque structured value that
+ * carries no promise of becoming required. If AST-only evaluation is ever
+ * chartered, this schema is the one place to revisit — relax `source` and
+ * require "`source` or `ast`, whichever the engine evaluates" — and every
+ * evaluated slot composes it, so that flip is one edit rather than a per-slot
+ * unwinding.
  *
  * Spelled as a property override rather than an object-level `.refine`, for a
  * measured reason: Zod runs an object's refinements even after a property has
@@ -160,10 +166,10 @@ export const EVALUATED_EXPRESSION_SOURCE_REQUIRED =
 export const EvaluatedExpressionSchema = ExpressionSchema.safeExtend({
   /**
    * Surface syntax — required and non-blank in an evaluated slot: it is what
-   * the engine evaluates (M9.1), and `ast` alone cannot be run.
+   * the engine evaluates, and `ast` alone cannot be run.
    */
   source: z.string({ error: () => EVALUATED_EXPRESSION_SOURCE_REQUIRED })
-    .refine((source) => source.trim().length > 0, { message: EVALUATED_EXPRESSION_SOURCE_REQUIRED }),
+    .refine(NON_BLANK_STRING, { message: EVALUATED_EXPRESSION_SOURCE_REQUIRED }),
 });
 export type EvaluatedExpression = z.input<typeof EvaluatedExpressionSchema>;
 export type EvaluatedExpressionParsed = z.infer<typeof EvaluatedExpressionSchema>;
@@ -225,7 +231,7 @@ function evaluatedExpressionInputRefusal(input: unknown): string | undefined {
  * required and non-blank there too. `ExpressionSchema` / `ExpressionInputSchema`
  * are NOT narrowed: they remain the persistence contract (`source` OR `ast`).
  *
- * The first slot to compose it is `FlowEdgeSchema.condition`, the branch
+ * The first slot to compose it was `FlowEdgeSchema.condition`, the branch
  * predicate `evaluateCondition` runs: an `ast`-only envelope authored there
  * used to parse, register, pass `objectstack validate`, and then land in the
  * evaluator's empty-source arm and answer a SILENT `false` — a branch that
@@ -238,10 +244,25 @@ function evaluatedExpressionInputRefusal(input: unknown): string | undefined {
  * The string arm's transform returns the narrowed `{ dialect: 'cel', source }`
  * as an `EvaluatedExpression`, so the parsed value of an evaluated slot stays
  * assignable to its own input type — the same move the typed arms make.
+ *
+ * Since #15811 it is the schema of EVERY evaluated slot in the spec, not of one
+ * of them: the flow-node ledger's rule generalised to the other declaring
+ * positions the #15811 census enumerated by identity — the formula
+ * `expression`, the field / option / grid-column / form / section / component
+ * `visibleWhen` / `visibleOn` / `readonlyWhen` / `requiredWhen` / `visibility`
+ * predicates, validation `condition` / `when`, hook `condition`, the object
+ * field-group and row-CRUD `visibleWhen` / `disabledWhen`, the sharing-rule
+ * `condition`, plugin-security-advanced and plugin-versioning `condition`,
+ * action `visible` / `disabled` / per-option `visibleWhen` / param `visible`,
+ * app nav `visible`, bulk-action `visible`, settings-manifest visibility, and
+ * the metrics / tracing expression union members. What is deliberately NOT
+ * narrowed is the pair above it: `ExpressionSchema` and
+ * `ExpressionInputSchema` remain the persistence contract (`source` OR `ast`),
+ * and so does `PredicateInputSchema`, which is a plain alias of the latter.
  */
 export const EvaluatedExpressionInputSchema = z.union([
   z.string()
-    .refine((source) => source.trim().length > 0, { message: EVALUATED_EXPRESSION_SOURCE_REQUIRED })
+    .refine(NON_BLANK_STRING, { message: EVALUATED_EXPRESSION_SOURCE_REQUIRED })
     .transform((source): EvaluatedExpression => ({ dialect: 'cel', source })),
   EvaluatedExpressionSchema,
 ], { error: (issue) => evaluatedExpressionInputRefusal(issue.input) });
@@ -316,7 +337,7 @@ export const TYPED_EXPRESSION_DIALECT_ONLY: Readonly<Record<TypedExpressionDiale
  */
 function typedExpressionStringArm<D extends TypedExpressionDialect>(dialect: D) {
   return z.string()
-    .refine((source) => source.trim().length > 0, { message: TYPED_EXPRESSION_SOURCE_REQUIRED[dialect] })
+    .refine(NON_BLANK_STRING, { message: TYPED_EXPRESSION_SOURCE_REQUIRED[dialect] })
     .transform((source) => ({ dialect, source }));
 }
 
@@ -401,8 +422,30 @@ export type PredicateInput = z.input<typeof PredicateInputSchema>;
 /**
  * Construct an Expression literal from a CEL source string. Used by DX
  * shorthand (`cel\`...\``) and by codegen tools.
+ *
+ * ## Why these four constructors return {@link EvaluatedExpression}
+ *
+ * `expression`, {@link cel}, {@link tmpl} and {@link cron} each assign a
+ * `string` to `source` unconditionally — read their four bodies — so the wider
+ * `Expression` return type they used to carry was never a statement about what
+ * they PRODUCE: a helper that over-declares its output is a defect at the
+ * PRODUCER (Prime Directive #12), not a harmless looseness. It was slop, and
+ * the evaluated-slot narrowing of #15811 is what made it cost something: an
+ * evaluated slot requires `source`, `Expression` does not carry it, and so
+ * ``visibleWhen: P`…` `` and `FlowEdgeSchema.condition` stopped type-checking
+ * (TS2322) at the one spelling this file's own docblock tells authors to use —
+ * against a value that in fact satisfies the schema at runtime.
+ *
+ * `EvaluatedExpression` is assignable to `Expression`, so narrowing the return
+ * type removes nothing from a caller: every persistence-contract slot still
+ * accepts these values unchanged; what the narrower type adds is that an
+ * evaluated slot accepts them too.
+ *
+ * ⛔ Never widen these back to buy a call site. A caller that genuinely has no
+ * `source` is constructing an `ast`-only envelope — it does not come from here,
+ * it writes the object literal, and an evaluated slot refuses it on purpose.
  */
-export function expression(source: string, dialect: ExpressionDialect = 'cel', meta?: ExpressionMeta): Expression {
+export function expression(source: string, dialect: ExpressionDialect = 'cel', meta?: ExpressionMeta): EvaluatedExpression {
   return { dialect, source, ...(meta ? { meta } : {}) };
 }
 
@@ -420,8 +463,8 @@ export function expression(source: string, dialect: ExpressionDialect = 'cel', m
  *
  * Each helper produces an {@link Expression} envelope with `dialect: 'cel'`
  * and the rendered template string as `source`. The CLI `objectstack compile`
- * step (M9.2) parses these into ASTs at build time so the persisted artifact
- * is dialect-AST only.
+ * step parses these into ASTs at build time, so the persisted envelope carries
+ * `ast` beside the canonical `source`.
  */
 function renderTemplate(strings: TemplateStringsArray, values: readonly unknown[]): string {
   if (values.length === 0) return strings[0] ?? '';
@@ -441,8 +484,12 @@ function renderTemplate(strings: TemplateStringsArray, values: readonly unknown[
   return out;
 }
 
-/** Tagged template — produces a CEL Expression envelope. */
-export function cel(strings: TemplateStringsArray, ...values: unknown[]): Expression {
+/**
+ * Tagged template — produces a CEL Expression envelope.
+ *
+ * Returns {@link EvaluatedExpression} — see {@link expression} for why.
+ */
+export function cel(strings: TemplateStringsArray, ...values: unknown[]): EvaluatedExpression {
   return { dialect: 'cel', source: renderTemplate(strings, values) };
 }
 
@@ -457,7 +504,7 @@ export const P = cel;
  * notification subjects, prompt bodies, titleFormat strings, etc. Variable
  * scope is the same as CEL (`{{record.x}}`, `{{os.user.id}}`).
  */
-export function tmpl(strings: TemplateStringsArray, ...values: unknown[]): Expression {
+export function tmpl(strings: TemplateStringsArray, ...values: unknown[]): EvaluatedExpression {
   // Templates do not get JSON.stringify on substitution — interpolation happens
   // at evaluate time via `{{path}}` markers, so we keep raw substitutions here.
   let out = strings[0] ?? '';
@@ -469,7 +516,7 @@ export function tmpl(strings: TemplateStringsArray, ...values: unknown[]): Expre
 }
 
 /** Tagged template — produces a cron Expression envelope. */
-export function cron(strings: TemplateStringsArray, ...values: unknown[]): Expression {
+export function cron(strings: TemplateStringsArray, ...values: unknown[]): EvaluatedExpression {
   let out = strings[0] ?? '';
   for (let i = 0; i < values.length; i++) {
     out += String(values[i]);

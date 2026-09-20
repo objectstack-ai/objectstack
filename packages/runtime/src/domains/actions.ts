@@ -61,6 +61,11 @@
 import {
     shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE,
 } from '@objectstack/core';
+// [#17273] The ONE reader of the native-error name list (#17681) and the ONE
+// generic replacement text — the same two `@objectstack/rest` composes into
+// `isScriptFaultMessage` / `UNCLASSIFIED_FAULT`, so this door's crash reading
+// cannot drift from the `/data` door's. ⛔ Never re-inline either.
+import { isNativeErrorName, INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import * as actionExec from '../action-execution.js';
 import { actorUserFromExecutionContext, resolveActorDisplayName } from '../security/actor-user.js';
 import { validationFailure, validationFailureDetails, VALIDATION_FAILED_STATUS } from '../validation-failure.js';
@@ -855,6 +860,53 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         const code: unknown = err?.code;
         const fields: unknown = err?.fields;
 
+        // [#17273] A sandboxed body that CRASHED is a fault before it is
+        // anything else — asked FIRST, above every branch that reads a
+        // producer declaration as intent.
+        //
+        // Two of those branches used to answer a crash, and neither was
+        // reading a statement the author made about a failure they handled:
+        //
+        //   - the declared-status branch below serves `err.status`, which the
+        //     sandbox lifts off whatever error crossed out of the VM (#7867,
+        //     `SandboxError.status`), so a crash could be served at a 4xx;
+        //   - `unexpectedFault` further down requires `!inner`, i.e. it reads
+        //     the PRESENCE of `innerMessage` as "user code threw this
+        //     deliberately". For a crash the runner sets `innerMessage` to the
+        //     native error text (`sandbox/quickjs-runner.ts`), so the mark that
+        //     means "deliberate" is set by the very case that is not — and the
+        //     crash fell to the 400 terminal at the bottom carrying
+        //     `TypeError: …` as its client-facing message, `err.message`
+        //     having been rewritten to the inner text above.
+        //
+        // That answer contradicted this route's own published catalog row
+        // (`content/docs/api/error-catalog.mdx`, Action Errors: a `TypeError` /
+        // `ReferenceError` / a driver's own class "is a crash (500)") and the
+        // header of this very file (`did it reject or crash? … crash → 500`).
+        //
+        // The rule is #15071's, ruled on the `/data` door and quoted there
+        // rather than restated: *"A declared code is the author's statement
+        // about the failure mode they **handled**. A crash … is not that mode,
+        // so it is classified as a fault"*. This is the same terminal at the
+        // door `mapDataError` does not decide, which is what #17273 is.
+        //
+        // The wire answer is the sanitised one, not `errorFromThrown`: that
+        // helper relays `err.message`, and `looksLikeInternalErrorLeak` reads
+        // FALSE for `TypeError: x is not a function` (it recognises driver
+        // dumps, not stack-shaped prose), so routing a crash through it would
+        // have moved the status and left the leak. The full wrapper still
+        // reaches the operator on the line below — the same "the client does
+        // not read it, the log keeps it" split #5437 draws in `rest`.
+        //
+        // ⛔ The predicate is a READ of the field the sandbox populated plus
+        // the shared name list, never a pattern-strip of the wrapper off
+        // `.message`.
+        const sandboxCrash = typeof inner === 'string' && inner.length > 0 && isNativeErrorName(inner.trim());
+        if (sandboxCrash) {
+            console.error(`[action ${objectName}/${actionName}] sandboxed body crashed: ${full}`);
+            return { handled: true, response: deps.error(INTERNAL_ERROR_MESSAGE, 500) };
+        }
+
         // An error that NAMES its own HTTP status is asking to be served with
         // it — a plugin's `FORBIDDEN` (status 403), a domain error from the
         // protocol layer. Honour that first: burying an explicit 403 in a 200
@@ -888,7 +940,10 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         //   name === 'Error'        a deliberate `throw new Error(msg)` — the
         //                           shape a registered handler uses to reject.
         //   innerMessage present    the sandbox's mark for "user code threw
-        //                           this deliberately" (SandboxError).
+        //                           this deliberately" (SandboxError). [#17273]
+        //                           True only of a REFUSAL now: a crash sets
+        //                           the same mark and is taken by the terminal
+        //                           above before this predicate is reached.
         //   code / fields present   a structured domain failure — the
         //                           ValidationError shape #3937 carries out.
         //   a ValidationError       matched by `validationFailureDetails`, the
@@ -914,7 +969,58 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
             && !validationFailureDetails(err);
         if (unexpectedFault) {
             console.error(`[action ${objectName}/${actionName}] unexpected fault (${name}): ${full}`);
-            return { handled: true, response: deps.errorFromThrown(err, 500) };
+            // [#18540] This branch is this door's UNCLASSIFIED-FAULT TERMINAL, so
+            // it answers the terminal's envelope — `INTERNAL_ERROR_MESSAGE`, the
+            // same sentence `/data` answers — instead of relaying `err.message`.
+            //
+            // The status was already right; what leaked was the SENTENCE. A
+            // non-sandboxed crash — a plain `TypeError` from an in-process
+            // registered handler — reached the wire as `500 INTERNAL_ERROR`
+            // carrying `Cannot read properties of undefined (reading 'id')`
+            // verbatim, while the IDENTICAL throw through the `/data` door
+            // answered `Internal server error`.
+            //
+            // Why neither existing guard caught it, both measured on this tree:
+            //
+            //   - #17273's crash terminal above is keyed on the SANDBOX
+            //     (`isNativeErrorName` over the `innerMessage` the QuickJS runner
+            //     fills). This face never crosses a VM boundary, so nothing sets
+            //     `innerMessage` and that terminal never fires. A predicate that
+            //     classifies by HOW a crash arrived is structurally blind to
+            //     crashes that did not arrive that way — while looking exhaustive.
+            //   - `errorFromThrown` relays `err.message` through the dispatcher's
+            //     5xx withhold, which is gated on `looksLikeInternalErrorLeak` —
+            //     a DRIVER-DUMP heuristic that reads FALSE for stack-shaped prose
+            //     (#17273's changeset records the same reading). So that relay is
+            //     DEFAULT-ALLOW: prose ships unless the heuristic recognises it.
+            //
+            // `/data` is default-DENY by construction: `classifyDataError` ends
+            // in an unconditional `UNCLASSIFIED_FAULT()`, and its
+            // `looksLikeInternalErrorLeak` limb only chooses `DATABASE_ERROR`
+            // over `INTERNAL_ERROR` — that limb is not what sanitises. Aligning
+            // therefore means answering the terminal here too, ⛔ never teaching
+            // the heuristic a new phrasing: re-pointing `looksLikeInternalErrorLeak`
+            // at stack-shaped prose would change what every OTHER boundary
+            // withholds, and it guards a different question.
+            //
+            // Nothing about the ANSWER moves but the sentence. Reaching here
+            // already proves `.status`/`.statusCode` are absent (the branch above
+            // serves them) and that this is not a `ValidationError`, so
+            // `resolveThrownHttpError` had no declared status either: its `status`
+            // was the 500 fallback and its `code` was
+            // `standardErrorCodeForHttpStatus(500)` — `INTERNAL_ERROR`, the code
+            // this exit emits. Same status, same code, same envelope shape.
+            //
+            // ⛔ Deliberately the SAME `deps.error` seam #17273's terminal uses,
+            // never a widened one: a fault's `userMessage` and its non-string
+            // `details.code` (a driver errno — the backend-naming disclosure
+            // `demotedDeclaredCode` already withholds on an undeclared 5xx) do not
+            // ride this exit, exactly as they do not ride `/data`'s.
+            //
+            // The words are not lost: the `console.error` above keeps the full
+            // text — the same "the client does not read it, the log keeps it"
+            // split #5437 draws in `rest`.
+            return { handled: true, response: deps.error(INTERNAL_ERROR_MESSAGE, 500) };
         }
 
         // [#3962] A deliberate REJECTION is a 400. The 200-with-inner-envelope

@@ -210,7 +210,12 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { gitFreeEnv } from './git-env.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
+// #16421 — the `fw-gate` sandbox below copies `check-adr-0087-registration.mjs`
+// in and runs it. Its staging manifest is DERIVED from that gate's module graph,
+// by the same module the gate's own fixture uses, so the two cannot disagree.
+import { firstPartyModuleClosure, stageFirstPartyClosure } from './first-party-closure.mjs';
 
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
 //
@@ -260,6 +265,37 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..');
 
 /**
+ * Stage the shell driver and everything it needs into a throwaway framework
+ * root, so `bump-objectui.sh` can be run there for real. (#16421)
+ *
+ * Seven of this file's self-test cases build such a root, and all seven used to
+ * carry the SAME hand-written three-name manifest — `bump-objectui.sh`, this
+ * script, `invoked-as.mjs`. One function now, for the reason the other staging
+ * site in this file just learned the hard way: a manifest is a rule enforced by
+ * remembering, and the first time this script gained an import, CI went red with
+ * an `ERR_MODULE_NOT_FOUND` naming neither the import nor the list.
+ *
+ * ⭐ `bump-objectui.sh` stays NAMED, and that is not an oversight. It is a shell
+ * script: no `import` statement reaches it, so no module walk can find it. What
+ * is derived is exactly the part a walk can answer — this script's own
+ * first-party JS closure — and what is named is the part it cannot.
+ *
+ * @param {string} root — the throwaway framework root.
+ * @returns {string[]} every repo-relative path written, for a caller to assert on.
+ */
+function stageBumpDriver(root) {
+  const write = (rel, text) => {
+    mkdirSync(dirname(join(root, rel)), { recursive: true });
+    writeFileSync(join(root, rel), text);
+  };
+  write('scripts/bump-objectui.sh', readFileSync(join(__dirname, 'bump-objectui.sh'), 'utf8'));
+  return [
+    'scripts/bump-objectui.sh',
+    ...stageFirstPartyClosure('scripts/objectui-changeset-digest.mjs', { root: REPO_ROOT, write }),
+  ];
+}
+
+/**
  * Default cap on EACH rendered list. The releasing entries (#4731) and the
  * undeclared commits (#6174) are capped INDEPENDENTLY, so a long release can
  * never squeeze the other list down to nothing — one budget shared between them
@@ -281,6 +317,13 @@ const LEVEL_RANK = { patch: 1, minor: 2, major: 3 };
  */
 function git(cwd, args, { captureStderr = false } = {}) {
   return execFileSync('git', ['-C', cwd, ...args], {
+    // LOCAL-ONLY, every caller (#16644). This helper serves `rev-parse`, `log`, `show`,
+    // `cat-file`, `merge-base`, `update-ref`, `init`, `add` and `commit` -- all against
+    // the repository `-C cwd` names, which is the objectui checkout on a real run and a
+    // mkdtemp fixture throughout the self-test. ⛔ No caller fetches, clones or pushes
+    // through it, so no transport configuration is lost; the two `clone`s in this file
+    // are spawned separately and labelled where they stand.
+    env: gitFreeEnv(),
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
     ...(captureStderr ? { stdio: ['ignore', 'pipe', 'pipe'] } : {}),
@@ -1713,15 +1756,15 @@ function selfTest() {
     mkdirSync(join(fwRun, '.changeset'), { recursive: true });
     writeFileSync(join(fwRun, '.changeset', 'pre.json'), '{"mode":"pre","tag":"rc"}\n');
     writeFileSync(join(fwRun, '.objectui-sha'), `${base}\n`);
-    for (const f of ['bump-objectui.sh', 'objectui-changeset-digest.mjs', 'invoked-as.mjs']) {
-      writeFileSync(join(fwRun, 'scripts', f), readFileSync(join(__dirname, f), 'utf8'));
-    }
+    stageBumpDriver(fwRun);
     const bumpStdout = execFileSync(
       'bash',
       [join(fwRun, 'scripts', 'bump-objectui.sh'), '--no-commit', head],
       {
         encoding: 'utf8',
-        env: { ...process.env, OBJECTUI_ROOT: ui },
+        // #16644: `gitFreeEnv()` as the BASE -- `bump-objectui.sh` spawns `git` one frame
+        // down against the fixture, where an inherited GIT_DIR outranks its `cwd`.
+        env: { ...gitFreeEnv(), OBJECTUI_ROOT: ui },
       },
     );
     // #5960: the pin bump is the ONLY trigger of ADR-0082 D4's declaration-parity
@@ -1760,13 +1803,13 @@ function selfTest() {
     mkdirSync(join(fwDegraded, 'scripts'), { recursive: true });
     mkdirSync(join(fwDegraded, '.changeset'), { recursive: true });
     writeFileSync(join(fwDegraded, '.objectui-sha'), `${'0'.repeat(40)}\n`);
-    for (const f of ['bump-objectui.sh', 'objectui-changeset-digest.mjs', 'invoked-as.mjs']) {
-      writeFileSync(join(fwDegraded, 'scripts', f), readFileSync(join(__dirname, f), 'utf8'));
-    }
+    stageBumpDriver(fwDegraded);
     const unwalkableRun = spawnSync(
       'bash',
       [join(fwDegraded, 'scripts', 'bump-objectui.sh'), '--no-commit', head],
-      { encoding: 'utf8', env: { ...process.env, OBJECTUI_ROOT: ui, GIT_TERMINAL_PROMPT: '0' } },
+      // #16644: `gitFreeEnv()` as the BASE -- `bump-objectui.sh` spawns `git` one frame
+      // down against the fixture, where an inherited GIT_DIR outranks its `cwd`.
+      { encoding: 'utf8', env: { ...gitFreeEnv(), OBJECTUI_ROOT: ui, GIT_TERMINAL_PROMPT: '0' } },
     );
     const unwalkableCs = join(fwDegraded, '.changeset', `console-${head.slice(0, 12)}.md`);
     check(
@@ -1788,13 +1831,13 @@ function selfTest() {
     const fwInitial = join(tmp, 'fw-initial-pin');
     mkdirSync(join(fwInitial, 'scripts'), { recursive: true });
     mkdirSync(join(fwInitial, '.changeset'), { recursive: true });
-    for (const f of ['bump-objectui.sh', 'objectui-changeset-digest.mjs', 'invoked-as.mjs']) {
-      writeFileSync(join(fwInitial, 'scripts', f), readFileSync(join(__dirname, f), 'utf8'));
-    }
+    stageBumpDriver(fwInitial);
     const initialRun = spawnSync(
       'bash',
       [join(fwInitial, 'scripts', 'bump-objectui.sh'), '--no-commit', head],
-      { encoding: 'utf8', env: { ...process.env, OBJECTUI_ROOT: ui, GIT_TERMINAL_PROMPT: '0' } },
+      // #16644: `gitFreeEnv()` as the BASE -- `bump-objectui.sh` spawns `git` one frame
+      // down against the fixture, where an inherited GIT_DIR outranks its `cwd`.
+      { encoding: 'utf8', env: { ...gitFreeEnv(), OBJECTUI_ROOT: ui, GIT_TERMINAL_PROMPT: '0' } },
     );
     const initialCs = join(fwInitial, '.changeset', `console-${head.slice(0, 12)}.md`);
     const initialBody = existsSync(initialCs) ? readFileSync(initialCs, 'utf8') : '';
@@ -2272,21 +2315,40 @@ function selfTest() {
     // in the judged diff) — the gate's convention-rot assertion needs its
     // breaking detector to match something.
     gw('.changeset/stock-breaking.md', '---\n"@objectstack/spec": major\n---\n\nstock\n\n**BREAKING** something\n');
-    gw(
-      'scripts/check-adr-0087-registration.mjs',
-      readFileSync(join(__dirname, 'check-adr-0087-registration.mjs'), 'utf8'),
+    // EVERY first-party module that gate imports, TRANSITIVELY, travels with the
+    // copy, or it dies on ERR_MODULE_NOT_FOUND — and the two cases below then
+    // read as "the ROUND TRIP assertion broke" when nothing about the round trip
+    // moved.
+    //
+    // ⭐ It was a hand MANIFEST, and the manifest is what broke (#16421). That
+    // gate gained one import — `pm/check-clause2-carriers.mjs`, the fleet's one
+    // clause-② declaration reader, whose own closure is nine modules deep — and
+    // the author updated the gate's OWN I1/I2 staging site in the same edit and
+    // not this one. CI went red HERE, on a gate about objectui changesets, with
+    // an error naming neither the new import nor this list. Both sites now DERIVE
+    // the closure from the same edges Node resolves, through
+    // `first-party-closure.mjs`; neither holds an opinion about the graph any
+    // more, and adding an import over there costs nothing here by construction.
+    //
+    // ⚠️ THE ENTRY IS READ HERE, BY NAME, and that line is not redundant with the
+    // walk below — it is this family's REGISTRATION. `dispatch-gates` derives
+    // "which gate does this family run a copy of?" from an anchored
+    // `readFileSync` whose target resolves to a tracked path; a loop variable or
+    // a read that happens inside another module is deliberately NOT followed. So
+    // the first spelling of this fix staged the gate correctly and made the
+    // dependency invisible, and `check:pm-dispatch-gates` said so: "the staged
+    // gate reaches the family that runs a copy of it (no key)". ⛔ Do not fold
+    // this read into the walk to save a line — the walk stages the DEPENDENCIES,
+    // this read stages the GATE, and each is load-bearing for a different reader.
+    const gateEntry = 'scripts/check-adr-0087-registration.mjs';
+    gw(gateEntry, readFileSync(join(__dirname, 'check-adr-0087-registration.mjs'), 'utf8'));
+    const gateDeps = firstPartyModuleClosure(gateEntry, { root: join(__dirname, '..') }).filter((rel) => rel !== gateEntry);
+    for (const rel of gateDeps) gw(rel, readFileSync(join(__dirname, '..', rel), 'utf8'));
+    check(
+      '#6494 the staged gate carries its whole first-party closure — DERIVED, not a hand manifest',
+      gateDeps.includes('scripts/pm/check-clause2-carriers.mjs') && gateDeps.length >= 2,
+      `${gateDeps.length} dependenc(ies): ${gateDeps.join(', ')}`,
     );
-    // EVERY `./`-relative sibling that gate imports travels with the copy, or it
-    // dies on ERR_MODULE_NOT_FOUND — and the two cases below then read as "the
-    // ROUND TRIP assertion broke" when nothing about the round trip moved. This
-    // is a MANIFEST, so adding an import over there means adding a row here;
-    // `js-comment-mask.mjs` (#12881) is the case that proved it has to be a list
-    // rather than the one hard-coded `invoked-as.mjs` line it replaced. It is the
-    // second staging site of this same gate to learn that (the gate's own I1/I2
-    // fixture is the first), which is why both now spell it the same way.
-    for (const sibling of ['invoked-as.mjs', 'js-comment-mask.mjs']) {
-      gw(`scripts/${sibling}`, readFileSync(join(__dirname, sibling), 'utf8'));
-    }
     gg('add', '-A');
     gg('commit', '-q', '-m', 'base');
     const gateBase = gg('rev-parse', 'HEAD').trim();
@@ -2657,15 +2719,13 @@ function selfTest() {
     mkdirSync(join(fwTrunc, 'scripts'), { recursive: true });
     mkdirSync(join(fwTrunc, '.changeset'), { recursive: true });
     writeFileSync(join(fwTrunc, '.objectui-sha'), `${c6from}\n`);
-    for (const f of ['bump-objectui.sh', 'objectui-changeset-digest.mjs', 'invoked-as.mjs']) {
-      writeFileSync(join(fwTrunc, 'scripts', f), readFileSync(join(__dirname, f), 'utf8'));
-    }
+    stageBumpDriver(fwTrunc);
     const truncPinBefore = readFileSync(join(fwTrunc, '.objectui-sha'), 'utf8');
     // OBJECTUI_NO_DEEPEN=1 on purpose: a self-test must never reach the network,
     // and this run is also the opt-out's only coverage.
     const truncBump = spawnSync('bash', [join(fwTrunc, 'scripts', 'bump-objectui.sh'), '--no-commit', c6to], {
       encoding: 'utf8',
-      env: { ...process.env, OBJECTUI_ROOT: ui6, OBJECTUI_NO_DEEPEN: '1' },
+      env: { ...gitFreeEnv(), OBJECTUI_ROOT: ui6, OBJECTUI_NO_DEEPEN: '1' }, // #16644: see above
     });
     const truncCsPath = join(fwTrunc, '.changeset', `console-${c6to.slice(0, 12)}.md`);
     check(
@@ -2710,12 +2770,10 @@ function selfTest() {
     mkdirSync(join(fwTrunc2, 'scripts'), { recursive: true });
     mkdirSync(join(fwTrunc2, '.changeset'), { recursive: true });
     writeFileSync(join(fwTrunc2, '.objectui-sha'), `${c6from}\n`);
-    for (const f of ['bump-objectui.sh', 'objectui-changeset-digest.mjs', 'invoked-as.mjs']) {
-      writeFileSync(join(fwTrunc2, 'scripts', f), readFileSync(join(__dirname, f), 'utf8'));
-    }
+    stageBumpDriver(fwTrunc2);
     const noopDeepen = spawnSync('bash', [join(fwTrunc2, 'scripts', 'bump-objectui.sh'), '--no-commit', c6to], {
       encoding: 'utf8',
-      env: { ...process.env, OBJECTUI_ROOT: ui6, GIT_TERMINAL_PROMPT: '0' },
+      env: { ...gitFreeEnv(), OBJECTUI_ROOT: ui6, GIT_TERMINAL_PROMPT: '0' }, // #16644: see above
     });
     const noopDeepenCsPath = join(fwTrunc2, '.changeset', `console-${c6to.slice(0, 12)}.md`);
     check(
@@ -2793,7 +2851,11 @@ function selfTest() {
       const args = ['clone', '-q'];
       if (depth) args.push('--depth', String(depth));
       args.push(pathToFileURL(uiUp).href, dir);
-      execFileSync('git', args, { encoding: 'utf8' });
+      // LOCAL-ONLY despite being a `clone` (#16644): the source is a `file://` URL under
+      // this battery's own mkdtemp root, so the transport settings this container carries
+      // in GIT_CONFIG_* / GIT_SSL_* are not in play -- while an inherited GIT_DIR would
+      // still decide where the clone lands.
+      execFileSync('git', args, { encoding: 'utf8', env: gitFreeEnv() });
       // A real checkout has this ref, and #10495's reachability report keys on
       // it — without it these cases would bury their assertions under warnings.
       git(dir, ['update-ref', 'refs/remotes/origin/main', upTo]);
@@ -2883,15 +2945,13 @@ function selfTest() {
       mkdirSync(join(dir, 'scripts'), { recursive: true });
       mkdirSync(join(dir, '.changeset'), { recursive: true });
       writeFileSync(join(dir, '.objectui-sha'), `${pinSha}\n`);
-      for (const f of ['bump-objectui.sh', 'objectui-changeset-digest.mjs', 'invoked-as.mjs']) {
-        writeFileSync(join(dir, 'scripts', f), readFileSync(join(__dirname, f), 'utf8'));
-      }
+      stageBumpDriver(dir);
       return dir;
     };
     const runShellBump = (fwDir, uiRoot, extraEnv = {}) =>
       spawnSync('bash', [join(fwDir, 'scripts', 'bump-objectui.sh'), '--no-commit', upTo], {
         encoding: 'utf8',
-        env: { ...process.env, OBJECTUI_ROOT: uiRoot, GIT_TERMINAL_PROMPT: '0', ...extraEnv },
+        env: { ...gitFreeEnv(), OBJECTUI_ROOT: uiRoot, GIT_TERMINAL_PROMPT: '0', ...extraEnv }, // #16644: see above
       });
     const csName = `console-${upTo.slice(0, 12)}.md`;
 
@@ -2984,9 +3044,7 @@ function selfTest() {
       mkdirSync(join(dir, 'scripts'), { recursive: true });
       mkdirSync(join(dir, '.changeset'), { recursive: true });
       writeFileSync(join(dir, '.objectui-sha'), `${pinSha}\n`);
-      for (const f of ['bump-objectui.sh', 'objectui-changeset-digest.mjs', 'invoked-as.mjs']) {
-        writeFileSync(join(dir, 'scripts', f), readFileSync(join(__dirname, f), 'utf8'));
-      }
+      stageBumpDriver(dir);
       return dir;
     };
     // Offline by construction — a self-test must never reach the network.
@@ -2996,7 +3054,11 @@ function selfTest() {
       spawnSync('bash', [join(fwDir, 'scripts', 'bump-objectui.sh'), ...args], {
         encoding: 'utf8',
         env: {
-          ...process.env,
+        // #16644: `gitFreeEnv()` rather than `process.env` as the BASE. This child is
+        // `bash`, not `git`, but `bump-objectui.sh` spawns `git` one frame down against
+        // the fixture repositories below, and an inherited GIT_DIR outranks their `cwd`
+        // there exactly as it would here. The deliberate keys are re-applied ON TOP.
+          ...gitFreeEnv(),
           OBJECTUI_ROOT: uiRoot,
           OBJECTUI_NO_DEEPEN: '1',
           GIT_TERMINAL_PROMPT: '0',
@@ -3150,6 +3212,7 @@ function selfTest() {
     });
     const revParseMissing = spawnSync('git', ['-C', uiMiss.dir, 'rev-parse', 'HEAD'], {
       encoding: 'utf8',
+      env: gitFreeEnv(), // LOCAL-ONLY (#16644): the fixture `-C` names, never a hook's repo
     });
     check(
       '#10495 R5a `git rev-parse HEAD` exits 0 for a commit whose OBJECT is gone — so NEW_SHA arriving is no proof of presence',
@@ -3159,7 +3222,9 @@ function selfTest() {
     const isAncestorMissing = spawnSync(
       'git',
       ['-C', uiMiss.dir, 'merge-base', '--is-ancestor', missHead, 'origin/main'],
-      { encoding: 'utf8' },
+      // LOCAL-ONLY (#16644): `origin/main` here is a ref this fixture wrote with
+      // `update-ref`, not a remote to reach.
+      { encoding: 'utf8', env: gitFreeEnv() },
     );
     check(
       '#10495 R5b `merge-base --is-ancestor` exits 128 on an absent object — an ERROR, not the "no" that 1 means',

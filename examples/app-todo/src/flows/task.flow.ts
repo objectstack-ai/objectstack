@@ -1,37 +1,39 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// ⛔ NEITHER FLOW IN THIS FILE FIRES AS SHIPPED (#16659).
+// ⚠️ WHETHER EITHER FLOW IN THIS FILE FIRES IS A DEPLOYMENT DECISION (#17396).
 //
-// Both are `type: 'schedule'`. Since #16659 a time-triggered flow must declare
-// the organization it runs as — `config.organization`, a `sys_organization.id`
-// — and a flow that declares none is REFUSED at bind: the trigger logs the
-// reason at `error` and throws, the engine records the flow as NOT bound, and
-// it appears in `getTriggerBindingAudit()` and the CLI's startup summary.
+// Both are `type: 'schedule'` and neither declares `config.organization`, on
+// purpose. Two environment facts decide what happens, and neither is metadata:
 //
-// A package-shipped flow has no legal value to write there: organization ids
-// are minted at runtime, per install. ⛔ A placeholder id must NOT be invented
-// — a value matching no row is silently authoritative to every report, export
-// and cleanup that filters by organization, which is strictly worse than the
-// refusal.
+//  1. `OS_AUTOMATION_SCHEDULED_WORK_ENABLED` — package-authored scheduled work
+//     is OFF by default in every tenancy posture. Unset, neither flow is armed,
+//     and both are listed in `getTriggerBindingAudit()` and the CLI startup
+//     summary as *disabled by deployment policy* — ⛔ NOT as a binding failure.
+//     Nothing in this file needs fixing for that state.
+//  2. The tenancy posture, once the switch is ON. Under `single` both bind and
+//     run as written, carrying NO organization; every tenant-scoped write
+//     beneath them resolves the deployment's one organization. Under a wall
+//     (`group` / `isolated`) a time-triggered flow declares the organization it
+//     runs as or it is not armed (#16659, unchanged behind the wall).
 //
-// ⇒ What a package-shipped time-triggered flow should do instead is an open
-// maintainer decision. Its tracking card was destroyed along with a suspended
-// account and is being re-filed; until that card carries a number, this note is
-// the record. Until then these two are worked examples of the SHAPE: to run
-// either end to end, register it at runtime with an `organization` the install
+// ⛔ A placeholder id must NOT be invented for the walled case: organization ids
+// are minted at runtime, per install, and a value matching no row is silently
+// authoritative to every report, export and cleanup that filters by
+// organization — strictly worse than the refusal. To run either flow on a
+// walled deployment, register it at runtime with an `organization` that install
 // actually holds.
 //
-// `os lint` / `os validate` / `objectstack build` report it as a `warning`
-// (`flow-schedule-organization-missing`) — deliberately not an `error`, which
-// would refuse this package's own build for a defect it cannot repair.
+// `os lint` / `os validate` / `objectstack build` say NOTHING about the missing
+// key: lint can see neither the switch nor the posture, so a finding here would
+// be false for the default deployment.
 
 import type { Flow } from '@objectstack/spec/automation';
 
 /**
  * Task Reminder Flow — scheduled flow to send reminders for upcoming tasks.
  *
- * ⛔ Does not fire as shipped: it declares no `config.organization`. See the
- * file header.
+ * ⚠️ Whether it fires is a deployment decision — it declares no
+ * `config.organization`. See the file header.
  */
 export const TaskReminderFlow: Flow = {
   name: 'task_reminder',
@@ -56,21 +58,69 @@ export const TaskReminderFlow: Flow = {
       config: { objectName: 'todo_task', filter: { due_date: '{tomorrow}', status: { $ne: 'completed' } }, outputVariable: 'tasksToRemind', limit: 200 },
     },
     {
+      // #19206 — the per-item steps live in `config.body`, and that is what
+      // binds `currentTask` at all. A `loop` node carrying only `collection` +
+      // `iteratorVariable` takes the LEGACY flat-graph path
+      // (`loop-node.ts`: `if (raw.body == null)`), which sets `$loopItems` /
+      // `$loopIndex` and returns WITHOUT ever binding `iteratorVariable` — so
+      // every `{currentTask.X}` token in the nodes wired after it resolved to
+      // nothing. The structured container (ADR-0031) is the form that
+      // iterates: it binds `iteratorVariable` in the enclosing scope and runs
+      // the body region once per item, and the node's ordinary out-edge
+      // (`→ end`) is the after-loop continuation.
       id: 'loop_tasks', type: 'loop', label: 'Loop Through Tasks',
-      config: { collection: '{tasksToRemind}', iteratorVariable: 'currentTask' },
-    },
-    {
-      // `notify` is what actually delivers (#4343): it hands the messaging
-      // service the notification — the in-app inbox by default, and email once
-      // `@objectstack/plugin-email` is installed. The `script` node this
-      // replaced only ever logged a line and reported success.
-      id: 'send_reminder', type: 'notify', label: 'Send Reminder',
       config: {
-        recipients: '{currentTask.owner}',
-        title: 'Task due tomorrow: {currentTask.subject}',
-        message: 'Due {currentTask.due_date} · priority {currentTask.priority}.',
-        sourceObject: 'todo_task',
-        sourceId: '{currentTask.id}',
+        collection: '{tasksToRemind}',
+        iteratorVariable: 'currentTask',
+        // The read above is capped at `limit: 200`, so this cap is the same
+        // bound stated on the side that iterates it — the engine FAILS the
+        // node on a longer collection rather than truncating in silence.
+        maxIterations: 200,
+        body: {
+          nodes: [
+            {
+              // Per-iteration containment (`flow-loop-body-uncontained`). A
+              // `loop` body has no error handling of its own: the container
+              // iterates with a bare `await`, so a body node answering
+              // `success: false` propagates straight out and ends the WHOLE
+              // sweep. `notify` fails on an empty resolved recipient set, so
+              // one task with a blank `owner` would leave every later task
+              // unreminded. The guard is a `try_catch` INSIDE the body.
+              id: 'guard_reminder', type: 'try_catch', label: 'Guarded Reminder',
+              config: {
+                try: {
+                  nodes: [
+                    {
+                      // `notify` is what actually delivers (#4343): it hands the
+                      // messaging service the notification — the in-app inbox by
+                      // default, and email once `@objectstack/plugin-email` is
+                      // installed. The `script` node this replaced only ever
+                      // logged a line and reported success.
+                      id: 'send_reminder', type: 'notify', label: 'Send Reminder',
+                      config: {
+                        recipients: '{currentTask.owner}',
+                        title: 'Task due tomorrow: {currentTask.subject}',
+                        message: 'Due {currentTask.due_date} · priority {currentTask.priority}.',
+                        sourceObject: 'todo_task',
+                        sourceId: '{currentTask.id}',
+                      },
+                    },
+                  ],
+                },
+                // The shortest handler that works: ONE bare `assignment` node
+                // with no `config`. A `catch` region cannot be empty —
+                // `FlowRegionSchema.nodes` is `.min(1)`, so `catch: {}` and
+                // `catch: { nodes: [] }` are both refused by the parse, and
+                // omitting `catch` entirely parses while containing NOTHING.
+                catch: {
+                  nodes: [
+                    { id: 'reminder_failed', type: 'assignment', label: 'Reminder Failed (contained)' },
+                  ],
+                },
+              },
+            },
+          ],
+        },
       },
     },
     { id: 'end', type: 'end', label: 'End' },
@@ -79,16 +129,17 @@ export const TaskReminderFlow: Flow = {
   edges: [
     { id: 'e1', source: 'start', target: 'get_upcoming_tasks', type: 'default' },
     { id: 'e2', source: 'get_upcoming_tasks', target: 'loop_tasks', type: 'default' },
-    { id: 'e3', source: 'loop_tasks', target: 'send_reminder', type: 'default' },
-    { id: 'e4', source: 'send_reminder', target: 'end', type: 'default' },
+    // The loop's ordinary out-edge is the AFTER-loop continuation; the
+    // per-item step is `config.body`, not a node wired after the container.
+    { id: 'e3', source: 'loop_tasks', target: 'end', type: 'default' },
   ],
 };
 
 /**
  * Overdue Task Escalation Flow.
  *
- * ⛔ Does not fire as shipped: it declares no `config.organization`. See the
- * file header.
+ * ⚠️ Whether it fires is a deployment decision — it declares no
+ * `config.organization`. See the file header.
  */
 export const OverdueEscalationFlow: Flow = {
   name: 'overdue_escalation',
@@ -115,26 +166,78 @@ export const OverdueEscalationFlow: Flow = {
       },
     },
     {
+      // #19206 — same repair as `task_reminder` above, and this is the flow
+      // where the omission was MEASURED: with the per-item steps wired as
+      // ordinary nodes AFTER a body-less `loop`, `currentTask` was never
+      // bound, and the run died at `update_priority` with "refusing to run -
+      // 1 filter condition(s) resolved to nothing: {currentTask.id} (at id)".
+      // `notify_owner` sits one node BEHIND that refusal, so no escalation
+      // notice was ever sent — the loud refusal is the only reason a filter
+      // that resolved to nothing did not match every task in the table.
       id: 'loop_overdue', type: 'loop', label: 'Loop Through Overdue Tasks',
-      config: { collection: '{overdueTasks}', iteratorVariable: 'currentTask' },
-    },
-    {
-      id: 'update_priority', type: 'update_record', label: 'Escalate Priority',
       config: {
-        objectName: 'todo_task',
-        filter: { id: '{currentTask.id}' },
-        fields: { priority: 'urgent', tags: ['important', 'follow_up'] },
-      },
-    },
-    {
-      id: 'notify_owner', type: 'notify', label: 'Notify Task Owner',
-      config: {
-        recipients: '{currentTask.owner}',
-        title: 'URGENT: task overdue — {currentTask.subject}',
-        message: 'Due {currentTask.due_date}, {currentTask.days_overdue} day(s) overdue.',
-        severity: 'critical',
-        sourceObject: 'todo_task',
-        sourceId: '{currentTask.id}',
+        collection: '{overdueTasks}',
+        iteratorVariable: 'currentTask',
+        // Same bound as the read above (`limit: 200`), stated on the side
+        // that iterates: a longer collection fails the node rather than
+        // truncating in silence.
+        maxIterations: 200,
+        body: {
+          nodes: [
+            {
+              // Per-iteration containment (`flow-loop-body-uncontained`): both
+              // per-item steps are fallible — `update_record` answers
+              // `success: false` on a refused write, `notify` on an empty
+              // resolved recipient set — and an uncontained failure propagates
+              // straight out of the container, ending the sweep at the first
+              // bad row with every later task left unescalated.
+              //
+              // ONE `try_catch` over BOTH steps, not one per step: the notice
+              // announces the escalation the update performs, so a row whose
+              // update was refused must not be told its priority was raised.
+              id: 'guard_escalation', type: 'try_catch', label: 'Guarded Escalation',
+              config: {
+                try: {
+                  nodes: [
+                    {
+                      id: 'update_priority', type: 'update_record', label: 'Escalate Priority',
+                      config: {
+                        objectName: 'todo_task',
+                        filter: { id: '{currentTask.id}' },
+                        fields: { priority: 'urgent', tags: ['important', 'follow_up'] },
+                      },
+                    },
+                    {
+                      id: 'notify_owner', type: 'notify', label: 'Notify Task Owner',
+                      config: {
+                        recipients: '{currentTask.owner}',
+                        title: 'URGENT: task overdue — {currentTask.subject}',
+                        // `days_overdue` is the formula field the record
+                        // projection carries (#18584); the loop binding this
+                        // template reads it from is what #19206 restores.
+                        message: 'Due {currentTask.due_date}, {currentTask.days_overdue} day(s) overdue.',
+                        severity: 'critical',
+                        sourceObject: 'todo_task',
+                        sourceId: '{currentTask.id}',
+                      },
+                    },
+                  ],
+                  edges: [
+                    { id: 'be1', source: 'update_priority', target: 'notify_owner', type: 'default' },
+                  ],
+                },
+                // One bare `assignment` — the shortest handler that works; a
+                // `catch` region's `nodes` is `.min(1)`, so an empty one is
+                // refused at parse and an omitted one contains nothing.
+                catch: {
+                  nodes: [
+                    { id: 'escalation_failed', type: 'assignment', label: 'Escalation Failed (contained)' },
+                  ],
+                },
+              },
+            },
+          ],
+        },
       },
     },
     { id: 'end', type: 'end', label: 'End' },
@@ -143,9 +246,8 @@ export const OverdueEscalationFlow: Flow = {
   edges: [
     { id: 'e1', source: 'start', target: 'get_overdue_tasks', type: 'default' },
     { id: 'e2', source: 'get_overdue_tasks', target: 'loop_overdue', type: 'default' },
-    { id: 'e3', source: 'loop_overdue', target: 'update_priority', type: 'default' },
-    { id: 'e4', source: 'update_priority', target: 'notify_owner', type: 'default' },
-    { id: 'e5', source: 'notify_owner', target: 'end', type: 'default' },
+    // The container's ordinary out-edge is the after-loop continuation.
+    { id: 'e3', source: 'loop_overdue', target: 'end', type: 'default' },
   ],
 };
 

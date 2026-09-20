@@ -157,6 +157,7 @@ import {
     isApiOperationAllowed,
     API_PRIMITIVES,
     DATA_ACTION_TO_API_OPERATION,
+    referenceCarrierOf,
 } from '@objectstack/spec/data';
 // [#8013] The SHARED envelope writer (#3973), aliased. [#9098] The alias no
 // longer exists to dodge a NAME collision — the local responder this used to
@@ -335,6 +336,7 @@ import {
     sendDeclaredFault,
     sendFieldVisibilityFault,
     handleRouteError,
+    thrownAnswerIsBareNotFound,
     logUnexpectedRouteError,
     isExpectedRouteError,
     applyDroppedFieldsHeader,
@@ -1157,33 +1159,6 @@ function parseDeclaredSubConfig<T extends z.ZodType>(
 }
 
 /**
- * RestServer
- * 
- * Provides automatic REST API endpoint generation for ObjectStack.
- * Generates standard RESTful CRUD endpoints, metadata endpoints, and batch operations
- * based on the configured protocol provider.
- * 
- * Features:
- * - Automatic CRUD endpoint generation (GET, POST, PUT, PATCH, DELETE)
- * - Metadata API endpoints (/meta)
- * - Batch operation endpoints (/batch, /createMany, /updateMany, /deleteMany)
- * - Discovery endpoint
- * - Configurable path prefixes
- * 
- * @example
- * const restServer = new RestServer(httpServer, protocolProvider, {
- *   api: {
- *     version: 'v1',
- *     basePath: '/api'
- *   },
- *   crud: {
- *     dataPrefix: '/data'
- *   }
- * });
- * 
- * restServer.registerRoutes();
- */
-/**
  * Minimal env registry shape consumed by the REST server for hostname →
  * environmentId resolution and `X-Environment-Id` header validation on unscoped
  * routes. Mirrors the surface of `EnvironmentDriverRegistry` defined in
@@ -1507,6 +1482,84 @@ function notImplementedRefusalAnswer(
     return { status: 501, body: { error: { code: 'NOT_IMPLEMENTED', message } } };
 }
 
+/**
+ * [#18066] THE one absence answer `GET /meta/:type/:name` gives — a single
+ * emitter, so the several conditions that mean "you get nothing" cannot answer
+ * several different bodies.
+ *
+ * ⭐ Byte-identity is the POINT here, not tidiness. #8013 partitioned this
+ * route's refusals deliberately: an app that EXISTS and whose
+ * `requiredPermissions` the caller lacks reports `403 PERMISSION_DENIED`,
+ * while an unpublished app (ADR-0045 §3, "externally unobservable"), an app
+ * gated by an absent optional service (ADR-0057 D10) and a name with nothing
+ * behind it must be INDISTINGUISHABLE — extending the denial to them "would
+ * make every app name on the platform enumerable", which is the unruled change
+ * that card fenced off. Two hand-built bodies for two of those three arms is
+ * that fence held by coincidence; one emitter makes it structural.
+ *
+ * The condition this closes was the LOUDEST of the three and the one that got
+ * away. The uncached arm reached its 404 only from INSIDE `if (isAppType &&
+ * visible)`, where `visible` is the document — so for a name that resolves to
+ * nothing the gate was skipped whole and the envelope fell through to
+ * `res.json`, answering `200` with the declared envelope MINUS its `item`
+ * member. Two in-repo declarations already said otherwise, and this restores
+ * what they declare rather than deciding anything new:
+ *
+ *  - `GetMetaItemResponseSchema` (the route's own `responseSchema`, see
+ *    `rest-route-ledger.ts`) makes `item` a required member. Measured on this
+ *    tree with the body a real server sent: `safeParse({ type: 'app', name:
+ *    'no_such_app_xyz', lock: 'none', editable: true, deletable: true,
+ *    resettable: false })` fails `invalid_type` / `expected: 'nonoptional'` at
+ *    `item`. ⚠️ The producer's in-process return passes that same parse —
+ *    `item` is PRESENT holding `undefined`, and `z.unknown()` admits that — so
+ *    the contract broke at `JSON.stringify`, which drops the member. A probe
+ *    written against the object rather than the wire bytes sees nothing wrong.
+ *  - The CACHED arm of this same route already answers this condition `404
+ *    RESOURCE_NOT_FOUND`: `getMetaItemCached` throws
+ *    `metadataItemNotFoundError` on a falsy `item`. `app`, `dashboard`, `doc`,
+ *    `book`, `?state=draft`, `?preview=draft`, `?package=` and every
+ *    `enableCache: false` deployment are diverted around it, so which arm a
+ *    request took decided whether absence was an error — the #5563 defect
+ *    class, one member over.
+ *
+ * ⛔ Not `sendEnvelopeError`, which the 403 beside it uses: that builder adds
+ * `success: false`, and an absence answer that carries a key the unpublished
+ * app's answer does not is the enumeration signal all over again. The nested
+ * `error.code` accessor is the same one objectui#4252 reads on both.
+ */
+function sendMetaItemAbsent(res: any): void {
+    res.status(404).json({
+        error: { code: 'RESOURCE_NOT_FOUND', message: 'Metadata item not found or access denied.' },
+    });
+}
+
+/**
+ * RestServer
+ * 
+ * Provides automatic REST API endpoint generation for ObjectStack.
+ * Generates standard RESTful CRUD endpoints, metadata endpoints, and batch operations
+ * based on the configured protocol provider.
+ * 
+ * Features:
+ * - Automatic CRUD endpoint generation (GET, POST, PUT, PATCH, DELETE)
+ * - Metadata API endpoints (/meta)
+ * - Batch operation endpoints (/batch, /createMany, /updateMany, /deleteMany)
+ * - Discovery endpoint
+ * - Configurable path prefixes
+ * 
+ * @example
+ * const restServer = new RestServer(httpServer, protocolProvider, {
+ *   api: {
+ *     version: 'v1',
+ *     basePath: '/api'
+ *   },
+ *   crud: {
+ *     dataPrefix: '/data'
+ *   }
+ * });
+ * 
+ * restServer.registerRoutes();
+ */
 export class RestServer {
     private protocol: RestProtocol;
     private config: NormalizedRestServerConfig;
@@ -1772,28 +1825,6 @@ export class RestServer {
     }
 
     /**
-     * Resolve the protocol for a given request. When `environmentId` is present
-     * and a KernelManager is wired, fetch the per-project kernel's
-     * `protocol` service so metadata / data / UI reads hit the project's
-     * own registry and datastore.
-     *
-     * When `environmentId` is absent on an unscoped route and an `envRegistry`
-     * is wired (runtime mode), the resolution chain is:
-     *   1. Hostname → environmentId (`envRegistry.resolveByHostname`)
-     *   2. `X-Environment-Id` header → environmentId (`envRegistry.resolveById`)
-     *   3. Default-project fallback (`defaultEnvironmentIdProvider`, set by
-     *      `createSingleEnvironmentPlugin`)
-     *   4. Control-plane protocol captured at boot.
-     *
-     * Special case: `environmentId === 'platform'` is a reserved virtual id used
-     * by Studio to address the control plane through the regular project
-     * URL shape (`/projects/platform/...`). It is NOT a row in the projects
-     * table, so we must never call `KernelManager.getOrCreate('platform')`.
-     * Instead, return the control-plane protocol directly. This lets Studio
-     * (and any other client) speak a single, uniform URL family without
-     * duplicating route logic for the platform surface.
-     */
-    /**
      * Cached wrapper around `envRegistry.resolveByHostname` (P1-4). Returns the
      * cached result while fresh; on a miss it queries the registry and caches the
      * outcome (positive *and* negative) for {@link hostnameCacheTtlMs}. Registry
@@ -1894,6 +1925,14 @@ export class RestServer {
      * response served against no kernel. Removing the first (wasted) window
      * shortened the wait to that 503; it did not, and must not, turn it into a
      * success.
+     *
+     * Special case: `environmentId === 'platform'` is a reserved virtual id used
+     * by Studio to address the control plane through the regular environment
+     * URL shape (`/environments/platform/...`). It is NOT a row in the projects
+     * table, so we must never call `KernelManager.getOrCreate('platform')`.
+     * Instead, return the control-plane protocol directly. This lets Studio
+     * (and any other client) speak a single, uniform URL family without
+     * duplicating route logic for the platform surface.
      */
     private async resolveProtocol(environmentId?: string, req?: any): Promise<RestProtocol> {
         if (environmentId === 'platform') return this.protocol;
@@ -6926,6 +6965,38 @@ export class RestServer {
                             // envelope is rebuilt around the result at `res.json`.
                             // Nothing downstream asks which shape it holds.
                             let visible: any = envelope?.item;
+
+                            // [#18066] ABSENCE IS AN ERROR ON THIS ARM TOO.
+                            //
+                            // Ordered BEFORE every gate below, and that ordering
+                            // is the security half of this change rather than a
+                            // style choice. The three gates under it all read
+                            // `&& visible`, so they are reached only by a
+                            // document that EXISTS; a name that resolves to
+                            // nothing can never enter the app gate and can
+                            // therefore never be converted into the `403
+                            // PERMISSION_DENIED` #8013 reserves for an app the
+                            // caller may not open. The withheld-but-existing
+                            // app keeps answering exactly what it answered
+                            // before — 403 for a permission denial, absence for
+                            // the other two arms — because nothing on its path
+                            // changed.
+                            //
+                            // `== null` rather than falsiness: the miss this
+                            // catches is `undefined` (no overlay row, no
+                            // MetadataService copy, no registry entry — see
+                            // `metadata-protocol`'s `getMetaItem`, whose three
+                            // lookups all leave `item` undefined) or a protocol
+                            // implementation that resolved nothing at all. A
+                            // document that is legitimately falsy-but-present is
+                            // not a miss, and a metadata store that could not be
+                            // READ never arrives here as a value at all — it
+                            // throws 503 (#5532), which is the distinction this
+                            // condition must not flatten.
+                            if (visible == null) {
+                                sendMetaItemAbsent(res);
+                                return;
+                            }
                             // Same per-user RBAC filtering as the list endpoint:
                             // for `app` items, drop entirely (404) when the user
                             // lacks the app's `requiredPermissions`, and strip
@@ -6982,9 +7053,14 @@ export class RestServer {
                                             );
                                             return;
                                         }
-                                        res.status(404).json({
-                                            error: { code: 'RESOURCE_NOT_FOUND', message: 'Metadata item not found or access denied.' },
-                                        });
+                                        // [#18066] Through the shared emitter, so
+                                        // this arm and the nothing-behind-the-name
+                                        // arm above it are byte-identical by
+                                        // construction — see
+                                        // {@link sendMetaItemAbsent} for why that
+                                        // is the ADR-0045 §3 property and not
+                                        // housekeeping.
+                                        sendMetaItemAbsent(res);
                                         return;
                                     }
                                 }
@@ -7101,6 +7177,73 @@ export class RestServer {
                             ));
                         }
                     } catch (error: any) {
+                        // [#18402] THE one absence answer, whichever arm
+                        // produced it — the last half of #18066.
+                        //
+                        // #18066 gave this route a single absence EMITTER
+                        // ({@link sendMetaItemAbsent}) and reached it from the
+                        // two conditions that RETURN nothing. The conditions
+                        // that THROW one were left on the classification door
+                        // below, which renders the flat `{ error: '<message>',
+                        // code }` — so `body.error.code`, the accessor #8013
+                        // settled on and objectui#4252 reads, was `undefined`
+                        // on exactly those. Which one a caller got was decided
+                        // by two things it cannot see:
+                        //
+                        //  - `metadata.enableCache` (default TRUE). The cached
+                        //    arm's `getMetaItemCached` THROWS
+                        //    `metadataItemNotFoundError` on a falsy `item`; the
+                        //    uncached arm resolves item-less and returns. One
+                        //    request, one missing name, two envelopes, chosen
+                        //    by a server setting — the #7035 failure class.
+                        //  - which protocol implementation is mounted. The
+                        //    in-repo `metadata-protocol` resolves item-less
+                        //    from `getMetaItem`, but a protocol that throws the
+                        //    miss instead reached the same flat door
+                        //    (pinned in `rest-meta-outage-vs-miss.test.ts`).
+                        //
+                        // Recognised by the ANSWER this repo's own
+                        // classification door would have given — see
+                        // {@link thrownAnswerIsBareNotFound}, which asks that
+                        // door rather than re-reading the error, so this fork
+                        // and the `handleRouteError` it forks away from cannot
+                        // drift apart about what a caught value means.
+                        //
+                        // ⛔ NOT "the status is 404", and that narrowing was
+                        // measured rather than assumed. `NO_DRAFT` is a 404 on
+                        // THIS route — the Studio designer's `?state=draft`
+                        // probe, pinned byte-for-byte two files over — and it
+                        // says the item IS there and its draft is not.
+                        // Answering it as absence would tell a designer the
+                        // object does not exist, which is #5532's flattening
+                        // reintroduced by the repair for a sibling of it. Same
+                        // reasoning excludes a producer-declared code the
+                        // ledger does not know: ADR-0112 keeps that spelling in
+                        // `declaredCode`, and converting would delete it.
+                        //
+                        // ⭐ It STRENGTHENS the ADR-0045 §3 property rather
+                        // than merely preserving it. The unpublished app and
+                        // the service-gated one answer through the emitter, so
+                        // an absence that kept the thrown dialect was a
+                        // response pair that told them apart — by envelope
+                        // shape, and by the producer's `Metadata item
+                        // <type>/<name> not found` prose where the emitter says
+                        // one fixed sentence. Four arms, one body now; the
+                        // byte-identity is pinned in
+                        // `meta-item-absent-404.test.ts` §2 and §5.
+                        //
+                        // ⛔ NOT a convergence of the flat dialect itself. The
+                        // audience gate's `sendDeclaredFault` 401/403 beside
+                        // this, and the door in `error-response.ts`, still
+                        // answer flat: that position is the live ratchet
+                        // #9559 owns repo-wide (`check:route-envelope`), and
+                        // converting two of its four emissions here would mint
+                        // a new divergence — the same refusal answering two
+                        // shapes depending on which ROUTE served it.
+                        if (thrownAnswerIsBareNotFound(error)) {
+                            sendMetaItemAbsent(res);
+                            return;
+                        }
                         handleRouteError(res, error);
                     }
                 },
@@ -10700,6 +10843,17 @@ export class RestServer {
                     const p = await this.resolveProtocol(environmentId, req);
                     let referenceObject: string | undefined = picker.object;
                     if (!referenceObject && typeof (p as any).getMetaItems === 'function') {
+                        // [#18550] The field def is HOISTED out of the fetch's
+                        // swallow and the carrier is read after it, deliberately.
+                        // The `catch` below exists for the metadata fetch — a
+                        // protocol that cannot answer leaves `referenceObject`
+                        // unset and the route answers `500 LOOKUP_TARGET_MISSING`
+                        // — and an unreadable carrier read INSIDE it would be
+                        // swallowed by it and land on that same envelope, which
+                        // is the conflation this card exists to end: "no target
+                        // is declared" and "the declared target cannot be read"
+                        // want different fixes from whoever owns the metadata.
+                        let fieldDef: unknown;
                         try {
                             const objectsRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
                                 type: 'object',
@@ -10708,7 +10862,6 @@ export class RestServer {
                             const r: any = await p.getMetaItems(objectsRequest);
                             const items: any[] = Array.isArray(r?.items) ? r.items : Array.isArray(r) ? r : [];
                             const obj = items.find((o: any) => o?.name === match.object);
-                            const def = obj?.fields?.[fieldName];
                             // [#7486] Resolve the target from the canonical key — and, since
                             // [#12920], from it ALONE. `reference` is the spelling `FieldSchema`
                             // accepts, so it is the only spelling a field def can legitimately
@@ -10744,8 +10897,21 @@ export class RestServer {
                             // tolerated is the ADR-0087 conversion layer (`fieldReferenceToAlias`),
                             // replayed on stored-row rehydration — declared, tested and removable
                             // on a schedule, which a `??` arm here never was.
-                            referenceObject = def?.reference;
+                            //
+                            // [#18550] The canonical-key read itself now happens just BELOW this
+                            // `catch`, through the one arbiter — see there for why it moved.
+                            fieldDef = obj?.fields?.[fieldName];
                         } catch {/* ignore */}
+                        // ABSENCE stays silent and unchanged: `undefined` /
+                        // `null` / `''` all answer `undefined`, so the route
+                        // falls to the `LOOKUP_TARGET_MISSING` refusal below
+                        // exactly as before. UNREADABILITY throws past this
+                        // handler's outer `catch`, which classifies and LOGS it
+                        // (`mapDataError` + `logError`) rather than reporting a
+                        // missing target — and it also stops an object-valued
+                        // carrier from being forwarded as `query.object` into
+                        // `findData`, which is what it did before this change.
+                        referenceObject = referenceCarrierOf(fieldDef, 'REST public-form lookup picker');
                     }
                     if (!referenceObject) {
                         res.status(500).json({
@@ -10883,22 +11049,6 @@ export class RestServer {
         });
     }
 
-    /**
-     * Register record-level sharing endpoints (M11.C17).
-     *
-     * Surfaces `ISharingService` over HTTP so the UI can list, create
-     * and revoke per-record grants without going through ObjectQL. The
-     * three routes mirror the share-management drawer in Salesforce /
-     * ServiceNow:
-     *
-     *   GET    {basePath}/data/:object/:id/shares
-     *   POST   {basePath}/data/:object/:id/shares
-     *   DELETE {basePath}/data/:object/:id/shares/:shareId
-     *
-     * All three resolve via `sharingServiceProvider`; routes return 501
-     * when no sharing service is configured so a deployment without the
-     * `@objectstack/plugin-sharing` plugin fails cleanly.
-     */
     /**
      * ADR-0021 — analytics dataset preview/query endpoint.
      *
@@ -11542,6 +11692,20 @@ export class RestServer {
                 ) {
                     return respondError(res, 403, 'PERMISSION_DENIED', msg.slice(0, 1000));
                 }
+                // [#18253] The name asked about is not a declared object
+                // (`ExplainObjectNotFoundError`, plugin-security `errors.ts`) —
+                // a REFUSAL, not a fault, so it keeps its declared answer
+                // instead of falling to the 500 below. 404 `OBJECT_NOT_FOUND`
+                // is what this package already answers for an unregistered
+                // object name (`mapDataError`, `error-response.ts`), emitted
+                // here through this family's ONE refusal emitter so the body
+                // is the same ADR-0112 D5 envelope every other arm sends.
+                // Matched by `code`/`name`, exactly as the 403 arm above is:
+                // `@objectstack/plugin-security` is not a dependency of this
+                // package, and the thrown shape is the contract (#8016).
+                if (error?.code === 'OBJECT_NOT_FOUND' || error?.name === 'ExplainObjectNotFoundError') {
+                    return respondError(res, 404, 'OBJECT_NOT_FOUND', msg.slice(0, 1000));
+                }
                 logError('[REST] Security explain error:', error);
                 // The 500 arm keeps its 500-char cap: an unexpected fault's
                 // message is not a contract, and truncating it stays a
@@ -11619,6 +11783,22 @@ export class RestServer {
         });
     }
 
+    /**
+     * Register record-level sharing endpoints (M11.C17).
+     *
+     * Surfaces `ISharingService` over HTTP so the UI can list, create
+     * and revoke per-record grants without going through ObjectQL. The
+     * three routes mirror the share-management drawer in Salesforce /
+     * ServiceNow:
+     *
+     *   GET    {basePath}/data/:object/:id/shares
+     *   POST   {basePath}/data/:object/:id/shares
+     *   DELETE {basePath}/data/:object/:id/shares/:shareId
+     *
+     * All three resolve via `sharingServiceProvider`; routes return 501
+     * when no sharing service is configured so a deployment without the
+     * `@objectstack/plugin-sharing` plugin fails cleanly.
+     */
     private registerSharingEndpoints(basePath: string): void {
         const { crud } = this.config;
         const dataPath = `${basePath}${crud.dataPrefix}`;
@@ -13231,7 +13411,64 @@ export class RestServer {
                     const environmentId = isScoped ? req.params?.environmentId : undefined;
                     const context = await this.resolveExecCtx(environmentId, req);
                     if (this.enforceAuth(req, res, context)) return;
-                    const ql = this.objectQLProvider ? await this.objectQLProvider(environmentId) : undefined;
+                    // [#18559] The engine seam, reached the way its two SIBLING
+                    // consumers of this same slot already reach it —
+                    // `wiredEngineOrLoud` — so "no engine is wired" and "the
+                    // engine WAS wired and could not be resolved" stay two facts
+                    // instead of being told apart only by accident. The retired
+                    // spelling this replaces was a plain read:
+                    //
+                    //     this.objectQLProvider ? await this.objectQLProvider(environmentId) : undefined
+                    //
+                    // ⚠️ It did NOT re-collapse them — that is why this is not a
+                    // regression and was not a blocker for #14251's decidable
+                    // test. A rejection escaped the plain read, missed the 501
+                    // arm below (which tests `!ql || typeof ql.transaction !==
+                    // 'function'`, and a rejection never reaches it), and was
+                    // caught by this handler's GENERIC outer catch
+                    // (`handleRouteError`). So the two facts did differ on the
+                    // wire — 500 INTERNAL_ERROR against 501 NOT_IMPLEMENTED —
+                    // but through a catch-all that knows nothing about this
+                    // seam, at a status this slot's other two consumers do not
+                    // use for the same fact.
+                    //
+                    // ⭐ What decided it, measured on a real `RestServer` over a
+                    // real `ObjectKernel` rather than argued: THIS DOOR ALREADY
+                    // ANSWERS 503 on the single-kernel wiring. There
+                    // `computeExecCtx` takes its PROVIDER branch, which is
+                    // `wiredEngineOrLoud`, and raises before this line runs. The
+                    // 500 was reachable only on the MULTI-KERNEL wiring, where
+                    // the gate's kernel branch absorbs by design (see
+                    // `wiredEngineOrLoud`'s RESIDUE note) and hands the engine
+                    // question down to this line:
+                    //
+                    // | wiring, engine wired and FAILING | before | after |
+                    // |:--|:--|:--|
+                    // | single-kernel (gate raises first)| 503    | 503 — unchanged |
+                    // | multi-kernel (gate absorbs)      | **500**| **503** |
+                    //
+                    // ⇒ the repair does not choose a new wire answer for this
+                    // door; it removes a WIRING-DEPENDENT divergence, leaving
+                    // the answer this door already gave on the composition the
+                    // open core boots.
+                    //
+                    // ⛔ NOT `seamOrUndefined`. That helper SWALLOWS, and its own
+                    // docblock forbids routing the data-engine seam back through
+                    // it "to make the seams uniform".
+                    //
+                    // The wiring fact is the provider's PRESENCE, asked once and
+                    // never inferred from what it returned, so both ABSENCE
+                    // shapes reach the 501 below byte-for-byte as before: no
+                    // provider wired at all, and a provider that RESOLVES
+                    // `undefined`, which is the seam contract declaring absence
+                    // rather than failing. `wiredEngineOrLoud` also invokes the
+                    // provider SYNCHRONOUSLY, so a host wiring a non-`async`
+                    // provider — which the seam's declared type cannot prevent —
+                    // reaches the same answer as one that rejects (#13280).
+                    const ql = await wiredEngineOrLoud(
+                        Boolean(this.objectQLProvider),
+                        () => this.objectQLProvider!(environmentId),
+                    );
                     if (!ql || typeof ql.transaction !== 'function') {
                         // Typed like every other 501 on this server (clone/search,
                         // #4067) so a client can key on the code, not the prose.

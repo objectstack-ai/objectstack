@@ -18,6 +18,7 @@ import type { ASTNode } from '@marcbachmann/cel-js';
 import type { Expression } from '@objectstack/spec';
 
 import { buildScope, registerNumericCoercions, registerStdLib } from './stdlib';
+import type { PermissionBinding } from './stdlib';
 import type { DialectEngine, EvalContext, EvalResult } from './types';
 
 /**
@@ -57,10 +58,22 @@ export const CEL_ENV_OPTIONS = {
  *
  * Exported (package-internal; NOT in `index.ts`) so the stdlib drift pin reads
  * the authoritative environment through the same constructor the engine uses.
+ *
+ * `permissionBinding` is the acting subject plus its effective object
+ * permissions, pinned for this one evaluation (see `PermissionBinding`). Every
+ * caller that is not evaluating — `compile()`, the drift pin, the
+ * function-existence oracle — omits it, and that is exactly right: it changes
+ * what `can` ANSWERS, never whether `can` EXISTS, so the set of registered
+ * names is identical with and without it and a publish-time verdict can never
+ * disagree with the runtime about which names resolve.
  */
-export function buildEnv(now: () => Date, timezone = 'UTC'): Environment {
+export function buildEnv(
+  now: () => Date,
+  timezone = 'UTC',
+  permissionBinding?: PermissionBinding,
+): Environment {
   const env = new Environment(CEL_ENV_OPTIONS);
-  return registerNumericCoercions(registerStdLib(env, now, timezone));
+  return registerNumericCoercions(registerStdLib(env, now, timezone, permissionBinding));
 }
 
 /**
@@ -412,6 +425,50 @@ let canonicalParseEnv: Environment | undefined;
 export function parseCelToAst(source: string): CelAstNode | null {
   const parsed = parseCelToAstWithReason(source);
   return parsed.ok ? parsed.ast : null;
+}
+
+/**
+ * The inverse of {@link parseCelToAst}: print a CEL AST back to surface syntax.
+ *
+ * This is the lossless half of the #15811 migration. Every EVALUATED expression
+ * slot in the spec now composes `EvaluatedExpressionInputSchema`, so an
+ * `{ dialect: 'cel', ast }` envelope carrying no `source` is refused at the
+ * door — and the author of such an envelope needs a `source` back. For CEL the
+ * platform HAS a printer (cel-js `serialize`, which this package already uses
+ * for its own scope rewrites), so that recovery is mechanical rather than a
+ * re-authoring job. `cron` and `template` have no AST at all, so the question
+ * does not arise for them; ADR-0087's structured TODO covers every case this
+ * function answers `null` to.
+ *
+ * ⚠️ Lossless is claimed about MEANING, not bytes. `serialize` re-renders from
+ * the parse tree, so it normalises what the grammar does not distinguish —
+ * measured: single-quoted string literals come back double-quoted
+ * (`record.p == 'x'` → `record.p == "x"`), and redundant parentheses that the
+ * parser dropped do not come back. A caller that needs the author's original
+ * bytes cannot get them from an AST; a caller that needs a `source` the engine
+ * evaluates identically can.
+ *
+ * Returns `null` — never throws — on anything that is not a CEL AST this
+ * platform can round-trip, so a caller can fall back to the hand-migration path
+ * in one line. Three ways to earn that `null`, and the third is the one that
+ * matters: `serialize` refuses the value (it throws `Unknown AST operation` on
+ * a non-AST, which is how an opaque `ast` an author hand-wrote is caught); the
+ * printed text is blank; or the printed text does not parse back through
+ * {@link parseCelToAst} — the platform's own bounded parser, the same one every
+ * other entry point in this package reaches. That last check is what makes
+ * "lossless" a reading rather than a claim: a source this platform cannot parse
+ * is not a source it can evaluate, whatever the printer produced.
+ */
+export function printCelAst(ast: unknown): string | null {
+  if (ast === null || typeof ast !== 'object') return null;
+  let printed: unknown;
+  try {
+    printed = serialize(ast as Parameters<typeof serialize>[0]);
+  } catch {
+    return null;
+  }
+  if (typeof printed !== 'string' || printed.trim().length === 0) return null;
+  return parseCelToAst(printed) === null ? null : printed;
 }
 
 // ---------------------------------------------------------------------------
@@ -1715,9 +1772,10 @@ export const celEngine: DialectEngine = {
     const source = expr.source;
     if (typeof source !== 'string' || source.length === 0) {
       // AST-only inputs: cel-js does not currently expose a public API to
-      // re-execute a parsed AST without re-serializing. We persist `source`
-      // as the canonical form during M9.1 and revisit AST-only execution in
-      // M9.7 when we cut the spec persistence over.
+      // re-execute a parsed AST without re-serializing. `source` is the
+      // canonical persisted form and is what this engine evaluates, so an
+      // envelope carrying only `ast` has no evaluable form here and is
+      // reported as such rather than run.
       return {
         ok: false,
         error: { kind: 'parse', message: 'AST-only evaluation not yet supported; persist `source`' },
@@ -1726,8 +1784,16 @@ export const celEngine: DialectEngine = {
 
     const now = () => ctx.now ?? new Date();
     try {
-      const env = buildEnv(now, ctx.timezone ?? 'UTC');
+      // Scope FIRST: `can` is answered about the acting subject by IDENTITY, and
+      // the subject is the canonical `EvalUser` object `buildScope` mints. The
+      // environment therefore has to be built from the scope, not beside it —
+      // rebuilding a lookalike user here would give `current_user.can(…)` a
+      // receiver that is equal to the bound one and not the same as it.
       const scope = buildScope(ctx);
+      const env = buildEnv(now, ctx.timezone ?? 'UTC', {
+        subject: scope.current_user,
+        permissions: ctx.permissions,
+      });
       // #3183 — coerce a date-field operand compared with `==`/`!=` against a
       // temporal function (`date(record.d) == today()`), so a `Field.date` string
       // matches the Timestamp instead of silently never equalling it. No-op (and

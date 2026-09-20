@@ -75,6 +75,7 @@ import { describeAnchorForbiddenBits, postureEnforcesWall } from '@objectstack/s
 import { EVERYONE_POSITION, AUDIENCE_ANCHOR_POSITIONS } from '@objectstack/spec';
 import { PermissionDeniedError } from './errors.js';
 import { readDeclared, upsertPackagePermissionSet } from './bootstrap-declared-permissions.js';
+import { readDeclaredCapabilityContext } from './declared-capability-context.js';
 import { isTenantAdmin } from './delegated-admin-gate.js';
 
 /**
@@ -958,7 +959,17 @@ export async function confirmAudienceBindingSuggestion(
   // Early, friendly rendition of the anchor gate so the caller gets the
   // decision without a write attempt; the engine middleware re-enforces it
   // unconditionally on the insert below.
-  const offending = describeAnchorForbiddenBits(setRow, row.anchor as 'everyone' | 'guest');
+  // [#18535, ADR-0090 D5] With the stack's declared `capabilities:` — the same
+  // source the boot binding and the engine-side gate read. This check is the
+  // FRIENDLY EARLY RENDITION of the gate the insert below re-enforces
+  // unconditionally, so the two must ask the identical question: a context here
+  // that the middleware does not also see would answer "confirmed" and then
+  // have the write refused under it.
+  const offending = describeAnchorForbiddenBits(
+    setRow,
+    row.anchor as 'everyone' | 'guest',
+    await readDeclaredCapabilityContext(ql, deps.metadata),
+  );
   if (offending) {
     throw new PermissionDeniedError(
       `[Security] Access denied: permission set '${row.permission_set_name}' cannot be bound to the ` +

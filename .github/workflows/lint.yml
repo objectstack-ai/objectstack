@@ -409,6 +409,28 @@ jobs:
       - name: Raw control-byte guard
         run: pnpm check:nul-bytes
 
+      # Gitlink guard (#17472). Refuses an index entry at mode 160000 — a
+      # SUBMODULE POINTER — that no tracked `.gitmodules` row declares. Placed
+      # beside the control-byte guard because it is its structural sibling: a
+      # whole-index population, a hygiene property of what a CLONE receives, and
+      # a defect whose only native signal is a warning on a command that exits 0.
+      # WHY mode 160000 and why "undeclared" rather than "none at all" are stated
+      # and argued once, in the gate script's header — `scripts/check-gitlink-
+      # declared.mjs`. That header is authoritative and this comment cites it
+      # rather than restating it. The one-line summary, for whoever is reading
+      # this because the step just went red: `git add -A` over a nested git
+      # repository (a linked worktree, a nested clone, a vendored checkout)
+      # stages ONE 160000 entry at exit 0 with only a `warning:` line, and the
+      # commit that follows carries a pointer to an object no clone of this
+      # repository has. A real submodule passes untouched — `git submodule add`
+      # writes the declaration and the pointer in one act — so a hit here is
+      # never a submodule you added on purpose.
+      # ⛔ Not the untracked-signal half: PR #17468 closed that one by ignoring
+      # `.worktrees/`. This step is the STAGE, and it is path-blind on purpose.
+      # Reads the index only, no network, well under a second.
+      - name: Staged gitlinks are declared in .gitmodules
+        run: pnpm check:gitlink-declared
+
       # The first three of these are the shared modules the two `scripts/**`
       # routing gates below DELEGATE their design arguments to (#10608). Both of
       # those gates are
@@ -943,6 +965,18 @@ jobs:
       - name: A declared gate population reaches the tree
         run: pnpm check:declared-population-live
 
+      # ADR-0087 D4's per-release correctness gate (#17080). The REAL run needs
+      # two published tarballs and npm, so it lives in the release lane and
+      # cannot run on a PR; what runs here is its `--self-test`, which is
+      # therefore the only thing standing between an edit to that gate and the
+      # next release trusting it. Its batteries drive the same `verifyRelease()`
+      # the release lane calls, over synthetic tarball trees: a section matching
+      # both artifacts, one omitting a real export, one inventing an export, a
+      # from/to version pointing at another release, and the two absences that
+      # are legitimate. Fixture-only, no spawns; well under a second.
+      - name: Per-release spec-changes gate self-test
+        run: pnpm check:release-spec-changes
+
       # PM bare-root worklist self-test (#10840). The step above proves the
       # dispatch derivation still WORKS; this one proves the recorded triage of
       # the gates that derivation structurally cannot see is still true of the
@@ -1367,6 +1401,16 @@ jobs:
       - name: 'Settings deny-roster pin (#18281)'
         run: pnpm check:pm-settings-deny-roster
 
+      # Expected-skips roster self-test (#18308) — same family and the same
+      # split as the widening-tell and prior-ruling steps above: the LIVE read
+      # takes a PR head and judges its check-runs over REST, so it is a tool a
+      # seat runs against the PR in front of it, not a verdict about the PR
+      # that happens to run CI next. Only the offline self-test runs here — it
+      # is the only instrument this roster's matching rules have, which is
+      # exactly the family `check:self-test-wired` requires this step for.
+      - name: Expected-skips roster self-test
+        run: pnpm check:pm-expected-skips
+
       # Release-rehearsal clone preflight self-test (#9555). A local
       # `pnpm run version` rehearsal — the prescribed verification route for
       # every release-machinery change — HANGS FOREVER in an agent container:
@@ -1490,13 +1534,14 @@ jobs:
           run_self_test node scripts/pm/git-history.mjs --self-test
           run_self_test node scripts/check-engine-split-ratio.mjs --self-test
           run_self_test bash scripts/collect-release-notes.sh --self-test
+          run_self_test node scripts/pm/check-harness-current.mjs --self-test
           if [ -n "$failed" ]; then
             echo ""
             echo "Shallow-history guard self-tests — the following FAILED:"
             printf "%s" "$failed"
             exit 1
           fi
-          echo "Shallow-history guard self-tests — all three ran and passed"
+          echo "Shallow-history guard self-tests — all four ran and passed"
 
       # Step-collector gate (#10814) — the guard over the two steps above, and
       # over any step that grows their shape later. It has a static half and a
@@ -3997,6 +4042,31 @@ jobs:
       - name: Shard partitioner self-test
         run: node scripts/partition-test-shards.mjs --self-test
 
+      # A self-test that RUNS but cannot fail anything (#17097) — the sibling of
+      # the defect above, one turn further out. `scripts/report-test-timings.mjs`
+      # ships a real self-test: 61 cases across 4 batteries, a naive prefix-only
+      # reference parser plus three controls that assert it gets the answer WRONG
+      # exactly where the real parser gets it right. ci.yml names it, so
+      # `check:self-test-wired` was green. But every `Test Core` step that runs
+      # that script carries `continue-on-error: true`, and MUST: #16454 rules the
+      # timing feature report-only, and #14469 is the measured cost of an
+      # unguarded diagnostics step there (a FinalizeArtifact 403 on a 313-byte
+      # upload evicted a fully green shard from the merge queue). So the guard
+      # that makes the feature safe was the same guard that disarmed its
+      # self-test — the verdict was produced and then discarded, and the wiring
+      # gate was satisfied by an invocation that could not fail.
+      #
+      # ⇒ the self-test runs HERE, where it has teeth, and ⛔ is no longer
+      # invoked from ci.yml: ONE enforcing run, not one enforcing and one
+      # decorative. ci.yml's own `continue-on-error` on the capture and merge
+      # steps is untouched by this — the report-only property belongs to that
+      # workflow, not to this script.
+      # Invoked as `node` rather than through a `pnpm check:*` alias for the same
+      # reason as the steps above: see the GATE INVOCATION IDIOM note at the top
+      # of this file. In-process fixtures, no IO, milliseconds.
+      - name: Test-timing parser self-test
+        run: node scripts/report-test-timings.mjs --self-test
+
       # Hand-written `.d.mts` mirrors (#10549). `scripts/js-comment-mask.mjs`
       # and `scripts/check-regen-pending.mjs` are untyped `.mjs` that each ship
       # a hand-written declaration beside them, and both files say "keep this in
@@ -4123,32 +4193,6 @@ jobs:
       # Static scan of ~4.8k sources; sub-second.
       - name: Ref'd-timer probe containment
         run: pnpm check:refd-timer-probe
-
-      # The TYPE axis of the same invariant (#8180). The gate above reads
-      # `vitest.config.*` and nothing else, so the identical exposure on the
-      # type axis was unguarded repo-wide — and its symptom is likewise a GREEN
-      # `typecheck`. Measured on `packages/qa/downstream-contract` (#8021):
-      # identical checkout, identical stale `dist`, a narrowing injected into
-      # `packages/spec/src` in SOURCE only — without a `paths` block
-      # `tsc --noEmit` exited 0 and clean; with one it reported the `TS2322` the
-      # frozen fixture should always have produced. The comment beside the
-      # type-check-debt step below documents the same mechanism as expected
-      # state ("tsc resolves workspace imports through each dependency's built
-      # `dist/*.d.ts`"), and turbo's `typecheck` dependsOn `^build` does not
-      # reach it for the same reason it does not reach the runtime axis.
-      # NOT a port of the gate above: tsc's `paths` algorithm is exact-key-wins
-      # then longest-prefix (Vite's is first-match-wins), type-only imports
-      # COUNT here, and `tsconfig.json` is JSONC that inherits through
-      # `extends`. The trap is also different and worse — `@objectstack/spec*`,
-      # star not after a separator, folds every namespace onto one target and
-      # type-checks GREEN against the wrong module instead of crashing.
-      # The registry is measured (51 of 76 packages on the day it landed),
-      # shrink-only and audited in BOTH directions. It finds no new offender
-      # today: it is a ratchet, so the remediation list is finite and cannot
-      # grow behind anyone's back. Static scan of sources and tsconfigs; no
-      # build needed (~1.2s), so it belongs in this job.
-      - name: Type-source resolution gate
-        run: pnpm check:type-source-resolution
 
       # #4248 packaging-hygiene guard. Without a `files` whitelist npm packs the
       # whole package directory, and 20 of the 49 publishable packages declared
@@ -4594,38 +4638,6 @@ jobs:
       - name: workspace manifest dependency graph has no cycle
         run: pnpm check:workspace-manifest-cycles
 
-      # A relationship carrier is spelled as the target object's NAME (#13103).
-      # `FieldSchema.reference` is `z.string()`, and #13053 measured what a
-      # non-string one costs: a fixture spelling `reference: { object: '...' }`
-      # inside `fields:` is refused by `ObjectSchema.safeParse` AND read as
-      # `undefined` by the rule resolving it, so the suite was blind in both
-      # directions and the test still passed.
-      #
-      # ⛔ Deliberately NOT the broad guard that first suggests itself. Running
-      # every object fixture through `ObjectSchema.safeParse` was measured at
-      # 838 fixtures across 303 files going red, and those fixtures are invalid
-      # ON PURPOSE — the same carve-out `check:query-options-erasure` prints for
-      # itself: a rejection test must be able to build off-contract input. So
-      # the population judged here is the CARRIER, never the fixture.
-      #
-      # Lands as a ZERO-BASELINE ratchet: re-measured before landing at 443
-      # string carriers and 0 object/array ones at a field-def position, so
-      # there is no grandfathering file and nowhere to park the next defect.
-      # Two words keep it narrow, and the self-test is where both are observed:
-      # only a LITERAL is judged (identifiers, pass-throughs, Zod declarations
-      # and `reference: null` stay unjudged), and only at a field-def carrier
-      # POSITION (the generated i18n bundles write `reference:` as a field NAME,
-      # and are excluded BY SHAPE, never by a path ignore that would rot).
-      # A position it cannot resolve REFUSES with exit 3 rather than counting as
-      # "not a field def", and so does a run that measures zero carriers —
-      # a green whose success condition equals its total-failure condition.
-      #
-      # Reads source with scripts/ts-parse.mjs; no build, no spawns, ~5s.
-      - name: Relationship carriers are spelled as the string the spec declares
-        run: |
-          node packages/lint/scripts/check-reference-carrier-shape.mjs --self-test
-          node packages/lint/scripts/check-reference-carrier-shape.mjs
-
       # #15149. Grep-level guard for the defect this very repo just shipped: an
       # unquoted `- name:` step name containing ` #` is silently truncated by
       # YAML at that point (a space + hash starts a comment inside a plain
@@ -4933,6 +4945,26 @@ jobs:
       # population. Reads workflow text only; no build, no network, sub-second.
       - name: Stall-guard budget invariant
         run: pnpm check:stall-guard-budget
+
+      # The `Rerun Safety` verdict table (#18590) — self-test half only, and the
+      # asymmetry is the same one the step below explains: the measurement half
+      # takes two log paths and two exit codes that exist only inside that
+      # nightly job, so there is nothing here for a bare invocation to read.
+      #
+      # ⭐ It is wired HERE rather than left in the nightly deliberately.
+      # `rerun-safety-nightly.yml` declares `schedule` and `workflow_dispatch`
+      # and no PR-time event, so a gate family reachable only from it would be
+      # this tree's first SCHEDULED-ONLY family — which `check:pm-dispatch-gates`
+      # refuses by name, on the ground that a board sweep must not be routed into
+      # a per-PR gate list.
+      #
+      # WHAT REDDENS IT: its own script's parsing rules and verdict table. Those
+      # are matching rules, so their production verdict is identical before and
+      # after they break (see `check-self-test-wired.mjs`) — this step is the
+      # only instrument watching them. Reads nothing but its own fixtures; no
+      # build, no network, no token, sub-second.
+      - name: Rerun-safety verdict table self-test
+        run: pnpm check:rerun-safety-verdict
 
       # The third member of the stall-guard family, and the only one that was
       # never wired (#13246). `measure-stall-guard-headroom.mjs` re-derives the

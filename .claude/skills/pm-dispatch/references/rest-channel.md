@@ -31,35 +31,35 @@
 - ✓ 祖先与对比 `GET .../compare/{base}...{head}` —— 浅检出上本地祖先判据不可信时的正解。
 - ✓ `GET .../commits/{sha}/check-runs` 门禁、`GET .../actions/runs` workflow、`GET /rate_limit` 配额零计费。
 
-## 写侧 —— 全部可迁移
+## 写侧 —— 全部可迁移;允许规则按首个 glob 前的字面前缀匹配:verb 紧跟裸 url,`-H`/`-d` 后置
 
 - ✓ 评论 `POST .../issues/{n}/comments`;改评论 `PATCH .../issues/comments/{id}`。
 - ✓ 标签加法 `POST .../issues/{n}/labels`,定向删 `DELETE .../issues/{n}/labels/{name}`;加法优先。
 - 标签/assignee 写恒经 `scripts/pm/label-write.mjs`:四步内建、回读、回退整组 PATCH 回传 assignees。
+- ⛔ `post-stamped`/`label-write` 永不接进管道再 `&&`:拒收读成 0;看尾先落文件或 `set -o pipefail`。
 - ⛔ 永不 MCP `issue_write`(锁 1 已拒);会话分类器拒改动 ⇒ 无通道,交有通道席位立卡。
 - ✓ 建卡带标签 `POST .../issues` · 改正文 `PATCH .../issues/{n}` · 认领 `POST .../issues/{n}/assignees`。
+- ✓ 该 `PATCH` 带 `state` 关卡/重开,`state_reason` 交付 `completed`、撤单 `not_planned`,走裸 REST。
 - 请求体走文件(`-d @file`)或引号定界 heredoc(`<<'EOF'`),⛔ 永不内联双引号串。
-- 双引号内 shell 先展开反引号、`$(...)`、`$VAR`,请求尚未成形;只标题坏而正文完好即此形。
+- 每个写请求必带 `Content-Type: application/json`;缺头的 415 与判别式见配额段。
 - ✓ 请求复审 `POST .../pulls/{n}/requested_reviewers` · 开 PR `POST .../pulls` 带 `draft=true`。
 - ✓ `origin/main` 合进 PR head:`PUT .../pulls/{n}/update-branch`,PM 席位、零文件写、真合并提交。
 - `expected_head_sha` 须完整 40 字符 SHA(短 SHA 回 422);base 未动回 422 = 无事可做,不是失败。
-- ✓ draft 转 ready `POST .../pulls/{n}/ccr/ready_for_review`,反向 `.../ccr/convert_to_draft`。
+- ✓ draft 转 ready `curl -sS -X POST .../pulls/{n}/ccr/ready_for_review -d '{}'`,反向 `.../ccr/convert_to_draft`。
 - ⛔ 裸 `PATCH /pulls/{n}` 带 `{"draft": false}` 回 200 零改;状态码不作数,`GET /pulls/{n}` 才作数。
 - 线程自己建:`POST .../pulls/{n}/comments` 带 `commit_id`·`path`·`line`,回读看 `review_threads`。
 - ✓ `POST .../ccr/comments/{id}/resolve` · `/unresolve`;`{id}` 是评审评论 id,⛔ 只在自己 PR 上探。
-- ✓ auto-merge 挂载 `PUT .../pulls/{n}/ccr/auto_merge` 带 `{"merge_method":"SQUASH"}`,`DELETE` 卸载。
+- ✓ auto-merge 挂载 `curl -sS -X PUT .../pulls/{n}/ccr/auto_merge -d '{"merge_method":"SQUASH"}'`,`DELETE` 卸载。
 - ⛔ `PUT .../ccr/auto_merge` 在 draft 上 422 零存储;`DELETE` 无挂载回 422 = 本就没挂,非失败。
-- 入队读 timeline `added_to_merge_queue`,落地读 `git rev-list --parents`;⛔ `auto_merge` 与回显都不作数。
-- ⛔ 永不 MCP `update_pull_request`(锁 1 已拒);ready/draft 翻转只走 ccr 路;auto-merge 备用 MCP 未拒。
-- 直合仓 `PUT .../pulls/{n}/merge`;actor 记通道令牌:REST 按会话为 `claude[bot]` 或用户,MCP 恒用户。
+- ⛔ 永不 MCP `update_pull_request`(锁 1 已拒);ready/draft 翻转只走 ccr 路;auto-merge MCP 锁 1 同拒。
+- 直合仓 `PUT .../pulls/{n}/merge`;actor 记令牌类,按账号非会话、逐写回读;见配额段,MCP 恒用户。
 
 ## 不可迁移 —— 只有这三件,围着它们排计划;红窗守候规则住 `platform-readings.md` 配额段
 
 1. 语义搜索:`/search/*` 被出口代理按设计拒绝。退路 = REST 列表端点加本地 grep。
    REST 也被会话门关掉的席位 = 一次定向 MCP `search_issues`,⛔ 不宽表扫。
 2. Projects field_values:GraphQL-only —— 舰队并不需要它;MCP 服务器端无条件抓它才是漏点。
-3. `issue transfer`:issues 端点表无 transfer 路由(核对文档,未实调)⇒ 同为 GraphQL-only。
-   拿不到时当轮改走在目的仓重建配方,配方住 `platform-readings.md`。
+3. `issue transfer`:issues 端点表无此路由(未实调)⇒ 同为 GraphQL-only;配方住 `platform-readings.md`。
 
 ## 第三桶 —— git 零配额等价物
 

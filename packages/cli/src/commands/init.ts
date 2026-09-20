@@ -616,6 +616,12 @@ export const TEMPLATES: Record<string, {
     configContent: (name: string, namespace: string) => `import { defineStack } from '@objectstack/spec';
 import * as objects from './src/objects';
 
+// This file is a MODULE, and the whole module is the stack: the default
+// export below is the base, and every NAMED export is merged onto it as a
+// top-level stack key under its own name. A helper exported from here is
+// therefore read as a stack key and the build refuses it — keep helpers in a
+// sibling module and import them. Only names the stack schema declares
+// (onEnable, functions, the collections) belong here as named exports.
 export default defineStack({
   manifest: {
     id: 'com.example.${manifestIdSlug(name)}',
@@ -704,6 +710,12 @@ export default ${toCamelCase(namespace)}Item;
     configContent: (name: string, namespace: string) => `import { defineStack } from '@objectstack/spec';
 import * as objects from './src/objects';
 
+// This file is a MODULE, and the whole module is the stack: the default
+// export below is the base, and every NAMED export is merged onto it as a
+// top-level stack key under its own name. A helper exported from here is
+// therefore read as a stack key and the build refuses it — keep helpers in a
+// sibling module and import them. Only names the stack schema declares
+// (onEnable, functions, the collections) belong here as named exports.
 export default defineStack({
   manifest: {
     id: 'com.objectstack.plugin-${manifestIdSlug(name)}',
@@ -776,6 +788,12 @@ export default ${toCamelCase(namespace)}Item;
     },
     configContent: (name: string, namespace: string) => `import { defineStack } from '@objectstack/spec';
 
+// This file is a MODULE, and the whole module is the stack: the default
+// export below is the base, and every NAMED export is merged onto it as a
+// top-level stack key under its own name. A helper exported from here is
+// therefore read as a stack key and the build refuses it — keep helpers in a
+// sibling module and import them. Only names the stack schema declares
+// (onEnable, functions, the collections) belong here as named exports.
 export default defineStack({
   manifest: {
     id: 'com.example.${manifestIdSlug(name)}',

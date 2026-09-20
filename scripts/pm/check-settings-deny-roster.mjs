@@ -23,8 +23,8 @@
  *
  * Nothing under `scripts/` read the deny list's MEMBERSHIP before this file.
  * The key `permissions.deny` occurred there only inside comments and one
- * handoff string, and the hook self-tests grep `.claude/settings.json` for hook
- * registration and for two enqueue matchers -- never for a tool name. So a tool
+ * handoff string, and the hook self-tests grep `.claude/settings.json` for
+ * their own registration -- never for a tool name. So a tool
  * the charter declares closed could be absent from `deny` with every gate
  * green, and that is measured rather than hypothetical: #18218 was exactly that
  * state for `update_pull_request`, declared closed in the prose and open in the
@@ -54,19 +54,25 @@
  * tells a seat which tools are closed POINTS at it; a second enumeration is the
  * hand reconciliation this gate exists to end.
  *
+ * ## The ENQUEUE class is in the roster
+ *
+ * `enable_pr_auto_merge` and `disable_pr_auto_merge` are declared closed
+ * (#18282, ruled A). The REST route `PUT .../pulls/{n}/ccr/auto_merge` in
+ * `.claude/skills/pm-dispatch/references/rest-channel.md` already serves every
+ * real enqueue, so denying the MCP pair costs a seat nothing, and a tool the
+ * runtime refuses cannot be mis-called at all. This roster is the ONLY
+ * seat-side refusal of the MCP enqueue class: the client-side PreToolUse
+ * enqueue guard was removed by ruling (it only ever saved a queue cycle), and
+ * the line that judges a governed PR's approval is
+ * `scripts/pm/check-governed-queue-guard.mjs` on the `merge_group` build. This
+ * gate judges membership; neither reads the other.
+ *
  * ## What is deliberately NOT asserted
  *
- * The ENQUEUE class -- `enable_pr_auto_merge` and `disable_pr_auto_merge` -- is
- * not in the roster. Both are a live fallback channel in
- * `.claude/skills/pm-dispatch/references/rest-channel.md`, so whether they are
- * closed is the maintainer's call and is carded separately (#18282). If they
- * are ruled closed, this gate needs exactly one edit -- two more names in the
- * constant -- and that is the point of a single constant.
- *
- * Also not asserted: that `allow` and `deny` agree, that the tools exist on the
- * MCP server, or that a session honours either list. This gate holds the one
- * property neither prose surface can hold about itself -- that the enforced
- * list still equals the declared one.
+ * That `allow` and `deny` agree, that the tools exist on the MCP server, or
+ * that a session honours either list. This gate holds the one property neither
+ * prose surface can hold about itself -- that the enforced list still equals
+ * the declared one.
  *
  * ## Exit contract
  *
@@ -99,9 +105,9 @@ import { isEntrypoint } from '../invoked-as.mjs';
  *
  * Membership rule, so the next editor does not have to infer it: a tool is here
  * when invoking it PUBLISHES or MUTATES repository content -- an issue, a
- * comment, a review body, a pull request, a branch, a file, a repository. The
- * enqueue pair is deliberately absent (see the header). Read-only tools are not
- * in this namespace question at all.
+ * comment, a review body, a pull request, a branch, a file, a repository -- or
+ * arms or disarms a pull request's landing, which is the enqueue pair (see the
+ * header). Read-only tools are not in this namespace question at all.
  */
 export const CONTENT_WRITE_TOOLS = Object.freeze([
   'mcp__github__issue_write',
@@ -119,6 +125,8 @@ export const CONTENT_WRITE_TOOLS = Object.freeze([
   'mcp__github__merge_pull_request',
   'mcp__github__create_repository',
   'mcp__github__fork_repository',
+  'mcp__github__enable_pr_auto_merge',
+  'mcp__github__disable_pr_auto_merge',
 ]);
 
 /** The namespace this gate judges. Entries outside it are another subsystem's. */
@@ -337,12 +345,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'settingsPathFromArgv': 3,
   'the exit contract': 4,
   'the shipped .claude/settings.json': 4,
+  'the enqueue class — declared closed': 4,
   'the dispatch-gates declaration': 3,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 7;
+const SELF_TEST_BATTERY_FLOOR = 8;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -435,6 +444,24 @@ function selfTest() {
   assert('the shipped deny list denies the pull-request create tool', shipped.deny.includes('mcp__github__create_pull_request'), true);
   assert('the shipped deny list declares no tool this roster lacks', verdict(shipped.deny, CONTENT_WRITE_TOOLS).drift, []);
   assert('every shipped deny entry is a string', shipped.deny.every((entry) => typeof entry === 'string'), true);
+
+  // --- the enqueue class -------------------------------------------------
+  //
+  // Ruled closed (see the header). Pinned on FIXTURES, not on the shipped
+  // file: the shipped-file battery above deliberately leaves containment to
+  // the live run, and this battery keeps that line. What it holds is that the
+  // roster names both tools and that the gate's verdict moves with them.
+  battery('the enqueue class — declared closed');
+  assert('the roster declares the auto-merge arming tool', CONTENT_WRITE_TOOLS.includes('mcp__github__enable_pr_auto_merge'), true);
+  assert('the roster declares the auto-merge disarming tool', CONTENT_WRITE_TOOLS.includes('mcp__github__disable_pr_auto_merge'), true);
+  // A settings document denying exactly the roster -- every entry, the pair
+  // included -- reads declared = enforced in both directions.
+  const exactlyTheRoster = denyList(settingsWith([...CONTENT_WRITE_TOOLS]));
+  assert('a document denying exactly the roster reads declared = enforced', verdict(exactlyTheRoster.deny, CONTENT_WRITE_TOOLS), { missing: [], drift: [] });
+  // The pre-ruling shape, reproduced: the pair absent from the file is the
+  // containment finding, and it names the tool.
+  const withoutDisarm = CONTENT_WRITE_TOOLS.filter((tool) => tool !== 'mcp__github__disable_pr_auto_merge');
+  assert('a document missing one of the pair names it as left open', verdict(withoutDisarm, CONTENT_WRITE_TOOLS).missing, ['mcp__github__disable_pr_auto_merge']);
 
   // --- the dispatch-gates declaration ------------------------------------
   //

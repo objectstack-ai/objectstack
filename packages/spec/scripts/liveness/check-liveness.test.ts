@@ -21,10 +21,23 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+// The registry itself, so the denominator block at the bottom of this file can
+// hold the gate's output answerable to it rather than to a copied list (#18133).
+import {
+  listMetadataTypeSchemaTypes,
+  listUnregisteredKindSchemaTypes,
+} from '../../src/kernel/metadata-type-schemas';
+// The published status vocabulary, so the sample builder below moves counts
+// between the same columns the artifact publishes rather than a copied order.
+import { STATUS_COLUMNS } from './readme-table.mts';
+// The bound high-risk coordinates, so the #19062 block can EXCLUDE them when it
+// derives its sample carrier: flipping one of those to `live` would demand an
+// ADR-0054 proof and give the run a second cause.
+import { BOUND_PROOF_PATHS } from './proof-registry.mts';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SPEC = path.resolve(HERE, '../..');
@@ -981,20 +994,28 @@ describe('check:liveness — the drill recurses past one level (#17424)', () => 
   // depth-two container is now VISIBLE. Before the walk recursed, a container
   // sitting under a drilled child was neither classified, nor deferred, nor
   // recorded — it was not in any population at all, which is why nothing could
-  // ever have gone red about it. `dashboard/widgets.chartConfig` was the #17385
-  // coordinate that could not be drilled until this landed — and it has since
-  // BEEN drilled, on that card, which is why this pin no longer names it. Two
-  // coordinates stand in its place and the pair is deliberate: `widgets.compareTo`
-  // is its exact structural replacement (a container that is a drilled child, the
-  // shape that was invisible before the recursion), and `widgets.chartConfig.xAxis`
-  // is one level deeper again — a container under TWO drilled levels, which exists
-  // only because the #17385 drill landed. A pin naming a coordinate that a card is
-  // about goes stale the moment that card lands; naming the SHAPE does not.
+  // ever have gone red about it. Two coordinates are pinned and the pair is
+  // deliberate: `widgets.compareTo` is the exact structural replacement (a
+  // container that is a drilled child, the shape that was invisible before the
+  // recursion), and `widgets.chartConfig.annotations` is one level deeper again
+  // — a container under TWO drilled levels.
+  //
+  // ⚠️ The depth-3 half has now gone stale TWICE for the same reason, so read
+  // the warning the previous author wrote here rather than only the assertion:
+  // a pin naming a coordinate that a card is about goes stale the moment that
+  // card lands; naming the SHAPE does not. It named `widgets.chartConfig` until
+  // the #17385 drill landed, then `widgets.chartConfig.xAxis` until #17385's
+  // second half tombstoned that key on the dashboard carrier (a tombstone has no
+  // children, so the container left the population). `annotations` is chosen
+  // because it is an appearance key — the half of `chartConfig` the ownership
+  // ruling deliberately leaves with the author — so the next card about chart
+  // STRUCTURE cannot move it. Any depth-3 container serves; what is pinned is
+  // that one EXISTS in the population.
   it('SEES a container that sits under a drilled child, at either depth', () => {
     const r = report();
     const seen = [...r.undrilled.map((u: any) => u.key), ...r.deferredContainers.map((d: string) => d.split(' → ')[0])];
     expect(seen).toContain('dashboard/widgets.compareTo');
-    expect(seen).toContain('dashboard/widgets.chartConfig.xAxis');
+    expect(seen).toContain('dashboard/widgets.chartConfig.annotations');
   });
 
   it('is green against a verbatim copy of the shipped ledgers', () => {
@@ -1118,5 +1139,348 @@ describe('check:liveness — the drill recurses past one level (#17424)', () => 
     writeFileSync(file, `${JSON.stringify(ledger, null, 2)}\n`);
     const { status, output } = runGate(root);
     expect(status, output).toBe(1);
+  });
+});
+
+// The DENOMINATOR the coverage ratchet divides by (#18133).
+//
+// Everything in the block above asks whether the gate judges what it walks
+// correctly. This asks the prior question — WHOM does it walk for? — and it is
+// the one question a gate cannot ask about itself, because the failure mode has
+// no output: a type in neither `GOVERNED` nor `PENDING_GOVERNANCE` produces no
+// row in any bucket, so `ungoverned: []` reads identically whether the gate
+// looked and found nothing or never looked at all.
+//
+// WHAT WAS WRONG. The denominator was `listMetadataTypeSchemaTypes()` under a
+// comment claiming it was "exactly the set of authorable metadata types". That
+// function deliberately does NOT enumerate `UNREGISTERED_KIND_SCHEMAS` (#6245 —
+// enrolling those entries there "would claim a status this change is careful
+// not to grant"), while the four kinds bound in that map are authored on every
+// boot through their stack collections and on every write through
+// `PUT /api/v1/meta/:type/:name`. So `connector`, `sharing_rule` and
+// `analytics_cube` were structurally unnameable by `report.ungoverned` — the
+// same sentence #17356 measured false for the reachability gate, one gate over.
+//
+// WHY THESE ASSERT AGAINST THE LIVE REGISTRY rather than against a literal list:
+// a hard-coded expectation would pass unchanged if the gate stopped reading the
+// registry at all, which is the regression class this whole block exists for.
+// The registry is imported here and the gate is spawned; the two have to agree.
+describe('check:liveness — the governance denominator is the AUTHORABLE set (#18133)', () => {
+  function jsonReport(extraArgs: readonly string[] = []): any {
+    const { output } = runGate(undefined, ['--json', ...extraArgs]);
+    const start = output.indexOf('{');
+    expect(start, output).toBeGreaterThanOrEqual(0);
+    return JSON.parse(output.slice(start));
+  }
+
+  // The control for every assertion below. Without it, "the denominator omits
+  // nothing" is also satisfied by a registry that enumerates nothing.
+  it('has a non-empty registry on BOTH sides of the union', () => {
+    expect(listMetadataTypeSchemaTypes().length).toBeGreaterThan(20);
+    expect(listUnregisteredKindSchemaTypes().length).toBeGreaterThan(0);
+    // The two sets are disjoint — that disjointness IS #6245, and it is why the
+    // union is not a no-op. If this ever fails, the fix below has become moot
+    // and this whole block needs re-reading, not re-pinning.
+    const registered = new Set(listMetadataTypeSchemaTypes());
+    expect(listUnregisteredKindSchemaTypes().filter((t) => registered.has(t))).toEqual([]);
+  });
+
+  it('counts every unregistered kind, which the registered set alone cannot', () => {
+    const report = jsonReport();
+    for (const kind of listUnregisteredKindSchemaTypes()) {
+      expect(report.authorable, `'${kind}' is authored through its stack collection and through `
+        + 'PUT /api/v1/meta/:type/:name, so a governance denominator that omits it cannot report '
+        + 'on it — which is exactly the state #18133 found').toContain(kind);
+    }
+    // …and the denominator is STRICTLY larger than the registered set, which is
+    // the assertion that goes red the moment somebody "simplifies" the union
+    // back into `listMetadataTypeSchemaTypes()`.
+    expect(report.authorable.length).toBeGreaterThan(listMetadataTypeSchemaTypes().length);
+    expect(report.authorable).toEqual(
+      [...new Set([...listMetadataTypeSchemaTypes(), ...listUnregisteredKindSchemaTypes()])].sort(),
+    );
+  });
+
+  it('accounts for every member of it — governed or explicitly pending, never silent', () => {
+    const report = jsonReport();
+    expect(report.ungoverned).toEqual([]);
+    // An empty `ungoverned` is only meaningful next to a denominator that could
+    // have populated it, so assert the population too — this is the pair the
+    // old output could not print.
+    expect(report.authorable.length).toBeGreaterThan(0);
+    // And no pending row claims a debt for a type the denominator does not hold:
+    // before the union landed, recording one of the unregistered kinds here would
+    // have been reported STALE rather than pending.
+    expect(report.stalePending).toEqual([]);
+  });
+
+  it('prints the denominator and its composition on EVERY run, green included', () => {
+    const { status, output } = runGate();
+    expect(status, output).toBe(0);
+    const line = output.split('\n').find((l) => l.startsWith('governance denominator:')) ?? '';
+    // The line used to print only when `PENDING_GOVERNANCE` was non-empty, so the
+    // one state worth reporting — "N types looked at, none unaccounted for" —
+    // rendered as nothing at all: the same silence an unseen type produces.
+    expect(line, output).not.toBe('');
+    expect(line).toMatch(/^governance denominator: \d+ authorable type\(s\) — \d+ registered kind\(s\) \+ \d+ unregistered-kind stack collection\(s\)/);
+    for (const kind of listUnregisteredKindSchemaTypes()) expect(line).toContain(kind);
+  });
+
+  // #6245's guarantee, asserted from the gate that had the motive to break it.
+  // The repair for #18133 belongs in this gate's own denominator; enrolling the
+  // unregistered kinds in the registry instead would have granted them a KIND
+  // status (`MetadataTypeSchema` enum membership, a `DEFAULT_METADATA_TYPE_REGISTRY`
+  // entry, a create seed, a place in the #4001 campaign count) that #6245 and
+  // #2657's still-open B/C decision deliberately withhold.
+  it('reads the unregistered kinds WITHOUT registering them', () => {
+    const registered = listMetadataTypeSchemaTypes();
+    for (const kind of listUnregisteredKindSchemaTypes()) {
+      expect(registered, `#6245: '${kind}' must not become a registered KIND just because a `
+        + 'check needs to enumerate it — listUnregisteredKindSchemaTypes() (#6931) exists so '
+        + 'that enumeration costs nothing').not.toContain(kind);
+    }
+    const src = readFileSync(GATE, 'utf8');
+    expect(src).toContain('listUnregisteredKindSchemaTypes');
+  });
+});
+
+
+// ── THE TOMBSTONE JOIN (#19062) ──
+//
+// Same harness and the same #5623 reason as every block above: the grading
+// lives in check-liveness.mts, so only a real run can say whether a finding
+// class reaches `process.exit(1)`.
+//
+// This block needs its red/green pair MORE than its neighbours, not less. The
+// rule's whole population on the shipped ledgers is rows that are ALREADY
+// correct — the one offender that existed when the rule was written (#18304's
+// `agent/tools`) was repaired by #19059 while this branch was open — so a green
+// `check:liveness` cannot distinguish "the rule holds" from "the rule never
+// ran". The pair is what makes it an answer.
+//
+// WHY THE CARRIER IS DERIVED AND NOT NAMED. The first draft of this block named
+// two rows: it flipped `agent/tools` to `dead` to neutralise the then-offender,
+// and flipped `hook/timeout` to `live` as the sample. The first of those broke
+// within the day — `agent/tools` became `dead` upstream, the "this would be a
+// no-op" guard fired, and four cases went red. The guard was right and is kept
+// below; what was wrong was pinning a fixture to one row's CURRENT VERDICT,
+// which is a moving fact about the ledger and not a property of the rule. So
+// the carrier is now derived, per run, from the gate's own `report.tombstones`
+// enumeration, under filters that are properties of the SHAPE rather than of
+// today's verdicts:
+//
+//   · top-level — `setCarrierStatus` edits `props[key]`, not a `children` path;
+//   · not a BOUND_PROOF_PATHS coordinate — a bound class graded `live` demands
+//     an ADR-0054 proof, which would give the red run a second cause;
+//   · currently `dead` — the no-op guard, and the only status from which a flip
+//     to `live` is a real state change.
+//
+// A carrier can still stop qualifying; what it can no longer do is stop
+// qualifying SILENTLY, because the derivation asserts it found one and names
+// the population it searched. And the neutralisation half is gone outright:
+// these cases now inherit this file's existing, deliberate dependency on the
+// shipped ledgers being green — the same dependency its very first control case
+// ("is green against a verbatim copy of the shipped ledgers") already states —
+// rather than carrying a private list of rows to paper over.
+
+/** What the fixture writes into the carrier row, so a stray copy is traceable. */
+const FIXTURE_NOTE = 'fixture row written by check-liveness.test.ts (#19062 block)';
+
+/** The carrier the #19062 block flips, derived from the gate rather than named. */
+interface Carrier {
+  key: string;
+  type: string;
+  prop: string;
+  /** How many tombstones the gate enumerated — the population searched. */
+  enumerated: number;
+  /** How many of them passed every filter — more than one means a real choice. */
+  eligible: number;
+}
+
+/** Move one unit between two status columns of a copied `state-counts.md`. */
+function moveCount(root: string, type: string, from: string, to: string): void {
+  const fromCol = STATUS_COLUMNS.indexOf(from as (typeof STATUS_COLUMNS)[number]);
+  const toCol = STATUS_COLUMNS.indexOf(to as (typeof STATUS_COLUMNS)[number]);
+  expect(fromCol, `unknown status "${from}"`).toBeGreaterThanOrEqual(0);
+  expect(toCol, `unknown status "${to}"`).toBeGreaterThanOrEqual(0);
+
+  const countsFile = path.join(root, 'state-counts.md');
+  let text = readFileSync(countsFile, 'utf8');
+  // The generated count artifact is checked on every run, so a sample that
+  // moves a verdict and leaves the counts behind goes red for the WRONG reason
+  // and masks the verdict this block is reading.
+  const shift = (rowRe: RegExp, wrap: (n: number) => string): void => {
+    const m = rowRe.exec(text);
+    expect(m, `no state-counts row matching ${rowRe}`).not.toBeNull();
+    const nums = m![1].split('|').map((c) => Number(c.trim().replaceAll('*', '')));
+    expect(nums).toHaveLength(STATUS_COLUMNS.length + 1);
+    nums[fromCol] -= 1;
+    nums[toCol] += 1;
+    const rebuilt = `${m![0].slice(0, m![0].indexOf('|', 1) + 1)} ${nums.map(wrap).join(' | ')} |`;
+    text = text.slice(0, m!.index) + rebuilt + text.slice(m!.index + m![0].length);
+  };
+  shift(new RegExp(`^\\| \`${type}\` \\| (.+) \\|$`, 'm'), (n) => String(n));
+  shift(/^\| \*\*total\*\* \| (.+) \|$/m, (n) => `**${n}**`);
+  writeFileSync(countsFile, text);
+}
+
+describe('check:liveness — a tombstoned key may not be graded `live` (#19062)', () => {
+  let tmp: string;
+  let carrier: Carrier;
+
+  beforeAll(() => {
+    tmp = mkdtempSync(path.join(tmpdir(), 'os-liveness-tombstone-'));
+
+    // The gate IS the instrument: asking it for its own enumeration means the
+    // fixture and the rule can never disagree about what a tombstone is. Read
+    // regardless of exit code — the JSON is written before `process.exit`, so a
+    // red tree still yields a usable population.
+    const { output } = runGate(undefined, ['--json']);
+    const report = JSON.parse(output.slice(output.indexOf('{')));
+    const enumerated: string[] = report.tombstones ?? [];
+
+    const eligible = enumerated
+      .filter((key) => !key.slice(key.indexOf('/') + 1).includes('.'))
+      .filter((key) => !BOUND_PROOF_PATHS.has(key))
+      .filter((key) => {
+        const [type, prop] = [key.slice(0, key.indexOf('/')), key.slice(key.indexOf('/') + 1)];
+        const file = path.join(LEDGERS, `${type}.json`);
+        if (!existsSync(file)) return false;
+        return JSON.parse(readFileSync(file, 'utf8')).props?.[prop]?.status === 'dead';
+      })
+      .sort();
+
+    const key = eligible[0] ?? '';
+    carrier = {
+      key,
+      type: key.slice(0, key.indexOf('/')),
+      prop: key.slice(key.indexOf('/') + 1),
+      enumerated: enumerated.length,
+      eligible: eligible.length,
+    };
+  });
+  afterAll(() => rmSync(tmp, { recursive: true, force: true }));
+
+  /**
+   * Write the carrier row as a minimal `{ status, note }` in a copied ledger.
+   *
+   * Wholesale replacement rather than a status edit, so the red and green
+   * samples differ in ONE value and nothing else: a retained `evidence` or
+   * `proof` pointer would be scanned at `live` and unscanned at `dead`, which
+   * is a second difference between the two legs and a second possible cause.
+   */
+  function sampleWith(name: string, status: string): string {
+    const root = path.join(tmp, name);
+    cpSync(LEDGERS, root, { recursive: true });
+    const file = path.join(root, `${carrier.type}.json`);
+    const ledger = JSON.parse(readFileSync(file, 'utf8'));
+    const prev: string = ledger.props[carrier.prop].status;
+    ledger.props[carrier.prop] = { status, note: FIXTURE_NOTE };
+    writeFileSync(file, `${JSON.stringify(ledger, null, 2)}\n`);
+
+    // Proof the edit reached disk. An editor's exit code is not evidence; the
+    // read-back is.
+    const written = JSON.parse(readFileSync(file, 'utf8')).props[carrier.prop].status;
+    expect(written, `${carrier.key} did not take status "${status}" on disk`).toBe(status);
+
+    if (status !== prev) moveCount(root, carrier.type, prev, status);
+    return root;
+  }
+
+  // THE DERIVATION, asserted before anything is concluded from a run that
+  // assumes it worked. An empty enumeration is the drifted-marker failure this
+  // whole block exists to keep visible, and it must not read as "no work to do".
+  it('derives its carrier from the gate\'s own tombstone enumeration', () => {
+    expect(
+      carrier.enumerated,
+      'the gate enumerated NO tombstones — a scan reaching zero is a degraded scan, not a clean tree',
+    ).toBeGreaterThan(0);
+    expect(
+      carrier.eligible,
+      `no eligible carrier among ${carrier.enumerated} tombstone(s): a carrier must be top-level, unbound, and `
+      + 'currently `dead` — already `live` would make the flip below a no-op and the red leg would prove nothing',
+    ).toBeGreaterThan(0);
+    expect(carrier.key, 'the derivation produced no carrier').toMatch(/^[a-z_]+\/[A-Za-z0-9_]+$/);
+  });
+
+  it('FAILS when a tombstoned key\'s ledger row claims `live`', () => {
+    const root = sampleWith('tombstone-live', 'live');
+
+    const { status, output } = runGate(root);
+    // The defect itself, caught. Before this rule the same sample exited 0:
+    // the forward pass was satisfied (the tombstone keeps the key in the walked
+    // shape), the orphan pass was satisfied (the property is still there), and
+    // nothing read the marker at all.
+    expect(status, output).toBe(1);
+    expect(output).toContain('✗ 1 TOMBSTONED key(s) whose ledger row still claims a forbidden status:');
+    expect(output).toContain(`${carrier.key} -> "live"`);
+    // The prescription travels with the finding, and rules out deleting the row.
+    expect(output).toContain('Do NOT delete the row');
+    // ONE cause. A second ✗ block would mean the carrier dragged another check
+    // in with it, and the exit 1 above would no longer be this rule's.
+    expect(output.split('\n').filter((l) => l.startsWith('✗')), output).toHaveLength(1);
+  });
+
+  // THE LIT CONTROL. Without it, the exit 1 above is equally explained by the
+  // sample being unreadable, or by any other rule reddening on the same copy.
+  it('is GREEN on the same sample with a legal status — one value apart', () => {
+    const root = sampleWith('tombstone-dead', 'dead');
+
+    const { status, output } = runGate(root);
+    expect(status, output).toBe(0);
+    expect(output).toContain('✓ every governed-type property');
+    expect(output).toContain("no tombstoned key's row claims a status the tombstone forbids");
+  });
+
+  // …and "one value apart" is a claim about bytes, so it is checked as one
+  // rather than asserted in prose. Everything outside the carrier's own status
+  // and the arithmetic the count artifact requires must be identical.
+  it('builds the red and green samples one value apart, and nothing else', () => {
+    const red = sampleWith('apart-live', 'live');
+    const green = sampleWith('apart-dead', 'dead');
+
+    const differing = readdirSync(green).filter(
+      (f) => readFileSync(path.join(green, f), 'utf8') !== readFileSync(path.join(red, f), 'utf8'),
+    );
+    expect(differing.sort()).toEqual([`${carrier.type}.json`, 'state-counts.md'].sort());
+
+    const redLedger = JSON.parse(readFileSync(path.join(red, `${carrier.type}.json`), 'utf8'));
+    const greenLedger = JSON.parse(readFileSync(path.join(green, `${carrier.type}.json`), 'utf8'));
+    expect(redLedger.props[carrier.prop].status).toBe('live');
+    expect(greenLedger.props[carrier.prop].status).toBe('dead');
+    redLedger.props[carrier.prop].status = 'dead';
+    expect(redLedger).toEqual(greenLedger);
+  });
+
+  // THE DARK CONTROL. A rule that reddens honest rows is a different gate, not
+  // a stricter one — so the ordinary, non-tombstoned `live` rows must keep the
+  // verdict they had. Read off the carrier's own type, which carries both: the
+  // tombstone under test and every live key beside it.
+  it('leaves ordinary `live` rows alone — the per-type verdicts are unchanged', () => {
+    const shipped = runGate();
+    const sampled = runGate(sampleWith('tombstone-dark', 'dead'));
+    expect(sampled.status, sampled.output).toBe(0);
+
+    const verdict = (out: string) =>
+      out.split('\n').filter((l) => /^ {2}[a-z_]+ +\d+ classified/.test(l));
+    // Every type's verdict line, not just the carrier's: a tightening anywhere
+    // in the walk would move one of these.
+    expect(verdict(sampled.output)).toEqual(verdict(shipped.output));
+    expect(verdict(sampled.output).length, sampled.output).toBeGreaterThan(0);
+  });
+
+  // NON-VACUITY. "0 forbidden" reads identically whether every row is honest or
+  // the marker drifted and the scan reached nothing, so the gate prints the
+  // population it asked on every run, pass or fail.
+  it('reports how many tombstones it reached, not only how many were forbidden', () => {
+    const { status, output } = runGate(sampleWith('tombstone-census', 'dead'));
+    expect(status, output).toBe(0);
+    const line = output.split('\n').find((l) => l.startsWith('tombstoned keys:')) ?? '';
+    expect(line, 'the gate must publish the population it scanned').not.toBe('');
+    const reached = Number(/^tombstoned keys: (\d+) /.exec(line)?.[1] ?? 0);
+    expect(reached, 'a scan reaching zero tombstones is a degraded scan, not a clean tree').toBeGreaterThan(0);
+    expect(reached, 'the printed population and the enumerated one are the same reading').toBe(carrier.enumerated);
+    expect(line).toContain(`${reached} graded with a status the tombstone allows`);
+    expect(line).not.toContain('FORBIDDEN');
   });
 });

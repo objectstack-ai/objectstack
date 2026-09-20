@@ -28,20 +28,20 @@ for both corollaries.
 | Type | live | exp | elsewhere | dead | planned | classified |
 |---|---|---|---|---|---|---|
 | `object` | 51 | 0 | 0 | 0 | 1 | 52 |
-| `field` | 90 | 0 | 0 | 1 | 2 | 93 |
+| `field` | 91 | 0 | 0 | 1 | 1 | 93 |
 | `flow` | 34 | 0 | 0 | 6 | 0 | 40 |
 | `action` | 44 | 0 | 0 | 3 | 2 | 49 |
 | `hook` | 19 | 0 | 0 | 3 | 0 | 22 |
 | `permission` | 36 | 0 | 0 | 6 | 0 | 42 |
 | `position` | 12 | 0 | 0 | 0 | 0 | 12 |
-| `agent` | 21 | 4 | 0 | 1 | 0 | 26 |
+| `agent` | 20 | 4 | 0 | 2 | 0 | 26 |
 | `tool` | 13 | 1 | 0 | 0 | 0 | 14 |
 | `skill` | 16 | 0 | 0 | 1 | 0 | 17 |
 | `dataset` | 27 | 0 | 0 | 0 | 0 | 27 |
 | `page` | 22 | 0 | 0 | 1 | 1 | 24 |
 | `view` | 78 | 0 | 0 | 11 | 0 | 89 |
 | `report` | 21 | 0 | 0 | 0 | 0 | 21 |
-| `dashboard` | 45 | 0 | 0 | 10 | 0 | 55 |
+| `dashboard` | 42 | 0 | 0 | 13 | 0 | 55 |
 | `webhook` | 19 | 0 | 0 | 0 | 0 | 19 |
 | `query` | 16 | 0 | 0 | 5 | 0 | 21 |
 | `datasource` | 30 | 0 | 0 | 0 | 0 | 30 |
@@ -63,4 +63,7 @@ for both corollaries.
 | `batch_endpoints` | 5 | 0 | 0 | 2 | 0 | 7 |
 | `route_generation` | 0 | 0 | 0 | 4 | 0 | 4 |
 | `realtime_subscription` | 0 | 0 | 0 | 6 | 0 | 6 |
-| **total** | **862** | **5** | **1** | **96** | **10** | **974** |
+| `sharing_rule` | 16 | 0 | 0 | 0 | 1 | 17 |
+| `connector` | 20 | 0 | 0 | 53 | 1 | 74 |
+| `analytics_cube` | 17 | 0 | 0 | 10 | 0 | 27 |
+| **total** | **912** | **5** | **1** | **163** | **11** | **1092** |

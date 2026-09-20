@@ -528,21 +528,27 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir, totalmem } from 'node:os';
 import { join, posix, resolve } from 'node:path';
 import { getHeapStatistics } from 'node:v8';
+import { gitFreeEnv } from './git-env.mjs';
 import {
   selfTest as workspaceEnumeratorSelfTest,
   workspaceEnumeratorFloorFailures,
   workspacePackageDirs,
 } from './workspace-enumerator.mjs';
-// `typecheck`-script -> tsconfig program set. Shared with
-// `check-type-source-resolution.mjs` since #11490, which needs the identical
-// answer to decide its POPULATION: two copies of this predicate drift, and the
-// symptom of drift is a green gate on either side.
+// `typecheck`-script -> tsconfig program set. It moved into its own module in
+// #11490, when `check-type-source-resolution.mjs` needed the identical answer
+// to decide its POPULATION; that gate was retired under the maintainer ruling
+// of 2026-09-18 on #18373, so this file is the only consumer left. ⛔ Folding
+// the predicate back in here is a separate decision, not a consequence of that
+// retirement -- it floors its own cases in its own battery (PR #15327), which
+// this file deliberately does not re-pin. Two copies of this predicate drift,
+// and the symptom of drift is a green gate on either side.
 import {
   configsNamedByTypecheck,
   typecheckScriptChain,
   SELF_TEST_CASE_COUNT as TYPECHECK_CONFIGS_CASES,
   selfTest as typecheckConfigsSelfTest,
 } from './typecheck-configs.mjs';
+import { definePopulationFloor } from './population-floor.mjs';
 
 // Anchored to the script, not to cwd: the verdict must not depend on where the
 // guard was invoked from.
@@ -933,9 +939,12 @@ const EXEMPT = {
 // So it took the #5286 sibling route (`tsconfig.test.json` named by the
 // `typecheck` script), which puts the same 10 files in front of tsc while
 // leaving `tsconfig.json` -- the only config that gate reads -- untouched. The
-// general lesson, which is this ledger's to carry: the two remedies are
+// general lesson, which is this ledger's to carry: the two edits were
 // interchangeable only where the excluded tests import nothing the src layer
-// does not, and that is a property to MEASURE per package, never to assume.
+// does not, and that was a property to MEASURE per package, never to assume.
+// ⛔ Nobody has to weigh them any more -- the exclusion edit is no longer an
+// offered route (#18953); the sibling config is the whole prescription, and
+// this paragraph is the record of why, not a second option.
 //
 // `@objectstack/rest` GRADUATED from this ledger (#12542; entry: 155 raw,
 // re-measured 37 raw across 13 files under the sibling program). It is worth a
@@ -983,10 +992,13 @@ const EXEMPT = {
 // an exclusion go red the way trigger-record-change did, 4 stay green
 // (`objectql`, `lint`, `formula`, `verify`), and the 19th (`cli`) has no
 // exclusion to drop at all -- its tests are hidden by an `include` that never
-// reaches them. So that package was the majority case, not the exception, and
-// the graduation message no longer offers the exclusion route without its
-// precondition. Re-measure before relying on the split: it moves with every
-// import a test file gains.
+// reaches them. So that package was the majority case, not the exception --
+// and that is the measurement the graduation message was withdrawn on: it no
+// longer offers the exclusion route AT ALL (maintainer ruling of 2026-09-18 on
+// #18953), once the gate that decided the precondition had itself been retired
+// (#18373). ⛔ The 14/4 split above is kept here as a READING, never as a route
+// to pick from: it was taken at e47d5ef61, it moves with every import a test
+// file gains, and nothing measures it any more.
 //
 // ── #14062: three plugin entries GRADUATED, and what replaced them ───────────
 //
@@ -1090,14 +1102,16 @@ const EXEMPT = {
 // what WOULD happen, not about an existing dead pin, exactly as `cli`'s
 // graduation recorded for its own 115 files.
 //
-// ⚠️ ROUTE (b) WAS AVAILABLE HERE and was still not taken. The #11491 note
-// above names `verify` as one of the 4 entries whose exclusion could be dropped
-// with `check:type-source-resolution` staying green, and that split was
-// re-measured on 2026-09-04 under a trap-restored mutation and still holds for
-// this package (exit 0; 124 programs across 78 packages). It was declined on
-// module semantics: `tsconfig.json` inherits NodeNext from the repo root and
-// would hold the test layer to a resolver vitest never runs it under. Onboard
-// by WIRING, not by widening the build config.
+// ⚠️ DROPPING THE EXCLUSION WAS AVAILABLE HERE and was still not taken. The
+// #11491 note above names `verify` as one of the 4 entries whose exclusion
+// could be dropped with `check:type-source-resolution` staying green, and that
+// split was re-measured on 2026-09-04 under a trap-restored mutation and still
+// held for this package (exit 0; 124 programs across 78 packages). It was
+// declined on module semantics: `tsconfig.json` inherits NodeNext from the repo
+// root and would hold the test layer to a resolver vitest never runs it under.
+// Onboard by WIRING, not by widening the build config -- which is now the only
+// route the graduation message prescribes at all (#18953), so this record is
+// history and ⛔ not a second option anybody still has to weigh.
 const TEST_DEBT = {
 // ── #14710: `@objectstack/cli` GRADUATED, and it was not paid down ─────────
 //
@@ -1253,40 +1267,71 @@ const TEST_DEBT = {
 // that half had no subject here. What the gap cost was the other half: 83
 // diagnostics that no gate this repo runs had ever reported.
 //
-// ⛔ WHAT DID NOT GRADUATE, and why it is still below: `@objectstack/http-conformance`.
-// Its 2 recorded errors reproduce exactly (TS2307 x1, TS2304 x1) and its own
-// note already says what they are — both inside `node_modules` `.d.ts` files, so
-// the entry moves with the lockfile rather than with this package's code. The
-// reason it cannot take the sibling route unchanged is one this file did not
-// record before: `packages/qa/http-conformance/tsconfig.json` is one of the six
-// package configs that do NOT extend the repo root config, and it is the only
-// one of those that also declares no `skipLibCheck` — which is the sole reason
-// those two third-party declarations are checked at all. Ledgering them per FILE
-// would key a shrink-only ratchet on `.pnpm` content-hash paths that move on any
-// unrelated dependency bump, and turning `skipLibCheck` on in a test program has
-// no precedent among the 31 sibling configs (none declares it). That is a
-// judgement about this repo's config policy rather than about this package, so
-// it is left to the card.
-
-  '@objectstack/http-conformance': {
-    errors: 2,
-    note: 'TS2307 x1, TS2304 x1, and BOTH are reported inside node_modules `.d.ts` files '
-      + '(@better-auth/core\'s `bun:sqlite` import, @better-fetch/fetch\'s `Timer`), so this entry now '
-      + 'moves with the lockfile and NOT with this package\'s own code at all -- every file this package '
-      + 'checks in is clean with the test exclusion lifted. Raw `tsc --noEmit` counts are what every '
-      + 'number in these ledgers means, so they are counted here rather than filtered out -- but they are '
-      + 'not this package\'s debt to fix, and this entry cannot graduate by fixing code. Re-measured 2 at '
-      + '3954fb7df, DOWN from 3 (#11788). The retired third diagnostic was a TS2307 on '
-      + '`@objectstack/spec/contracts` in conformance.integration.test.ts, which this package imported '
-      + 'without declaring @objectstack/spec: under pnpm\'s strict layout that specifier reached no '
-      + '@objectstack/spec anywhere on its resolution walk, so the old ceiling was a reading of the '
-      + 'INSTALL LAYOUT rather than of this package\'s types. Measured three ways on one tree at '
-      + '3954fb7df, same sources, same built closure: 3 as installed, 2 with @objectstack/spec merely '
-      + 'symlinked into the root node_modules and nothing else touched, 125 with packages/spec/dist moved '
-      + 'aside. #11788 declared the dependency, so the specifier now resolves through the closure this '
-      + 'gate refreshes and refuses on -- the number dropped because the program became well-defined, '
-      + 'not because anything was suppressed.',
-  },
+// ── #12511: `@objectstack/http-conformance` GRADUATED, and THIS LEDGER IS NOW
+// EMPTY ──────────────────────────────────────────────────────────────────────
+//
+// The eighth and last of the card, on 2026-09-17, by the same route as the
+// seven above and the six before them: it now has a `tsconfig.test.json` its
+// own `typecheck` script NAMES, so `hidesTests` is false for it and this gate's
+// per-PACKAGE approximation has nothing left to approximate. ⛔ Read that first
+// — a deleted TEST_DEBT entry normally means the errors are gone, and here it
+// does not. This change repairs no test file and edits none.
+//
+// ⭐ WHAT THIS ONE NEEDED THAT THE SEVEN DID NOT, because the deleted note said
+// the sibling route was unavailable and that reading was correct at the time:
+// `packages/qa/http-conformance/tsconfig.json` was one of the six package
+// configs that do NOT extend the repo root config, and the only one of those
+// that also declared no `skipLibCheck` — the sole reason its two third-party
+// declarations were checked at all. The note left the choice to the card
+// because it is a judgement about this repo's CONFIG POLICY and not about this
+// package. The director ruling of 2026-09-07 (decision batch #66, maintainer
+// verbatim: 「同意」) made it: the build config takes one `extends` line onto the
+// repo root, the way 73 of 79 packages already do, and the sibling then follows
+// unchanged. ⛔ No
+// per-package dialect, ⛔ no ratchet keyed on `.pnpm` content-hash paths that
+// move on an unrelated dependency bump, ⛔ no residual entry here.
+//
+// ⚠️ THE ATTRIBUTION HAS NO REMAINDER, and it does not run the way the other
+// thirteen graduations did — this is the first entry whose LEDGER is LARGER
+// than what it graduated with, so read the terms rather than the totals.
+// Measured on objectstack-ai/objectstack at f6c2eb7c865065943a474d1e49833d6184d76e32
+// with the dependency closure built (an error count taken against an unbuilt
+// closure is not a reading — unresolved-import cascades inflate it), each term
+// isolated by its own single-option probe rather than inferred from the ends:
+//
+//   RECORDED here                                                        2
+//   RAW — this gate's own `remeasureProject` shape against the
+//     UNCHANGED config (extends nothing, drops only the test glob):
+//     TS2307 x1, TS2304 x1, class for class and file for file            2
+//   dissolve — `skipLibCheck`, inherited from the root config. Both
+//     are inside `node_modules` `.d.ts` (@better-auth/core's
+//     `bun:sqlite` import, @better-fetch/fetch's `Timer`)               -2
+//   exposed — the root config DECLARES `lib`, which REPLACES the
+//     `lib.es2022.full` default that `target: ES2022` had been
+//     supplying, so `Response.json()` is read from @types/node's
+//     undici (`Promise<unknown>`) instead of from DOM
+//     (`Promise<any>`): TS18046 x14, TS2571 x6, TS2339 x5             +25
+//   exposed — the root config's `noUnusedParameters`: TS6133 x2        +2
+//   LEDGER, per file and per signature                                  27
+//
+// The `+25` is one idiom — `await res.json()` bound without a narrowing —
+// across three suites, which is `packages/mcp`'s population above almost
+// exactly (51 of its 53). It is NOT a config-tier artefact to be tuned away:
+// vitest runs this package with `environment: 'node'`, so the undici reading is
+// the one that matches the runtime and the DOM one was the fiction. The sibling
+// therefore declares `lib: ["ES2022"]` like all 31 of its siblings and ⛔ does
+// not re-add `DOM` to shrink its own ledger. Measured, not reasoned: with
+// `lib: ["ES2022", "DOM", "DOM.Iterable"]` the same program reports 2.
+//
+// ⚠️ PINS_CHECKED reported nothing for this package in either direction and
+// still does not: its test layer holds ZERO `@ts-expect-error` directives
+// (grepped with a positive control — the same grep hits 49 files under
+// `packages/spec/src`), so that half had no subject here either.
+//
+// ⛔ AN EMPTY LEDGER IS NOT A LICENCE TO REOPEN IT. TEST_DEBT is closed to new
+// entries exactly as it was while it held rows: a package whose tests sit
+// outside every tsc program onboards by WIRING a sibling config, never by
+// adding a row back here.
 };
 
 // Repo-relative path -> why this test file's `@ts-expect-error` directives are
@@ -1697,6 +1742,7 @@ function gitIgnoredPaths(rels) {
   if (rels.length === 0) return new Set();
   const res = spawnSync('git', ['-c', 'core.excludesFile=', 'check-ignore', '--stdin', '-z'], {
     cwd: ROOT,
+    env: gitFreeEnv(), // LOCAL-ONLY (#16644): the ignore rules of the tree at `cwd`, never a hook's
     input: rels.map((r) => `${r}\0`).join(''),
     encoding: 'utf8',
     maxBuffer: 16 * 1024 * 1024,
@@ -1785,7 +1831,10 @@ function readIgnoredPaths(cwd) {
       '--directory',
       '-z',
     ],
-    { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
+    // LOCAL-ONLY (#16644): `cwd` is a package directory on a gate run and a mkdtemp
+    // fixture in the self-test battery below; an inherited GIT_DIR outranks it and this
+    // would answer with the real repository's ignored paths for a fixture.
+    { cwd, env: gitFreeEnv(), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
   );
   if (res.error) {
     refusePrerequisite(
@@ -2223,89 +2272,48 @@ const MIN_WALKED_TEST_FILES = 2800;
 const MIN_WALKED_SOURCE_FILES = 2000;
 
 /**
- * The first floor a run falls below, as a refusal message -- or `null` when
- * every count clears. Pure, so `--self-test` drives every row with no tree.
+ * The POPULATION FLOORS and the provenance line, over the row table THIS gate
+ * declares. The row-walk, the refusal wording and the provenance formatting are
+ * shared with the two other gates that carry the same mechanism
+ * (`scripts/population-floor.mjs`); the rows stay HERE, because each `why` is a
+ * claim about this gate's internals and is true of nothing else.
  *
  * ⛔ Each `why` names ONLY the stage its own count measures. A row that fell
  * says which reader went quiet and nothing else: the other rows report
  * themselves, and listing every way a run can collapse would put causes that
  * did not occur in front of the reader.
  *
- * @param {{packages?: number, walkedTestFiles?: number, walkedSourceFiles?: number}} counts
- * @returns {string | null}
- *
  * ⛔ NOT exported, deliberately. `check:entry-guard` refuses a `scripts/**` file
  * that exports a binding AND runs on import -- whatever its top level does then
  * runs inside the importer -- and this file's top level IS its dispatch. The
- * self-test lives in this same module and reaches it directly, so an export
- * would buy nothing and cost that rule. (The precedent this shape is copied
- * from, `check-dual-build-cjs-loads.mjs`, exports because it already guards its
- * dispatch with `isEntrypoint`; retrofitting that here is a change to two large
- * gates' argv handling and not this card's subject.)
+ * self-test lives in this same module and reaches these directly, so an export
+ * would buy nothing and cost that rule. The shared module is the other half of
+ * the same rule: it only ever exports and never runs, so importing it costs
+ * this file nothing.
+ *
+ * @type {{populationFloorProblem: (counts?: object) => string | null,
+ *         populationProvenanceLine: (counts?: object) => string}}
  */
-function populationFloorProblem(counts) {
-  const rows = [
-    [counts?.packages ?? 0, MIN_PACKAGES, MEASURED_POPULATION.packages,
-      'workspace package(s) enumerated',
-      'This is the population every per-package clause is asked about. With none of it, each '
+const { populationFloorProblem, populationProvenanceLine } = definePopulationFloor({
+  ref: MEASURED_POPULATION.ref,
+  rows: [
+    { key: 'packages', min: MIN_PACKAGES, measured: MEASURED_POPULATION.packages,
+      what: 'workspace package(s) enumerated',
+      why: 'This is the population every per-package clause is asked about. With none of it, each '
         + 'clause is vacuously satisfied and the summary line reports a coverage ratio over an '
-        + 'empty set.'],
-    [counts?.walkedTestFiles ?? 0, MIN_WALKED_TEST_FILES, MEASURED_POPULATION.walkedTestFiles,
-      'test file(s) found by the per-package walk',
-      'TESTS_COVERED and PINS_CHECKED are decided against what this walk hands over. A walk that '
+        + 'empty set.' },
+    { key: 'walkedTestFiles', min: MIN_WALKED_TEST_FILES, measured: MEASURED_POPULATION.walkedTestFiles,
+      what: 'test file(s) found by the per-package walk',
+      why: 'TESTS_COVERED and PINS_CHECKED are decided against what this walk hands over. A walk that '
         + 'returns nothing hides no tests and pins nothing, which is the same silence a fully '
-        + 'covered workspace produces.'],
-    [counts?.walkedSourceFiles ?? 0, MIN_WALKED_SOURCE_FILES, MEASURED_POPULATION.walkedSourceFiles,
-      'non-test source file(s) found by the per-package walk',
-      'SOURCES_COVERED is decided against this half of the same walk. With none of it every '
+        + 'covered workspace produces.' },
+    { key: 'walkedSourceFiles', min: MIN_WALKED_SOURCE_FILES, measured: MEASURED_POPULATION.walkedSourceFiles,
+      what: 'non-test source file(s) found by the per-package walk',
+      why: 'SOURCES_COVERED is decided against this half of the same walk. With none of it every '
         + 'source directory reads as accounted for, because the clause reports the REMAINDER and '
-        + 'the remainder of nothing is nothing.'],
-  ];
-  for (const [got, min, measured, what, why] of rows) {
-    if (got >= min) continue;
-    return `measured only ${got} ${what}, below the floor of ${min} `
-      + `(${measured} on ${MEASURED_POPULATION.ref}).\n`
-      + `  ${why}\n`
-      + '  ⛔ NOT a pass: nothing, or nearly nothing, was read. This says WHICH population fell and\n'
-      + '  nothing about why the others stand — they are reported by their own rows.';
-  }
-  return null;
-}
-
-/**
- * The provenance footer for a PASSING run: what this run read, the floors it
- * cleared, and the census those floors came from, side by side.
- *
- * The floors are inequalities on purpose, so no run can contradict the record.
- * Without this line the record could stop describing the tree with nothing
- * anywhere saying so. The delta is INFORMATION, never a verdict: this
- * population moves in both directions for good reasons -- a package merged
- * away, a test tree deleted -- and only the floors decide. Pure.
- *
- * @param {{packages?: number, walkedTestFiles?: number, walkedSourceFiles?: number}} counts
- * @returns {string}
- *
- * ⛔ NOT exported, deliberately. `check:entry-guard` refuses a `scripts/**` file
- * that exports a binding AND runs on import -- whatever its top level does then
- * runs inside the importer -- and this file's top level IS its dispatch. The
- * self-test lives in this same module and reaches it directly, so an export
- * would buy nothing and cost that rule. (The precedent this shape is copied
- * from, `check-dual-build-cjs-loads.mjs`, exports because it already guards its
- * dispatch with `isEntrypoint`; retrofitting that here is a change to two large
- * gates' argv handling and not this card's subject.)
- */
-function populationProvenanceLine(counts) {
-  const got = [counts?.packages ?? 0, counts?.walkedTestFiles ?? 0, counts?.walkedSourceFiles ?? 0];
-  const rec = [MEASURED_POPULATION.packages, MEASURED_POPULATION.walkedTestFiles,
-    MEASURED_POPULATION.walkedSourceFiles];
-  const floors = [MIN_PACKAGES, MIN_WALKED_TEST_FILES, MIN_WALKED_SOURCE_FILES];
-  const delta = got.map((g, i) => (g === rec[i] ? '=' : `${g > rec[i] ? '+' : ''}${g - rec[i]}`));
-  return `  provenance — packages/walkedTestFiles/walkedSourceFiles: this run ${got.join('/')}`
-    + ` · floors ${floors.join('/')} · derived from ${rec.join('/')} measured on ${MEASURED_POPULATION.ref}`
-    + ` (${delta.join('/')} vs the record).\n`
-    + '  ⚠ The delta is information, not a verdict — this population grows AND shrinks for good'
-    + ' reasons, and only the floors decide.';
-}
+        + 'the remainder of nothing is nothing.' },
+  ],
+});
 
 function workspacePackages() {
   // Membership comes from scripts/workspace-enumerator.mjs (#11510) — this repo's
@@ -4447,11 +4455,32 @@ function ratchetRemedyCarriesAuthority(message) {
 //
 // So the fix is not more words. It is the branch: `m.ledger` is already on
 // every measurement, and each ledger's remedy prints only where it is the
-// remedy. Neither is dropped -- both are still offered, in the branch that
-// owns them. Within TEST_DEBT there IS a real choice of route, so that one
-// keeps both and names the PRECONDITION plus the command that decides it: a
-// message the reader has to open a gate's source to act on has not fixed
-// anything.
+// remedy. Neither LEDGER is dropped -- each still gets the remedy that is its
+// own, in the branch that owns it.
+//
+// ── Within TEST_DEBT the exclusion route came OUT (#18953) ──────────────────
+//
+// TEST_DEBT used to print a SECOND route beside the sibling config: drop the
+// `**/*.test.ts` entry from `exclude` (or widen `include` to reach the test
+// tree). Whether that route was available for a given package was decided by
+// `check:type-source-resolution` -- and that gate was RETIRED under the
+// maintainer ruling of 2026-09-18 on #18373, leaving an official route whose
+// precondition nothing measured any more. What it had measured is the second
+// bullet above: RED for 14 of the 18 entries that had an exclusion to drop. A
+// remedy that is wrong 14 times out of 18, with nothing left to say so, is not
+// a remedy, so the maintainer ruling of 2026-09-18 on #18953 (decision batch
+// #159 item 4, letter ②, maintainer verbatim 「同意」) withdrew it: the printed
+// prescription names (a) alone, and the docs that restated the route drop it
+// with the same edit.
+//
+// ⛔ The other way out was REJECTED in that same ruling, so the way back in is
+// closed from both sides: having THIS gate measure the precondition itself
+// rebuilds half of a gate the maintainer had just retired. An author who
+// widens `include` to the test tree anyway does so on their own judgement --
+// ⛔ not on this gate's advice, which now says nothing about that edit in
+// either direction. The self-test pins the withdrawal as ANTI-content, the way
+// every other branch here is pinned, because the state a well-meaning re-merge
+// returns to is the one that printed both.
 //
 // ⛔ This changes no verdict and no number. Graduation candidates were, and
 // remain, a NOTE -- never a failure.
@@ -4476,15 +4505,9 @@ function graduationRemedy({ ledger, isRoot = false }) {
       `Onboard it: put the hidden test files in front of tsc, and delete the TEST_DEBT entry in the same ` +
       `PR. ⛔ Adding a \`typecheck\` script is NOT the remedy here -- this ledger is "src checks, tests ` +
       `are hidden", so the package already has one.\n` +
-      `    (a) The #5286 sibling route: add a \`tsconfig.test.json\` that reaches the ` +
-      `tests and NAME it in the \`typecheck\` script. Always available -- it leaves \`tsconfig.json\` alone.\n` +
-      `    (b) Drop the \`**/*.test.ts\` entry from \`exclude\` in \`tsconfig.json\` (or widen \`include\` to ` +
-      `reach the test tree). Available ONLY while \`pnpm check:type-source-resolution\` still passes with ` +
-      `the tests re-admitted: that gate reads \`tsconfig.json\` and nothing else, the re-admitted tests ` +
-      `import workspace packages this package's src program never held, and its registry is ⛔ SHRINK-ONLY ` +
-      `-- registering the new ones is not the way out. Measured red on 14 of the 18 entries that have an ` +
-      `exclusion to drop, so assume (b) is unavailable until that gate says otherwise. Run it before you ` +
-      `commit; nothing in this gate's own verdict will tell you.`
+      `    (a) The #5286 sibling route, and the ONLY route this gate prescribes: add a ` +
+      `\`tsconfig.test.json\` that reaches the tests and NAME it in the \`typecheck\` script. Always ` +
+      `available -- it leaves \`tsconfig.json\` alone.`
     );
   }
   if (ledger === 'DEBT') {
@@ -5589,9 +5612,11 @@ function selfTest() {
   // The observation half is where the :267 blind spot lived: `excludesTests`
   // read only `tsconfig.json`, so a sibling test config was invisible however
   // it was wired. `configsNamedByTypecheck` and `typecheckScriptChain` now
-  // decide it, and since #11490 they live in `scripts/typecheck-configs.mjs`
-  // because `check-type-source-resolution.mjs` needs the same answer for its
-  // population. Their cases moved WITH them -- one rule, one home, one battery
+  // decide it, and since #11490 they live in `scripts/typecheck-configs.mjs`,
+  // where they moved because `check-type-source-resolution.mjs` needed the same
+  // answer for its population -- that gate was retired on 2026-09-18 (#18373),
+  // leaving this file its only consumer. Their cases moved WITH them -- one
+  // rule, one home, one battery
   // -- and are folded in here so this gate still fails when the predicate it
   // depends on breaks.
   //
@@ -5854,7 +5879,8 @@ function selfTest() {
   const ignoreRepo = mkdtempSync(join(tmpdir(), 'objectstack-type-check-ignore-'));
   let ignoreSourceCases = [];
   try {
-    const g = (args) => spawnSync('git', args, { cwd: ignoreRepo, encoding: 'utf8' });
+    // LOCAL-ONLY (#16644): `init` / `config` / `add` against a mkdtemp fixture.
+    const g = (args) => spawnSync('git', args, { cwd: ignoreRepo, encoding: 'utf8', env: gitFreeEnv() });
     g(['init', '-q', '.']);
     g(['config', 'user.email', 'self-test@objectstack.invalid']);
     g(['config', 'user.name', 'check-type-check-coverage self-test']);
@@ -6367,13 +6393,17 @@ function selfTest() {
         + 'that remedy is a no-op on every one of them -- the misfire #11491 was filed on.',
     },
     {
-      label: 'TEST_DEBT graduation names the gate that DECIDES whether the exclusion route is available',
+      label: 'TEST_DEBT graduation prescribes the sibling config ALONE -- the exclusion route is withdrawn',
       message: testDebtGrad,
-      present: ['check:type-source-resolution', 'SHRINK-ONLY', 'tsconfig.test.json'],
-      absent: [],
-      why: 'the exclusion route reds that gate on 14 of the 18 entries that have an exclusion, and this '
-        + 'gate never runs it. A message the author has to read a second gate\'s SOURCE to act on is the '
-        + 'half of #11491 that a correct-but-terse rewrite would leave unfixed.',
+      present: ['tsconfig.test.json', 'the ONLY route this gate prescribes'],
+      absent: ['exclude', 'widen', 'check:type-source-resolution', 'SHRINK-ONLY'],
+      why: 'the exclusion route read red on 14 of the 18 entries that had an exclusion, and the gate that '
+        + 'decided the precondition per package was retired (2026-09-18, #18373), so nothing measured it. '
+        + 'The maintainer ruling of 2026-09-18 on #18953 withdrew the route rather than leave an official '
+        + 'path that is wrong 14 times out of 18: the remedy names (a) alone. These are ANTI-content '
+        + 'needles on purpose -- a presence-only assertion would sit green through exactly the '
+        + 're-merge that hands the route back, and the retired gate\'s NAME is only one of the spellings '
+        + 'it could come back under, which is why `exclude` and `widen` are named beside it.',
     },
     {
       label: 'the workspace root graduates through `typecheck:root`, never through `typecheck`',
@@ -6388,9 +6418,12 @@ function selfTest() {
       label: 'an unrecognised ledger inherits NEITHER remedy',
       message: gradNote({ ledger: 'FUTURE_DEBT' }),
       present: ['FUTURE_DEBT'],
-      absent: [ADD_SCRIPT, 'drop the test exclusion', 'check:type-source-resolution'],
+      absent: [ADD_SCRIPT, 'drop the test exclusion', 'tsconfig.test.json'],
       why: 'a third ledger silently receiving DEBT\'s advice is how this message was wrong for TEST_DEBT '
-        + 'for its whole life. Saying less is the only safe default.',
+        + 'for its whole life. Saying less is the only safe default. ⚠️ The TEST_DEBT needle here is '
+        + '`tsconfig.test.json` and NOT the retired gate\'s name: that name left the message when #18953 '
+        + 'withdrew the exclusion route, and an anti-content needle naming a string no branch can emit '
+        + 'proves nothing about inheritance.',
     },
   ];
   for (const c of gradCases) {
@@ -6402,8 +6435,8 @@ function selfTest() {
     for (const needle of c.absent) {
       if (c.message.includes(needle))
         failures.push(
-          `#11491 graduation remedy — ${c.label}: message STILL contains ${needle}, which is the other `
-            + `ledger's remedy. ${c.why}`,
+          `#11491 graduation remedy — ${c.label}: message STILL contains ${needle}, which this case pins `
+            + `as ABSENT -- another ledger's remedy, or a route this one no longer offers. ${c.why}`,
         );
     }
   }

@@ -1,0 +1,1397 @@
+{
+  "description": "Shrink-only ledger of every PUBLISHED JSON Schema that is STILL WIDER than the Zod type it was generated from, because a rule written as `.refine()` reaches the runtime and not the file (#18670). `z.toJSONSchema()` has no arm for a `custom` check: a plain record, the same record with a `.refine()`, and the same record with an ABORTING `.refine()` all project byte-identically (measured on zod 4.4.3, the version packages/spec resolves). So a document one of these files ACCEPTS can still be refused at parse time, and an author -- or an AI -- validating against packages/spec/json-schema/** finds out a release later. Each `sites` path is a position under that schema at which a refinement is dropped; the same paths are written onto the artifact itself as `x-dropped-refinements`. Item 2 closed the first patterns: a refinement DECLARED through the closed list in src/shared/refinement-projection.ts is emitted into the published file, reads `projected` rather than `dropped`, and its row LEAVES this ledger in the same PR -- which is why the ledger shrinks and never grows on a repair. Every refinement outside that closed list stays here, and adding an arm to the list is a public-contract decision, not a refactor. Hand-edited on purpose and with no `gen:` script: a generator would let a new gap be admitted by running a command instead of by a decision, which is the silence this ledger exists to end. Adding, removing or moving a site fails packages/spec/scripts/build-schemas.ts until the line moves with it, and the failure prints the corrected entry in full. ⛔ Do not delete or weaken a refinement to shorten this file -- the runtime rule is correct; it is the projection that is silent, and the remedy is to teach the closed list a NAMED pattern, never to drop the rule.",
+  "measured": {
+    "zod": "4.4.3",
+    "publishedSchemasWithDroppedRefinements": 204,
+    "droppedRefinementSites": 569,
+    "refinementSitesThatDidProject": 357,
+    "refinementSitesWithNoJsonFormToCompare": 9
+  },
+  "entries": {
+    "ai/BlueprintField": {
+      "sites": [
+        "summaryOperations.filter.lazy"
+      ]
+    },
+    "ai/BlueprintObject": {
+      "sites": [
+        "fields.element.summaryOperations.filter.lazy"
+      ]
+    },
+    "ai/BlueprintSummaryOperations": {
+      "sites": [
+        "filter.lazy"
+      ]
+    },
+    "ai/Skill": {
+      "sites": [
+        "triggerConditions.element"
+      ]
+    },
+    "ai/SkillTriggerCondition": {
+      "sites": [
+        ""
+      ]
+    },
+    "ai/SolutionBlueprint": {
+      "sites": [
+        "objects.element.fields.element.summaryOperations.filter.lazy"
+      ]
+    },
+    "api/AnalyticsQueryRequest": {
+      "sites": [
+        "where.lazy"
+      ]
+    },
+    "api/AppDefinitionResponse": {
+      "sites": [
+        "data.navigation.element.lazy.options[0]"
+      ]
+    },
+    "api/AssembledInstalledPackage": {
+      "sites": [
+        "manifest.actions.element.in",
+        "manifest.actions.element.in.params.element.in",
+        "manifest.connectors.element",
+        "manifest.dashboards.element.globalFilters.element",
+        "manifest.dashboards.element.widgets.element",
+        "manifest.datasets.element",
+        "manifest.datasets.element.include.element",
+        "manifest.datasources.element",
+        "manifest.flows.element",
+        "manifest.flows.element.errorHandling",
+        "manifest.flows.element.nodes.element.in.waitEventConfig",
+        "manifest.jobs.element.schedule.options[0].timezone",
+        "manifest.navigationContributions.element.items.element.lazy.options[0]",
+        "manifest.objectExtensions.element",
+        "manifest.objects.element",
+        "manifest.objects.element.fieldGroups",
+        "manifest.objects.element.fields.out.keyType",
+        "manifest.objects.element.fields.out.valueType",
+        "manifest.objects.element.fields.out.valueType.currencyConfig",
+        "manifest.objects.element.lifecycle",
+        "manifest.pages.element",
+        "manifest.pages.element.slots.header.options[0].in.type",
+        "manifest.permissions.element.objects.valueType.out",
+        "manifest.permissions.element.rowLevelSecurity.element",
+        "manifest.reports.element",
+        "manifest.reports.element.blocks.element",
+        "manifest.reports.element.runtimeFilter.lazy",
+        "manifest.sharingRules.element.sharedWith",
+        "manifest.skills.element.triggerConditions.element",
+        "manifest.views.element.form",
+        "manifest.views.element.form.sections.element.in",
+        "manifest.views.element.form.submitBehavior.options[1].url",
+        "manifest.views.element.list",
+        "manifest.views.element.list.bulkActionDefs.element",
+        "manifest.views.element.list.filter.element",
+        "manifest.views.element.list.gantt.groupByField",
+        "manifest.views.element.list.grouping.fields.element.field",
+        "manifest.views.element.list.kanban.groupByField",
+        "manifest.views.element.list.timeline.groupByField"
+      ]
+    },
+    "api/CreateFlowRequest": {
+      "sites": [
+        "",
+        "errorHandling",
+        "nodes.element.in.waitEventConfig"
+      ]
+    },
+    "api/CreateFlowResponse": {
+      "sites": [
+        "data",
+        "data.errorHandling",
+        "data.nodes.element.in.waitEventConfig"
+      ]
+    },
+    "api/CreateImportJobRequest": {
+      "sites": [
+        ""
+      ]
+    },
+    "api/DisablePackageResponse": {
+      "sites": [
+        "package.manifest.navigationContributions.element.items.element.lazy.options[0]"
+      ]
+    },
+    "api/EnablePackageResponse": {
+      "sites": [
+        "package.manifest.navigationContributions.element.items.element.lazy.options[0]"
+      ]
+    },
+    "api/ExportRequest": {
+      "sites": [
+        "left.where.lazy"
+      ]
+    },
+    "api/FindDataRequest": {
+      "sites": [
+        "query.in.having.lazy",
+        "query.in.where.options[0].lazy.options[0].items[0]",
+        "query.in.where.options[0].lazy.options[0].items[1]",
+        "query.in.where.options[0].lazy.options[2].items[0]"
+      ]
+    },
+    "api/GetFlowResponse": {
+      "sites": [
+        "data",
+        "data.errorHandling",
+        "data.nodes.element.in.waitEventConfig"
+      ]
+    },
+    "api/GetInstalledPackageResponse": {
+      "sites": [
+        "data.options[0].manifest.navigationContributions.element.items.element.lazy.options[0]",
+        "data.options[1].manifest.actions.element.in",
+        "data.options[1].manifest.actions.element.in.params.element.in",
+        "data.options[1].manifest.connectors.element",
+        "data.options[1].manifest.dashboards.element.globalFilters.element",
+        "data.options[1].manifest.dashboards.element.widgets.element",
+        "data.options[1].manifest.datasets.element",
+        "data.options[1].manifest.datasets.element.include.element",
+        "data.options[1].manifest.datasources.element",
+        "data.options[1].manifest.flows.element",
+        "data.options[1].manifest.flows.element.errorHandling",
+        "data.options[1].manifest.flows.element.nodes.element.in.waitEventConfig",
+        "data.options[1].manifest.jobs.element.schedule.options[0].timezone",
+        "data.options[1].manifest.objectExtensions.element",
+        "data.options[1].manifest.objects.element",
+        "data.options[1].manifest.objects.element.fieldGroups",
+        "data.options[1].manifest.objects.element.fields.out.keyType",
+        "data.options[1].manifest.objects.element.fields.out.valueType",
+        "data.options[1].manifest.objects.element.fields.out.valueType.currencyConfig",
+        "data.options[1].manifest.objects.element.lifecycle",
+        "data.options[1].manifest.pages.element",
+        "data.options[1].manifest.pages.element.slots.header.options[0].in.type",
+        "data.options[1].manifest.permissions.element.objects.valueType.out",
+        "data.options[1].manifest.permissions.element.rowLevelSecurity.element",
+        "data.options[1].manifest.reports.element",
+        "data.options[1].manifest.reports.element.blocks.element",
+        "data.options[1].manifest.reports.element.runtimeFilter.lazy",
+        "data.options[1].manifest.sharingRules.element.sharedWith",
+        "data.options[1].manifest.skills.element.triggerConditions.element",
+        "data.options[1].manifest.views.element.form",
+        "data.options[1].manifest.views.element.form.sections.element.in",
+        "data.options[1].manifest.views.element.form.submitBehavior.options[1].url",
+        "data.options[1].manifest.views.element.list",
+        "data.options[1].manifest.views.element.list.bulkActionDefs.element",
+        "data.options[1].manifest.views.element.list.filter.element",
+        "data.options[1].manifest.views.element.list.gantt.groupByField",
+        "data.options[1].manifest.views.element.list.grouping.fields.element.field",
+        "data.options[1].manifest.views.element.list.kanban.groupByField",
+        "data.options[1].manifest.views.element.list.timeline.groupByField"
+      ]
+    },
+    "api/GetObjectPermissionsResponse": {
+      "sites": [
+        "permissions.out"
+      ]
+    },
+    "api/GetPackageResponse": {
+      "sites": [
+        "package.manifest.navigationContributions.element.items.element.lazy.options[0]"
+      ]
+    },
+    "api/GetUiViewResponse": {
+      "sites": [
+        "form",
+        "form.sections.element.in",
+        "form.submitBehavior.options[1].url",
+        "list",
+        "list.bulkActionDefs.element",
+        "list.filter.element",
+        "list.gantt.groupByField",
+        "list.grouping.fields.element.field",
+        "list.kanban.groupByField",
+        "list.timeline.groupByField"
+      ]
+    },
+    "api/ImportRequest": {
+      "sites": [
+        ""
+      ]
+    },
+    "api/InstallPackageRequest": {
+      "sites": [
+        "manifest.navigationContributions.element.items.element.lazy.options[0]"
+      ]
+    },
+    "api/InstallPackageResponse": {
+      "sites": [
+        "package.manifest.navigationContributions.element.items.element.lazy.options[0]"
+      ]
+    },
+    "api/InstalledPackageAtEitherStage": {
+      "sites": [
+        "options[0].manifest.navigationContributions.element.items.element.lazy.options[0]",
+        "options[1].manifest.actions.element.in",
+        "options[1].manifest.actions.element.in.params.element.in",
+        "options[1].manifest.connectors.element",
+        "options[1].manifest.dashboards.element.globalFilters.element",
+        "options[1].manifest.dashboards.element.widgets.element",
+        "options[1].manifest.datasets.element",
+        "options[1].manifest.datasets.element.include.element",
+        "options[1].manifest.datasources.element",
+        "options[1].manifest.flows.element",
+        "options[1].manifest.flows.element.errorHandling",
+        "options[1].manifest.flows.element.nodes.element.in.waitEventConfig",
+        "options[1].manifest.jobs.element.schedule.options[0].timezone",
+        "options[1].manifest.objectExtensions.element",
+        "options[1].manifest.objects.element",
+        "options[1].manifest.objects.element.fieldGroups",
+        "options[1].manifest.objects.element.fields.out.keyType",
+        "options[1].manifest.objects.element.fields.out.valueType",
+        "options[1].manifest.objects.element.fields.out.valueType.currencyConfig",
+        "options[1].manifest.objects.element.lifecycle",
+        "options[1].manifest.pages.element",
+        "options[1].manifest.pages.element.slots.header.options[0].in.type",
+        "options[1].manifest.permissions.element.objects.valueType.out",
+        "options[1].manifest.permissions.element.rowLevelSecurity.element",
+        "options[1].manifest.reports.element",
+        "options[1].manifest.reports.element.blocks.element",
+        "options[1].manifest.reports.element.runtimeFilter.lazy",
+        "options[1].manifest.sharingRules.element.sharedWith",
+        "options[1].manifest.skills.element.triggerConditions.element",
+        "options[1].manifest.views.element.form",
+        "options[1].manifest.views.element.form.sections.element.in",
+        "options[1].manifest.views.element.form.submitBehavior.options[1].url",
+        "options[1].manifest.views.element.list",
+        "options[1].manifest.views.element.list.bulkActionDefs.element",
+        "options[1].manifest.views.element.list.filter.element",
+        "options[1].manifest.views.element.list.gantt.groupByField",
+        "options[1].manifest.views.element.list.grouping.fields.element.field",
+        "options[1].manifest.views.element.list.kanban.groupByField",
+        "options[1].manifest.views.element.list.timeline.groupByField"
+      ]
+    },
+    "api/ListInstalledPackagesResponse": {
+      "sites": [
+        "data.packages.element.options[0].manifest.navigationContributions.element.items.element.lazy.options[0]",
+        "data.packages.element.options[1].manifest.actions.element.in",
+        "data.packages.element.options[1].manifest.actions.element.in.params.element.in",
+        "data.packages.element.options[1].manifest.connectors.element",
+        "data.packages.element.options[1].manifest.dashboards.element.globalFilters.element",
+        "data.packages.element.options[1].manifest.dashboards.element.widgets.element",
+        "data.packages.element.options[1].manifest.datasets.element",
+        "data.packages.element.options[1].manifest.datasets.element.include.element",
+        "data.packages.element.options[1].manifest.datasources.element",
+        "data.packages.element.options[1].manifest.flows.element",
+        "data.packages.element.options[1].manifest.flows.element.errorHandling",
+        "data.packages.element.options[1].manifest.flows.element.nodes.element.in.waitEventConfig",
+        "data.packages.element.options[1].manifest.jobs.element.schedule.options[0].timezone",
+        "data.packages.element.options[1].manifest.objectExtensions.element",
+        "data.packages.element.options[1].manifest.objects.element",
+        "data.packages.element.options[1].manifest.objects.element.fieldGroups",
+        "data.packages.element.options[1].manifest.objects.element.fields.out.keyType",
+        "data.packages.element.options[1].manifest.objects.element.fields.out.valueType",
+        "data.packages.element.options[1].manifest.objects.element.fields.out.valueType.currencyConfig",
+        "data.packages.element.options[1].manifest.objects.element.lifecycle",
+        "data.packages.element.options[1].manifest.pages.element",
+        "data.packages.element.options[1].manifest.permissions.element.objects.valueType.out",
+        "data.packages.element.options[1].manifest.permissions.element.rowLevelSecurity.element",
+        "data.packages.element.options[1].manifest.reports.element",
+        "data.packages.element.options[1].manifest.reports.element.blocks.element",
+        "data.packages.element.options[1].manifest.reports.element.runtimeFilter.lazy",
+        "data.packages.element.options[1].manifest.sharingRules.element.sharedWith",
+        "data.packages.element.options[1].manifest.skills.element.triggerConditions.element",
+        "data.packages.element.options[1].manifest.views.element.form",
+        "data.packages.element.options[1].manifest.views.element.form.sections.element.in",
+        "data.packages.element.options[1].manifest.views.element.form.submitBehavior.options[1].url",
+        "data.packages.element.options[1].manifest.views.element.list",
+        "data.packages.element.options[1].manifest.views.element.list.bulkActionDefs.element",
+        "data.packages.element.options[1].manifest.views.element.list.filter.element",
+        "data.packages.element.options[1].manifest.views.element.list.gantt.groupByField",
+        "data.packages.element.options[1].manifest.views.element.list.kanban.groupByField",
+        "data.packages.element.options[1].manifest.views.element.list.timeline.groupByField"
+      ]
+    },
+    "api/ListPackagesResponse": {
+      "sites": [
+        "packages.element.manifest.navigationContributions.element.items.element.lazy.options[0]"
+      ]
+    },
+    "api/MetadataTypeInfoResponse": {
+      "sites": [
+        "data.actions.element.in",
+        "data.actions.element.in.params.element.in"
+      ]
+    },
+    "api/ObjectDefinitionResponse": {
+      "sites": [
+        "data",
+        "data.actions.element.in",
+        "data.actions.element.in.params.element.in",
+        "data.fieldGroups",
+        "data.fields.out.keyType",
+        "data.fields.out.valueType",
+        "data.fields.out.valueType.currencyConfig",
+        "data.fields.out.valueType.relatedListFilter.lazy",
+        "data.lifecycle",
+        "data.listViews.valueType",
+        "data.listViews.valueType.bulkActionDefs.element",
+        "data.listViews.valueType.filter.element",
+        "data.listViews.valueType.gantt.groupByField",
+        "data.listViews.valueType.grouping.fields.element.field",
+        "data.listViews.valueType.kanban.groupByField",
+        "data.listViews.valueType.timeline.groupByField"
+      ]
+    },
+    "api/PackageInstallBody": {
+      "sites": [
+        "options[1].navigationContributions.element.items.element.lazy.options[0]"
+      ]
+    },
+    "api/PackageInstallRequest": {
+      "sites": [
+        "manifest.navigationContributions.element.items.element.lazy.options[0]"
+      ]
+    },
+    "api/PackageInstallResponse": {
+      "sites": [
+        "data.package.manifest.navigationContributions.element.items.element.lazy.options[0]"
+      ]
+    },
+    "api/PackageUpgradeRequest": {
+      "sites": [
+        "manifest.navigationContributions.element.items.element.lazy.options[0]"
+      ]
+    },
+    "api/ResolveDependenciesRequest": {
+      "sites": [
+        "manifest.navigationContributions.element.items.element.lazy.options[0]"
+      ]
+    },
+    "api/UpdateFlowRequest": {
+      "sites": [
+        "definition",
+        "definition.errorHandling",
+        "definition.nodes.element.in.waitEventConfig"
+      ]
+    },
+    "api/UpdateFlowResponse": {
+      "sites": [
+        "data",
+        "data.errorHandling",
+        "data.nodes.element.in.waitEventConfig"
+      ]
+    },
+    "automation/ApprovalNodeConfig": {
+      "sites": [
+        ""
+      ]
+    },
+    "automation/AssignmentConfig": {
+      "sites": [
+        "assignments.out.valueType"
+      ]
+    },
+    "automation/AssignmentValue": {
+      "sites": [
+        ""
+      ]
+    },
+    "automation/EndConfig": {
+      "sites": [
+        ""
+      ]
+    },
+    "automation/Flow": {
+      "sites": [
+        "",
+        "errorHandling",
+        "nodes.element.in.waitEventConfig"
+      ]
+    },
+    "automation/FlowNode": {
+      "sites": [
+        "in.waitEventConfig"
+      ]
+    },
+    "automation/FlowRegion": {
+      "sites": [
+        "nodes.element.lazy.in.waitEventConfig"
+      ]
+    },
+    "automation/FlowVersionHistory": {
+      "sites": [
+        "definition",
+        "definition.errorHandling",
+        "definition.nodes.element.in.waitEventConfig"
+      ]
+    },
+    "automation/LoopConfig": {
+      "sites": [
+        "body.nodes.element.lazy.in.waitEventConfig"
+      ]
+    },
+    "automation/NotifyConfig": {
+      "sites": [
+        ""
+      ]
+    },
+    "automation/ParallelBranch": {
+      "sites": [
+        "nodes.element.lazy.in.waitEventConfig"
+      ]
+    },
+    "automation/ParallelConfig": {
+      "sites": [
+        "branches.element.nodes.element.lazy.in.waitEventConfig"
+      ]
+    },
+    "automation/ScreenConfig": {
+      "sites": [
+        "fields.element"
+      ]
+    },
+    "automation/ScreenFieldConfig": {
+      "sites": [
+        ""
+      ]
+    },
+    "automation/TimeRelativeTrigger": {
+      "sites": [
+        ""
+      ]
+    },
+    "automation/TryCatchConfig": {
+      "sites": [
+        "try.nodes.element.lazy.in.waitEventConfig"
+      ]
+    },
+    "data/AggregationNode": {
+      "sites": [
+        "filter.lazy"
+      ]
+    },
+    "data/AnalyticsQuery": {
+      "sites": [
+        "where.lazy"
+      ]
+    },
+    "data/AutoPersistenceConfig": {
+      "sites": [
+        "key",
+        "path"
+      ]
+    },
+    "data/ContextToken": {
+      "sites": [
+        ""
+      ]
+    },
+    "data/ContextTokenPlaceholder": {
+      "sites": [
+        ""
+      ]
+    },
+    "data/CurrencyConfig": {
+      "sites": [
+        ""
+      ]
+    },
+    "data/DataEngineAggregateOptions": {
+      "sites": [
+        "filter.options[1].lazy"
+      ]
+    },
+    "data/DataEngineAggregateRequest": {
+      "sites": [
+        "query.in.having.lazy"
+      ]
+    },
+    "data/DataEngineCountOptions": {
+      "sites": [
+        "filter.options[1].lazy"
+      ]
+    },
+    "data/DataEngineCountRequest": {
+      "sites": [
+        "query.in.where.options[1].lazy"
+      ]
+    },
+    "data/DataEngineDeleteOptions": {
+      "sites": [
+        "filter.options[1].lazy"
+      ]
+    },
+    "data/DataEngineDeleteRequest": {
+      "sites": [
+        "options.in.where.options[1].lazy"
+      ]
+    },
+    "data/DataEngineFilter": {
+      "sites": [
+        "options[1].lazy"
+      ]
+    },
+    "data/DataEngineFindOneRequest": {
+      "sites": [
+        "query.in.where.options[1].lazy"
+      ]
+    },
+    "data/DataEngineFindRequest": {
+      "sites": [
+        "query.in.where.options[1].lazy"
+      ]
+    },
+    "data/DataEngineQueryOptions": {
+      "sites": [
+        "filter.options[1].lazy"
+      ]
+    },
+    "data/DataEngineRequest": {
+      "sites": [
+        "options[8].where.options[1].lazy"
+      ]
+    },
+    "data/DataEngineUpdateOptions": {
+      "sites": [
+        "filter.options[1].lazy"
+      ]
+    },
+    "data/DataEngineUpdateRequest": {
+      "sites": [
+        "options.in.where.options[1].lazy"
+      ]
+    },
+    "data/DataEngineVectorFindRequest": {
+      "sites": [
+        "where.options[1].lazy"
+      ]
+    },
+    "data/Datasource": {
+      "sites": [
+        ""
+      ]
+    },
+    "data/DateMacroPlaceholder": {
+      "sites": [
+        ""
+      ]
+    },
+    "data/DateMacroToken": {
+      "sites": [
+        ""
+      ]
+    },
+    "data/EngineAggregateOptions": {
+      "sites": [
+        "having.lazy"
+      ]
+    },
+    "data/EngineCountOptions": {
+      "sites": [
+        "where.options[1].lazy"
+      ]
+    },
+    "data/EngineDeleteOptions": {
+      "sites": [
+        "where.options[1].lazy"
+      ]
+    },
+    "data/EngineQueryOptions": {
+      "sites": [
+        "where.options[1].lazy"
+      ]
+    },
+    "data/EngineUpdateOptions": {
+      "sites": [
+        "where.options[1].lazy"
+      ]
+    },
+    "data/Field": {
+      "sites": [
+        "",
+        "currencyConfig",
+        "relatedListFilter.lazy"
+      ]
+    },
+    "data/FieldOperators": {
+      "sites": [
+        "$in",
+        "$nin"
+      ]
+    },
+    "data/FilePersistenceConfig": {
+      "sites": [
+        "path"
+      ]
+    },
+    "data/FilterArray": {
+      "sites": [
+        "lazy.options[0].items[0]",
+        "lazy.options[0].items[1]",
+        "lazy.options[2].items[0]"
+      ]
+    },
+    "data/FilterCondition": {
+      "sites": [
+        "lazy"
+      ]
+    },
+    "data/Hook": {
+      "sites": [
+        "object"
+      ]
+    },
+    "data/InstantValue": {
+      "sites": [
+        ""
+      ]
+    },
+    "data/Lifecycle": {
+      "sites": [
+        ""
+      ]
+    },
+    "data/LocalStoragePersistenceConfig": {
+      "sites": [
+        "key"
+      ]
+    },
+    "data/MongoConfig": {
+      "sites": [
+        "",
+        "authSource",
+        "database",
+        "host",
+        "options",
+        "url",
+        "username"
+      ]
+    },
+    "data/MysqlConfig": {
+      "sites": [
+        "",
+        "database",
+        "host",
+        "url",
+        "username"
+      ]
+    },
+    "data/NormalizedFilter": {
+      "sites": [
+        "lazy.$not.options[0].valueType.$in",
+        "lazy.$not.options[0].valueType.$nin"
+      ]
+    },
+    "data/Object": {
+      "sites": [
+        "",
+        "actions.element.in",
+        "actions.element.in.params.element.in",
+        "fieldGroups",
+        "fields.out.keyType",
+        "fields.out.valueType",
+        "fields.out.valueType.currencyConfig",
+        "fields.out.valueType.relatedListFilter.lazy",
+        "lifecycle",
+        "listViews.valueType",
+        "listViews.valueType.bulkActionDefs.element",
+        "listViews.valueType.filter.element",
+        "listViews.valueType.gantt.groupByField",
+        "listViews.valueType.grouping.fields.element.field",
+        "listViews.valueType.kanban.groupByField",
+        "listViews.valueType.timeline.groupByField"
+      ]
+    },
+    "data/ObjectExtension": {
+      "sites": [
+        "",
+        "fields.valueType",
+        "fields.valueType.currencyConfig",
+        "fields.valueType.relatedListFilter.lazy"
+      ]
+    },
+    "data/PostgresConfig": {
+      "sites": [
+        "",
+        "applicationName",
+        "database",
+        "host",
+        "schema",
+        "url",
+        "username"
+      ]
+    },
+    "data/Query": {
+      "sites": [
+        "where.lazy"
+      ]
+    },
+    "data/QueryFilter": {
+      "sites": [
+        "where.lazy"
+      ]
+    },
+    "data/QueryTransportParams": {
+      "sites": [
+        "$filter.options[0].lazy.options[0].items[0]",
+        "$filter.options[0].lazy.options[0].items[1]",
+        "$filter.options[0].lazy.options[2].items[0]",
+        "$filter.options[1].options[1].lazy"
+      ]
+    },
+    "data/QueryWithTransport": {
+      "sites": [
+        "in.having.lazy",
+        "in.where.options[0].lazy.options[0].items[0]",
+        "in.where.options[0].lazy.options[0].items[1]",
+        "in.where.options[0].lazy.options[2].items[0]"
+      ]
+    },
+    "data/ReferenceIdValue": {
+      "sites": [
+        ""
+      ]
+    },
+    "data/SQLDriverConfig": {
+      "sites": [
+        ""
+      ]
+    },
+    "data/SetOperator": {
+      "sites": [
+        "$in",
+        "$nin"
+      ]
+    },
+    "data/SqliteConfig": {
+      "sites": [
+        "filename"
+      ]
+    },
+    "data/SqliteWasmConfig": {
+      "sites": [
+        "filename"
+      ]
+    },
+    "data/TursoConfig": {
+      "sites": [
+        "",
+        "encryptionKey",
+        "syncUrl",
+        "url"
+      ]
+    },
+    "identity/SCIMError": {
+      "sites": [
+        "schemas"
+      ]
+    },
+    "identity/SCIMGroup": {
+      "sites": [
+        "schemas"
+      ]
+    },
+    "identity/SCIMListResponse": {
+      "sites": [
+        "Resources.element.options[0]",
+        "Resources.element.options[0].schemas",
+        "Resources.element.options[1].schemas",
+        "schemas"
+      ]
+    },
+    "identity/SCIMPatchRequest": {
+      "sites": [
+        "schemas"
+      ]
+    },
+    "identity/SCIMUser": {
+      "sites": [
+        "",
+        "schemas"
+      ]
+    },
+    "integration/DeclarativeConnectorEntry": {
+      "sites": [
+        ""
+      ]
+    },
+    "kernel/DisablePackageResponse": {
+      "sites": [
+        "package.manifest.navigationContributions.element.items.element.lazy.options[0]"
+      ]
+    },
+    "kernel/EnablePackageResponse": {
+      "sites": [
+        "package.manifest.navigationContributions.element.items.element.lazy.options[0]"
+      ]
+    },
+    "kernel/GetPackageResponse": {
+      "sites": [
+        "package.manifest.navigationContributions.element.items.element.lazy.options[0]"
+      ]
+    },
+    "kernel/InstallPackageRequest": {
+      "sites": [
+        "manifest.navigationContributions.element.items.element.lazy.options[0]"
+      ]
+    },
+    "kernel/InstallPackageResponse": {
+      "sites": [
+        "package.manifest.navigationContributions.element.items.element.lazy.options[0]"
+      ]
+    },
+    "kernel/InstalledPackage": {
+      "sites": [
+        "manifest.navigationContributions.element.items.element.lazy.options[0]"
+      ]
+    },
+    "kernel/ListPackagesResponse": {
+      "sites": [
+        "packages.element.manifest.navigationContributions.element.items.element.lazy.options[0]"
+      ]
+    },
+    "kernel/Manifest": {
+      "sites": [
+        "navigationContributions.element.items.element.lazy.options[0]"
+      ]
+    },
+    "kernel/MetadataTypeRegistryEntry": {
+      "sites": [
+        "",
+        "actions.element.in",
+        "actions.element.in.params.element.in"
+      ]
+    },
+    "kernel/OpsDomainModule": {
+      "sites": [
+        ""
+      ]
+    },
+    "kernel/OpsFilePath": {
+      "sites": [
+        ""
+      ]
+    },
+    "kernel/OpsPluginStructure": {
+      "sites": [
+        ""
+      ]
+    },
+    "kernel/Plugin": {
+      "sites": [
+        ""
+      ]
+    },
+    "kernel/UpgradePackageRequest": {
+      "sites": [
+        "manifest.navigationContributions.element.items.element.lazy.options[0]"
+      ]
+    },
+    "kernel/UpgradeSnapshot": {
+      "sites": [
+        "previousManifest.navigationContributions.element.items.element.lazy.options[0]"
+      ]
+    },
+    "security/CriteriaSharingRule": {
+      "sites": [
+        "sharedWith"
+      ]
+    },
+    "security/ExplainRequest": {
+      "sites": [
+        ""
+      ]
+    },
+    "security/ObjectPermission": {
+      "sites": [
+        "out"
+      ]
+    },
+    "security/PermissionSet": {
+      "sites": [
+        "objects.valueType.out",
+        "rowLevelSecurity.element"
+      ]
+    },
+    "security/RowLevelSecurityPolicy": {
+      "sites": [
+        ""
+      ]
+    },
+    "security/SharingRule": {
+      "sites": [
+        "sharedWith"
+      ]
+    },
+    "security/TenantLayer0Verdict": {
+      "sites": [
+        "options[2].organizationIds"
+      ]
+    },
+    "system/AddFieldOperation": {
+      "sites": [
+        "field",
+        "field.currencyConfig",
+        "field.relatedListFilter.lazy"
+      ]
+    },
+    "system/AudienceConfig": {
+      "sites": [
+        ""
+      ]
+    },
+    "system/AuthConfig": {
+      "sites": [
+        "audience"
+      ]
+    },
+    "system/BucketConfig": {
+      "sites": [
+        "lifecyclePolicy.rules.element"
+      ]
+    },
+    "system/ChangeSet": {
+      "sites": [
+        "operations.element.options[0].field",
+        "operations.element.options[0].field.currencyConfig",
+        "operations.element.options[0].field.relatedListFilter.lazy",
+        "operations.element.options[3].object",
+        "operations.element.options[3].object.actions.element.in",
+        "operations.element.options[3].object.actions.element.in.params.element.in",
+        "operations.element.options[3].object.fieldGroups",
+        "operations.element.options[3].object.fields.out.keyType",
+        "operations.element.options[3].object.fields.out.valueType",
+        "operations.element.options[3].object.lifecycle",
+        "operations.element.options[3].object.listViews.valueType",
+        "operations.element.options[3].object.listViews.valueType.bulkActionDefs.element",
+        "operations.element.options[3].object.listViews.valueType.filter.element",
+        "operations.element.options[3].object.listViews.valueType.gantt.groupByField",
+        "operations.element.options[3].object.listViews.valueType.grouping.fields.element.field",
+        "operations.element.options[3].object.listViews.valueType.kanban.groupByField",
+        "operations.element.options[3].object.listViews.valueType.timeline.groupByField"
+      ]
+    },
+    "system/CreateObjectOperation": {
+      "sites": [
+        "object",
+        "object.actions.element.in",
+        "object.actions.element.in.params.element.in",
+        "object.fieldGroups",
+        "object.fields.out.keyType",
+        "object.fields.out.valueType",
+        "object.fields.out.valueType.currencyConfig",
+        "object.fields.out.valueType.relatedListFilter.lazy",
+        "object.lifecycle",
+        "object.listViews.valueType",
+        "object.listViews.valueType.bulkActionDefs.element",
+        "object.listViews.valueType.filter.element",
+        "object.listViews.valueType.gantt.groupByField",
+        "object.listViews.valueType.grouping.fields.element.field",
+        "object.listViews.valueType.kanban.groupByField",
+        "object.listViews.valueType.timeline.groupByField"
+      ]
+    },
+    "system/CronSchedule": {
+      "sites": [
+        "timezone"
+      ]
+    },
+    "system/Job": {
+      "sites": [
+        "schedule.options[0].timezone"
+      ]
+    },
+    "system/LifecyclePolicyConfig": {
+      "sites": [
+        "rules.element"
+      ]
+    },
+    "system/LifecyclePolicyRule": {
+      "sites": [
+        ""
+      ]
+    },
+    "system/MigrationOperation": {
+      "sites": [
+        "options[0].field",
+        "options[0].field.currencyConfig",
+        "options[0].field.relatedListFilter.lazy",
+        "options[3].object",
+        "options[3].object.actions.element.in",
+        "options[3].object.actions.element.in.params.element.in",
+        "options[3].object.fieldGroups",
+        "options[3].object.fields.out.keyType",
+        "options[3].object.fields.out.valueType",
+        "options[3].object.lifecycle",
+        "options[3].object.listViews.valueType",
+        "options[3].object.listViews.valueType.bulkActionDefs.element",
+        "options[3].object.listViews.valueType.filter.element",
+        "options[3].object.listViews.valueType.gantt.groupByField",
+        "options[3].object.listViews.valueType.grouping.fields.element.field",
+        "options[3].object.listViews.valueType.kanban.groupByField",
+        "options[3].object.listViews.valueType.timeline.groupByField"
+      ]
+    },
+    "system/ObjectStorageConfig": {
+      "sites": [
+        "buckets.element.lifecyclePolicy.rules.element"
+      ]
+    },
+    "system/Schedule": {
+      "sites": [
+        "options[0].timezone"
+      ]
+    },
+    "system/ServerRateLimitConfig": {
+      "sites": [
+        ""
+      ]
+    },
+    "system/SettingsManifest": {
+      "sites": [
+        "",
+        "specifiers.element",
+        "visible"
+      ]
+    },
+    "system/SettingsNamespacePayload": {
+      "sites": [
+        "manifest",
+        "manifest.specifiers.element",
+        "manifest.visible"
+      ]
+    },
+    "system/Specifier": {
+      "sites": [
+        "",
+        "visible"
+      ]
+    },
+    "system/StackServerConfig": {
+      "sites": [
+        "security.rateLimit"
+      ]
+    },
+    "system/StackServerSecurity": {
+      "sites": [
+        "rateLimit"
+      ]
+    },
+    "ui/Action": {
+      "sites": [
+        "in",
+        "in.params.element.in"
+      ]
+    },
+    "ui/ActionParam": {
+      "sites": [
+        "in"
+      ]
+    },
+    "ui/App": {
+      "sites": [
+        "navigation.element.lazy.options[0]"
+      ]
+    },
+    "ui/BulkActionDef": {
+      "sites": [
+        ""
+      ]
+    },
+    "ui/ChartAggregate": {
+      "sites": [
+        ""
+      ]
+    },
+    "ui/Dashboard": {
+      "sites": [
+        "globalFilters.element",
+        "widgets.element",
+        "widgets.element.filter.lazy"
+      ]
+    },
+    "ui/DashboardWidget": {
+      "sites": [
+        "",
+        "filter.lazy"
+      ]
+    },
+    "ui/Dataset": {
+      "sites": [
+        "",
+        "filter.lazy",
+        "include.element"
+      ]
+    },
+    "ui/DatasetMeasure": {
+      "sites": [
+        "filter.lazy"
+      ]
+    },
+    "ui/ElementButtonProps": {
+      "sites": [
+        "action.out",
+        "action.out.params.element.in"
+      ]
+    },
+    "ui/ElementDataSource": {
+      "sites": [
+        "filter.element"
+      ]
+    },
+    "ui/ElementNumberProps": {
+      "sites": [
+        "filter.element"
+      ]
+    },
+    "ui/ElementRecordPickerProps": {
+      "sites": [
+        "filter.element"
+      ]
+    },
+    "ui/FormField": {
+      "sites": [
+        "in.publicPicker.filter.element"
+      ]
+    },
+    "ui/FormFieldPublicPicker": {
+      "sites": [
+        "filter.element"
+      ]
+    },
+    "ui/FormSection": {
+      "sites": [
+        "in",
+        "in.fields.element.options[1].in.publicPicker.filter.element"
+      ]
+    },
+    "ui/FormView": {
+      "sites": [
+        "",
+        "sections.element.in",
+        "sections.element.in.fields.element.options[1].in.publicPicker.filter.element",
+        "submitBehavior.options[1].url"
+      ]
+    },
+    "ui/GanttConfig": {
+      "sites": [
+        "groupByField"
+      ]
+    },
+    "ui/GlobalFilter": {
+      "sites": [
+        "",
+        "optionsFrom.filter.lazy"
+      ]
+    },
+    "ui/GlobalFilterOptionsFrom": {
+      "sites": [
+        "filter.lazy"
+      ]
+    },
+    "ui/GroupingConfig": {
+      "sites": [
+        "fields.element.field"
+      ]
+    },
+    "ui/GroupingField": {
+      "sites": [
+        "field"
+      ]
+    },
+    "ui/InlineAction": {
+      "sites": [
+        "out",
+        "out.params.element.in"
+      ]
+    },
+    "ui/InterfacePageConfig": {
+      "sites": [
+        "filterBy.element"
+      ]
+    },
+    "ui/JoinedReportBlock": {
+      "sites": [
+        "",
+        "runtimeFilter.lazy"
+      ]
+    },
+    "ui/KanbanConfig": {
+      "sites": [
+        "groupByField"
+      ]
+    },
+    "ui/ListView": {
+      "sites": [
+        "",
+        "bulkActionDefs.element",
+        "filter.element",
+        "gantt.groupByField",
+        "grouping.fields.element.field",
+        "kanban.groupByField",
+        "timeline.groupByField"
+      ]
+    },
+    "ui/NavigationArea": {
+      "sites": [
+        "navigation.element.lazy.options[0]"
+      ]
+    },
+    "ui/NavigationContribution": {
+      "sites": [
+        "items.element.lazy.options[0]"
+      ]
+    },
+    "ui/NavigationItem": {
+      "sites": [
+        "lazy.options[0]"
+      ]
+    },
+    "ui/ObjectCalendarProps": {
+      "sites": [
+        "filter.element"
+      ]
+    },
+    "ui/ObjectGanttProps": {
+      "sites": [
+        "filter.element",
+        "gantt.groupByField"
+      ]
+    },
+    "ui/ObjectGridProps": {
+      "sites": [
+        "filter.element"
+      ]
+    },
+    "ui/ObjectKanbanProps": {
+      "sites": [
+        "filter.element"
+      ]
+    },
+    "ui/ObjectListView": {
+      "sites": [
+        "",
+        "bulkActionDefs.element",
+        "filter.element",
+        "gantt.groupByField",
+        "grouping.fields.element.field",
+        "kanban.groupByField",
+        "timeline.groupByField"
+      ]
+    },
+    "ui/ObjectMapProps": {
+      "sites": [
+        "filter.element"
+      ]
+    },
+    "ui/ObjectMetricProps": {
+      "sites": [
+        "filter.element"
+      ]
+    },
+    "ui/ObjectTimelineProps": {
+      "sites": [
+        "filter.element",
+        "timeline.groupByField"
+      ]
+    },
+    "ui/ObjectTreeProps": {
+      "sites": [
+        "filter.element"
+      ]
+    },
+    "ui/Page": {
+      "sites": [
+        "",
+        "interfaceConfig.filterBy.element",
+        "slots.header.options[0].in.type"
+      ]
+    },
+    "ui/PageComponent": {
+      "sites": [
+        "in.dataSource.filter.element",
+        "in.type"
+      ]
+    },
+    "ui/PageRegion": {
+      "sites": [
+        "components.element.lazy.in.dataSource.filter.element",
+        "components.element.lazy.in.type"
+      ]
+    },
+    "ui/RecordDetailsProps": {
+      "sites": [
+        "sections.element"
+      ]
+    },
+    "ui/RecordRelatedListProps": {
+      "sites": [
+        "filter.element"
+      ]
+    },
+    "ui/Report": {
+      "sites": [
+        "",
+        "blocks.element",
+        "runtimeFilter.lazy"
+      ]
+    },
+    "ui/TimelineConfig": {
+      "sites": [
+        "groupByField"
+      ]
+    },
+    "ui/UserFilters": {
+      "sites": [
+        "tabs.element.filter.element"
+      ]
+    },
+    "ui/View": {
+      "sites": [
+        "form",
+        "form.sections.element.in",
+        "form.submitBehavior.options[1].url",
+        "list",
+        "list.bulkActionDefs.element",
+        "list.filter.element",
+        "list.gantt.groupByField",
+        "list.grouping.fields.element.field",
+        "list.kanban.groupByField",
+        "list.timeline.groupByField"
+      ]
+    },
+    "ui/ViewFilterRule": {
+      "sites": [
+        ""
+      ]
+    },
+    "ui/ViewItem": {
+      "sites": [
+        "options[0].config",
+        "options[0].config.bulkActionDefs.element",
+        "options[0].config.filter.element",
+        "options[0].config.gantt.groupByField",
+        "options[0].config.grouping.fields.element.field",
+        "options[0].config.kanban.groupByField",
+        "options[0].config.timeline.groupByField",
+        "options[1].config",
+        "options[1].config.sections.element.in",
+        "options[1].config.submitBehavior.options[1].url"
+      ]
+    },
+    "ui/ViewItemWire": {
+      "sites": [
+        "options[0].config",
+        "options[0].config.bulkActionDefs.element",
+        "options[0].config.filter.element",
+        "options[0].config.gantt.groupByField",
+        "options[0].config.grouping.fields.element.field",
+        "options[0].config.kanban.groupByField",
+        "options[0].config.timeline.groupByField",
+        "options[1].config",
+        "options[1].config.sections.element.in",
+        "options[1].config.submitBehavior.options[1].url"
+      ]
+    },
+    "ui/ViewTab": {
+      "sites": [
+        "filter.element"
+      ]
+    }
+  }
+}

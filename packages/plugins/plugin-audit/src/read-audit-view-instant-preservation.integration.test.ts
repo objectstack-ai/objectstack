@@ -15,9 +15,11 @@
  * the driver stores, on BOTH sides of any change to the write's context. The
  * case is green today, was green before #15964 flattened the ordinary insert
  * branch, and stays green after this card's fix. An instrument that cannot fail
- * is indistinguishable from a pass — the same shape that let
+ * is indistinguishable from a pass — the same shape that let the since-retired
  * `migrate-sys-notification-to-event.test.ts` read `23 passed` for #16312 while
- * the rows it described were being restamped.
+ * the rows it described were being restamped. That file went with the
+ * adr-0030-notification-event migration it covered; it is named here for the
+ * SHAPE it demonstrated, not as a file to go read.
  *
  * ⇒ this file is the instrument that CAN fail. It boots a real
  * {@link ObjectKernel} with the real {@link ObjectQLPlugin} (so the shipped
@@ -25,8 +27,9 @@
  * reads the persisted row back through the driver's own SQL surface.
  *
  * ⚠️ Unlike #16312's equivalent (`packages/runtime/src/notification-migration-
- * audit-preservation.integration.test.ts`), this one lives beside the code it
- * tests. That file had to leave `packages/metadata` because
+ * audit-preservation.integration.test.ts`, retired together with the migration
+ * it covered and no longer in the tree), this one lives beside the code it
+ * tests. That file had had to leave `packages/metadata` because
  * `@objectstack/objectql` depends on it and the test-only import would have
  * closed a cycle. Here the edge already runs the other way —
  * `@objectstack/plugin-audit` depends on `@objectstack/objectql` — and

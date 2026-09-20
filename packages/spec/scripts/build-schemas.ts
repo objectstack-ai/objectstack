@@ -42,9 +42,30 @@ import {
   type UnemittedSkip,
 } from './lib/unemitted-schemas';
 import {
+  UNPROJECTABLE_BRANCHES_KEY,
+  auditUnprojectableBranchRecord,
   projectByPruningUnionBranches,
+  type BranchProjection,
   type PrunedBranch,
 } from './lib/union-branch-projection';
+// The closed list of refinements this generator DOES publish (#18670 item 2).
+// The ratchet below measures against this same override, so a rule the list
+// emits leaves the ledger and a rule it does not emit stays in it — see the
+// module header for why the two halves must not be read against each other.
+import { projectPublishedJsonSchema } from './lib/refinement-projection';
+// The dropped-refinement ratchet (#18670). The mirror image of the branch
+// pruning above, and deliberately its own module for the same reason: the
+// pruner guards a projection NARROWER than the Zod type, this one the direction
+// nothing guarded at all — a projection WIDER than it, which is the direction an
+// author's validator says yes in and the runtime says no.
+import {
+  DROPPED_REFINEMENTS_BASELINE_FILE,
+  checkDroppedRefinements,
+  collectDroppedRefinements,
+  hasDroppedRefinementProblems,
+  readDroppedRefinementsBaseline,
+  type RefinementCensusEntry,
+} from './lib/dropped-refinements';
 // Who owns what under json-schema/. This generator shares that directory with
 // gen:openapi, and used to clear it by deleting the directory itself (#5371).
 import {
@@ -81,11 +102,34 @@ import {
   parseDefaultEntries,
 } from './lib/authorable-defaults';
 import { DEFAULT_CHANGES_BY_MAJOR } from './lib/default-changes';
+// The nested half of check (b2)'s question (#17969). Its own module because the
+// nested view must stay reachable from nothing that EMITS — recursing the
+// `currentKeys` walk three lines below would publish 14,376 nested keys into
+// `authorable-surface/**` — and because a resolution rule is assertable without
+// running the whole generator (scripts/nested-authorable-keys.test.ts).
+import {
+  isNestedAuthorableKey,
+  isRetiredJsonSchemaNode,
+  nestedAuthorableKeyState,
+  type NestedAuthorableKeyState,
+} from './lib/nested-authorable-keys';
 import { RETIRED_DEFS_BY_MAJOR, RETIRED_KEYS_BY_MAJOR } from '../src/migrations/registry';
 import {
   getMetadataTypeSchema,
   listMetadataTypeSchemaTypes,
+  listUnregisteredKindSchemaTypes,
 } from '../src/kernel/metadata-type-schemas';
+// Check (c) proof 4's evidence (#18301): the `guidance` / `guidanceSets` tables
+// `strictObject` records at CONSTRUCTION, which is the only place a key removed
+// from a shape still has its prescription written down. Read here rather than
+// re-derived, because a second reading of the same tables is a second thing to
+// keep in step — and `keySetMatches` is, by its own docblock, the one place set
+// membership is decided.
+import {
+  strictObjectDeclarations,
+  type StrictObjectDeclaration,
+} from '../src/shared/strict-object';
+import { keySetMatches } from '../src/shared/suggestions.zod';
 import * as AI from '../src/ai';
 import * as API from '../src/api';
 import * as Automation from '../src/automation';
@@ -401,6 +445,20 @@ const branchPrunedProjections: Array<{
   readonly pruned: readonly PrunedBranch[];
 }> = [];
 
+// Every published schema's refinement census (#18670) — the rules that reach
+// the runtime and NOT the file. Collected inside the emit loop rather than
+// re-derived afterwards because this loop is the only place that holds both the
+// Zod value and the def key the artifact is written under, and a second walk
+// keyed by something else is a second thing to keep in step.
+const refinementCensus: RefinementCensusEntry[] = [];
+
+// Every disagreement between an `x-unprojectable-branches` record and the
+// artifact it was written onto (#17107). Collected rather than thrown because
+// this loop's own catch reads a throw as "this export has no JSON Schema" and
+// would file the export as an ordinary skip — the record being wrong is the
+// opposite of that, and it is a build failure of its own kind, reported below.
+const branchRecordDefects: string[] = [];
+
 // Error messages for schema types that inherently cannot be represented in JSON Schema.
 // These are expected warnings, not build-breaking errors.
 const KNOWN_UNSUPPORTED_PATTERNS = [
@@ -449,18 +507,14 @@ for (const [namespaceName, namespaceExports] of Object.entries(Protocol)) {
           let jsonSchema: Record<string, unknown>;
           let io: 'output' | 'input' = 'output';
           let prunedBranches: readonly PrunedBranch[] = [];
+          let branchProjection: BranchProjection | null = null;
           try {
-            jsonSchema = z.toJSONSchema(value, {
-              target: 'draft-2020-12',
-            }) as Record<string, unknown>;
+            jsonSchema = projectPublishedJsonSchema(value) as Record<string, unknown>;
           } catch (outputError) {
             if (!isKnownUnsupported(outputError)) throw outputError;
             io = 'input';
             try {
-              jsonSchema = z.toJSONSchema(value, {
-                target: 'draft-2020-12',
-                io: 'input',
-              }) as Record<string, unknown>;
+              jsonSchema = projectPublishedJsonSchema(value, { io: 'input' }) as Record<string, unknown>;
             } catch (inputError) {
               if (!isKnownUnsupported(inputError)) throw inputError;
               // THIRD attempt, #16431 (a): both directions above refuse the
@@ -476,11 +530,12 @@ for (const [namespaceName, namespaceExports] of Object.entries(Protocol)) {
               // then re-thrown with the message Zod produced, so this attempt
               // can never change WHY an export is skipped, and so never the
               // `cause` recorded for it in unemitted-schemas.baseline.json.
-              const projected = projectByPruningUnionBranches(value, { target: 'draft-2020-12' });
+              const projected = projectByPruningUnionBranches(value);
               if (!projected) throw inputError;
               jsonSchema = projected.schema;
               io = projected.io;
               prunedBranches = projected.pruned;
+              branchProjection = projected;
             }
           }
 
@@ -493,18 +548,54 @@ for (const [namespaceName, namespaceExports] of Object.entries(Protocol)) {
             // shape — parse-time transforms/defaults are not applied in it.
             jsonSchema['x-io'] = 'input';
           }
-          if (prunedBranches.length > 0) {
+          if (branchProjection && prunedBranches.length > 0) {
             // Say it on the artifact, not only in the build log (#16431 (a)).
             // A reader of this file — or of the reference page rendered from it
             // — can otherwise not tell that the Zod type carries a branch no
             // JSON document could ever satisfy, and the `.describe()` prose
             // above the union DOES name it (the ordering comparand's text says
             // "a number, a Date, a string, or a { $field } reference").
-            jsonSchema['x-unprojectable-branches'] = prunedBranches.map((branch) => ({
+            jsonSchema[UNPROJECTABLE_BRANCHES_KEY] = prunedBranches.map((branch) => ({
               at: branch.at,
               type: branch.type,
             }));
+            // ⭐ And READ it back, here, in the one place that still holds the
+            // tree the record describes (#17107). A published record nothing
+            // consumes is a claim no run can contradict: the guard below is
+            // what makes `x-unprojectable-branches` a statement about this
+            // artifact rather than a decoration on it. It reads the record
+            // the way a consumer of the file would — off `jsonSchema`, by its
+            // key — and checks it against the projection, so the two can never
+            // agree merely by being computed from the same expression twice.
+            for (const defect of auditUnprojectableBranchRecord(jsonSchema, branchProjection)) {
+              branchRecordDefects.push(`${namespaceName}.${key}: ${defect}`);
+            }
             branchPrunedProjections.push({ namespace: namespaceName, exportKey: key, pruned: prunedBranches });
+          }
+
+          // The refinements this projection STILL drops (#18670), named on the
+          // artifact for the same reason `x-unprojectable-branches` is: a reader
+          // of this file — an author, a reference page, an AI validating a
+          // document against it — can otherwise not tell that the contract
+          // underneath carries rules this file does not state. It is an
+          // annotation and nothing more: `x-` keywords are ignored by every
+          // validator, so the set of documents this schema ACCEPTS is unchanged
+          // by it.
+          //
+          // What DID narrow (#18670 item 2) is the closed list in
+          // `src/shared/refinement-projection.ts`, applied by the `override`
+          // above: a refinement declared through it is emitted as real
+          // keywords, so it never reaches `census.dropped` and never reaches
+          // this annotation. ⛔ The two are exclusive by construction — a site
+          // cannot be both stated and annotated as unstated.
+          const census = collectDroppedRefinements(`${categorySlug}/${schemaName}`, value);
+          refinementCensus.push(census);
+          if (census.dropped.length > 0) {
+            jsonSchema['x-dropped-refinements'] = census.dropped.map((site) => ({
+              at: site.path,
+              type: site.nodeType,
+              count: site.count,
+            }));
           }
 
           const fileName = `${schemaName}.json`;
@@ -583,6 +674,21 @@ if (errorCount > 0) {
 // measure def keys, and a collision produces exactly one), and neither should
 // adjudicate a build whose output already depends on export iteration order.
 // See lib/def-key-collisions.ts for why a self-alias is exempt.
+// ─── Guard: the branch record describes the artifact it rides on (#17107) ───
+// `x-unprojectable-branches` is published — `files[]` ships `json-schema/` — and
+// until this guard it had one writer and no reader at all, so nothing in the
+// repo could tell a faithful record from one naming branches this projection
+// never dropped. Fatal, not a warning: the record is the only statement on the
+// file that the Zod type behind it accepts a shape the file does not.
+if (branchRecordDefects.length > 0) {
+  console.error(
+    `\n❌ ${branchRecordDefects.length} \`${UNPROJECTABLE_BRANCHES_KEY}\` record(s) disagree with the ` +
+      `schema they annotate:`,
+  );
+  for (const defect of branchRecordDefects) console.error(`     ⤷ ${defect}`);
+  process.exit(1);
+}
+
 const defKeyCollisions = findDefKeyCollisions(emittedDefs);
 if (defKeyCollisions.length > 0) {
   console.error(`\n❌ ${formatDefKeyCollisions(defKeyCollisions)}`);
@@ -820,11 +926,7 @@ interface AuthorableSurface { keys: string[] }
 interface AuthorableSurfaceBase { description: string; baseRev: string; keys: string[] }
 
 /** `retiredKey()` is `z.never()`, which Zod renders as `{ "not": {} }`. */
-function isRetired(prop: unknown): boolean {
-  if (!prop || typeof prop !== 'object') return false;
-  const not = (prop as Record<string, unknown>).not;
-  return !!not && typeof not === 'object' && Object.keys(not).length === 0;
-}
+const isRetired = isRetiredJsonSchemaNode;
 
 /**
  * Every authorable key the ADR-0087 registries declare as tombstoned, by exact
@@ -1030,6 +1132,29 @@ if (surfaceDoc) {
     }
   }
 
+  // The nested half of the two checks below (#17969). `currentKeys` is built
+  // from `schema.properties` ONE LEVEL DEEP, so a dotted row —
+  // `system/SchemaLevelIsolationStrategy:performance.schemaCacheTTL`, 48 of them
+  // on this tree — matches nothing in it and was IGNORED rather than judged:
+  // measured by ablation, a fabricated nested row passed this gate at exit 0
+  // with zero ❌ against a lit control (a live top-level key) refused at exit 1.
+  // Resolved here against the schemas this build emitted, for the REGISTERED
+  // ROWS ONLY — never materialised as a map, because the map three lines above
+  // is also `currentEntries`, the PUBLISHED baseline, and recursing it in place
+  // measures at +14,376 lines across all 14 shards. ./lib/nested-authorable-keys
+  // is the authority on the resolution rules and on what they cannot see.
+  //
+  // A dot in the name half does NOT by itself mean nested: `@odata.context` and
+  // the SCIM extension URN are TOP-LEVEL property names that carry one (4 such
+  // keys on the shipped baseline, all live). So a row whose exact key this build
+  // emits as a top-level property is judged as one, and only what is left over
+  // is read as a path — the routing record is this map's own membership.
+  const nestedStates = new Map<string, NestedAuthorableKeyState>(
+    [...registeredRetired.keys()]
+      .filter((k) => !currentKeys.has(k) && isNestedAuthorableKey(k))
+      .map((k) => [k, nestedAuthorableKeyState(k, generatedSchemas)]),
+  );
+
   // (b2) The other direction: an entry that registers a key this build still
   //      emits as LIVE. Nothing consumed that registration — it pre-approves a
   //      retirement that has not happened, and check (b) would then wave the
@@ -1037,8 +1162,8 @@ if (surfaceDoc) {
   //      the build no longer emits at all is NOT an error: that is the expected
   //      steady state once a tombstone ages out and check (c) lets its baseline
   //      line go (see RETIRED_KEYS_BY_MAJOR's "Lifecycle").
-  const liveButRegistered = [...registeredRetired.entries()].filter(
-    ([k]) => currentKeys.get(k) === false,
+  const liveButRegistered = [...registeredRetired.entries()].filter(([k]) =>
+    nestedStates.has(k) ? nestedStates.get(k) === 'live' : currentKeys.get(k) === false,
   );
   if (liveButRegistered.length > 0) {
     console.error(
@@ -1056,6 +1181,56 @@ if (surfaceDoc) {
     );
     process.exit(1);
   }
+
+  // (b3) A nested entry whose path this build does not emit at all. For a
+  //      TOP-LEVEL key that state is the aged-out steady state (b2) exempts
+  //      above — the tombstone carried `[RETIRED]` in `authorable-surface/`,
+  //      aged two majors, and check (c) let the line go, with evidence at every
+  //      step. A nested key reaches NONE of that: it has no baseline line (0
+  //      dotted entries on the shipped surface), so checks (a0)/(a)/(b)/(c) are
+  //      structurally blind to it and no gated route can produce a registered
+  //      nested row whose path is absent. The one origin left is that the row is
+  //      wrong — a typo'd def, a typo'd path, a stale key name — which until
+  //      #17969 registered silently and stayed registered, feeding the ADR-0087
+  //      conversions a fact nothing had checked.
+  //
+  //      A row whose DEF this build does not emit is deliberately NOT here: that
+  //      is the whole-def removal steady state, registered in
+  //      RETIRED_DEFS_BY_MAJOR and adjudicated by the json-schema.manifest/
+  //      ratchet, which subsumes the key entries under it (3 of the 48 nested
+  //      rows on this tree).
+  const unresolvableNested = [...registeredRetired.entries()].filter(
+    ([k]) => nestedStates.get(k) === 'unresolvable',
+  );
+  if (unresolvableNested.length > 0) {
+    console.error(
+      `\n❌ ${unresolvableNested.length} RETIRED_KEYS_BY_MAJOR entr(ies) name a NESTED key this build does not emit:`,
+    );
+    for (const [k, major] of unresolvableNested) {
+      console.error(`     - ${k}  (registered at major ${major})`);
+    }
+    console.error(
+      `\n   The def IS emitted; the dotted path is not in it. Unlike a top-level key, a\n` +
+      `   nested one never reaches ${SURFACE_FILE_NAME} — checks (a0)/(a)/(b)/(c) never see\n` +
+      `   it, and there is no aging clock that could have let it go. So this is not the\n` +
+      `   aged-out steady state: the row names a path this build has no property for.\n\n` +
+      `   Fix the spelling against the emitted schema (json-schema/<category>/<Def>.json —\n` +
+      `   an array member is spelled without its \`[]\`, as \`steps.estimatedMinutes\`), or\n` +
+      `   delete the entry from packages/spec/src/migrations/registry.ts.\n\n` +
+      `   Two legitimate shapes this check cannot yet tell apart from a wrong row, both\n` +
+      `   unreached on this tree — if yours is the first, teach this check the shape,\n` +
+      `   ⛔ do not delete a row that is telling the truth:\n` +
+      `     - a key retired by REMOVAL from a \`strictObject\` shape with a \`guidance\`\n` +
+      `       prescription (check (c) proof 4) is absent from the emitted schema on\n` +
+      `       purpose; that proof has no nested form, and 0 of this tree's nested rows\n` +
+      `       take that route;\n` +
+      `     - a TOP-LEVEL key whose own name carries a dot (\`@odata.context\`, a SCIM\n` +
+      `       extension URN — 4 on this tree, all live) that has aged out and stopped\n` +
+      `       being emitted: the row then reads as a path, and the aged-out steady state\n` +
+      `       (b2) exempts would land here instead.`,
+    );
+    process.exit(1);
+  }
 }
 
 // ─── (c) A deleted baseline line must prove itself (#4650) ─────────────
@@ -1070,7 +1245,7 @@ if (surfaceDoc) {
 // matters — in CI, HEAD IS the PR's own commit, so both sides always match
 // and the check never fires.)
 //
-// A deletion is legitimate on exactly one of three proofs, each computed
+// A deletion is legitimate on exactly one of FOUR proofs, each computed
 // inside this gate — never argued in a PR description:
 //
 //   1. aged-out tombstone — the base entry carried `[RETIRED]` AND its EXACT
@@ -1095,7 +1270,27 @@ if (surfaceDoc) {
 //      deleting the line deleted the evidence, exactly as hand-editing this
 //      file did before #4650. The manifest deletion gate below now anchors that
 //      comparison on the merge base and demands a declared removal, and it runs
-//      BEFORE this check so the deferral resolves to a real verdict.
+//      BEFORE this check so the deferral resolves to a real verdict;
+//   4. the guidance route (#18301) — the base entry was NOT `[RETIRED]`, and
+//      writing the key at this build's own instance for the def is REFUSED as an
+//      unrecognized key carrying the prescription its `strictObject` `guidance`
+//      table (or an enumerated `guidanceSets` entry) declares for it, so an
+//      author who keeps writing it is answered with the upgrade prescription
+//      instead of a silent parse. This is the retirement route that deletes the
+//      key from the shape
+//      rather than tombstoning it in place, so it never earns the `[RETIRED]`
+//      mark proof 1 starts from — proof 1 cannot apply to it at all, which is
+//      why it needed a proof of its own rather than a relaxation of that clock.
+//      The un-marked half is load-bearing: it keeps the two DISJOINT, so a key
+//      that IS tombstoned stays on proof 1's aging clock and a `guidance` line
+//      written beside it cannot shorten that. `computeGuidanceRoutes()` below is
+//      the authority on what is proved and on the two deliberate narrowings.
+//
+// Proofs 2 and 4 are asymmetric on purpose and must stay so: proof 2 waives
+// because nobody could be authoring the key, proof 4 because everybody who does
+// is told what to write instead. Widening either one into the other's territory
+// — "reachable enough", "prescribed enough" — waives a deletion silently, and
+// this gate's whole history (#4638, #4643, #4662) is that direction of error.
 
 /** A tombstone may be deleted once its registration is this many majors old. */
 const TOMBSTONE_AGE_MAJORS = 2;
@@ -1143,10 +1338,60 @@ interface SurfaceReachability {
 }
 
 /**
+ * The type names this gate starts its BFS from — deliberately NOT the same set
+ * as `listMetadataTypeSchemaTypes()`, and the difference is the whole of #17356.
+ *
+ * Two different questions wear the same words here, and conflating them produced
+ * a false "unreachable" in the tree:
+ *
+ *   - **"is this a REGISTERED metadata type?"** — `listMetadataTypeSchemaTypes()`,
+ *     which unions BUILTIN_METADATA_TYPE_SCHEMAS with the
+ *     EXTRA_METADATA_TYPE_SCHEMAS overlay and, per **#6245**, pointedly does not
+ *     enumerate UNREGISTERED_KIND_SCHEMAS: enrolling those entries there "would
+ *     claim a status this change is careful not to grant" (a `MetadataTypeSchema`
+ *     enum member, a DEFAULT_METADATA_TYPE_REGISTRY entry, a create seed, a place
+ *     in the #4001 campaign count). That function answers its own question
+ *     correctly and this file does not touch it.
+ *   - **"is there an AUTHOR who could be authoring against this def?"** — the only
+ *     question a REACHABILITY root set is asking, because the sole consequence of
+ *     `reachableVia() === null` is waiving a tombstone on the grounds that nobody
+ *     can receive the prescription. For THAT question the unregistered kinds are
+ *     authored documents too: `PUT /api/v1/meta/connector/:name` and a
+ *     `defineStack({ connectors: [...] })` manifest both parse a metadata document
+ *     against `UNREGISTERED_KIND_SCHEMAS['connector']` (#6245 bound them there for
+ *     exactly that reason), and `getMetadataTypeSchema()` resolves them as its
+ *     third fallback.
+ *
+ * Measured on #17356: with the registered set alone the BFS starts from 26 roots,
+ * closes over 5420 nodes, and misses `integration/DataSyncConfig` — two hops from
+ * the `connector` root, through `syncConfig` unwrapped once through `optional` to
+ * the very instance the module exports. A bare deletion of one of its baseline
+ * lines was therefore waived by check (c) proof 2 as "over-collection, never parsed
+ * against a metadata document", while `stack.connectors[]` parses it on every boot.
+ *
+ * ⛔ So do NOT "simplify" these two back into one call. They differ on purpose, in
+ * the direction #6245 fixed and the direction #4650's docblock promises: one shared
+ * entry marks a def reachable, because a false "reachable" demands a tombstone too
+ * many while a false "unreachable" would waive one silently.
+ *
+ * `listUnregisteredKindSchemaTypes()` exists (#6931) so a check can ENUMERATE that
+ * map and for nothing else, and being listed by it grants nothing — which is the
+ * whole reason it, and not a new kind registration, is what this gate reads.
+ */
+function reachabilityRootTypes(): string[] {
+  const types = new Set<string>(listMetadataTypeSchemaTypes());
+  for (const kind of listUnregisteredKindSchemaTypes()) types.add(kind);
+  return [...types].sort();
+}
+
+/**
  * Reachability of every emitted def from the metadata-type roots —
  * BUILTIN_METADATA_TYPE_SCHEMAS plus the EXTRA_METADATA_TYPE_SCHEMAS overlay
- * (both behind listMetadataTypeSchemaTypes / getMetadataTypeSchema), i.e. the
- * schemas a metadata document is actually parsed against. Computed by BFS over
+ * plus the UNREGISTERED_KIND_SCHEMAS bindings (all three behind
+ * `reachabilityRootTypes()` / getMetadataTypeSchema), i.e. the schemas a metadata
+ * document is actually parsed against. That union is this gate's own, and the
+ * docblock on `reachabilityRootTypes()` above is the authority on why it is not
+ * `listMetadataTypeSchemaTypes()`. Computed by BFS over
  * THIS build's in-memory Zod graph, per the 2026-08-02 ruling on #4650 — a
  * static import/regex approximation misses alias imports, runtime
  * registration and casts, so it is deliberately not used here.
@@ -1163,7 +1408,7 @@ interface SurfaceReachability {
 function computeSurfaceReachability(): SurfaceReachability {
   const rootTypes: string[] = [];
   const roots: z.ZodType[] = [];
-  for (const type of listMetadataTypeSchemaTypes()) {
+  for (const type of reachabilityRootTypes()) {
     const schema = getMetadataTypeSchema(type);
     if (schema) {
       rootTypes.push(type);
@@ -1222,6 +1467,262 @@ function computeSurfaceReachability(): SurfaceReachability {
         if (prop instanceof z.ZodType && bridged.get(prop)?.has(name)) return 'derived-clone';
       }
       return null;
+    },
+  };
+}
+
+/** Check (c) proof 4's reading: what a def really does with a key it no longer declares. */
+type GuidanceVerdict =
+  /** The def REFUSES the key as unrecognized, and the refusal carries the exact
+   *  prescription its `strictObject` declaration owes it. */
+  | 'prescribed'
+  /** A declaration promises a prescription for the key and this def does not
+   *  deliver it — an open door, or an error map that is not the one holding
+   *  that table. The promise is the only part that was ever checkable from the
+   *  registry alone, and it is not the part an author meets. */
+  | 'declared-but-silent'
+  /** Nothing this gate can read prescribes for this key on this def. */
+  | 'none';
+
+/** Check (c) proof 4's lookup: which keys a def answers with a prescription. */
+interface GuidanceRoutes {
+  /**
+   * What an author who keeps writing `leaf` on `defKey` actually gets.
+   *
+   * THREE answers rather than a boolean, because "nothing prescribes for this
+   * key" and "something prescribes for it and the author never hears it" are
+   * different facts about the tree — the second is a declaration that is not
+   * being kept, and a verdict that folded it into the first would report the
+   * deletion in words that send its author looking for a `guidance` entry they
+   * have already written.
+   */
+  verdictFor(defKey: string, leaf: string): GuidanceVerdict;
+}
+
+/**
+ * Check (c) proof 4 (#18301): the retirement route that leaves NO tombstone.
+ *
+ * Proof 1 dates a retirement by its `[RETIRED]` tombstone — `retiredKey()`, which
+ * keeps the key DECLARED (as `z.never()`) so it stays in the shape, stays in
+ * `authorable-surface/`, and carries its own `[REMOVED]` prescription. A key
+ * retired the other legal way — deleted from the shape outright, its prescription
+ * moved into the closed shape's `guidance` table (`data/object.zod.ts`'s
+ * `UNKNOWN_KEY_GUIDANCE` is the founding spelling; `strictObject`'s `guidance` /
+ * `guidanceSets` options are the general one) — is never marked `[RETIRED]`,
+ * because there is nothing left in the shape to mark. Proof 1 therefore cannot
+ * apply to it, EVER: not "has not aged yet" but "has no clock".
+ *
+ * Until #17356 that gap was invisible, because proof 2 was answering for these
+ * defs: the BFS root set omitted the four unregistered kinds, so whole families
+ * read as unreachable and every deletion under them was waived as
+ * over-collection. #18131 repaired the root set, and the repair is what exposes
+ * the class — a guidance-route retirement on a REACHABLE def had, at that point,
+ * no proof shape at all.
+ *
+ * ## What is proved, and from where
+ *
+ * What proof 4 waives a deletion on is a claim about the AUTHOR: someone who
+ * keeps writing the key is answered with the upgrade prescription instead of
+ * having the value dropped in silence. So it is established the way the author
+ * meets it — by writing the key at this build's own instance for the def and
+ * reading what comes back. Two halves, both required:
+ *
+ *   - **A declaration promises the prescription.** The def resolves to exactly
+ *     one {@link StrictObjectDeclaration}, and that declaration's `guidance`
+ *     names the exact key, or one of its `guidanceSets` ENUMERATES it. This half
+ *     says which text is owed, and it is read from the tree.
+ *   - **The def keeps that promise.** `safeParse` of `{ [key]: … }` against the
+ *     schema `zodByDefKey` holds raises an `unrecognized_keys` issue naming the
+ *     key, and that issue's message carries the declared text verbatim.
+ *
+ * ## ⚠️ Two things that look like door tests and are not
+ *
+ * Both of these were load-bearing in the first cut of this proof, and the repo's
+ * own measurements say neither separates a closed door from a silent strip:
+ *
+ *   - **`additionalProperties: false` on the emitted artifact.** This generator
+ *     converts with the default `io: 'output'`, and in output mode zod emits
+ *     `additionalProperties: false` for a `.strip()` object too — the post-parse
+ *     shape genuinely has no extra keys, whether they were refused or dropped.
+ *     Measured and written down in
+ *     `docs/audits/2026-07-unknown-key-strictness-ledger.md` ("strictness does
+ *     not change the published JSON Schema", verified there by regenerating both
+ *     ways to a byte-identical artifact). A condition that answers the same for
+ *     both cases cannot be the thing that excludes one of them, so the artifact
+ *     read is GONE from this proof rather than restated more carefully.
+ *   - **Shape identity against the declaration registry.** `strictObjectError()`
+ *     registers a declaration WITHOUT closing the shape (`view.zod.ts`'s
+ *     `FormFieldBaseSchema` is the shipped case), and `Strict.strip()` /
+ *     `z.object(Strict.shape)` build a clone that shares every shape ENTRY with a
+ *     closed declaration while leaving the door open. Either one satisfies the
+ *     identity match while the author's write is dropped in silence — the one
+ *     direction this gate must not err in. The match stays, because it is how the
+ *     owed text is found; what it is no longer asked to prove is closure.
+ *
+ * ## Why the probe reads `unrecognized_keys`, and why it reads the message
+ *
+ * `unrecognized_keys` is the ONLY issue code a `guidance` table is ever consulted
+ * from — `strictUnknownKeyError` returns undefined for every other code — and the
+ * prescription is appended to that message verbatim, one bullet per key. So the
+ * issue's presence is exactly "the door refused this write", and the declared
+ * text appearing in its message is exactly "the map this def parses through is
+ * the one holding that table" — which shape identity alone cannot tell, since a
+ * clone can share a shape without sharing an error map. ⛔ No message WORDING is
+ * pinned by this: the needle is read out of the tree, from the very declaration
+ * the first half matched, so a rewritten prescription moves both sides together.
+ *
+ * ## Why `strictObjectDeclarations()` and not the built schema
+ *
+ * A `guidance` table is consumed inside a closure (`strictObjectError`'s deferred
+ * error map) and leaves no mark on the instance — and any mark it did leave would
+ * not survive the `.extend()` / `.superRefine()` clones, which is the very trap
+ * `strict-object.ts` records for the audit registry. The registry is the one
+ * handle, and it is recorded at construction, which by this point in the run has
+ * happened for every emitted def: the JSON-Schema pass above walked all of them.
+ *
+ * ## The two narrowings, both deliberate, both fail-closed
+ *
+ *   - **Exactly one matching declaration.** A declaration is matched to a def by
+ *     shape IDENTITY — same key set, and every entry the same Zod instance —
+ *     because `z.object(shape)` copies the shape object while sharing its entries
+ *     (`.strict()` clones again). An EMPTY shape is excluded outright: it matches
+ *     every other empty shape, and on the shipped graph that alone was 6 defs
+ *     answering to 9 declarations each. Where two declarations still answer, this
+ *     returns "no evidence" rather than unioning them — a wrong table here waives
+ *     a deletion silently, which is the one direction this gate must not err in.
+ *   - **A `guidanceSets` PATTERN does not count.** `keySetMatches` decides
+ *     membership for both forms, but only an enumerated `keys: [...]` list NAMES
+ *     the key; a `RegExp` claims a family whose members were never written down,
+ *     so it cannot distinguish "this key was retired with a prescription" from
+ *     "this key happens to be spelled like a wrong-layer pointer". The pattern
+ *     sets prove nothing here and still prescribe to authors exactly as before.
+ *
+ * Everything else fails closed by construction: a def with no shape, an empty
+ * shape, an ambiguous match, a probe that throws, a parse that SUCCEEDS with the
+ * key in it, a union or pipe the probe cannot drive to a single door, or a refusal
+ * whose message does not carry the declared text — all read as "no evidence",
+ * never as "proved". ⛔ And the verdict for the second half says only THAT the
+ * prescription did not arrive, never WHY: at `88aa326deb` that state held 9 keys
+ * on 4 defs, 3 of those 4 defs unions carrying 7 of the 9 keys — for a union
+ * "the door is open" would be a guess this gate has not measured, the mistake
+ * this proof's first cut made about `additionalProperties` and must not repeat
+ * one layer down.
+ *
+ * Every count above is a reading of ONE tree — objectstack-ai/objectstack
+ * `88aa326deb`, where #18579 re-took all of them with THIS instrument — and each
+ * is written beside the population it counts: of the 1527 emitted defs, 258
+ * resolve to exactly one declaration, and 147 of those 258 name a key the def
+ * does not declare; those 147 defs promise 779 keys, of which 770 are delivered
+ * and the 9 above are not. Which defs sit in that last group is a fact about the
+ * graph at that commit and not a property of this proof — closing an open door
+ * moves it — so a later reader RE-MEASURES rather than re-dates these, and ⛔
+ * derives none of them from the #18301 PR body, whose census row gives the 147
+ * population the 258 count: a count wearing another population's label is the
+ * defect this docblock was corrected for.
+ * `integration/DataSyncConfig` has NO route (its shape is not a `strictObject`
+ * and nothing prescribes for `schedule`), so this proof does not reach the
+ * 2026-09-10 ruling that withheld that tombstone.
+ */
+function computeGuidanceRoutes(): GuidanceRoutes {
+  const shapeSignature = (shape: Record<string, unknown>): string =>
+    JSON.stringify(Object.keys(shape).sort());
+  const bySignature = new Map<string, StrictObjectDeclaration[]>();
+  for (const decl of strictObjectDeclarations()) {
+    // See "the two narrowings" above: an empty shape carries no identity.
+    if (Object.keys(decl.shape).length === 0) continue;
+    const signature = shapeSignature(decl.shape);
+    const list = bySignature.get(signature);
+    if (list) list.push(decl);
+    else bySignature.set(signature, [decl]);
+  }
+  /** defKey -> key -> the prescription its declaration OWES for that key. */
+  const promised = new Map<string, ReadonlyMap<string, string> | null>();
+  const verdicts = new Map<string, GuidanceVerdict>();
+
+  const promisesFor = (defKey: string): ReadonlyMap<string, string> | null => {
+    if (promised.has(defKey)) return promised.get(defKey) ?? null;
+    const computed = ((): ReadonlyMap<string, string> | null => {
+      const schema = zodByDefKey.get(defKey);
+      if (!schema) return null;
+      const shape = zodShapeOf(schema);
+      if (!shape || Object.keys(shape).length === 0) return null;
+      const matched = (bySignature.get(shapeSignature(shape)) ?? []).filter((decl) =>
+        Object.entries(decl.shape).every(([name, prop]) => shape[name] === prop));
+      if (matched.length !== 1) return null;
+      const { options } = matched[0]!;
+      const owed = new Map<string, string>();
+      // `name in shape` drops an entry filed under a key the shape DECLARES. Such an
+      // entry is a false claim about its own schema — `guidance` is consulted only
+      // from the `unrecognized_keys` path, which a declared key never reaches — so
+      // it prescribes about a door no author arrives at and must prove nothing
+      // here. The `alias-integrity` audit says the same from the other side; this
+      // gate computes it rather than importing the guarantee. (What keeps proof 4
+      // disjoint from proof 1 is the un-marked gate at the CALL SITE, not this
+      // line: a tombstone is in the shape at HEAD but its baseline entry is what
+      // check (c) reads, and the two can disagree.)
+      for (const [name, prescription] of Object.entries(options.guidance ?? {})) {
+        if (!(name in shape)) owed.set(name, prescription);
+      }
+      // Precedence, as `strictUnknownKeyError` resolves it: an exact `guidance`
+      // entry wins over every set, and among sets the first declared one answers.
+      // Read the same way here so the text this gate expects is the text that
+      // surface really emits.
+      for (const set of options.guidanceSets ?? []) {
+        if (set.keys instanceof RegExp) continue;
+        for (const name of set.keys) {
+          if (!(name in shape) && !owed.has(name) && keySetMatches(set, name)) {
+            owed.set(name, set.prescription);
+          }
+        }
+      }
+      return owed;
+    })();
+    promised.set(defKey, computed);
+    return computed;
+  };
+
+  /**
+   * Write the key at the def and read the answer.
+   *
+   * The value is irrelevant and never parsed — a key the shape does not declare
+   * is rejected before its value is looked at — so `null` is used rather than
+   * anything that could accidentally satisfy a declared key if the shape ever
+   * regains one.
+   *
+   * A throw is an answer too, and it is "no evidence": a def whose parse cannot
+   * be driven from here has not been shown to refuse anything.
+   */
+  const delivers = (defKey: string, key: string, prescription: string): boolean => {
+    const schema = zodByDefKey.get(defKey);
+    if (!schema) return false;
+    try {
+      const result = schema.safeParse({ [key]: null });
+      if (result.success) return false;
+      const issue = result.error.issues.find(
+        (candidate) =>
+          candidate.code === 'unrecognized_keys' &&
+          ((candidate as { keys?: readonly string[] }).keys ?? []).includes(key),
+      );
+      return issue !== undefined && issue.message.includes(prescription);
+    } catch {
+      return false;
+    }
+  };
+
+  return {
+    verdictFor(defKey: string, leaf: string): GuidanceVerdict {
+      const cacheKey = `${defKey}:${leaf}`;
+      const cached = verdicts.get(cacheKey);
+      if (cached !== undefined) return cached;
+      const prescription = promisesFor(defKey)?.get(leaf);
+      const verdict: GuidanceVerdict =
+        prescription === undefined
+          ? 'none'
+          : delivers(defKey, leaf, prescription)
+            ? 'prescribed'
+            : 'declared-but-silent';
+      verdicts.set(cacheKey, verdict);
+      return verdict;
     },
   };
 }
@@ -2186,14 +2687,25 @@ let gitResolvedAnchor: { rev: string; keys: string[] } | null = null;
       const baseRev = base.rev.slice(0, 12);
       const declaredRetired = registeredRetiredKeys();
       const reachability = computeSurfaceReachability();
+      const guidanceRoutes = computeGuidanceRoutes();
+      /** How a def is reachable, in the words every verdict below reuses. */
+      const describeReach = (via: 'root-graph' | 'derived-clone'): string =>
+        via === 'root-graph'
+          ? 'reachable from the metadata-type roots'
+          : 'authorable through a derived clone of a root-reachable schema';
       const allowed: string[] = [];
       const violations: string[] = [];
       const goneDefs = new Map<string, number>(); // def no longer emitted -> deleted key count
       for (const key of deletedKeys) {
-        // Only the def half is read now. The leaf half fed the leaf-NAME match
-        // #5898 removed from route 3 (see the RETIRED_KEYS_BY_MAJOR message
-        // below); slicing it out survived the rewrite as a dead local (#5475).
-        const defKey = key.slice(0, key.indexOf(':'));
+        // Both halves are read. The def half routes proofs 2 and 3; the leaf half
+        // is what proof 4 looks up in the def's `guidance` table (#18301). It is
+        // NOT the leaf-NAME match #5898 removed from proof 1 — that one matched a
+        // leaf against ADR-0087 clauses belonging to OTHER defs, which is how a
+        // flow node's `.type` dated an index type's tombstone. This lookup is
+        // scoped to the one def the key belongs to and never leaves it.
+        const separator = key.indexOf(':');
+        const defKey = key.slice(0, separator);
+        const leaf = key.slice(separator + 1);
         if (!generatedSchemas.has(defKey)) {
           goneDefs.set(defKey, (goneDefs.get(defKey) ?? 0) + 1);
           continue;
@@ -2202,7 +2714,8 @@ let gitResolvedAnchor: { rev: string; keys: string[] } | null = null;
         if (via === null) {
           allowed.push(
             `${key} — def not reachable from the ${reachability.rootTypes.length} metadata-type roots\n` +
-              `       (BUILTIN_METADATA_TYPE_SCHEMAS + EXTRA_METADATA_TYPE_SCHEMAS overlay; BFS over this\n` +
+              `       (BUILTIN_METADATA_TYPE_SCHEMAS + EXTRA_METADATA_TYPE_SCHEMAS overlay +\n` +
+              `       UNREGISTERED_KIND_SCHEMAS, this gate's own union — #17356; BFS over this\n` +
               `       build's in-memory Zod graph): an over-collected entry, never parsed against a\n` +
               `       metadata document. This waives ONLY the tombstone requirement of this file — it is\n` +
               `       not a license to change the schema (#4650).`,
@@ -2210,11 +2723,50 @@ let gitResolvedAnchor: { rev: string; keys: string[] } | null = null;
           continue;
         }
         const wasRetired = baseSnapshot.get(key) === true;
-        const how =
-          via === 'root-graph'
-            ? 'reachable from the metadata-type roots'
-            : 'authorable through a derived clone of a root-reachable schema';
+        const how = describeReach(via);
         if (!wasRetired) {
+          // Proof 4 (#18301) lives on THIS branch and only on it. A guidance-route
+          // retirement deletes the key from the shape instead of leaving a
+          // `retiredKey()` in it, so it never earned the `[RETIRED]` mark — "the
+          // entry at baseRev was LIVE" is the true description of every member of
+          // the class, and it is the verdict they were all getting.
+          //
+          // The un-marked gate is what makes the two proofs DISJOINT rather than
+          // merely different, and it is not a formality: `data/Object:compactLayout`
+          // is both #5898's aged-tombstone fixture and a real `guidance` key, so a
+          // proof 4 placed AHEAD of this branch took that deletion off proof 1's
+          // aging clock — measured, in the two #5898 cases that reddened. A key that
+          // WAS marked is a tombstone; it stays on the clock, and a `guidance` line
+          // written beside it may not shorten that.
+          const verdict = guidanceRoutes.verdictFor(defKey, leaf);
+          if (verdict === 'prescribed') {
+            allowed.push(
+              `${key} — def ${how}; writing '${leaf}' on it is REFUSED as an unrecognized key\n` +
+                `       and the refusal carries the prescription its \`strictObject\` declaration owes\n` +
+                `       it (\`guidance\` / \`guidanceSets\`, probed against this build's own instance):\n` +
+                `       an author who keeps writing the key gets the upgrade prescription, not a\n` +
+                `       silent parse, so the retirement is audible without a \`retiredKey()\`\n` +
+                `       tombstone to age out (#18301).`,
+            );
+            continue;
+          }
+          if (verdict === 'declared-but-silent') {
+            // A declaration that is not being kept. Reported apart from the plain
+            // "was LIVE" verdict because the two send their reader to different
+            // places: this one's `guidance` entry already exists, and what is
+            // missing is the door it was written for.
+            violations.push(
+              `${key} — def ${how}; a \`strictObject\` declaration NAMES '${leaf}', but writing it\n` +
+                `       on this def does NOT raise that prescription — probed at this build's own\n` +
+                `       instance for the def. WHICH of the reasons applies is not established here\n` +
+                `       and this gate does not guess: the key may be dropped in silence (an open\n` +
+                `       door), answered by a different error map, or sit behind a union or pipe this\n` +
+                `       probe cannot drive. Either way the retirement is not audible THROUGH THIS\n` +
+                `       DEF, so proof 4 has nothing to waive on; the entry at ${baseRev} was LIVE\n` +
+                `       (never tombstoned) (#18301).`,
+            );
+            continue;
+          }
           violations.push(`${key} — def ${how}; the entry at ${baseRev} was LIVE (never tombstoned).`);
           continue;
         }
@@ -2276,7 +2828,21 @@ let gitResolvedAnchor: { rev: string; keys: string[] } | null = null;
             `        that itself (it would have said so above); or\n` +
             `     3. its whole def stopped being emitted — adjudicated by the manifest deletion\n` +
             `        gate above (#4725), which demands the removal be declared in\n` +
-            `        RETIRED_DEFS_BY_MAJOR (src/migrations/registry.ts).\n\n` +
+            `        RETIRED_DEFS_BY_MAJOR (src/migrations/registry.ts); or\n` +
+            `     4. its baseline entry was NOT \`[RETIRED]\`, and writing the key on its def is\n` +
+            `        REFUSED as an unrecognized key carrying the prescription its\n` +
+            `        \`strictObject\` \`guidance\` table declares for it — an enumerated\n` +
+            `        \`guidanceSets\` entry counts, a RegExp one does not. Both halves are\n` +
+            `        probed against this build's own instance, because neither the published\n` +
+            `        \`additionalProperties: false\` nor the declaration registry can tell a\n` +
+            `        closed door from a shape that merely STRIPS the key: in \`io: 'output'\`\n` +
+            `        zod emits \`false\` for a stripping shape too, and a \`.strip()\` clone\n` +
+            `        shares its source's shape entries. That is the retirement route that\n` +
+            `        removes the key from the shape rather than leaving a \`retiredKey()\`\n` +
+            `        tombstone in it, and it is the only one of the four with no \`[RETIRED]\`\n` +
+            `        mark to age (#18301). A key that IS marked is a tombstone and stays on\n` +
+            `        route 1's clock. This gate computes all of that too (it would have said\n` +
+            `        so above).\n\n` +
             `   Restore the line(s) — \`pnpm --filter @objectstack/spec gen:schema\` regenerates\n` +
             `   the file — or complete the retirement route (#4650, ADR-0104, and the\n` +
             `   spec-property-retirement skill in .claude/skills/).`,
@@ -2881,6 +3447,222 @@ if (unemittedSkips.length > 0) {
   for (const skip of unemittedSkips) {
     console.log(`     ${ledgerKey(skip)}  (${causeOf(skip.message)})`);
     console.log(`       ${unemittedBaseline.entries[ledgerKey(skip)].reason}`);
+  }
+}
+
+// ─── The dropped-refinement ratchet (#18670) ─────────────────────────
+//
+// Runs after the never-published ratchet above, and the two populations are
+// DISJOINT by construction: that one adjudicates exports this build published
+// NOTHING for, this one adjudicates what it DID publish. So neither can mask
+// the other, and an export that stops emitting still gets the remedy the
+// ratchet above prescribes rather than this block's.
+//
+// What it holds closed: a rule written as `.refine()` reaches the runtime and
+// not the file. `z.toJSONSchema()` has no arm for a `custom` check, so the
+// published JSON Schema is WIDER than the Zod type it was generated from — the
+// direction in which an author's validator says yes and the platform then says
+// no. Measured on this tree at the change that added this block: 682 refinement
+// sites across 237 published schemas, zero of which projected anything.
+//
+// ⛔ This ratchet still narrows nothing by itself and touches no refinement —
+// the runtime rule is correct. It makes the remaining population declared, so
+// the next gap arrives as a line in a diff instead of as nothing at all.
+//
+// The narrowing is the CLOSED list in `src/shared/refinement-projection.ts`
+// (#18670 item 2), emitted by the `override` this generator passes to every
+// projection. It and this ratchet compose in one direction: a site the list
+// emits is `projected` and its ledger row is deleted in the same PR; every
+// other site is `dropped` and stays declared. So the ledger is shrink-only in
+// the strong sense — a repair is the only thing that shortens it.
+const droppedRefinementsBaseline = readDroppedRefinementsBaseline(PKG_DIR);
+if (!droppedRefinementsBaseline) {
+  console.error(`\n❌ ${DROPPED_REFINEMENTS_BASELINE_FILE} is missing — it is a committed, hand-edited ledger (#18670).`);
+  console.error(
+    `\n   Without it nothing holds the dropped-refinement population closed, and a rule that\n` +
+      `   reaches the runtime but not packages/spec/json-schema/** arrives in total silence —\n` +
+      `   the state #18670 measured. Restore packages/spec/${DROPPED_REFINEMENTS_BASELINE_FILE}\n` +
+      `   from git rather than regenerating it: it has no generator on purpose (see\n` +
+      `   scripts/lib/dropped-refinements.ts).`,
+  );
+  process.exit(1);
+}
+
+const droppedRefinementProblems = checkDroppedRefinements({
+  census: refinementCensus,
+  publishedKeys: new Set(generatedSchemas.keys()),
+  baseline: droppedRefinementsBaseline,
+});
+
+if (hasDroppedRefinementProblems(droppedRefinementProblems)) {
+  const { undeclared, miscounted, repaired, vanished, unreasoned } = droppedRefinementProblems;
+
+  if (undeclared.length > 0) {
+    console.error(
+      `\n❌ ${undeclared.length} published schema(s) drop a refinement and are not declared in ${DROPPED_REFINEMENTS_BASELINE_FILE}:`,
+    );
+    for (const entry of undeclared) {
+      console.error(`     + ${entry.defKey}  (${entry.dropped.length} site(s))`);
+      for (const site of entry.dropped) {
+        console.error(`         ${site.path || '<root>'}  (${site.nodeType}${site.aborting ? ', aborting' : ''})`);
+      }
+    }
+    console.error(
+      `\n   The rule is enforced by the runtime and absent from the published file: a document\n` +
+        `   the file ACCEPTS can be refused at parse time, and the author — or the AI — that\n` +
+        `   validated against json-schema/** finds out a release later. The refinement itself is\n` +
+        `   correct; ⛔ do not delete or weaken it to make this line go away.\n\n` +
+        `   Declare it by adding to packages/spec/${DROPPED_REFINEMENTS_BASELINE_FILE}:\n\n` +
+        undeclared
+          .map(
+            (entry) =>
+              `        "${entry.defKey}": {\n` +
+              `          "sites": [${entry.dropped.map((s) => `"${s.path}"`).join(', ')}]\n` +
+              `        },\n`,
+          )
+          .join(''),
+    );
+  }
+
+  if (miscounted.length > 0) {
+    console.error(`\n❌ ${miscounted.length} ledger entry(ies) in ${DROPPED_REFINEMENTS_BASELINE_FILE} name a different set of sites:`);
+    for (const m of miscounted) {
+      console.error(`     ~ ${m.defKey}:`);
+      for (const site of m.added) console.error(`         + ${site || '<root>'}`);
+      for (const site of m.removed) console.error(`         - ${site || '<root>'}`);
+    }
+    console.error(
+      `\n   A \`+\` is a new gap: a rule that now reaches the runtime and not the file. A \`-\` is a\n` +
+        `   gap that closed or a path that moved — good news either way, and the line has to move\n` +
+        `   with it in the same PR. A ledger that keeps naming sites the build no longer sees has\n` +
+        `   stopped describing the tree and started covering for it, and the next gap then arrives\n` +
+        `   inside a list nobody re-read.\n\n` +
+        `   The corrected entries, in full:\n\n` +
+        miscounted
+          .map(
+            (m) =>
+              `        "${m.defKey}": {\n` +
+              `          "sites": [${m.observedSites.map((s) => `"${s}"`).join(', ')}]\n` +
+              `        },\n`,
+          )
+          .join(''),
+    );
+  }
+
+  if (repaired.length > 0) {
+    console.error(`\n❌ ${repaired.length} ledger entry(ies) in ${DROPPED_REFINEMENTS_BASELINE_FILE} drop NOTHING now:`);
+    for (const defKey of repaired) console.error(`     - ${defKey}`);
+    console.error(
+      `\n   Good news, and the line goes with it — in this same PR. Either the refinement was\n` +
+        `   removed, or the projection learned to emit what it constrains. Say which in the PR:\n` +
+        `   the second is the repair this ledger exists to become unnecessary for.`,
+    );
+  }
+
+  if (vanished.length > 0) {
+    console.error(`\n❌ ${vanished.length} ledger entry(ies) in ${DROPPED_REFINEMENTS_BASELINE_FILE} name no published schema:`);
+    for (const defKey of vanished) console.error(`     - ${defKey}`);
+    console.error(
+      `\n   The schema was removed, renamed, or stopped being published altogether. Delete the\n` +
+        `   line (a rename gets a new line under the new key), so the ledger keeps naming exactly\n` +
+        `   the population this build measures.`,
+    );
+  }
+
+  if (unreasoned.length > 0) {
+    console.error(`\n❌ ${unreasoned.length} ledger entry(ies) carry an empty \`sites\` list:`);
+    for (const defKey of unreasoned) console.error(`     - ${defKey}`);
+    console.error(
+      `\n   An entry that records only that a schema IS in the population is a count wearing a\n` +
+        `   ledger's shape. The site paths are the whole instrument: they are what makes a new\n` +
+        `   gap legible as a line in a diff instead of a number going up by one.`,
+    );
+  }
+
+  process.exit(1);
+}
+
+// The accepted population, reported in full on every run — the same discipline
+// as the never-published ledger above, and for the same reason: a population
+// that passes in silence is the silence this ratchet was built to end.
+const droppedSiteTotal = refinementCensus.reduce((sum, entry) => sum + entry.dropped.length, 0);
+const droppedFiles = refinementCensus.filter((entry) => entry.dropped.length > 0);
+const projectedSiteTotal = refinementCensus.reduce((sum, entry) => sum + entry.projected.length, 0);
+const undecidableSiteTotal = refinementCensus.reduce((sum, entry) => sum + entry.undecidable.length, 0);
+if (droppedSiteTotal > 0) {
+  console.log(
+    `\n🔇 ${droppedSiteTotal} refinement site(s) across ${droppedFiles.length} published schema(s) reach the ` +
+      `RUNTIME and not the published JSON Schema — all declared in ${DROPPED_REFINEMENTS_BASELINE_FILE} (#18670).`,
+  );
+  console.log(
+    `     Those files are therefore still WIDER than the Zod types they are generated from:\n` +
+      `     a document one of them accepts can be refused at parse time. Each affected file names\n` +
+      `     its own remaining sites as \`x-dropped-refinements\`. Closing one means teaching the\n` +
+      `     CLOSED list in src/shared/refinement-projection.ts a NAMED pattern — ⛔ never deleting\n` +
+      `     the refinement, and ⛔ never an open-ended translator over the whole population.`,
+  );
+  console.log(
+    `     Also measured this run: ${projectedSiteTotal} refinement site(s) DID reach the file, ` +
+      `${undecidableSiteTotal} had no JSON form on either side to compare.`,
+  );
+}
+
+// Which projected sites got there through which arm of the closed list (#18670
+// item 2). Printed per pattern rather than as one total, for the reason the
+// ledger records sites rather than a count: a total cannot tell "one arm stopped
+// emitting" from "somebody deleted a refinement", and the two have opposite
+// remedies. A site that projects with NO declared pattern is reported on its own
+// line — it means zod started emitting something by itself, which is news.
+if (projectedSiteTotal > 0) {
+  const byPattern = new Map<string, number>();
+  for (const entry of refinementCensus) {
+    for (const site of entry.projected) {
+      const key = site.declaredPatterns.length > 0
+        ? site.declaredPatterns.join('+')
+        : 'UNDECLARED — zod projected this on its own';
+      byPattern.set(key, (byPattern.get(key) ?? 0) + 1);
+    }
+  }
+  console.log(
+    `\n📣 ${projectedSiteTotal} refinement site(s) DO reach the published JSON Schema, by declared pattern:`,
+  );
+  for (const [pattern, n] of [...byPattern].sort((a, b) => b[1] - a[1])) {
+    console.log(`     ${String(n).padStart(4)}  ${pattern}`);
+  }
+}
+
+// Nodes whose projection MOVED and which are still counted as dropped — the
+// reading the per-node differential cannot express as a verdict (#18670 third
+// arm). Two shapes reach this line and both are news:
+//
+//   - a node carrying a DECLARED arm beside a rule the closed list does not
+//     cover, so part of it is stated in the file and part of it is not. It is
+//     ledgered and annotated conservatively, which is what the ruling's 「A
+//     refinement that is not one of these named patterns stays dropped and
+//     annotated」 requires — before the verdict was per-check-aware such a node
+//     read `projected` outright and its undeclared rule was recorded nowhere;
+//   - zod having started to project a `custom` check on its own, which is the
+//     upgrade this whole instrument is waiting for and must not swallow.
+//
+// Printed rather than fatal: the site is already held by the ledger as a drop,
+// so a NEW one fails the ratchet above on its own. What this line adds is WHICH
+// of the declared population is only half-stated, which no count can say.
+const partiallyStated = refinementCensus.flatMap((entry) =>
+  entry.dropped
+    .filter((site) => site.projectionMoved)
+    .map((site) => ({ defKey: entry.defKey, site })),
+);
+if (partiallyStated.length > 0) {
+  console.log(
+    `\n🪢 ${partiallyStated.length} refinement site(s) are PARTIALLY stated by the published file — ` +
+      `the projection moved, yet not every \`custom\` check on the node is one the closed list declares, ` +
+      `so the node stays dropped and annotated (#18670).`,
+  );
+  for (const { defKey, site } of partiallyStated) {
+    const declared = site.declaredPatterns.length > 0
+      ? site.declaredPatterns.join('+')
+      : 'nothing declared — zod projected this on its own';
+    console.log(`     ${defKey} at "${site.path}": ${site.count} check(s), declared: ${declared}`);
   }
 }
 

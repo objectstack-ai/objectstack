@@ -100,7 +100,7 @@ const CUBE: Cube = {
   dimensions: {
     status: { name: 'status', label: 'Status', type: 'string', sql: 'status' },
   },
-  joins: { account: { name: 'crm_account', relationship: 'belongsTo', sql: '' } },
+  joins: { account: { name: 'crm_account' } },
 } as never;
 
 /**

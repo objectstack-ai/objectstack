@@ -47,13 +47,7 @@
 # the real `objectui-changeset-digest.mjs` (a byte copy, like the script under
 # test) through a throwaway objectui repo with a real changeset commit.
 #
-# dispatch-gates: no-path-population -- every path this file writes or reads
-# lives inside a disposable checkout under mktemp -d (a throwaway objectui and
-# a throwaway FRAMEWORK_ROOT, both destroyed by the EXIT trap below), so no
-# quoted literal in this file names a path this repo tracks. Case 5's fixture
-# changeset filename is assembled from CHANGESET_NAME by interpolation
-# everywhere it is used, deliberately never spelled as one bare quoted token,
-# so it does not read as a declared population here either.
+# dispatch-gates: no-path-population -- every path this file writes or reads lives inside a disposable checkout under mktemp -d (a throwaway objectui and a throwaway FRAMEWORK_ROOT, both destroyed by the EXIT trap below), so no quoted literal in this file names a path this repo tracks. Case 5's fixture changeset filename is assembled from CHANGESET_NAME by interpolation everywhere it is used, deliberately never spelled as one bare quoted token, so it does not read as a declared population here either.
 
 set -euo pipefail
 
@@ -77,11 +71,40 @@ bad()  { echo "    ✗ $*" >&2; FAILED=$((FAILED + 1)); }
 case_begin() { CASE="$1"; echo "  • ${CASE}"; }
 
 # case_5 additionally needs a copy of the digest script `bump-objectui.sh`
-# calls and the `isEntrypoint` helper it imports, alongside the script under
-# test — mirroring `objectui-changeset-digest.mjs`'s own self-test fixtures
-# (which copy the same trio for the same reason).
-DIGEST_SCRIPT="${SCRIPT_DIR}/objectui-changeset-digest.mjs"
-INVOKED_AS_SCRIPT="${SCRIPT_DIR}/invoked-as.mjs"
+# calls, plus every first-party module that script imports, alongside the script
+# under test — mirroring `objectui-changeset-digest.mjs`'s own self-test
+# fixtures, which stage the same closure for the same reason.
+#
+# ⭐ The module list is DERIVED, not typed (#16421). It was two names here
+# (`objectui-changeset-digest.mjs`, `invoked-as.mjs`) and the same two names in
+# three other places; when the digest script gained one import, this file was the
+# THIRD staging site to go red, and what a reader saw was not an
+# `ERR_MODULE_NOT_FOUND` they could act on: the staged digest died as a
+# subprocess, so `range_walkable` never returned one of its two verdicts and
+# case 5 failed on the refusal's wording instead. (⚠️ `bump-objectui.sh` itself
+# is NOT at fault and is not to be touched for this: it swallows no stderr, and
+# its `WALK_RC` branch already separates a verdict from a no-answer and refuses
+# to offer `--unshallow` for a crash. What WAS at fault was this file, and it
+# is fixed below: `check_walkable` keeps the child's stderr and
+# `walk_answered` forks on the same 2-or-3 criterion, so a probe that never
+# answered is no longer reported as a verdict about the objectui range.) The
+# derivation lives in `first-party-closure.mjs`, shared with the JS sites.
+#
+# ⚠️ THE BASENAME IS SPELLED ALONE AND THE DIRECTORY IS INTERPOLATED ONTO IT —
+# the same discipline the declaration above states for CHANGESET_NAME, and for
+# the same machine reason: `dispatch-gates` reads a quoted literal carrying a
+# separator as a DECLARED WATCHED PATH, so writing the repo-relative path as one
+# bare token here gives this gate a path population and CONTRADICTS the
+# `no-path-population` marker above. Measured, not theorised —
+# `check:pm-dispatch-gates`: "no family both DECLARES no path population and
+# names paths anyway (contradicted: check:objectui-bump)". ⛔ Do not tidy this
+# back into a single literal.
+DIGEST_BASENAME='objectui-changeset-digest.mjs'
+REPO_ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+DIGEST_ENTRY="scripts/${DIGEST_BASENAME}"
+# The same script, absolute, for the two cases that run it from THIS checkout
+# rather than from a sandbox — those need no staging at all.
+DIGEST_SCRIPT="${REPO_ROOT_DIR}/${DIGEST_ENTRY}"
 
 # Case 5's fixture changeset BASENAME — interpolated into a changeset path
 # everywhere it is used, never spelled as one bare path literal: that path
@@ -123,13 +146,48 @@ new_framework() {
 }
 
 # Same, plus a byte copy of the digest script `bump-objectui.sh` shells out to
-# and the `invoked-as.mjs` helper it imports — needed only by cases that do NOT
-# pass `--no-changeset` and so actually reach the changeset section.
+# and every first-party module that script imports — needed only by cases that
+# do NOT pass `--no-changeset` and so actually reach the changeset section.
+#
+# ⛔ The closure is written to a file and its exit code read on its own line: a
+# `node ... | while read` pipeline would hand this function the exit code of
+# `while`, so a derivation that died would stage NOTHING and look like it worked,
+# which is the failure shape this whole change exists to remove.
 new_framework_with_digest() {
   local d="$1" pin="${2-}"
   new_framework "$d" "$pin"
-  cp "$DIGEST_SCRIPT" "${d}/scripts/objectui-changeset-digest.mjs"
-  cp "$INVOKED_AS_SCRIPT" "${d}/scripts/invoked-as.mjs"
+  local list="${d}/.closure.txt" rel
+  # ⚠️ Each path is emitted with its OWN trailing newline, and the loop below
+  # still reads an unterminated last line. Both halves, because the first time
+  # this was written with `join('\n')` the final path — `first-party-closure.mjs`
+  # itself — was silently dropped by `read`, and the sandbox then failed with the
+  # SAME ERR_MODULE_NOT_FOUND this derivation exists to prevent, from a list that
+  # had named the file correctly.
+  node --input-type=module -e "
+    import { firstPartyModuleClosure } from '${REPO_ROOT_DIR}/scripts/first-party-closure.mjs';
+    for (const rel of firstPartyModuleClosure('${DIGEST_ENTRY}', { root: '${REPO_ROOT_DIR}' })) console.log(rel);
+  " > "$list" 2>"${list}.err"
+  local ec=$?
+  if [[ $ec -ne 0 ]]; then
+    printf 'bump-objectui.selftest: could not derive the digest closure (exit %s)\n' "$ec" >&2
+    cat "${list}.err" >&2
+    return "$ec"
+  fi
+  local staged_count=0
+  while read -r rel || [[ -n "$rel" ]]; do
+    [[ -z "$rel" ]] && continue
+    mkdir -p "${d}/$(dirname "$rel")"
+    cp "${REPO_ROOT_DIR}/${rel}" "${d}/${rel}"
+    staged_count=$((staged_count + 1))
+  done < "$list"
+  # A derivation that came back short stages a sandbox that looks runnable and
+  # is not, so the count is ASSERTED here rather than discovered three cases
+  # later as "the objectui range does not walk".
+  if [[ "$staged_count" -lt 2 ]]; then
+    printf 'bump-objectui.selftest: the digest closure staged only %s file(s) — expected the script and its imports\n' "$staged_count" >&2
+    return 1
+  fi
+  rm -f "$list" "${list}.err"
 }
 
 # A throwaway objectui repo with a REAL changeset commit — commit A (the
@@ -235,6 +293,51 @@ run_bump() {
 }
 
 log_has() { grep -qF -- "$1" "$LOG"; }
+
+# --- the walkability probe, and the ONE criterion for reading its exit -------
+#
+# THE PROBE'S STDERR IS THE ONLY DIAGNOSTIC IT EMITS. `--check-walkable`
+# derives nothing and prints nothing on stdout — the digest's own self-test
+# asserts that emptiness — so everything it has to say arrives on stderr: a
+# real verdict's explanation, and equally a crash's `ERR_MODULE_NOT_FOUND`.
+# Both call sites below used to send stderr to the bit bucket along with
+# stdout, which threw the only clue away before anyone could read it.
+#
+# ⭐ AND A NON-ZERO EXIT IS NOT AUTOMATICALLY A VERDICT ABOUT THE RANGE.
+# `bump-objectui.sh` already forks on exactly this, and the criterion is taken
+# from there rather than re-invented, so the two cannot drift into two
+# different ideas of what "the range does not walk" means: 2 and 3 are the
+# probe's two VERDICTS (2 = an endpoint is missing, 3 = the endpoints are here
+# but the history stops inside the range); any other non-zero exit means it
+# never reached one — no node, a missing module, a syntax error, a killed
+# process. Reporting that as "the range does not walk" is a confident, wrong
+# diagnosis pointing at another subsystem, and it has cost a round already
+# (#16421): a new import made the digest die, the wording sent that dev to
+# investigate shallow clones and `fetch --unshallow`, and the real cause was a
+# copy manifest three directories away. Their report calls it the longest part
+# of the round.
+WALK_ERR=""
+check_walkable() {
+  local oui="$1" from="$2" to="$3" rc=0
+  WALK_ERR="${TMPROOT}/walk-$$-${RANDOM}.err"
+  node "$DIGEST_SCRIPT" --objectui-root "$oui" --from "$from" --to "$to" \
+    --check-walkable >/dev/null 2>"$WALK_ERR" || rc=$?
+  return "$rc"
+}
+
+# True for the probe's two verdicts, false for every "it never answered" exit.
+walk_answered() { [[ "$1" -eq 2 || "$1" -eq 3 ]]; }
+
+# Replay the child's stderr BEFORE the `bad` that reports it, so the failure
+# carries its evidence instead of only pointing somewhere.
+walk_replay_stderr() {
+  echo "      ↳ the walkability probe's own stderr:" >&2
+  if [[ -s "$WALK_ERR" ]]; then
+    sed 's#^#      | #' "$WALK_ERR" >&2
+  else
+    echo "      | (nothing — the probe wrote no stderr at all)" >&2
+  fi
+}
 
 # --- case 1: unreadable commit object ⇒ refusal, pin file untouched ----------
 case_1() {
@@ -366,10 +469,14 @@ case_5() {
   new_framework_with_digest "$fw" "$old_sha"
 
   local walk_rc=0
-  node "$DIGEST_SCRIPT" --objectui-root "$oui" --from "$old_sha" --to "$new_sha" \
-    --check-walkable >/dev/null 2>&1 || walk_rc=$?
+  check_walkable "$oui" "$old_sha" "$new_sha" || walk_rc=$?
   if [[ "$walk_rc" -ne 0 ]]; then
-    bad "fixture: the range does not walk BEFORE breaking the blob (rc=${walk_rc}) — not this card's state"
+    walk_replay_stderr
+    if walk_answered "$walk_rc"; then
+      bad "fixture: the range does not walk BEFORE breaking the blob (rc=${walk_rc}) — not this card's state"
+    else
+      bad "fixture: the walkability probe never ANSWERED before the blob was broken (exit ${walk_rc}; its verdicts are 2 and 3) — this says nothing about the objectui range; read the probe's stderr above"
+    fi
     return 0
   fi
 
@@ -378,12 +485,16 @@ case_5() {
   # Re-assert walkability AFTER breaking the blob — the whole point of this
   # case is that the commit/tree walk stays green while the blob read fails.
   walk_rc=0
-  node "$DIGEST_SCRIPT" --objectui-root "$oui" --from "$old_sha" --to "$new_sha" \
-    --check-walkable >/dev/null 2>&1 || walk_rc=$?
+  check_walkable "$oui" "$old_sha" "$new_sha" || walk_rc=$?
   if [[ "$walk_rc" -eq 0 ]]; then
     ok 'fixture: --check-walkable still exits 0 after the blob is deleted (walk is commits/trees, not blobs)'
   else
-    bad "fixture: --check-walkable now exits ${walk_rc} — the blob deletion broke the WALK, not just the blob read"
+    walk_replay_stderr
+    if walk_answered "$walk_rc"; then
+      bad "fixture: --check-walkable now exits ${walk_rc} — the blob deletion broke the WALK, not just the blob read"
+    else
+      bad "fixture: the walkability probe never ANSWERED after the blob deletion (exit ${walk_rc}; its verdicts are 2 and 3) — the WALK is UNMEASURED here, not broken; read the probe's stderr above"
+    fi
     return 0
   fi
 

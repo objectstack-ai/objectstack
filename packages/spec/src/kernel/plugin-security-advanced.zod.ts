@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { ExpressionInputSchema } from '../shared/expression.zod';
+import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
 
 /**
  * # Plugin Security and Sandboxing Protocol
@@ -114,7 +114,7 @@ export const PluginPermissionSchema = lazySchema(() => z.object({
     /**
      * Filter condition
      */
-    condition: ExpressionInputSchema.optional().describe('Predicate (CEL) filter, e.g. P`record.owner == os.user.id`.'),
+    condition: EvaluatedExpressionInputSchema.optional().describe('Predicate (CEL) filter, e.g. P`record.owner == os.user.id`.'),
     
     /**
      * Field-level access
@@ -620,7 +620,13 @@ export const KernelSecurityPolicySchema = lazySchema(() => z.object({
     allowedMethods: z.array(z.string()),
     allowedHeaders: z.array(z.string()),
     allowCredentials: z.boolean().default(false),
-    maxAge: z.number().int().optional(),
+    // `externalVocabulary` mirror (#14478 ruling B), the same declaration its
+    // twin `CorsConfig.maxAge` (`src/shared/http.zod.ts`) already carries: this
+    // key IS the CORS `Access-Control-Max-Age` response header, whose value the
+    // standard defines in seconds. Renaming it to `maxAgeSeconds` would break the
+    // one-to-one reading between this policy and the header it emits.
+    maxAge: z.number().int().optional().describe('Preflight cache duration in seconds')
+      .meta({ externalVocabulary: 'CORS `Access-Control-Max-Age` (WHATWG Fetch)' }),
   }).optional(),
   
   /**

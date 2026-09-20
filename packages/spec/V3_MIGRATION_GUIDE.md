@@ -11,7 +11,7 @@
 | Category | Change | Impact |
 |----------|--------|--------|
 | Hub Module Removal | `Hub.*` namespace removed from barrel exports | Medium |
-| Runtime Logic Extraction | `createErrorResponse()`, `getHttpStatusForCategory()`, `definePlugin()` removed from spec | Medium |
+| Runtime Helper Removal | `createErrorResponse()`, `getHttpStatusForCategory()`, `definePlugin()` removed from spec, with no replacement export | Medium |
 | Deprecated Field Removal | `location` (singular) removed from ActionSchema | Low |
 | Deprecated Schema Aliases | `RealtimePresenceStatus`, `RealtimeAction`, `RateLimitSchema` removed | Low |
 
@@ -24,7 +24,10 @@
 The `hub/` directory has been removed. Previously it re-exported schemas from `system/` and `kernel/`:
 
 ```typescript
-// ❌ v2.x (deprecated, removed in v3.0)
+// ❌ v2.x — REMOVED in v3.0, shown so you can find it in your own code and
+// delete it. ⛔ Do not copy this block: `@objectstack/spec/hub` is in no
+// `exports` entry and the `Hub` namespace is off the root barrel, so neither
+// line resolves for any consumer today. The ✅ replacement is below.
 import { TenantSchema } from '@objectstack/spec/hub';
 import { Hub } from '@objectstack/spec';
 const tenant = Hub.TenantSchema.parse({ ... });
@@ -52,33 +55,51 @@ import { PluginRegistryEntrySchema } from '@objectstack/spec/kernel';
 
 ---
 
-## 2. Runtime Logic Extraction
+## 2. Runtime Helper Removal
 
 ### What Changed
 
-Helper functions that contain runtime logic have been moved from `@objectstack/spec` to `@objectstack/core`. The spec package should contain only schema definitions.
+Three helper functions that carried runtime logic were **removed** from `@objectstack/spec`. The spec package should contain only schema definitions.
+
+> **⚠️ Removed, ⛔ not relocated — there is no replacement import.** An earlier
+> revision of this guide said these helpers had "moved to
+> `@objectstack/core/errors`" and `@objectstack/core/plugin`. **That move never
+> happened.** `@objectstack/core` publishes exactly two entry points —
+> `@objectstack/core` and `@objectstack/core/logger` — so neither of those
+> subpaths resolves for any consumer, and the three symbols themselves exist
+> nowhere in the codebase. The v3.0 change deleted them outright.
 
 ### Functions Removed from Spec
 
-| Function | Previous Location | New Location |
-|----------|-------------------|-------------|
-| `createErrorResponse()` | `api/errors.zod.ts` | `@objectstack/core/errors` |
-| `getHttpStatusForCategory()` | `api/errors.zod.ts` | `@objectstack/core/errors` |
-| `definePlugin()` | `kernel/plugin.zod.ts` | `@objectstack/core/plugin` |
+| Function | Previous Location | v3.0 disposition |
+|----------|-------------------|------------------|
+| `createErrorResponse()` | `api/errors.zod.ts` | Removed — no replacement export |
+| `getHttpStatusForCategory()` | `api/errors.zod.ts` | Removed — no replacement export |
+| `definePlugin()` | `kernel/plugin.zod.ts` | Removed — no replacement export |
 
 ### How to Migrate
 
+Delete the import and inline what you were using. There is no ✅ counterpart to
+paste, because nothing was published to replace these:
+
+- **`createErrorResponse()` / `getHttpStatusForCategory()`** — `ErrorResponseSchema` still
+  describes the error envelope, so build the object you need and validate it against that
+  schema directly.
+- **`definePlugin()`** — a plugin is an ordinary object or class matching the `Plugin`
+  interface exported from `@objectstack/core` (`init` / `start` / `destroy`); no wrapper
+  function is involved.
+
 ```typescript
-// ❌ v2.x (deprecated, removed in v3.0)
+// ❌ v2.x — REMOVED in v3.0, shown so you can find these imports in your own
+// code and delete them. ⛔ Do not copy this block.
 import { createErrorResponse, getHttpStatusForCategory } from '@objectstack/spec/api';
 import { definePlugin } from '@objectstack/spec/kernel';
-
-// ✅ v3.0
-import { createErrorResponse, getHttpStatusForCategory } from '@objectstack/core/errors';
-import { definePlugin } from '@objectstack/core/plugin';
 ```
 
-> **Note:** The schemas `ErrorResponseSchema`, `PluginDefinitionSchema` etc. remain in `@objectstack/spec`. Only the runtime helper functions are moved.
+> **Note:** `ErrorResponseSchema` remains in `@objectstack/spec`, exported from the
+> `@objectstack/spec/api` entrypoint. The removal took the runtime helper functions only.
+> ⛔ `PluginDefinitionSchema` is **not** among the survivors — it is exported from no
+> entrypoint today.
 
 ---
 
@@ -147,8 +168,8 @@ import { EventBusConfigSchema, EventSchema, EventPriority } from '@objectstack/s
 ## Migration Checklist
 
 - [x] Replace all `Hub.*` imports with direct `system/` or `kernel/` imports
-- [x] Remove `createErrorResponse()` / `getHttpStatusForCategory()` from spec (moved to `@objectstack/core/errors`)
-- [x] Remove `definePlugin()` from spec (moved to `@objectstack/core/plugin`)
+- [ ] Drop `createErrorResponse()` / `getHttpStatusForCategory()` — removed from spec in v3.0 and ⛔ **not** relocated; there is no replacement import (see §2)
+- [ ] Drop `definePlugin()` — removed from spec in v3.0 and ⛔ **not** relocated; there is no replacement import (see §2)
 - [x] Replace `location` with `locations` in ActionSchema definitions
 - [x] Replace `RealtimePresenceStatus` with `PresenceStatus`
 - [x] Replace `RealtimeAction` with `RealtimeRecordAction`

@@ -52,6 +52,13 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// The tree's ONE answer to "is this span code, or prose" — the same import
+// `test/vitest-tiers-partition.test.ts` and `src/commands/
+// serve-bound-port-publication.test.ts` use. The ANTI-VACUITY describe below
+// is the only consumer here; see its header for why a raw read is unsound in
+// BOTH directions.
+import { maskComments } from '../../../scripts/js-comment-mask.mjs';
+
 import {
   boundPortFromBanner,
   holdPort,
@@ -198,10 +205,45 @@ describe('#12525: the child\'s REAL port is read back out of its own banner', ()
     // above stays green while `boundPortFromBanner()` returns `no-banner`
     // forever — which is a SILENT SKIP on every real boot, i.e. the exact false
     // green this card is about, restored with nothing red to show for it.
-    const formatSource = () => readFileSync(resolve(HERE, '../src/utils/format.ts'), 'utf8');
+    //
+    // ## ⛔ EVERY read in this describe is of CODE, never of the raw file
+    //
+    // `scripts/js-comment-mask.mjs` blanks comment spans in place — spaces for
+    // comment bytes, newlines kept — so every offset and line number survives
+    // the mask and an `indexOf` still points at the line it names.
+    //
+    // A raw read is unsound in BOTH directions, and this file has now been bitten
+    // by each of them on a nightly that no pull request could have reddened:
+    //
+    //   - it FABRICATES. `format.ts` gained a docblock quoting
+    //     `Press Ctrl+C to stop` 281 lines ABOVE the `console.error` that prints
+    //     it, so a whole-file `indexOf` put the tail before the `API:` row and
+    //     the order assertion reported a print order that had never changed.
+    //   - it VANISHES a pin. A comment naming the exact spelling a `toContain`
+    //     looks for satisfies that pin with no code behind it — the vacuum this
+    //     whole describe exists to prevent, reintroduced by its own instrument.
+    //
+    // Reading the raw bytes too is deliberate: the mask's own anti-vacuity
+    // control needs something to compare against.
+    const sourceOf = (relPath: string): { raw: string; code: string } => {
+      const raw = readFileSync(resolve(HERE, relPath), 'utf8');
+      return { raw, code: maskComments(raw) };
+    };
+
+    /**
+     * The mask ran, blanked in place, and blanked SOMETHING. Without it every
+     * negative below would pass against an empty string and every positive
+     * would fail for a reason that is not about the source under test.
+     */
+    const expectMasked = ({ raw, code }: { raw: string; code: string }): void => {
+      expect(code.length, 'the mask changed the file length — offsets no longer line up').toBe(raw.length);
+      expect(code, 'the mask returned the file unchanged — it blanked no comment at all').not.toBe(raw);
+    };
 
     it('printServerReady still prints an `API:` row and still ends with the tail', () => {
-      const source = formatSource();
+      const format = sourceOf('../src/utils/format.ts');
+      expectMasked(format);
+      const source = format.code;
       const apiAt = source.indexOf('API:');
       const tailAt = source.indexOf('Press Ctrl+C to stop');
 
@@ -238,13 +280,54 @@ describe('#12525: the child\'s REAL port is read back out of its own banner', ()
       // number that was REQUESTED and it stays 0 under `--port 0` (#13062).
       // The banner now reads the transport's own answer, so the premise below
       // is the stronger one it was always meant to be.
-      const serveSource = readFileSync(resolve(HERE, '../src/commands/serve.ts'), 'utf8');
+      //
+      // ## ⭐ The ARGUMENT is the invariant; the argument LIST is not
+      //
+      // This same claim is pinned twice in this package, on purpose and at two
+      // different strengths, because the two copies run in different tiers:
+      //
+      //   - `src/commands/serve-bound-port-publication.test.ts` runs per-PR
+      //     (`queue`) and holds the BYTE-EXACT call, `boundProtocol` argument
+      //     and all. It reddens on the pull request that rewords the line, with
+      //     that PR's author reading the failure.
+      //   - this file runs ONLY on the nightly `main` sweep, so an exact-spelling
+      //     pin here cannot be kept honest by the PR that moves the spelling: it
+      //     goes red a day later, on a card nobody can attribute. That is not a
+      //     hypothetical — it is what happened, and what this test is being
+      //     repaired from. So this copy binds the SEMANTIC premise the read-back
+      //     rests on and nothing more: whatever else the call grows, the port it
+      //     is handed is the BOUND one.
+      //
+      // ⛔ Binding less is not binding loosely — the matcher still fails on every
+      // spelling that would make this file vacuous, and that discrimination is
+      // PROVEN below on synthetic text rather than asserted, so the proof holds
+      // whatever `serve.ts` goes on to say.
+      const BANNER_FROM_BOUND_PORT = /externalBaseOrigin:\s*resolveAuthBaseUrl\(\s*boundPort\s*[,)]/;
+      const BANNER_FROM_REQUESTED_PORT = /externalBaseOrigin:\s*resolveAuthBaseUrl\(\s*(?:port|requestedPort)\s*[,)]/;
+
+      expect('externalBaseOrigin: resolveAuthBaseUrl(boundPort).baseOrigin').toMatch(BANNER_FROM_BOUND_PORT);
+      expect('externalBaseOrigin: resolveAuthBaseUrl(boundPort, boundProtocol).baseOrigin')
+        .toMatch(BANNER_FROM_BOUND_PORT);
+      // ⛔ …and the regression it exists to catch does NOT satisfy it, in either
+      // of the two names the requested port goes by in `run()`.
+      expect('externalBaseOrigin: resolveAuthBaseUrl(port).baseOrigin').not.toMatch(BANNER_FROM_BOUND_PORT);
+      expect('externalBaseOrigin: resolveAuthBaseUrl(requestedPort, boundProtocol).baseOrigin')
+        .not.toMatch(BANNER_FROM_BOUND_PORT);
+
+      const serve = sourceOf('../src/commands/serve.ts');
+      expectMasked(serve);
+      const serveSource = serve.code;
       expect(serveSource).toContain('port = await getAvailablePort(requestedPort)');
       expect(
         serveSource,
         'the ready banner no longer derives its API row from `resolveAuthBaseUrl(boundPort)` — '
         + 'if it now uses the REQUESTED port, the #12525 read-back is vacuous by construction',
-      ).toContain('externalBaseOrigin: resolveAuthBaseUrl(boundPort).baseOrigin');
+      ).toMatch(BANNER_FROM_BOUND_PORT);
+      expect(
+        serveSource,
+        'the banner row is built from the REQUESTED port — #12525 read-back is vacuous: '
+        + 'the harness can never disagree with a banner derived from what it asked for',
+      ).not.toMatch(BANNER_FROM_REQUESTED_PORT);
       expect(
         serveSource,
         'the bound port is no longer resolved off the transport — `boundPort` is what the '

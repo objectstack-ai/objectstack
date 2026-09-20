@@ -123,11 +123,25 @@
  *      but `GITHUB_REPOSITORY` or `GITHUB_TOKEN` missing, #16329). A
  *      usage/wiring failure, never a verdict about any PR, and never a
  *      statement that the board is clean.
+ *   3  PREREQUISITE NOT MET — the board could not be READ (transport, auth, a
+ *      404 from a number that resolves to no pull request). Nothing was
+ *      judged, and it is never a statement about the board (#18940). The code
+ *      is the fleet's shared one, imported rather than restated, so every
+ *      instrument in this tree spells "could not read" identically.
  *
  * A gate that cannot read its input has verified nothing, and exiting 0 there
  * reads as "no violations" — the anti-pattern this repo keeps paying for. The
  * inverse matters too: a mis-wired gate must not read as an accusation, because
  * it would be red on every PR at once for something no author did.
+ *
+ * That inverse is why 3 exists and why a transport failure may not be left to
+ * node's unhandled-rejection status. That status is 1, and 1 here is the
+ * ACCUSATION — an earlier open PR already claims a listed path — so a 404, a
+ * dead credential or a dropped connection printed a stack trace and told the
+ * author their PR was racing someone else's. Every word of that is about a
+ * board this run never read. The read is wrapped, the failure is named, and
+ * the exit stays NON-ZERO, because a board that could not be read is not a
+ * clean one either.
  *
  * A file list that could not be walked to the end is a third thing again. It is
  * reported as UNDETERMINED, loudly, and never silently folded into the clean
@@ -145,10 +159,27 @@
  * names a tree that does not exist, so a hint on one can never match anything.
  */
 
+import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
+import { maskCommentsAndLiterals } from './js-comment-mask.mjs';
+// ⛔ Not copied. The proxy-rearm PLAN is ONE source for every instrument in this
+// tree, so this gate and the sweeps can never disagree about whether this
+// container's fetch reaches GitHub at all. Only the guard variable below is
+// this file's own, and the block above `rearmThroughProxy` says why.
+//
+// The PREREQUISITE NOT MET code arrives the same way and for the same reason:
+// "the read did not happen" is one answer across the fleet, and a gate that
+// numbered it locally would make a reader learn a second dialect per script.
+import {
+  EXIT_PREREQUISITE_NOT_MET,
+  PROXY_FLAG,
+  PROXY_REARM_GUARD,
+  proxyRearmPlan,
+} from './pm/check-half-states.mjs';
 
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
 //
@@ -182,11 +213,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'UNDETERMINED is its own answer. It must never read as clean, and it': 5,
   'Wiring absent: never clean, never an accusation.': 16,
   'The short-circuit. This is the property that makes the gate affordable,': 22,
+  'The route to GitHub. A 401 from a bypassed proxy reads as a dead': 9,
+  'A transport failure is a PREREQUISITE, never the accusation this': 19,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 7;
+const SELF_TEST_BATTERY_FLOOR = 9;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -261,6 +294,9 @@ function batteryFloorFailures() {
 }
 
 const ROOT = new URL('..', import.meta.url).pathname;
+
+/** This file, resolved for the proxy re-exec and for the self-test's own structural reads. */
+const SELF_PATH = fileURLToPath(import.meta.url);
 
 /** The wiring that gives this gate a PR to judge. */
 const WIRING_WORKFLOW = '.github/workflows/single-claim-path-guard.yml';
@@ -532,6 +568,126 @@ const githubApi = (token) => async (path) => {
   return response.json();
 };
 
+/**
+ * The read did not happen — the refusal, as data (#18940).
+ *
+ * `githubApi` throws on any non-ok response and `fetch` throws on a dead
+ * socket, so every transport, auth and not-found failure arrives here as an
+ * exception out of `collect`. Before this existed nothing caught it: node
+ * exited 1 on the unhandled rejection, and 1 is this gate's ACCUSATION code —
+ * the header's own rule, that a gate which cannot read its input must never
+ * read as an accusation, broken by its own live path.
+ *
+ * Pure, and returning `{ exit, lines }` exactly as `judge` does, for one
+ * reason: the self-test drives this arm offline and asserts the code and the
+ * words without a process exit or a network. The `process.exit` stays at the
+ * single dispatch site below, where every other verdict's exit also lives.
+ *
+ * ⛔ It is not wired around `judge`. `judge` is pure and cannot throw on a
+ * transport; a catch that spanned it would relabel a real crash in the verdict
+ * layer as "the board was not read", which is the same lie in the other
+ * direction.
+ */
+export function boardNotReadRefusal(error) {
+  const detail = error instanceof Error ? error.message : String(error);
+  return {
+    exit: EXIT_PREREQUISITE_NOT_MET,
+    lines: [
+      `❌ check:single-claim-paths: PREREQUISITE NOT MET — the board was not read — ${detail} — ` +
+        '⛔ not a verdict, not a clean tree.',
+      '',
+      '  Nothing below this line is a reading. This run never learned which paths any pull request',
+      '  claims, so it says nothing about whether one is claimed twice, and it accuses no author of',
+      `  anything. Exit ${EXIT_PREREQUISITE_NOT_MET} rather than ${EXIT_CONFLICT}: that code means an EARLIER open PR already`,
+      '  claims a listed path, and a failed read is not evidence of any such PR. Exit',
+      `  ${EXIT_PREREQUISITE_NOT_MET} rather than ${EXIT_CLEAN} too — a board that could not be read is not a clean board.`,
+      '',
+      '  Usual causes, in the order worth checking: the token cannot read this repository, the PR',
+      '  number resolves to no pull request, or the request never left the container (in an agent',
+      '  container `fetch` reaches GitHub only through the session proxy — this gate re-execs itself',
+      '  to arm it, and the note it prints on doing so is above).',
+    ],
+  };
+}
+
+// ---------------------------------------------------------------------------
+// The route to GitHub (#18314) — why this gate re-execs itself.
+//
+// Every real run reads a PR's file list over the network, and in an agent
+// container that network is reachable only through the session proxy. Node's
+// `fetch` does not read the proxy variables, so an unrouted run left WITHOUT
+// its credential and GitHub answered 401. That 401 has three readings available
+// to whoever sees it — the token is wrong, the PR does not exist, the repo is
+// wrong — and none of them is the true one, so a seat that tries to pre-run the
+// gate its own PR will be judged by records NOT MEASURED where a real reading
+// was one flag away.
+//
+// The switch is read at process START, which is the whole reason this is a
+// re-exec rather than an assignment.
+//
+// The DECISION is imported, not restated: one spelling of "go through the
+// proxy" for the whole tree. What is local is the guard VARIABLE, deliberately.
+// Sharing a sibling's guard would let that sibling's re-exec suppress this
+// one's — a grandchild is spawned without the flag in its argv, so it needs the
+// re-exec even though the guard the parent set says one already happened.
+//
+// ⭐ On a GitHub Actions runner there is no proxy in the environment, so the
+// plan never re-arms and this gate behaves exactly as it did before. The fix is
+// inert in CI, which is all this card ever claimed about CI.
+// ---------------------------------------------------------------------------
+
+/** This file's OWN re-exec guard — deliberately not any sibling's. */
+export const OWN_PROXY_REARM_GUARD = 'OS_SINGLE_CLAIM_PATHS_PROXY_REARMED';
+
+/**
+ * The environment the imported plan is asked about: this file's own guard,
+ * presented under the name the plan reads. Pure, so the self-test drives every
+ * branch offline — and the branch worth pinning is a SIBLING's guard being set,
+ * which must NOT stop this run from re-arming.
+ */
+export function proxyPlanEnv(env) {
+  return { ...env, [PROXY_REARM_GUARD]: env[OWN_PROXY_REARM_GUARD] };
+}
+
+/**
+ * Hand this run off through the proxy, or `null` to carry on in-process.
+ *
+ * A returned number is the child's exit status, forwarded VERBATIM: the four
+ * exit codes above are this gate's contract with CI, so the hand-off has to be
+ * invisible in them.
+ *
+ * Everything printed here goes to STDERR. The clean verdict is this script's
+ * only stdout, and a status line there would land inside whatever reads it.
+ *
+ * @param {string[]} args  this run's own argv tail, forwarded unchanged
+ */
+function rearmThroughProxy(args) {
+  const plan = proxyRearmPlan({
+    env: proxyPlanEnv(process.env),
+    execArgv: process.execArgv,
+    flagSupported: process.allowedNodeEnvironmentFlags.has(PROXY_FLAG),
+  });
+  if (plan.hint) {
+    console.error(`ℹ️  ${plan.reason}. A refusal below may be about the route, not this container.`);
+    return null;
+  }
+  if (!plan.rearm) return null;
+  console.error(`ℹ️  re-exec with ${plan.flag}: ${plan.reason}.`);
+  // The env proxy agent is experimental and says so once per run. Nobody can
+  // act on that notice, so silence it where the node in use can.
+  const quiet = process.allowedNodeEnvironmentFlags.has('--disable-warning') ? ['--disable-warning=UNDICI-EHPA'] : [];
+  const child = spawnSync(process.execPath, [plan.flag, ...quiet, SELF_PATH, ...args], {
+    stdio: 'inherit',
+    env: { ...process.env, [OWN_PROXY_REARM_GUARD]: '1' },
+  });
+  if (typeof child.status === 'number') return child.status;
+  console.error(
+    `⚠️  could not re-exec with ${plan.flag} (${child.error?.message ?? 'no exit status'}); ` +
+      'continuing in-process — every request will bypass the proxy.',
+  );
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Self-test — the verdict layer, the exit-code contract, the declared list's
 // own invariants, the short-circuit that makes this affordable, and the wiring.
@@ -542,6 +698,14 @@ const githubApi = (token) => async (path) => {
 // and still exits 0 — a self-test that never finished, reported as one that
 // passed (#13798). The self-test's own exit code stays load-bearing, so the
 // handshake is a flag rather than a returned sentinel.
+//
+// ⛔ "After its verdict is printed" is positional and it is the whole contract.
+// This self-test runs its assertions inside an async block that `selfTest()`
+// RETURNS, and the assignment used to sit on the line above that `return`
+// (#18940): synchronously true before a single assertion had run, so every
+// early return and every throw inside the block still left it true and the
+// dispatch could never reach its own diagnostic. The flag belongs to the code
+// that PRINTED the verdict, never to the code that is about to start.
 let selfTestReachedVerdict = false;
 
 function selfTest() {
@@ -676,6 +840,30 @@ function selfTest() {
     { number: '16326', repo: 'o/r', token: 't' },
   );
 
+  // --- The route to GitHub. A 401 from a bypassed proxy reads as a dead
+  // credential, so both legs are pinned rather than one: the CI leg must stay
+  // untouched (no proxy in the environment, no re-exec, no behaviour change at
+  // all), and a container must re-arm EXACTLY once. The fixture proxy names no
+  // tree in any repo, per this file's header rule on quoted literals.
+  battery('The route to GitHub. A 401 from a bypassed proxy reads as a dead');
+  const proxied = { HTTPS_PROXY: 'http://127.0.0.1:41733' };
+  t('the Actions-runner leg: no proxy in the env, so no re-exec and nothing changes in CI', proxyRearmPlan({ env: proxyPlanEnv({}) }).rearm, false);
+  t('an agent container re-arms, which is the whole of the fix', proxyRearmPlan({ env: proxyPlanEnv(proxied), flagSupported: true }).rearm, true);
+  t("...exactly once — this run's OWN guard is what stops the loop", proxyRearmPlan({ env: proxyPlanEnv({ ...proxied, [OWN_PROXY_REARM_GUARD]: '1' }), flagSupported: true }).rearm, false);
+  t("...and a SIBLING instrument's guard does NOT suppress it", proxyRearmPlan({ env: proxyPlanEnv({ ...proxied, [PROXY_REARM_GUARD]: '1' }), flagSupported: true }).rearm, true);
+  t("this file's guard is not the imported one, which is what makes that hold", OWN_PROXY_REARM_GUARD === PROXY_REARM_GUARD, false);
+  t('a run already routed through the proxy does not re-arm again', proxyRearmPlan({ env: proxyPlanEnv(proxied), execArgv: [PROXY_FLAG], flagSupported: true }).rearm, false);
+  const unsupported = proxyRearmPlan({ env: proxyPlanEnv(proxied), flagSupported: false });
+  t('a node that cannot take the flag SAYS so rather than bypassing silently', [unsupported.rearm, unsupported.hint], [false, true]);
+  const ownSource = maskCommentsAndLiterals(readFileSync(SELF_PATH, 'utf8'));
+  t('structural: the plan is imported, not restated here', /\bproxyRearmPlan\b/.test(ownSource) && !/function\s+proxyRearmPlan\b/.test(ownSource), true);
+  // Both halves, because the ablation that planned this case found the
+  // ordering alone vacuous: with the CALL deleted, the last occurrence is the
+  // DECLARATION, which sits above the collection and satisfied the comparison
+  // with no hand-off left in the file at all.
+  const rearmSites = ownSource.split('rearmThroughProxy(').length - 1;
+  t('structural: the hand-off is CALLED exactly once, and decided BEFORE the first network read', [rearmSites, ownSource.lastIndexOf('rearmThroughProxy(') < ownSource.lastIndexOf('await collect(')], [2, true]);
+
   // --- The short-circuit. This is the property that makes the gate affordable,
   // and it is invisible in the verdict layer, so it is pinned here against a
   // recording fake API. Fixture paths name a tree that exists in no repo.
@@ -690,7 +878,6 @@ function selfTest() {
   };
 
   const ctxOf = (number) => ({ number: String(number), repo: 'o/r', token: 't' });
-  selfTestReachedVerdict = true;
   return (async () => {
     calls.length = 0;
     const quiet = await collect(ctxOf(200), fakeApi({ 200: ['fixture/tree/alpha.ts', 'fixture/tree/beta.ts'] }));
@@ -743,6 +930,68 @@ function selfTest() {
     t('the card-keyed duplicate gate still exists', sibling !== '', true);
     t('...and still asks its own question', sibling.includes('No other open PR may claim the same issue'), true);
 
+    // --- A transport failure is a PREREQUISITE, never the accusation this
+    // gate reserves for a real earlier claim. The live read is the only part
+    // of this gate that can throw, and node exits 1 on an unhandled rejection
+    // — the exact code that here means "an earlier open PR already claims a
+    // listed path" (#18940). The fixture paths name a tree that exists in no
+    // repo, per this file's header rule on quoted literals.
+    battery('A transport failure is a PREREQUISITE, never the accusation this');
+    const notFound = boardNotReadRefusal(new Error('GitHub API 404 for /repos/o/r/pulls/424242/files'));
+    const notFoundText = notFound.lines.join('\n');
+    t('a failed read exits PREREQUISITE NOT MET', notFound.exit, EXIT_PREREQUISITE_NOT_MET);
+    t('...and that exit code really is the number 3, not just the named constant', notFound.exit, 3);
+    t('...and it is NOT the accusation code, which is the whole point', notFound.exit === EXIT_CONFLICT, false);
+    t('...and it is NOT clean either — a board that could not be read is not a clean board', notFound.exit === EXIT_CLEAN, false);
+    t('...and it is NOT the wiring code — the wiring was fine, the READ was not', notFound.exit === EXIT_NOT_WIRED, false);
+    t('the refusal says the board was not read', notFoundText.includes('the board was not read'), true);
+    t('the refusal quotes the transport failure it caught', notFoundText.includes('GitHub API 404'), true);
+    t('the refusal says it is not a verdict and not a clean tree', notFoundText.includes('not a verdict, not a clean tree'), true);
+    t('the refusal does not read as a clean board', notFoundText.includes('✓'), false);
+    t('the refusal carries the fleet wording, so one phrase greps every instrument', notFoundText.includes('PREREQUISITE NOT MET'), true);
+    t('a non-Error throw still names itself rather than printing an object', boardNotReadRefusal('socket hang up').lines.join('\n').includes('socket hang up'), true);
+
+    // The integration, in the shape the live failure really has: an api that
+    // throws, driven through `collect`. No process exit and no network — the
+    // handler is pure, and the exit stays at the single dispatch site.
+    const throwingApi = async (path) => {
+      throw new Error(`GitHub API 404 for ${path}`);
+    };
+    let liveRefusal = null;
+    let liveResolved = null;
+    try {
+      liveResolved = await collect(ctxOf(200), throwingApi);
+    } catch (error) {
+      liveRefusal = boardNotReadRefusal(error);
+    }
+    t('a throwing api really does escape collect — the shape of the live defect', liveResolved, null);
+    t('...and the handler turns that escape into the PREREQUISITE refusal', liveRefusal?.exit, EXIT_PREREQUISITE_NOT_MET);
+    t('...naming the request that failed, so the reader knows what went unread', liveRefusal.lines.join('\n').includes('/pulls/200/files'), true);
+
+    // Reverse control: nothing about a HEALTHY read changed. A working api
+    // still reaches a real verdict, and the three older codes keep their
+    // values and stay distinct from the new one.
+    const healthy = await collect(ctxOf(200), fakeApi({ 200: ['fixture/tree/alpha.ts'] }));
+    t('reverse control: a healthy api still reaches a verdict, never the refusal', judge(healthy).exit, EXIT_CLEAN);
+    t('the four exit codes are four distinct values — a caller reads exactly one', new Set([EXIT_CLEAN, EXIT_CONFLICT, EXIT_NOT_WIRED, EXIT_PREREQUISITE_NOT_MET]).size, 4);
+
+    // Structural: the LIVE read is the one that is wrapped. Both halves,
+    // because the ordering alone would be vacuous — the cases above call the
+    // handler too, and every one of those calls sits ABOVE the live `collect`,
+    // so a deleted live catch leaves the last occurrence before it.
+    const refusalSites = ownSource.split('boardNotReadRefusal(').length - 1;
+    t(
+      'structural: the handler is reached AFTER the last network read — the live one',
+      [refusalSites >= 2, ownSource.lastIndexOf('boardNotReadRefusal(') > ownSource.lastIndexOf('await collect(')],
+      [true, true],
+    );
+    t(
+      'structural: the exit code is imported from the fleet, not restated here',
+      /\bEXIT_PREREQUISITE_NOT_MET\b/.test(ownSource) && !/(?:const|let|var)\s+EXIT_PREREQUISITE_NOT_MET\s*=/.test(ownSource),
+      true,
+    );
+    t('structural: the header exit register names the code', readFileSync(SELF_PATH, 'utf8').includes('3  PREREQUISITE NOT MET'), true);
+
     // The floor runs BEFORE the verdict below, so a success line can only be
     // printed by a run in which every declared battery registered its cases.
     for (const message of batteryFloorFailures()) cases.push([message, false, true]);
@@ -755,9 +1004,19 @@ function selfTest() {
     }
     if (failedCount) {
       console.error(`✗ check-single-claim-paths self-test: ${failedCount} of ${cases.length} case(s) failed.`);
+      // No handshake is owed on this arm: the process is gone on the next
+      // instruction, so nothing downstream can read the flag. The handshake
+      // exists for the SILENT ways out — a `return` or a throw that prints
+      // nothing — and those are exactly the ones the line below now catches.
       process.exit(1);
     }
     console.log(`✓ check-single-claim-paths self-test: ${cases.length} cases pass.`);
+    // LAST statement of the block, after the success line printed (#18940).
+    // Set before the block, it certified a run that had not happened yet: an
+    // early return or a throw anywhere inside left it true, and the dispatch
+    // below could never say the self-test had not reached its verdict — the
+    // one sentence the flag exists to make possible.
+    selfTestReachedVerdict = true;
   })();
 }
 
@@ -777,7 +1036,24 @@ if (isMain) {
     }
   } else {
     const ctx = readPrContext(process.env);
-    const resolved = ctx === null || ctx.wired === false ? ctx : await collect(ctx, githubApi(ctx.token));
+    // Only a run with a usable context reaches the network, so only that run
+    // needs the route. Re-execing a NOT WIRED run would spend a process to
+    // reprint the identical wiring verdict.
+    if (ctx !== null && ctx.wired !== false) {
+      const handed = rearmThroughProxy(process.argv.slice(2));
+      if (handed !== null) process.exit(handed);
+    }
+    // The read is the only part that can throw, and it is the only part inside
+    // the try (#18940). `judge` stays outside on purpose — see the block above
+    // `boardNotReadRefusal`.
+    let resolved;
+    try {
+      resolved = ctx === null || ctx.wired === false ? ctx : await collect(ctx, githubApi(ctx.token));
+    } catch (error) {
+      const refusal = boardNotReadRefusal(error);
+      for (const line of refusal.lines) console.error(line);
+      process.exit(refusal.exit);
+    }
     const result = judge(resolved);
     const emit = result.exit === EXIT_CLEAN ? console.log : console.error;
     for (const line of result.lines) emit(line);

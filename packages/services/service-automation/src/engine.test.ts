@@ -16,6 +16,8 @@ import { defineActionDescriptor } from '@objectstack/spec/automation';
 // program, where `rootDir` rejects it. That module's header carries the full
 // argument and the measurements behind it.
 import { recordGuards, stillPinningTheLoop } from '@objectstack/refd-timer-testkit';
+import { withScheduledWorkOn } from './deployment-switch.test-support.js';
+import { SCHEDULED_WORK_ENV, SCHEDULED_WORK_DISABLED_REASON } from '@objectstack/types';
 
 /**
  * A pausing fixture's `resumeAuthority: 'any'` declaration (#5561).
@@ -2819,6 +2821,14 @@ function recordChangeFlow(name: string, overrides?: Record<string, unknown>) {
 }
 
 describe('AutomationEngine - Flow Trigger Wiring', () => {
+    // [#17396] Time-triggered flows arm only where the deployment runs
+    // package-authored scheduled work, and that switch is OFF by default in
+    // every posture — so without this line the two time-triggered cases below
+    // fail for a reason that has nothing to do with wiring. Scoped to this
+    // suite rather than the file: everything else here is trigger-kind
+    // agnostic and must keep running in the DEFAULT deployment.
+    withScheduledWorkOn();
+
     let engine: AutomationEngine;
 
     beforeEach(() => {
@@ -3289,5 +3299,316 @@ describe('#9378 — execute() classifies terminal exits for the trigger transpor
         // Success keeps the shape it had: `status` is the classification this
         // card needed, not a field being backfilled everywhere.
         expect(ok.status).toBeUndefined();
+    });
+});
+
+// ─── the deployment switch: what the engine does and says (#17396) ──
+//
+// Ruling G, item 6, in one sentence: when package-authored scheduled work is
+// off, every time-triggered flow is listed in `getTriggerBindingAudit()` with a
+// DISTINCT reason — *disabled by deployment policy* — and ⛔ never as "binding
+// failed". A binding failure is a defect with an engineering remedy; this is a
+// deployment policy with an operator remedy, and reporting one as the other
+// sends the reader to the wrong place.
+describe('AutomationEngine - the deployment switch (#17396)', () => {
+    const PRIOR = process.env[SCHEDULED_WORK_ENV];
+    afterEach(() => {
+        if (PRIOR === undefined) delete process.env[SCHEDULED_WORK_ENV];
+        else process.env[SCHEDULED_WORK_ENV] = PRIOR;
+    });
+
+    function scheduleFlow(name: string) {
+        return {
+            name,
+            label: name,
+            type: 'schedule' as const,
+            status: 'active',
+            nodes: [
+                {
+                    id: 'start',
+                    type: 'start' as const,
+                    label: 'Start',
+                    config: { schedule: { type: 'cron', expression: '0 8 * * *' }, organization: 'org_a' },
+                },
+                { id: 'end', type: 'end' as const, label: 'End' },
+            ],
+            edges: [{ id: 'e1', source: 'start', target: 'end' }],
+        };
+    }
+
+    it('OFF: never calls the trigger at all — so nothing can throw and nothing can "fail"', () => {
+        delete process.env[SCHEDULED_WORK_ENV];
+        const engine = new AutomationEngine(createTestLogger());
+        const rec = recordingTrigger('schedule');
+        engine.registerTrigger(rec.trigger);
+        engine.registerFlow('digest', scheduleFlow('digest'));
+
+        expect(rec.started, 'the trigger is not asked to arm work the deployment refused').toHaveLength(0);
+        expect(engine.getActiveTriggerBindings()).toHaveLength(0);
+        expect(engine.getFlowRuntimeStates().find((s) => s.name === 'digest')?.bound).toBe(false);
+    });
+
+    it('OFF: the audit names the policy, and ⛔ NOT a binding failure', () => {
+        delete process.env[SCHEDULED_WORK_ENV];
+        const engine = new AutomationEngine(createTestLogger());
+        engine.registerTrigger(recordingTrigger('schedule').trigger);
+        engine.registerFlow('digest', scheduleFlow('digest'));
+
+        const audit = engine.getTriggerBindingAudit();
+        expect(audit.map((a) => a.flowName), 'ruled item 6: the flow IS listed').toEqual(['digest']);
+        expect(audit[0].triggerType).toBe('schedule');
+        expect(audit[0].reason).toBe(SCHEDULED_WORK_DISABLED_REASON);
+        // ⭐ The distinction the ruling is entirely about. The registered-trigger
+        // branch would have said exactly this, which is why it is pinned by
+        // absence rather than left to the reason's own wording.
+        expect(audit[0].reason).not.toMatch(/binding failed/);
+        expect(audit[0].reason).toContain(SCHEDULED_WORK_ENV);
+    });
+
+    it('OFF: the policy branch outranks "no trigger is registered", because that remedy does not work', () => {
+        // Registering the trigger would change nothing while the switch is off,
+        // so telling the operator to add `requires: ['triggers']` is a remedy
+        // that cannot succeed.
+        delete process.env[SCHEDULED_WORK_ENV];
+        const engine = new AutomationEngine(createTestLogger());
+        engine.registerFlow('digest', scheduleFlow('digest'));
+
+        const audit = engine.getTriggerBindingAudit();
+        expect(audit).toHaveLength(1);
+        expect(audit[0].reason).toBe(SCHEDULED_WORK_DISABLED_REASON);
+        expect(audit[0].reason).not.toMatch(/requires: \['triggers'\]/);
+    });
+
+    it('OFF: a record_change flow is untouched — the switch is scoped to the clock-driven kinds', () => {
+        // The control. `record_change` and `api` are fired by a caller that
+        // already exists and already carries an identity; they are not the
+        // unbounded background load the switch exists to bound.
+        delete process.env[SCHEDULED_WORK_ENV];
+        const engine = new AutomationEngine(createTestLogger());
+        const rec = recordingTrigger('record_change');
+        engine.registerTrigger(rec.trigger);
+        engine.registerFlow('rc_flow', recordChangeFlow('rc_flow'));
+
+        expect(rec.started).toHaveLength(1);
+        expect(engine.getTriggerBindingAudit()).toHaveLength(0);
+    });
+
+    it('ON: the same flow binds and leaves the audit empty', () => {
+        // Non-vacuity for every assertion above: the fixture really is armable,
+        // so "not bound" up there is the switch and not a broken fixture.
+        process.env[SCHEDULED_WORK_ENV] = 'true';
+        const engine = new AutomationEngine(createTestLogger());
+        const rec = recordingTrigger('schedule');
+        engine.registerTrigger(rec.trigger);
+        engine.registerFlow('digest', scheduleFlow('digest'));
+
+        expect(rec.started.map((b) => b.flowName)).toEqual(['digest']);
+        expect(engine.getTriggerBindingAudit()).toHaveLength(0);
+    });
+
+    it('ON: a genuine bind failure still reads as one — the two reasons do not collapse', () => {
+        // The other half of the distinction. With the switch on, a trigger that
+        // throws is reported exactly as it was before this card.
+        process.env[SCHEDULED_WORK_ENV] = 'true';
+        const engine = new AutomationEngine(createTestLogger());
+        engine.registerTrigger({
+            type: 'schedule',
+            start() {
+                throw new Error('the job service refused');
+            },
+            stop() {},
+        });
+        engine.registerFlow('digest', scheduleFlow('digest'));
+
+        const audit = engine.getTriggerBindingAudit();
+        expect(audit).toHaveLength(1);
+        expect(audit[0].reason).toMatch(/binding failed/);
+        expect(audit[0].reason).not.toBe(SCHEDULED_WORK_DISABLED_REASON);
+    });
+
+    it('the audit reports what HAPPENED, not what the environment says when it is read', () => {
+        // ⭐ REGRESSION PIN. The first spelling re-derived the reason inside
+        // `getTriggerBindingAudit()` from a live `resolveScheduledWorkPolicy()`
+        // read. The audit is read long after the bind — `kernel:bootstrapped`
+        // and the CLI startup summary, its only two callers — so an
+        // environment that moved in between made it report `binding failed —
+        // see earlier warnings` for a flow whose trigger was NEVER CALLED,
+        // pointing the
+        // reader at warnings that do not exist. That is precisely the reading
+        // ruled item 6 forbids, reached by a route the ruling's own words do
+        // not describe. Caught by the dogfood sweep suite, pinned here.
+        delete process.env[SCHEDULED_WORK_ENV];
+        const engine = new AutomationEngine(createTestLogger());
+        const rec = recordingTrigger('schedule');
+        engine.registerTrigger(rec.trigger);
+        engine.registerFlow('digest', scheduleFlow('digest'));
+        expect(rec.started, 'control: the flow really was refused by policy').toHaveLength(0);
+
+        // The environment moves, and nothing re-registers the flow.
+        process.env[SCHEDULED_WORK_ENV] = 'true';
+
+        const audit = engine.getTriggerBindingAudit();
+        expect(audit.map((a) => a.flowName)).toEqual(['digest']);
+        expect(
+            audit[0].reason,
+            'the flow is still unarmed because the policy refused it — the switch moving later does not turn that into a binding failure',
+        ).toBe(SCHEDULED_WORK_DISABLED_REASON);
+        expect(audit[0].reason).not.toMatch(/binding failed/);
+    });
+
+    it('a flow that gets past the gate drops the record, so the reason is its own', () => {
+        // The other direction, and what keeps the record from becoming a
+        // permanent label: once the switch is on and the flow is registered
+        // again, whatever happens next owns the reason.
+        delete process.env[SCHEDULED_WORK_ENV];
+        const engine = new AutomationEngine(createTestLogger());
+        engine.registerFlow('digest', scheduleFlow('digest'));
+        expect(engine.getTriggerBindingAudit()[0]?.reason).toBe(SCHEDULED_WORK_DISABLED_REASON);
+
+        process.env[SCHEDULED_WORK_ENV] = 'true';
+        // Registering the trigger re-attempts activation for every flow.
+        engine.registerTrigger({
+            type: 'schedule',
+            start() {
+                throw new Error('the job service refused');
+            },
+            stop() {},
+        });
+
+        const audit = engine.getTriggerBindingAudit();
+        expect(audit).toHaveLength(1);
+        expect(
+            audit[0].reason,
+            'a real bind failure after the gate opened must read as one — the policy record must not outlive the policy',
+        ).toMatch(/binding failed/);
+    });
+
+    it('is read at BIND, not cached, so flipping the switch changes the next registration', () => {
+        // The CLI's `--fresh` harness and any test that flips the switch
+        // between kernels in one process depend on this.
+        delete process.env[SCHEDULED_WORK_ENV];
+        const engine = new AutomationEngine(createTestLogger());
+        const rec = recordingTrigger('schedule');
+        engine.registerTrigger(rec.trigger);
+        engine.registerFlow('a', scheduleFlow('a'));
+        expect(rec.started).toHaveLength(0);
+
+        process.env[SCHEDULED_WORK_ENV] = 'true';
+        engine.registerFlow('b', scheduleFlow('b'));
+        expect(rec.started.map((s) => s.flowName)).toEqual(['b']);
+    });
+
+    // ─── the THIRD surface: the status door Studio reads (#18235) ──
+    //
+    // Ruled item 6 names three surfaces. Two of them — the audit above and the
+    // CLI startup summary that prints it — can ask the engine a second
+    // question. Studio cannot: its only status door is `GET /automation/_status`,
+    // which passes `getFlowRuntimeStates()` rows through verbatim. Until the row
+    // carried a reason, a policy-disabled flow reached that door as
+    // `enabled: true, bound: false` — byte-identical to one whose trigger is
+    // missing, which is the reading ruled item 6 forbids.
+    it('OFF: the status row names the policy, and ⛔ NOT a binding failure', () => {
+        delete process.env[SCHEDULED_WORK_ENV];
+        const engine = new AutomationEngine(createTestLogger());
+        engine.registerTrigger(recordingTrigger('schedule').trigger);
+        engine.registerFlow('digest', scheduleFlow('digest'));
+
+        const row = engine.getFlowRuntimeStates().find((s) => s.name === 'digest');
+        expect(row, 'control: the flow is listed at all').toBeTruthy();
+        expect(row).toMatchObject({ enabled: true, bound: false, triggerType: 'schedule' });
+        expect(row?.reason).toBe(SCHEDULED_WORK_DISABLED_REASON);
+        expect(row?.reason).not.toMatch(/binding failed/);
+        expect(row?.reason).toContain(SCHEDULED_WORK_ENV);
+    });
+
+    it('the two doors answer the SAME sentence for the same flow — one computation, no drift', () => {
+        // ⭐ ANTI-DRIFT PIN. The whole point of the third surface is that it
+        // agrees with the first: an operator reading Studio and an operator
+        // reading the boot summary must be told the same thing. Pinned as an
+        // identity rather than as two copies of the expected text, so a future
+        // edit to either door's wording fails here instead of silently forking
+        // the vocabulary ruled item 6 requires to be one.
+        delete process.env[SCHEDULED_WORK_ENV];
+        const engine = new AutomationEngine(createTestLogger());
+        engine.registerTrigger(recordingTrigger('schedule').trigger);
+        engine.registerFlow('digest', scheduleFlow('digest'));
+        engine.registerFlow('missing_trigger', {
+            ...scheduleFlow('missing_trigger'),
+            type: 'autolaunched' as const,
+            nodes: [
+                { id: 'start', type: 'start' as const, label: 'On Update', config: { objectName: 'task', triggerType: 'record-after-update' } },
+                { id: 'end', type: 'end' as const, label: 'End' },
+            ],
+        });
+
+        const audit = engine.getTriggerBindingAudit();
+        const states = engine.getFlowRuntimeStates();
+        expect(audit.map((a) => a.flowName).sort(), 'control: both reasons are exercised').toEqual(['digest', 'missing_trigger']);
+        for (const entry of audit) {
+            expect(
+                states.find((s) => s.name === entry.flowName)?.reason,
+                `the status door and the binding audit disagree about '${entry.flowName}'`,
+            ).toBe(entry.reason);
+        }
+        // And they really are two different sentences — an identity between two
+        // constants would pass vacuously.
+        expect(new Set(audit.map((a) => a.reason)).size).toBe(2);
+    });
+
+    it('the status row reports what HAPPENED, not what the environment says when it is read', () => {
+        // ⭐ REGRESSION PIN, the status door's half. `_status` is served on
+        // demand, arbitrarily long after the bind — a strictly worse case than
+        // the audit's two boot-time callers. Re-deriving the reason from a live
+        // `resolveScheduledWorkPolicy()` here would make an operator who has
+        // just set the switch (and not yet restarted) see *binding failed* for
+        // a trigger that was never called.
+        delete process.env[SCHEDULED_WORK_ENV];
+        const engine = new AutomationEngine(createTestLogger());
+        const rec = recordingTrigger('schedule');
+        engine.registerTrigger(rec.trigger);
+        engine.registerFlow('digest', scheduleFlow('digest'));
+        expect(rec.started, 'control: the flow really was refused by policy').toHaveLength(0);
+
+        process.env[SCHEDULED_WORK_ENV] = 'true';
+
+        expect(engine.getFlowRuntimeStates().find((s) => s.name === 'digest')?.reason)
+            .toBe(SCHEDULED_WORK_DISABLED_REASON);
+    });
+
+    it('ON: a genuine bind failure reads as one on the status row too', () => {
+        process.env[SCHEDULED_WORK_ENV] = 'true';
+        const engine = new AutomationEngine(createTestLogger());
+        engine.registerTrigger({
+            type: 'schedule',
+            start() { throw new Error('the job service refused'); },
+            stop() {},
+        });
+        engine.registerFlow('digest', scheduleFlow('digest'));
+
+        const row = engine.getFlowRuntimeStates().find((s) => s.name === 'digest');
+        expect(row?.reason).toMatch(/binding failed/);
+        expect(row?.reason).not.toBe(SCHEDULED_WORK_DISABLED_REASON);
+    });
+
+    it('⭐ DARK: a row with nothing to explain carries NO reason key at all', () => {
+        // The five members that were there before this card behave exactly as
+        // they did, and `reason` is absent — not `undefined`, not an empty
+        // string — on every row that is bound or disabled. A consumer that
+        // styles on `reason` must not light up for a healthy flow.
+        process.env[SCHEDULED_WORK_ENV] = 'true';
+        const engine = new AutomationEngine(createTestLogger());
+        engine.registerTrigger(recordingTrigger('schedule').trigger);
+        engine.registerTrigger(recordingTrigger('record_change').trigger);
+        engine.registerFlow('digest', scheduleFlow('digest'));                                   // bound
+        engine.registerFlow('rc_obsolete', { ...recordChangeFlow('rc_obsolete'), status: 'obsolete' }); // disabled
+
+        const states = engine.getFlowRuntimeStates();
+        const bound = states.find((s) => s.name === 'digest');
+        const disabled = states.find((s) => s.name === 'rc_obsolete');
+        expect(bound).toMatchObject({ enabled: true, bound: true });
+        expect(disabled).toMatchObject({ enabled: false, bound: false });
+        expect(Object.keys(bound ?? {}), 'a bound flow explains nothing').not.toContain('reason');
+        expect(Object.keys(disabled ?? {}), '`enabled: false` already says it').not.toContain('reason');
+        expect(engine.getTriggerBindingAudit(), 'control: the sibling door is empty for the same reason').toHaveLength(0);
     });
 });

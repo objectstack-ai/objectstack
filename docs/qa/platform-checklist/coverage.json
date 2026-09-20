@@ -19,6 +19,11 @@
         "ai.console-ai-surface-gating"
       ]
     },
+    "analytics_cube": {
+      "items": [
+        "dashboards.cube-query"
+      ]
+    },
     "api": {
       "items": [
         "api-backend.declarative-endpoint-execution",
@@ -48,6 +53,15 @@
       "items": [
         "platform-core.docs-audience-gate",
         "platform-core.docs-portal-render"
+      ]
+    },
+    "connector": {
+      "items": [
+        "integration-system.connector-declarative-boot",
+        "integration-system.connector-auth-kind-application",
+        "integration-system.connector-descriptor-audit",
+        "integration-system.connector-degraded-recovery",
+        "automation.connector-dispatch-matrix"
       ]
     },
     "crud_endpoints": {
@@ -254,6 +268,13 @@
         "platform-core.seed-integrity",
         "platform-core.marketplace-install-local-lifecycle",
         "platform-core.seed-mode-matrix"
+      ]
+    },
+    "sharing_rule": {
+      "items": [
+        "access-security.sharing-rules-widen",
+        "access-security.sharing-rule-authoring-ui",
+        "access-security.record-share-grant-revoke"
       ]
     },
     "skill": {

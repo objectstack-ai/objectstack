@@ -56,7 +56,7 @@ import type {
 // fields the caller had already supplied.
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
-import { isFileIdToken } from '@objectstack/spec/data';
+import { isFileIdToken, referenceTargetOf } from '@objectstack/spec/data';
 // [#11993] The SANCTIONED renderer for OPERATION-level refusal copy. The
 // Operation Message Catalog is the ONE seat for these sentences — its own
 // header bars both a package-local string table and a second rendering
@@ -2652,6 +2652,11 @@ export class ApprovalService implements IApprovalService {
    * #3447 P2: may instead return an {@link ApprovalNodeAutoOutcome} — no
    * request opened — when the slate resolves empty and the node's
    * `onEmptyApprovers` policy is `auto_approve`.
+   *
+   * An empty slate under `onEmptyApprovers: 'fallback'` opens a NORMAL request
+   * on the node's declared `fallbackApprovers` instead, resolved through the
+   * same expansion as `approvers`. The return type is unchanged for that
+   * policy: from the flow node's side it is an ordinary pending request.
    */
   async openNodeRequest(
     input: {
@@ -2732,10 +2737,13 @@ export class ApprovalService implements IApprovalService {
     const subjectOrg = this.recordOrgResolver.organizationOf(input.object, liveRecord, input.record);
     const requestOrg = subjectOrg ?? ctxOrg;
     const resolvedFrom: Record<string, unknown> = {};
-    const approvers = await this.expandApprovers(
+    const exprCtx = { trigger: input.record ?? null, vars: input.variables ?? null };
+    // `let`, not `const`: the `fallback` empty-slate policy below REPLACES this
+    // slate with the node's declared fallback approvers.
+    let approvers = await this.expandApprovers(
       { approvers: input.config.approvers }, liveRecord, requestOrg, {
         now: nowDate.getTime(), substitutions, groups,
-        exprCtx: { trigger: input.record ?? null, vars: input.variables ?? null },
+        exprCtx,
         resolvedFrom,
       },
     );
@@ -2760,16 +2768,89 @@ export class ApprovalService implements IApprovalService {
         );
         return { autoApproved: true, reason: 'empty_approvers' };
       }
+      // `fallback`: the one policy that NAMES people. The declared
+      // `fallbackApprovers` go through the SAME resolver as `approvers` — not
+      // a parallel path — so every approver type, OOO delegation (#1322) and
+      // per_group tagging (#3266) behaves on the fallback exactly as it does on
+      // the primary slate. The request then opens on THOSE ids.
+      //
+      // ⛔ What must never happen here is opening on the abandoned slate: an
+      // empty `{ type: 'manager' }` rung leaves the literal `manager:undefined`
+      // (the type is in GRAPH_APPROVER_TYPES and `value` is omitted for
+      // `manager`, so the literal interpolates the missing value), and that
+      // slot is decidable by nobody. Replacing the slate is the whole point.
+      if (emptyPolicy === 'fallback') {
+        const declared = (input.config as any).fallbackApprovers;
+        // The spec refuses `fallback` without a non-empty list, so an empty one
+        // here means a stored node written before the policy existed, or a
+        // caller that bypassed the schema. Degrade to admin_rescue rather than
+        // throw: this is a rescue path, and killing the run is the one outcome
+        // the policy was chosen to avoid.
+        if (Array.isArray(declared) && declared.length) {
+          const fallbackResolvedFrom: Record<string, unknown> = {};
+          const fallbackApprovers = await this.expandApprovers(
+            { approvers: declared }, liveRecord, requestOrg, {
+              now: nowDate.getTime(), substitutions, groups,
+              exprCtx,
+              resolvedFrom: fallbackResolvedFrom,
+            },
+          );
+          // Keep the primary slate's resolution inputs (they explain WHY the
+          // fallback fired) and namespace the fallback's own, so neither
+          // clobbers the other in the `__resolvedFrom` audit snapshot.
+          for (const [k, v] of Object.entries(fallbackResolvedFrom)) {
+            resolvedFrom[`fallback:${k}`] = v;
+          }
+          if (fallbackApprovers.some(a => a && !a.includes(':'))) {
+            this.logger?.warn?.(
+              `[approvals] approval node '${input.nodeId}' on ${input.object}/${input.recordId} resolved to no `
+              + `concrete approver — opening on the declared fallbackApprovers per onEmptyApprovers: 'fallback'.`,
+              {
+                object: input.object, recordId: input.recordId, node: input.nodeId,
+                resolved: approvers, fallback: fallbackApprovers,
+              },
+            );
+            // The abandoned slate's per_group tags describe ids that are no
+            // longer on this request; drop them so the snapshot the tally reads
+            // describes the slate the approvers actually see.
+            for (const slot of approvers) delete groups[slot];
+            approvers = fallbackApprovers;
+          } else {
+            this.logger?.warn?.(
+              `[approvals] approval node '${input.nodeId}' on ${input.object}/${input.recordId} resolved to no `
+              + `concrete approver AND its declared fallbackApprovers resolved to nobody either — falling back `
+              + `to admin_rescue. Check that the fallback target(s) are staffed.`,
+              {
+                object: input.object, recordId: input.recordId, node: input.nodeId,
+                resolved: approvers, fallback: fallbackApprovers,
+              },
+            );
+          }
+        } else {
+          this.logger?.warn?.(
+            `[approvals] approval node '${input.nodeId}' on ${input.object}/${input.recordId} declares `
+            + `onEmptyApprovers: 'fallback' with no fallbackApprovers — falling back to admin_rescue.`,
+            { object: input.object, recordId: input.recordId, node: input.nodeId, resolved: approvers },
+          );
+        }
+      }
+
       // #3424 admin_rescue (default): the request is still opened (a privileged
       // admin can override it, and legacy 15.x literal slots stay queryable) —
       // the only option that neither waves the record through nor kills the
       // run — but warn loudly so the misconfiguration surfaces instead of
       // silently locking the record with no obvious cause.
-      this.logger?.warn?.(
-        `[approvals] approval node '${input.nodeId}' on ${input.object}/${input.recordId} resolved to no concrete approver`
-        + ' — the request is decidable only by a privileged admin. Check that the approver target(s) are staffed.',
-        { object: input.object, recordId: input.recordId, node: input.nodeId, resolved: approvers },
-      );
+      //
+      // Re-tested rather than assumed: a `fallback` that landed people above
+      // has already turned this into a normal request, and warning "decidable
+      // only by a privileged admin" about it would be false.
+      if (!approvers.some(a => a && !a.includes(':'))) {
+        this.logger?.warn?.(
+          `[approvals] approval node '${input.nodeId}' on ${input.object}/${input.recordId} resolved to no concrete approver`
+          + ' — the request is decidable only by a privileged admin. Check that the approver target(s) are staffed.',
+          { object: input.object, recordId: input.recordId, node: input.nodeId, resolved: approvers },
+        );
+      }
     }
 
     const now = nowDate.toISOString();
@@ -5681,16 +5762,68 @@ export class ApprovalService implements IApprovalService {
     return names;
   }
 
-  /** Lookup-typed fields (key + referenced object) of an object's schema. */
+  /**
+   * Reference-typed fields (key + TARGET OBJECT) of an object's schema.
+   *
+   * The target is read through `referenceTargetOf` — the spec's single arbiter
+   * of "what does this field point at" — and NOT through the materialized
+   * `reference` carrier. For `user` the two differ, and the contract is
+   * explicit about which one answers: `IMPLICIT_REFERENCE_TARGETS`
+   * (`@objectstack/spec/data`) declares the target of a `user` field "a
+   * CONSTANT OF THE TYPE, so `reference` on a `user` field materializes that
+   * constant; it does not supply it. Metadata authored without it
+   * (hand-written JSON, an AI author, a Studio form) is fully specified, not
+   * under-specified." Gating on the carrier therefore dropped the spelling the
+   * contract calls COMPLETE: a `{ type: 'user' }` field with no `reference`
+   * was left out of inbox display enrichment with no refusal and no
+   * diagnostic, so the reviewer read a raw user id where every other reference
+   * field showed a name (Framework#4443 / cloud#983 is the same defect at the
+   * expand gate, fixed there by the same arbiter).
+   *
+   * The type gate stays the three types this enrichment has always carried.
+   * `tree` is a reference type too but is deliberately not added here: it takes
+   * an author-chosen target, so admitting it would widen what the inbox
+   * resolves rather than repair what it silently dropped.
+   *
+   * `referenceTargetOf` reads the carrier through `referenceCarrierOf`, so the
+   * unreadable-carrier behaviour below is unchanged. That carrier is read
+   * through the ONE arbiter instead of a truthiness gate: `String()` on an
+   * object-valued `reference` produced the literal target name
+   * `'[object Object]'`, and the sole consumer below hands the target straight
+   * to `engine.find(<object name>)` — so an unreadable carrier became a query
+   * for an object that can never exist, swallowed by that consumer's own
+   * `catch`. Absence is the contract's answer (`FieldSchema.reference` is an
+   * optional STRING) and is what this yields.
+   *
+   * The throw is caught PER FIELD, which is the deliberate difference between
+   * this reader and the cascade seams in `@objectstack/objectql` that let the
+   * arbiter propagate: those assert something positive about the schema on a
+   * write path, while this is a best-effort display enrichment whose outer
+   * `catch` returns `[]` — letting the throw reach it would drop EVERY
+   * reference field of the object over one unreadable carrier. The entry is
+   * dropped rather than pushed with the target absent because the consumer
+   * uses it as the object name argument and has nothing to do with an entry
+   * that carries none. The warning names THIS reader, because the message the
+   * arbiter throws names itself.
+   */
   private resolveLookupFields(object: string): Array<{ key: string; reference: string }> {
     try {
       const schema: any = (this.engine as any).getSchema?.(object);
       const fields = schema?.fields ?? {};
       const out: Array<{ key: string; reference: string }> = [];
       for (const [key, f] of Object.entries<any>(fields)) {
-        if ((f?.type === 'lookup' || f?.type === 'master_detail' || f?.type === 'user') && f?.reference) {
-          out.push({ key, reference: String(f.reference) });
+        if (f?.type !== 'lookup' && f?.type !== 'master_detail' && f?.type !== 'user') continue;
+        let reference: string | undefined;
+        try {
+          reference = referenceTargetOf(f);
+        } catch (err: any) {
+          this.logger?.warn?.(
+            `[approvals] ApprovalService.resolveLookupFields: reference field "${object}.${key}" `
+            + `left out of inbox display enrichment: ${err?.message ?? err}`,
+          );
+          continue;
         }
+        if (reference) out.push({ key, reference });
       }
       return out;
     } catch { return []; }

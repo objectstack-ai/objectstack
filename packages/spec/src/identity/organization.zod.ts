@@ -36,9 +36,41 @@ export const OrganizationSchema = lazySchema(() => z.object({
     .describe('Unique URL-friendly slug (lowercase alphanumeric, hyphens, underscores)'),
   
   /**
-   * Organization logo URL
+   * Organization logo URL.
+   *
+   * `null` is accepted alongside a URL string and alongside the key being
+   * absent. `logo` is one of better-auth's own `sys_organization` columns,
+   * declared `Field.url({ required: false })` and reaching SQLite as
+   * `logo varchar(255)` with `notnull=0`; better-auth serialises it
+   * present-and-null for an organization created without one. Measured on a
+   * real `AuthManager` over ObjectQL + driver-sqlite-wasm (#18509): the
+   * `/auth/organization/create`, `/auth/organization/list` and
+   * `/auth/organization/get-full-organization` bodies all carry `"logo": null`.
+   *
+   * Same defect and same remedy as `SessionUserSchema.image` (#17235 / PR
+   * #18501, ruling batch #138 item 1), reached here by measurement rather than
+   * by analogy — #18509 exists precisely because that review refused to infer
+   * this key's verdict from that one.
+   *
+   * `.nullish()`, NOT `.nullable()`: the key's ABSENCE is a legal shape today,
+   * so `.nullable()` would retire a live shape as the price of admitting
+   * `null`. Pure widening only.
+   *
+   * `.url()` is KEPT, and it is not in tension with `null`. `.nullish()` wraps
+   * the whole `z.string().url()`, so `null` and `undefined` are separate
+   * branches the URL check never sees, while a present string is still required
+   * to be a well-formed URL. Measured: of the six inputs
+   * (absent / `null` / `''` / a URL / a non-URL / a number) exactly ONE moves,
+   * and it is the ruled one.
+   *
+   * ⚠️ This widening does NOT make a served organization body parse clean.
+   * The same measurement found two further divergences on this schema —
+   * `metadata` is served present-and-null, and `/auth/organization/create`
+   * omits `updatedAt`, which is declared required. Those are separate defects
+   * with their own reasoning and are filed separately rather than folded in
+   * here; #18509 asked about `logo`.
    */
-  logo: z.string().url().optional().describe('Organization logo URL'),
+  logo: z.string().url().nullish().describe('Organization logo URL'),
   
   /**
    * Custom metadata for the organization
@@ -50,11 +82,38 @@ export const OrganizationSchema = lazySchema(() => z.object({
    * Organization creation timestamp
    */
   createdAt: z.string().datetime().describe('Organization creation timestamp'),
-  
+
   /**
-   * Last update timestamp
+   * Last update timestamp — OPTIONAL, because the documented wire carries none.
+   *
+   * [#18728] Maintainer ruling C (batch #158 item 4) fixes the producer rather
+   * than the consumer, and makes this one key conditional on a measurement:
+   * 「**Fallback A**, decided by measurement first: if the identity wire is
+   * produced by better-auth's own serializer and its documented shape carries
+   * no `updatedAt`, then for those routes the spec aligns to the documented
+   * wire (`updatedAt` optional there)」. Both halves measured against the
+   * installed better-auth 1.7.3, so fallback A applies:
+   *
+   *  - **The serializer is the vendor's.** The `organization/*` routes are
+   *    better-auth's own endpoints, mounted through plugin-auth's single
+   *    catch-all (`AUTH_ROUTE_LEDGER` books every one of them
+   *    `source: 'better-auth'`); each read route answers `ctx.json(<what the
+   *    adapter returned>)` with no ObjectStack post-processing.
+   *  - **The documented shape has no `updatedAt`.** better-auth's organization
+   *    plugin declares `organization` as `name` / `slug` / `logo` /
+   *    `createdAt` / `metadata` and nothing else, and its adapter factory's
+   *    `transformOutput` iterates the declared fields ONLY — an undeclared
+   *    column is dropped before any route sees it. Control, same file and same
+   *    grep: the vendor's `team` and `organizationRole` models DO declare
+   *    `updatedAt`, so the absence here is a reading rather than a miss.
+   *
+   * `sys_organization.updated_at` does exist as a column — the vendor's
+   * serializer simply never emits it. Declaring absence is therefore the
+   * honest shape (Prime Directive #10: never advertise what the runtime does
+   * not deliver), and `.optional()` NOT `.nullish()`: the key is absent on the
+   * wire, never `null`.
    */
-  updatedAt: z.string().datetime().describe('Last update timestamp'),
+  updatedAt: z.string().datetime().optional().describe('Last update timestamp (absent on the better-auth organization wire)'),
 }));
 
 export type Organization = z.input<typeof OrganizationSchema>;
@@ -98,11 +157,27 @@ export const MemberSchema = lazySchema(() => z.object({
    * Member creation timestamp
    */
   createdAt: z.string().datetime().describe('Member creation timestamp'),
-  
+
   /**
-   * Last update timestamp
+   * Last update timestamp — OPTIONAL, and here there is no column at all.
+   *
+   * [#18728] Fallback A of maintainer ruling C, on two independent measurements
+   * (see {@link OrganizationSchema}'s `updatedAt` for the ruling's text and for
+   * the vendor-serializer half, which holds identically for this model):
+   *
+   *  1. better-auth's `member` model declares `organizationId` / `userId` /
+   *     `role` / `createdAt` — no `updatedAt` — and its `transformOutput`
+   *     emits declared fields only.
+   *  2. ⭐ `sys_member` provisions no `updated_at` COLUMN either. It declares
+   *     `id` / `created_at` / `organization_id` / `user_id` / `role`, and it is
+   *     `managedBy: 'better-auth'`, which is the one disposition under which
+   *     `resolveInjectedSystemColumns` injects nothing — the audit family
+   *     included. So unlike the organization row there is no stored value to
+   *     put on the wire in the first place.
+   *
+   * `.optional()` NOT `.nullish()`: absent, never `null`.
    */
-  updatedAt: z.string().datetime().describe('Last update timestamp'),
+  updatedAt: z.string().datetime().optional().describe('Last update timestamp (no such column on sys_member; absent on the wire)'),
 }));
 
 export type Member = z.input<typeof MemberSchema>;
@@ -176,11 +251,20 @@ export const InvitationSchema = lazySchema(() => z.object({
    * Invitation creation timestamp
    */
   createdAt: z.string().datetime().describe('Invitation creation timestamp'),
-  
+
   /**
-   * Last update timestamp
+   * Last update timestamp — OPTIONAL, and here there is no column at all.
+   *
+   * [#18728] Fallback A of maintainer ruling C, same two measurements as
+   * {@link MemberSchema}'s `updatedAt`: better-auth's `invitation` model
+   * declares `organizationId` / `email` / `role` / `teamId` / `status` /
+   * `expiresAt` / `createdAt` / `inviterId` and no `updatedAt`, and
+   * `sys_invitation` — `managedBy: 'better-auth'`, so nothing is injected —
+   * provisions no `updated_at` column.
+   *
+   * `.optional()` NOT `.nullish()`: absent, never `null`.
    */
-  updatedAt: z.string().datetime().describe('Last update timestamp'),
+  updatedAt: z.string().datetime().optional().describe('Last update timestamp (no such column on sys_invitation; absent on the wire)'),
 }));
 
 export type Invitation = z.input<typeof InvitationSchema>;

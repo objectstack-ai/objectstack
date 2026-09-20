@@ -35,7 +35,7 @@ const result = HookSchema.parse(data);
 | **body** | `{ language: 'expression'; source: string } \| { language: 'js'; source: string; capabilities?: Enum<'api.read' \| 'api.write' \| 'api.transaction' \| 'crypto.uuid' \| 'log'>[]; timeoutMs?: integer; … }` | optional | Hook body — expression (L1) or sandboxed JS (L2) |
 | **priority** | `number` | optional (default: `100`) | Execution priority |
 | **async** | `boolean` | optional (default: `false`) | Run specifically as fire-and-forget |
-| **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Predicate (CEL); hook runs only when TRUE. e.g. P`record.status == "closed" && record.amount > 1000` |
+| **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Predicate (CEL); hook runs only when TRUE. e.g. P`record.status == "closed" && record.amount > 1000` |
 | **description** | `string` | optional | Human-readable description of what this hook does |
 | **retryPolicy** | `{ maxRetries?: number; backoffMs?: number }` | optional | Retry policy for failed hook executions |
 | **timeoutMs** | `number` | optional | Maximum execution time in milliseconds before the hook is aborted |
@@ -96,7 +96,7 @@ L2 sandboxed JS body — runs inside an isolated VM with declared capabilities
 | **submitted** | `Record<string, any>` | optional | What the caller submitted, as sent (update only) — diagnostics only, never the persist image |
 | **dispatch** | `{ mode: Enum<'record' \| 'per-row'>; index: integer; scope: Record<string, any> }` | optional | How this hook call relates to the caller's write (engine-produced) |
 | **session** | `{ userId?: string; actor?: string; organizationId?: string; accessToken?: string; … }` | optional | Current session context |
-| **provenance** | `{ flowRunId?: string; attributedUserId?: string }` | optional | Server-stamped write provenance (never client-supplied, never an authorization input) |
+| **provenance** | `{ flowRunId?: string; attributedUserId?: string; performedByClientId?: string }` | optional | Server-stamped write provenance (never client-supplied, never an authorization input) |
 | **referentialFieldClear** | `boolean` | optional | Engine-produced marker: true exactly when this write is the engine's own referential cleanup (the set_null cascade UPDATE clearing — or, for multiple: true, removing the deleted member from — a lookup that references a record being deleted). Absent on every other write, including a user hand-clearing the same lookup; read as `ctx.referentialFieldClear === true`. The declared projection of the operation-private `__referentialFieldClear`, carried across the sandbox boundary by contract; server-derived and never client-supplied. |
 | **transaction** | `any` | optional | Database transaction handle |
 | **ql** | `any` | ✅ | ObjectQL Engine Reference |
@@ -132,6 +132,7 @@ L2 sandboxed JS body — runs inside an isolated VM with declared capabilities
 | :--- | :--- | :--- | :--- |
 | **flowRunId** | `string` | optional | Id of the automation flow run performing this write, when it originates from a flow data node. Lets a hook recognize the run that OWNS state that run itself opened — the approvals record lock exempts the run holding the pending request. |
 | **attributedUserId** | `string` | optional | The real human credited for a write whose authorization subject was the SYSTEM — e.g. the admin whose better-auth `update-member-role` call the identity adapter executes as `isSystem`. ATTRIBUTION ONLY: the audit writer records it as `sys_audit_log.user_id`; no security middleware reads it, and it never becomes the subject the write is authorized as. |
+| **performedByClientId** | `string` | optional | [ADR-0090 D10 rule 4] The AGENT that performed this write — the OAuth client (`azp`, a registered sys_oauth_application id) the access token was issued to, when an AI client acted on behalf of the human in `session.userId`. Copied from `ExecutionContext.performedBy.clientId`, which only the /mcp OAuth door sets. ATTRIBUTION ONLY, exactly like `attributedUserId`: the audit writer records it in `sys_audit_log.metadata` as `performed_by` beside `on_behalf_of`; no security middleware reads it and it never becomes the subject the write is authorized as. Absent on every non-delegated write, so a hook tells the two apart by the key being there rather than by guesswork. |
 
 ### Nested Shape: `HookContext.user`
 

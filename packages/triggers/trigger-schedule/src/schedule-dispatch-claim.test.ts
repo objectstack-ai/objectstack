@@ -34,6 +34,7 @@ import {
     type ScheduleDispatchLedger,
     type TriggerLogger,
 } from './schedule-trigger.js';
+import { withScheduledWorkOn } from './deployment-switch.test-support.js';
 
 // ─── Harness ────────────────────────────────────────────────────────
 
@@ -132,6 +133,12 @@ async function rig(opts: { now?: Date; store?: InMemoryFlowDispatchStore; throws
 }
 
 // ─── The window key ─────────────────────────────────────────────────
+
+// [#17396] Every assertion in this file is about a deployment that RUNS
+// package-authored scheduled work. The switch is OFF by default in every
+// posture, so without this line nothing here binds and every case below
+// would fail for a reason that has nothing to do with what it pins.
+withScheduledWorkOn('single');
 
 describe('computeTickWindow — one notion of "window", derived from the schedule itself', () => {
     it('cron: every instant inside one occurrence maps to the same window start', () => {

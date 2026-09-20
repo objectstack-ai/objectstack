@@ -7,6 +7,7 @@ import { PermissionSetSchema } from '@objectstack/spec/security';
 import { PermissionEvaluator } from './permission-evaluator';
 import { explainAccess, buildContextForUser, type ExplainEngineDeps } from './explain-engine';
 import { RLS_DENY_FILTER } from './rls-compiler';
+import { unresolvedPostureRemedy } from './unresolved-posture';
 import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 
 // [#13176] `ExplainDecision.layers` is `ExplainLayer[]` — the z.INPUT shape
@@ -1487,5 +1488,94 @@ describe('explainAccess — fail-closed RLS denial (#13639)', () => {
         'Business RLS composes to DENY ALL for this principal.',
       );
     });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// [#18253] A name nobody declared is a REFUSAL, not a verdict
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Maintainer ruling of 2026-09-17, letter B: "`explain` on an object name that
+ * does not exist returns a distinct error … instead of `denies`. … a typo must
+ * not look like a permission decision."
+ *
+ * Measured before the fix (this file, one-off probe): a typo answered
+ * `allowed: false` + `object_crud: 'denies'` — the pair a GENUINE denial
+ * answers, on a `200`. Only the layer prose differed, and no client branches on
+ * prose.
+ *
+ * The assertions are the ADR-0112 PAIR (`code` and `status`), never a bare
+ * `toThrow()`: a `toThrow` passes for any `Error`, including the plain one a
+ * regression would throw, and the ENVELOPE is what the ruling binds.
+ */
+describe('[#18253] explain refuses an object that does not exist', () => {
+  const unresolvedDeps = (cause?: 'unpublished_draft' | 'metadata_unavailable' | 'unknown') =>
+    makeDeps({
+      getObjectSecurityMeta: async () => ({
+        isPrivate: false,
+        requiredPermissions: { all: [], read: [], create: [], update: [], delete: [] },
+        fieldRequiredPermissions: {},
+        unresolved: true,
+        ...(cause ? { unresolvedCause: cause } : {}),
+      }),
+    } as Partial<ExplainEngineDeps>);
+
+  const explainUnknown = (cause?: 'unpublished_draft' | 'metadata_unavailable' | 'unknown') =>
+    explainAccess(unresolvedDeps(cause), { object: 'leave_requst', operation: 'read', context: CTX });
+
+  it('answers 404 OBJECT_NOT_FOUND — the pair, not merely "it threw"', async () => {
+    await expect(explainUnknown('unknown')).rejects.toMatchObject({
+      code: 'OBJECT_NOT_FOUND',
+      status: 404,
+      // Both transports read a different property name (`errors.ts` header).
+      statusCode: 404,
+      name: 'ExplainObjectNotFoundError',
+    });
+  });
+
+  it('the message says it is NOT an access decision, and names the object and operation', async () => {
+    const err = await explainUnknown('unknown').then(
+      () => { throw new Error('explain resolved a decision for an object that does not exist'); },
+      (e: any) => e,
+    );
+    expect(err.message).toContain("'leave_requst'");
+    expect(err.message).toContain("'read'");
+    expect(err.message).toContain('NOT an access decision');
+    // ⛔ NOT the `[Security] Access denied` prefix: that string is a MATCHER
+    // (`isPermissionDeniedError`, `mapDataError`, the rest-server sanitiser),
+    // and wearing it would re-flatten this refusal into the 403 it exists to
+    // stop being.
+    expect(err.message.startsWith('[Security] Access denied')).toBe(false);
+    // One wording module, not a second spelling of the advice (#10401).
+    expect(err.message).toContain(unresolvedPostureRemedy('unknown'));
+  });
+
+  it('a deps bag with NO cause at all refuses too — the default reading is `unknown`', async () => {
+    await expect(explainUnknown(undefined)).rejects.toMatchObject({ code: 'OBJECT_NOT_FOUND', status: 404 });
+  });
+
+  it('an UNPUBLISHED DRAFT still explains as `denies` — the declaration exists', async () => {
+    const d = await explainUnknown('unpublished_draft');
+    expect(d.allowed).toBe(false);
+    expect(d.layers.find((l) => l.layer === 'object_crud')!.verdict).toBe('denies');
+    expect(d.layers.find((l) => l.layer === 'object_crud')!.detail).toContain('is not published');
+  });
+
+  it('a metadata-store OUTAGE still explains as `denies` — absence was never established', async () => {
+    const d = await explainUnknown('metadata_unavailable');
+    expect(d.allowed).toBe(false);
+    expect(d.layers.find((l) => l.layer === 'object_crud')!.verdict).toBe('denies');
+    expect(d.layers.find((l) => l.layer === 'object_crud')!.detail).toContain('OUTAGE');
+  });
+
+  it('control: a RESOLVED object whose sets grant nothing still answers `denies`, unchanged', async () => {
+    const d = await explainAccess(makeDeps({ sets: [] }), {
+      object: 'leave_request',
+      operation: 'delete',
+      context: CTX,
+    });
+    expect(d.allowed).toBe(false);
+    expect(d.layers.find((l) => l.layer === 'object_crud')!.verdict).toBe('denies');
   });
 });

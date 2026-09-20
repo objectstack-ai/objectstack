@@ -517,3 +517,80 @@ describe('validateObjectReferences — exemptions (false-positive floor)', () =>
     expect(findings).toEqual([]);
   });
 });
+
+/**
+ * [#18550] Both of this rule's carrier reads must refuse a `reference` they
+ * cannot read, rather than saying nothing about it.
+ *
+ * Two of the measured residue sites of ruling letter E item 2 on #18095. Both
+ * read `strName(field.reference)` / `strName(param.reference)`, and `check`
+ * returns early on `undefined` — so the declaration that most needs a
+ * resolvable target reported NOTHING: not this rule's unknown-object error
+ * (there is no name to resolve), and not `relationship/missing-reference`
+ * either (the target is not missing). Refused where it was written by
+ * `ObjectSchema.safeParse`, read as absent where it was consumed, reported
+ * nowhere.
+ *
+ * Absence keeps its answer, and that answer is deliberately silence HERE: an
+ * absent target is `field/relationship-without-reference`'s subject (it names
+ * the field and prescribes the key), not this rule's.
+ */
+describe('validateObjectReferences — an unreadable `reference` carrier is refused (#18550)', () => {
+  const fieldCarrier = (carrier: Record<string, unknown>) => ({
+    ...baseStack(),
+    objects: [
+      ...baseStack().objects,
+      { name: 'crm_contact', fields: { name: { type: 'text' }, account: { type: 'lookup', ...carrier } } },
+    ],
+  });
+  const paramCarrier = (carrier: Record<string, unknown>) => ({
+    ...baseStack(),
+    actions: [{ name: 'mass_reassign', params: [{ name: 'owner', type: 'lookup', ...carrier }] }],
+  });
+
+  it('control: a READABLE field carrier resolving to a known object is silent', () => {
+    expect(validateObjectReferences(fieldCarrier({ reference: 'crm_account' }))).toHaveLength(0);
+  });
+
+  it('control: a READABLE field carrier naming an UNKNOWN object still errors — the rule still works', () => {
+    const findings = validateObjectReferences(fieldCarrier({ reference: 'zzz_nope' }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(OBJECT_REFERENCE_UNKNOWN);
+  });
+
+  it('an OBJECT-valued FIELD carrier REFUSES — ⛔ not silence, and ⛔ not "unknown object"', () => {
+    const run = () => validateObjectReferences(fieldCarrier({ reference: { object: 'crm_account' } }));
+    expect(run).toThrow(TypeError);
+    expect(run).toThrow(/validate-object-references field target/);
+    expect(run).toThrow(/`reference` is an object/);
+    expect(run).toThrow(/FieldSchema declares it as an optional STRING/);
+  });
+
+  it('an OBJECT-valued ACTION-PARAM carrier refuses too, and the reader that could not read it is named', () => {
+    // `ActionParamSchema.reference`'s own docblock: the key name "deliberately
+    // mirrors `FieldSchema.reference` so the same spelling" carries the target
+    // object's name. One contract, so one reader.
+    const run = () => validateObjectReferences(paramCarrier({ reference: { object: 'sys_user' } }));
+    expect(run).toThrow(TypeError);
+    expect(run).toThrow(/validate-object-references action param target/);
+    expect(run).toThrow(/`reference` is an object/);
+  });
+
+  it('control: a READABLE action-param carrier naming an unknown object still errors', () => {
+    const findings = validateObjectReferences(paramCarrier({ reference: 'user' }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].path).toBe('actions[0].params[0].reference');
+  });
+
+  it.each([
+    ['undefined (the key omitted)', {}],
+    ['null (`StrictField` declares it nullable)', { reference: null }],
+    ["'' (names no object)", { reference: '' }],
+  ])('absence stays SILENT here and does not throw: %s', (_label, carrier) => {
+    // ⛔ Deliberate silence, not an oversight: an absent relationship target is
+    // reported by `field/relationship-without-reference`, which names the field
+    // and prescribes the key. This rule only judges targets that ARE named.
+    expect(validateObjectReferences(fieldCarrier(carrier))).toHaveLength(0);
+    expect(validateObjectReferences(paramCarrier(carrier))).toHaveLength(0);
+  });
+});

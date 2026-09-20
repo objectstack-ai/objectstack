@@ -555,9 +555,17 @@ export function coerceBooleanFields<T extends Record<string, unknown>>(
  *     [1] invalid_type       lng   Invalid input: expected number, received undefined
  *     [2] unrecognized_keys        ... Did you mean `latitude` -> `lat`, `longitude` -> `lng`? ...
  *
- * The rename IS the prescription, and edit distance cannot reach it
- * (`latitude` -> `lat`), which is exactly why `LocationValueSchema` curates an
- * `aliases` map. Reading positionally builds that hint and then discards it,
+ * The rename IS the prescription, and the distance fallback will not hand it
+ * over: `latitude` -> `lat` is 5 edits against a budget of
+ * `Math.max(2, Math.floor(key.length / 3))` = 2 (spec `shared/suggestions.zod.ts`).
+ * What the fallback hands over instead is not silence — `altitude` is a
+ * declared member of the same shape, 2 edits away and inside the budget — so
+ * `LocationValueSchema`'s `aliases` entry is OVERRULING a confident wrong
+ * answer rather than filling a gap: the lookup is
+ * `aliases[aliasProbe(key)] ?? findClosestMatches(…)`, table first and winning
+ * outright. That is the entry's real job here, and spec's
+ * `data/field-value.test.ts` pins both halves of it. Reading positionally
+ * builds that hint and then discards it,
  * leaving an operator running `os migrate value-shapes` to derive the rename
  * themselves while the identically-shaped `address` case is handed it.
  *
@@ -821,7 +829,15 @@ function validateOne(
   // disguise — it falls through to the multi-value branch below (#2552;
   // previously an array here was stringified to "a,b" and wrongly
   // rejected as invalid_option, while a scalar slipped straight through).
-  if ((t === 'select' || t === 'radio') && def.multiple !== true) {
+  //
+  // [#18408] The gate is the NEGATION of that branch's own predicate, ⛔ not a
+  // raw `def.multiple !== true`. The two are extensionally equal only while
+  // `select` and `radio` both sit in `MULTI_CAPABLE_TYPES` and in neither
+  // multi-option set — a membership `packages/spec` owns and may move. Spelling
+  // the complement as the flag would make this dispatch answer the multi-value
+  // question from two authorities that happen to agree today, which is the
+  // drift the one-definition ruling (#17469) closes.
+  if ((t === 'select' || t === 'radio') && !isMultiValueField(def)) {
     const allowed = optionValues(def.options);
     if (allowed.length > 0 && !allowed.includes(String(value))) {
       return fail('invalid_option', { allowed: allowed.join(', ') }, 'invalid_option', allowed);

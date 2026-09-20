@@ -67,10 +67,10 @@
  *   its own id.
  * - `visibility-predicate-unknown-function` (**error**, #13594) — a predicate
  *   that PARSES perfectly and calls a function the CEL environment does not
- *   register (`current_user.can(object, verb)`, `totallyBogusFn(1,2)`). See the
- *   §Function existence block below for the ruling that put it here, for why it
- *   is the one `check()` verdict this file adopts, and for the four things it
- *   deliberately still does not report.
+ *   register (`current_user.canApprove(object, verb)`, `totallyBogusFn(1,2)`).
+ *   See the §Function existence block below for the ruling that put it here, for
+ *   why it is the one `check()` verdict this file adopts, and for the four
+ *   things it deliberately still does not report.
  * - `visibility-bare-identifier` (**error**, #6128 / #5149 requirement 3) — a
  *   predicate referencing a top-level identifier that no binding root can
  *   resolve (`status == 'active'` instead of `record.status == 'active'`). See
@@ -187,6 +187,19 @@
  * validator has refused unknown calls since #1877 — and the hole was here, on
  * the one predicate surface `validate-expressions.ts` does not walk.
  *
+ * ⚠️ **SINCE — `can` itself is no longer an example of this** (batch #147 item
+ * 5, letter A). `@objectstack/formula` registers `can` RECEIVER-ONLY and answers
+ * it from `EvalContext.permissions`, so `current_user.can(object, verb)` now
+ * resolves here AND evaluates at runtime — publish acceptance and runtime
+ * evaluability moved together, which is the property this arm exists to hold.
+ * The paragraph above is kept as the RECORD of what the gate was measured to do
+ * before the ruling, because that measurement is what the arm rests on; the
+ * carriers that used to spell the shape with `can` are re-pointed onto
+ * `canApprove` (⛔ not deleted) and read as a pair with the acceptance case
+ * beside each of them. A bare `can(object, verb)` still faults, and this gate
+ * still says nothing about it: the name exists, so that is a call-FORM fault,
+ * exactly like `split` in refinement 3 below.
+ *
  * ### The ruling
  *
  * Maintainer, 2026-08-31, on a censused premise (host-registered extra CEL
@@ -216,9 +229,13 @@
  *    call this refuses is a call that WILL fault when evaluated. The old ruling's
  *    fear — an `error`-level gate rejecting predicates that work — needs a fault
  *    class that is data-dependent, and existence is not one.
- * 4. **No suggestion is offered.** 「不给 `nearestName` 建议。」 —
- *    `nearestName('can', <the function set>)` answers `'min'`. The engine's own
- *    wording ships verbatim and nothing is guessed on top of it.
+ * 4. **No suggestion is offered.** 「不给 `nearestName` 建议。」 — the measured
+ *    hazard was `nearestName('can', <the function set>)` answering `'min'`, two
+ *    edits on a three-character name across an unrelated namespace. `can` is a
+ *    registered name now, so that exact source no longer reaches this arm; the
+ *    refinement is unchanged and the pins are re-pointed onto a name that still
+ *    does. The engine's own wording ships verbatim and nothing is guessed on top
+ *    of it.
  *
  * The fault this closes is the one metadata validation exists for, and the one
  * an AI author hits hardest: a plausible-looking function name that does not
@@ -1030,13 +1047,16 @@ function checkElement(
   // restated per RULE PAIR instead of per predicate.
   //
   // The finding carries NO "did you mean" suggestion, and the hint says nothing
-  // about why — ruling refinement 2, 「不给 `nearestName` 建议。」 The measured
-  // hazard: `nearestName('can', <the function set>)` answers `min`, two edits on
-  // a three-character name, jumping from a permission verb to a numeric
-  // function. An author who takes it (an LLM author above all, following the
-  // last sentence it was handed) writes `min(object, verb)` and is further from
-  // working than before it asked. The engine's own wording ships verbatim and
-  // nothing is guessed on top of it.
+  // about why — ruling refinement 2, 「不给 `nearestName` 建议。」 The hazard was
+  // measured on `can`: `nearestName('can', <the function set>)` answers `min`,
+  // two edits on a three-character name, jumping from a permission verb to a
+  // numeric function. An author who takes it (an LLM author above all, following
+  // the last sentence it was handed) writes `min(object, verb)` and is further
+  // from working than before it asked. (`can` is a registered receiver method
+  // since batch #147 item 5, so that source no longer reaches here; the hazard
+  // CLASS is unchanged — short names land two edits from an unrelated catalog
+  // entry — and the pins are re-pointed onto one that still does.) The engine's
+  // own wording ships verbatim and nothing is guessed on top of it.
   const unknownCall: UnknownFunctionCall | null =
     source && !refusal ? firstUnknownFunctionCall(source) : null;
   if (source && unknownCall) {

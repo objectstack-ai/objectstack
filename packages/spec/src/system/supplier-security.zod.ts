@@ -2,6 +2,7 @@
 
 import { z } from 'zod';
 import { DataClassificationSchema } from './security-context.zod';
+import { EpochMs } from '../shared/epoch.zod';
 
 /**
  * Supplier Security Protocol — ISO 27001:2022 (A.5.19–A.5.22)
@@ -143,12 +144,12 @@ export const SupplierSecurityAssessmentSchema = lazySchema(() => z.object({
   /**
    * Assessment completion timestamp (Unix milliseconds)
    */
-  assessedAt: z.number().describe('Assessment timestamp'),
+  assessedAt: EpochMs.describe('Assessment timestamp'),
 
   /**
    * Assessment validity expiry (Unix milliseconds)
    */
-  validUntil: z.number().describe('Assessment validity expiry timestamp'),
+  validUntil: EpochMs.describe('Assessment validity expiry timestamp'),
 
   /**
    * Security requirements assessed
@@ -185,7 +186,7 @@ export const SupplierSecurityAssessmentSchema = lazySchema(() => z.object({
   remediationItems: z.array(z.object({
     requirementId: z.string().describe('Non-compliant requirement ID'),
     action: z.string().describe('Required remediation action'),
-    deadline: z.number().describe('Remediation deadline timestamp'),
+    deadline: EpochMs.describe('Remediation deadline timestamp (Unix milliseconds)'),
     status: z.enum(['pending', 'in_progress', 'completed']).default('pending')
       .describe('Remediation status'),
   })).optional().describe('Remediation items for non-compliant requirements'),

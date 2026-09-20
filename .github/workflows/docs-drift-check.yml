@@ -355,6 +355,49 @@ jobs:
             // run by construction, exactly like the SDK bridge line above, and stating it
             // only sometimes would be the lie.
             limits.push('a page that states a rule by its **inputs** shares no identifier with the **emitter** that implements the rule, so an emitter-only diff cannot list it — not on this run and not on any run. Measured on #11430: `content/docs/protocol/objectql/types.mdx` documents the text-family column mapping by the ObjectQL type names it maps FROM (`text` / `textarea` / `html`) while the diff changed `createColumn`; it went unlisted, and it was the page that diff falsified, in four places. No shared token exists to detect this on, so a rule your change carries has to be re-read by hand in the pages that restate it.');
+            // ── A KEY NAME IS NOT A KEY — THE SECOND BOUNDARY OF THE HAND-GREP REMEDY (#19093)
+            //
+            // The line above ends by prescribing a remedy: re-read the rule by hand in the
+            // pages that restate it. This one states that remedy's OWN failure mode, because
+            // the remedy is a name-based search and a name does not identify a key.
+            //
+            // The same spelling can be authorable on one schema and a `[REMOVED]` tombstone
+            // on another, and a search result carries nothing that tells the two apart. So a
+            // hand-grep that lands on a page's LIVE example reads it as evidence about the
+            // DEAD key — a false alarm that is indistinguishable from a real find until
+            // someone parses the value. That is not hypothetical: on #19059 a reviewer
+            // grepping `content/docs` for `tools` reported `content/docs/ai/agents.mdx` as
+            // contradicting the `agent.tools` tombstone, citing an example at `:161` that is
+            // inside a `defineSkill({` block opened at `:155`. The page was already correct;
+            // the cost was one stop-the-line alarm and a round of the implementing dev's
+            // attention. The grep was the RIGHT method — it is what found the genuinely
+            // falsified page on #19080, in exactly the blind spot the line above names.
+            //
+            // The names are the payload, and they are a census rather than the one instance:
+            // measured on #19093 by walking the liveness ledger's governed types and reading
+            // each top-level key's `[REMOVED]` marker. ⛔ A COUNT IS NOT A READING HERE — the
+            // whole defect is that a count cannot tell two identically-named keys apart, so
+            // this line prints the names and any re-measure must do the same.
+            //
+            // ⛔ Its radius is stated because it is NOT the whole class. Top-level keys of
+            // governed types only: a key retired through the `.strict()` guidance-map route
+            // instead of `retiredKey()` leaves NO tombstone in the walked shape and so cannot
+            // appear here at all — `tool.category` is retired that way while
+            // `AIToolDefinition.category` stays live, the identical trap one radius out.
+            //
+            // ⛔ Sited here, not in the liveness ledger's `_note`, and that was a choice
+            // between two candidates. The ledger records the verdict; this comment reaches
+            // the reader AT THE MOMENT THE METHOD IS PRESCRIBED, on every run, in the same
+            // fold as the prescription. A reader alarmed about `agent.tools` opens the AGENT
+            // ledger — so a discriminator written on the SKILL ledger sits on the half they
+            // have no reason to open, which is the failure this card exists to stop.
+            //
+            // Unconditional by construction, like the line above and for the same reason:
+            // the collision is a property of the schemas, not of any diff. Pinned byte-exact
+            // on every case in `scripts/docs-audit/check-drift-comment.mjs`
+            // (`SAME_NAME_DIFFERENT_SHAPE`) — an unconditional line nothing pins is one that
+            // can vanish silently, which is the defect that file was written for.
+            limits.push('a key NAME is not a key, so the hand re-read the line above prescribes can land on the wrong schema. The same spelling is authorable on one governed type and a `[REMOVED]` tombstone on another for each of `active`, `aria`, `joins`, `objects`, `template`, `tools` and `version` (censused on #19093 over the liveness ledger\'s governed types, top-level keys); nothing in a search result distinguishes the two, so a grep hit on a LIVE example reads as evidence about the DEAD key. Measured on #19059: `content/docs/ai/agents.mdx` was reported as contradicting the `agent.tools` tombstone over its `tools:` example at `:161`, which is inside the `defineSkill({` block opened at `:155` — the page was already correct. Settle ownership by PARSING the value against both schemas, never by the name: that literal PASSES `SkillSchema`, and as an `AgentSchema` it FAILS at `tools` with the tombstone prescription. ⛔ These names are not the whole class — a key retired through a `.strict()` guidance map leaves no tombstone in the walked shape and none of them here (`tool.category`, live as `AIToolDefinition.category`).');
             // A broken scan is not a coverage number and must not read like one — see
             // `bridgeCoverageFrom`. Rendered outside the collapsed section below, because
             // "the bridge could not read the ledgers" is not a limit of this run, it is a
@@ -554,9 +597,17 @@ jobs:
             //        separates it from a genuine permission denial.
             // Everything else stays fatal on purpose: 401 / plain 403 (the `permissions:`
             // block above is wrong), 404 (wrong target), 422 (the body this workflow built
-            // is not postable — e.g. past GitHub's 65536-character comment limit), and any
-            // non-HTTP error such as a TypeError in the code above. Those are this repo's
-            // own bugs and must keep failing the job.
+            // is not postable — e.g. past the COMMENT cap), and any non-HTTP error such as
+            // a TypeError in the code above. Those are this repo's own bugs and must keep
+            // failing the job.
+            //
+            // That cap is MEASURED, in UTF-8 BYTES, ⛔ not the 65,536 characters this
+            // comment used to name: a comment stores 262,144 bytes and refuses 262,145
+            // with a real 422, on BOTH `issues.createComment` and `issues.updateComment`
+            // below — objectstack#18826, bisected to one byte on each endpoint. ⛔ Do not
+            // re-derive 65,536 from the refusal itself: GitHub's own 422 text still reads
+            // "maximum is 65536 characters" and #18826 falsified it in both unit and
+            // value, storing a 262,144-CHARACTER comment.
             const TRANSIENT_NETWORK_CODES = new Set([
               'ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EAI_AGAIN', 'ENOTFOUND', 'EPIPE',
               'EHOSTUNREACH', 'ENETUNREACH', 'UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT',

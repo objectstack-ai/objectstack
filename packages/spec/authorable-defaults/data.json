@@ -11,7 +11,6 @@
     "data/CrossFieldValidation:priority = 100",
     "data/CrossFieldValidation:severity = \"error\"",
     "data/Cube:public = false",
-    "data/CubeJoin:relationship = \"many_to_one\"",
     "data/CurrencyConfig:currencyMode = \"dynamic\"",
     "data/CurrencyConfig:defaultCurrency = \"CNY\"",
     "data/CurrencyConfig:precision = 2",

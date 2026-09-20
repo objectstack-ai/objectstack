@@ -47,14 +47,16 @@
 //     Both directions together are what the trap vocabulary beside them has
 //     always had — used implies documented, documented implies used.
 //   - every SYMBOL ANCHOR (`<dir>/<file>.ts#<symbol>`, the spelling
-//     `scripts/symbol-anchors.mjs#ANCHOR_GRAMMAR` defines) resolves — and it is
-//     `scripts/symbol-anchors.mjs#symbolResolutionClass` that says so, the ONE
-//     resolver the #13556 ruling allows. This gate detects anchors and owns no
-//     rule about what "the symbol is in that file" means (#16898); the 56
-//     anchors that stopped resolving when the private permissive rule was
-//     withdrawn are a named, closed, grow-never residual. A shrink-never floor
-//     per family file keeps the population from being emptied one deleted
-//     `#symbol` at a time (see the symbol-anchor block below);
+//     `scripts/symbol-anchors.mjs#ANCHOR_GRAMMAR` defines) resolves — and this
+//     gate neither detects nor resolves one itself. It is a REGISTERED CORPUS
+//     (`CORPUS` below, a `scripts/symbol-anchors.mjs#defineCorpus` call swept by
+//     `scripts/symbol-anchors.mjs#sweepCorpus`), which is the one shape the
+//     #13556 ruling allows a second body of documents to join in: #16898 bound
+//     the verdict, #18107 the grammar and the sweep. The 56 anchors that stopped
+//     resolving when the private permissive rule was withdrawn are a named,
+//     closed, grow-never residual. A shrink-never floor per family file keeps
+//     the population from being emptied one deleted `#symbol` at a time (see the
+//     symbol-anchor block below);
 //   - and no `call` string — the one field in this ledger a runner REPLAYS —
 //     instructs a `/meta/<plural>` URL spelling the boundary merely folds.
 //     `call` ONLY: the fields beside it legitimately quote plural spellings to
@@ -64,15 +66,41 @@
 // It does NOT judge whether an item is testable or its oracle sufficient — no
 // static check can. It guarantees the *structure* a run can be trusted against.
 //
+// ## Honest limitations, stated up front rather than discovered later
+//
+//   1. **An anchor whose file extension is outside the shared anchorable
+//      vocabulary is NOT REPORTED — it is simply not swept.** Detection is the
+//      registered corpus's, and the shared extractor matches only a path ending
+//      in one of `scripts/symbol-anchors.mjs#ANCHORABLE_EXTENSIONS`, so a
+//      `#symbol` on any other extension matches nothing and produces no finding
+//      at all — where the pre-registration detector raised a hard
+//      `UNRESOLVABLE ANCHOR` red telling the author to cite that file bare.
+//      The silent class is recorded here rather than compensated: the shared
+//      vocabulary is 23 extensions against the private 8, so what it can hide
+//      is strictly smaller than what the private set refused, and MEASURED on
+//      today's population it is ZERO — every anchor-shaped token in this family
+//      names `.ts` (622), `.json` (9) or `.mjs` (3), all three inside the
+//      vocabulary. ⚠️ Read that zero with the cadence beside it: this gate is
+//      NOT wired into per-PR CI (the maintainer decision recorded in
+//      `.github/workflows/lint.yml` — it runs by hand before a release or after
+//      a large platform surface lands, with
+//      `.github/workflows/platform-checklist-watchdog.yml` sweeping `main`
+//      daily as its only standing caller), so a future out-of-vocabulary anchor
+//      sits unreported until somebody runs this gate. The exit is the ruling's
+//      own: widen the shared vocabulary in `scripts/symbol-anchors.mjs`, and
+//      ⛔ never re-fork a private extension set here.
+//
 // Usage: node scripts/check-platform-checklist.mjs   (pnpm check:platform-checklist)
 
 import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import { maskComments } from './js-comment-mask.mjs';
-import { symbolResolutionClass } from './symbol-anchors.mjs';
-import { join, basename } from 'node:path';
+import * as symbolAnchorsModule from './symbol-anchors.mjs';
+import { ANCHORABLE_EXTENSIONS, defineCorpus, extractAnchors, sweepCorpus, symbolSegmentResolution } from './symbol-anchors.mjs';
+import { join, basename, relative } from 'node:path';
 
 const ROOT = new URL('..', import.meta.url).pathname;
-const CHECKLIST_DIR = join(ROOT, 'docs/qa/platform-checklist');
+const CHECKLIST_REL = 'docs/qa/platform-checklist';
+const CHECKLIST_DIR = join(ROOT, CHECKLIST_REL);
 const AREAS_DIR = join(CHECKLIST_DIR, 'areas');
 
 /**
@@ -99,11 +127,235 @@ function familyFiles(dir, prefix = '') {
   return out;
 }
 
-const STATUSES = new Set(['active', 'draft', 'retired']);
+const STATUSES = new Set(['active', 'draft', 'planned', 'retired']);
+
+// ── Which statuses CARRY coverage ───────────────────────────────────────────
+// The capability-coverage ratchet below asks "does the checklist test this
+// governed metadata kind?". `planned` is the ledger's answer to "the definition
+// requires this capability and nothing verifies it yet" — a promise, not a
+// test. So a planned item is a legal MAP TARGET (that is how a capability-gap
+// card gets somewhere to point) and contributes ZERO coverage: a kind whose
+// only items are planned is UNMAPPED, exactly as if the entry were empty.
+// ⛔ Folding `planned` in here is the one edit that would turn this ratchet
+// into a way to green a kind by promising to test it.
+const COVERAGE_BEARING_STATUSES = new Set(['active', 'draft']);
+
 const PRIORITIES = new Set(['P0', 'P1', 'P2']);
 const SURFACES = new Set(['browser', 'api', 'cli', 'build', 'mixed']);
 const ORACLES = new Set(['api', 'network', 'screenshot', 'dom', 'log', 'test', 'build']);
 const BLOCKED_BY = new Set(['fixture', 'environment', 'dependency', 'product-bug']);
+
+const RELEASE_RE = /^v\d+(\.\d+)?$/;
+
+/**
+ * The field rules an item's `status` implies, as a pure function so the battery
+ * can drive every status through it with no tree to read.
+ *
+ * `planned` is the only status that RELAXES anything, and it relaxes exactly
+ * the three fields that cannot honestly exist before the capability does:
+ * `since` (no release has introduced it), `steps` (nothing to drive) and
+ * `acceptance` (no oracle to consult — handled at its own site below). In
+ * exchange it REQUIRES `personas`: who the capability is for is what makes a
+ * gap readable to the next sweep, and it is knowable the day the gap is found.
+ *
+ * ⚠️ On `since` the claim is kept as narrow as the enforcement. What is checked
+ * is the SHAPE — `null`, or a release-looking string. Whether the release named
+ * has already SHIPPED is not checkable here and is not checked: this ledger
+ * holds no release timeline and `RELEASE_RE` is a spelling rule. A planned item
+ * targeting a release that is already out is an authoring error, and it passes.
+ * Saying otherwise in the refusal would advertise a check that does not exist,
+ * which is the one thing a refusal must never do.
+ *
+ * @param {{status?: string, since?: unknown, steps?: unknown, personas?: unknown}} item
+ * @returns {string[]}
+ */
+function statusFieldProblems(item) {
+  const problems = [];
+  const isRelease = typeof item.since === 'string' && RELEASE_RE.test(item.since);
+  const hasSteps = Array.isArray(item.steps) && item.steps.length > 0;
+
+  if (item.status === 'planned') {
+    if (!(item.since === null || isRelease)) {
+      problems.push('"since" on a planned item must be null (no target release chosen yet) or a TARGET release, e.g. "v18". ⛔ Only the SHAPE is checked here: this ledger holds no release timeline, so a target naming a release that already shipped PASSES and is an authoring error no gate can see');
+    }
+    if (hasSteps) {
+      problems.push('a planned item carries NO "steps" — there is nothing to drive yet. Steps arrive in the PR that implements the capability, in the same edit that promotes it to "active"');
+    }
+    if (!Array.isArray(item.personas) || item.personas.length === 0) {
+      problems.push('a planned item must name its "personas" — who the capability is for is what makes the gap readable before anything exists to run');
+    }
+    return problems;
+  }
+
+  if (!isRelease) problems.push('"since" must be the release that introduced the capability, e.g. "v16" or "v16.0"');
+  if (!hasSteps) problems.push('"steps" must be a non-empty array of strings');
+  return problems;
+}
+
+/**
+ * One `coverage.json` entry's `items` list, judged. Pure, and the ONE place the
+ * ratchet decides what counts — so the battery can drive both directions of the
+ * planned rule without a tree, and so there is no second opinion to drift from.
+ *
+ * The two directions that matter, and why the second is the load-bearing one:
+ *
+ *   - a kind mapped to an ACTIVE item is covered, and stays covered when a
+ *     planned item is listed beside it (the planned id is where the next
+ *     capability-gap card points; it must not turn a green kind red);
+ *   - a kind whose ONLY items are planned is UNMAPPED. The platform has the
+ *     capability on its definition list, the checklist records that nothing
+ *     verifies it, and the ratchet must say so — otherwise `planned` becomes
+ *     the cheapest way to green an untested kind, and the ratchet measures
+ *     intentions instead of tests.
+ *
+ * @param {string[]} ids the entry's `items`
+ * @param {(id: string) => string|undefined} statusOf item id -> status, undefined when unknown
+ * @returns {{problems: string[], bearing: number}} `bearing` = items that CARRY coverage
+ */
+function coverageEntryProblems(ids, statusOf) {
+  const problems = [];
+  let bearing = 0;
+  for (const id of ids) {
+    const status = statusOf(id);
+    if (status === undefined) {
+      problems.push(`maps to unknown item id "${id}"`);
+      continue;
+    }
+    if (status === 'retired') {
+      problems.push(`maps to retired item "${id}" — point at its successor or re-waive the kind`);
+      continue;
+    }
+    if (COVERAGE_BEARING_STATUSES.has(status)) bearing += 1;
+  }
+  if (bearing === 0) {
+    problems.push(
+      'UNMAPPED — nothing here CARRIES coverage: every item mapped to this kind is `planned` (or does not resolve).'
+        + ' A planned item records that the definition requires the capability and that nothing verifies it yet — it is a promise, not a test,'
+        + ' and counting it would let any kind go green by promising to cover it. Add an item that RUNS, or waive the kind with a reason.',
+    );
+  }
+  return { problems, bearing };
+}
+
+/**
+ * ⭐ The BINDING of the two predicates above into the walks that judge the
+ * ledger, read out of this file's own source so it can be driven ON and OFF.
+ *
+ * ## The hole this closes, measured rather than supposed
+ *
+ * `statusFieldProblems` and `coverageEntryProblems` are pure, which is what
+ * lets the battery drive them on fixtures — and a pure function's battery says
+ * NOTHING about whether anything calls it. Both severings were run on this
+ * file:
+ *
+ *   - revert the coverage call site to the pre-`planned` loop so
+ *     `coverageEntryProblems` is never called → `--self-test` exit 0 with all
+ *     207 assertions passing, the live gate green, and a fixture kind whose
+ *     ONLY item is planned green too;
+ *   - drop `statusFieldProblems(item)` from the item walk → `--self-test`
+ *     exit 0 with 207, and an ACTIVE item carrying `since: null` and no
+ *     `steps` green.
+ *
+ * ⇒ a severed call site left every instrument in this file reporting success.
+ * That is worse here than it would be almost anywhere else: the subject of
+ * these two functions IS a ratchet, so a ratchet whose binding nothing pins is
+ * one that can be switched off without a single number moving.
+ *
+ * The remedy is the one the line-citation limb already uses below — a source
+ * read driven BOTH ways over ONE text, so a green is the binding holding and
+ * not a read that matched everything, or nothing.
+ *
+ * ## ⛔ WHAT THIS PIN CANNOT SEE — read this before trusting it
+ *
+ * It is a TEXT pin over comment-masked source. It answers one question — "is
+ * this call site still written, in live code, exactly once?" — and ⛔ it is not
+ * a proof that the call EXECUTES. Three ordinary severings walk straight past
+ * it, and all three were measured leaving `--self-test` at exit 0 and the live
+ * gate at exit 0 on this file:
+ *
+ *   - **shadowing** — `const statusFieldProblems = () => [];` above the call,
+ *     which stays written and starts returning nothing;
+ *   - **a dead helper** — the call moved into a function nobody invokes;
+ *   - **a dead branch** — the call left under a condition that never holds.
+ *
+ * Those are SEMANTIC, and no text pin can reach them: the spelling is intact in
+ * every one. Closing them needs the walk driven over a fixture ledger, which
+ * needs a root knob (`AREAS_DIR` is fixed from `import.meta.url`) or the walk
+ * factored into a callable. That is deliberately NOT built here, and this
+ * paragraph is the disclosure that makes the omission a recorded trade rather
+ * than an implied guarantee. ⛔ Do not describe this function as proving the
+ * bindings execute.
+ *
+ * What masking DOES close is the form that defeated the first version of this
+ * pin: **commenting the call out in place**. The commented line was the one
+ * occurrence, the raw-source count read 1, and everything stayed green — the
+ * exact "commented-out draft" this function's own decoy note already named.
+ * `maskComments` is applied before counting for that reason, and three OFF legs
+ * below drive it.
+ *
+ * ⚠️ This pin is SPELLING-SENSITIVE on purpose, and that is its whole cost:
+ * rewording a call site reds it. ⛔ The repair is to update the pinned spelling
+ * in the same edit — ⛔ never to delete the row, which is indistinguishable
+ * from severing the call it guards.
+ *
+ * Readings quoted above were taken on `claude/issue-19157-checklist-planned-status`
+ * at `b835196bc1` (this repo) — a count without the tree it came from is not a
+ * reading.
+ *
+ * @param {string} source this module's own text, raw; comments are masked here
+ * @returns {string[]} one message per binding that is not present in LIVE code
+ */
+function statusBindingProblems(source) {
+  const problems = [];
+  // ⭐ Comments are masked BEFORE counting, and that one call is the whole
+  // difference between a pin that fires on a commented-out call site and one
+  // that does not. It also fixes the decoy rule's own blind spot in the right
+  // direction: a copy of a pinned spelling sitting in a comment is not a live
+  // call site, so it must neither satisfy the count nor inflate it.
+  // ⛔ Do not switch this back to raw `source` to make a reword green.
+  const live = maskComments(String(source));
+  /**
+   * EXACTLY ONE occurrence in LIVE code, not "at least one" — and the second
+   * direction is the one this was rewritten for. The OFF legs below sever a
+   * call site over a copy of this text, so anything that leaves a SECOND
+   * literal copy of a pinned spelling in live code (a needle written out
+   * longhand, a doc example in a template string) keeps this check green after
+   * the real call is gone. That is a decoy, and the first draft of this very
+   * function shipped one: its severing needles were plain string literals, the
+   * predicate matched THOSE, and both OFF legs read as passes. The OFF legs
+   * caught it.
+   *
+   * A copy inside a COMMENT is neither a decoy nor a call site — masking removes
+   * it from both sides of the count, which is the only consistent reading: the
+   * same commented line must not satisfy the rule when the real call is gone.
+   */
+  const bound = (re, what) => {
+    const hits = live.match(re)?.length ?? 0;
+    if (hits === 1) return;
+    problems.push(
+      hits === 0
+        ? what
+        : `${what} — and this spelling occurs ${hits} times in LIVE code; a second literal copy of a pinned call site is a DECOY that holds this check green after the real one is severed`,
+    );
+  };
+  bound(
+    /for \(const msg of statusFieldProblems\(item\)\) where\(msg\);/g,
+    'the item walk does not consume `statusFieldProblems(item)` — every status-keyed field rule (a planned item\'s `since`/`steps`/`personas`, and the release-and-steps rules for every other status) is then declared and never applied',
+  );
+  bound(
+    /const \{ problems, bearing \} = coverageEntryProblems\(entry\.items, statusOf\);/g,
+    'the capability-coverage limb does not call `coverageEntryProblems(entry.items, statusOf)` — the planned-items-are-not-coverage rule is then declared and never applied',
+  );
+  bound(
+    /for \(const msg of problems\) err\('coverage\.json', kind, msg\);/g,
+    'the capability-coverage limb computes `problems` and never reports them — an UNMAPPED kind is then found and swallowed',
+  );
+  bound(
+    /if \(bearing > 0\) mappedCount\+\+;/g,
+    'the capability-coverage limb does not gate `mappedCount` on `bearing` — a kind mapped only to planned items is then counted as covered on the OK line',
+  );
+  return problems;
+}
 
 const errors = [];
 const err = (file, id, msg) => errors.push(`${file}${id ? ` · ${id}` : ''}: ${msg}`);
@@ -745,8 +997,9 @@ let trapReachedVerdict = false;
 let provisioningReachedVerdict = false;
 let unreferencedReachedVerdict = false;
 let metaCallReachedVerdict = false;
-let citationsReachedVerdict = false;
+let lineCitationsReachedVerdict = false;
 let symbolAnchorsReachedVerdict = false;
+let plannedStatusReachedVerdict = false;
 
 // ── The self-test's own battery roster and floor (#13489, adopted here) ────
 //
@@ -775,18 +1028,54 @@ const BATTERY_TRAP_VOCABULARY = 'selfTestTrapVocabulary: the trap table, read an
 const BATTERY_PROVISIONING_USE = 'selfTestProvisioningUse: both `use` spellings and all three dangling shapes';
 const BATTERY_UNREFERENCED_RECIPES = 'selfTestUnreferencedRecipes: the reverse direction';
 const BATTERY_META_CALL_SPELLING = 'selfTestMetaCallSpelling: the folded `/meta` plural, read from the live contract';
-const BATTERY_SOURCE_LINE_CITATIONS = 'selfTestSourceLineCitations: the `:NNN` refusal and its silent neighbours';
-const BATTERY_SYMBOL_ANCHORS = 'selfTestSymbolAnchors: the anchor detector, the resolver and the floor';
+const BATTERY_LINE_CITATION_BINDING = 'selfTestLineCitationBinding: the corpus declaration, the absent fork, and the binding driven both ways';
+const BATTERY_SYMBOL_ANCHORS = 'selfTestSymbolAnchors: the corpus registration, the binding to the shared resolver, the residual and the floor';
+const BATTERY_PLANNED_STATUS = 'selfTestPlannedStatus: the `planned` accept set, the fields it relaxes, and the coverage ratchet driven BOTH ways';
 
 const SELF_TEST_BATTERIES = Object.freeze({
   [BATTERY_TRAP_VOCABULARY]: 22,
   [BATTERY_PROVISIONING_USE]: 34,
   [BATTERY_UNREFERENCED_RECIPES]: 19,
   [BATTERY_META_CALL_SPELLING]: 53,
-  [BATTERY_SOURCE_LINE_CITATIONS]: 19,
-  [BATTERY_SYMBOL_ANCHORS]: 40,
+  // 19 → 9 at #18592, and the SHAPE of the battery changed under it exactly as
+  // the symbol-anchor battery's did at #18107: the 19 spelling cases that
+  // pinned this file's own forked LINE-CITATION grammar moved into
+  // `scripts/symbol-anchors.mjs`'s battery (122 → 149 there), and 9 took their
+  // place — the corpus declaration, the source read that says no fork survives
+  // here, its control, the binding driven ON and OFF against ONE text, the DARK
+  // case that a citation both grammars already agreed on keeps its verdict, the
+  // over-firing refusal on this ledger's own colon-then-digit neighbours, and
+  // the live reading with its control.
+  [BATTERY_LINE_CITATION_BINDING]: 9,
+  // 40 → 42 at #18107, and the SHAPE of the battery changed under it: the 25
+  // detector/resolver cases that pinned this file's own forked grammar moved
+  // into `scripts/symbol-anchors.mjs`'s battery (93 → 122 there) and 27 took
+  // their place — the registration, the ONE-vocabulary pin, the live `runs/`
+  // exclusion in both directions, and every re-judged #16898 case, which
+  // ⛔ survives the transplant unchanged in verdict.
+  [BATTERY_SYMBOL_ANCHORS]: 42,
+  // New with the `planned` status. Set at its landed count (headroom 0, the
+  // convention every entry above uses). The load-bearing third of it is the
+  // coverage direction: the live ledger carries ZERO planned items today, so
+  // nothing but these fixtures can tell a working ratchet rule from a deleted
+  // one — the unreferenced-recipe argument, applied to a rule whose subject
+  // population is empty on purpose rather than by luck.
+  //
+  // 28 → 38: the fixtures above drive two PURE functions and so could say
+  // nothing about whether anything CALLS them. Both call sites were severed and
+  // measured green at 207/207 (this branch, `22453417e1`), so the G-rows pin the
+  // BINDINGS by a source read driven ON and OFF, and two F-rows pin the `since`
+  // rule's own limit in the direction it deliberately does not go.
+  //
+  // 38 → 42: that first pin counted RAW source, so commenting a pinned call out
+  // IN PLACE left it green — the commented line was the one occurrence. Counting
+  // over comment-MASKED source closes it; G9–G11 are what keep the mask, and
+  // G12 records in an assertion what the pin still cannot see. Measured on this
+  // branch at `b835196bc1`: reverting the mask reds G9, G10 and G11 and nothing
+  // else.
+  [BATTERY_PLANNED_STATUS]: 42,
 });
-const SELF_TEST_BATTERY_FLOOR = 6;
+const SELF_TEST_BATTERY_FLOOR = 7;
 
 /**
  * @param {Record<string, number>} ran battery name -> assertions it reported
@@ -1269,102 +1558,121 @@ export const NEIGHBOURING_MAP: Readonly<Record<string, string>> = Object.freeze(
   return { checked, failures };
 }
 
-// ── Source-line citations ───────────────────────────────────────────────────
+// ── Line citations ─ ONE grammar, reached by the SAME registration ─────────
+//
 // An item's `source` (and the prose beside it) is the evidence pointer a later
 // runner uses to decide whether the item still describes reality. This ledger
 // used to pin those pointers at `file:line` — and a line number is the ONE part
 // of a citation that rots on an edit the citation has nothing to do with: two
 // TSDoc blocks widening in the cited file shift every symbol below them, and
-// every pinned line silently starts naming something else. Nothing here
-// resolved a citation, so the rot was exit-0 by construction: the pointer keeps
-// reading as "verified against source" while pointing somewhere else, which is
-// strictly worse than no pointer at all.
+// every pinned line silently starts naming something else. Nothing resolved a
+// citation, so the rot was exit-0 by construction: the pointer keeps reading as
+// "verified against source" while pointing somewhere else, which is strictly
+// worse than no pointer at all. The whole class was stripped (#13482 → #13786),
+// and what remains is keeping it from coming back.
 //
-// The whole class was stripped: `file` plus the symbol name is the load-bearing
-// half and does not rot in place. This check keeps them from coming back. It is
-// deliberately NOT a symbol resolver (that is the follow-up) — it is the cheap
-// half, and the cheap half is the one that removes a false signal today.
+// ⛔ THERE IS NO DETECTOR HERE ANY MORE, and its absence is the deliverable
+// (#18592). It used to be `SOURCE_LINE_CITATION` / `findSourceLineCitations`
+// plus a family-file loop of their own — a SECOND grammar for the same rule,
+// beside the shared one the symbol-anchor limb had already moved to at #18107.
+// The two had drifted in BOTH directions, each recognising spellings the other
+// did not, and neither could see it: two graders, two greens, one rule.
 //
-// A citation is a colon-then-digits reached one of two ways, because the ledger
-// spelled it both ways: anchored to a source filename (`<file>.ts:158`, the
-// placeholder spelling `scripts/symbol-anchors.mjs#ANCHOR_GRAMMAR` uses),
-// or BARE, continuing a filename named earlier in the same sentence
-// (`ManifestSchema id :140 and version :202`). The bare half is why a plain
-// "filename followed by a colon" rule is not enough — and the bare half is the
-// worse one, since it carries no file at all, only a number.
+// ⭐ The direction is the 2026-09-01 ruling written in the shared core's own
+// header, verbatim: 「⛔ Do not fork this file for a second corpus; if a corpus
+// needs behaviour this core lacks, **widen the core**」and「Two copies of that
+// rule drift, and they drift **SILENTLY**」. So the core was widened, and the
+// five spelling classes that were this file's alone went with it:
 //
-// The second branch is a negative lookbehind rather than a list of allowed
-// prefixes: it is what separates a citation from the neighbours that share the
-// colon-then-digit shape, all of which occur in this ledger and must stay
-// silent — HTTP status (`status:409`), config literals (`{maxRetries:3}`),
-// ports (`http://localhost:3000`), clock times (`08:00`, `...T00:00:00Z`) and
-// JSON quoted in prose (`{"scannedTypes":1}`). Each is pinned below.
+//   the bare colon continuation      `ManifestSchema id :140 and version :202`
+//   the parenthesised bare form      `holds ONLY auditor (:395)`
+//   the `~:` approximation           `computeAuthGate ~:5084-5160`
+//   the `L` line pin                 `registerRecordShareEndpoints ~L7246-7331`
+//   the `html` extension             a citation into a template page
 //
-// A THIRD branch was added by #13788, measured rather than reasoned: sweeping
-// the ledger for anchorable citations turned up four line pins the two
-// branches above do not reach — `AiChatPage.tsx:~605-615` (the tilde INSIDE
-// the colon form, where the battery only ever pinned `~:`) and the `~L7246-7331`
-// spelling, which carries no colon at all. Both read exactly like the class
-// step (1) removed, and both sat green through it. The `L` form needs its own
-// left boundary so an identifier ending in a capital L before digits
-// (`SQL2019`) is not read as a line pin.
-const SOURCE_LINE_CITATION =
-  /(?:\.(?:ts|tsx|mts|cts|js|mjs|cjs|json|jsonc|md|mdx|ya?ml|sql|css|html|sh|py|toml)|(?<![A-Za-z0-9_"])):~?\d+(?:-\d+)?|(?<![A-Za-z0-9_])~?L\d{2,}(?:-\d+)?(?![A-Za-z0-9_])/g;
+// The first four are the corpus declaration `pathlessLineCitations` and the
+// approximation tilde now admitted inside the colon form; the fifth is a row in
+// the shared anchorable vocabulary. The verdict a citation gets is unchanged in
+// every case — this is a FOLD, not a re-grading — and the direction the fold
+// moved in the OTHER sense is a strict gain: the shared grammar already caught
+// the tilde bare-number form, the comma continuation and five extensions this
+// file's grammar was blind to, and those now reach this corpus too.
+//
+// What this limb owes now is exactly what the symbol-anchor limb owes: that
+// THIS corpus reaches that one grammar, declares what it needs from it, and
+// carries none of its own. `selfTestLineCitationBinding` below is that, driven
+// live in both directions on a synthetic corpus — the citation is a finding
+// with the declaration, and is not one without it.
 
 /**
- * @param {string} text
- * @returns {string[]} every line-number citation in `text`, with context
+ * ⛔ NOT a grammar, and not a detector — the two things this limb used to be.
+ * Every spelling case that lived here moved into
+ * `scripts/symbol-anchors.mjs`'s own battery, firing rows and silent
+ * neighbours alike. ⭐ A case is not deleted by moving; it is deleted by
+ * stopping. What is owed here is the BINDING: that this corpus reaches the one
+ * grammar, declares from it what its data shape needs, and carries none of its
+ * own — driven in BOTH directions, because a case that only ever says "found"
+ * cannot tell a working declaration from a text that would have matched
+ * anyway.
  */
-function findSourceLineCitations(text) {
-  const hits = [];
-  for (const m of text.matchAll(SOURCE_LINE_CITATION)) {
-    const from = Math.max(0, m.index - 55);
-    hits.push(`${text.slice(from, m.index)}«${m[0]}»${text.slice(m.index + m[0].length, m.index + m[0].length + 20)}`.replace(/\s+/g, ' '));
-  }
-  return hits;
-}
-
-/**
- * Both directions, because this detector's whole value is the boundary: it must
- * fire on every spelling of a line citation the ledger actually used, and stay
- * silent on the five colon-then-digit shapes that legitimately live beside them.
- * A detector that over-fires would be silenced by the first author it blocked.
- */
-function selfTestSourceLineCitations() {
+function selfTestLineCitationBinding() {
   const failures = [];
   let checked = 0;
-  const t = (what, ok) => {
+  const t = (what, ok, note = '') => {
     checked++;
-    if (!ok) failures.push(what);
+    if (!ok) failures.push(`${what}${note ? ` — ${note}` : ''}`);
   };
-  const n = (s) => findSourceLineCitations(s).length;
+  const OWN_SOURCE = readFileSync(new URL(import.meta.url).pathname, 'utf8');
 
-  // FIRES — the spellings this ledger actually carried.
-  t('C1 a file-anchored citation is caught', n('packages/spec/src/kernel/manifest.zod.ts:158') === 1);
-  t('C2 a line RANGE is caught, as one hit not two', n('rest-server.ts:1276-1331') === 1);
-  t('C3 a bare continuation citation is caught', n('ManifestSchema id :140 and version :202') === 2);
-  t('C4 a parenthesised bare citation is caught', n('Ada Auditor holds ONLY auditor (:395)') === 1);
-  t('C5 an approximate `~:` citation is caught', n('computeAuthGate ~:5084-5160') === 1);
-  t('C6 a comma/slash-chained run is caught in full', n('storage-routes.ts:241-243,:255,:267') === 3);
+  // ── the DECLARATION, and no grammar behind it ────────────────────────────
+  t('D1 the corpus DECLARES its path-less citations — this ledger continues a filename it has already named, and without the declaration the shared grammar requires a path',
+    CORPUS.pathlessLineCitations === true);
+  /* ⚠️ NAME-BASED and PREFIX-matched, exactly as V2 below: a fork under a
+   * nearby name is a fork. The residual gap is the same one and is stated
+   * rather than papered over — a grammar under a name sharing none of these
+   * tokens is invisible here, which is why D3 keeps the READ honest. */
+  const noLocal = (name) => !new RegExp(`\\b(?:const|let|var)\\s+${name}\\w*\\s*=`).test(OWN_SOURCE);
+  t('D2 this gate defines NO line-citation grammar of its own — no citation regex, no detector, no family loop of its own',
+    noLocal('SOURCE_LINE_CITATION') && noLocal('LINE_CITATION') && noLocal('LINE_ANCHOR')
+      && !/\bfunction\s+findSourceLineCitations\w*\b/.test(OWN_SOURCE)
+      && !/\bfunction\s+findLineCitations\w*\b/.test(OWN_SOURCE));
+  t('D3 CONTROL for D2 — the same source read DOES find the declaration, so a green above is "no fork" and not "the read returned nothing"',
+    /pathlessLineCitations:\s*true/.test(OWN_SOURCE) && /sweepCorpus\(CORPUS, ROOT\)/.test(OWN_SOURCE));
 
-  // FIRES — the two spellings #13788 measured still in the ledger after step (1).
-  t('C7 a colon-TILDE citation is caught — the tilde inside the colon form', n('AiChatPage.tsx:~605-615') === 1);
-  t('C8 a `~L` line pin is caught, colon or no colon', n('registerRecordShareEndpoints ~L7246-7331') === 1);
-  t('C9 a bare `L` line pin is caught', n('the evaluate leg L7477-7493') === 1);
+  // ── the binding, BOTH DIRECTIONS on the SAME text ────────────────────────
+  //
+  // ⭐ The declaration is read off `CORPUS` rather than written as a literal,
+  // so deleting it from the registration fails B1 instead of leaving a case
+  // that passes on a flag nothing reads.
+  const declared = { unspannedAnchors: CORPUS.unspannedAnchors, pathlessLineCitations: CORPUS.pathlessLineCitations };
+  const cited = 'ManifestSchema id :140 and the leg ~L7246-7331';
+  t('B1 ON — a path-less citation in THIS ledger’s shape is read as a line anchor by the shared grammar, through the declarations this corpus makes',
+    extractAnchors(cited, declared).lineAnchors.length === 2,
+    JSON.stringify(extractAnchors(cited, declared).lineAnchors.map((l) => l.raw)));
+  t('B2 OFF — the SAME text is not read without the declaration, so B1 is the declaration doing the work and not a text that would have matched anyway',
+    extractAnchors(cited, { unspannedAnchors: CORPUS.unspannedAnchors }).lineAnchors.length === 0);
+  t('B3 DARK — a citation BOTH grammars already agreed on keeps its verdict, with the declaration and without it: the fold re-grades nothing that was already judged',
+    extractAnchors('a pin at packages/spec/src/kernel/x.zod.ts:158 here', declared).lineAnchors.length === 1
+      && extractAnchors('a pin at packages/spec/src/kernel/x.zod.ts:158 here', {}).lineAnchors.length === 1);
+  /* ⛔ The over-firing direction, which is the whole risk of admitting a
+   * citation that carries no path: THIS ledger is dense with colon-then-digit
+   * text that is not a pin. One case, not a battery — every one of these is
+   * pinned by name beside the grammar, and repeating them here would be the
+   * second copy this card exists to delete. */
+  t('B4 the neighbours this ledger is full of stay silent under the declaration — an HTTP status, a config literal, a URL port, a clock time and JSON quoted in prose',
+    extractAnchors('status:409 {maxRetries:3} http://localhost:3000/_console/ 08:00 {"scannedTypes":1}', declared).lineAnchors.length === 0);
 
-  // STAYS SILENT — the neighbours that share the colon-then-digit shape.
-  t('S1 an HTTP status in prose is not a citation', n("thrown {code:'DELETE_RESTRICTED', status:409}") === 0);
-  t('S2 a config literal is not a citation', n('retry {maxRetries:3, backoffMs:1000}') === 0);
-  t('S3 a URL port is not a citation', n('probe http://localhost:3000/_console/') === 0);
-  t('S4 a clock time is not a citation', n('daily 08:00 UTC; today() == 2026-08-31T00:00:00Z') === 0);
-  t('S5 JSON quoted in prose is not a citation', n('a 200 {"scannedTypes":1,"stats":{}}') === 0);
-  t('S6 an ADR section reference is not a citation', n('ADR-0025 §3.3 and #13479') === 0);
-  t('S7 the README placeholder spelling of the ban is not itself a citation', n('never pin `file.ts:NNN` or a bare `:NNN`') === 0);
-  t('S8 a capital L ending an identifier before digits is not a line pin', n('SQL2019 and a TTL3600 budget') === 0);
-  t('S9 an i18n-style token is not a line pin', n('the L10n bundle') === 0);
-  t('S10 a one-digit `L` reference is not a line pin — the floor is two digits', n('lane L1 of the queue') === 0);
+  // ── the LIVE reading, so the zero above the console line prints is a
+  //    reading and not an instrument that stopped ──────────────────────────
+  const liveSweep = sweepCorpus(CORPUS, ROOT);
+  const liveLineAnchors = liveSweep.findings.filter((f) => f.kind === 'line-anchor');
+  t('B5 the live family carries NO line citation — the class the migration deleted has not come back',
+    liveLineAnchors.length === 0,
+    liveLineAnchors.map((f) => `${f.doc}:${f.line} ${f.raw}`).join(', '));
+  t('B6 CONTROL for B5 — the same sweep over the same family DID read anchors, so the zero above is a reading and not a sweep that reached nothing',
+    liveSweep.counts.anchors > 0, `${liveSweep.counts.anchors} anchor(s)`);
 
-  citationsReachedVerdict = true;
+  lineCitationsReachedVerdict = true;
   return { failures, checked };
 }
 
@@ -1436,65 +1744,100 @@ function selfTestSourceLineCitations() {
 //
 // ## Why anchors are not authored on every citation
 //
-// Only extensions this gate can read are anchorable (`ANCHORABLE_EXTENSIONS`);
-// an anchor on anything else is an ERROR rather than a silent skip, because a
-// spelling that resolves nowhere is exactly the false pointer above. Citations
-// that name a sibling repo (`objectui …`), a document, or a file with no symbol
-// worth naming stay BARE — a bare citation is honest, and this check is not the
-// place to force one into a shape it does not have. The floor below is what
+// Citations that name a sibling repo, a document, or a file with no symbol
+// worth naming stay BARE — a bare citation is honest, and this check is not
+// the place to force one into a shape it does not have. The floor below is what
 // keeps that door from swinging the other way.
-const ANCHORABLE_EXTENSIONS = new Set(['ts', 'tsx', 'mts', 'cts', 'js', 'mjs', 'cjs', 'json']);
-
-// The path half is required — that is what separates an anchor from the two
-// `#` shapes this ledger is full of and must never read as one: a GitHub issue
-// reference (`#13788`, `objectui#2563`) and a URL fragment. A path here must
-// carry a slash and an extension, and the symbol half must open with an
-// identifier character, so `schema.json#/$defs/x` is a fragment, not an anchor.
-const SYMBOL_ANCHOR =
-  /(?<![A-Za-z0-9_$@\-/])((?:[A-Za-z0-9_.\-]+\/)+[A-Za-z0-9_.\-]+\.([A-Za-z]{1,4}))#([A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*)/g;
-
-/**
- * @param {string} text
- * @returns {Array<{file: string, ext: string, symbol: string, anchor: string}>}
- */
-function findSymbolAnchors(text) {
-  const out = [];
-  for (const m of text.matchAll(SYMBOL_ANCHOR)) {
-    out.push({ file: m[1], ext: m[2].toLowerCase(), symbol: m[3], anchor: m[0] });
-  }
-  return out;
-}
-
-/**
- * Which segments of a (possibly dotted) anchor symbol are NOT in the source.
- * Every segment must be present: `Foo.bar` naming a member that was dropped is
- * the same rot as `Foo` being dropped, and reporting the whole anchor as
- * present because its first half survived is the fail-open one level down.
- *
- * ⛔ THE VERDICT IS NOT TAKEN HERE. Each segment goes to
- * `scripts/symbol-anchors.mjs#symbolResolutionClass`, which owns the rule for
- * every anchor corpus in this tree; the per-segment split above it is this
- * corpus's anchor GRAMMAR (the shared grammar's `#symbol` carries no dot), not
- * a rule about what "present" means. A matcher of any kind inside this body is
- * the fork the ruling forbids, and `selfTestSymbolAnchors`'s N5 reads this
- * source to say so.
- *
- * The target extension is derived by the shared module from `filePath`, so the
- * `.json`-is-not-masked special case this function used to carry is gone with
- * the rest of the private rule: JSON resolves against KEYS there.
- *
- * @param {string} source raw file text
- * @param {string} filePath repo-relative path of the cited file
- * @param {string} symbol the anchor's symbol, dots allowed
- * @returns {string[]}
- */
-function absentAnchorSegments(source, filePath, symbol) {
-  const absent = [];
-  for (const seg of symbol.split('.')) {
-    if (!symbolResolutionClass(source, filePath, seg)) absent.push(seg);
-  }
-  return absent;
-}
+//
+// ⭐ THE CORPUS REGISTRATION (#18107) — and why this file now holds no
+// grammar of its own.
+//
+// #16898 (PR #18100) bound the VERDICT to the shared resolver. It left the
+// DETECTOR forked, and the 2026-09-01 ruling this gate's resolver reproduces is
+// explicit that the two halves travel together: a corpus joins by REGISTRATION,
+// and 「if a corpus needs behaviour this core lacks, **widen the core**」.
+//
+// The fork was not inert. Measured on `main` at `4bd2c60e81`, two constants
+// named `ANCHORABLE_EXTENSIONS` existed in this tree, one module importing the
+// other, with different contents: the shared one carried 23 extensions and the
+// private one 8 — a strict subset. And an extension outside the private set was
+// not SKIPPED here, it was a hard ERROR, so the same anchor spelling was a
+// resolved anchor in one governed corpus and a refusal in another. That is
+// precisely 「each gate stays green on its own corpus while meaning something
+// different by "resolves"」. The detector had drifted a second way too: the
+// shared extractor skips code fences and honours `anchor-exempt` markers, and
+// the private `matchAll` did neither.
+//
+// ⚠️ Registering needed the core widened, which is the ruling's own exit and
+// ⛔ NOT a widening of the RESOLUTION RULE — the thing #18100's error text
+// forbids widening, and still forbids. Two different surfaces:
+//
+//   * what counts as the symbol being PRESENT in the cited file — unchanged,
+//     and ⛔ nothing here may loosen it to clear a red;
+//   * how a citation is WRITTEN and which documents are swept — corpus data,
+//     and that is what was widened.
+//
+// Three declarations this corpus needed and the core did not have:
+//
+//   `unspannedAnchors: true`  Every citation here lives inside a JSON string
+//       value, where a backtick is payload rather than a code span. Measured
+//       before registration: the private detector found 634 anchors where the
+//       spanned grammar found 8. That 626-anchor gap — not the `runs/` walker —
+//       is what had kept this corpus forked.
+//   `excludeDirs: ['runs']`   `docPattern` is a regex on the BASENAME and
+//       cannot see a directory, so "the family MINUS `runs/`" had no spelling.
+//       Run records are outputs; see `familyFiles` above.
+//   `pathlessLineCitations: true`  (#18592) This ledger writes a second pointer
+//       into a file it has already named — `ManifestSchema id :140 and version
+//       :202` — and an `L` pin beside it. Both carry NO path of their own, and
+//       both were the last thing this file still detected with a grammar of its
+//       own. ⛔ Default OFF everywhere else, and that is a measurement rather
+//       than caution: in PROSE a colon before digits is punctuation, so the two
+//       spellings turned on there admit ports, scenario labels and docblock
+//       back-references, and in the PROJECTED corpora that population was
+//       re-measured to buy unjudged residual and NOT ONE finding an author
+//       could act on. In DATA, beside the filename they continue, they are
+//       line pins.
+//
+//       ⛔ That measurement is CITED from here and no longer RESTATED here
+//       (#18913). The corpus-wide tally this entry used to carry was a
+//       RAW-REGEX count, and the re-take named it void: it subtracted neither
+//       the fenced blocks the extractor skips nor the citations the
+//       path-anchored passes had already recorded, so it overstated what the
+//       option admits by about a half. ⭐ Retyping the corrected figure here
+//       would rot the same way, because a reading is a count plus the tree it
+//       was taken against and this entry never carried a tree — so the reading
+//       stays with the grammar that admits the two spellings,
+//       `scripts/symbol-anchors.mjs#PATHLESS_COLON_CITATION`, where the re-take
+//       names its own tree. That anchor is resolved on every PR by
+//       `check:scripts-symbol-anchors`; a digit is gated by nothing. Re-take it
+//       THERE.
+//
+//       ⭐ And what makes THIS declaration legal is not a cost reading at all:
+//       `scripts/symbol-anchors.mjs#defineCorpus` REFUSES the option to any
+//       corpus declaring a `docProjection` (#18845), at registration. A
+//       projection is a corpus saying its judged text is authored PROSE; this
+//       one declares none and sweeps its documents raw. That test is
+//       mechanical, and this registration passes it.
+//
+// The dotted `#Outer.member` form this ledger's grammar carried is now the
+// shared grammar's, and `sweepCorpus` requires EVERY segment to resolve — the
+// capability moved into the core rather than being dropped with the fork.
+/* ⛔ NOT exported, and that is `scripts/check-entry-guard.mjs`'s rule rather
+ * than a style choice: this file's top level RUNS the gate, so a single export
+ * would make it importable for that binding and run the whole gate — including
+ * its `process.exit` — inside the importer. The sibling corpus gates export
+ * their `CORPUS` because their dispatch sits behind `isEntrypoint`; this one's
+ * does not, and nothing outside reads this corpus. */
+const CORPUS = defineCorpus({
+  id: 'platform-checklist',
+  label: 'the standing platform test checklist (docs/qa/platform-checklist)',
+  docRoots: [CHECKLIST_REL],
+  docPattern: /\.(json|md)$/,
+  excludeDirs: ['runs'],
+  unspannedAnchors: true,
+  pathlessLineCitations: true,
+});
 
 // ── The residual the binding measured (#16898) ────────────────────────
 //
@@ -1524,11 +1867,12 @@ function absentAnchorSegments(source, filePath, symbol) {
 //   string-substring   the symbol survives only INSIDE a longer string token:
 //                      `saveItem` in `client: 'meta.saveItem'`, `:shareId` in a
 //                      route pattern, a name inside an `it(...)` title or a
-//                      `.describe(...)` sentence. 29 rows, the largest class.
+//                      `.describe(...)` sentence. 12 rows, still the largest
+//                      class.
 //   import-only        the cited file IMPORTS the symbol; the declaration is in
-//                      another file. 9 rows.
+//                      another file. 6 rows.
 //   member-access      the symbol survives only as `x.symbol` on some other
-//                      object — `manifest.objectExtensions`. 3 rows.
+//                      object — `manifest.objectExtensions`. 2 rows.
 //   json-value-not-key the `.json` target carries the symbol as a VALUE; the
 //                      shared rule reads JSON KEYS. 3 rows.
 //   regex-literal      the symbol survives only inside a regex literal. 1 row.
@@ -1538,13 +1882,63 @@ function absentAnchorSegments(source, filePath, symbol) {
 //                      truncated an item-id reference at its first hyphen and
 //                      produced a phantom `#access`, which the permissive rule
 //                      then resolved against the spelling `access-security`.
-//                      1 row — the sharpest single illustration of what a
-//                      looser second resolver buys.
+//                      the sharpest single illustration of what a looser second
+//                      resolver buys. 0 rows — DRAINED by the second slice, and
+//                      the reading is kept because the shape is not: its one row
+//                      was `bad-citation` BY VERDICT, and `shape` only ever said
+//                      why the withdrawn rule used to resolve it. ⚠️ A reader who
+//                      takes the shape for the disposition is sent at the
+//                      DETECTOR, which since #18107 is `scripts/symbol-anchors.mjs`
+//                      — the file this card forbids by name. Repaired
+//                      citation-side like the other twelve: the truncation was
+//                      not even happening any more — the citation's fragment
+//                      was followed by a SPACE — so the symbol it named was
+//                      simply a key `areas/access-security.json` does not
+//                      declare. ⚠️ That fragment is spelled in WORDS here and
+//                      not in a code span: a lone fragment span is a
+//                      CONTINUATION anchor, so writing it would file this
+//                      comment as the citation the row was.
+//
+// ⭐ THE DRAIN (#18104). The `bad-citation` half is a population with an owner,
+// and it leaves this ledger ONE WAY: the citation is re-pointed at what the
+// cited file actually declares, the row goes, and the ceiling below comes down
+// by the same number in the same edit. ⛔ Never by raising the ceiling, ⛔ never
+// by widening `scripts/symbol-anchors.mjs`, ⛔ never by lowering a file floor —
+// a repair moves an anchor from `residual` to `resolved` and leaves the floor
+// population untouched, which is why draining costs no floor headroom at all.
+//
+// ⚠️ The binding measurement above (56 of 633, at #16898) is a DATED READING of
+// the tree it was taken against and is left standing as one. It is not this
+// ledger's current size: the drain lands per area file, so read the live count
+// off `SHARED_RESOLVER_RESIDUAL.length` and the console line, never off that
+// paragraph. First slice landed (#18104): `areas/access-security.json`,
+// `areas/api-backend.json` and `areas/automation.json` — 9 rows, all of them
+// citations naming a route table's client-method names or route path
+// parameters where the declaration the item means is the ledger export itself.
+// Second slice landed (#18104): `areas/identity-auth.json` — 13 rows, the
+// largest single-file block, the same reading applied plus three of its own: an
+// import-only persona whose constant had MOVED to another file (the path was
+// re-pointed, not the symbol), a `.json` cross-area citation re-pointed at the
+// `items` block it means, and the `detector-artifact` row above. ⚠️ That file
+// still carries its 2 `accept-set` rows and that is CORRECT, not half-done:
+// they are #18101's, and reaching them means widening the shared core.
+// Third slice landed (#18104): `areas/cli.json`, `areas/platform-core.json`
+// and `areas/records-forms.json` — 15 rows, the three largest remaining
+// `bad-citation` blocks taken together. Two classes recur from the slices
+// above (a route PATH PARAMETER re-pointed at the ledger export, a symbol the
+// cited file only IMPORTS re-pointed at what it declares) and three are this
+// slice's own: an error code cited in the LOWER-CASE spelling where the test
+// pins the ADR-0112 SCREAMING_SNAKE one, a manifest VALUE re-pointed at the
+// `scripts.dev` key pair that carries it, and a member read off a manifest or
+// a capability re-pointed at the function whose body does the reading.
+// ⚠️ `areas/records-forms.json` still carries its 2 `accept-set` rows, for
+// the same reason `areas/identity-auth.json` does: that file mixes both
+// verdicts, so a slice judges it ROW BY ROW BY VERDICT, never by file.
 //
 // `verdict` is the classification #16898's acceptance asks for, and there are
 // exactly two:
 //
-//   bad-citation  (47 rows) the anchor names a symbol the cited file does not
+//   bad-citation  (10 rows) the anchor names a symbol the cited file does not
 //                 declare. The repair is in the LEDGER: re-point the anchor at
 //                 what the file carries, or drop to a bare citation. ⚠️ Dropping
 //                 costs the file an anchor and most floors have no headroom, so
@@ -1559,57 +1953,20 @@ function absentAnchorSegments(source, filePath, symbol) {
 //                 the core to reach them: it is shared with four other corpora
 //                 and widening it would export this defect to all of them.
 const SHARED_RESOLVER_RESIDUAL = Object.freeze([
-  { doc: 'areas/access-security.json', anchor: 'packages/rest/src/rest-route-ledger.ts#saveItem', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/access-security.json', anchor: 'packages/rest/src/rest-route-ledger.ts#shareId', shape: 'string-substring', verdict: 'bad-citation' },
   { doc: 'areas/ai.json', anchor: 'packages/mcp/src/plugin.ts#OS_MCP_SERVER_ENABLED', shape: 'string-substring', verdict: 'bad-citation' },
   { doc: 'areas/ai.json', anchor: 'packages/runtime/src/domains/ai.ts#capabilityUnavailable', shape: 'import-only', verdict: 'bad-citation' },
-  { doc: 'areas/api-backend.json', anchor: 'packages/rest/src/rest-route-ledger.ts#REST', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/api-backend.json', anchor: 'packages/runtime/src/route-ledger.ts#getLegalNextStates', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/api-backend.json', anchor: 'packages/triggers/trigger-api/src/trigger-api-route-ledger.ts#flowName', shape: 'string-substring', verdict: 'bad-citation' },
   { doc: 'areas/approvals.json', anchor: 'examples/app-showcase/src/security/seed-approval-demo.ts#AUDITOR_DEMO_USER', shape: 'import-only', verdict: 'bad-citation' },
   { doc: 'areas/attachments-storage.json', anchor: 'packages/spec/liveness/field.json#live', shape: 'json-value-not-key', verdict: 'bad-citation' },
-  { doc: 'areas/automation.json', anchor: 'examples/app-showcase/objectstack.config.ts#ConnectorRestPlugin', shape: 'import-only', verdict: 'bad-citation' },
-  { doc: 'areas/automation.json', anchor: 'packages/runtime/src/route-ledger.ts#getRuntimeStatus', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/automation.json', anchor: 'packages/runtime/src/route-ledger.ts#getScreen', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/automation.json', anchor: 'packages/runtime/src/route-ledger.ts#runId', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/cli.json', anchor: 'packages/cli/src/commands/compile.ts#emitJson', shape: 'import-only', verdict: 'bad-citation' },
-  { doc: 'areas/cli.json', anchor: 'packages/cli/src/commands/doctor-deprecation-hint-commands.test.ts#Doctor', shape: 'import-only', verdict: 'bad-citation' },
-  { doc: 'areas/cli.json', anchor: 'packages/cli/src/utils/format.exit-code.test.ts#emitJson', shape: 'import-only', verdict: 'bad-citation' },
-  { doc: 'areas/cli.json', anchor: 'packages/create-objectstack/src/templates/blank/package.json#objectstack', shape: 'json-value-not-key', verdict: 'bad-citation' },
-  { doc: 'areas/cli.json', anchor: 'packages/verify/src/verify.ts#VALIDATION_FAILED', shape: 'regex-literal', verdict: 'bad-citation' },
   { doc: 'areas/dashboards.json', anchor: 'examples/app-showcase/src/data/seed/index.ts#sales_region', shape: 'inline-key', verdict: 'accept-set' },
   { doc: 'areas/dashboards.json', anchor: 'examples/app-showcase/src/data/seed/index.ts#signed_on', shape: 'inline-key', verdict: 'accept-set' },
-  { doc: 'areas/identity-auth.json', anchor: 'docs/qa/platform-checklist/areas/access-security.json#access', shape: 'detector-artifact', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'examples/app-showcase/src/security/seed-approval-demo.ts#PHONE_DEMO_USER', shape: 'import-only', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/platform-objects/src/identity/sys-member.object.ts#BUILTIN_MEMBERSHIP_ROLE_OPTIONS', shape: 'import-only', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/platform-objects/src/identity/sys-oauth-application.object.ts#OAuth', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/plugins/plugin-auth/src/auth-route-ledger.ts#bootstrapStatus', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/plugins/plugin-auth/src/auth-route-ledger.ts#linkSocial', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/plugins/plugin-auth/src/auth-route-ledger.ts#revokeOthers', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/plugins/plugin-auth/src/auth-route-ledger.ts#sendVerificationEmail', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/plugins/plugin-auth/src/auth-route-ledger.ts#setActive', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/plugins/plugin-auth/src/auth-route-ledger.ts#updateUser', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/plugins/plugin-security/src/security-plugin.ts#__referentialFieldClear', shape: 'member-access', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/qa/dogfood/test/membership-role-vocabulary.dogfood.test.ts#PermissionSet', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/rest/src/rest-route-ledger.ts#describeDelegableScope', shape: 'string-substring', verdict: 'bad-citation' },
   { doc: 'areas/identity-auth.json', anchor: 'packages/spec/src/kernel/public-auth-features.ts#sys_invitation', shape: 'dotted-string-head', verdict: 'accept-set' },
   { doc: 'areas/identity-auth.json', anchor: 'packages/spec/src/kernel/public-auth-features.ts#sys_user', shape: 'dotted-string-head', verdict: 'accept-set' },
   { doc: 'areas/integration-system.json', anchor: 'examples/app-showcase/objectstack.config.ts#declarativeStdio', shape: 'inline-key', verdict: 'accept-set' },
   { doc: 'areas/integration-system.json', anchor: 'examples/app-showcase/src/system/datasources/showcase-external.datasource.ts#onMismatch', shape: 'inline-key', verdict: 'accept-set' },
   { doc: 'areas/integration-system.json', anchor: 'packages/services/service-messaging/src/messaging-service.ts#PreferenceResolver', shape: 'import-only', verdict: 'bad-citation' },
   { doc: 'areas/integration-system.json', anchor: 'packages/spec/liveness/email_template.json#requireVars', shape: 'json-value-not-key', verdict: 'bad-citation' },
-  { doc: 'areas/platform-core.json', anchor: 'packages/objectql/src/engine.ts#objectExtensions', shape: 'member-access', verdict: 'bad-citation' },
-  { doc: 'areas/platform-core.json', anchor: 'packages/plugins/plugin-auth/src/auth-plugin.ts#Providers', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/platform-core.json', anchor: 'packages/qa/dogfood/test/package-first-authoring.dogfood.test.ts#writable_package_required', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/platform-core.json', anchor: 'packages/runtime/src/domains/notifications.ts#markRead', shape: 'member-access', verdict: 'bad-citation' },
-  { doc: 'areas/platform-core.json', anchor: 'packages/runtime/src/route-ledger.ts#commitId', shape: 'string-substring', verdict: 'bad-citation' },
   { doc: 'areas/records-forms.json', anchor: 'examples/app-showcase/src/data/objects/business-unit.object.ts#allowCreate', shape: 'inline-key', verdict: 'accept-set' },
-  { doc: 'areas/records-forms.json', anchor: 'examples/app-showcase/src/data/seed/index.ts#Specimen', shape: 'string-substring', verdict: 'bad-citation' },
   { doc: 'areas/records-forms.json', anchor: 'examples/app-showcase/src/ui/actions/index.ts#maxSize', shape: 'inline-key', verdict: 'accept-set' },
-  { doc: 'areas/records-forms.json', anchor: 'packages/lint/src/validate-action-locations.ts#action', shape: 'local-binding', verdict: 'bad-citation' },
-  { doc: 'areas/records-forms.json', anchor: 'packages/rest/src/rest-route-ledger.ts#jobId', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/records-forms.json', anchor: 'packages/spec/src/data/object.zod.ts#FEEDS_DISABLED', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/records-forms.json', anchor: 'packages/spec/src/data/object.zod.ts#query', shape: 'string-substring', verdict: 'bad-citation' },
   { doc: 'areas/studio-authoring.json', anchor: 'packages/objectql/src/overlay-precedence.test.ts#not_overridable', shape: 'string-substring', verdict: 'bad-citation' },
   { doc: 'areas/studio-authoring.json', anchor: 'packages/rest/src/meta-write-actor-identity.test.ts#Actor', shape: 'string-substring', verdict: 'bad-citation' },
   { doc: 'areas/studio-authoring.json', anchor: 'packages/rest/src/rest-route-ledger.ts#getHistory', shape: 'string-substring', verdict: 'bad-citation' },
@@ -1620,7 +1977,7 @@ const SHARED_RESOLVER_RESIDUAL = Object.freeze([
 // fail), so this is the belt on the braces: a silent append — the one edit that
 // would turn a closed ledger back into a permissive rule, one row at a time —
 // refuses here rather than validating.
-const SHARED_RESOLVER_RESIDUAL_CEILING = 55;
+const SHARED_RESOLVER_RESIDUAL_CEILING = 18;
 
 const residualKey = (doc, anchor) => `${doc}::${anchor}`;
 const SHARED_RESOLVER_RESIDUAL_INDEX = new Map(
@@ -1701,34 +2058,116 @@ function selfTestSymbolAnchors() {
     checked++;
     if (!ok) failures.push(`${what}${note ? ` — ${note}` : ''}`);
   };
-  const a = (s) => findSymbolAnchors(s);
+  const OWN_SOURCE = readFileSync(new URL(import.meta.url).pathname, 'utf8');
 
-  // ── the detector FIRES on every spelling an author will write ─────────────
-  const one = a('see packages/core/src/security/platform-admin.ts#parsePlatformAdminEmails for the refusal');
-  t('A1 a bare anchor is found, split into file and symbol',
-    one.length === 1 && one[0].file === 'packages/core/src/security/platform-admin.ts' && one[0].symbol === 'parsePlatformAdminEmails');
-  t('A2 trailing punctuation is not part of the symbol',
-    a('(packages/rest/src/rest-server.ts#buildRouter).').length === 1 && a('(packages/rest/src/rest-server.ts#buildRouter).')[0].symbol === 'buildRouter');
-  const dotted = a('packages/spec/src/data/object.zod.ts#ObjectSchema.shape');
-  t('A3 a dotted member anchor keeps both segments', dotted.length === 1 && dotted[0].symbol === 'ObjectSchema.shape');
-  t('A4 two anchors in one citation are both found',
-    a('a/b/x.ts#alpha + a/b/y.tsx#beta').length === 2);
-  t('A5 every anchorable extension is recognised',
-    ['ts', 'tsx', 'mts', 'cts', 'js', 'mjs', 'cjs', 'json'].every((e) => a(`p/q/f.${e}#sym`).length === 1));
-  t('A6 the extension is reported lower-cased, so the anchorable test cannot be dodged by case', a('p/q/F.TS#sym')[0]?.ext === 'ts');
+  // ── the REGISTRATION is what this gate claims it is (#18107) ─────────────
+  //
+  // ⛔ The detector cases that used to live here are GONE, and their absence is
+  // the deliverable: they pinned a second implementation of a grammar the
+  // 2026-09-01 ruling says has exactly one. Every one of them was transplanted
+  // into `scripts/symbol-anchors.mjs`'s own battery — the unspanned form and
+  // each `#`-shaped neighbour it must refuse (an issue reference, a JSON-pointer
+  // fragment, a scoped package specifier, a hyphenated word with a tail, a bare
+  // filename with no directory), the dotted segments, the trailing punctuation.
+  // ⭐ A case is not deleted by moving; it is deleted by stopping. What this
+  // battery owes now is that THIS corpus reaches that one grammar and carries
+  // none of its own.
+  t('G1 the corpus sweeps this family and nothing else',
+    CORPUS.docRoots.length === 1 && CORPUS.docRoots[0] === CHECKLIST_REL,
+    JSON.stringify(CORPUS.docRoots));
+  t('G2 the corpus reads both authored shapes of this family and no third one',
+    CORPUS.docPattern.test('areas/x.json'.split('/').pop()) && CORPUS.docPattern.test('README.md')
+      && !CORPUS.docPattern.test('page.mdx') && !CORPUS.docPattern.test('notes.txt'));
+  t('G3 the corpus EXCLUDES `runs/` — run records are outputs, and holding a past record to today’s authoring rules would make the rule unfixable',
+    CORPUS.excludeDirs.length === 1 && CORPUS.excludeDirs[0] === 'runs');
+  t('G4 the corpus declares its citations UNSPANNED — every one of them lives inside a JSON string value, where a backtick is payload and not a code span',
+    CORPUS.unspannedAnchors === true);
+  t('G5 the corpus does NOT check bare paths — a citation with no `#symbol` is honest here, and turning them into reds is a corpus-wide cleanup nobody ruled on',
+    CORPUS.checkBarePaths === false);
+  t('G6 the corpus sweeps its documents RAW — these files ARE the citations, so a comment projection (which a `scripts/**` corpus needs) would blank the whole ledger away',
+    CORPUS.docProjection === null);
 
-  // ── and STAYS SILENT on the `#` shapes this ledger is full of ─────────────
-  t('S1 a cross-repo issue reference is not an anchor', a('the objectui#2563 regression').length === 0);
-  t('S2 a bare issue reference is not an anchor', a('closed by #13786 and #13482').length === 0);
-  t('S3 a JSON-pointer URL fragment is not an anchor', a('https://example.com/schema.json#/$defs/Item').length === 0);
-  t('S4 an ADR section reference is not an anchor', a('ADR-0025 §3.3, ADR-0090 D4').length === 0);
-  t('S5 a BARE citation — the shape most of this ledger still carries — is not an anchor',
-    a('packages/objectql/src/search-filter.ts (each latin term ORs $contains)').length === 0);
-  t('S6 a dotted machine name with no path is not an anchor', a('sys_user.name and showcase.export_data').length === 0);
-  t('S7 an anchor-shaped tail on a word with no slash is not an anchor', a('release-15.1#B2').length === 0);
-  t('S8 an email-ish `@`-prefixed path is not read as an anchor', a('@objectstack/spec/src/x.ts#Y').length === 0);
+  // ── ONE extension vocabulary, and one grammar (#18107) ───────────────────
+  //
+  // Before registration two constants named `ANCHORABLE_EXTENSIONS` existed in
+  // this tree, one module importing the other, with different contents — 23
+  // shared against 8 private, a strict subset — and NOTHING asserted they were
+  // the same. That is the whole reason the drift was invisible. V1 holds the
+  // name this file uses to the shared OBJECT (identity, not a value compare: a
+  // copied array would satisfy an equality and drift again the next day), and
+  // V2 reads this file's own source to say it defines no vocabulary and no
+  // matcher of its own.
+  t('V1 the anchorable-extension vocabulary this gate names IS the shared object — a second definition is the drift this card closes',
+    ANCHORABLE_EXTENSIONS === symbolAnchorsModule.ANCHORABLE_EXTENSIONS && ANCHORABLE_EXTENSIONS.length > 8,
+    `${ANCHORABLE_EXTENSIONS?.length} extension(s)`);
+  /* ⚠️ NAME-BASED, and the names are matched as a PREFIX with any suffix
+   * allowed — not as an equality, which is what this pin was first written as
+   * and what let a `…_SHADOW` redefinition of the same vocabulary straight
+   * through when it was ablated. A fork under a nearby name is a fork.
+   *
+   * ⛔ The residual gap is stated rather than papered over: a fork under a name
+   * sharing none of these tokens is invisible here, and no regex over a
+   * source file will close that. V3 beside it is what keeps the READ honest
+   * (a read that returned nothing would pass V2 forever), and the pin claims
+   * exactly this much and no more. */
+  const noLocal = (name) => !new RegExp(`\\b(?:const|let|var)\\s+${name}\\w*\\s*=`).test(OWN_SOURCE);
+  t('V2 this gate defines NO anchor grammar of its own — no local extension set, no anchor regex, no detector',
+    noLocal('ANCHORABLE_EXTENSIONS') && noLocal('SYMBOL_ANCHOR')
+      && !/\bfunction\s+findSymbolAnchors\w*\b/.test(OWN_SOURCE)
+      && !/\bfunction\s+absentAnchorSegments\w*\b/.test(OWN_SOURCE));
+  t('V3 CONTROL for V2 — the same source read DOES find the registration, so a green above is "no fork" and not "the read returned nothing"',
+    /defineCorpus\(\{/.test(OWN_SOURCE) && /sweepCorpus\(CORPUS, ROOT\)/.test(OWN_SOURCE));
 
-  // ── the resolver FIRES ────────────────────────────────────────────────────
+  // ── the `runs/` exclusion, BOTH DIRECTIONS on the LIVE corpus ────────────
+  //
+  // The core's own battery proves the mechanism on a synthetic fixture, with
+  // the SAME unresolvable anchor in an excluded and an included subtree. This
+  // pair proves it HERE, against the real tree, which is the half a fixture
+  // cannot cover: that this corpus's declaration actually lands on this
+  // corpus's `runs/`. X1 is worthless without X0 — an exclusion that excludes
+  // nothing would pass X1 forever.
+  const runsDir = join(CHECKLIST_DIR, 'runs');
+  const runsFiles = existsSync(runsDir)
+    ? readdirSync(runsDir).filter((n) => n.endsWith('.json') || n.endsWith('.md'))
+    : [];
+  t('X0 PRECONDITION — `runs/` really holds authored-shaped files, so excluding it is a reading and not a no-op',
+    runsFiles.length > 0, `${runsFiles.length} file(s)`);
+  /* ⛔ ITS OWN SWEEP, deliberately. This battery is also the positive control
+   * that runs before the module-level sweep is trusted, so it cannot read that
+   * sweep's result — and a case that silently skipped because a binding was not
+   * initialised yet is the "green that never ran" this file is built around. */
+  const liveSweep = sweepCorpus(CORPUS, ROOT);
+  const sweptDocs = [...liveSweep.byDoc.keys()];
+  t('X1 no document under `runs/` is swept',
+    sweptDocs.every((d) => !relative(CHECKLIST_REL, d).startsWith('runs/')),
+    sweptDocs.filter((d) => relative(CHECKLIST_REL, d).startsWith('runs/')).join(', '));
+  t('X2 CONTROL — the SAME sweeper does reach the areas beside it, so X1 is an exclusion and not an empty walk',
+    sweptDocs.filter((d) => relative(CHECKLIST_REL, d).startsWith('areas/')).length > 0,
+    `${sweptDocs.length} document(s) swept`);
+  const unexcluded = sweepCorpus(
+    defineCorpus({ ...CORPUS, id: 'platform-checklist-unexcluded', excludeDirs: [] }),
+    ROOT,
+  );
+  t('X3 CONTROL — dropping `excludeDirs` puts those same `runs/` documents back, which is what makes X1 a measurement of the exclusion itself',
+    unexcluded.counts.docs === liveSweep.counts.docs + runsFiles.length,
+    `${unexcluded.counts.docs} unexcluded vs ${liveSweep.counts.docs} excluded, ${runsFiles.length} under runs/`);
+
+  // ── the sweep is BOUND to the shared verdict, both directions ────────────
+  //
+  // #16898's N-block, re-taken through the registered path. The four shapes the
+  // withdrawn permissive rule accepted must still read ABSENT, and N4 is the
+  // positive control without which a green here cannot tell "bound correctly"
+  // from "nothing resolves any more".
+  /* ⭐ THE RE-JUDGED CASES, carried through the registration UNCHANGED in
+   * verdict and only re-spelled in call. #16898 wrote the rule for them and it
+   * still binds: 「keeping the case with its verdict inverted is what pins the
+   * narrowing, where deleting it would leave the tree unable to say the
+   * narrowing ever happened」. Deleting the FORKED DETECTOR is this card's
+   * deliverable; deleting the record of a previous card's narrowing is not, so
+   * every one of these survives the transplant. `absentAnchorSegments` was this
+   * file's per-segment split and is gone with the fork — the split is the
+   * GRAMMAR's, and it now lives beside the grammar as
+   * `scripts/symbol-anchors.mjs#symbolSegmentResolution`. */
   const src = [
     '// parsePlatformAdminEmails used to live here; renamed in #9999.',
     "export const RESOLVED = { mode: 'strict' };",
@@ -1737,83 +2176,62 @@ function selfTestSymbolAnchors() {
   ].join('\n');
   /* The same shape with the member at the START OF A LINE, which is where the
    * shared rule reads one. Kept as a second fixture rather than folded into
-   * `src`, because `src`'s inline member is exactly what P3 now pins. */
-  const blockSrc = [
-    'export const PolicyShape = {',
-    "  mode: 'strict',",
-    '};',
-  ].join('\n');
+   * `src`, because `src`'s inline member is exactly what P3 pins. */
+  const blockSrc = ['export const PolicyShape = {', "  mode: 'strict',", '};'].join('\n');
+  const absent = (source, path, sym) => symbolSegmentResolution(source, path, sym).absent;
   t('R1 a symbol that is gone from the file is reported absent',
-    absentAnchorSegments(src, 'x.ts', 'parsePlatformAdminEmails').length === 1);
+    absent(src, 'x.ts', 'parsePlatformAdminEmails').length === 1);
   t('R2 a symbol surviving ONLY in a comment is ABSENT — prose about a symbol is not a symbol',
-    absentAnchorSegments(src, 'x.ts', 'renamed').length === 1);
+    absent(src, 'x.ts', 'renamed').length === 1);
   t('R3 a dotted anchor whose SECOND segment is gone is reported, not passed on the first',
-    absentAnchorSegments(src, 'x.ts', 'RESOLVED.strictness').join(',') === 'strictness');
+    absent(src, 'x.ts', 'RESOLVED.strictness').join(',') === 'strictness');
   t('R4 a substring of a present identifier does not count as present',
-    absentAnchorSegments(src, 'x.ts', 'PlatformAdmin').length === 1);
-
-  // ── and STAYS SILENT ──────────────────────────────────────────────────────
-  t('P1 a declared export resolves', absentAnchorSegments(src, 'x.ts', 'hasPlatformAdminStanding').length === 0);
-  t('P2 a const resolves', absentAnchorSegments(src, 'x.ts', 'RESOLVED').length === 0);
-  /* P3 and P5 are RE-JUDGED IN PLACE (#16898), ⛔ not deleted. Both asserted a
-   * resolution only the permissive token match this gate used to carry could
-   * produce, so both had to be re-read once the verdict moved to
-   * `scripts/symbol-anchors.mjs#symbolResolutionClass` — and keeping the case
-   * with its verdict inverted is what pins the narrowing, where deleting it
-   * would leave the tree unable to say the narrowing ever happened.
-   *
-   *   P3 asserted `RESOLVED.mode` resolves. `{ mode: 'strict' }` is an
-   *      object-literal key written INLINE; the shared rule admits a member or
-   *      object-literal key written at the START OF A LINE. Six of the ledger's
-   *      own residual rows are this exact shape, and whether the shared accept
-   *      set should reach an inline key is a card against that module — ⛔ never
-   *      a widening made here. The direction P3 used to cover (both segments of
-   *      a live dotted anchor resolving) is P3b, on a member the rule accepts.
-   *   P5 asserted a `.json` VALUE resolves, because this gate used to scan JSON
-   *      unmasked and ask only whether the token appeared. The shared rule reads
-   *      JSON KEYS, which is what keeps a value of the same spelling out. The
-   *      half P5 really cared about — that a `//`-carrying string value is never
-   *      blanked away — is P5b, which resolves a key while such a value sits
-   *      beside it.
-   */
-  t('P3 a dotted anchor whose member is written INLINE is now ABSENT — the shared rule takes a member key at the start of a line (re-judged, #16898)',
-    absentAnchorSegments(src, 'x.ts', 'RESOLVED.mode').join(',') === 'mode');
+    absent(src, 'x.ts', 'PlatformAdmin').length === 1);
+  t('P1 a declared export resolves', absent(src, 'x.ts', 'hasPlatformAdminStanding').length === 0);
+  t('P2 a const resolves', absent(src, 'x.ts', 'RESOLVED').length === 0);
+  t('P3 a dotted anchor whose member is written INLINE is ABSENT — the shared rule takes a member key at the start of a line (re-judged, #16898; the shape #18101 owns)',
+    absent(src, 'x.ts', 'RESOLVED.mode').join(',') === 'mode');
   t('P3b both segments of a live dotted anchor resolve when the member IS at the start of a line',
-    absentAnchorSegments(blockSrc, 'x.ts', 'PolicyShape.mode').length === 0);
+    absent(blockSrc, 'x.ts', 'PolicyShape.mode').length === 0);
   t('P4 a symbol that is a COMPLETE quoted token counts as present — this ledger cites machine names, not only exports',
-    absentAnchorSegments(src, 'x.ts', 'strict').length === 0);
-  t('P5 a `.json` VALUE is ABSENT — the shared rule resolves JSON KEYS (re-judged, #16898)',
-    absentAnchorSegments('{ "route": "https://x/y", "kind": "live" }', 'x.json', 'live').join(',') === 'live');
-  t('P5b a `.json` KEY resolves, and a `//`-carrying string value beside it is never blanked away',
-    absentAnchorSegments('{ "route": "https://x/y", "live": true }', 'x.json', 'live').length === 0);
+    absent(src, 'x.ts', 'strict').length === 0);
 
-  // ── the BINDING itself (#16898) ───────────────────────────────────────────
-  //
-  // The four shapes the withdrawn rule accepted and the shared resolver
-  // refuses, measured on one fixture — and, in the same fixture, the POSITIVE
-  // CONTROL that says the binding narrowed rather than simply broke. Without
-  // N4 a green here cannot tell "bound correctly" from "everything stopped
-  // resolving", which is the only way a resolver swap can look fine and be
-  // worthless.
   const bindSrc = [
     "import { importedOnly } from './elsewhere.js';",
     'export function declaredHere(paramOnly) { return importedOnly(paramOnly); }',
     "export const HOST = { list: ['whole_token', 'dotted_head.actions.go'] };",
   ].join('\n');
   t('N1 a CALL SITE / IMPORT only is ABSENT — the file uses the symbol, it does not declare it',
-    absentAnchorSegments(bindSrc, 'x.ts', 'importedOnly').length === 1);
-  t('N2 a LOCAL PARAMETER only is ABSENT',
-    absentAnchorSegments(bindSrc, 'x.ts', 'paramOnly').length === 1);
+    absent(bindSrc, 'x.ts', 'importedOnly').length === 1);
+  t('N2 a LOCAL PARAMETER only is ABSENT', absent(bindSrc, 'x.ts', 'paramOnly').length === 1);
   t('N3 a SUBSTRING of a longer string token is ABSENT — `literal` is a COMPLETE quoted token',
-    absentAnchorSegments(bindSrc, 'x.ts', 'dotted_head').length === 1);
+    absent(bindSrc, 'x.ts', 'dotted_head').length === 1);
   t('N4 POSITIVE CONTROL — a declaration and a complete quoted token BOTH still resolve, so a green above is a narrowing and not a dead resolver',
-    absentAnchorSegments(bindSrc, 'x.ts', 'declaredHere').length === 0
-      && absentAnchorSegments(bindSrc, 'x.ts', 'whole_token').length === 0);
-  const ownResolverBody = /function absentAnchorSegments\([^)]*\)\s*\{[\s\S]*?\n\}/
-    .exec(readFileSync(new URL(import.meta.url).pathname, 'utf8'))?.[0] ?? '';
-  t('N5 this gate carries NO resolution rule of its own — the body delegates and holds no matcher, which is the fork the #13556 ruling forbids',
-    ownResolverBody.includes('symbolResolutionClass(')
-      && !/new RegExp|RegExp\(|\.test\(|maskComments|indexOf\(/.test(ownResolverBody));
+    absent(bindSrc, 'x.ts', 'declaredHere').length === 0 && absent(bindSrc, 'x.ts', 'whole_token').length === 0);
+  t('N5 a `.json` VALUE is ABSENT where a `.json` KEY resolves (re-judged, #16898) — the shared rule reads JSON keys',
+    absent('{ "route": "https://x/y", "kind": "live" }', 'x.json', 'live').join(',') === 'live'
+      && absent('{ "route": "https://x/y", "live": true }', 'x.json', 'live').length === 0);
+  t('N6 a dotted anchor whose SECOND segment is gone names that segment — ⛔ it is not passed on the first',
+    absent('export const PolicyShape = {\n  mode: 1,\n};', 'x.ts', 'PolicyShape.strictness').join(',') === 'strictness');
+
+  // ── the live sweep actually ran ──────────────────────────────────────────
+  //
+  // A registration that reached nothing reports zero problems, which is the
+  // same green a clean corpus prints. L1/L2 make the console line's numbers
+  // load-bearing rather than decorative.
+  const liveResolved = liveSweep.counts.declaration + liveSweep.counts.literal;
+  t('L1 the live sweep resolved anchors through the shared resolver — a registration that reached nothing prints the same green a clean corpus does',
+    liveResolved > 0 && liveSweep.counts.symbol >= liveResolved,
+    `${liveResolved}/${liveSweep.counts.symbol}`);
+  t('L2 the sweep and `familyFiles` agree on the population — two walkers over one corpus is the drift this card closes one level up',
+    liveSweep.counts.docs === familyFiles(CHECKLIST_DIR).length,
+    `${liveSweep.counts.docs} swept vs ${familyFiles(CHECKLIST_DIR).length} walked`);
+  t('X4 every residual row names a document the sweep actually reaches — a row filed against a doc outside the registered corpus could never fire, and would read as a standing excuse rather than the STALE RESIDUAL ROW red it is',
+    SHARED_RESOLVER_RESIDUAL.every((r) => sweptDocs.includes(join(CHECKLIST_REL, r.doc))),
+    SHARED_RESOLVER_RESIDUAL.filter((r) => !sweptDocs.includes(join(CHECKLIST_REL, r.doc))).map((r) => r.doc).join(', '));
+  t('L3 the per-document counts sum to the corpus-wide ones — a per-file floor read off a total could never see one file emptied while another grew',
+    [...liveSweep.byDoc.values()].reduce((n, c) => n + c.symbol, 0) === liveSweep.counts.symbol
+      && [...liveSweep.byDoc.values()].reduce((n, c) => n + c.declaration + c.literal, 0) === liveResolved);
 
   // ── the residual ledger, both directions ─────────────────────────────────
   t('D1 the residual is a CLOSED ledger — every row carries a doc, an anchor, a shape and one of exactly two verdicts',
@@ -1847,36 +2265,280 @@ function selfTestSymbolAnchors() {
   return { checked, failures };
 }
 
+/**
+ * The `planned` status, both of its halves, and the ratchet direction that is
+ * the whole point of it.
+ *
+ * ## Why this battery exists at all
+ *
+ * `planned` RELAXES an authored surface: an area JSON carrying it is refused by
+ * the landed gate and accepted by this one. Every relaxation buys a way to be
+ * wrong, and here the dangerous one is not the schema — it is the coverage
+ * ratchet. If a planned item ever counted as coverage, "凡是有的能力, 都要测试"
+ * would become "凡是有的能力, 都要打算测试", and the ratchet would go green on
+ * a kind nothing runs against. So the ratchet direction is pinned BOTH ways,
+ * on fixtures, not on the tree: the live ledger carries zero planned items and
+ * is expected to for a while, which means the real data cannot tell "this rule
+ * works" from "this rule was deleted" — the same silent-success argument the
+ * unreferenced-recipe battery above makes.
+ */
+function selfTestPlannedStatus() {
+  const failures = [];
+  let checked = 0;
+  const t = (what, ok, note = '') => {
+    checked++;
+    if (!ok) failures.push(`${what}${note ? ` — ${note}` : ''}`);
+  };
+
+  // ── the live ledger, read FIRST so every count below is derived ───────────
+  // ⛔ Read here rather than from the item walk: this battery runs before that
+  // walk on every invocation, and behind `--self-test` the walk never runs.
+  // ⛔ And nothing below may TYPE a count of this ledger. A hand-typed 264 in an
+  // assertion label reads false on the 265th item and nothing moves — the same
+  // rot the census docblock in `scripts/pm/dispatch-gates.mjs` warns about.
+  const liveStatuses = new Set();
+  let liveItems = 0;
+  for (const f of readdirSync(AREAS_DIR).filter((n) => n.endsWith('.json'))) {
+    for (const it of JSON.parse(readFileSync(join(AREAS_DIR, f), 'utf8')).items ?? []) {
+      liveItems += 1;
+      liveStatuses.add(it.status);
+    }
+  }
+
+  // ── the accept set ────────────────────────────────────────────────────────
+  t('S1 `planned` is an accepted status — the widening this rule is', STATUSES.has('planned'));
+  t('S2 the statuses that were accepted before still are — a widening that narrowed something else is a different change',
+    ['active', 'draft', 'retired'].every((s) => STATUSES.has(s)));
+  t('S3 the set is still CLOSED — a typo like `planed` is refused, not read as a fourth status', !STATUSES.has('planed'));
+
+  // ── the field rules `planned` relaxes, and the one it adds ────────────────
+  const planned = (over = {}) => statusFieldProblems({ status: 'planned', since: null, personas: ['admin'], ...over });
+  const active = (over = {}) => statusFieldProblems({ status: 'active', since: 'v16', steps: ['do a thing'], ...over });
+
+  t('F1 a planned item with `since: null`, no steps and personas is clean', planned().length === 0, planned().join('; '));
+  t('F2 `since` may instead name the TARGET release', planned({ since: 'v18' }).length === 0);
+  t('F3 a `since` that is neither null nor a release is refused', planned({ since: 'someday' }).length === 1);
+  t('F4 and that message names the two legal spellings rather than only the release one',
+    planned({ since: 'someday' })[0]?.includes('null') && planned({ since: 'someday' })[0]?.includes('TARGET release'));
+  t('F5 steps on a planned item are refused — nothing is implemented to drive', planned({ steps: ['open the page'] }).length === 1);
+  t('F6 and that message sends them to the promotion edit, not to a workaround',
+    planned({ steps: ['open the page'] })[0]?.includes('promotes it to "active"'));
+  t('F7 an empty steps array is not steps — a planned item may carry the key', planned({ steps: [] }).length === 0);
+  t('F8 a planned item with no personas is refused — the gap must say who it is for', planned({ personas: undefined }).length === 1);
+  t('F9 an empty personas array is refused the same way', planned({ personas: [] }).length === 1);
+
+  t('F10 an ACTIVE item is judged exactly as before — release `since`, non-empty steps', active().length === 0, active().join('; '));
+  t('F11 an active item may NOT use `since: null` — the relaxation is scoped to planned', active({ since: null }).length === 1);
+  t('F12 an active item still owes steps', active({ steps: [] }).length === 1);
+  t(`F13 an active item owes NO personas — this battery did not widen a requirement onto the ${liveItems} live items`,
+    active({ personas: undefined }).length === 0);
+  t('F14 a planned item is never asked for steps AND a release at once — the two relaxations compose',
+    planned({ since: null, steps: undefined }).length === 0);
+
+  // ── the `since` rule's own LIMIT, pinned in the direction it does NOT go ──
+  // The shape is enforced; the release TIMELINE is not, because this ledger
+  // holds none. Recorded as an assertion rather than left to prose, so the
+  // unenforced direction is a measured fact — and so that anyone who later adds
+  // a real floor finds a row that reds and tells them to move it.
+  t('F15 a planned item whose `since` names an already-shipped release PASSES — the shape is all this rule checks, and that is deliberate',
+    planned({ since: 'v1' }).length === 0);
+  t('F16 and the refusal says so, so an author is never told this gate checks a timeline it cannot read',
+    planned({ since: 'someday' })[0]?.includes('Only the SHAPE is checked'));
+
+  // ── the coverage ratchet, both directions ────────────────────────────────
+  // A miniature ledger: one kind's worth of ids, each with a status.
+  const LEDGER = new Map([
+    ['area.runs', 'active'],
+    ['area.drafted', 'draft'],
+    ['area.promised', 'planned'],
+    ['area.promised-two', 'planned'],
+    ['area.gone', 'retired'],
+  ]);
+  const cov = (ids) => coverageEntryProblems(ids, (id) => LEDGER.get(id));
+
+  const activeOnly = cov(['area.runs']);
+  t('C1 DIRECTION A — a kind mapped to an active item is covered, silently', activeOnly.problems.length === 0 && activeOnly.bearing === 1,
+    activeOnly.problems.join('; '));
+  const mixed = cov(['area.runs', 'area.promised']);
+  t('C2 a planned item listed BESIDE an active one changes nothing — that is where a capability-gap card points, and it must not red a covered kind',
+    mixed.problems.length === 0 && mixed.bearing === 1, mixed.problems.join('; '));
+
+  const plannedOnly = cov(['area.promised']);
+  t('C3 DIRECTION B — a kind whose ONLY item is planned is UNMAPPED', plannedOnly.problems.length === 1 && plannedOnly.bearing === 0);
+  t('C4 and it is reported as UNMAPPED, in the vocabulary the unclassified-kind message already uses',
+    plannedOnly.problems[0]?.startsWith('UNMAPPED'));
+  t('C5 the message says WHY, so the cheap fix (promote it) is visibly not the fix',
+    plannedOnly.problems[0]?.includes('promise, not a test'));
+  const plannedTwo = cov(['area.promised', 'area.promised-two']);
+  t('C6 two planned items are not one active item — coverage does not accumulate from promises',
+    plannedTwo.problems.length === 1 && plannedTwo.bearing === 0);
+
+  t('C7 a draft item still carries coverage — this change moved ONE status, not the ratchet\'s meaning',
+    cov(['area.drafted']).problems.length === 0 && cov(['area.drafted']).bearing === 1);
+  const retiredOnly = cov(['area.gone']);
+  t('C8 a retired-only mapping keeps its own message AND is now also reported as uncovered',
+    retiredOnly.problems.length === 2 && retiredOnly.problems.some((p) => p.includes('retired item')) && retiredOnly.bearing === 0);
+  const unknown = cov(['area.never-existed']);
+  t('C9 an unresolvable id is still named as unknown', unknown.problems.some((p) => p.includes('unknown item id')) && unknown.bearing === 0);
+  t('C10 ⛔ the bearing set does not contain `planned` — folding it in is the ONE edit that turns this ratchet into a way to green an untested kind',
+    !COVERAGE_BEARING_STATUSES.has('planned') && !COVERAGE_BEARING_STATUSES.has('retired'));
+
+  // ── ⭐ the BINDING, driven ON and OFF over ONE text ───────────────────────
+  //
+  // Everything above drives two PURE functions, and a pure function's battery
+  // cannot see whether anything calls it. Both call sites were severed and
+  // measured: the self-test stayed at 207/207 green, the live gate stayed
+  // green, and even a fixture kind whose only item is planned stayed green.
+  // So these rows pin the CALL SITES, the way the line-citation limb below
+  // pins its own binding — the ON leg says the bindings are there, and each
+  // OFF leg severs exactly one of them over a COPY of this source and requires
+  // the predicate to notice. Without the OFF legs this would be a check that
+  // can never fail, which is the thing it exists to refuse.
+  const OWN_SOURCE = readFileSync(new URL(import.meta.url).pathname, 'utf8');
+  /**
+   * Sever ONE spelling over a COPY; `changed` is what says the cut landed.
+   *
+   * ⛔ The needle arrives in TWO halves and is joined here, and that is not
+   * style: written out longhand it would be a second literal copy of the very
+   * call site being pinned, sitting in this file forever. `statusBindingProblems`
+   * counts occurrences precisely so such a decoy reds — and the split keeps this
+   * battery from being the thing that trips it. Each break falls INSIDE an
+   * identifier, so no contiguous copy exists in the source at rest.
+   *
+   * ⚠️ ORDER-SENSITIVE: `String.replace` with a string needle cuts the FIRST
+   * occurrence. Were a decoy copy ever to appear ABOVE the real call site, the
+   * cut would land on the decoy and the real call would survive — the leg still
+   * reds, but through the exactly-one row rather than the one it was written
+   * for. ⛔ Read the failure TEXT of a red leg, never just its exit code.
+   */
+  const sever = (head, tail) => {
+    const text = OWN_SOURCE.replace(head + tail, '/* severed for the OFF leg */');
+    return { text, changed: text !== OWN_SOURCE };
+  };
+  /**
+   * Comment a line out IN PLACE — the severing gesture a RAW-text count misses
+   * entirely, because the commented line is still the one occurrence. Same
+   * two-half needle and the same first-occurrence caveat as `sever`.
+   */
+  const commentOut = (head, tail) => {
+    const needle = head + tail;
+    const text = OWN_SOURCE.replace(needle, `// ${needle}`);
+    return { text, changed: text !== OWN_SOURCE };
+  };
+
+  t('G1 ON — every binding these rules ride on is present in this file',
+    statusBindingProblems(OWN_SOURCE).length === 0,
+    statusBindingProblems(OWN_SOURCE).join(' | '));
+
+  const offWalk = sever('for (const msg of statusField', 'Problems(item)) where(msg);');
+  t('G2 the item-walk severing really landed on a copy — an anchor that missed would make G3 a pass about nothing', offWalk.changed);
+  t('G3 OFF — with `statusFieldProblems(item)` gone from the walk the binding check FIRES. Measured before this row existed: that severing left `--self-test` at 207/207 and an ACTIVE item with `since: null` and no `steps` green',
+    statusBindingProblems(offWalk.text).some((p) => p.includes('statusFieldProblems(item)')),
+    statusBindingProblems(offWalk.text).join(' | '));
+
+  const offCov = sever('const { problems, bearing } = coverageEntry', 'Problems(entry.items, statusOf);');
+  t('G4 the coverage-call severing really landed on a copy', offCov.changed);
+  t('G5 OFF — with `coverageEntryProblems` never called the binding check FIRES. Measured before this row existed: that severing left the live gate green on a kind whose ONLY item is planned',
+    statusBindingProblems(offCov.text).some((p) => p.includes('coverageEntryProblems')),
+    statusBindingProblems(offCov.text).join(' | '));
+
+  const offReport = sever("for (const msg of problems) err('cover", "age.json', kind, msg);");
+  t('G6 OFF — a coverage limb that computes the problems and never reports them FIRES: found and swallowed is not found',
+    offReport.changed && statusBindingProblems(offReport.text).some((p) => p.includes('swallowed')));
+
+  const offCount = sever('if (bearing > 0) mapped', 'Count++;');
+  t('G7 OFF — an ungated `mappedCount` FIRES: a kind mapped only to promises would otherwise be counted as covered on the OK line',
+    offCount.changed && statusBindingProblems(offCount.text).some((p) => p.includes('mappedCount')));
+
+  t('G8 CONTROL — the same read reaches this file and finds a landmark that is NOT one of the four pinned spellings, so G1 is the bindings holding rather than a read that matches anything it is handed',
+    OWN_SOURCE.length > 10000 && /const COVERAGE_BEARING_STATUSES = new Set/.test(OWN_SOURCE),
+    `${OWN_SOURCE.length} bytes read`);
+
+  // ── the COMMENT-OUT forms, which a raw-text count misses entirely ─────────
+  //
+  // Measured on this file before masking landed: commenting a pinned call out
+  // IN PLACE left `--self-test` at exit 0 with all 217 assertions passing AND
+  // the live gate at exit 0 over 264 active items, because the commented line
+  // IS the one occurrence a raw count finds. `maskComments` is what closes it,
+  // and these rows are what keep it closed — reverting the mask reds G9–G11
+  // instead of quietly restoring the hole.
+  const outWalk = commentOut('for (const msg of statusField', 'Problems(item)) where(msg);');
+  t('G9 OFF — commenting the item-walk call out IN PLACE FIRES, because the count is taken over comment-MASKED source',
+    outWalk.changed && statusBindingProblems(outWalk.text).some((p) => p.includes('statusFieldProblems(item)')),
+    statusBindingProblems(outWalk.text).join(' | '));
+
+  // ⭐ The nastiest of the set: comment the GATE out and add an ungated
+  // increment below it. The spelling survives in the comment, the behaviour
+  // inverts, and a kind mapped only to planned items is counted as covered on
+  // the OK line — silently, in the one number a reader trusts.
+  const gateLine = `if (bearing > 0) mapped${'Count++;'}`;
+  const ungated = `mapped${'Count++;'}`;
+  const outGateThenAdd = OWN_SOURCE.replace(gateLine, `// ${gateLine}\n        ${ungated}`);
+  t('G10 OFF — commenting the `mappedCount` gate out and adding an UNGATED increment in its place FIRES: the spelling survives in the comment while the behaviour inverts, and a kind mapped only to planned items would be counted as covered on the OK line',
+    outGateThenAdd !== OWN_SOURCE
+      && outGateThenAdd.includes(`// ${gateLine}`)
+      && maskComments(outGateThenAdd).includes(ungated)
+      && statusBindingProblems(outGateThenAdd).some((p) => p.includes('mappedCount')),
+    statusBindingProblems(outGateThenAdd).join(' | '));
+
+  t('G11 a copy of a pinned spelling inside a COMMENT neither satisfies the rule nor inflates it — the same masked line must not stand in for a call site that is gone',
+    statusBindingProblems(`${OWN_SOURCE}\n// for (const msg of statusField${'Problems(item)) where(msg);'}`).length === 0
+      && statusBindingProblems(`${outWalk.text}\n// a second commented copy changes nothing`).some((p) => p.includes('statusFieldProblems(item)')));
+
+  // ⛔ And the disclosure, asserted rather than left to the docblock: the three
+  // SEMANTIC severings this pin cannot see. Each keeps the spelling intact, so
+  // the predicate reports no problem — that is the honest answer, and the row
+  // exists so nobody reads a green G1 as "the bindings execute".
+  const shadowed = `const statusFieldProblems = () => [];\n${OWN_SOURCE}`;
+  t('G12 DISCLOSED LIMIT — a shadowing redefinition leaves the spelling intact and this pin reports NOTHING. It is a TEXT pin; ⛔ never read it as proof the call executes',
+    statusBindingProblems(shadowed).length === 0);
+
+  // ── the live control ──────────────────────────────────────────────────────
+  // The fixtures prove the rules; this reads the ledger the gate actually
+  // validates and proves they are pointed at IT. Every assertion above would
+  // pass just as well against a `planned` no area file could ever carry.
+  t('L1 every status on the live ledger is one this gate accepts — the control that says the assertions above are about THIS ledger',
+    liveItems > 0 && [...liveStatuses].every((s) => STATUSES.has(s)),
+    `${liveItems} items, statuses: ${[...liveStatuses].sort().join(', ')}`);
+
+  plannedStatusReachedVerdict = true;
+  return { checked, failures, liveItems };
+}
+
 if (process.argv.slice(2).includes('--self-test')) {
   const trap = selfTestTrapVocabulary();
   const prov = selfTestProvisioningUse();
   const unref = selfTestUnreferencedRecipes();
   const metaCall = selfTestMetaCallSpelling();
-  const cites = selfTestSourceLineCitations();
+  const cites = selfTestLineCitationBinding();
   const anchors = selfTestSymbolAnchors();
+  const plannedStatus = selfTestPlannedStatus();
   requireReachedVerdict('selfTestTrapVocabulary', trapReachedVerdict);
   requireReachedVerdict('selfTestProvisioningUse', provisioningReachedVerdict);
   requireReachedVerdict('selfTestUnreferencedRecipes', unreferencedReachedVerdict);
   requireReachedVerdict('selfTestMetaCallSpelling', metaCallReachedVerdict);
-  requireReachedVerdict('selfTestSourceLineCitations', citationsReachedVerdict);
+  requireReachedVerdict('selfTestLineCitationBinding', lineCitationsReachedVerdict);
   requireReachedVerdict('selfTestSymbolAnchors', symbolAnchorsReachedVerdict);
+  requireReachedVerdict('selfTestPlannedStatus', plannedStatusReachedVerdict);
   const rosterFailures = batteryRosterFailures({
     [BATTERY_TRAP_VOCABULARY]: trap.checked,
     [BATTERY_PROVISIONING_USE]: prov.checked,
     [BATTERY_UNREFERENCED_RECIPES]: unref.checked,
     [BATTERY_META_CALL_SPELLING]: metaCall.checked,
-    [BATTERY_SOURCE_LINE_CITATIONS]: cites.checked,
+    [BATTERY_LINE_CITATION_BINDING]: cites.checked,
     [BATTERY_SYMBOL_ANCHORS]: anchors.checked,
+    [BATTERY_PLANNED_STATUS]: plannedStatus.checked,
   });
-  const failures = [...trap.failures, ...prov.failures, ...unref.failures, ...metaCall.failures, ...cites.failures, ...anchors.failures, ...rosterFailures];
+  const failures = [...trap.failures, ...prov.failures, ...unref.failures, ...metaCall.failures, ...cites.failures, ...anchors.failures, ...plannedStatus.failures, ...rosterFailures];
   if (failures.length === 0) {
     console.log(
-      `✓ check-platform-checklist --self-test: ${trap.checked + prov.checked + unref.checked + metaCall.checked + cites.checked + anchors.checked} assertions — the trap-table extractor reads a good table and REFUSES an empty/renamed/reshaped one;` +
+      `✓ check-platform-checklist --self-test: ${trap.checked + prov.checked + unref.checked + metaCall.checked + cites.checked + anchors.checked + plannedStatus.checked} assertions — the trap-table extractor reads a good table and REFUSES an empty/renamed/reshaped one;` +
         ' `fixtures.provisioning.use` resolves both spellings (own-area key and `<area>:<recipe>`) and fires on all three dangling shapes;' +
         ' the unreferenced-recipe direction fires on a recipe nobody uses while leaving a cross-area consumer, a retired consumer and a `$`-annotation alone;' +
         ' and the `/meta` call-spelling refusal reads its vocabulary out of the live generated contract, fires on every folded spelling a `call` can instruct, and stays silent on the canonical singular, on parameter placeholders, and on the `why`/`expect`/`source`/`requires` prose that narrates the fold;' +
-        ' and the source-line-citation refusal fires on every spelling this ledger carried (file-anchored, range, bare continuation, parenthesised, `~:`, comma/slash-chained) while staying silent on HTTP status, config literals, URL ports, clock times, JSON quoted in prose and the README placeholder that documents the ban;' +
-        ' and the symbol-anchor limb finds every anchor spelling an author writes while reading no issue reference, URL fragment, ADR section or bare citation as one, and then RESOLVES NOTHING ITSELF: the verdict is `scripts/symbol-anchors.mjs#symbolResolutionClass` (#16898), pinned here by a body that holds no matcher, by a call site / import / local parameter / string-substring all reading ABSENT, by the positive control that a declaration and a complete quoted token still resolve, by a `.json` key resolving where a `.json` value no longer does, and by the closed, grow-never residual that names what the binding withdrew — with the per-file anchor floor held in both directions beside it.',
+        ' and the line-citation limb DETECTS NOTHING ITSELF EITHER: the last forked grammar in this file went into the shared core at #18592, so what is pinned here is the BINDING — the corpus declaring `pathlessLineCitations`, a source read finding no citation regex and no detector while the same read DOES find the declaration, the binding driven ON and OFF against ONE text so the green is the declaration working rather than a text that would have matched anyway, the DARK case that a citation both grammars already agreed on keeps its verdict either way, the refusal to over-fire on this ledger\'s own HTTP statuses, config literals, URL ports, clock times and quoted JSON, and the live zero with the control that says it is a reading;' +
+        ' and the symbol-anchor limb DETECTS NOTHING AND RESOLVES NOTHING ITSELF: it is a registered corpus (#18107), so the grammar, the walk and the verdict are all `scripts/symbol-anchors.mjs`\'s, pinned here by a source read that finds no local extension set, no anchor regex and no detector while the same read DOES find the registration, by the anchorable-extension vocabulary being the shared OBJECT rather than a copy of it, by the `runs/` exclusion driven three ways on the live corpus (the subtree holds files, none is swept, the areas beside it still are, and dropping the exclusion puts them back), and by the #16898 binding re-taken through the registration — a call site / import / local parameter / string-substring all reading ABSENT, the positive control that a declaration and a complete quoted token still resolve, a `.json` key resolving where a `.json` value does not, an INLINE object-literal key reading absent where one at the start of a line resolves — with the closed, grow-never residual and the per-file anchor floor held in both directions beside it;' +
+        ` and the \`planned\` status is driven on fixtures rather than on a ledger that carries none of it — the accept set widened without losing its closure, \`since: null\`/no-steps/personas relaxed for planned alone while the ${plannedStatus.liveItems} live items are judged exactly as before, and the coverage ratchet held BOTH ways: a planned item beside an active one is silent, a kind whose only items are planned is UNMAPPED, and the bearing set is pinned NOT to contain \`planned\`; and the two CALL SITES those rules ride on are pinned by a source read over comment-MASKED source driven ON and OFF, because severing either one — by deletion OR by commenting it out in place — left this very self-test green; \u26d4 that pin is a TEXT pin and G12 records the three semantic severings it cannot see.`,
     );
     process.exit(0);
   }
@@ -1929,16 +2591,16 @@ if (metaCallControl.failures.length) {
   process.exit(1);
 }
 
-// And for the source-line-citation refusal. The control matters more here than
-// anywhere else in this file: the ledger is CLEAN of line citations now, so
-// this check's real output is permanently empty and its green says nothing on
-// its own. A detector that silently stopped matching would be indistinguishable
-// from the ledger staying clean — which is precisely the exit-0-by-construction
-// shape this check was added to end.
-const citationControl = selfTestSourceLineCitations();
-requireReachedVerdict('selfTestSourceLineCitations', citationsReachedVerdict);
+// And for the line-citation binding. The control matters more here than
+// anywhere else in this file: the ledger is CLEAN of line citations, so this
+// limb's real output is permanently empty and its green says nothing on its
+// own. A binding that silently stopped reaching the grammar would be
+// indistinguishable from the ledger staying clean — which is precisely the
+// exit-0-by-construction shape this check was added to end.
+const citationControl = selfTestLineCitationBinding();
+requireReachedVerdict('selfTestLineCitationBinding', lineCitationsReachedVerdict);
 if (citationControl.failures.length) {
-  console.error('check-platform-checklist: the source-line-citation refusal\'s own positive control FAILED — a rotting `file:line` pointer would pass unreported, and because the ledger is clean nothing else here would ever notice.\n');
+  console.error('check-platform-checklist: the line-citation binding\'s own positive control FAILED — a rotting `file:line` pointer would pass unreported, and because the ledger is clean nothing else here would ever notice.\n');
   for (const f of citationControl.failures) console.error(`  ✗ ${f}`);
   process.exit(1);
 }
@@ -1955,13 +2617,26 @@ if (symbolAnchorControl.failures.length) {
   for (const f of symbolAnchorControl.failures) console.error(`  ✗ ${f}`);
   process.exit(1);
 }
+// And for the `planned` status. Its schema half is exercised by the tree the
+// moment anyone authors a planned item; its COVERAGE half is not, and will not
+// be for as long as the ledger's planned count is the 0 this gate prints. A
+// deleted ratchet rule and an honest ledger print the same green, so the
+// fixtures below it are the only thing that can tell them apart.
+const plannedStatusControl = selfTestPlannedStatus();
+requireReachedVerdict('selfTestPlannedStatus', plannedStatusReachedVerdict);
+if (plannedStatusControl.failures.length) {
+  console.error("check-platform-checklist: the `planned` status check's own positive control FAILED — a metadata kind whose only checklist items are PLANNED would report as covered, which turns this ratchet from 'the platform tests what it has' into 'the platform intends to'.\n");
+  for (const f of plannedStatusControl.failures) console.error(`  ✗ ${f}`);
+  process.exit(1);
+}
 const inlineRosterFailures = batteryRosterFailures({
   [BATTERY_TRAP_VOCABULARY]: trapControl.checked,
   [BATTERY_PROVISIONING_USE]: provisioningControl.checked,
   [BATTERY_UNREFERENCED_RECIPES]: unreferencedControl.checked,
   [BATTERY_META_CALL_SPELLING]: metaCallControl.checked,
-  [BATTERY_SOURCE_LINE_CITATIONS]: citationControl.checked,
+  [BATTERY_LINE_CITATION_BINDING]: citationControl.checked,
   [BATTERY_SYMBOL_ANCHORS]: symbolAnchorControl.checked,
+  [BATTERY_PLANNED_STATUS]: plannedStatusControl.checked,
 });
 if (inlineRosterFailures.length) {
   console.error('check-platform-checklist: the self-test battery roster FAILED — assertions stopped running, and every leg below would read the smaller count as a pass.\n');
@@ -2061,9 +2736,7 @@ for (const { file, stem, doc } of parsed) {
     if (!STATUSES.has(item.status)) where(`"status" must be one of ${[...STATUSES].join('|')}`);
     if (!PRIORITIES.has(item.priority)) where(`"priority" must be one of ${[...PRIORITIES].join('|')}`);
     if (!SURFACES.has(item.surface)) where(`"surface" must be one of ${[...SURFACES].join('|')}`);
-    if (typeof item.since !== 'string' || !/^v\d+(\.\d+)?$/.test(item.since)) {
-      where('"since" must be the release that introduced the capability, e.g. "v16" or "v16.0"');
-    }
+    for (const msg of statusFieldProblems(item)) where(msg);
 
     if (!Number.isInteger(item.revision) || item.revision < 1) where('"revision" must be an integer >= 1');
     if (!Array.isArray(item.history) || item.history.length === 0) {
@@ -2080,8 +2753,6 @@ for (const { file, stem, doc } of parsed) {
         }
       }
     }
-
-    if (!Array.isArray(item.steps) || item.steps.length === 0) where('"steps" must be a non-empty array of strings');
 
     for (const msg of trapProblems(item, TRAPS)) where(msg);
 
@@ -2104,7 +2775,12 @@ for (const { file, stem, doc } of parsed) {
       if (typeof item.retiredReason !== 'string' || !item.retiredReason) where('retired items must carry "retiredReason"');
     } else {
       if (!Array.isArray(item.acceptance) || item.acceptance.length === 0) {
-        where('active/draft items must have at least one acceptance clause');
+        // A planned item has no oracle to consult yet — that is what `planned`
+        // MEANS. Requiring a clause here would buy one written against a
+        // capability nobody has implemented, which is the ticking-on-vibes this
+        // ledger exists to refuse. Clauses it DOES carry are still validated
+        // below, so an early draft of the acceptance cannot rot unchecked.
+        if (item.status !== 'planned') where('active/draft items must have at least one acceptance clause');
       } else {
         item.acceptance.forEach((c, i) => {
           if (typeof c.clause !== 'string' || !c.clause) where(`acceptance[${i}] missing "clause"`);
@@ -2285,16 +2961,10 @@ if (!existsSync(COVERAGE_FILE)) {
         continue;
       }
       if (hasItems) {
-        mappedCount++;
-        for (const id of entry.items) {
-          if (!allIds.has(id)) err('coverage.json', kind, `maps to unknown item id "${id}"`);
-          else {
-            const mapped = allItems.find((r) => r.item.id === id);
-            if (mapped?.item.status === 'retired') {
-              err('coverage.json', kind, `maps to retired item "${id}" — point at its successor or re-waive the kind`);
-            }
-          }
-        }
+        const statusOf = (id) => allItems.find((r) => r.item.id === id)?.item.status;
+        const { problems, bearing } = coverageEntryProblems(entry.items, statusOf);
+        for (const msg of problems) err('coverage.json', kind, msg);
+        if (bearing > 0) mappedCount++;
       } else {
         waivedCount++;
       }
@@ -2307,30 +2977,38 @@ if (!existsSync(COVERAGE_FILE)) {
   }
 }
 
-// The source-line-citation sweep, over the whole family rather than the area
-// files alone: the same rot lives in README/RUNNER/SWEEP/FOLLOW-UPS prose, and
-// FOLLOW-UPS in particular carried more citations than most area files.
-let citationsScanned = 0;
-for (const rel of familyFiles(CHECKLIST_DIR)) {
-  const hits = findSourceLineCitations(readFileSync(join(CHECKLIST_DIR, rel), 'utf8'));
-  citationsScanned++;
-  for (const hit of hits) {
-    err(
-      rel,
-      null,
-      `SOURCE LINE CITATION — \`${hit}\`. Line numbers rot on the next unrelated edit to the cited file and nothing can tell a stale one from a fresh one, so the pointer keeps reading as "verified against source" while naming something else. Cite the FILE plus the SYMBOL instead (README.md → "Every call cites framework source as \`file\` plus the symbol it lands in").`,
-    );
-  }
-}
+// ── The symbol-anchor sweep ─ ONE call into the registered corpus ───────
+//
+// ⛔ There is no loop over family files here any more, and no detector: the
+// walk, the extraction and the verdict are all `scripts/symbol-anchors.mjs`'s,
+// reached through the `CORPUS` registration above. What stays local is what is
+// genuinely this corpus's own — the closed #16898 residual, and the per-file
+// shrink-never floor — and both are keyed off what the sweep reports.
+//
+// ⭐ ONE call, and it now carries BOTH limbs. The line-citation loop that used
+// to stand beside this one is gone with its grammar (#18592): a surviving
+// `file:line`, a bare `:NNN` continuation and an `L` pin all arrive here as
+// `line-anchor` findings from the same sweep, reported below with every other
+// finding kind. Two walkers over one corpus became one.
+const sweep = sweepCorpus(CORPUS, ROOT);
 
-// ── The symbol-anchor sweep, over the same family the citation sweep reads ──
-// Cached per cited file: the ledger points many citations at the same hot
-// sources, and re-reading + re-masking each one per anchor is the difference
-// between a gate that costs milliseconds and one nobody runs.
-const anchorSourceCache = new Map();
-function anchorSource(absPath) {
-  if (!anchorSourceCache.has(absPath)) anchorSourceCache.set(absPath, readFileSync(absPath, 'utf8'));
-  return anchorSourceCache.get(absPath);
+// The population the sweep walked, held against the one `familyFiles` walks.
+// ⚠️ The second walker is no longer a second GRADER — the line-citation limb
+// that owned one went into the registration at #18592 — but `familyFiles` is
+// still walked for the ledger's own structural checks, and two walkers that
+// silently disagree about the POPULATION is drift of its own. So they are
+// compared on every run rather than assumed equal: a `docPattern` or an
+// `excludeDirs` that stops matching shows up here as a number, not as a
+// quietly smaller sweep.
+const familyPopulation = familyFiles(CHECKLIST_DIR);
+if (sweep.counts.docs !== familyPopulation.length) {
+  err(
+    'docs/qa/platform-checklist',
+    null,
+    `CORPUS POPULATION DISAGREES — the registered corpus swept ${sweep.counts.docs} document(s) but \`familyFiles\` walks ${familyPopulation.length}.`
+      + ' One of the two stopped reaching part of the family, and a sweep that reads fewer files than it did yesterday reports fewer problems for exactly the wrong reason.'
+      + ' Reconcile `CORPUS` (`docRoots` / `docPattern` / `excludeDirs`) with `familyFiles`.',
+  );
 }
 
 const anchorCounts = new Map();
@@ -2338,46 +3016,48 @@ let anchorsScanned = 0;
 let anchorsResolved = 0;
 let anchorsResidual = 0;
 const residualFired = new Set();
-for (const rel of familyFiles(CHECKLIST_DIR)) {
-  const text = readFileSync(join(CHECKLIST_DIR, rel), 'utf8');
-  let resolved = 0;
-  let residual = 0;
-  for (const anchor of findSymbolAnchors(text)) {
-    anchorsScanned++;
-    if (!ANCHORABLE_EXTENSIONS.has(anchor.ext)) {
-      err(rel, null, `UNRESOLVABLE ANCHOR — \`${anchor.anchor}\`: this gate reads symbols out of ${[...ANCHORABLE_EXTENSIONS].join('/')} only, so a \`#symbol\` on a .${anchor.ext} resolves nowhere and would read as verified while pointing at nothing. Cite that file BARE (path, no \`#\`) and put the symbol in the prose beside it.`);
+const relToChecklist = (doc) => relative(CHECKLIST_REL, doc);
+
+// Resolved, per family file, straight out of the sweep's per-document counts.
+for (const [doc, c] of sweep.byDoc) {
+  const rel = relToChecklist(doc);
+  anchorsScanned += c.symbol;
+  anchorsResolved += c.declaration + c.literal;
+  anchorCounts.set(rel, c.declaration + c.literal);
+}
+
+for (const f of sweep.findings) {
+  const rel = relToChecklist(f.doc);
+  if (f.kind === 'unresolved-symbol') {
+    const anchor = `${f.path}#${f.symbol}`;
+    // On the measured residual? Then this is one of the 56 the binding
+    // withdrew (#16898) — recorded, counted apart from `resolved`, and NOT a
+    // red. Anything else that fails to resolve is an ordinary red, which is
+    // what keeps the ledger closed instead of permissive.
+    if (SHARED_RESOLVER_RESIDUAL_INDEX.has(residualKey(rel, anchor))) {
+      residualFired.add(residualKey(rel, anchor));
+      anchorsResidual += 1;
+      // The floor's population is every anchor this gate holds BOUND — resolved
+      // plus the named residual. ⛔ That is deliberately not the same number as
+      // `resolved`, and the console line prints both so the coverage claim stays
+      // honest: folding the residual in silently is the exact move this card
+      // exists to undo, and no floor in the maintainer-only baseline is touched.
+      anchorCounts.set(rel, (anchorCounts.get(rel) ?? 0) + 1);
       continue;
     }
-    const abs = join(ROOT, anchor.file);
-    if (!existsSync(abs)) {
-      err(rel, null, `ANCHOR FILE NOT FOUND — \`${anchor.anchor}\`: ${anchor.file} is not in this repo. A path this gate cannot open is not an anchor; a sibling-repo citation (objectui/cloud) stays BARE, and a moved file needs the pin re-pointed.`);
-      continue;
-    }
-    const absent = absentAnchorSegments(anchorSource(abs), anchor.file, anchor.symbol);
-    if (absent.length) {
-      // On the measured residual? Then this is one of the 56 the binding
-      // withdrew (#16898) — recorded, counted apart from `resolved`, and NOT a
-      // red. Anything else that fails to resolve is an ordinary red, which is
-      // what keeps the ledger closed instead of permissive.
-      const known = SHARED_RESOLVER_RESIDUAL_INDEX.get(residualKey(rel, anchor.anchor));
-      if (known) {
-        residualFired.add(residualKey(rel, anchor.anchor));
-        residual++;
-        anchorsResidual++;
-        continue;
-      }
-      err(rel, null, `ABSENT SYMBOL — \`${anchor.anchor}\`: ${absent.map((s) => `\`${s}\``).join(' and ')} ${absent.length > 1 ? 'are' : 'is'} not declared in ${anchor.file} by \`scripts/symbol-anchors.mjs#symbolResolutionClass\` — no declaration site and no complete quoted string token, comments stripped. A call site, an import, a member access or a substring of a longer string is NOT resolution. Re-point the anchor at what the file declares now, or drop the \`#symbol\` half and cite the file bare. ⛔ Do not widen \`scripts/symbol-anchors.mjs\` to make this green: it is shared with four other corpora.`);
-      continue;
-    }
-    resolved++;
-    anchorsResolved++;
+    err(rel, null, `ABSENT SYMBOL — \`${anchor}\`: ${(f.absent ?? []).map((x) => `\`${x}\``).join(' and ')} ${(f.absent ?? []).length > 1 ? 'are' : 'is'} not declared in ${f.path} by \`scripts/symbol-anchors.mjs#symbolResolutionClass\` — no declaration site and no complete quoted string token, comments stripped. A call site, an import, a member access or a substring of a longer string is NOT resolution. Re-point the anchor at what the file declares now, or drop the \`#symbol\` half and cite the file bare. ⛔ Do not widen the RESOLUTION RULE in \`scripts/symbol-anchors.mjs\` to make this green: it is shared with four other corpora.`);
+    continue;
   }
-  // The floor's population is every anchor this gate holds BOUND — resolved
-  // plus the named residual. ⛔ That is deliberately not the same number as
-  // `resolved`, and the console line prints both so the coverage claim stays
-  // honest: folding the residual in silently is the exact move this card
-  // exists to undo, and no floor in the maintainer-only baseline is touched.
-  anchorCounts.set(rel, resolved + residual);
+  if (f.kind === 'unresolved-path') {
+    err(rel, null, `ANCHOR FILE NOT FOUND — \`${f.raw}\`: ${f.path} is not a tracked file in this repo. A path this gate cannot open is not an anchor; a sibling-repo citation stays BARE or carries its \`<repo>:\` prefix, and a moved file needs the pin re-pointed.`);
+    continue;
+  }
+  if (f.kind === 'line-anchor' || f.kind === 'bad-exemption') {
+    err(rel, null, `${f.kind === 'bad-exemption' ? 'BAD ANCHOR EXEMPTION' : 'LINE ANCHOR'} — \`${f.raw}\` at line ${f.line}: ${f.detail}`);
+    continue;
+  }
+  if (f.soft) continue; // cross-repo with no checkout — reported by the sweep, never red
+  err(rel, null, `${f.kind} — \`${f.raw}\` at line ${f.line}: ${f.detail}`);
 }
 
 // A residual row that did not fire has been repaired, re-authored or removed —
@@ -2437,18 +3117,23 @@ if (errors.length) {
 
 const total = allItems.length;
 const active = allItems.filter(({ item }) => item.status === 'active').length;
+// Printed beside `active` so the ledger's implementation status is visible from
+// the gate itself, not only from `pnpm gen:checklist-status`. A planned count
+// that climbs while `active` stands still is the ledger doing its job; one that
+// climbs while coverage stays green would be this gate failing at its.
+const planned = allItems.filter(({ item }) => item.status === 'planned').length;
 // Counted, not inferred. On this path it necessarily equals `recipeTotal` —
 // an unreferenced recipe would have exited above — but a line that RESTATES a
 // constant reports nothing, and this direction's whole risk is a green that
 // looks the same whether it ran or not.
 const recipesReferenced = [...recipesByArea].reduce((n, [area, keys]) => n + keys.filter((k) => referencedByArea.get(area)?.has(k)).length, 0);
 console.log(
-  `check-platform-checklist: OK — ${files.length} areas, ${total} items (${active} active); coverage: ${mappedCount} kinds mapped, ${waivedCount} waived;` +
+  `check-platform-checklist: OK — ${files.length} areas, ${total} items (${active} active, ${planned} planned); coverage: ${mappedCount} kinds mapped, ${waivedCount} waived;` +
     ` traps: ${TRAPS.size} documented, ${usedTraps.size} in use;` +
     ` provisioning: ${recipeTotal} area recipes, ${recipeRefs} item references resolved (${qualifiedRefs} area-qualified), ${recipesReferenced}/${recipeTotal} recipes referenced;` +
     ` meta-URL spelling: ${metaCallsScanned} \`call\` strings scanned against ${FOLDED_META_SPELLINGS.size} folded spellings;` +
-    ` source citations: ${citationsScanned} family files carry no \`file:line\` pin;` +
-    ` symbol anchors: ${anchorsResolved}/${anchorsScanned} resolved by \`symbol-anchors.mjs\` (the ONE resolver) against ${anchorSourceCache.size} cited sources` +
+    ` line citations: 0 survive across ${sweep.counts.docs} swept documents — \`file:line\`, a bare \`:NNN\` continuation and an \`L\` pin are all judged by \`symbol-anchors.mjs\`, through the same registration;` +
+    ` symbol anchors: ${anchorsResolved}/${anchorsScanned} resolved by \`symbol-anchors.mjs\` (the ONE resolver, reached as a REGISTERED corpus) across ${sweep.counts.docs} swept documents against ${sweep.counts.citedSources} cited sources` +
     `, ${anchorsResidual} on the named #16898 residual, ${Object.keys(anchorFloors).length} file floors held;` +
-    ` (self-checks: ${trapControl.checked} trap-vocabulary + ${provisioningControl.checked} provisioning-resolve + ${unreferencedControl.checked} unreferenced-recipe + ${metaCallControl.checked} meta-call-spelling + ${citationControl.checked} source-line-citation + ${symbolAnchorControl.checked} symbol-anchor assertions).`,
+    ` (self-checks: ${trapControl.checked} trap-vocabulary + ${provisioningControl.checked} provisioning-resolve + ${unreferencedControl.checked} unreferenced-recipe + ${metaCallControl.checked} meta-call-spelling + ${citationControl.checked} line-citation-binding + ${symbolAnchorControl.checked} symbol-anchor + ${plannedStatusControl.checked} planned-status assertions).`,
 );

@@ -121,9 +121,22 @@ jobs:
           # Same transient-retry posture as merge-queue-triage.yml, and for the
           # same reason: 403 is REMOVED from the exempt list because GitHub
           # answers a secondary rate limit with 403 as well as 429, and this job
-          # pages issues. 400/401/404/422 stay exempt — a malformed request or a
-          # body past the 65536-character limit is this repo's own bug and is
-          # not improved by asking again.
+          # pages issues. 400/401/404/422 stay exempt — a malformed request or
+          # an oversized body is this repo's own bug and is not improved by
+          # asking again. The size that makes a body oversized is MEASURED, in
+          # UTF-8 BYTES: this job writes an ISSUE BODY, which stores 262,144
+          # bytes and refuses 262,145 (objectstack#18793, bisected to one byte;
+          # restated as `ISSUE_BODY_LIMIT` in scripts/pm/check-half-states.mjs).
+          # ⛔ Not the 65,536 characters this comment used to name, and ⛔ not
+          # the number in GitHub's own refusal text either — that string still
+          # reads "maximum is 65536 characters" and objectstack#18826 falsified
+          # it in both unit and value by storing a 262,144-character comment.
+          # ⚠️ On `issues.update` an oversized body is not a 422 at all: the
+          # platform answers 200, keeps the OLD body and reports nothing
+          # (#18793). The 422 exemption stays right for the malformed request it
+          # also covers, and `issues.create` DOES answer 422 on an oversized
+          # body (#18826) — but ⛔ a refresh that outgrows the cap never reaches
+          # it.
           retries: 3
           retry-exempt-status-codes: 400,401,404,422
           script: |

@@ -87,9 +87,9 @@ Each anchor kind names its own origin, from the same field the JSON publishes as
 | kind | the clause |
 |:--|:--|
 | `symbol` | `a field of interface MetaOverlayCacheKey` · `a method of class RestServer` · `a top-level function` |
-| `route` | `a path literal in RestServer` · `bridged from symbol enforceEnvironmentOwnership — its route-source handler names it` |
+| `route` | `a path literal in RestServer` · `a path literal in a comment in meta` · `bridged from symbol enforceEnvironmentOwnership — its route-source handler names it` |
 | `sdk` | `the route ledger binds it to GET /api/v1/ui/view/:object/:type` |
-| `literal` | `a string literal in cacheKeyOf` |
+| `literal` | `a string literal in cacheKeyOf` · `a string literal in a comment in cacheKeyOf` |
 | `command` | `read off packages/cli/src/commands/environments/bind.ts` |
 | `rule` | `a @docs-rule block in packages/objectql/src/engine.ts` |
 
@@ -107,6 +107,65 @@ provenance key set is exactly the anchor set, in both directions, so a future ch
 cannot start deciding with it without going red. Container-qualified *discrimination* is
 the separate, later step below (option D), and it decides from the declarations directly,
 never by parsing this clause back out.
+
+### A row says whether its anchor came from CODE or from PROSE (#16696)
+
+A comment line is a changed line, so a path written in a JSDoc mints a `route` anchor like
+any other. That is deliberate and stays: a doc comment that newly documents a real route is
+sometimes exactly the signal that the page documenting it needs re-reading, and ⛔ excluding
+comments from anchor sources is the one repair ruled out. What was missing is the reader's
+half — the row did not say which kind of line it found.
+
+Measured on PR #16694: seven of that run's nine hand-written rows rode
+`/environments/:environmentId`, and that anchor entered the diff on **exactly one added
+line**, English prose inside a JSDoc block in `packages/client/src/index.ts`. Every row read
+`a path literal in meta`, indistinguishable from a registration. A reader who opens seven
+pages and finds seven non-answers stops opening them, and then the list fails on the PR
+where it is right.
+
+So the clause carries the strength beside the location: `a path literal in a comment in meta`
+against `a path literal in meta`. Like every other clause it is **publication, not
+discrimination** — the mask is read only to word the clause, nothing is admitted or dropped
+by it, and `--self-test` pins both directions: the comment-only anchor is still an anchor,
+and a code occurrence still produces a clause that says nothing about comments.
+
+### A route anchor must name the route the page names (#16696)
+
+The doc-side matcher lets a page spell a parameter three ways — `:type`, `{type}`, or a
+concrete example value — so `GET /api/v1/meta/object/account/history` counts as documenting
+`/:type/:name/history`. Both leniencies used to be unconditional, and each one alone is
+enough to list a page for a route it does not document. `protocol/kernel/metadata-service.mdx`
+was listed via `/environments/:environmentId`, a string that page does not contain, on:
+
+```
+:204  `/pub/v1/environments/:id/artifact[?commit=<id>]`        — a DIFFERENT parameter name
+:213  'https://cloud.example.com/pub/v1/environments/env_42/artifact?commit=cmt_1a2b'
+                                           — a concrete value with the tail's right edge open
+```
+
+Two narrowings, one per hit. A parameter **written as a parameter** must name the same
+parameter, either spelling. A **concrete value filling the tail's last segment** must end the
+documented path — every earlier parameter is still bounded by the segments to its right, so
+`GET /api/v1/data/accounts` still matches `/data/:object` while
+`GET /api/v1/data/account/123` no longer does, because that is `/data/:object/:id` and that
+is the tail which lists it.
+
+Measured over the **228** distinct route tails declared in this repo's **28** route-ledger
+files against all **195** hand-written docs: tail×page rows **571 → 524**, −8.2%, with **zero**
+tails going from matching some page to matching none. Arm 1 accounts for 5 of the 47 dropped
+rows; the other 42 are one shape — `/packages/:id` matched eleven pages on the monorepo
+source paths `packages/core`, `packages/spec`, `packages/plugins` …, and `/meta/:type`
+matched `api/environment-routing.mdx` on the prose *"data/meta/AI/automation"*.
+
+⛔ Requiring **every** match to sit at the end of the documented path — the way the same tail
+is matched against a ledger row — was measured and rejected: −36.3%, and it deletes
+`api/environment-routing.mdx`, the most on-target page of that run, whose every occurrence is
+`/api/v1/environments/:environmentId/...` with a segment after it. A route PREFIX written
+with the route's own parameter named IS a page documenting that route.
+
+⛔ **No claim is made here about how often either shape occurs.** One PR is nine rows, not a
+population; the corpus figures above are about the matcher over the declared route surface,
+which is a different statement and is the only one measured.
 
 ### A data property is qualified by its declaring container (#13713)
 
@@ -493,9 +552,12 @@ How often it renders, re-derived over the 40 first-parent commits ending at `e43
 3 of the 17 package-touching runs (18%) — `20a452e664`, `f213793ddb`, `dd4113ec0b` — so it
 is a rare notice rather than a per-PR banner, which is what keeps it readable.
 
-**Cost** (the card's open question): the anchor derivation reads the same 178-page corpus
-the old one did, plus the 18 route-source/ledger files (~875 KB) and one `git show`
-per changed file per side. Measured end-to-end on the ten PRs above, `node affected-docs.mjs`
+**Cost** (the card's open question): the anchor derivation reads the same hand-written
+corpus the old one did, plus the 18 route-source/ledger files (~875 KB) and one `git show`
+per changed file per side. ⛔ The corpus SIZE is deliberately absent from that sentence —
+run `check-audit-scope.mjs` (`pnpm check:docs-audit-scope`) for today's page count. A size
+written down in the present tense decays with nothing going red, which is exactly what the
+`178` that used to stand here did. Measured end-to-end on the ten PRs above, `node affected-docs.mjs`
 went from 85-195 ms to 114-582 ms. The heaviest case is the widest diff; every case stays
 well under a second, against a job that already spends seconds checking out the repo and
 setting up Node. It is the right default for every PR.

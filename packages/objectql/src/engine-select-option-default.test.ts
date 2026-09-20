@@ -21,7 +21,9 @@
  *     declaration (the precedence pin the ruling asks for by name);
  *   - presence is the engine's own `dv == null` test, so `defaultValue: ''` is a
  *     real default that wins;
- *   - `multiple: true` assembles an ARRAY, because that field stores one;
+ *   - a MULTI-VALUED field assembles an ARRAY, because that field stores one —
+ *     [#18408] multi-valued by `isMultiValueField`, the one definition #17469
+ *     ruled, ⛔ never a raw `field.multiple`;
  *   - an option value is a plain LITERAL — never routed through the
  *     `DEFAULT_VALUE_TOKENS` branches, which is why the fallback resolves in the
  *     `defaultValue == null` arm rather than upstream of the token tests.
@@ -292,6 +294,40 @@ describe('[#7246] the default follows the FIELD shape, not the option count', ()
     ], { multiple: true }) as any, 'test.issue7246');
     const row: any = await engine.insert('opt_multi_one', {}, sys);
     expect(row.tags).toEqual(['important']);
+  });
+
+  it('[#18408] an inherently-multi type assembles an ARRAY with NO `multiple` flag — the shape is the TYPE\'s', async () => {
+    // The flag is REDUNDANT on `multiselect` / `checkboxes` / `tags`
+    // (`MULTI_OPTION_TYPES`): the field stores an array with or without it, and
+    // `isMultiValueField` — the one definition (#17469) — says so. Reading the
+    // raw flag here answered "single-valued" for this declaration and handed
+    // back the bare `'important'`, which `validateRecord`'s multi-value branch
+    // then refuses as `invalid_type_array` on the very insert the default was
+    // resolved for. Measured: this case threw `VALIDATION_ERROR` before #18408.
+    engine.registry.registerObject(multi('opt_inherent_multi', [
+      { label: 'Important', value: 'important', default: true },
+      { label: 'Quick', value: 'quick' },
+      { label: 'Review', value: 'review', default: true },
+    ], { type: 'multiselect' }) as any, 'test.issue18408');
+    const row: any = await engine.insert('opt_inherent_multi', {}, sys);
+    expect(row.tags).toEqual(['important', 'review']);
+  });
+
+  it('[#18408] the flag on a type OUTSIDE both multi sets is inert — the default stays a scalar', async () => {
+    // The other direction of the same definition. `text` is neither
+    // multi-capable nor inherently-multi, so `FieldSchema` refuses the flag at
+    // the authoring entrance and every storage side (driver-sql #17469, `os
+    // generate migration` #18199, this driver's own column builder) declares a
+    // SCALAR column for it. A declaration that reaches the engine through a door
+    // that never runs `FieldSchema` used to be defaulted to `['important']`
+    // here — an array aimed at a varchar, and a value this engine's own
+    // validator refuses for a `text` field.
+    engine.registry.registerObject(multi('opt_flag_inert', [
+      { label: 'Important', value: 'important', default: true },
+      { label: 'Quick', value: 'quick' },
+    ], { type: 'text', multiple: true }) as any, 'test.issue18408');
+    const row: any = await engine.insert('opt_flag_inert', {}, sys);
+    expect(row.tags).toBe('important');
   });
 
   it('a SINGLE-valued field takes the FIRST marked option — one slot, declaration order decides', async () => {

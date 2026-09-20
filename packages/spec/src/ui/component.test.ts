@@ -24,6 +24,10 @@ import {
   ObjectKanbanPropsSchema,
 } from './component.zod';
 import { PageComponentSchema, PageSchema, PageComponentType, ElementDataSourceSchema, RETIRED_PAGE_COMPONENT_TYPES } from './page.zod';
+import { GanttConfigSchema, TreeConfigSchema, ListMapConfigSchema, ListColumnSchema, ListViewSchema } from './view.zod';
+import { FieldSchema } from '../data/field.zod';
+import { ALL_CONVERSIONS } from '../conversions/registry';
+import { strictObjectDeclarations } from '../shared/strict-object';
 
 describe('PageHeaderProps', () => {
   it('should accept minimal header', () => {
@@ -856,6 +860,168 @@ describe('RecordRelatedListProps', () => {
   });
 });
 
+// ===========================================================================
+// #18639 — `record:related_list.columns` IS the saved-view `ListColumn` union
+// ===========================================================================
+/**
+ * Ruling A on objectui#9593 (decision batch #144 item 3, maintainer verbatim
+ * 「9593 A，其他同意」): `RecordRelatedListProps.columns` declares the SAME
+ * union as the saved-view key `listViews[].columns`, because objectui composes
+ * a saved view's columns onto this block VERBATIM (`dataSource.view` →
+ * `composeElementDataSource` → `savedViewColumns`). Before it, two published
+ * declarations disagreed about one key.
+ *
+ * What is pinned here:
+ *
+ *   1. both spellings parse, and the decoration SURVIVES the parse — a
+ *      `describe()` promising decoration a parse strips would be the defect
+ *      class this card exists to close, one layer over;
+ *   2. it is the same DECLARATION, not a lookalike: the object arm is the
+ *      `ListColumnSchema` binding itself (reference identity, and the refusal
+ *      text carries that schema's own surface word), and block and view give
+ *      every fixture the same verdict;
+ *   3. what it still REFUSES — an unknown member on a column object, a MIXED
+ *      array (the arms are exclusive), a non-array, an identity-less object;
+ *   4. the prose↔schema agreement, so the two cannot drift apart silently;
+ *   5. the ruling's two scope fences, held by measurement rather than intent.
+ */
+describe('RecordRelatedListProps.columns — the saved-view ListColumn union (#18639)', () => {
+  const base = { objectName: 'contact', relationshipField: 'account_id' };
+  const parse = (columns: unknown) => RecordRelatedListProps.safeParse({ ...base, columns });
+  /** Refuse `columns` and hand back the issues as a searchable string. */
+  const refusalOf = (columns: unknown): string => {
+    const r = parse(columns);
+    expect(r.success, `expected REJECTION of ${JSON.stringify(columns)}`).toBe(false);
+    return JSON.stringify(r.error?.issues ?? []);
+  };
+
+  it('still accepts the legacy field-name string array', () => {
+    const r = parse(['name', 'email']);
+    expect(r.success, JSON.stringify(r.error?.issues)).toBe(true);
+    expect(r.data?.columns).toEqual(['name', 'email']);
+  });
+
+  it("accepts a saved view's decorated columns, and the decoration survives the parse", () => {
+    const decorated = [
+      { field: 'name', label: 'Name', link: true },
+      { field: 'amount', width: 120, align: 'right', summary: 'sum' },
+      { field: 'internal_note', hidden: true, sortable: false },
+    ];
+    const r = parse(decorated);
+    expect(r.success, JSON.stringify(r.error?.issues)).toBe(true);
+    // Not just "it parsed": the keys the ruling wants on the screen are still
+    // there afterwards. A strip would satisfy `success` and lose the point.
+    expect(r.data?.columns).toMatchObject(decorated);
+  });
+
+  it('is the SAME union the saved-view key declares — the object arm IS ListColumnSchema', () => {
+    /** The element schema of a `columns` union's object arm, both carriers. */
+    const objectArmElement = (schema: unknown): unknown => {
+      const def = (schema as { _zod: { def: Record<string, unknown> } })._zod.def;
+      const union = (def.type === 'optional'
+        ? (def.innerType as { _zod: { def: Record<string, unknown> } })._zod.def
+        : def) as { type: string; options: Array<{ _zod: { def: { element: unknown } } }> };
+      expect(union.type).toBe('union');
+      expect(union.options).toHaveLength(2);
+      return union.options[1]._zod.def.element;
+    };
+    const blockArm = objectArmElement((RecordRelatedListProps as unknown as {
+      shape: Record<string, unknown>;
+    }).shape.columns);
+    const viewArm = objectArmElement((ListViewSchema as unknown as {
+      shape: Record<string, unknown>;
+    }).shape.columns);
+    // Reference identity, not structural resemblance: one def, two carriers.
+    expect(blockArm).toBe(ListColumnSchema);
+    expect(viewArm).toBe(ListColumnSchema);
+    expect(blockArm).toBe(viewArm);
+  });
+
+  it('agrees with `listViews[].columns` on every fixture — one union, two carriers', () => {
+    const fixtures: unknown[] = [
+      ['name', 'email'],
+      [{ field: 'amount', label: 'Amount', width: 120 }],
+      [{ field: 'amount', summary: { type: 'avg', field: 'total' } }],
+      [{ field: 'name', prefix: { field: 'status', type: 'badge' } }],
+      [{ field: 'amount', bogus: 1 }],
+      ['name', { field: 'amount' }],
+      [{ field: 'name', prefix: { field: 'status', type: 'chip' } }],
+      [{}],
+      'name',
+      { field: 'name' },
+    ];
+    for (const columns of fixtures) {
+      const view = (ListViewSchema as unknown as {
+        safeParse: (v: unknown) => { success: boolean };
+      }).safeParse({ columns });
+      expect(
+        parse(columns).success,
+        `block and saved view disagree about ${JSON.stringify(columns)}`,
+      ).toBe(view.success);
+    }
+  });
+
+  it("refuses an unknown member on a column object — through ListColumnSchema's own strictness", () => {
+    const text = refusalOf([{ field: 'amount', bogus: 1 }]);
+    expect(text).toContain('"code":"unrecognized_keys"');
+    expect(text).toContain('bogus');
+    // The named-surface refusal is ListColumnSchema's own text. A re-spelled
+    // lookalike would refuse too, and would not say this.
+    expect(text).toContain('this list column');
+  });
+
+  it('refuses a MIXED array — the two arms are exclusive, exactly as the describe says', () => {
+    const text = refusalOf(['name', { field: 'amount' }]);
+    expect(text).toContain('"code":"invalid_union"');
+  });
+
+  it('refuses a non-array, and an object entry with no resolvable field', () => {
+    refusalOf('name');
+    refusalOf({ field: 'name' });
+    refusalOf([{}]);
+    refusalOf([{ label: 'Amount' }]);
+  });
+
+  it('the describe() says what the schema does — override chain and the ListColumn spelling', () => {
+    const text = String((RecordRelatedListProps as unknown as {
+      shape: Record<string, { description?: string }>;
+    }).shape.columns.description);
+    // The override chain the ruling asked the describe to name …
+    expect(text).toContain('Override chain: child highlightFields → field-level relatedListColumns');
+    // … that a view-supplied list may arrive in the ListColumn spelling …
+    expect(text).toContain('`ListColumn`');
+    expect(text).toContain('listViews[].columns');
+    expect(text).toContain('verbatim');
+    // … and the exclusivity the schema really enforces (pinned above).
+    expect(text).toContain('the two arms are exclusive');
+  });
+});
+
+describe('#18639 scope fences — held by measurement, not by intent', () => {
+  it('`field.relatedListColumns` is still strings-only — a ListColumn entry is refused at the field door', () => {
+    const lookup = { name: 'project', label: 'Project', type: 'lookup', reference: 'showcase_project' };
+    const field = (relatedListColumns: unknown) =>
+      FieldSchema.safeParse({ ...lookup, relatedListColumns });
+    expect(field(['status', 'amount']).success).toBe(true);
+    const refused = field([{ field: 'amount', label: 'Amount', width: 120 }]);
+    expect(refused.success, 'the sibling key stays strings-only by ruling').toBe(false);
+    expect(JSON.stringify(refused.error?.issues)).toContain('FIELD-NAME strings');
+  });
+
+  it('the `field-column-lists-canonicalized` conversion is unchanged — object entries still fold to the identity string', () => {
+    const entry = ALL_CONVERSIONS.find((c) => c.id === 'field-column-lists-canonicalized');
+    expect(entry, 'the ruling keeps this conversion exactly as it is').toBeDefined();
+    expect(entry?.surface).toBe('field.inlineColumns[].field / field.relatedListColumns[] object entries');
+    const after = entry?.fixture.after as {
+      objects: Array<{ fields: Record<string, { relatedListColumns?: unknown }> }>;
+    };
+    // `{ field: 'status', label: 'Status' }` → `'status'`: the decoration is
+    // still DROPPED on this key, which is precisely what widening the block
+    // sibling does NOT do.
+    expect(after.objects[0].fields.project.relatedListColumns).toEqual(['status', 'amount', 'issued_on']);
+  });
+});
+
 describe('RecordHighlightsProps', () => {
   it('should accept valid highlights', () => {
     const props = { fields: ['name', 'status', 'amount'] };
@@ -1367,11 +1533,53 @@ describe('ElementTextPropsSchema', () => {
     expect(props.align).toBe('center');
   });
 
-  it('should accept all variants', () => {
-    const variants = ['heading', 'subheading', 'body', 'caption'] as const;
-    variants.forEach(variant => {
-      expect(() => ElementTextPropsSchema.parse({ content: 'Test', variant })).not.toThrow();
-    });
+  /**
+   * The accept set, measured rather than described. Release 1 of the
+   * objectui#7450 convergence (maintainer 2026-09-09, option B) is additive
+   * only, so the assertion has two halves and BOTH are load-bearing: the nine
+   * published values are accepted, and the two legacy spellings are STILL
+   * accepted. A pin that only checked the nine would stay green through the
+   * release-2 retirement this card explicitly does not carry.
+   */
+  const PUBLISHED_NINE = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'body', 'caption', 'overline'] as const;
+  const STILL_ACCEPTED = ['heading', 'subheading'] as const;
+
+  it.each(PUBLISHED_NINE)('accepts the published variant %s', variant => {
+    const parsed = ElementTextPropsSchema.safeParse({ content: 'Test', variant });
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.variant).toBe(variant);
+  });
+
+  it.each(STILL_ACCEPTED)('release 1 refuses nothing — %s is still accepted', variant => {
+    const parsed = ElementTextPropsSchema.safeParse({ content: 'Test', variant });
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.variant).toBe(variant);
+  });
+
+  /**
+   * The lit control for the two tests above: the enum is still a CLOSED set,
+   * so a zero-refusal reading on the eleven is a reading and not a schema that
+   * stopped judging `variant` at all.
+   */
+  it('still refuses a value outside the eleven, with invalid_value', () => {
+    const parsed = ElementTextPropsSchema.safeParse({ content: 'Test', variant: 'small' });
+    expect(parsed.success).toBe(false);
+    expect(parsed.success ? [] : parsed.error.issues.map(issue => issue.code)).toContain('invalid_value');
+    expect(parsed.success ? [] : parsed.error.issues.map(issue => issue.path.join('.'))).toContain('variant');
+  });
+
+  /**
+   * Absence is the one thing this widening must not move (objectui#6942 keeps
+   * the `ui:text` side from synthesising `body`; the spec side always has).
+   * `.optional().default('body')` is kept deliberately, so an absent `variant`
+   * still materialises `'body'` — pinned here as well as in the minimal-props
+   * test above, because that test would keep passing if the default moved to
+   * some other member of the widened enum.
+   */
+  it('leaves absence exactly where it was — no variant materialises body', () => {
+    const parsed = ElementTextPropsSchema.safeParse({ content: 'Test' });
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.variant).toBe('body');
   });
 
   it('should reject without content', () => {
@@ -2073,12 +2281,19 @@ describe("element:record_picker `filter` — one filter orthography platform-wid
 });
 
 // ---------------------------------------------------------------------------
-// The four `object-*` `filter` doors — the ViewFilterRule ARRAY orthography
+// The seven `object-*` `filter` doors — the ViewFilterRule ARRAY orthography
 // (ui#6206-B reaching the object-* family: #15449, folded into #15442,
-// decision batch #55, option A: family-wide, one ADR-0087 D3 entry)
+// decision batch #55, option A: family-wide, one ADR-0087 D3 entry). The last
+// three joined at #18305, when `object-map` / `object-gantt` / `object-tree`
+// got their rows: a NEW `filter` door on this family declares the ruled
+// orthography from birth — the ruling is family-wide, so there is no
+// "measured before the ruling" arm left for a door that did not exist then.
 // ---------------------------------------------------------------------------
-describe('the four `object-*` `filter` doors — one filter orthography platform-wide (ui#6206-B, #15449)', () => {
-  const OBJECT_DOORS = ['object-grid', 'object-metric', 'object-kanban', 'object-calendar'] as const;
+describe('the seven `object-*` `filter` doors — one filter orthography platform-wide (ui#6206-B, #15449, #18305)', () => {
+  const OBJECT_DOORS = [
+    'object-grid', 'object-metric', 'object-kanban', 'object-calendar',
+    'object-map', 'object-gantt', 'object-tree',
+  ] as const;
   const RULES = [{ field: 'status', operator: 'not_equals', value: 'done' }];
   const RECORD_FORM = { status: { $ne: 'done' } };
   /** The showcase's `object-grid` used to author THIS — an ObjectQL AST tuple array. */
@@ -2095,7 +2310,10 @@ describe('the four `object-*` `filter` doors — one filter orthography platform
     // hand it verbatim to `$filter`, where `convertQueryParams` lowers it; the
     // metric's aggregate path lowers it through `translateFilterArray` and
     // `parseFilterAST` before `POST /analytics/query` (objectui#7754 — the
-    // door the family was sequenced behind, #15828 / #16626).
+    // door the family was sequenced behind, #15828 / #16626). Re-measured at
+    // the same pin for the three #18305 doors: `ObjectMap.tsx:742`,
+    // `ObjectGantt.tsx:738` and `ObjectTree.tsx:474` each hand `schema.filter`
+    // verbatim to `$filter`, the kanban/calendar shape.
     const r = door(type).safeParse({ objectName: 'showcase_task', filter: RULES });
     expect(r.success).toBe(true);
     expect(r.data!.filter).toEqual(RULES);
@@ -2155,8 +2373,16 @@ describe('the four `object-*` `filter` doors — one filter orthography platform
   });
 });
 
-describe('`object-grid` / `object-calendar` `sort` — one sort orthography, the array (objectui#8221, decision batch #77, option B)', () => {
-  const SORT_DOORS = ['object-grid', 'object-calendar'] as const;
+describe('the four `object-*` `sort` doors — one sort orthography, the array (objectui#8221, decision batch #77, option B; #18305)', () => {
+  // `object-map` and `object-gantt` joined at #18305: both hand `schema.sort`
+  // to the SAME shared sink the grid and the calendar do
+  // (`convertSortToQueryParams`, `core/src/utils/sort-query.ts`) —
+  // `ObjectMap.tsx:743`, `ObjectGantt.tsx:739` at the pin `53ded82b`.
+  // `object-tree` is deliberately NOT here: its fetch (`ObjectTree.tsx:473-484`)
+  // carries `$filter`, `$top` and `$expand` and no `$orderby` at all, so its row
+  // declares no `sort` — a door with no read site is what this family refuses to
+  // publish.
+  const SORT_DOORS = ['object-grid', 'object-calendar', 'object-map', 'object-gantt'] as const;
   const ARRAY_FORM = [{ field: 'created_at', order: 'desc' }];
   /**
    * The legacy OData-ish clause `convertSortToQueryParams` honours at the
@@ -2881,10 +3107,15 @@ describe('#7751 — object-* block props schemas', () => {
     return r.error.issues.map((i: { message: string }) => i.message).join('\n');
   };
 
-  it('the six ruled blocks are registered; object-chart deliberately is NOT', () => {
+  it('the nine ruled blocks are registered; object-chart deliberately is NOT', () => {
+    // Six at #7751, three more at #18305 (`object-map` / `object-gantt` /
+    // `object-tree`) — the blocks that section enumerated past rather than
+    // ruled out. `Object.keys(ComponentPropsMap)` is what every downstream
+    // reader dispatches on, so the row set is pinned by name here.
     for (const type of [
       'object-grid', 'object-metric', 'object-kanban', 'object-calendar',
       'object-form', 'object-master-detail-form',
+      'object-map', 'object-gantt', 'object-tree',
     ]) {
       expect(ComponentPropsMap[type as keyof typeof ComponentPropsMap], type).toBeDefined();
     }
@@ -3091,7 +3322,10 @@ describe('#7751 — object-* block props schemas', () => {
   });
 
   it('the plural `filters` is rejected by name on every block that reads `filter`', () => {
-    for (const type of ['object-grid', 'object-metric', 'object-kanban', 'object-calendar'] as const) {
+    for (const type of [
+      'object-grid', 'object-metric', 'object-kanban', 'object-calendar',
+      'object-map', 'object-gantt', 'object-tree',
+    ] as const) {
       const message = refuse(ComponentPropsMap[type], { filters: [] });
       expect(message, type).toContain('Did you mean `filters` → `filter`?');
     }
@@ -3113,6 +3347,7 @@ describe('#7751 — object-* block props schemas', () => {
     for (const type of [
       'object-grid', 'object-metric', 'object-kanban', 'object-calendar',
       'object-form', 'object-master-detail-form',
+      'object-map', 'object-gantt', 'object-tree',
     ] as const) {
       expect(ComponentPropsMap[type].safeParse({}).success, type).toBe(true);
     }
@@ -3356,5 +3591,196 @@ describe('ObjectMetricPropsSchema icon liveness (#10053)', () => {
     }).def.shape;
     expect(shape.icon?.description).toContain('getLazyIcon');
     expect(shape.icon?.description).toContain('MetricWidget');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #18305 — `object-map` / `object-gantt` / `object-tree` get their
+// `ComponentPropsMap` rows, executing the objectui#8348 ruling
+// 「8348 以协议为准」 (batch #83, 2026-09-08) and batch #136 item 3 (Q1-C).
+//
+// The acceptance the card names, pinned: each row's KEY SET is the one the
+// renderer's read points support at the `.objectui-sha` pin `53ded82b`, and
+// `Object.keys(ComponentPropsMap)` lists the three. The key sets are asserted
+// WHOLE rather than by spot-check — a row derived from read points is a claim
+// about a complete set, and only an equality can hold a later addition to
+// having been measured too.
+// ---------------------------------------------------------------------------
+describe('the three #18305 object blocks — key sets derived from the renderers read points', () => {
+  type Shape = { shape: Record<string, unknown>; safeParse(v: unknown): any };
+  const door = (type: string) => ComponentPropsMap[type as keyof typeof ComponentPropsMap] as unknown as Shape;
+  const keysOf = (type: string) => Object.keys(door(type).shape).sort();
+  const refuse = (type: string, value: unknown): string => {
+    const r = door(type).safeParse(value);
+    expect(r.success).toBe(false);
+    return r.error.issues.map((i: { message: string }) => i.message).join('\n');
+  };
+
+  it('object-map declares exactly its measured read set', () => {
+    // ObjectMap.tsx @ 53ded82b: data (:169 -> resolveRecordSourceConfig :174),
+    // staticData / objectName (the shared ladder's rungs 2 and 3), filter
+    // (:742), sort (:743), map (:370), mapStyle (:365), navigation (:889),
+    // enableClustering (:905).
+    expect(keysOf('object-map')).toEqual([
+      'data', 'enableClustering', 'filter', 'map', 'mapStyle', 'navigation', 'objectName', 'sort', 'staticData',
+    ]);
+  });
+
+  it('object-gantt declares exactly its measured read set', () => {
+    // ObjectGantt.tsx @ 53ded82b: the ladder (:593), filter (:738), sort
+    // (:739), gantt (:499), navigation (:1487), label (:1849), skipWeekends
+    // (:1205), holidays (:1206), persistLayout (:1357), viewName (:1359),
+    // markers (:1826), criticalPath (:1829), showBaselines (:1832), readOnly
+    // (:1833), mobileReadOnly (:1834).
+    expect(keysOf('object-gantt')).toEqual([
+      'criticalPath', 'data', 'filter', 'gantt', 'holidays', 'label', 'markers', 'mobileReadOnly',
+      'navigation', 'objectName', 'persistLayout', 'readOnly', 'showBaselines', 'skipWeekends',
+      'sort', 'staticData', 'viewName',
+    ]);
+  });
+
+  it('object-tree declares exactly its measured read set — and `data` IS in it', () => {
+    // The card's open question, answered by measurement rather than by family
+    // symmetry: ObjectTree.tsx @ 53ded82b reaches `schema.data` through
+    // `resolveRecordSourceConfig(schema)` at :359 — rung 1 of the shared
+    // ladder, which returns the authored value VERBATIM as a `ViewData`. That
+    // ONE site is the whole support for the object arm, and it is sufficient.
+    // ⛔ :496 is NOT a second one: `(rest as any).data ?? (schema as any).data`
+    // is gated by `Array.isArray(passed)` on the next line, so it honours only
+    // the bare-ARRAY shorthand this row REFUSES (pinned below). objectui#9234
+    // left the :359 read marked `undeclared` because neither published face
+    // carried the key; the protocol row follows the READ POINTS, which is what
+    // 「以协议为准」 resolving for this block means.
+    expect(keysOf('object-tree')).toEqual([
+      'data', 'filter', 'navigation', 'objectName', 'staticData', 'tree',
+    ]);
+    // …and NOT `sort`: this renderer's fetch carries $filter, $top and $expand
+    // and no $orderby, so a `sort` door here would publish a key with no read
+    // site. The negative is the other half of "derived from read points".
+    expect(keysOf('object-tree')).not.toContain('sort');
+  });
+
+  it('`data` takes the ViewData object arm on all three — the arm the shared ladder returns verbatim', () => {
+    for (const type of ['object-map', 'object-gantt', 'object-tree'] as const) {
+      const bound = door(type).safeParse({ data: { provider: 'object', object: 'showcase_task' } });
+      expect([type, bound.success]).toEqual([type, true]);
+      const inline = door(type).safeParse({ data: { provider: 'value', items: [{ id: 1 }] } });
+      expect([type, inline.success]).toEqual([type, true]);
+      // The bare-array shorthand two of these renderers normalize is off
+      // contract — `ViewData` is a discriminated union over OBJECT variants —
+      // so it is refused here exactly as it is on `object-grid`.
+      const bare = door(type).safeParse({ data: [{ id: 1 }] });
+      expect([type, bare.success]).toEqual([type, false]);
+      // Inline rows have their own declared door, and it is an array.
+      const staticRows = door(type).safeParse({ staticData: [{ id: 1 }] });
+      expect([type, staticRows.success]).toEqual([type, true]);
+    }
+  });
+
+  it('the flat config spellings are refused with the wrong-layer prescription, not a rename', () => {
+    // The ObjectView / ListView flatten product: read by all three renderers,
+    // ruled an internal transport form rather than a second authoring surface
+    // (objectui#5018 for the map, inherited by objectui#6469 for the gantt;
+    // one composition key per concept for the tree).
+    const mapMsg = refuse('object-map', { objectName: 'task', latitudeField: 'lat' });
+    expect(mapMsg).toContain('`map`');
+    expect(mapMsg).toContain('latitudeField');
+    const ganttMsg = refuse('object-gantt', { objectName: 'task', startDateField: 'starts_at' });
+    expect(ganttMsg).toContain('`gantt`');
+    expect(ganttMsg).toContain('startDateField');
+    const treeMsg = refuse('object-tree', { objectName: 'task', parentField: 'parent_id' });
+    expect(treeMsg).toContain('`tree`');
+    expect(treeMsg).toContain('parentField');
+  });
+
+  it('each flat-key set is HELD EQUAL to the config block it points at — it cannot drift silently', () => {
+    // The lists are spelled out at the declaration (forcing a `lazySchema`
+    // proxy at module load would build `view.zod` mid-initialisation), so the
+    // derivation is asserted here instead. A key added to a config block on
+    // either face lands in this assertion, not in a silent gap between the
+    // block and the prescription that sends authors to it.
+    const setFor = (type: string, name: string): readonly string[] => {
+      // Force the row first: declarations register when their `lazySchema` body
+      // runs, so a registry read before that returns a set this row is not in.
+      void door(type).shape;
+      const decl = strictObjectDeclarations().find((d) => d.options.surface === `this \`${type}\``);
+      expect(decl, type).toBeDefined();
+      const set = (decl!.options.guidanceSets ?? []).find((g) => g.name === name);
+      expect(set, name).toBeDefined();
+      expect(Array.isArray(set!.keys), name).toBe(true);
+      return [...(set!.keys as readonly string[])].sort();
+    };
+    // map: `ListMapConfigSchema`'s own shape MINUS `style`, the one member that
+    // has no flat spelling — flattened to the top level it collides with
+    // `BaseSchema.style`, the node's inline CSS record, so objectui's own
+    // `FLAT_MAP_CONFIG_KEYS` subtracts it and this set follows. Derived by
+    // SUBTRACTION rather than hand-listed, so a newly declared config key still
+    // lands in this assertion.
+    expect(setFor('object-map', 'OBJECT_MAP_FLAT_CONFIG_KEYS'))
+      .toEqual(Object.keys(ListMapConfigSchema.shape).filter((k) => k !== 'style').sort());
+    // gantt: `GanttConfigSchema`'s shape PLUS the legacy singular alias the
+    // renderer's flat branch still reads beside `dependenciesField`.
+    expect(setFor('object-gantt', 'OBJECT_GANTT_FLAT_CONFIG_KEYS'))
+      .toEqual([...Object.keys(GanttConfigSchema.shape), 'dependencyField'].sort());
+    // tree: `TreeConfigSchema`'s shape PLUS `titleField`, which `getTreeConfig`
+    // reads only as `labelField`'s last fallback (ObjectTree.tsx:117).
+    expect(setFor('object-tree', 'OBJECT_TREE_FLAT_CONFIG_KEYS'))
+      .toEqual([...Object.keys(TreeConfigSchema.shape), 'titleField'].sort());
+  });
+
+  it('the config blocks are the spec own schemas where the renderer names one, `z.unknown()` where it does not', () => {
+    // gantt: `ObjectGantt.tsx:501` validates the authored block against
+    // `GanttConfigSchema` imported from `@objectstack/spec/ui`, so the read
+    // point names the schema and the door takes it — a misspelling inside the
+    // block is refused here exactly as the renderer's own safeParse warns.
+    expect(door('object-gantt').safeParse({
+      gantt: { startDateField: 's', endDateField: 'e', titleField: 't' },
+    }).success).toBe(true);
+    expect(door('object-gantt').safeParse({
+      gantt: { startDateField: 's', endDateField: 'e', titleField: 't', colourField: 'status' },
+    }).success).toBe(false);
+    // tree: `TreeConfigSchema`, closed at #15469 on this very measurement.
+    expect(door('object-tree').safeParse({ tree: { parentField: 'parent_id' } }).success).toBe(true);
+    expect(door('object-tree').safeParse({ tree: { labelFeild: 'name' } }).success).toBe(false);
+    // map: `ListMapConfigSchema` — the ratchet the previous posture deferred,
+    // taken now that `style` is declared on that block (the key `getMapConfig`
+    // reads at `ObjectMap.tsx:365`, `schema.mapStyle || schema.map?.style`). The
+    // two assertions that used to record the divergence are INVERTED here: the
+    // list-view face accepts the style URL, and the door accepts it through the
+    // spec's own schema rather than through an open value.
+    expect(ListMapConfigSchema.safeParse({ style: 'https://tiles.example/style.json' }).success).toBe(true);
+    expect(door('object-map').safeParse({ map: { latitudeField: 'lat', style: 'https://tiles.example/style.json' } }).success).toBe(true);
+    // …and the acceptance is the SCHEMA's, not an open value's: a misspelling
+    // inside the block is refused AT `map`, by name. Without this half the pin
+    // above passes just as well against the `z.unknown()` it replaced.
+    const mapTypo = door('object-map').safeParse({ map: { latitudeField: 'lat', styl: 'https://tiles.example/style.json' } });
+    expect(mapTypo.success).toBe(false);
+    const mapUnknown = mapTypo.error.issues.find(
+      (i: { code: string; path: PropertyKey[] }) => i.code === 'unrecognized_keys'
+        && JSON.stringify(i.path) === JSON.stringify(['map']),
+    );
+    expect(mapUnknown, 'the refusal must land at `map`, not at the node root').toBeDefined();
+    expect(mapUnknown.keys).toContain('styl');
+  });
+
+  it('every one of the three still refuses an undeclared key BY NAME — the control', () => {
+    for (const type of ['object-map', 'object-gantt', 'object-tree'] as const) {
+      const r = door(type).safeParse({ objectName: 'task', bogusProp: 1 });
+      expect([type, r.success]).toEqual([type, false]);
+      const unrecognized = r.error.issues.filter((i: { code: string }) => i.code === 'unrecognized_keys');
+      expect(unrecognized.flatMap((i: { keys?: string[] }) => i.keys ?? [])).toContain('bogusProp');
+    }
+  });
+
+  it('each row carries the objectBlockHistory line — the silence it ends is named in the refusal', () => {
+    for (const type of ['object-map', 'object-gantt', 'object-tree'] as const) {
+      const message = refuse(type, { bogusProp: 1 });
+      expect(message, type).toContain('had no entry there at all');
+      expect(message, type).toContain(type);
+    }
+  });
+
+  it('object-chart is STILL deliberately absent — the three rows did not sweep it in', () => {
+    expect((ComponentPropsMap as Record<string, unknown>)['object-chart']).toBeUndefined();
   });
 });

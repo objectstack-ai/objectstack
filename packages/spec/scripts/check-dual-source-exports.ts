@@ -160,6 +160,62 @@ function makeProgram(files: string[], extra: ts.CompilerOptions = {}): ts.Progra
   });
 }
 
+// ── Self-test: the handshake flag ────────────────────────────────────────────
+//
+// Set by `selfTest()` only after its verdict line prints, and read at the
+// dispatch below: a `return` that leaves the function above that line prints
+// nothing, and here it does not even stop — control falls through to the audit,
+// which on a fresh dist prints its own green line and exits 0. A self-test that
+// never finished, reported as one that passed. ⛔ AN EXIT CODE IS NOT A
+// HANDSHAKE: `fail()` below exits 1 on its own, so the exit code stays
+// load-bearing; the flag is the thing an early return cannot carry with it.
+let selfTestReachedVerdict = false;
+
+// ── The self-test's own battery roster and floor ─────────────────────────────
+//
+// Reaching the `✅ self-test` line used to be this self-test's ONLY success
+// condition, so "every case held" and "the cases never ran" printed the same
+// line — no count, nothing to compare. The shrink was measured on this file's
+// sibling `check-exported-any.ts`, whose self-test has the same anatomy:
+// deleting one name from a fixture name list de-registers that case and the run
+// still prints its verdict byte-identically and still exits 0.
+//
+// Closed the way `scripts/check-agent-model-declared.mjs` and its TypeScript
+// ports (`scripts/check-test-typecheck.mts`, `check-duration-unit-keys.ts` in
+// this very directory) closed it — COPIED and ⛔ never imported, because every
+// self-test has to keep running standalone as
+// `tsx scripts/check-dual-source-exports.ts --self-test`, and a shared
+// assertion module would be one point of failure for every instrument at once.
+// What is pinned is the registered NAMES, not a number.
+//
+// A BATTERY HERE IS A SECTION: this self-test is a sequence of assertions
+// grouped by what they hold, so each group opens with `battery('<name>')` and
+// every `expect()` after it is attributed to that name until the next opens.
+//
+// ⛔ A pinned TOTAL is not the repair — a battery falling from 4 cases to 1
+// keeps a total "right" the moment a sibling grows — and ⛔ neither is a roster
+// DERIVED from the run: a count taken from the cases that ran can never notice
+// one that stopped. The two fixture name lists are exactly what a shrink
+// deletes from, so their floors are their live lengths.
+//
+// The counts are a FLOOR, not an equality: adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running.
+const SELF_TEST_BATTERIES: Readonly<Record<string, number>> = Object.freeze({
+  'the fixture compiles: two entries over one shared declaration source': 1,
+  'the fixture RESOLVES: the counts that keep both legs below non-vacuous': 2,
+  'the RED leg: one name, two declarations — flagged in both faces of the trap': 2,
+  'the GREEN leg: a re-export of ONE declaration, and a single-entry name, are NOT flagged': 4,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 4;
+
+// The key a case is filed under when no battery is open. It is not a declared
+// battery, so it reds by the same set difference rather than silently inflating
+// whichever battery happened to open last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 // ── Self-test ────────────────────────────────────────────────────────────────
 
 /**
@@ -168,10 +224,33 @@ function makeProgram(files: string[], extra: ts.CompilerOptions = {}): ts.Progra
  * re-export must NOT be (a false positive drowns the signal in the ~80
  * legitimate re-exports the real surface carries).
  */
-function selfTest(): never {
+function selfTest(): void {
   const fail = (msg: string): never => {
     console.error(`✗ self-test: ${msg}`);
     process.exit(1);
+  };
+
+  // The battery ledger this self-test's floor is evaluated against.
+  // `battery()` opens a battery; every `expect()` below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  //
+  // Registration is the FIRST statement of `expect()`, before the outcome is
+  // consulted, because the floor asserts REACH: a case that runs and FAILS
+  // still registers (and `fail()` exits loudly on its own), and only a case that
+  // never runs at all goes missing from the ledger. Routing registration
+  // through the failure path instead would register a case only when it failed
+  // — a fully green run would register 0 and every battery would read DID NOT
+  // RUN, the floor inverted rather than installed.
+  const seen = new Map<string, number>();
+  let openBattery: string | undefined;
+  const battery = (name: string): void => {
+    openBattery = name;
+  };
+  const expect = (ok: boolean, msg: string | (() => string)): void => {
+    const attributedTo = openBattery ?? UNATTRIBUTED_BATTERY;
+    seen.set(attributedTo, (seen.get(attributedTo) ?? 0) + 1);
+    if (!ok) fail(typeof msg === 'function' ? msg() : msg);
   };
 
   const dir = mkdtempSync(join(tmpdir(), 'spec-dual-source-'));
@@ -200,8 +279,12 @@ function selfTest(): never {
 
     const entries = { './a': join(dir, 'a.ts'), './b': join(dir, 'b.ts') };
     const program = makeProgram(Object.values(entries));
+    battery('the fixture compiles: two entries over one shared declaration source');
     const syntactic = program.getSyntacticDiagnostics();
-    if (syntactic.length > 0) fail(`fixture does not parse: ${ts.flattenDiagnosticMessageText(syntactic[0].messageText, ' ')}`);
+    expect(
+      syntactic.length === 0,
+      () => `fixture does not parse: ${ts.flattenDiagnosticMessageText(syntactic[0].messageText, ' ')}`,
+    );
 
     const { findings, names, reExports } = scan(program, entries);
     const flagged = new Set(findings.map((f) => f.split(' — ')[0]));
@@ -209,24 +292,94 @@ function selfTest(): never {
     // 6 distinct names (SharedType, sharedConst, TrueDup, Mixed, OnlyA, OnlyB).
     // Fewer means exports are not resolving, and every assertion below would
     // pass vacuously — the exact way a gate goes dormant.
-    if (names !== 6) fail(`saw ${names} export names, expected 6 — the fixture's modules are not resolving`);
-    if (reExports !== 2) fail(`saw ${reExports} re-exported names, expected 2 (SharedType, sharedConst) — alias resolution is broken`);
+    battery('the fixture RESOLVES: the counts that keep both legs below non-vacuous');
+    expect(names === 6, `saw ${names} export names, expected 6 — the fixture's modules are not resolving`);
+    expect(reExports === 2, `saw ${reExports} re-exported names, expected 2 (SharedType, sharedConst) — alias resolution is broken`);
 
+    battery('the RED leg: one name, two declarations — flagged in both faces of the trap');
     for (const name of ['TrueDup', 'Mixed']) {
-      if (!flagged.has(name)) fail(`missed \`${name}\` — two declarations share the name and the gate is DORMANT`);
+      expect(flagged.has(name), `missed \`${name}\` — two declarations share the name and the gate is DORMANT`);
     }
+    battery('the GREEN leg: a re-export of ONE declaration, and a single-entry name, are NOT flagged');
     for (const name of ['SharedType', 'sharedConst', 'OnlyA', 'OnlyB']) {
-      if (flagged.has(name)) fail(`false positive on \`${name}\` — only same-name DIFFERENT-declaration exports may be flagged`);
+      expect(!flagged.has(name), `false positive on \`${name}\` — only same-name DIFFERENT-declaration exports may be flagged`);
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 
-  console.log('✅  self-test: flags same-name different-declaration exports, and nothing else.');
-  process.exit(0);
+  // ── The floor: every declared battery RAN, and ran its cases ──────────────
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered EQUALS the set declared, each at or above its own
+  // count. A set difference names WHICH battery stopped; a count says only that
+  // something did — and, before this block existed, not even that.
+  const floorProblems: string[] = [];
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorProblems.push(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of seen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorProblems.push(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — a case attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = seen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorProblems.push(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — ${SELF_TEST_BATTERIES[name] - count} case(s) that used to run no longer do.`,
+    );
+  }
+  if (floorProblems.length > 0) {
+    for (const problem of floorProblems) console.error(`✗ self-test floor: ${problem}`);
+    console.error(
+      '✗ self-test floor: A battery below its floor means cases STOPPED RUNNING — the battery is the ' +
+        'bug, not the number. Find what stopped registering (a name deleted from a fixture name list, ' +
+        'a guard that now skips, an early return) and restore it.',
+    );
+    process.exit(1);
+  }
+
+  // The count is printed because a reader had to hand-tally the assertions to
+  // get one, and it is printed AFTER the floor rather than instead of it: the
+  // number is evidence, the floor is the proof.
+  const registered = [...seen.values()].reduce((a, b) => a + b, 0);
+  console.log(
+    '✅  self-test: flags same-name different-declaration exports, and nothing else — ' +
+      `${registered} case(s) across ${declaredBatteries.length} batteries, every battery at or above ` +
+      'its pinned floor.',
+  );
+  selfTestReachedVerdict = true;
 }
 
-if (SELF_TEST) selfTest();
+if (SELF_TEST) {
+  selfTest();
+  // The handshake. Without it a `return` above the verdict prints nothing and
+  // does not even stop: control reaches the audit below, which on a fresh dist
+  // prints its own green line and exits 0 — a self-test that never finished,
+  // reported as one that passed. `fail()`'s own exit code stays load-bearing;
+  // this refuses to believe a SILENT success.
+  if (!selfTestReachedVerdict) {
+    console.error(
+      '\n✗ check-dual-source-exports self-test: selfTest() returned without reaching its verdict,\n' +
+        'so no verdict line was printed. Exiting 0 here would report a self-test that never\n' +
+        'finished as a self-test that passed.\n',
+    );
+    process.exit(1);
+  }
+  process.exit(0);
+}
 
 // ── Audit ────────────────────────────────────────────────────────────────────
 

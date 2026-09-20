@@ -164,6 +164,36 @@
  * judged on arrival instead of arriving unjudged. Its positive control is the
  * fixture, never the population -- a rule with an empty population cannot be
  * shown to work by the population.
+ *
+ * ## The harness spawns a REAL bash, so the host's bash decides what it can drive
+ *
+ * `driveBlock` reproduces GitHub's `bash -e <file>` verbatim, and that fidelity
+ * is the whole point of the dynamic half -- it must not be traded away. But the
+ * blocks it replays are written for CI's bash 5 and two of them enumerate with
+ * `mapfile`, a bash-4 builtin. On macOS `/bin/bash` is 3.2.57, where that line
+ * exits 127 before the block does anything: every assertion about the
+ * collector's behaviour failed, INCLUDING the ablation legs, which reported
+ * that they "cannot reproduce the defect". The step under test was fine; the
+ * harness could not run it there.
+ *
+ * So the interpreter is measured once, through the SHARED reading in
+ * `check-bash32-floor.mjs` -- the file that owns this repo's bash-floor
+ * knowledge and already carries the construct table this scan reuses. A block
+ * whose text uses a construct the measured host cannot run is not driven, and
+ * the three things that makes true are all deliberate:
+ *
+ *   - the skip is LOUD and carries its REASON -- the block, the line, the
+ *     spelling and what that construct does on the floor, printed in the same
+ *     sentence this repo's floor gate prints when it flags the same token in a
+ *     tracked file. A skip reporting a count is the quiet pass #4690 refuses.
+ *   - the skip is PER BLOCK, not per harness. On a 3.2 host exactly one live
+ *     collector enumerates with `mapfile`; the other four drive in full, and
+ *     the static half is untouched. A harness-wide skip would throw away four
+ *     working blocks to accommodate one.
+ *   - driving NOTHING is a refusal, never a pass. If every block were skipped
+ *     the dynamic half verified nothing, and this self-test fails saying so.
+ *
+ * On CI and on any bash 4+ host nothing is skipped and the run is unchanged.
  */
 
 import { requireDependency } from './import-prerequisite.mjs';
@@ -173,10 +203,25 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
+import { probeBashCapabilities, unsupportedConstructs } from './check-bash32-floor.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '..');
 const WORKFLOW_DIR = join('.github', 'workflows');
+// The SECOND root (#19229). A composite action's steps run on the runner under
+// the same `bash -e <file>` a workflow step does -- so the first non-zero exit
+// aborts the block and everything after it is neither green nor red, which is
+// this gate's whole subject. Rooting the population at `.github/workflows`
+// alone made a directory boundary into a coverage boundary; this gate's row in
+// #19229's table was UNJUDGED precisely because the root is assembled with
+// `join` and a literal grep for `.github/workflows` found nothing here.
+//
+// ⚠️ Absent is NOT a refusal: a repo may hold no composite action. What keeps
+// the root from going quiet on a repo that has them is the live assertion in
+// `--self-test`, which is the #4690 floor in the form this root can carry.
+const ACTION_DIR = join('.github', 'actions');
+/** The file names GitHub accepts for a local action, in the order it resolves them. */
+const ACTION_FILES = ['action.yml', 'action.yaml'];
 
 /** The block this gate requires, recognised by the helper it must define. */
 const COLLECTOR_ANCHOR = /^\s*run_self_test\s*\(\)\s*\{/m;
@@ -366,8 +411,39 @@ export function collectedCommands(runText) {
 }
 
 /**
- * Judge one workflow's text. Pure over the text, so the self-test drives the
- * same predicate the gate does rather than a paraphrase of it.
+ * The step lists a parsed document holds, each with the name a message should
+ * attribute it to.
+ *
+ * TWO document shapes, one predicate (#19229). A workflow declares its steps
+ * under `jobs.<id>.steps`; a composite action declares them under `runs.steps`
+ * and has no `jobs:` at all. The masking defect is identical in both -- the
+ * runner writes the block to a file and runs `bash -e` on it either way -- so
+ * the judgement below is shared and only the walk to the steps differs. A
+ * document with neither shape contributes nothing, which is what a reusable
+ * workflow call or a `node20` action does.
+ *
+ * @param {unknown} doc
+ * @returns {{ job: string, steps: unknown[] }[]}
+ */
+function stepGroups(doc) {
+  if (!doc || typeof doc !== 'object') return [];
+  const out = [];
+  const jobs = doc.jobs;
+  if (jobs && typeof jobs === 'object') {
+    for (const [job, body] of Object.entries(jobs)) {
+      if (Array.isArray(body?.steps)) out.push({ job, steps: body.steps });
+    }
+  }
+  // A composite action: ONE implicit group, labelled so a finding names the
+  // shape a reader will find in the file rather than a job id that is not there.
+  if (Array.isArray(doc.runs?.steps)) out.push({ job: 'runs (composite)', steps: doc.runs.steps });
+  return out;
+}
+
+/**
+ * Judge one workflow's or one composite action's text. Pure over the text, so
+ * the self-test drives the same predicate the gate does rather than a
+ * paraphrase of it.
  *
  * @param {string} text  workflow YAML source
  * @param {string} file  its file name, for messages
@@ -384,11 +460,8 @@ export function scanWorkflowText(text, file, parseYaml) {
   } catch (error) {
     return { problems: [`${file} does not parse as YAML: ${error.message}`], steps: 0, collectors: [] };
   }
-  const jobs = doc && typeof doc === 'object' ? doc.jobs : undefined;
-  if (!jobs || typeof jobs !== 'object') return { problems, steps, collectors };
-
-  for (const [job, body] of Object.entries(jobs)) {
-    for (const step of Array.isArray(body?.steps) ? body.steps : []) {
+  for (const { job, steps: group } of stepGroups(doc)) {
+    for (const step of group) {
       if (typeof step?.run !== 'string') continue;
       steps++;
       const targets = selfTestTargets(step.run);
@@ -439,11 +512,29 @@ export function scanWorkflowText(text, file, parseYaml) {
 }
 
 /**
- * Scan every checked-in workflow.
+ * Every `action.yml` / `action.yaml` under `<root>/.github/actions/`, relative
+ * to that directory. Walked rather than read one level deep, because a local
+ * action may be nested (`uses: ./.github/actions/a/b`). A missing directory
+ * answers `[]` -- see ACTION_DIR for why absence here is a state and not a
+ * refusal.
+ */
+function actionFilesUnder(dir, prefix = '', out = []) {
+  if (!existsSync(dir)) return out;
+  for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+    if (entry.isDirectory()) actionFilesUnder(join(dir, entry.name), `${prefix}${entry.name}/`, out);
+    else if (ACTION_FILES.includes(entry.name)) out.push(`${prefix}${entry.name}`);
+  }
+  return out;
+}
+
+/**
+ * Scan every checked-in workflow AND every checked-in composite action.
  *
  * Missing input is a failure, never a pass (#4690): no workflow directory, and
  * no collector found at all, are both problems -- a scan that reads nothing is
- * indistinguishable from a scan that found nothing wrong.
+ * indistinguishable from a scan that found nothing wrong. The SECOND root is
+ * the one exception and it is declared rather than assumed: `.github/actions/`
+ * absent is a real state, so it answers zero files instead of a refusal.
  *
  * @param {string} root
  * @param {(source: string) => unknown} parseYaml
@@ -451,19 +542,27 @@ export function scanWorkflowText(text, file, parseYaml) {
 export function scanWorkflows(root, parseYaml) {
   const dir = join(root, WORKFLOW_DIR);
   if (!existsSync(dir)) {
-    return { problems: [`${WORKFLOW_DIR} does not exist -- nothing was verified (see #4690).`], steps: 0, collectors: [], files: 0 };
+    return { problems: [`${WORKFLOW_DIR} does not exist -- nothing was verified (see #4690).`], steps: 0, collectors: [], files: 0, actionFiles: 0 };
   }
-  const files = readdirSync(dir)
+  const workflowNames = readdirSync(dir)
     .filter((n) => n.endsWith('.yml') || n.endsWith('.yaml'))
     .sort();
-  if (files.length === 0) {
-    return { problems: [`${WORKFLOW_DIR} holds no workflow files -- nothing was verified (see #4690).`], steps: 0, collectors: [], files: 0 };
+  if (workflowNames.length === 0) {
+    return { problems: [`${WORKFLOW_DIR} holds no workflow files -- nothing was verified (see #4690).`], steps: 0, collectors: [], files: 0, actionFiles: 0 };
   }
+  const actionNames = actionFilesUnder(join(root, ACTION_DIR)).sort();
+  // Each entry carries the path it is REPORTED under: `action.yml` is the same
+  // string in every action directory, so a bare name is an attribution nobody
+  // can open.
+  const files = [
+    ...workflowNames.map((n) => ({ rel: `${WORKFLOW_DIR}/${n}`, abs: join(dir, n) })),
+    ...actionNames.map((n) => ({ rel: `${ACTION_DIR}/${n}`, abs: join(root, ACTION_DIR, n) })),
+  ];
   const problems = [];
   const collectors = [];
   let steps = 0;
-  for (const file of files) {
-    const out = scanWorkflowText(readFileSync(join(dir, file), 'utf8'), file, parseYaml);
+  for (const { rel, abs } of files) {
+    const out = scanWorkflowText(readFileSync(abs, 'utf8'), rel, parseYaml);
     problems.push(...out.problems);
     collectors.push(...out.collectors);
     steps += out.steps;
@@ -475,7 +574,7 @@ export function scanWorkflows(root, parseYaml) {
         `(#4690). Recognised enumeration spellings for a discovered set:\n${discoverySpellingHelp()}`,
     );
   }
-  return { problems, steps, collectors, files: files.length };
+  return { problems, steps, collectors, files: workflowNames.length, actionFiles: actionNames.length };
 }
 
 // -- The dynamic half: drive a real block under a real `bash -e` --------------
@@ -600,14 +699,15 @@ async function loadYamlParser() {
 
 async function run() {
   const parseYaml = await loadYamlParser();
-  const { problems, steps, collectors, files } = scanWorkflows(REPO_ROOT, parseYaml);
+  const { problems, steps, collectors, files, actionFiles } = scanWorkflows(REPO_ROOT, parseYaml);
   if (problems.length > 0) {
     console.error(`✗ check-step-collectors -- ${problems.length} problem(s)\n`);
     for (const p of problems) console.error(`  • ${p}\n`);
     return 1;
   }
   console.log(
-    `✓ check-step-collectors: ${steps} \`run:\` steps across ${files} workflow(s); ` +
+    `✓ check-step-collectors: ${steps} \`run:\` steps across ${files} workflow(s) and ` +
+      `${actionFiles} composite action(s); ` +
       `${collectors.length} step(s) run 2+ independent self-tests, all of them through a collector.`,
   );
   return 0;
@@ -620,6 +720,39 @@ async function selfTest() {
   const assert = (condition, description) => {
     checked++;
     if (!condition) failures.push(description);
+  };
+
+  // ---- What this host's `bash` can actually drive ---------------------------
+  const caps = probeBashCapabilities();
+  assert(
+    caps.answered === true,
+    `the host's \`bash\` capabilities could not be read (${JSON.stringify(caps)}) -- a harness that drives a ` +
+      `real shell and cannot say WHICH shell knows nothing about its own verdict, so this is a refusal and not ` +
+      `a skip (#4690)`,
+  );
+  /** @type {{ label: string, blocked: ReturnType<typeof unsupportedConstructs> }[]} */
+  const skipped = [];
+  let drivenBlocks = 0;
+  /**
+   * May this host drive these block texts? Records a reasoned skip if not.
+   * Every text a block family needs is passed, the ablation shapes included --
+   * skipping the fixed shape while still driving its pre-fix ablation would
+   * leave half a verdict behind.
+   */
+  const drivable = (label, ...texts) => {
+    if (!caps.answered) return false;
+    const blocked = new Map();
+    for (const text of texts) {
+      for (const finding of unsupportedConstructs(label, text, caps)) {
+        if (!blocked.has(finding.id)) blocked.set(finding.id, finding);
+      }
+    }
+    if (blocked.size === 0) {
+      drivenBlocks += 1;
+      return true;
+    }
+    skipped.push({ label, blocked: [...blocked.values()] });
+    return false;
   };
 
   // ---- The static half: the predicate can go red, and reds are specific -----
@@ -670,6 +803,87 @@ async function selfTest() {
     scanWorkflows(join(tmpdir(), 'os-step-collectors-absent'), parseYaml).problems.some((p) => p.includes('does not exist')),
     '#4690: a missing workflow directory is a failure, never a pass',
   );
+
+  // ---- The composite action root (#19229) ----------------------------------
+  //
+  // The runner writes a composite action's `run:` body to a file and executes
+  // `bash -e` on it, exactly as it does a workflow step's -- so the masking this
+  // gate exists to stop is the same defect in the same shell, and the only thing
+  // that differed was which directory the file sat in. This gate's row in the
+  // filing card was UNJUDGED rather than clean: its root is assembled with
+  // `join('.github', 'actions')`, so a literal grep for the path spelling found
+  // nothing here and said nothing about the population.
+  const compositeBare = [
+    'name: Fixture gate',
+    'description: two independent self-tests, bare',
+    'runs:',
+    '  using: composite',
+    '  steps:',
+    '    - name: Two self-tests, bare',
+    '      shell: bash',
+    '      run: |',
+    '        node scripts/alpha.mjs --self-test',
+    '        node scripts/beta.mjs --self-test',
+    '',
+  ].join('\n');
+  const compositeFlag = scanWorkflowText(compositeBare, 'fixture-action.yml', parseYaml);
+  assert(
+    compositeFlag.steps === 1 && compositeFlag.problems.length === 1,
+    `the FIRING control: a composite action's own steps are judged (steps=${compositeFlag.steps}, problems=${compositeFlag.problems.length})`,
+  );
+  assert(
+    (compositeFlag.problems[0] ?? '').includes('runs (composite)')
+      && (compositeFlag.problems[0] ?? '').includes('2 independent self-tests'),
+    'the finding names the shape a reader will find in the file -- an action has no job id to attribute to',
+  );
+  // The DARK control for the judgement: the same two self-tests, routed through
+  // a collector, are green -- so the flag above is about the bare sequence and
+  // not about the shape merely being read.
+  const compositeCollected = compositeBare.replace(
+    '      run: |\n        node scripts/alpha.mjs --self-test\n        node scripts/beta.mjs --self-test',
+    '      run: |\n        run_self_test() { "$@"; }\n        run_self_test node scripts/alpha.mjs --self-test\n'
+      + '        run_self_test node scripts/beta.mjs --self-test',
+  );
+  assert(
+    scanWorkflowText(compositeCollected, 'fixture-action.yml', parseYaml).problems.length === 0
+      && scanWorkflowText(compositeCollected, 'fixture-action.yml', parseYaml).collectors.length === 1,
+    'the same pair routed through a collector is green inside a composite action too',
+  );
+  // And the same thing through the REAL root walk, which is the half a pure
+  // text predicate cannot prove: the file has to be FOUND before it is judged.
+  {
+    const dir = mkdtempSync(join(tmpdir(), 'os-step-collectors-actions-'));
+    try {
+      mkdirSync(join(dir, WORKFLOW_DIR), { recursive: true });
+      writeFileSync(
+        join(dir, WORKFLOW_DIR, 'lint.yml'),
+        'jobs:\n  lint:\n    steps:\n      - name: A collector\n        run: |\n'
+          + '          run_self_test() { "$@"; }\n          run_self_test node scripts/a.mjs --self-test\n'
+          + '          run_self_test node scripts/b.mjs --self-test\n',
+      );
+      const withoutActions = scanWorkflows(dir, parseYaml);
+      assert(
+        withoutActions.problems.length === 0 && withoutActions.actionFiles === 0,
+        `the DARK control: a tree with no ${ACTION_DIR}/ is green and NOT a refusal (${withoutActions.problems[0] ?? ''})`,
+      );
+      mkdirSync(join(dir, ACTION_DIR, 'nested', 'gate'), { recursive: true });
+      writeFileSync(join(dir, ACTION_DIR, 'nested', 'gate', 'action.yml'), compositeBare);
+      const withActions = scanWorkflows(dir, parseYaml);
+      assert(
+        withActions.actionFiles === 1
+          && withActions.problems.length === 1
+          && (withActions.problems[0] ?? '').startsWith(`${ACTION_DIR}/nested/gate/action.yml:`),
+        `the same tree plus one nested action file is flagged, and the finding names the path (${withActions.problems[0] ?? 'none'})`,
+      );
+      writeFileSync(join(dir, ACTION_DIR, 'nested', 'gate', 'README.md'), '- run: node scripts/a.mjs --self-test\n');
+      assert(
+        scanWorkflows(dir, parseYaml).actionFiles === 1,
+        `only action.yml/action.yaml are read under ${ACTION_DIR}/ -- a README beside one is not an action`,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
 
   // ---- DISCOVERED sets: recognition, both reds, and the driven block -------
   //
@@ -806,6 +1020,8 @@ async function selfTest() {
    * enumeration will find them, then read what ran from the stubs' side effect.
    */
   const checkDiscoveryCollector = (label, runText, discovery) => {
+    // The block AND its ablation shape are driven below, so both are weighed.
+    if (!drivable(label, runText, bareDiscoveryLoop(discovery))) return;
     const names = ['zz-os-a.selftest.sh', 'zz-os-b.selftest.sh', 'zz-os-c.selftest.sh'];
     const n = names.length;
 
@@ -877,6 +1093,13 @@ async function selfTest() {
   // ---- The dynamic half: the LIVE blocks, under a real `bash -e` ------------
   const live = scanWorkflows(REPO_ROOT, parseYaml);
   assert(live.problems.length === 0, `the checked-in workflows pass the static half (${live.problems[0] ?? ''})`);
+  // The #4690 floor the second root CAN carry: absence there is legal in
+  // general, so on a repo that HOLDS composite actions a zero is a reader that
+  // stopped reading rather than a tree that stopped having them (#19229).
+  assert(
+    live.actionFiles > 0,
+    `this repo holds composite actions and the live scan read ${live.actionFiles} of them`,
+  );
   assert(live.collectors.length >= 2, `at least the two known collectors are found (found ${live.collectors.length})`);
 
   for (const collector of live.collectors) {
@@ -890,6 +1113,9 @@ async function selfTest() {
     const commands = collectedCommands(collector.run);
     assert(commands.length >= 2, `${label}: the collector drives 2+ commands (found ${commands.length})`);
     if (commands.length < 2) continue;
+    // `bareSequence` re-uses these same commands, so the block's own text
+    // decides for both the fixed shape and its ablation.
+    if (!drivable(label, collector.run)) continue;
 
     // Every self-test green: everything runs, nothing is reported failed, exit 0.
     const allPass = driveBlock(collector.run, commands, new Set());
@@ -961,8 +1187,47 @@ async function selfTest() {
     );
   }
 
+  // ---- The skip ledger: loud, reasoned, and never a pass on its own --------
+  if (skipped.length > 0) {
+    console.error('');
+    console.error(
+      `⚠ check-step-collectors --self-test: SKIPPED ${skipped.length} block(s) -- this host's \`bash\` cannot ` +
+        `run them.`,
+    );
+    console.error(
+      `  host: bash ${caps.version ?? '(unreadable)'}; ` +
+        Object.entries(caps.builtins)
+          .map(([name, present]) => `${name} ${present === true ? 'present' : 'ABSENT'}`)
+          .join(', '),
+    );
+    for (const entry of skipped) {
+      console.error(`  · ${entry.label}`);
+      for (const f of entry.blocked) {
+        console.error(`      line ${f.line}: ${f.spelling} (bash ${f.since}) -- ${f.breaks}`);
+        console.error(`        ${f.text}`);
+      }
+    }
+    console.error(
+      '  This is a SKIP WITH A REASON, not a pass: the blocks above were never driven, so nothing below ' +
+        'vouches for them. The static half ran in full, and every other block was driven. To get a verdict ' +
+        'on these, run this self-test under a bash that has the builtins named above.',
+    );
+    console.error('');
+  }
+  // #4690, one level up again: a dynamic half that drove nothing is a dynamic
+  // half that verified nothing, and it must not print a success line.
+  assert(
+    drivenBlocks > 0,
+    `every block was skipped, so the dynamic half drove nothing and verified nothing -- that is a refusal, ` +
+      `not a pass (#4690). Host: bash ${caps.version ?? '(unreadable)'}.`,
+  );
+
   if (failures.length === 0) {
-    console.log(`✓ check-step-collectors --self-test: ${checked} assertions, ${live.collectors.length} live block(s) driven under a real \`bash -e\`.`);
+    const tail = skipped.length > 0 ? `, ${skipped.length} block(s) SKIPPED -- see the ledger above` : '';
+    console.log(
+      `✓ check-step-collectors --self-test: ${checked} assertions, ${drivenBlocks} block(s) driven under a ` +
+        `real \`bash -e\`${tail}.`,
+    );
     return 0;
   }
   console.error(`✗ check-step-collectors --self-test -- ${failures.length} failure(s)\n`);

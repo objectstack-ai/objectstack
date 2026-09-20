@@ -307,6 +307,47 @@ the enterprise runtime.
 
 ---
 
+## Scheduled work is off until the deployment says otherwise
+
+Time-triggered flows and packaged `defineJob` cron jobs do not run on a
+deployment that has not switched them on
+(`OS_AUTOMATION_SCHEDULED_WORK_ENABLED`), and that is true in **every** posture,
+including `single` and `group`. Whether a clock-driven workload is affordable is
+a fact about the deployment — its database, its tenants, its budget — that no
+package author can know, so it is not metadata and there is no spec key for it.
+
+Once it **is** on, the posture decides what a time-triggered flow owes:
+
+| posture | what an armed time-triggered flow needs |
+|---|---|
+| `single` | nothing. The deployment holds exactly one organization, the run carries **no** organization, and every tenant-scoped insert beneath it resolves that one organization the way a single-organization install always did. |
+| `group` | **optionally** `config.organization`. Declared, it behaves exactly as `isolated` below — bounding the sweep's query as well as its identity. Undeclared, the flow still arms: a `timeRelative` sweep reads group-wide and each run it launches acts as **its own swept record's organization**. |
+| `isolated` | `config.organization` on the start node, naming the organization the run executes as. A flow that declares none is **not armed** and is named in the boot summary. There is no fan-out: a sweep wanted in N organizations is declared N times, and nothing ever chooses an organization for a flow. |
+
+`group` is walled like `isolated` — an organization-less system insert is refused
+under any wall — but that is not the whole picture, and it is why the two rows
+differ. `group` is one legal group over one shared database, where group-wide
+visibility and cross-organization workflow are *inherent to the shape*, so a
+group-level batch job is a capability of the posture rather than a boundary
+violation. What was open until 2026-09-16 was which organization such a run's
+inserts belong to; the answer is the swept record's own, which is the
+subject-first order `sys_automation_run` already used.
+
+<Callout type="warn">
+A **record-less** flow under `group` — a plain `schedule` cron with no sweep —
+has nothing to derive an organization from. It binds and runs, but any
+tenant-scoped row it writes (a notification, an inbox message) is **refused** at
+the write, by name, with the remedy. Declare `organization` on such a flow if it
+writes per-organization data; its bind line says so at boot. ⛔ Nothing falls
+back to a "default" organization — a wrong `organization_id` is silently
+authoritative to every report and export that filters by organization, which is
+worse than a refusal.
+</Callout>
+
+While the switch is off, such a flow is listed in the startup summary and in
+`getTriggerBindingAudit()` as **disabled by deployment policy** — not as a
+binding failure. Nothing about the flow needs fixing.
+
 ## Environment variables
 
 | Variable | Default | Effect |
@@ -316,6 +357,7 @@ the enterprise runtime.
 | `OS_ALLOW_DEGRADED_TENANCY` | `false` | Boot even when a walled posture is requested but the runtime is absent (degraded). Accepts `1` / `true` / `on` / `yes`. Does not cover a runtime that refused to mount. |
 | `OS_ORG_LIMIT` | unset (unlimited) | Cap on organizations a single user may **own**; organizations they were merely invited into never count against it. Only meaningful under a walled posture, since org creation is refused otherwise. |
 | `OS_AUTH_MEMBERSHIP_POLICY` | `auto` | Env override for the `auth.membership_policy` setting — `auto` or `invite-only`. |
+| `OS_AUTOMATION_SCHEDULED_WORK_ENABLED` | `false` | Whether package-authored scheduled work runs here at all — time-triggered flows and packaged `defineJob` cron jobs. OFF in **every** posture until set. Under `single` a time-triggered flow that is armed by it needs no `config.organization` and its runs carry none; under `group` the declaration is optional and an undeclared sweep acts as each swept record's own organization; under `isolated` it must declare one or it is not armed. See [The acting organization](/docs/automation/flows). |
 | `OS_SKIP_MEMBERSHIP_BACKFILL` | unset | Set to `1` to skip the boot-time membership backfill. |
 
 See [Environment variables](/docs/deployment/environment-variables) for the full

@@ -133,9 +133,9 @@
 // dispatch-gates: whole-tree-population -- the sweep reads every tracked file (node_modules and dist aside) hunting the closing-keyword grammar, so a card adding prose or a workflow anywhere implicates it; the literals below are the parsers it grades.
 
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { requireDependency } from './import-prerequisite.mjs';
 const { parseDocument } = await requireDependency('yaml', () => import('yaml'), import.meta.url);
@@ -286,6 +286,47 @@ const SIGNATURES = [
   /clos\(\?:e\|es\|ed\)|resolv\(\?:e\|es\|ed\)|fix\(\?:es\|ed\)\?/,
 ];
 
+/**
+ * Every file the registry speaks for -- parsers and declared non-parsers alike.
+ *
+ * Hoisted out of `judge()` because the SWEEP needs it too: registration is the
+ * statement "this file carries the grammar", and a file the registry speaks for
+ * is owed a read no matter what `statSync` says about it.
+ */
+const REGISTERED = new Set([...PARSERS.map((p) => p.file), ...NON_PARSERS.map((n) => n.file)]);
+
+/**
+ * The size above which an UNREGISTERED file is not read.
+ *
+ * The sweep's job on unregistered files is a hunt for a fourth parser, and a
+ * multi-megabyte blob is overwhelmingly a fixture or a generated corpus rather
+ * than a fourth spelling of this grammar; the cutoff keeps a whole-tree read
+ * cheap. It has never applied to a REGISTERED file and must not: see `sweep()`.
+ */
+const SIZE_CUTOFF = 2 * 1024 * 1024;
+
+/**
+ * Hunt the grammar across the tracked tree.
+ *
+ * Returns `{ scanned, hits, skipped }`. `skipped` maps a file the sweep did NOT
+ * read to the reason in words, and it is part of the result rather than an
+ * optional extra: without it the registry check downstream cannot tell "this
+ * file stopped carrying the grammar" from "the sweep never opened this file",
+ * and it reported the second as the first -- the message prescribing removal of
+ * a correct registry row, with the real cause named nowhere.
+ *
+ * Two rules, and the asymmetry between them is the point:
+ *
+ *   - A REGISTERED file is read unconditionally. The registry asserts the file
+ *     carries the grammar; a sweep that skips it does not refute that assertion,
+ *     it simply fails to look, and a few megabytes of `readFileSync` is the
+ *     cheaper half of that trade by a wide margin.
+ *   - An UNREGISTERED file over `SIZE_CUTOFF` is still skipped -- and the skip
+ *     is RECORDED, so the gate can say its coverage has a hole instead of
+ *     implying it read everything.
+ *
+ * `extraFiles` entries are text handed in directly and never reach either rule.
+ */
 export function sweep(root, extraFiles = {}) {
   const tracked = execFileSync('git', ['ls-files', '-z'], { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
     .split('\0')
@@ -293,13 +334,20 @@ export function sweep(root, extraFiles = {}) {
     .filter((f) => !/(^|\/)(node_modules|dist)\//.test(f));
 
   const hits = [];
+  /** file -> why it was not read, in words the failure text can quote. */
+  const skipped = {};
   for (const f of tracked) {
     let text = extraFiles[f];
     if (text === undefined) {
       try {
-        if (statSync(join(root, f)).size > 2 * 1024 * 1024) continue;
+        const { size } = statSync(join(root, f));
+        if (size > SIZE_CUTOFF && !REGISTERED.has(f)) {
+          skipped[f] = `${size} bytes exceeds the sweep's ${SIZE_CUTOFF}-byte cutoff for UNREGISTERED files`;
+          continue;
+        }
         text = readFileSync(join(root, f), 'utf8');
-      } catch {
+      } catch (err) {
+        skipped[f] = `the sweep could not read it -- ${err.message}`;
         continue;
       }
     }
@@ -308,7 +356,7 @@ export function sweep(root, extraFiles = {}) {
   for (const [f, text] of Object.entries(extraFiles)) {
     if (!hits.includes(f) && SIGNATURES.some((re) => re.test(text))) hits.push(f);
   }
-  return { scanned: tracked.length, hits };
+  return { scanned: tracked.length, hits, skipped };
 }
 
 // ── Judgement ────────────────────────────────────────────────────────────────
@@ -357,16 +405,22 @@ export function judge(parsers, swept) {
   }
 
   // 5. The sweep.
-  const registered = new Set([...PARSERS.map((p) => p.file), ...NON_PARSERS.map((n) => n.file)]);
   for (const f of swept.hits) {
-    if (!registered.has(f)) {
+    if (!REGISTERED.has(f)) {
       fail('sweep', `${f} parses the closing-keyword grammar and is not in ${SELF}'s registry. A fourth parser is the finding this gate exists to surface: register it (and give it a scope), or explain it in NON_PARSERS.`);
     }
   }
-  for (const f of registered) {
-    if (!swept.hits.includes(f)) {
-      fail('sweep', `${f} is registered as carrying the closing-keyword grammar but no longer matches the sweep. Stale registry entries verify nothing -- remove it, or fix the signature.`);
+  for (const f of REGISTERED) {
+    if (swept.hits.includes(f)) continue;
+    // A registered file the sweep never OPENED is not a stale registry row, and
+    // saying so would prescribe deleting a correct row and retiring a live
+    // parity check. Name the real cause instead; `skipped` is what lets us.
+    const why = swept.skipped[f];
+    if (why !== undefined) {
+      fail('sweep', `${f} is registered as carrying the closing-keyword grammar and the sweep NEVER READ IT: ${why}. The registry entry is NOT stale -- do not remove it. Nothing was verified about this file; make it readable by the sweep.`);
+      continue;
     }
+    fail('sweep', `${f} is registered as carrying the closing-keyword grammar but no longer matches the sweep. Stale registry entries verify nothing -- remove it, or fix the signature.`);
   }
 
   return failures;
@@ -449,10 +503,22 @@ function run() {
 
   if (failures.length === 0) {
     const assertions = parsers.filter((p) => !p.problem).length;
+    // The unread files are named in the green line, not only in the red one: a
+    // sweep that reports "across N tracked file(s)" while silently having read
+    // fewer overstates its own coverage, and the hole is what let a registered
+    // file fall out of the sweep unannounced in the first place.
+    const unread = Object.keys(swept.skipped);
     console.log(
       `check-closing-keyword-parity: OK (${assertions} parsers agree on all ${KEYWORDS.length} keywords and both measured separators; `
       + `sweep found ${swept.hits.length} file(s) carrying the grammar across ${swept.scanned} tracked file(s), all registered).`,
     );
+    if (unread.length > 0) {
+      console.log(
+        `\n${unread.length} UNREGISTERED file(s) were not read, so the hunt for a fourth parser did not cover them `
+        + `(every registered file WAS read -- the cutoff does not apply to those):`,
+      );
+      for (const f of unread) console.log(`  • ${f} -- ${swept.skipped[f]}`);
+    }
     return 0;
   }
 
@@ -564,10 +630,34 @@ function selfTest() {
 
   // 4. A registry entry that stops matching must fail too -- a stale exemption
   //    verifies nothing.
-  const stale = judge(loadParsers(root), { scanned: plantedSweep.scanned, hits: plantedSweep.hits.filter((f) => f !== NON_PARSERS[0].file) });
+  const stale = judge(loadParsers(root), { scanned: plantedSweep.scanned, hits: plantedSweep.hits.filter((f) => f !== NON_PARSERS[0].file), skipped: {} });
   assert(
     stale.some((f) => f.id === 'sweep' && f.message.includes('no longer matches the sweep')),
     'X7: a registered file that stopped carrying the grammar is caught',
+  );
+  //    ... and it must STILL read as stale, not as unread: the size diagnostic
+  //    added below is a second arm of the same branch, and an arm that swallows
+  //    the first would retire the check X7 exists to be.
+  assert(
+    !stale.some((f) => f.id === 'sweep' && f.message.includes('NEVER READ IT')),
+    'X7: the stale entry is reported as stale, not as one the sweep never read',
+  );
+
+  // 4b. A registered file the sweep NEVER OPENED must NOT be reported as a
+  //     stale registry row. The prescribed remedy there is `remove it`, which
+  //     would delete a correct row and silently retire a live parity check --
+  //     and the real cause (the file was never read) appeared nowhere in it.
+  const unreadWhy = `4000000 bytes exceeds the sweep's ${2 * 1024 * 1024}-byte cutoff for UNREGISTERED files`;
+  const unreadSubject = PARSERS[PARSERS.length - 1].file;
+  const unread = judge(loadParsers(root), { scanned: plantedSweep.scanned, hits: [], skipped: { [unreadSubject]: unreadWhy } });
+  const aboutSubject = unread.filter((f) => f.id === 'sweep' && f.message.startsWith(unreadSubject));
+  assert(
+    aboutSubject.some((f) => f.message.includes('NEVER READ IT') && f.message.includes(unreadWhy)),
+    `X13: a registered file the sweep never read is reported with its CAUSE, got: ${aboutSubject.map((f) => f.message).join(' | ') || 'nothing'}`,
+  );
+  assert(
+    !aboutSubject.some((f) => f.message.includes('remove it, or fix the signature')),
+    'X13: and never with the stale-registry remedy, which would delete a correct registry row',
   );
 
   // 5. The BODY MODE, on the fixtures sections 2-4 already grade. The
@@ -627,6 +717,60 @@ function selfTest() {
     assert(clean.status === 0, `X12: \`--body -\` exits 0 on a body that declares no close, got ${clean.status}`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+
+  // 7. THE SIZE CUTOFF, on a real tree. `extraFiles` hands the sweep text
+  //    directly and therefore never reaches the `statSync` branch at all, so a
+  //    case built that way would pin nothing about the cutoff. This one builds a
+  //    real git-tracked tree with two real oversized files -- one registered,
+  //    one not -- and grades both arms of the asymmetry:
+  //
+  //      the registered one is READ, over the cutoff, because the registry
+  //      asserts it carries the grammar and a skip does not refute that;
+  //      the unregistered one is still skipped, and the skip is RECORDED.
+  const sizeDir = mkdtempSync(join(tmpdir(), 'closing-keyword-size-'));
+  try {
+    const registeredBig = 'scripts/pm/check-half-states.mjs';
+    assert(
+      REGISTERED.has(registeredBig),
+      `X14: the case's subject \`${registeredBig}\` is in the registry -- an unregistered subject would pin the opposite rule`,
+    );
+    const unregisteredBig = 'packages/somewhere/fixtures/huge-corpus.txt';
+    assert(!REGISTERED.has(unregisteredBig), `X14: the control subject \`${unregisteredBig}\` is NOT registered`);
+
+    // A signature plus enough padding to clear the cutoff with room to spare.
+    const specimen = `const KEYWORDS = '${KEYWORDS.join('|')}';\n`;
+    const padding = `// padding, carrying no grammar of its own${' .'.repeat(40)}\n`.repeat(30000);
+    const oversized = specimen + padding;
+    assert(oversized.length > SIZE_CUTOFF, `X14: the specimen really is over the cutoff (${oversized.length} > ${SIZE_CUTOFF})`);
+
+    const git = (...args) => execFileSync('git', args, { cwd: sizeDir, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+    git('init', '-q');
+    for (const rel of [registeredBig, unregisteredBig]) {
+      mkdirSync(dirname(join(sizeDir, rel)), { recursive: true });
+      writeFileSync(join(sizeDir, rel), oversized);
+    }
+    git('add', '-A');
+
+    const sized = sweep(sizeDir);
+    assert(
+      sized.hits.includes(registeredBig),
+      `X14: an oversized REGISTERED parser is still SCANNED and found (${statSync(join(sizeDir, registeredBig)).size} bytes), got hits: ${sized.hits.join(', ') || 'nothing'}`,
+    );
+    assert(
+      sized.skipped[registeredBig] === undefined,
+      `X14: and is not recorded as skipped, got: ${sized.skipped[registeredBig]}`,
+    );
+    assert(
+      !sized.hits.includes(unregisteredBig),
+      'X15: an oversized UNREGISTERED file is still skipped -- the cutoff keeps the whole-tree read cheap',
+    );
+    assert(
+      typeof sized.skipped[unregisteredBig] === 'string' && sized.skipped[unregisteredBig].includes('cutoff'),
+      `X15: and the skip is RECORDED with its cause, so the gate can say its coverage has a hole, got: ${sized.skipped[unregisteredBig] ?? 'nothing'}`,
+    );
+  } finally {
+    rmSync(sizeDir, { recursive: true, force: true });
   }
 
   if (failures.length === 0) {

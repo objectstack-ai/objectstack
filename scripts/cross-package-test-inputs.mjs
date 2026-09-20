@@ -160,11 +160,12 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // instead would re-assert the rule and see nothing about what is
       // checked in.
       //
-      // src/shared/retired-key-migrate-sentence.test.ts also reads this
-      // root (`PUBLISHED_SKILLS_ROOT`, `:102`) as the second corpus for its
-      // widened population (#10848, see the `.claude` entry above) — "plus
-      // every `.md` file under `skills/`" (`:92`), emitted as
-      // `skills:`-prefixed entries (`:484-485`).
+      // `packages/spec/src/shared/retired-key-migrate-sentence.test.ts` also
+      // reads this root (`PUBLISHED_SKILLS_ROOT`, line 102 as measured) as the
+      // second corpus for its widened population (#10848, see the `.claude`
+      // entry above) — "plus every `.md` file under `skills/`" (line 92 as
+      // measured), emitted as `skills:`-prefixed entries (lines 484-485 as
+      // measured).
       //
       // The whole subtree rather than `skills/*/references/_index.md`: the test
       // reads the DIRECTORY too (a new skill dir changes its verdict), and a
@@ -325,6 +326,14 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // this glob, so the pin is all that holds it.
       'packages/**/package.json': [
         'packages/plugins/organizations/src/no-framework-dependents.pin.test.ts',
+        // src/open-only-wall-acceptance.test.ts reads the SAME manifests for its
+        // own reason -- the structural half of clause 3 walks the composition's
+        // transitive workspace closure out of them -- and holds this glob in its
+        // own right since #18871 reseeded it to the recognised `findUp` spelling.
+        // Until then its hand-rolled walk produced no escape, so the radius it
+        // depends on was held entirely by the pin above: correct by coincidence,
+        // and silently wrong the day that pin stopped reading manifests.
+        'packages/plugins/organizations/src/open-only-wall-acceptance.test.ts',
       ],
     },
   },
@@ -934,6 +943,11 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // the two directories above.
       'scripts/check-published-files.mjs',
       'scripts/check-cross-package-test-inputs.mjs',
+      // [#18650] This module itself, NAMED the same way and settled the same
+      // way: src/checklist-refusal-envelope-consistency.test.ts cites it in
+      // prose as where its own escaping read is declared, and the collector
+      // takes the quoted path without parsing. Low-churn like the two above.
+      'scripts/cross-package-test-inputs.mjs',
       'packages/types/src/node-isolation.test.ts',
       // That same test imports `stripComments` from `js-comment-mask.mjs` to
       // separate code from prose in the 423 sources it walks -- the conversion
@@ -945,6 +959,21 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // typecheck verdict is a function of it too.
       'scripts/js-comment-mask.mjs',
       'scripts/js-comment-mask.d.mts',
+      // [#18650] src/checklist-refusal-envelope-consistency.test.ts holds the QA
+      // platform checklist's statements about the anonymous `/get-session`
+      // answer equal to this package's own refusal envelope
+      // (`anonymous-session-refusal.ts`). The two halves can drift in OPPOSITE
+      // directions, so the radius is declared for the one the graph cannot
+      // reach: a diff HERE that moves the status or the code already puts this
+      // package in the affected set, but a diff in the checklist that
+      // re-introduces better-auth's retired `200 null` convention touches
+      // nothing this package declares -- and that is the direction the drift
+      // actually arrived from (the clauses sat inverted for five weeks after
+      // #17881 landed, with every gate green). Area-file granularity rather
+      // than the whole `docs/qa/platform-checklist/` tree: the scan reads
+      // `areas/*.json` and nothing else, and `runs/` beside it churns once per
+      // QA run.
+      'docs/qa/platform-checklist/areas/*.json',
     ],
     heldBy: {
       // The pair #10566 was measured on. That test's walk of `PACKAGES_DIR`
@@ -1260,9 +1289,25 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // re-run this package's suite. The `.d.mts` sibling is declared alongside it
     // because it is what gives `stripComments` its type, so this package's
     // typecheck verdict is a function of it too.
+    //
+    // src/live-dialect-matrix.budget.test.ts reads `.github/workflows/ci.yml`
+    // for real: the live cell budget is pinned BELOW the stall guard the live
+    // job wraps this suite in, and the pin reads that `--stall-minutes N` off
+    // the workflow rather than re-typing it. Moving the guard has to re-run
+    // this package's suite or the derivation drifts in silence. One file, not
+    // `.github/workflows/**`: the pin reads that workflow and no other, and a
+    // narrower radius is the whole point of this table.
+    //
+    // ⚠️ That read was INVISIBLE here until #18871. It was seeded by a
+    // hand-rolled `for (;;)` walk to `pnpm-workspace.yaml`, which this gate
+    // does not recognise, so the file produced no escape and this entry could
+    // stay silent about a repo-level input. The test now spells the seed
+    // `findUp`; the class -- a future hand-rolled walk -- is recorded on that
+    // card as closed by convention.
     globs: [
       'scripts/js-comment-mask.mjs',
       'scripts/js-comment-mask.d.mts',
+      '.github/workflows/ci.yml',
     ],
   },
   '@objectstack/example-showcase': {

@@ -54,6 +54,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { gitFreeEnv } from '../../../scripts/git-env.mjs';
 import { schemaStamp } from '../../../scripts/check-regen-pending.mjs';
 import { RENAMED_DEFS } from './lib/renamed-defs';
 import { CONVERSIONS_BY_MAJOR } from '../src/conversions/registry';
@@ -62,6 +63,26 @@ import {
   RETIRED_DEFS_BY_MAJOR,
   RETIRED_KEYS_BY_MAJOR,
 } from '../src/migrations/registry';
+// Read ONLY to keep the #17356 fixture honest about which SET its root lives in
+// — never to assert gate behaviour, which is read off the spawned run's output.
+import {
+  listMetadataTypeSchemaTypes,
+  listUnregisteredKindSchemaTypes,
+} from '../src/kernel/metadata-type-schemas';
+// Read ONLY to keep the #18301 fixture honest about the TREE FACT it models — a
+// key that left the shape whose door still answers an author with a prescription
+// — never to assert gate behaviour, which is read off the spawned run's output.
+import { MetricSchema } from '../src/data/analytics.zod';
+// Read ONLY to keep the #18301 DOOR fixture honest about the tree fact it models
+// — ONE `strictObject` declaration whose shape entries two emitted defs share,
+// one of which never closed its door. Never to assert gate behaviour.
+// Read ONLY to keep the #17969 nested fixtures honest about the TREE FACTS they
+// model — one nested key still writable, one nested key tombstoned — never to
+// assert gate behaviour, which is read off the spawned run's output.
+import { SchemaLevelIsolationStrategySchema } from '../src/system/tenant.zod';
+import { RateLimitConfigSchema } from '../src/shared/http.zod';
+import { ServerRateLimitConfigSchema } from '../src/system/stack-server.zod';
+import { ViewItemSchema } from '../src/ui/view.zod';
 import {
   AUTHORABLE_SURFACE_DIR_NAME,
   SCHEMA_MANIFEST_DIR_NAME,
@@ -81,6 +102,7 @@ import {
   type UnemittedBaseline,
   type UnemittedEntry,
 } from './lib/unemitted-schemas';
+import { DROPPED_REFINEMENTS_BASELINE_FILE } from './lib/dropped-refinements';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PKG = path.resolve(HERE, '..');
@@ -211,25 +233,23 @@ let surfaceBaseDescription: string;
 // are already serial — vitest runs a file's tests one at a time, and every repo
 // here is an `fs.mkdtemp`, so no concurrently running test FILE can name one.
 
-/** `GIT_*` variables that would point a fixture's git at a different repository
- *  (or a different index/object store) than the directory it was handed. */
-const LEAKED_GIT_ENV = [
-  'GIT_DIR',
-  'GIT_WORK_TREE',
-  'GIT_COMMON_DIR',
-  'GIT_INDEX_FILE',
-  'GIT_OBJECT_DIRECTORY',
-  'GIT_ALTERNATE_OBJECT_DIRECTORIES',
-  'GIT_NAMESPACE',
-  'GIT_CEILING_DIRECTORIES',
-  'GIT_TEMPLATE_DIR',
-  'GIT_CONFIG',
-] as const;
+/* #16644 -- a hand-maintained allowlist of ten GIT_* location variables used to stand
+ * here. It is retired in favour of the blanket strip in `scripts/git-env.mjs`, and the
+ * constant is not re-spelled anywhere in this file so that a census of the retired shape
+ * does not match this paragraph.
+ *
+ * The reason the allowlist goes rather than gets one more entry: it had to be kept level
+ * with git's own list of location variables, and its failure mode is that THE KEY IT
+ * MISSES IS THE KEY THAT BITES. `gitFreeEnv()` removes every GIT_-prefixed key instead,
+ * which is the shape #16624 landed and #16753 applied. ⛔ One spelling in the repo, not
+ * two -- no "either is fine" transition state.
+ *
+ * Every git this file spawns is LOCAL-ONLY: it operates on the `fs.mkdtemp` fixture named
+ * by its `cwd`, so the blanket strip takes no transport configuration away from it. */
 
 /** The environment every fixture git — and every generator run inside one — gets. */
 const HERMETIC_ENV: NodeJS.ProcessEnv = (() => {
-  const env = { ...process.env };
-  for (const key of LEAKED_GIT_ENV) delete env[key];
+  const env = gitFreeEnv();
   // git's own documented "read no config file" spellings. `/dev/null` parses as
   // an empty config, which is what makes `init.templateDir`, `core.hooksPath`
   // and any ambient `[gc]` block unable to reach a fixture.
@@ -366,18 +386,34 @@ function mountSandbox(dir: string): void {
 }
 
 /**
- * Copy the committed never-published ledger (#16431) into a fixture tree.
+ * The committed, package-root ledgers `build-schemas.ts` READS — every one of
+ * them, mounted into a fixture tree as a set.
  *
- * `build-schemas.ts` resolves it from its own `__dirname/..`, so any tree that
- * copies `scripts/` without it fails the #16431 gate on a MISSING ledger,
- * before reaching whatever that fixture is about — which is how all four
- * sandbox builders in this file came to need one line each. Copied rather than
- * symlinked so a fixture may mutate it without writing to the real file; `src/`
- * is the fixture's own, so the population a run observes is the repo's and the
- * copied ledger is green without any seeding.
+ * A list rather than one constant because this is a population that grows: the
+ * generator resolves each of these from its own `__dirname/..`, so a tree that
+ * copies `scripts/` without one of them fails that ledger's gate on a MISSING
+ * artifact, before reaching whatever the fixture is about. That is not a
+ * hypothetical — it is how the never-published ledger (#16431) came to need one
+ * line in each of the five sandbox builders below, and how the
+ * dropped-refinement ledger (#18670) reddened 36 of them at once: every fixture
+ * that expects `status` 0 got a 1 that had nothing to do with its subject.
+ *
+ * ⇒ A new package-root ledger is ONE entry here, not a fifth mount call
+ * somebody has to remember at each builder.
  */
-function mountUnemittedLedger(dir: string): void {
-  fs.cpSync(path.join(PKG, UNEMITTED_BASELINE_FILE), path.join(dir, UNEMITTED_BASELINE_FILE));
+const COMMITTED_LEDGERS = [UNEMITTED_BASELINE_FILE, DROPPED_REFINEMENTS_BASELINE_FILE] as const;
+
+/**
+ * Copy every committed ledger into a fixture tree.
+ *
+ * Copied rather than symlinked so a fixture may mutate one without writing to
+ * the real file; `src/` is the fixture's own, so the population a run observes
+ * is the repo's and the copied ledgers are green without any seeding.
+ */
+function mountCommittedLedgers(dir: string): void {
+  for (const ledger of COMMITTED_LEDGERS) {
+    fs.cpSync(path.join(PKG, ledger), path.join(dir, ledger));
+  }
 }
 
 /**
@@ -439,7 +475,7 @@ function createSandbox(prefix: string): string {
   for (const entry of ['src', 'node_modules', 'package.json']) {
     fs.symlinkSync(path.join(PKG, entry), path.join(dir, entry));
   }
-  mountUnemittedLedger(dir);
+  mountCommittedLedgers(dir);
   mountSandbox(dir);
   // The authorable-surface ratchet runs after the manifest one; give it the
   // committed snapshot so a check that gets that far judges the same contract.
@@ -496,7 +532,7 @@ afterAll(() => {
   if (sharedSandbox) fs.rmSync(sandboxRoot(sharedSandbox), { recursive: true, force: true });
 });
 
-function run(args: string[] = []): { status: number; output: string } {
+function run(args: string[] = [], extraEnv: NodeJS.ProcessEnv = {}): { status: number; output: string } {
   const r = spawnSync(TSX, [script, ...args], {
     cwd: sandbox,
     encoding: 'utf8',
@@ -505,10 +541,28 @@ function run(args: string[] = []): { status: number; output: string } {
     // The generator shells out to git itself (`merge-base`, `cat-file`, a
     // `--depth=1` fetch), so the fixture's isolation has to reach its children
     // too — a `GIT_DIR` inherited here would point them at another repo (#9068).
-    env: HERMETIC_ENV,
+    env: { ...HERMETIC_ENV, ...extraEnv },
   });
   return { status: r.status ?? -1, output: `${r.stdout ?? ''}${r.stderr ?? ''}` };
 }
+
+/**
+ * How `gen:schema` and `check:authorable-surface` actually run — both package
+ * scripts export `OS_EAGER_SCHEMAS=1`, so `lazySchema()` returns the real schema
+ * and every def key holds the instance the BFS walks.
+ *
+ * Left OFF by default, because it is: this file's other cases pin the gate's
+ * reporting and its side effects, which the flag does not touch, and turning it
+ * on for all of them would change a graph shape they were written against. But a
+ * REACHABILITY case cannot be indifferent to it. Without the flag `lazySchema()`
+ * hands back a Proxy, `zodByDefKey` holds the Proxy while the walk visits the
+ * resolved target, and a def that IS a root's own child resolves through the
+ * derived-clone bridge instead of by identity — 'reachable' either way, so the
+ * gate's verdict is the same, but it is not the closure CI computes and
+ * `reachableVia()` never answers 'root-graph'. #17356's acceptance is stated in
+ * that vocabulary, so the pin below reads both.
+ */
+const EAGER_SCHEMAS_ENV: NodeJS.ProcessEnv = { OS_EAGER_SCHEMAS: '1' };
 
 /** Seed the sandbox manifest shards from the committed set; returns the bytes. */
 function seedManifest(mutate: (schemas: string[]) => string[]): string {
@@ -957,6 +1011,29 @@ const DELETED_LEAF_COLLIDER = `data/Object:${DELETED_LEAF_COLLIDER_LEAF} [RETIRE
  *  envelope no metadata document is ever parsed against (the issue's own
  *  over-collection example). */
 const DELETED_UNREACHABLE = 'api/SessionResponse:zzOverCollected4650';
+/** #17356's pin. A def whose ONLY root is an UNREGISTERED KIND — `connector`,
+ *  bound in `UNREGISTERED_KIND_SCHEMAS` by #6245 and deliberately absent from
+ *  `listMetadataTypeSchemaTypes()`. `integration/DataSyncConfig` sits two hops
+ *  from that root (`connector.syncConfig`, unwrapped once through `optional`),
+ *  and `stack.connectors[]` / `PUT /api/v1/meta/connector/:name` both parse a
+ *  real metadata document through it.
+ *
+ *  Until #17356 the gate built its roots from `listMetadataTypeSchemaTypes()`
+ *  alone, so this def read `null` and check (c) proof 2 WAIVED a bare deletion
+ *  of its baseline line as "over-collection, never parsed against a metadata
+ *  document" — the false "unreachable" the #4650 docblock names as the
+ *  dangerous direction. Measured on `main` at ca7886047b27 by deleting
+ *  `integration/DataSyncConfig:timestampField` from both the schema and the
+ *  baseline: `gen:schema` exit 0, with the proof-2 line printed.
+ *
+ *  The prop is synthetic for the reason every fixture here is: check (c) only
+ *  ever sees a key the build STOPPED emitting, and the def is judged by its
+ *  DEF half (`key.slice(0, key.indexOf(':'))`), so a synthetic leaf under the
+ *  real def runs the identical code path as the real deletion did. */
+const DELETED_VIA_UNREGISTERED_KIND_DEF = 'integration/DataSyncConfig';
+const DELETED_VIA_UNREGISTERED_KIND = `${DELETED_VIA_UNREGISTERED_KIND_DEF}:zzOnlyRootIsAnUnregisteredKind17356`;
+/** The unregistered kind that def's only root lives in. */
+const UNREGISTERED_KIND_ROOT = 'connector';
 /** Def the build no longer emits at all — the literal #4643 cluster. */
 const DELETED_GONE_DEF = ['identity/Session:userId', 'identity/Session:token'];
 /** Aged-out tombstone. Since #5898 the proof is a DECLARATION, not a clause
@@ -980,6 +1057,85 @@ const DELETED_BY_RENAME = `${DELETED_BY_RENAME_SOURCE_DEF}:source`;
  *  upstream anchor from before the rename is the mirror image, and holding both
  *  at once is the #17383 collision. */
 const CARRIED_BY_RENAME = `${RENAMED_DEFS[DELETED_BY_RENAME_SOURCE_DEF]}:source`;
+/** #18301's pin — the GUIDANCE ROUTE, and the only fixture here that is a REAL
+ *  completed retirement rather than a synthetic key.
+ *
+ *  `data/Metric:filters` was removed from `MetricSchema`'s shape outright (#10414,
+ *  ADR-0049) with its prescription left in the closed shape's `guidance` table. A
+ *  retirement done that way never carries the `[RETIRED]` mark, because there is
+ *  nothing left in the shape to mark — so proof 1 could not apply to it at any
+ *  major, and while proof 2 was broken (#17356) proof 2 was answering instead. The
+ *  key is usable verbatim here for the same reason the synthetic ones are not:
+ *  check (c) only ever sees a key the build STOPPED emitting, and this one really
+ *  has stopped. */
+const GUIDANCE_ROUTE_DEF = 'data/Metric';
+const GUIDANCE_ROUTE_LEAF = 'filters';
+const DELETED_GUIDANCE_ROUTE = `${GUIDANCE_ROUTE_DEF}:${GUIDANCE_ROUTE_LEAF}`;
+/** The dark control, and the reason proof 4 is not a blanket waiver: the SAME def
+ *  — same reachability, same closed door — with a key nothing prescribes for. */
+const DELETED_GUIDANCE_UNNAMED = `${GUIDANCE_ROUTE_DEF}:zzNotPrescribed18301`;
+/** The key a maintainer ruling (2026-09-10, #16320) retired while DELIBERATELY
+ *  withholding the tombstone. `DataSyncConfigSchema` is a plain `z.object`, not a
+ *  `strictObject`, so nothing declares a prescription for it and proof 4 has no
+ *  route to it — which is what keeps this card an ADDED proof rather than a
+ *  reversal of that ruling. If someone later writes a `guidance` entry for
+ *  `schedule`, this assertion flips, and it SHOULD: the retirement would have
+ *  become audible, which is a real change and not a test to relax. */
+const WITHHELD_TOMBSTONE = 'integration/DataSyncConfig:schedule';
+/** How `strictUnknownKeyError` renders a prescription: one bullet line. The
+ *  guard below reads it as a lit/dark PAIR, never alone — a shape that rejects
+ *  everything and prescribes for nothing passes a one-legged rejection test. */
+const PRESCRIPTION_BULLET = '\n  • ';
+/** #18301's DOOR pin — and the reason the first cut of proof 4 was wrong.
+ *
+ *  `ServerRateLimitConfigSchema` USED to be declared `strictObject({… guidance:
+ *  { keyBy, store } }, RateLimitConfigSchema.shape)` — built FROM the open
+ *  schema's own shape object. So ONE declaration was matched, by shape identity,
+ *  by TWO emitted defs: the closed one it built, and `shared/RateLimitConfig`, a
+ *  plain `z.object` that dropped an unknown key in silence. Both emitted
+ *  `additionalProperties: false` (in `io: 'output'` zod says `false` for a
+ *  non-closing shape too), and both satisfied the declaration match — so NEITHER
+ *  of the two facts the first cut read could tell them apart, and it waived the
+ *  open one.
+ *
+ *  ⚠️ **#18578 closed that open twin, so this pair no longer models opposite
+ *  doors — and re-picking it was the fixture's own instruction.** The strictness
+ *  and the tables moved onto the shared schema, which is where both defs inherit
+ *  them; the pair still shares ONE declaration and now keeps its promise on BOTH
+ *  sides. That is what makes it the right DARK leg here: if anyone re-opens the
+ *  shared shape, the two rows below stop being admitted and this test says so.
+ *
+ *  The census that found the original case (the gate's own instrument, driven
+ *  over every emitted def) reports no remaining def that ACCEPTS a promised key
+ *  and drops it. What it does report is the other way proof 4's second half can
+ *  come up empty, which is the LIT leg below. */
+const SHARED_TWIN_DEF = 'shared/RateLimitConfig';
+const SERVER_TWIN_DEF = 'system/ServerRateLimitConfig';
+/** A key the twins' one declaration prescribes for, and both now deliver. */
+const TWIN_LEAF = 'keyBy';
+const DELETED_SHARED_TWIN = `${SHARED_TWIN_DEF}:${TWIN_LEAF}`;
+const DELETED_SERVER_TWIN = `${SERVER_TWIN_DEF}:${TWIN_LEAF}`;
+/** A budget every twin accepts, so the door is the only thing the probe below reads. */
+const TWIN_VALID = { enabled: true, windowMs: 60_000, maxRequests: 100 };
+/** #18578's LIT leg: a def whose declaration NAMES the key and which this gate
+ *  cannot watch deliver it.
+ *
+ *  `ui/ViewItem` is a discriminated union of two `strictObject` arms that share
+ *  one `VIEW_ITEM_SURFACE` table, and `confg` is the one-letter typo that table
+ *  exists for. The probe writes `{ [key]: null }` and nothing else, so the
+ *  DISCRIMINATOR is missing and the union answers `invalid_union` on `viewKind`
+ *  before any arm's door is reached — measured, not assumed, and the same
+ *  document written whole DOES raise the prescription
+ *  (`ui/view-authoring-wire-split.test.ts`). So the key is promised, the author
+ *  really is answered, and this gate has still watched no delivery.
+ *
+ *  ⛔ That is exactly the state proof 4 must read as NO EVIDENCE rather than as
+ *  proof: "the door is open" would be a guess here, and a wrong guess waives a
+ *  deletion in the one direction this gate must not err in. Its verdict says only
+ *  THAT the prescription did not arrive, never why. */
+const UNREACHED_DOOR_DEF = 'ui/ViewItem';
+const UNREACHED_DOOR_LEAF = 'confg';
+const DELETED_UNREACHED_DOOR = `${UNREACHED_DOOR_DEF}:${UNREACHED_DOOR_LEAF}`;
 
 describe('build-schemas.ts — deleted baseline lines must prove themselves (#4650)', () => {
   beforeAll(() => {
@@ -990,9 +1146,16 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
       DELETED_UNREGISTERED,
       DELETED_LEAF_COLLIDER,
       DELETED_UNREACHABLE,
+      DELETED_VIA_UNREGISTERED_KIND,
       ...DELETED_GONE_DEF,
       DELETED_AGED,
       DELETED_BY_RENAME,
+      DELETED_GUIDANCE_ROUTE,
+      DELETED_GUIDANCE_UNNAMED,
+      DELETED_SHARED_TWIN,
+      DELETED_SERVER_TWIN,
+      DELETED_UNREACHED_DOOR,
+      WITHHELD_TOMBSTONE,
     ]) {
       expect(
         keys.includes(injected) || keys.includes(injected.replace(' [RETIRED]', '')),
@@ -1023,6 +1186,117 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
       Object.values(RETIRED_KEYS_BY_MAJOR).flat(),
       `${DELETED_LEAF_COLLIDER} is now declared for real — the pin needs an UNdeclared key`,
     ).not.toContain(DELETED_LEAF_COLLIDER.replace(RETIRED_MARK, ''));
+    // #17356's fixture is only a pin while its def's root is still an
+    // UNREGISTERED kind. Both halves are loud here: enrol `connector` into the
+    // registered set (reversing #6245) and the test below still passes while
+    // asserting nothing about this gate's own root union — the exact way a pin
+    // goes quiet. This pair is also acceptance 4 of the card, stated where it
+    // fails rather than where it is believed.
+    expect(
+      listMetadataTypeSchemaTypes(),
+      `'${UNREGISTERED_KIND_ROOT}' is now a REGISTERED metadata type — #6245's boundary moved, ` +
+        `so the #17356 fixture no longer models a def rooted only in UNREGISTERED_KIND_SCHEMAS`,
+    ).not.toContain(UNREGISTERED_KIND_ROOT);
+    expect(
+      listUnregisteredKindSchemaTypes(),
+      `'${UNREGISTERED_KIND_ROOT}' left UNREGISTERED_KIND_SCHEMAS — re-pick the fixture's root`,
+    ).toContain(UNREGISTERED_KIND_ROOT);
+    expect(
+      keys.some((k) => k.startsWith(`${DELETED_VIA_UNREGISTERED_KIND_DEF}:`)),
+      `${DELETED_VIA_UNREGISTERED_KIND_DEF} is no longer emitted with authorable keys — check (c) ` +
+        `would route this fixture to the vanished-def proof instead; re-pick the def`,
+    ).toBe(true);
+    // #18301's fixture is only a pin while `data/Metric:filters` is still a
+    // completed guidance-route retirement in the tree. Three halves, all loud,
+    // because each can rot on its own and each rots the pin into a green that
+    // asserts nothing about proof 4.
+    expect(
+      keys.some((k) => k.startsWith(`${GUIDANCE_ROUTE_DEF}:`)),
+      `${GUIDANCE_ROUTE_DEF} is no longer emitted with authorable keys — check (c) would route ` +
+        `this fixture to the vanished-def proof instead; re-pick the def`,
+    ).toBe(true);
+    expect(
+      Object.keys(MetricSchema.shape),
+      `'${GUIDANCE_ROUTE_LEAF}' is DECLARED on the shape again — it would reach the aging clock, ` +
+        `not the unrecognized-key path, so this fixture no longer models the guidance route`,
+    ).not.toContain(GUIDANCE_ROUTE_LEAF);
+    // The lit leg and the dark leg of the same read: the retired key's rejection
+    // carries a prescription bullet, an undeclared neighbour's does not.
+    const metric = { name: 'revenue', label: 'Revenue', type: 'sum', sql: 'amount' };
+    const lit = MetricSchema.safeParse({ ...metric, [GUIDANCE_ROUTE_LEAF]: [{ sql: '1 = 1' }] });
+    const dark = MetricSchema.safeParse({ ...metric, zzNotPrescribed18301: 1 });
+    expect(lit.success, `writing '${GUIDANCE_ROUTE_LEAF}' is accepted again — re-pick the fixture`).toBe(false);
+    expect(
+      lit.success ? '' : lit.error.issues.map((i) => i.message).join('\n'),
+      `'${GUIDANCE_ROUTE_LEAF}' is rejected with no prescription — the \`guidance\` entry that IS ` +
+        `proof 4's evidence has gone; this fixture models nothing`,
+    ).toContain(PRESCRIPTION_BULLET);
+    expect(
+      dark.success ? '' : dark.error.issues.map((i) => i.message).join('\n'),
+      'an UNdeclared metric key now renders a prescription bullet too — the lit leg above has ' +
+        'stopped discriminating, so it no longer reads the guidance table',
+    ).not.toContain(PRESCRIPTION_BULLET);
+    // #18301's DOOR fixture is only a pin while the tree still holds ONE
+    // declaration answering for TWO defs. Each half rots on its own, and each
+    // rots the pin into a green that asserts nothing about the one direction
+    // this gate must not err in.
+    expect(
+      Object.keys(RateLimitConfigSchema.shape),
+      `${SHARED_TWIN_DEF} and ${SERVER_TWIN_DEF} no longer declare the same key SET — the ` +
+        `registry match is keyed off the sorted key set, so this fixture no longer reaches it`,
+    ).toEqual(Object.keys(ServerRateLimitConfigSchema.shape));
+    expect(
+      Object.entries(RateLimitConfigSchema.shape).every(
+        ([name, prop]) => (ServerRateLimitConfigSchema.shape as Record<string, unknown>)[name] === prop,
+      ),
+      `${SERVER_TWIN_DEF} no longer shares ${SHARED_TWIN_DEF}'s shape ENTRIES — the declaration ` +
+        `match is by instance identity, so the two defs would stop answering to one declaration ` +
+        `and this fixture would pass while modelling nothing`,
+    ).toBe(true);
+    // Both doors, read as a pair. #18578 is the reason they agree: the shared
+    // schema carries the strictness and the tables, so the def mounted bare on
+    // `apis[].rateLimit` refuses the key with the same prescription the server
+    // key always got. Before that it ACCEPTED the key and dropped it, and proof 4
+    // waiving THAT is what this whole block exists to prevent.
+    const sharedTwin = RateLimitConfigSchema.safeParse({ ...TWIN_VALID, [TWIN_LEAF]: 'ip' });
+    const serverTwin = ServerRateLimitConfigSchema.safeParse({ ...TWIN_VALID, [TWIN_LEAF]: 'ip' });
+    for (const [def, result] of [[SHARED_TWIN_DEF, sharedTwin], [SERVER_TWIN_DEF, serverTwin]] as const) {
+      expect(
+        result.success,
+        `${def} now ACCEPTS '${TWIN_LEAF}' — its door re-opened, so the DARK leg below would be ` +
+          `asserting that proof 4 admits a def which drops an authored key in silence`,
+      ).toBe(false);
+      expect(
+        result.success ? '' : result.error.issues.map((i) => i.message).join('\n'),
+        `${def} rejects '${TWIN_LEAF}' with no prescription — the \`guidance\` entry that is this ` +
+          `pair's evidence has gone`,
+      ).toContain(PRESCRIPTION_BULLET);
+    }
+    // #18578's LIT fixture is only a pin while the probe still cannot watch
+    // `ui/ViewItem` deliver. Both halves are loud: the bare document must fail
+    // BEFORE any arm's door (no `unrecognized_keys` at all), and the whole
+    // document must succeed in raising the prescription — otherwise the key is
+    // either delivered (and the fixture models nothing) or not prescribed for
+    // (and it models the wrong verdict).
+    const bareDoor = ViewItemSchema.safeParse({ [UNREACHED_DOOR_LEAF]: null });
+    expect(
+      bareDoor.success,
+      `${UNREACHED_DOOR_DEF} now ACCEPTS a bare '${UNREACHED_DOOR_LEAF}' — re-pick the fixture`,
+    ).toBe(false);
+    expect(
+      bareDoor.success ? [] : bareDoor.error.issues.map((i) => i.code),
+      `${UNREACHED_DOOR_DEF} now answers the PROBE's own document with an unrecognized-key ` +
+        `issue — the probe reaches a door after all, so this def no longer models the boundary`,
+    ).not.toContain('unrecognized_keys');
+    const wholeDoor = ViewItemSchema.safeParse({
+      name: 'a.b', object: 'a', viewKind: 'list', [UNREACHED_DOOR_LEAF]: { columns: [] },
+    });
+    expect(
+      wholeDoor.success ? '' : wholeDoor.error.issues.map((i) => i.message).join('\n'),
+      `'${UNREACHED_DOOR_LEAF}' no longer raises its prescription on a WHOLE ${UNREACHED_DOOR_DEF} ` +
+        `document — the declaration this fixture is about has gone, so the gate's verdict would ` +
+        `be 'nothing prescribes' rather than 'prescribed and not delivered'`,
+    ).toContain(PRESCRIPTION_BULLET);
     // The manifest ratchet runs first; keep it current so every run reaches (c).
     seedManifest((s) => s);
   });
@@ -1135,6 +1409,295 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
       expect(output).toContain('json-schema.manifest/ (#2978)');
       expect(readSurface()).toBe(canonical);
       expect(status).toBe(0);
+    },
+  );
+
+  it(
+    '#17356 — a def rooted only in an UNREGISTERED kind is reachable, and a genuinely unreachable one still is not',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // BOTH directions in ONE run, because either alone is satisfiable by a
+      // gate that is simply wrong in the other direction: "always reachable"
+      // passes the first assertion and destroys proof 2, "always unreachable"
+      // passes the second and restores the defect.
+      //
+      // The defect: `computeSurfaceReachability()` built its roots from
+      // `listMetadataTypeSchemaTypes()`, which per #6245 deliberately does not
+      // enumerate `UNREGISTERED_KIND_SCHEMAS`. `connector` lives there, so the
+      // BFS never started from it, `integration/DataSyncConfig` read `null`,
+      // and a bare deletion of one of its baseline lines was waived as
+      // over-collection — for a def `stack.connectors[]` parses on every boot.
+      // The gate now enumerates its own reachability root union; the KIND
+      // vocabulary `listMetadataTypeSchemaTypes()` answers is untouched (the
+      // `beforeAll` guard above asserts that half).
+      seedBase((s) => [...s, DELETED_VIA_UNREGISTERED_KIND, DELETED_UNREACHABLE].sort());
+      const canonical = seedSurface((s) => s);
+
+      const rx = (key: string, tail: string): RegExp =>
+        new RegExp(`${key.replace(/[/$]/g, '\\$&')} — ${tail}`);
+
+      // Read the gate as CI runs it FIRST — `gen:schema` exports
+      // OS_EAGER_SCHEMAS=1, and only there does the card's acceptance sentence
+      // ("answers a root-graph hit rather than null") have a literal reading.
+      const eager = run(['--check'], EAGER_SCHEMAS_ENV);
+
+      // Direction 1 — the unregistered-kind root is a root: no waiver, and the
+      // verdict names the reason a reader has to act on (the entry was LIVE).
+      expect(eager.status).toBe(1);
+      expect(eager.output).toContain('authorable baseline line(s) were deleted without proof (#4650)');
+      expect(eager.output).toMatch(
+        rx(DELETED_VIA_UNREGISTERED_KIND, 'def reachable from the metadata-type roots; .*was LIVE'),
+      );
+      // Specifically NOT the proof-2 waiver, for this key. Asserting the absence
+      // is the pin: narrow the roots back to `listMetadataTypeSchemaTypes()` and
+      // the run exits 0 printing exactly the string below.
+      expect(eager.output).not.toMatch(rx(DELETED_VIA_UNREGISTERED_KIND, 'def not reachable from the'));
+
+      // Direction 2 — conservatism is not turned around. A REST response
+      // envelope no metadata document is parsed against still reads unreachable
+      // and still carries its own proof, in this same run.
+      expect(eager.output).toContain('carry their own proof (#4650)');
+      expect(eager.output).toMatch(rx(DELETED_UNREACHABLE, 'def not reachable from the \\d+ metadata-type roots'));
+      // The waiver message names all three sources of the union it computed, so
+      // a reader judging a waiver is not reading the pre-#17356 claim that the
+      // roots are the REGISTERED set.
+      expect(eager.output).toContain('BUILTIN_METADATA_TYPE_SCHEMAS + EXTRA_METADATA_TYPE_SCHEMAS');
+      expect(eager.output).toContain('UNREGISTERED_KIND_SCHEMAS');
+
+      // Same two directions under the lazy-Proxy graph, where the def resolves
+      // through the derived-clone bridge rather than by identity. The VERDICT is
+      // what this gate acts on, so it is the verdict that is pinned in both
+      // regimes; the wording differs and is deliberately not asserted here.
+      const lazy = run(['--check']);
+      expect(lazy.status).toBe(1);
+      expect(lazy.output).toMatch(rx(DELETED_VIA_UNREGISTERED_KIND, 'def .*was LIVE \\(never tombstoned\\)'));
+      expect(lazy.output).not.toMatch(rx(DELETED_VIA_UNREGISTERED_KIND, 'def not reachable from the'));
+      expect(lazy.output).toMatch(rx(DELETED_UNREACHABLE, 'def not reachable from the \\d+ metadata-type roots'));
+
+      expect(readSurface()).toBe(canonical);
+    },
+  );
+
+  it(
+    '#18301 — a guidance-route retirement on a reachable def proves itself; the same deletion, unnamed, does not',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // FOUR keys, ONE run, because every one of them is satisfiable by a gate
+      // that is simply wrong somewhere else — and a proof that admits everything
+      // and a proof that admits nothing both pass a one-legged test:
+      //
+      //   - `DELETED_GUIDANCE_ROUTE`  a blanket waiver passes this alone;
+      //   - `DELETED_GUIDANCE_UNNAMED` the SAME def, so a gate that keyed proof 4
+      //     off the def rather than the KEY passes the first and fails here;
+      //   - `WITHHELD_TOMBSTONE`      the 2026-09-10 ruling, which this card adds
+      //     a proof beside and must not reverse;
+      //   - `DELETED_UNREACHABLE`     proof 2's own territory, unchanged — it
+      //     would move if proof 4 had been written as a widening of proof 2
+      //     instead of a fourth proof beside it;
+      //   - `DELETED_AGED`            the DISJOINTNESS, measured rather than
+      //     argued: `data/Object:compactLayout` is a `[RETIRED]` baseline entry
+      //     AND a real `guidance` key on the same def, so a proof 4 that did not
+      //     require the entry to be un-marked takes this deletion off proof 1's
+      //     aging clock. It did, on the way in — the two #5898 cases at the
+      //     bottom of this file are what caught it.
+      seedBase((s) => [
+        ...s,
+        DELETED_GUIDANCE_ROUTE,
+        DELETED_GUIDANCE_UNNAMED,
+        WITHHELD_TOMBSTONE,
+        DELETED_UNREACHABLE,
+        DELETED_AGED,
+      ].sort());
+      const canonical = seedSurface((s) => s);
+
+      const rx = (key: string, tail: string): RegExp =>
+        new RegExp(`${key.replace(/[/$]/g, '\\$&')} — ${tail}`);
+
+      // Read the gate as CI runs it first: `check:authorable-surface` exports
+      // OS_EAGER_SCHEMAS=1, so `zodByDefKey` holds the real instances and the
+      // declaration registry proof 4 reads is populated by construction.
+      const eager = run(['--check'], EAGER_SCHEMAS_ENV);
+
+      // Direction 1 — proof 4 fires, and the verdict carries its own evidence:
+      // which def, that the door is closed, and the key it prescribes for BY
+      // NAME. A reader judging this waiver is not taking the deleter's word.
+      expect(eager.output).toContain('carry their own proof (#4650)');
+      expect(eager.output).toMatch(
+        rx(
+          DELETED_GUIDANCE_ROUTE,
+          `def reachable from the metadata-type roots; writing '${GUIDANCE_ROUTE_LEAF}' on it is ` +
+            `REFUSED as an unrecognized key`,
+        ),
+      );
+      expect(eager.output).toContain('carries the prescription its `strictObject` declaration owes');
+      // Specifically NOT proof 2. `data/Metric` hangs off the `analytics_cube`
+      // root, one of the four unregistered kinds #18131 put into the root union,
+      // so before that repair this key read unreachable and was waived for the
+      // WRONG reason — which is exactly how the class stayed invisible.
+      expect(eager.output).not.toMatch(rx(DELETED_GUIDANCE_ROUTE, 'def not reachable from the'));
+
+      // Direction 2 — the same deletion, on the same def, with nothing naming
+      // the key: still a violation. This is what makes proof 4 a proof and not a
+      // waiver for the def.
+      expect(eager.status).toBe(1);
+      expect(eager.output).toContain('authorable baseline line(s) were deleted without proof (#4650)');
+      expect(eager.output).toMatch(
+        rx(DELETED_GUIDANCE_UNNAMED, 'def reachable from the metadata-type roots; .*was LIVE'),
+      );
+      expect(eager.output).not.toMatch(rx(DELETED_GUIDANCE_UNNAMED, 'def .*is REFUSED as an unrecognized key'));
+      // …and not the "declared but not delivered" verdict either: nothing NAMES
+      // this key, so its reader is not sent looking for a `guidance` entry that
+      // was never written.
+      expect(eager.output).not.toMatch(rx(DELETED_GUIDANCE_UNNAMED, 'def .*declaration NAMES'));
+
+      // Direction 3 — the withheld tombstone stays withheld. Nothing prescribes
+      // for `schedule`, so proof 4 has no route to it and the deletion is still
+      // refused, on the same verdict it was refused on before this card.
+      expect(eager.output).toMatch(rx(WITHHELD_TOMBSTONE, 'def .*was LIVE \\(never tombstoned\\)'));
+      expect(eager.output).not.toMatch(rx(WITHHELD_TOMBSTONE, 'def .*is REFUSED as an unrecognized key'));
+
+      // Direction 4 — proof 2's repaired conservatism is untouched: a def no
+      // metadata document is ever parsed against still reads `null` and is still
+      // waived by proof 2, with proof 2's words and not proof 4's.
+      expect(eager.output).toMatch(rx(DELETED_UNREACHABLE, 'def not reachable from the \\d+ metadata-type roots'));
+      expect(eager.output).not.toMatch(rx(DELETED_UNREACHABLE, 'def .*is REFUSED as an unrecognized key'));
+
+      // Direction 5 — the two proofs are DISJOINT, not merely different. This key
+      // satisfies every OTHER condition proof 4 tests: reachable def, closed
+      // shape, and `compactLayout` really is in `data/Object`'s `guidance` table.
+      // What disqualifies it is that its baseline entry carried `[RETIRED]`, so it
+      // is a tombstone and stays on proof 1's clock — here refused for want of a
+      // RETIRED_KEYS_BY_MAJOR declaration, exactly as before this card.
+      const agedKey = DELETED_AGED.replace(RETIRED_MARK, '');
+      expect(eager.output).toMatch(rx(agedKey, 'def .*tombstoned, but no entry in RETIRED_KEYS_BY_MAJOR'));
+      expect(eager.output).not.toMatch(rx(agedKey, 'def .*is REFUSED as an unrecognized key'));
+
+      // The same five verdicts under the lazy-Proxy graph, where every def
+      // resolves through `zodShapeOf`'s lazy getter rather than by identity. The
+      // VERDICT is what this gate acts on, so it is the verdict pinned in both
+      // regimes.
+      const lazy = run(['--check']);
+      expect(lazy.status).toBe(1);
+      expect(lazy.output).toMatch(rx(DELETED_GUIDANCE_ROUTE, 'def .*is REFUSED as an unrecognized key'));
+      expect(lazy.output).toMatch(rx(DELETED_GUIDANCE_UNNAMED, 'def .*was LIVE \\(never tombstoned\\)'));
+      expect(lazy.output).toMatch(rx(WITHHELD_TOMBSTONE, 'def .*was LIVE \\(never tombstoned\\)'));
+      expect(lazy.output).toMatch(rx(DELETED_UNREACHABLE, 'def not reachable from the \\d+ metadata-type roots'));
+      expect(lazy.output).not.toMatch(rx(agedKey, 'def .*is REFUSED as an unrecognized key'));
+
+      expect(readSurface()).toBe(canonical);
+    },
+  );
+
+  it(
+    '#18301 — proof 4 reads the DOOR, not the registry: a promise the gate cannot watch kept is no proof',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // The case the contract review found, pinned in the spelling the tree
+      // really holds — and #18578 moved that spelling, so read both halves.
+      //
+      // ## What this used to pin, and why it could not stay
+      //
+      // `ServerRateLimitConfigSchema` was
+      // `strictObject({… guidance: { keyBy, store } }, RateLimitConfigSchema.shape)`,
+      // so ONE declaration answered for TWO emitted defs by shape identity — and
+      // only one of them had ever closed its door. Everything the first cut of
+      // proof 4 read said the two were the same:
+      //
+      //   - both emit `additionalProperties: false` (measured: in `io: 'output'`
+      //     zod says `false` for a non-closing shape too — the ledger reading at
+      //     docs/audits/2026-07-unknown-key-strictness-ledger.md);
+      //   - both match that one declaration by sorted key set AND by per-entry
+      //     instance identity, because the strict one was BUILT from the open
+      //     one's shape object;
+      //   - both are reachable, so proof 2 answers for neither.
+      //
+      // #18578 closed the open twin rather than leaving a live silent strip in
+      // the tree for this test to point at, which is what the fixture guard's own
+      // "re-pick the pair" instruction prescribes. The pair is now the DARK leg.
+      //
+      // ## What it pins now
+      //
+      // The invariant is unchanged and is the only one that matters here: proof 4
+      // admits a deletion ONLY where it has watched the def answer, and reads
+      // every other state as no evidence. So the LIT leg is a def whose
+      // declaration NAMES the key and whose delivery this gate cannot observe —
+      // `ui/ViewItem`, a discriminated union the probe's one-key document cannot
+      // drive past `viewKind` to any arm's door. Its author IS answered; this
+      // gate has still seen nothing, and guessing "the door is open" or "the door
+      // is closed" are both wrong here. It refuses.
+      seedBase((s) => [...s, DELETED_SHARED_TWIN, DELETED_SERVER_TWIN, DELETED_UNREACHED_DOOR].sort());
+      const canonical = seedSurface((s) => s);
+
+      const rx = (key: string, tail: string): RegExp =>
+        new RegExp(`${key.replace(/[/$]/g, '\\$&')} — ${tail}`);
+
+      const eager = run(['--check'], EAGER_SCHEMAS_ENV);
+
+      // DARK — BOTH twins are admitted by proof 4, on the door's own evidence.
+      // One declaration, two defs, and since #18578 one door: the def mounted
+      // bare on `apis[].rateLimit` answers exactly as the server key does. The
+      // `shared/` row is the regression guard for that card — re-open the shared
+      // shape and it stops being admitted here.
+      expect(eager.output).toContain('carry their own proof (#4650)');
+      expect(eager.output).toMatch(
+        rx(DELETED_SERVER_TWIN, `def .*; writing '${TWIN_LEAF}' on it is REFUSED as an unrecognized key`),
+      );
+      expect(eager.output).toMatch(
+        rx(DELETED_SHARED_TWIN, `def .*; writing '${TWIN_LEAF}' on it is REFUSED as an unrecognized key`),
+      );
+
+      // LIT — refused, and refused in words that name what is actually missing.
+      // The `guidance` entry exists; what this gate could not obtain is a reading
+      // of it being delivered, so the plain "was LIVE (never tombstoned)" verdict
+      // would send its reader to write an entry that is already there.
+      expect(eager.status).toBe(1);
+      expect(eager.output).toContain('authorable baseline line(s) were deleted without proof (#4650)');
+      expect(eager.output).toMatch(
+        rx(DELETED_UNREACHED_DOOR, `def .*; a \`strictObject\` declaration NAMES '${UNREACHED_DOOR_LEAF}', but writing it`),
+      );
+      expect(eager.output).not.toMatch(rx(DELETED_UNREACHED_DOOR, 'def .*is REFUSED as an unrecognized key'));
+      // …and it is not being waived by some OTHER proof either. The def is
+      // root-reachable, so proof 2 must not answer for it — without this leg the
+      // case would pass on a gate that had simply stopped emitting proof 4 at all.
+      expect(eager.output).not.toMatch(rx(DELETED_UNREACHED_DOOR, 'def not reachable from the'));
+
+      expect(readSurface()).toBe(canonical);
+    },
+  );
+
+  it(
+    "#18301 — the remedy names four proofs, and names what the fourth one needs",
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // The remedy is the only thing an author who hits this gate reads. Until
+      // this card it listed three routes and a guidance-route retirement matched
+      // none of them, so the honest next step was invisible — the #12574 shape,
+      // one proof further on.
+      seedBase((s) => [...s, DELETED_GUIDANCE_UNNAMED].sort());
+      seedSurface((s) => s);
+
+      const { status, output } = run(['--check'], EAGER_SCHEMAS_ENV);
+
+      expect(status).toBe(1);
+      expect(output).toContain('A line may only leave this file when:');
+      for (const route of ['     1.', '     2.', '     3.', '     4.']) {
+        expect(output, `the remedy stopped naming route ${route.trim()}`).toContain(route);
+      }
+      // Route 4 states all three halves of its own evidence — the un-marked
+      // baseline entry, the closed door, the named key — and the narrowing that
+      // keeps it from being a blanket waiver. The un-marked half is the one a
+      // reader most needs: without it route 4 reads as a way around route 1.
+      expect(output).toContain('its baseline entry was NOT `[RETIRED]`');
+      expect(output).toContain('writing the key on its def is');
+      expect(output).toContain('REFUSED as an unrecognized key carrying the prescription its');
+      // The remedy must not repeat the claim this round removed — that the
+      // published `additionalProperties: false` proves the door. It now says the
+      // opposite in the gate's own words, because an author reading route 4 is
+      // exactly who would otherwise go looking for that field.
+      expect(output).toContain("zod emits `false` for a stripping shape too");
+      expect(output).toContain('an enumerated');
+      expect(output).toContain('entry counts, a RegExp one does not');
+      expect(output).toContain("A key that IS marked is a tombstone");
     },
   );
 
@@ -2875,7 +3438,7 @@ describe('build-schemas.ts — check (b) matches the exact retired key, not its 
     for (const entry of ['node_modules', 'package.json']) {
       fs.symlinkSync(path.join(PKG, entry), path.join(box, entry));
     }
-    mountUnemittedLedger(box);
+    mountCommittedLedgers(box);
     writeManifestShards(path.join(box, SCHEMA_MANIFEST_DIR_NAME), pristine);
     boxSurfaceDir = path.join(box, AUTHORABLE_SURFACE_DIR_NAME);
     writeSurfaceShards(boxSurfaceDir, pristineSurface);
@@ -3174,7 +3737,7 @@ describe('build-schemas.ts — a deleted manifest key must prove itself (#4725)'
     for (const entry of ['node_modules', 'package.json']) {
       fs.symlinkSync(path.join(PKG, entry), path.join(box, entry));
     }
-    mountUnemittedLedger(box);
+    mountCommittedLedgers(box);
     boxScript = path.join(box, 'scripts', 'build-schemas.ts');
     boxManifestDir = path.join(box, SCHEMA_MANIFEST_DIR_NAME);
     boxSurfaceDir = path.join(box, AUTHORABLE_SURFACE_DIR_NAME);
@@ -3540,7 +4103,7 @@ describe('build-schemas.ts — check (c) dates a tombstone by its exact key (#58
     for (const entry of ['node_modules', 'package.json']) {
       fs.symlinkSync(path.join(PKG, entry), path.join(box, entry));
     }
-    mountUnemittedLedger(box);
+    mountCommittedLedgers(box);
     writeManifestShards(path.join(box, SCHEMA_MANIFEST_DIR_NAME), pristine);
     boxSurfaceDir = path.join(box, AUTHORABLE_SURFACE_DIR_NAME);
     writeSurfaceShards(boxSurfaceDir, pristineSurface);
@@ -3634,6 +4197,335 @@ describe('build-schemas.ts — check (c) dates a tombstone by its exact key (#58
         new RegExp(`data/Object:${DELETED_AGED_LEAF} — .*no entry in RETIRED_KEYS_BY_MAJOR`),
       );
       expect(output).not.toContain('tombstone aged out');
+    },
+  );
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #17969 — a NESTED RETIRED_KEYS_BY_MAJOR row is judged, not ignored.
+//
+// `currentKeys` is built from `schema.properties` ONE LEVEL DEEP, so a dotted
+// row — 48 of the shipped entries — matched nothing in the map check (b2)
+// consults and was silently IGNORED. Ablated on `origin/main` before the fix,
+// with controls: a fabricated nested row passed `check:authorable-surface` at
+// exit 0 with zero ❌, while a live TOP-LEVEL key was refused at exit 1. A
+// typo'd def, a typo'd path or a stale key name therefore registered silently
+// and stayed registered — and the retirement ledger is the input to the
+// ADR-0087 conversions downstream, so the error is inherited as fact.
+//
+// The fix is NOT "recurse `currentKeys`": three lines below its construction
+// that same map is `currentEntries`, the PUBLISHED authorable-surface baseline,
+// and recursing it in place measures at +14,376 lines across all 14 shards.
+// The nested view is resolved for the registered rows only, by
+// `scripts/lib/nested-authorable-keys.ts`, and reaches nothing that emits.
+//
+// The four cases below are the acceptance, and the two DARK controls are the
+// half that cannot be skipped: a check that refused every nested row would pass
+// the probe and the lit control alike, and be a new false red on 48 rows.
+//
+// This block needs its own sandbox for the reason the #4659 one gives: the
+// fixture is a claim about `src/migrations/registry.ts`, which the main sandbox
+// symlinks.
+
+/** A live NESTED key — (b2)'s own defect, one level down. */
+const NESTED_LIVE_KEY = 'system/SchemaLevelIsolationStrategy:performance.poolPerSchema';
+/** A real registered nested retirement (#15939 ruling A): the dark control. */
+const NESTED_RETIRED_KEY = 'system/SchemaLevelIsolationStrategy:performance.schemaCacheTTL';
+/** The card's probe: a path under a live nested object that no build emits. */
+const NESTED_TYPO_KEY = 'system/SchemaLevelIsolationStrategy:performance.zzNotARealKey9999';
+/** Fabricated, and under a def retired WHOLE (the change-management family) —
+ *  the second dark control: absent for a reason the manifest ratchet owns. */
+const NESTED_UNEMITTED_DEF_KEY = 'system/ChangeImpact:downtime.zzNotARealKey9999';
+/** The def both nested fixtures live on, and the def the last one does not. */
+const NESTED_FIXTURE_DEF = 'system/SchemaLevelIsolationStrategy';
+const UNEMITTED_FIXTURE_DEF = 'system/ChangeImpact';
+/**
+ * Every baseline key whose NAME half carries a dot — and every one of them is a
+ * TOP-LEVEL property name that contains one, never a nested path: the OData
+ * annotations a response envelope publishes, and a SCIM extension URN. Routing
+ * has to ask the schema rather than the spelling because of exactly these.
+ */
+const DOTTED_TOP_LEVEL_BASELINE_KEYS = [
+  'api/ODataResponse:@odata.context',
+  'api/ODataResponse:@odata.count',
+  'api/ODataResponse:@odata.nextLink',
+  'identity/SCIMUser:urn:ietf:params:scim:schemas:extension:enterprise:2.0:User',
+];
+/** …and the one of them this build still emits as LIVE — the routing fixture. */
+const DOTTED_TOP_LEVEL_LIVE_KEY = 'api/ODataResponse:@odata.context';
+
+const CHECK_B3 = 'RETIRED_KEYS_BY_MAJOR entr(ies) name a NESTED key this build does not emit';
+const CHECK_B2 = 'RETIRED_KEYS_BY_MAJOR entr(ies) name a key that is still LIVE';
+
+describe('build-schemas.ts — a nested retirement row is judged, not ignored (#17969)', () => {
+  let box: string;
+  let boxScript: string;
+  let boxRegistry: string;
+  let pristineRegistry: string;
+
+  /** Same hermetic invocation as the sandbox's `git` — this box is a fixture
+   *  repository too, and inherits nothing from the machine either (#9068). */
+  const boxGit = (...args: string[]): string => gitIn(box, ...args);
+
+  const runBox = (args: string[] = []): { status: number; output: string } => {
+    const r = spawnSync(TSX, [boxScript, ...args], {
+      cwd: box,
+      encoding: 'utf8',
+      timeout: SPAWN_TIMEOUT_MS,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: HERMETIC_ENV,
+    });
+    return { status: r.status ?? -1, output: `${r.stdout ?? ''}${r.stderr ?? ''}` };
+  };
+
+  /** Substitute RETIRED_KEYS_BY_MAJOR in this box's own copy of the registry. */
+  const seedRetiredKeys = (table: Record<number, readonly string[]>): void => {
+    const rendered =
+      `export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> = {\n` +
+      Object.keys(table)
+        .map(Number)
+        .sort((a, b) => a - b)
+        .map((m) => `  ${m}: [\n${table[m]!.map((k) => `    '${k}',\n`).join('')}  ],\n`)
+        .join('') +
+      `};\n`;
+    const anchor = /export const RETIRED_KEYS_BY_MAJOR[\s\S]*?\n\};\n/;
+    expect(
+      anchor.test(pristineRegistry),
+      'RETIRED_KEYS_BY_MAJOR is no longer a single object literal in src/migrations/registry.ts — ' +
+        'this fixture substitutes it textually and can no longer find it',
+    ).toBe(true);
+    fs.writeFileSync(boxRegistry, pristineRegistry.replace(anchor, rendered));
+  };
+
+  beforeAll(() => {
+    // ── Fixture validity, loud ───────────────────────────────────────────
+    // The PREMISE of the whole limb: the published baseline records def
+    // TOP-LEVEL keys only, so a nested key has no baseline line, no `[RETIRED]`
+    // mark and no aging clock — which is why check (b3) can read an absent
+    // nested path as a wrong row rather than as a steady state.
+    //
+    // The baseline's dotted entries are the OTHER shape: top-level property
+    // NAMES that carry a dot. Enumerated rather than counted, because what this
+    // assertion is really watching for is a nested PATH appearing here — the
+    // published surface widened, which is the thing #17969 deliberately did not
+    // do (recursing `currentKeys` in place measures at +14,376 lines). A new
+    // dotted top-level key is a one-line update here; 14,376 of them is the
+    // finding.
+    const dotted = pristineSurface
+      .map((e) => e.replace(RETIRED_MARK, ''))
+      .filter((e) => e.slice(e.indexOf(':') + 1).includes('.'))
+      .sort();
+    expect(
+      dotted,
+      `${AUTHORABLE_SURFACE_DIR_NAME}/ carries a dotted key this roster does not name — if it is a ` +
+        'nested PATH, the published surface has been widened and check (b3) has to be re-derived',
+    ).toEqual([...DOTTED_TOP_LEVEL_BASELINE_KEYS].sort());
+
+    // The tree facts each fixture models, read from the schema source itself so
+    // a fixture cannot quietly stop being the thing it claims to be.
+    const live = SchemaLevelIsolationStrategySchema.safeParse({
+      strategy: 'isolated_schema',
+      performance: { poolPerSchema: true },
+    });
+    expect(live.success, `${NESTED_LIVE_KEY} is no longer writable — re-pick the live fixture`).toBe(true);
+    const tombstoned = SchemaLevelIsolationStrategySchema.safeParse({
+      strategy: 'isolated_schema',
+      performance: { schemaCacheTTL: 3600 },
+    });
+    expect(
+      tombstoned.success,
+      `${NESTED_RETIRED_KEY} is no longer a tombstone — re-pick the dark control`,
+    ).toBe(false);
+
+    // The def halves: one this build emits, one it does not.
+    expect(pristine, `${NESTED_FIXTURE_DEF} is no longer emitted — re-pick`).toContain(NESTED_FIXTURE_DEF);
+    expect(pristine, `${UNEMITTED_FIXTURE_DEF} is emitted now — re-pick the def-level control`).not.toContain(
+      UNEMITTED_FIXTURE_DEF,
+    );
+
+    // The registered row the dark control models is real; the fabricated ones
+    // are not registered anywhere.
+    const declared = Object.values(RETIRED_KEYS_BY_MAJOR).flat();
+    expect(declared, `${NESTED_RETIRED_KEY} is no longer registered — re-pick`).toContain(NESTED_RETIRED_KEY);
+    for (const fabricated of [NESTED_TYPO_KEY, NESTED_UNEMITTED_DEF_KEY, NESTED_LIVE_KEY]) {
+      expect(declared, `${fabricated} is registered for real — pick another fixture`).not.toContain(fabricated);
+    }
+    expect(declared, `${DOTTED_TOP_LEVEL_LIVE_KEY} is registered for real — re-pick`).not.toContain(
+      DOTTED_TOP_LEVEL_LIVE_KEY,
+    );
+    expect(
+      pristineSurface,
+      `${DOTTED_TOP_LEVEL_LIVE_KEY} is no longer a LIVE top-level key — re-pick the routing fixture`,
+    ).toContain(DOTTED_TOP_LEVEL_LIVE_KEY);
+    // The census case below is only worth its spawn while the table HAS nested
+    // rows to judge.
+    expect(declared.filter((k) => k.slice(k.indexOf(':') + 1).includes('.')).length).toBeGreaterThan(0);
+
+    box = fixtureTree('build-schemas-nested-retired-');
+    fs.cpSync(path.join(PKG, 'scripts'), path.join(box, 'scripts'), { recursive: true });
+    fs.cpSync(path.join(PKG, 'src'), path.join(box, 'src'), { recursive: true });
+    for (const entry of ['node_modules', 'package.json']) {
+      fs.symlinkSync(path.join(PKG, entry), path.join(box, entry));
+    }
+    mountCommittedLedgers(box);
+    writeManifestShards(path.join(box, SCHEMA_MANIFEST_DIR_NAME), pristine);
+    writeSurfaceShards(path.join(box, AUTHORABLE_SURFACE_DIR_NAME), pristineSurface);
+    // The #4666 default ratchet runs on every invocation, so every box needs its
+    // committed record too — otherwise a fixture fails on a missing artifact
+    // instead of on the row it is actually testing.
+    writeDefaultsShards(path.join(box, AUTHORABLE_DEFAULTS_DIR_NAME), pristineDefaults);
+    boxScript = path.join(box, 'scripts', 'build-schemas.ts');
+    boxRegistry = path.join(box, 'src', 'migrations', 'registry.ts');
+    pristineRegistry = fs.readFileSync(boxRegistry, 'utf8');
+
+    initFixtureRepo(box);
+    boxGit('add', AUTHORABLE_SURFACE_DIR_NAME, AUTHORABLE_DEFAULTS_DIR_NAME);
+    boxGit('commit', '-q', '-m', `baseline: committed ${AUTHORABLE_SURFACE_DIR_NAME}/`);
+    fs.writeFileSync(
+      path.join(box, 'authorable-surface.base.json'),
+      JSON.stringify(
+        { description: surfaceBaseDescription, baseRev: boxGit('rev-parse', 'HEAD'), keys: pristineSurface },
+        null,
+        2,
+      ) + '\n',
+    );
+    boxGit('add', 'authorable-surface.base.json');
+    boxGit('commit', '-q', '-m', 'baseline anchor');
+    boxGit('update-ref', 'refs/remotes/origin/main', 'HEAD');
+  });
+
+  afterAll(() => {
+    if (box) fs.rmSync(sandboxRoot(box), { recursive: true, force: true });
+  });
+
+  it(
+    'PROBE: a fabricated nested row is REFUSED — the run the card measured at exit 0',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      seedRetiredKeys({ [CURRENT_MAJOR]: [NESTED_TYPO_KEY] });
+
+      const { status, output } = runBox(['--check']);
+
+      expect(status).toBe(1);
+      expect(output).toContain(`1 ${CHECK_B3}`);
+      expect(output).toContain(`     - ${NESTED_TYPO_KEY}  (registered at major ${CURRENT_MAJOR})`);
+      // Judged as absent, not as live: the two verdicts have different remedies.
+      expect(output).not.toContain(CHECK_B2);
+      // The refusal carries the remedy, including the one legitimate shape it
+      // cannot see — so the next author extends the check instead of deleting a
+      // row that is telling the truth.
+      expect(output).toContain('Fix the spelling against the emitted schema');
+      expect(output).toContain('check (c) proof 4');
+    },
+  );
+
+  it(
+    'LIT CONTROL: a live TOP-LEVEL key is still refused, on the same message as before',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // The guard that already worked must not regress: (b2) reads `currentKeys`
+      // for a top-level row exactly as it did, and says the same thing.
+      seedRetiredKeys({ [CURRENT_MAJOR]: [STILL_LIVE_KEY] });
+
+      const { status, output } = runBox(['--check']);
+
+      expect(status).toBe(1);
+      expect(output).toContain(`1 ${CHECK_B2}`);
+      expect(output).toContain(`     - ${STILL_LIVE_KEY}  (registered at major ${CURRENT_MAJOR})`);
+      expect(output).toContain('retiredKey(');
+      expect(output).not.toContain(CHECK_B3);
+    },
+  );
+
+  it(
+    'a live NESTED key is refused by (b2) too — the same defect, one level down',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // This is the row the top-level-only map could never see: the key is
+      // writable today, so the entry pre-approves a retirement nobody performed
+      // and check (b) would wave the real tombstone through later.
+      seedRetiredKeys({ [CURRENT_MAJOR]: [NESTED_LIVE_KEY] });
+
+      const { status, output } = runBox(['--check']);
+
+      expect(status).toBe(1);
+      expect(output).toContain(`1 ${CHECK_B2}`);
+      expect(output).toContain(`     - ${NESTED_LIVE_KEY}  (registered at major ${CURRENT_MAJOR})`);
+      expect(output).not.toContain(CHECK_B3);
+    },
+  );
+
+  it(
+    'a live TOP-LEVEL key whose own NAME carries a dot is judged as one, not as a path',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // `@odata.context` is a property name, not `context` inside `@odata`. A
+      // gate that routed on the spelling would resolve it as a path, find
+      // nothing, and answer with (b3)'s "does not emit" — the right refusal for
+      // the wrong reason, and the wrong remedy printed under it.
+      seedRetiredKeys({ [CURRENT_MAJOR]: [DOTTED_TOP_LEVEL_LIVE_KEY] });
+
+      const { status, output } = runBox(['--check']);
+
+      expect(status).toBe(1);
+      expect(output).toContain(`1 ${CHECK_B2}`);
+      expect(output).toContain(`     - ${DOTTED_TOP_LEVEL_LIVE_KEY}  (registered at major ${CURRENT_MAJOR})`);
+      expect(output).not.toContain(CHECK_B3);
+    },
+  );
+
+  it(
+    'DARK CONTROL: a real nested retirement PASSES — discrimination, not a blanket refusal',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // Without this case, a check that refused every dotted row would satisfy
+      // the probe and the lit control both, and be a new false red on 48 rows.
+      seedRetiredKeys({ [CURRENT_MAJOR]: [NESTED_RETIRED_KEY] });
+
+      const { status, output } = runBox(['--check']);
+
+      expect(output).not.toContain(CHECK_B3);
+      expect(output).not.toContain(CHECK_B2);
+      expect(output).not.toContain('deleted without proof');
+      expect(status).toBe(0);
+    },
+  );
+
+  it(
+    'DARK CONTROL: a nested row under a def this build does not emit PASSES — the steady state',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // A whole-def removal is registered in RETIRED_DEFS_BY_MAJOR and
+      // adjudicated by the json-schema.manifest/ ratchet, which subsumes the key
+      // entries under it. Three shipped nested rows are in this state; reading
+      // them as typos would be this gate's own false red. Fabricated on purpose:
+      // absence is waived by the DEF's state, never by the path being real.
+      seedRetiredKeys({ [CURRENT_MAJOR]: [NESTED_UNEMITTED_DEF_KEY] });
+
+      const { status, output } = runBox(['--check']);
+
+      expect(output).not.toContain(CHECK_B3);
+      expect(output).not.toContain(CHECK_B2);
+      expect(status).toBe(0);
+    },
+  );
+
+  it(
+    'the shipped table passes the new limb — the population the card left unmeasured',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // The card measured the predicate and said so: "how many of the 36 nested
+      // rows are accurate is not measured by this card and not measured by
+      // anything else". This is that measurement, kept measured — every dotted
+      // row in the real table either resolves to a tombstone or names a def this
+      // build does not emit.
+      seedRetiredKeys({ ...RETIRED_KEYS_BY_MAJOR });
+
+      const { status, output } = runBox(['--check']);
+
+      expect(output).not.toContain(CHECK_B3);
+      expect(output).not.toContain(CHECK_B2);
+      expect(status).toBe(0);
     },
   );
 });

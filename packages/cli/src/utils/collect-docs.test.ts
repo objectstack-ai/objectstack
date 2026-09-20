@@ -343,3 +343,106 @@ describe('locale variants (ADR-0046 i18n)', () => {
     expect(issues.some((i) => i.rule === 'docs/no-images' && i.path.endsWith('.zh'))).toBe(true);
   });
 });
+
+// ── #18170: the loss the build used to keep to itself ───────────────────────
+//
+// `collectDocsFromSrc` reads `<config dir>/src/docs` and nothing else. Under an
+// ADR-0130 multi-package layout the docs directory lives inside its package
+// (`src/<pkg>/docs/`), so the card's probe — `git mv src/docs src/sales/docs`,
+// then build — produced exit 0, the usual `Collecting package docs` step line,
+// and an artifact with no `docs[]` at all.
+//
+// ⚠️ These pins are written so a fix that COLLECTS NOTHING cannot satisfy them:
+// every case that asserts the warning also asserts what was (or was not)
+// collected, and the mixed case below asserts a non-empty `docs` array. A
+// collector silently returning `{ docs: [], issues: [] }` fails here.
+describe('uncollected docs directories (ADR-0130 layout, #18170)', () => {
+  const writeUnder = (pkg: string, name: string, content: string) => {
+    const dir = path.join(tmp, 'src', pkg, 'docs');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, name), content);
+    return dir;
+  };
+
+  it("warns for the card's own probe: src/docs moved to src/<pkg>/docs collects nothing, and now says so", () => {
+    writeUnder('sales', 'crm_index.md', '# CRM Overview\n\nWhat it is.');
+    writeUnder('sales', 'crm_lead_guide.md', '# Lead Guide');
+    fs.rmSync(docsDir, { recursive: true }); // the `git mv`: nothing left at src/docs
+
+    const { docs, issues } = collectDocsFromSrc(configPath);
+    expect(docs).toHaveLength(0); // the loss itself is unchanged — this is a diagnostic
+    expect(issues).toHaveLength(1); // ...and it is no longer silent
+    expect(issues[0].severity).toBe('warning');
+    expect(issues[0].rule).toBe('docs/uncollected-directory');
+    expect(issues[0].path).toBe('src/sales/docs');
+    expect(issues[0].message).toContain('2 Markdown file(s)'); // how much was dropped
+    expect(issues[0].message).toContain('crm_index.md'); // which files, by name
+    expect(issues[0].message).toContain('crm_lead_guide.md');
+    expect(issues[0].message).toContain('src/docs/'); // the one directory it does read
+    expect(issues[0].message).toContain('ADR-0046'); // the contract that decided it
+  });
+
+  // The adversarial case. A "fix" that quietly stopped collecting would pass
+  // every assertion about the warning and fail this one.
+  it('reports the uncollected directory WHILE still collecting src/docs', () => {
+    write('crm_index.md', '# CRM');
+    writeUnder('sales', 'sales_playbook.md', '# Playbook');
+
+    const { docs, issues } = collectDocsFromSrc(configPath);
+    expect(docs.map((d) => d.name)).toEqual(['crm_index']); // collection still works
+    expect(issues).toHaveLength(1);
+    expect(issues[0].rule).toBe('docs/uncollected-directory');
+    expect(issues[0].path).toBe('src/sales/docs');
+    expect(issues[0].message).toContain('sales_playbook.md');
+  });
+
+  it('reports one warning per package directory, in a deterministic order', () => {
+    fs.rmSync(docsDir, { recursive: true });
+    writeUnder('sales', 'sales_index.md', '# S');
+    writeUnder('billing', 'billing_index.md', '# B');
+    writeUnder('support', 'support_index.md', '# Su');
+
+    const { docs, issues } = collectDocsFromSrc(configPath);
+    expect(docs).toHaveLength(0);
+    // directory name order, not readdir order — billing, sales, support
+    expect(issues.map((i) => i.path)).toEqual(['src/billing/docs', 'src/sales/docs', 'src/support/docs']);
+    expect(issues.every((i) => i.rule === 'docs/uncollected-directory' && i.severity === 'warning')).toBe(true);
+  });
+
+  it('stays silent when there is nothing to report — no package docs dir, no .md in one, and src/docs itself is never flagged', () => {
+    write('crm_index.md', '# CRM');
+    fs.mkdirSync(path.join(tmp, 'src', 'sales'), { recursive: true }); // a package with no docs/
+    fs.writeFileSync(path.join(tmp, 'src', 'sales', 'index.ts'), '// stub');
+    fs.mkdirSync(path.join(tmp, 'src', 'billing', 'docs'), { recursive: true }); // docs/ with no .md
+    fs.writeFileSync(path.join(tmp, 'src', 'billing', 'docs', 'notes.txt'), 'not a doc');
+
+    const { docs, issues } = collectDocsFromSrc(configPath);
+    expect(docs.map((d) => d.name)).toEqual(['crm_index']);
+    expect(issues).toHaveLength(0);
+  });
+
+  it('leaves the flatness rule alone — a subdirectory under src/docs is still the flat-directory error', () => {
+    fs.mkdirSync(path.join(docsDir, 'user'));
+    fs.writeFileSync(path.join(docsDir, 'user', 'crm_deep.md'), '# Deep');
+    write('crm_index.md', '# CRM');
+
+    const { docs, issues } = collectDocsFromSrc(configPath);
+    expect(docs.map((d) => d.name)).toEqual(['crm_index']);
+    expect(issues.map((i) => i.rule)).toEqual(['docs/flat-directory']); // src/docs is not a "package"
+  });
+
+  // The seam that matters to `os build` / `os validate` / `os lint`: all three
+  // read `collectAndLintDocs`, and a diagnostic that stopped at the inner
+  // function would never reach a build's warning output.
+  it('reaches collectAndLintDocs, as a warning that does not fail the build', () => {
+    writeUnder('sales', 'crm_playbook.md', '# Playbook');
+    fs.rmSync(docsDir, { recursive: true });
+
+    const { docs, issues } = collectAndLintDocs(configPath, { manifest: { namespace: 'crm' } });
+    expect(docs).toHaveLength(0);
+    expect(issues.filter((i) => i.severity === 'error')).toHaveLength(0); // green build, loud line
+    const warning = issues.find((i) => i.rule === 'docs/uncollected-directory');
+    expect(warning?.severity).toBe('warning');
+    expect(warning?.path).toBe('src/sales/docs');
+  });
+});

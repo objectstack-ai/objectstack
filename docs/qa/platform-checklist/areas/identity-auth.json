@@ -136,7 +136,7 @@
       "source": [
         "#3358 §6",
         "#3408",
-        "examples/app-showcase/src/security/seed-approval-demo.ts#PHONE_DEMO_USER (PHONE_DEMO_USER)",
+        "examples/app-showcase/src/security/demo-personas.ts#PHONE_DEMO_USER (PHONE_DEMO_USER — re-pointed #18104: seed-approval-demo.ts only IMPORTS this persona and provisions it; the constant, phone_number included, is declared in demo-personas.ts, the one registry the seed and the approval bootstrap share)",
         "packages/spec/src/system/auth-config.zod.ts#phoneNumber (phoneNumber plugin: unique phone_number + phone_number_verified columns)",
         "packages/spec/src/kernel/public-auth-features.ts#phoneNumber (phoneNumber gates sys_user.actions.create_user.params.phoneNumber — #2871)"
       ],
@@ -355,7 +355,7 @@
       "source": [
         "packages/qa/dogfood/test/delegated-admin-invite.dogfood.test.ts (ADR-0105 D8 / #3697; the escalation chain the role cap blocks)",
         "packages/spec/src/identity/organization.zod.ts#InvitationSchema (InvitationSchema, InvitationStatus enum)",
-        "packages/rest/src/rest-route-ledger.ts#describeDelegableScope (GET /api/v1/security/my-delegable-scope — security.describeDelegableScope, ADR-0090 D12 / ADR-0105 D8, self-scoped read half of the delegated-admin gate)",
+        "packages/rest/src/rest-route-ledger.ts#REST_ROUTE_LEDGER (GET /api/v1/security/my-delegable-scope — security.describeDelegableScope, ADR-0090 D12 / ADR-0105 D8, self-scoped read half of the delegated-admin gate — re-pointed #18104: describeDelegableScope is a CLIENT METHOD name, carried in this file only inside a string value)",
         "packages/spec/src/contracts/security-service.ts#DelegableScope (DelegableScope: isTenantAdmin, scopes, placeableBusinessUnitIds, assignablePositions — no invitation-role field, which is why the scope read cannot be the invite picker's allowlist)",
         "packages/spec/src/kernel/public-auth-features.ts#sys_invitation (organization feature gates sys_invitation invite/cancel/resend actions)"
       ],
@@ -370,7 +370,7 @@
       "title": "Admin user-lifecycle operations (ban/unban, set-password, impersonate, create/set-role/remove, revoke-sessions) enforce, persist, and stay closed to non-admins",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["platform admin", "target user", "non-admin forger"],
@@ -393,7 +393,7 @@
         "attempt to sign in as the banned user (POST /api/v1/auth/sign-in/email) and capture the refusal",
         "unban, then verify the same sign-in now succeeds",
         "set the target's password via the admin set-password (out-of-band recovery); verify the NEW password signs in and the OLD one is refused",
-        "sign the target in to establish a LIVE session, then as admin POST /api/v1/auth/admin/revoke-user-sessions for that target; the target's very next PROTECTED authed request (e.g. GET /api/v1/data/<an object the target could read a moment ago>) must be refused mid-flight — the kill is immediate, not deferred to expiry. Do NOT score this off get-session's status code: better-auth answers get-session with HTTP 200 and a JSON null body when the session is gone (session-of-record.test.ts), so a status-only assertion passes against a fully revoked session",
+        "sign the target in to establish a LIVE session, then as admin POST /api/v1/auth/admin/revoke-user-sessions for that target; the target's very next PROTECTED authed request (e.g. GET /api/v1/data/<an object the target could read a moment ago>) must be refused mid-flight — the kill is immediate, not deferred to expiry. Do NOT score this off get-session's status code — and since #17881 that is no longer because it cannot discriminate: an anonymous OR revoked get-session answers 401 with the ADR-0112 refusal envelope (code UNAUTHENTICATED), converted from better-auth's bare 200+null by packages/plugins/plugin-auth/src/anonymous-session-refusal.ts, while a live session still answers 200 with { user, session }. It is not the oracle because this clause's contract is an immediate kill on a PROTECTED request, and one auth-route seam's status is not proof the AUTHORIZATION layer refuses the target's in-flight protected reads",
         "change the target's role via POST /api/v1/auth/admin/set-role and prove the change bites: an operation the new role gates flips outcome (e.g. promote → an admin-only read now 2xx; demote → it now 403)",
         "impersonate the target from the admin surface; verify via the API that the impersonation session carries impersonated_by, and screenshot the console's impersonation state; stop impersonating and verify the admin's own session is restored",
         "POST /api/v1/auth/admin/remove-user for a throwaway user that OWNS at least one showcase row (task/note), then read that owned row back: its owner_id is cleared to null (engine referential-integrity FK clear), the row itself survives, and the owner-anchor transfer guard did NOT veto the cascade (#3023/#3048)",
@@ -428,7 +428,7 @@
         {
           "clause": "revoke-user-sessions kills the target's LIVE session mid-flight: a PROTECTED authed request that succeeded a moment earlier is refused immediately after the admin revoke — not at token expiry",
           "oracle": "api",
-          "verify": "ORACLE = a protected authed request as the target (a data read the target was entitled to), 2xx before the revoke and refused on the very next call after it. get-session is NOT the oracle for this clause: better-auth's no-session convention is HTTP 200 with a JSON null body, so a 401 expectation misdescribes a correct implementation and a status-only assertion passes against a revoked session (packages/plugins/plugin-auth/src/session-of-record.test.ts). If get-session is captured at all, read its BODY (user null) as corroboration only",
+          "verify": "ORACLE = a protected authed request as the target (a data read the target was entitled to), 2xx before the revoke and refused on the very next call after it. get-session is NOT the oracle for this clause. Since #17881 an anonymous OR revoked get-session answers 401 UNAUTHENTICATED in the ADR-0112 refusal envelope (packages/plugins/plugin-auth/src/anonymous-session-refusal.ts) while a live session still answers 200 with { user, session }, so a 401 there is the CORRECT answer and must never be filed as the defect. It stays off the oracle seat for a reason that does not move with the wire: this clause's contract is an immediate kill on a PROTECTED request, and a refusal emitted by that one auth-route seam is not proof the authorization layer refuses the target's in-flight protected reads. If get-session is captured at all it is corroboration only — read its BODY as well as its status, the discipline packages/plugins/plugin-auth/src/session-of-record.test.ts states: a session that is gone is proven gone by the absence of a user, not by a status the file would then be trusting a single seam to keep emitting",
           "evidence": "the before/after protected-request pair (plus the get-session body, if captured)"
         },
         {
@@ -465,7 +465,7 @@
       "negative": [
         "a non-admin forged admin operation succeeding is a FAIL of the highest severity — apply RUNNER rule 7 (independent re-derivation) before acting on it",
         "a ban that hides the user in the UI while their sign-in still works is a FAIL — the sign-in refusal is the enforcement, not the list filter",
-        "revoke-user-sessions that only stops NEW logins while the existing live session keeps answering a PROTECTED request is a FAIL — the contract is an immediate kill. A get-session that answers 200 after the revoke is NOT that failure (better-auth's no-session convention is 200-with-null-body); filing it as one is the false positive run #7663 corrected — read the body, or better, re-drive a protected request",
+        "revoke-user-sessions that only stops NEW logins while the existing live session keeps answering a PROTECTED request is a FAIL — the contract is an immediate kill. Two scoring errors to avoid on get-session, and since #17881 inverted the wire answer they point OPPOSITE ways. (a) A 401 UNAUTHENTICATED there after the revoke is the CORRECT answer, not the failure — filing it as one is the false positive run #7663 corrected, and the remedy that mis-filing invites is undoing anonymous-session-refusal.ts, an auth tightening. (b) A 200 carrying a user after the revoke is no longer the benign no-session convention this line once described; the live-session answer is the only 200 left, so it IS a real signal the kill did not land. Neither is this clause's oracle: read the body, or better, re-drive a protected request",
         "remove-user aborting because the owner-anchor guard vetoed the owner_id-null cascade (instead of exempting the engine FK clear) is the #3023 regression returned — FAIL; equally, a create-user that applies the GENERATED password when an explicit one was supplied is the #3031 failure — FAIL"
       ],
       "automated": {
@@ -477,10 +477,10 @@
         "packages/spec/src/system/auth-config.zod.ts (admin plugin: endpoint list, sys_user role/banned/ban_reason/ban_expires, sys_session.impersonated_by)",
         "packages/plugins/plugin-auth/src/auth-route-ledger.ts#BETTER_AUTH_MOUNTED_SURFACE (BETTER_AUTH_MOUNTED_SURFACE admin/* rows: list-users, create-user, set-role, remove-user, revoke-user-session(s))",
         "packages/plugins/plugin-auth/src/admin-user-endpoints.ts#resolvePassword (create-user resolvePassword: explicit password wins over generatePassword — #3031/#3033; leaves sys_user + credential sys_account)",
-        "packages/plugins/plugin-security/src/security-plugin.ts#__referentialFieldClear (§A5 #3023 EXEMPTION: __referentialFieldClear owner_id-null cascade rides a server-derived context, the owner-anchor guard must not veto it) + security-plugin.test.ts '[#3023] … engine referential FK clear … is exempt'",
+        "packages/plugins/plugin-security/src/security-plugin.ts#SecurityPlugin (§A5 #3023 EXEMPTION: __referentialFieldClear owner_id-null cascade rides a server-derived context, the owner-anchor guard must not veto it — re-pointed #18104: __referentialFieldClear is a CONTEXT KEY this file only reads off opCtx.context, a member access; the guard that honours it is in the SecurityPlugin class this file declares) + security-plugin.test.ts '[#3023] … engine referential FK clear … is exempt'",
         "packages/spec/src/kernel/public-auth-features.ts#sys_user (admin flag gates the sys_user lifecycle actions; SCIM forces it on — ADR-0134)",
         "packages/qa/dogfood/test/admin-identity-audit-trail.dogfood.test.ts",
-        "packages/plugins/plugin-auth/src/session-of-record.test.ts#body (better-auth answers /get-session with HTTP 200 + a JSON null body when the session is gone — NOT 401; a status-only assertion would pass against a fully revoked session)"
+        "packages/plugins/plugin-auth/src/anonymous-session-refusal.ts#ANONYMOUS_SESSION_REFUSAL_STATUS (since #17881 an anonymous or revoked /get-session answers 401 with the ADR-0112 refusal envelope, code UNAUTHENTICATED derived from that status; a live session still answers 200 with { user, session }. Both legs are driven end to end in packages/plugins/plugin-auth/src/anonymous-session-refusal.test.ts, and the body-not-status discipline for a revoke is kept in packages/plugins/plugin-auth/src/session-of-record.test.ts)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item: admin lifecycle operations with persistence, enforcement, attribution and both-sides gate checks", "ref": "claude/platform-test-checklist-ocwugl" },
@@ -492,6 +492,12 @@
           "date": "2026-08-24",
           "change": "the ADMIN side pinned, and three clauses re-graded from 'blocked on a product decision' to 'ruled'. Revision 4 recorded that ban/unban/set-role/remove-user/impersonate/revoke-user-session(s)/list-users/get-user/list-user-sessions/update-user all refuse the platform admin; that is no longer true. Re-measured on main: #9970 re-mounted ban-user/unban-user with the ADR-0068 gate and #10352 (consolidated onto hasPlatformAdminStanding by #11686) re-authorized impersonate-user, so those answer 200 and clauses 0 and 6 are now pinned with their stored effects read back. The remaining EIGHT routes refuse the platform admin BY DESIGN — #9969 closed not_planned for seven consumer-less routes, #9968 ruled B for set-role — so clauses 3, 4 and 5 are not coverage debt but clauses whose operation the maintainer declined to build. The new pin asserts both sides with SEPARATE instruments, behind an admin-identity control proving the subject is a platform admin who does NOT carry the legacy role scalar",
           "ref": "#9482"
+        },
+        {
+          "revision": 6,
+          "date": "2026-09-17",
+          "change": "CORRECTION, and a correction OF a correction. Revision 3 was RIGHT when it was written: in August 2026 better-auth's bare no-session answer really was HTTP 200 with a JSON null body, so the literal 401 expectation it removed really did misdescribe a correct implementation. Its cited authority was then INVERTED underneath it — #17238 ruled the answer, #17881 landed refuseAnonymousSession (packages/plugins/plugin-auth/src/anonymous-session-refusal.ts), and packages/plugins/plugin-auth/src/session-of-record.test.ts now pins the very 401 it was cited for denying. Revision 3 is therefore left standing and UNEDITED: it records what the judgement rested on at the time, which is the whole point of keeping a revision history. This revision re-points the four instructional sites (the step, clause 5's verify, the third negative and the evidence row) at today's live wire answer, measured on this checkout rather than relayed: a sign-up read 200 with { user, session }, a revoke-sessions then read 401 with {\"success\":false,\"error\":{\"code\":\"UNAUTHENTICATED\"}}, and a fresh manager's new session still read 200 as the control — so the refusal covers the REVOKED path and not only the never-signed-in one, because the seam keys on the answer shape (/get-session + 200 + a body that is exactly null) rather than on how the caller became anonymous. The SUBSTANTIVE advice is unchanged and now rests on something that does not move with the wire: get-session is still not this clause's oracle, because the contract is an immediate kill on a PROTECTED request and one auth-route seam's status is not proof the authorization layer refuses one. Consistency between this file and the runtime's refusal envelope is now pinned by packages/plugins/plugin-auth/src/checklist-refusal-envelope-consistency.test.ts, which reads the status and code from the runtime constants rather than from a copy, so the next behaviour change reds instead of replaying this drift",
+          "ref": "#18650"
         }
       ]
     },
@@ -568,7 +574,7 @@
       ],
       "traps": ["wrong-persona", "shared-browser-tab"],
       "source": [
-        "packages/plugins/plugin-auth/src/auth-route-ledger.ts#revokeOthers (GET list-sessions=auth.sessions.list, POST revoke-session=auth.sessions.revoke, revoke-other-sessions=auth.sessions.revokeOthers, revoke-sessions=auth.sessions.revokeAll)",
+        "packages/plugins/plugin-auth/src/auth-route-ledger.ts#AUTH_ROUTE_LEDGER (GET list-sessions=auth.sessions.list, POST revoke-session=auth.sessions.revoke, revoke-other-sessions=auth.sessions.revokeOthers, revoke-sessions=auth.sessions.revokeAll — re-pointed #18104: revokeOthers is a CLIENT METHOD name, carried in this file only inside a dotted string value)",
         "packages/platform-objects/src/identity/sys-session.object.ts#user_id (mine view filter user_id={current_user_id}; all_sessions admin view; revoked_at/revoke_reason fields ADR-0069 D4; revoke_session action recordIdParam:'token'; apiMethods ['get','list'] — writes 405 before 403, #1591/ADR-0092 D2)",
         "packages/platform-objects/src/apps/setup-nav.contributions.ts#nav_sessions (nav_sessions → Setup Sessions, objectName sys_session)"
       ],
@@ -735,7 +741,7 @@
       "traps": ["hydration-race", "stale-console-bundle"],
       "source": [
         "objectui apps/console/src/pages/system/ProfilePage.tsx (updateUser name/image; useUpload avatar; PasswordCard changePassword vs setInitialPassword gated on hasLocalPassword; email immutable; data-testids profile-avatar-file/-upload-btn/-remove-btn)",
-        "packages/plugins/plugin-auth/src/auth-route-ledger.ts#updateUser (POST /api/v1/auth/update-user=auth.updateUser, POST /api/v1/auth/change-password=auth.changePassword, GET /api/v1/auth/get-session=auth.me)",
+        "packages/plugins/plugin-auth/src/auth-route-ledger.ts#AUTH_ROUTE_LEDGER (POST /api/v1/auth/update-user=auth.updateUser, POST /api/v1/auth/change-password=auth.changePassword, GET /api/v1/auth/get-session=auth.me — re-pointed #18104: updateUser is a CLIENT METHOD name, carried in this file only inside a dotted string value)",
         "packages/platform-objects/src/identity/sys-account.object.ts#previous_password_hashes (previous_password_hashes ring — ADR-0069 D1 reuse-prevention backs change-password)"
       ],
       "history": [
@@ -826,8 +832,8 @@
         "packages/plugins/plugin-auth/src/auth-route-ledger.ts (organization family: update-member-role, remove-member, update, create-team, add-team-member, list-members/teams/invitations, get-active-member, get-full-organization)",
         "packages/spec/src/identity/membership-role.ts#BUILTIN_MEMBERSHIP_ROLES (BUILTIN_MEMBERSHIP_ROLES / BUILTIN_MEMBERSHIP_ROLE_OPTIONS — THE role vocabulary: owner/admin/delegated_admin/member, ADR-0108; 'nothing widens these at boot any more')",
         "docs/adr/0108-membership-grade-is-not-a-capability-channel.md (why the list is closed: a grade decides what you can REACH, never a bundle of what you may do)",
-        "packages/qa/dogfood/test/membership-role-vocabulary.dogfood.test.ts#PermissionSet (both enforced selects offer exactly the four; a declared position or PermissionSet name is refused at better-auth's role check — ROLE_NOT_FOUND — before any insert)",
-        "packages/platform-objects/src/identity/sys-member.object.ts#BUILTIN_MEMBERSHIP_ROLE_OPTIONS + sys-invitation.object.ts (role select options: [...BUILTIN_MEMBERSHIP_ROLE_OPTIONS])",
+        "packages/qa/dogfood/test/membership-role-vocabulary.dogfood.test.ts#CLOSED_VOCABULARY (both enforced selects offer exactly the four; a declared position or PermissionSet name is refused at better-auth's role check — ROLE_NOT_FOUND — before any insert — re-pointed #18104: PermissionSet survives in this file only inside a comment and an it(...) title; the four this item means are what CLOSED_VOCABULARY declares)",
+        "packages/platform-objects/src/identity/sys-member.object.ts#SysMember + sys-invitation.object.ts (role select options: [...BUILTIN_MEMBERSHIP_ROLE_OPTIONS] — re-pointed #18104: this file IMPORTS that constant from the spec, which the membership-role.ts citation two rows up already anchors; what sys-member.object.ts declares is the object carrying the select)",
         "packages/platform-objects/src/identity/sys-team-member.object.ts#team_id (add_team_member/remove_team_member actions → organization/add-team-member; unique team_id+user_id; requiresFeature organization)"
       ],
       "history": [
@@ -908,7 +914,7 @@
         "packages/platform-objects/src/identity/sys-team-member.object.ts#team_id (add_team_member/remove_team_member → organization/add-team-member|remove-team-member; unique team_id+user_id)",
         "packages/platform-objects/src/identity/sys-business-unit.object.ts#parent_business_unit_id (canonical BU tree ADR-0057 D2; kind enum; parent_business_unit_id self-ref; org_chart tree view; managedBy 'platform' — writable over the data API)",
         "packages/platform-objects/src/identity/sys-business-unit-member.object.ts#function_in_business_unit (user↔BU placement: function_in_business_unit member/lead/deputy, is_primary)",
-        "docs/qa/platform-checklist/areas/access-security.json#access (access-security.scope-depth-asymmetry — the depth matrix this cross-references for the tree-widening geometry)",
+        "docs/qa/platform-checklist/areas/access-security.json#items (access-security.scope-depth-asymmetry — the depth matrix this cross-references for the tree-widening geometry — re-pointed #18104: access is not a key this JSON declares; a cross-area citation names the items block, and the item id stays in this parenthetical)",
         "examples/app-showcase/src/security/sharing-rules.ts#share_new_inquiries_with_field_ops (`share_new_inquiries_with_field_ops` — the shipped BU-consuming geometry: expands the bu_field_ops subtree onto showcase_inquiry)",
         "examples/app-showcase/src/data/seed/index.ts#sys_business_unit (the sys_business_unit tree is seeded with explicit ids; user↔unit membership — sys_business_unit_member — and position assignments are NOT seeded, they stay runtime admin actions)"
       ],
@@ -1082,7 +1088,7 @@
         "packages/types/src/env.ts#isMcpServerEnabled (isMcpServerEnabled — unset means TRUE; explicit false/0/off/no opts out)",
         "objectui apps/console/src/App.tsx (/oauth/consent → OAuthConsentPage) + apps/console/src/pages/auth/OAuthConsentPage.tsx",
         "packages/platform-objects/src/identity/sys-oauth-consent.object.ts#apiEnabled (row implies consent for listed scopes — consent_given removed; apiEnabled:false so verify via get-consents, not the data API)",
-        "packages/platform-objects/src/identity/sys-oauth-application.object.ts#OAuth + setup-nav.contributions.ts (nav_oauth_apps → Setup OAuth Applications)"
+        "packages/platform-objects/src/identity/sys-oauth-application.object.ts#SysOauthApplication + setup-nav.contributions.ts (nav_oauth_apps → Setup OAuth Applications — re-pointed #18104: the bare word OAuth is carried in this file only inside label and description strings)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-08", "change": "new item: OAuth client registration (secret once) + authorization-code consent loop (approve mints tokens + consent record, deny mints none, recorded consent short-circuits), mine-view scoped; blocked(fixture) pending a configured oidcProvider flow (PENDING-GAPS §C)", "ref": "claude/platform-test-checklist-ocwugl" },
@@ -1155,7 +1161,7 @@
       "traps": ["wrong-persona", "dispatcher-vs-hono-route", "hydration-race"],
       "source": [
         "packages/platform-objects/src/identity/sys-account.object.ts#user_id (link_social type:'url' → /api/v1/auth/sign-in/social?provider=&callbackURL=; unlink_account → /api/v1/auth/unlink-account accountId=row id; mine view user_id={current_user_id} vs all_links; provider options; apiMethods ['get','list'])",
-        "packages/plugins/plugin-auth/src/auth-route-ledger.ts#linkSocial (POST link-social=auth.accounts.linkSocial, GET list-accounts=auth.accounts.list, POST unlink-account=auth.accounts.unlink)",
+        "packages/plugins/plugin-auth/src/auth-route-ledger.ts#AUTH_ROUTE_LEDGER (POST link-social=auth.accounts.linkSocial, GET list-accounts=auth.accounts.list, POST unlink-account=auth.accounts.unlink — re-pointed #18104: linkSocial is a CLIENT METHOD name, carried in this file only inside a dotted string value)",
         "packages/platform-objects/src/apps/setup-nav.contributions.ts#nav_accounts (nav_accounts → 'Identity Links', objectName sys_account)"
       ],
       "history": [
@@ -1678,7 +1684,7 @@
         "objectui apps/console/src/components/SetupRoute.tsx (one URL, two surfaces — first-run wizard vs platform-admin deep link, objectui#2794) + setupEntry.ts (the latched verdict: fresh only from an unauthenticated probe)",
         "objectui apps/console/src/pages/auth/SetupPage.tsx (renders only at hasOwner:false; creates owner + names the auto-provisioned personal org) + (why both exits are FULL-PAGE navigations — objectui#4181) + handleSubmit (rename-not-create, refreshOrganizations poll, slug guard)",
         "packages/plugins/plugin-auth/src/auth-plugin.ts#dataEngine (bootstrap-status exempt from the auth wall) + (the route: hasOwner from dataEngine.count('sys_user'))",
-        "packages/plugins/plugin-auth/src/auth-route-ledger.ts#bootstrapStatus (GET /api/v1/auth/bootstrap-status = auth.bootstrapStatus, objectstack-mount)",
+        "packages/plugins/plugin-auth/src/auth-route-ledger.ts#AUTH_ROUTE_LEDGER (GET /api/v1/auth/bootstrap-status = auth.bootstrapStatus, objectstack-mount — re-pointed #18104: bootstrapStatus is a CLIENT METHOD name, carried in this file only inside a dotted string value)",
         "packages/plugins/plugin-auth/src/auth-manager.ts#isBootstrapCreation (the bypass's contract comment) + (the before-hook: isBootstrapCreation flips disableSignUp for this request — [#11767] fixed the inert probe) + (isBootstrapCreation: human rows, fail-closed on a full page)",
         "packages/plugins/plugin-auth/src/audience-posture.ts#isHumanUserRow (isHumanUserRow) + (decideAudienceAdmission isBootstrap arm) + (undeclared audience ⇒ invite_only, maintainer ruling 2026-08-24)",
         "packages/cli/src/commands/dev.ts,339 (seed-admin defaults ON — why a zero-user boot needs --no-seed-admin)"
@@ -1857,7 +1863,7 @@
       "source": [
         "packages/plugins/plugin-auth/src/auth-manager.ts#requireEmailVerification (requireEmailVerification wiring — [#11739]: a self-registration-permitting posture FORCES it on; otherwise config passthrough) + (emailVerification block: sendOnSignUp/sendOnSignIn/autoSignInAfterVerification/expiresIn passthrough; sendVerificationEmail via template auth.verify_email, failures thrown into the log) + (getPublicConfig mirrors the forced flag)",
         "packages/plugins/plugin-auth/src/audience-posture.ts#entry (entry validation refuses the permitting-posture + explicit-false contradiction)",
-        "packages/plugins/plugin-auth/src/auth-route-ledger.ts#sendVerificationEmail (POST /api/v1/auth/send-verification-email = auth.sendVerificationEmail) + (GET /api/v1/auth/verify-email = auth.verifyEmail)",
+        "packages/plugins/plugin-auth/src/auth-route-ledger.ts#AUTH_ROUTE_LEDGER (POST /api/v1/auth/send-verification-email = auth.sendVerificationEmail) + (GET /api/v1/auth/verify-email = auth.verifyEmail) — re-pointed #18104: sendVerificationEmail is a CLIENT METHOD name, carried in this file only inside a dotted string value",
         "objectui apps/console/src/App.tsx (/verify-email + /verify-email-prompt routes)",
         "objectui apps/console/src/pages/auth/VerifyEmailPage.tsx (consumes ?token= via the POST variant — GET 302s, POST returns JSON so the SPA controls the post-verify UX)",
         "objectui apps/console/src/pages/auth/VerifyEmailPromptPage.tsx (shown after sign-up or an EMAIL_NOT_VERIFIED-blocked sign-in; resend via useAuth().sendVerificationEmail)",
@@ -1948,7 +1954,7 @@
         "objectui packages/app-shell/src/layout/CurrentOrganizationIndicator.tsx (objectui#5287: read-only name for exactly-one membership, gated on postureHasOrgWall — single posture renders nothing by design; no click target)",
         "objectui packages/app-shell/src/hooks/useTenancyPosture.ts (postureHasOrgWall restated locally for bundle size, spec-parity test-locked)",
         "objectui packages/app-shell/src/providers/MetadataProvider.tsx (objectui#4486: an org change drops the whole metadata cache — one organization's metadata never survives into another organization's reads; the reloading switch paths and the SPA-internal path both covered)",
-        "packages/plugins/plugin-auth/src/auth-route-ledger.ts#setActive (POST /api/v1/auth/organization/set-active = organizations.setActive, requires organization)",
+        "packages/plugins/plugin-auth/src/auth-route-ledger.ts#AUTH_ROUTE_LEDGER (POST /api/v1/auth/organization/set-active = organizations.setActive, requires organization — re-pointed #18104: setActive is a CLIENT METHOD name, carried in this file only inside a dotted string value)",
         "packages/plugins/plugin-auth/src/auth-manager.ts#multiOrgEnabled (multiOrgEnabled = postureEnforcesWall(effectiveTenancyPosture()) — the SAME call the org-create gate makes, #5233/#5261) + area (features advertised)",
         "packages/types/src/env.ts#resolveTenancyPosture (resolveTenancyPosture: OS_TENANCY_POSTURE, invalid value refuses boot; unset falls back to `single` unless legacy multi-org env)"
       ],

@@ -63,22 +63,20 @@ import { ObjectQL } from '@objectstack/objectql';
 // Initialize ObjectQL as the data engine
 const dataEngine = new ObjectQL();
 
-const kernel = new ObjectKernel({
-  plugins: [
-    new AuthPlugin({
-      secret: process.env.AUTH_SECRET,
-      baseUrl: 'http://localhost:3000',
-      // ObjectQL will be automatically injected by the kernel
-      providers: [
-        {
-          id: 'google',
-          clientId: process.env.GOOGLE_CLIENT_ID!,
-          clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-        }
-      ]
-    })
+const kernel = new ObjectKernel();
+
+await kernel.use(new AuthPlugin({
+  secret: process.env.AUTH_SECRET,
+  baseUrl: 'http://localhost:3000',
+  // ObjectQL will be automatically injected by the kernel
+  providers: [
+    {
+      id: 'google',
+      clientId: process.env.GOOGLE_CLIENT_ID!,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+    }
   ]
-});
+}));
 ```
 
 **Note:** The `databaseUrl` parameter is no longer used. The plugin now uses ObjectQL's IDataEngine interface, which is provided by the kernel's `data` service. This allows the plugin to work with any ObjectQL-compatible driver (memory, SQL, NoSQL, etc.) without requiring a specific ORM.
@@ -181,8 +179,10 @@ This package provides authentication services powered by better-auth. Current im
 The plugin uses a **direct forwarding** approach:
 
 ```typescript
+import type { Context } from 'hono';
+
 // All requests under /api/v1/auth/* are forwarded to better-auth
-rawApp.all('/api/v1/auth/*', async (c) => {
+rawApp.all('/api/v1/auth/*', async (c: Context) => {
   const request = c.req.raw; // Web standard Request
   const response = await authManager.handleRequest(request);
   return response; // Web standard Response

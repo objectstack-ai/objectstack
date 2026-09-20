@@ -11,6 +11,8 @@ import {
     type TriggerLogger,
 } from './schedule-trigger.js';
 import { ScheduleTriggerPlugin } from './plugin.js';
+import { withScheduledWorkOff, withScheduledWorkOn } from './deployment-switch.test-support.js';
+import { SCHEDULED_WORK_ENV } from '@objectstack/types';
 
 // ─── Test doubles ───────────────────────────────────────────────────
 
@@ -121,6 +123,11 @@ describe('normalizeSchedule', () => {
 // ─── ScheduleTrigger ────────────────────────────────────────────────
 
 describe('ScheduleTrigger', () => {
+    // [#17396] Every assertion in this suite is about a deployment that RUNS
+    // package-authored scheduled work. Without the switch nothing binds — which
+    // is its own suite further down, not a wrinkle in these.
+    withScheduledWorkOn();
+
     it('schedules a job for the flow with the normalized schedule', async () => {
         const job = fakeJobService();
         const trigger = new ScheduleTrigger(() => job.service, silentLogger());
@@ -233,6 +240,8 @@ describe('ScheduleTrigger', () => {
 // ─── ScheduleTriggerPlugin ──────────────────────────────────────────
 
 describe('ScheduleTriggerPlugin', () => {
+    withScheduledWorkOn();
+
     interface FakeCtx {
         readyHandlers: Array<() => Promise<void> | void>;
         ctx: {
@@ -326,6 +335,11 @@ describe('ScheduleTriggerPlugin', () => {
 // binding from `binding()` above, which must still arm.
 
 describe('ScheduleTrigger — the acting-organization refusal (#16659)', () => {
+    // [#17396] `isolated`, and the posture is now load-bearing: this refusal
+    // exists behind a WALL. The same binding under `single` is armed, not
+    // refused — see the deployment-switch suite below, which pins exactly that.
+    withScheduledWorkOn('isolated');
+
     const orgLess = () => binding({ organization: undefined, config: {} });
 
     it('THROWS from start(), so the engine cannot record the flow as bound', () => {
@@ -483,5 +497,238 @@ describe('resolveBindingOrganization (#16659)', () => {
                 binding({ organization: undefined, config: { organization: value } as Record<string, unknown> }),
             ),
         ).toBeNull();
+    });
+});
+
+// ─── the deployment switch: the three bind states (#17396) ──────────
+//
+// Ruling G, recorded on #17396 (director seat, decision batch #116 item 4,
+// amended by batch #118): a deployment-level variable gates time-triggered
+// flows, the global default is OFF in every posture and every kernel, and when
+// it is ON the 2026-09-08 declaration requirement applies behind a WALL only.
+//
+// Three states, three suites, and each one asserts what BINDS rather than only
+// what is logged: a refusal that logs correctly and arms the job anyway is the
+// exact defect #16659's own refusal was shaped to avoid.
+describe('ScheduleTrigger — the deployment switch is OFF (#17396)', () => {
+    withScheduledWorkOff();
+
+    it('arms nothing, whatever the flow declares', () => {
+        const job = fakeJobService();
+        const trigger = new ScheduleTrigger(() => job.service, silentLogger());
+
+        // Declares an organization AND a valid cadence — nothing about this
+        // flow is wrong. The deployment simply does not run scheduled work.
+        expect(() => trigger.start(binding(), async () => {})).toThrow(/deployment policy/);
+        expect(job.jobs.size, 'a policy-disabled flow must have no job at all').toBe(0);
+    });
+
+    it('names the switch and its remedy, and ⛔ never says the binding failed', () => {
+        const job = fakeJobService();
+        const infos: string[] = [];
+        const log = recordingLogger();
+        const trigger = new ScheduleTrigger(() => job.service, {
+            ...log.logger,
+            info: (msg: string) => void infos.push(String(msg)),
+        });
+
+        expect(() => trigger.start(binding(), async () => {})).toThrow();
+
+        const said = infos.join('\n');
+        expect(said, 'the operator is owed the variable by name').toContain(SCHEDULED_WORK_ENV);
+        expect(said, 'and the flow it is about').toContain('nightly_health_sweep');
+        expect(said, 'and that this is policy, not a defect').toMatch(/deployment policy/);
+        expect(said, 'the remedy is the switch, not the flow').toMatch(/nothing about the flow needs fixing/);
+        // ⭐ The distinction ruled item 6 is entirely about.
+        expect(said).not.toMatch(/binding failed/);
+        expect(
+            log.errors.concat(log.warns).join('\n'),
+            'the DEFAULT configuration of every deployment must not print a warning or an error',
+        ).toBe('');
+    });
+
+    it('refuses BEFORE the descriptor and the declaration are judged', () => {
+        // Otherwise an operator on a deployment that was never going to run
+        // this flow is sent to fix a descriptor nothing would have read, or to
+        // write a key nothing would have wanted.
+        const job = fakeJobService();
+        const trigger = new ScheduleTrigger(() => job.service, silentLogger());
+        const broken = binding({ organization: undefined, config: {}, schedule: 'not-a-cron-…' });
+
+        expect(() => trigger.start(broken, async () => {})).toThrow(/deployment policy/);
+    });
+
+    it('drops a job armed while the switch was on, so flipping it off disarms', () => {
+        // The switch is read at BIND, so this is what a rebind after an
+        // operator turned it off has to do: the previous job must not survive
+        // behind a refusal that says the flow is not armed.
+        const job = fakeJobService();
+        const trigger = new ScheduleTrigger(() => job.service, silentLogger());
+
+        process.env[SCHEDULED_WORK_ENV] = 'true';
+        trigger.start(binding(), async () => {});
+        expect(job.jobs.size, 'control: it really did arm while the switch was on').toBe(1);
+
+        delete process.env[SCHEDULED_WORK_ENV];
+        expect(() => trigger.start(binding(), async () => {})).toThrow(/deployment policy/);
+        expect(job.jobs.size, 'the prior job must be gone, not left ticking').toBe(0);
+    });
+});
+
+describe('ScheduleTrigger — switched ON under `single` (#17396)', () => {
+    withScheduledWorkOn('single');
+
+    const orgLess = () => binding({ organization: undefined, config: {} });
+
+    it('arms a flow that declares NO organization', () => {
+        const job = fakeJobService();
+        const trigger = new ScheduleTrigger(() => job.service, silentLogger());
+
+        // ⭐ The widening the whole card turns on: this exact binding is
+        // REFUSED under a wall (the #16659 suite above) and armed here.
+        trigger.start(orgLess(), async () => {});
+        expect(job.jobs.size).toBe(1);
+    });
+
+    it('the run carries NO organization — the key is absent, not undefined', async () => {
+        const job = fakeJobService();
+        const trigger = new ScheduleTrigger(() => job.service, silentLogger());
+        const seen: AutomationContext[] = [];
+
+        trigger.start(orgLess(), async (ctx) => void seen.push(ctx));
+        await flush();
+        await job.fire('flow-schedule:nightly_health_sweep');
+
+        expect(seen).toHaveLength(1);
+        // ⛔ `'tenantId' in ctx` rather than `ctx.tenantId === undefined`: the
+        // ruling says the run carries no organization, and a present-but-
+        // undefined key is a different thing to every consumer that asks `in`.
+        expect('tenantId' in seen[0], 'no tenantId key at all').toBe(false);
+    });
+
+    it('still threads a DECLARED organization onto the run', async () => {
+        // `single` removes the REQUIREMENT, not the capability: a deployment
+        // that declares one still gets it, so nothing that worked stops.
+        const job = fakeJobService();
+        const trigger = new ScheduleTrigger(() => job.service, silentLogger());
+        const seen: AutomationContext[] = [];
+
+        trigger.start(binding(), async (ctx) => void seen.push(ctx));
+        await flush();
+        await job.fire('flow-schedule:nightly_health_sweep');
+
+        expect(seen[0]?.tenantId).toBe('org_2mtx1w9d0k4bqf7v');
+    });
+
+    it('⛔ still never invents one', () => {
+        // The one limb the 2026-09-08 ruling forbids outright. `single` omits
+        // the key; it does not fill it from the install, the platform
+        // organization, or anything else.
+        const job = fakeJobService();
+        const trigger = new ScheduleTrigger(() => job.service, silentLogger());
+        expect(resolveBindingOrganization(orgLess())).toBeNull();
+        trigger.start(orgLess(), async () => {});
+        expect(job.jobs.size).toBe(1);
+    });
+});
+
+describe('ScheduleTrigger — switched ON under `isolated` (#17396)', () => {
+    withScheduledWorkOn('isolated');
+
+    it('an undeclared flow is refused', () => {
+        const job = fakeJobService();
+        const trigger = new ScheduleTrigger(() => job.service, silentLogger());
+        expect(() =>
+            trigger.start(binding({ organization: undefined, config: {} }), async () => {}),
+        ).toThrow(/declares no acting organization/);
+        expect(job.jobs.size).toBe(0);
+    });
+
+    it('and a declared one binds', () => {
+        const job = fakeJobService();
+        const trigger = new ScheduleTrigger(() => job.service, silentLogger());
+        trigger.start(binding(), async () => {});
+        expect(job.jobs.size).toBe(1);
+    });
+});
+
+/**
+ * [#18378, ruling A′] ⚠️ RETIRED PIN, replaced rather than deleted.
+ *
+ * This block used to be `ScheduleTrigger — switched ON under a wall` with
+ * `withScheduledWorkOn('group')` and a case named "`group` is walled: an
+ * undeclared flow is refused there too". Its reason was explicit and is quoted
+ * here so the reversal is legible rather than looking like an erosion: `group`
+ * behaved as walled *while the question of which organization a group-wide
+ * sweep's inserts belong to was unanswered*. That question is answered now —
+ * the swept record's own — so the condition the old pin rested on is gone.
+ *
+ * The `isolated` half above is that pin, kept whole: nothing about `isolated`
+ * was reopened, and the refusal it asserts is byte-identical.
+ */
+describe('ScheduleTrigger — switched ON under `group` (#18378)', () => {
+    withScheduledWorkOn('group');
+
+    it('an undeclared flow BINDS — it is not refused, and the job is armed', async () => {
+        const job = fakeJobService();
+        const trigger = new ScheduleTrigger(() => job.service, silentLogger());
+        expect(() =>
+            trigger.start(binding({ organization: undefined, config: {} }), async () => {}),
+        ).not.toThrow();
+        await flush();
+        expect(job.jobs.size).toBe(1);
+    });
+
+    it('…and its run carries NO organization — a cron flow has no record to derive one from', async () => {
+        // The half that keeps A′ apart from the rejected option A. `group`
+        // binding without a declaration does NOT mean the run acquires an
+        // organization from somewhere: a plain `schedule` flow sweeps nothing,
+        // so there is nothing to derive, and the key is OMITTED. The write that
+        // needs one is refused downstream by the tenancy guard, which is the
+        // loud failure A′ chose over a bootstrap-organization fallback.
+        const job = fakeJobService();
+        const trigger = new ScheduleTrigger(() => job.service, silentLogger());
+        const seen: AutomationContext[] = [];
+
+        trigger.start(binding({ organization: undefined, config: {} }), async (ctx) => void seen.push(ctx));
+        await flush();
+        await job.fire('flow-schedule:nightly_health_sweep');
+
+        expect(seen).toHaveLength(1);
+        // Same `in` spelling as the `single` pin above, and for the same
+        // reason: a present-but-undefined key is a different thing to every
+        // consumer that asks `in`.
+        expect('tenantId' in seen[0], 'no tenantId key at all').toBe(false);
+    });
+
+    it('⛔ and it still never invents one — no bootstrap organization, no first row', async () => {
+        // The rejected arm of the card, pinned NEGATIVELY so a later edit that
+        // "helpfully" adds a fallback fails here by name.
+        const job = fakeJobService();
+        const trigger = new ScheduleTrigger(() => job.service, silentLogger());
+        const seen: AutomationContext[] = [];
+        const orgLessBinding = binding({ organization: undefined, config: {} });
+
+        expect(resolveBindingOrganization(orgLessBinding)).toBeNull();
+        trigger.start(orgLessBinding, async (ctx) => void seen.push(ctx));
+        await flush();
+        await job.fire('flow-schedule:nightly_health_sweep');
+
+        expect(seen[0]?.tenantId).toBeUndefined();
+    });
+
+    it('a DECLARED flow under `group` still acts as its declaration', async () => {
+        // `group` removes the REQUIREMENT, not the capability — the same
+        // sentence the `single` block records, and the reason the declaration
+        // outranks per-record ownership everywhere below.
+        const job = fakeJobService();
+        const trigger = new ScheduleTrigger(() => job.service, silentLogger());
+        const seen: AutomationContext[] = [];
+
+        trigger.start(binding(), async (ctx) => void seen.push(ctx));
+        await flush();
+        await job.fire('flow-schedule:nightly_health_sweep');
+
+        expect(seen[0]?.tenantId).toBe('org_2mtx1w9d0k4bqf7v');
     });
 });

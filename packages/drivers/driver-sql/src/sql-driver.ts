@@ -1789,6 +1789,28 @@ function isMultiValuedColumn(type: string, field: { multiple?: unknown } | null 
 }
 
 /**
+ * [#17231] ADR-0113's physical column constraint, asked once for every column
+ * {@link SqlDriver.createColumn} builds.
+ *
+ * It exists because `createColumn` has TWO exits: the multi-value short-circuit
+ * above its per-type switch, and the shared tail below it. The constraint used
+ * to be read only at the tail, so `storage: { notNull: true }` on a multi-valued
+ * field was silently inert on the platform's own table while BOTH
+ * `os generate migration` formats emitted it — one declaration, two databases,
+ * an INSERT omitting the field accepted by the platform's table and refused by
+ * every generated one. One exit acquiring the constraint and the other not is
+ * exactly how that happened, so the predicate is stated once here instead of
+ * being spelled at each exit.
+ *
+ * Truthiness rather than `=== true` deliberately: that is the test the tail has
+ * always applied, and this move is about WHERE the question is asked, never
+ * about which values answer it.
+ */
+function declaresColumnNotNull(field: unknown): boolean {
+  return Boolean((field as { storage?: { notNull?: boolean } } | null | undefined)?.storage?.notNull);
+}
+
+/**
  * [#16319] DDL-time defence: a field declaration with NO `type` gets no column
  * — it gets a refusal.
  *
@@ -4748,6 +4770,13 @@ export class SqlDriver implements IDataDriver {
       // Subclasses whose transport batches (Turso) implement the method AND
       // flip this bit — the engine requires both.
       batchSchemaSync: false,
+      // [#18063] knex transactions are real here, so this stays false — spelled
+      // rather than left absent for the same reason `batchSchemaSync` is: this
+      // literal is the baseline subclasses SPREAD, and the bit is the only way
+      // a subclass whose transport cannot carry a handle (TursoDriver's remote
+      // mode) opts out of the `beginTransaction()` it inherits from this class.
+      // Absence would mean the same thing and say nothing.
+      transactionsUnsupported: false,
     };
   }
 
@@ -17382,8 +17411,34 @@ export class SqlDriver implements IDataDriver {
     // reader now asks. A field whose `multiple` the spec does not recognise on
     // its type no longer gets a JSON column here — and `FieldSchema` refuses
     // that declaration at the authoring entrance in the same ruling.
+    //
+    // [#17231] The short-circuit decides the column TYPE; it does not decide
+    // the column's CONSTRAINTS, and returning here used to mean it silently
+    // did. ADR-0113 P0 names this site verbatim — 「the physical constraint now
+    // keys off the explicitly-authored `storage.notNull` at that same
+    // `#createColumn` site」 — and carves out no field type: `storage.notNull`'s
+    // only declared exclusivity is `requiredWhen` (`FieldSchema.superRefine`),
+    // so `multiple: true` + `storage: { notNull: true }` is an authorable
+    // declaration this site was dropping on the floor. The differ, ADR-0113's
+    // other named consumer in this package, never had the gap — `fieldHasColumn`
+    // answers multi-value first and the nullability comparison then runs — so
+    // the platform reported DESTRUCTIVE `tighten_not_null` drift against tables
+    // it had itself just created, with no rows in them.
+    //
+    // ⚠️ NOT the drift ceremony this ADR routes around: `createColumn` runs on
+    // `CREATE TABLE` and on `ALTER TABLE ADD COLUMN`, so the column constrained
+    // here is always EMPTY — the same reason the string family's #11431 note
+    // below gives for narrowing a varchar here. Imposing `NOT NULL` over
+    // possibly-null data stays `tighten_not_null`, destructive, behind
+    // `os migrate apply --allow-destructive`, untouched.
+    //
+    // The column DEFAULT is deliberately still NOT emitted on this path: the
+    // multi-value shape has no scalar DDL form, and `os generate migration`
+    // skips it for the same reason (`declaredColumnDefault`), so the two
+    // producers already agree.
     if (isMultiValuedColumn(String(field.type ?? ''), field)) {
-      this.jsonColumn(table, name);
+      const jsonCol = this.jsonColumn(table, name);
+      if (declaresColumnNotNull(field)) jsonCol.notNullable();
       return;
     }
 
@@ -17790,7 +17845,11 @@ export class SqlDriver implements IDataDriver {
       // its author wrote `storage: { notNull: true }`, and for no other
       // reason; a `required: true` field with no `storage` block gets a
       // nullable column, at every protocol floor, on every dialect.
-      if ((field as { storage?: { notNull?: boolean } }).storage?.notNull) col.notNullable();
+      //
+      // [#17231] Asked through {@link declaresColumnNotNull} — the same
+      // question the multi-value short-circuit above now asks, stated once so
+      // this method's two exits cannot answer it differently again.
+      if (declaresColumnNotNull(field)) col.notNullable();
       this.applyDeclaredColumnDefault(col, field, type);
     }
   }

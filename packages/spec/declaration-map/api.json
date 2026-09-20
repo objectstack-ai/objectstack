@@ -550,6 +550,8 @@
     "PackageApiErrorCode": "api/PackageApiErrorCode",
     "PackageExportManifest": "api/PackageExportManifest",
     "PackageExportManifestSchema": "api/PackageExportManifest",
+    "PackageInstallBody": "api/PackageInstallBody",
+    "PackageInstallBodySchema": "api/PackageInstallBody",
     "PackageInstallRequest": "api/PackageInstallRequest",
     "PackageInstallRequestSchema": "api/PackageInstallRequest",
     "PackageInstallResponse": "api/PackageInstallResponse",

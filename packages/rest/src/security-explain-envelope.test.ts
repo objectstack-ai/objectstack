@@ -231,6 +231,39 @@ describe('[#8073] /security/explain — every refusal arm answers the ADR-0112 D
         expectNestedEnvelope(await api.explainPost(), 403, 'PERMISSION_DENIED');
     });
 
+    /**
+     * [#18253] The arm this family gained: `explain` asked about an object name
+     * no declaration answers to. The engine REFUSES
+     * (`ExplainObjectNotFoundError`, plugin-security `errors.ts`) instead of
+     * reporting `denies`, and the door keeps the refusal's declared answer
+     * rather than letting it fall to the 500 below — a typo must not look like
+     * a permission decision, and it must not look like a server fault either.
+     *
+     * The code/status pair is NOT newly minted: `OBJECT_NOT_FOUND` at 404 is
+     * what this package already answers for an unregistered object name
+     * (`mapDataError`, `error-response.ts`), and it is a standard-catalog
+     * member, so no ledger row and no `packages/spec` change carries it.
+     */
+    it('404 OBJECT_NOT_FOUND — the object name is not declared on this runtime', async () => {
+        const unknown = Object.assign(
+            new Error("[Security] Unknown object: explain was asked to report 'read' access on 'leave_requst'."),
+            { code: 'OBJECT_NOT_FOUND', status: 404, statusCode: 404, name: 'ExplainObjectNotFoundError' },
+        );
+        const api = boot(throwingExplain(unknown));
+        expectNestedEnvelope(await api.explainPost(), 404, 'OBJECT_NOT_FOUND');
+        // Same refusal on the other transport — one contract, two transports.
+        expectNestedEnvelope(await api.explainGet(), 404, 'OBJECT_NOT_FOUND');
+    });
+
+    it('404 is matched on the DECLARED code alone — no name, still not a 500', async () => {
+        // The door does not import plugin-security (it is not a dependency), so
+        // the thrown SHAPE is the contract (#8016). A producer that declares
+        // only `code` must reach the same arm, or the mapping would silently
+        // depend on a class name.
+        const unknown = Object.assign(new Error('nope'), { code: 'OBJECT_NOT_FOUND' });
+        expectNestedEnvelope(await boot(throwingExplain(unknown)).explainPost(), 404, 'OBJECT_NOT_FOUND');
+    });
+
     it('500 EXPLAIN_FAILED — an unexpected service fault', async () => {
         const api = boot(throwingExplain(new Error('boom')));
         const answer = await api.explainPost();
@@ -279,6 +312,12 @@ describe('[#8073] the whole explain family reduces to ONE skeleton', () => {
             ['explain 401', await boot({ explain: vi.fn() }, SYSTEM_NO_USER).explainPost()],
             ['explain 501', await boot(undefined).explainPost()],
             ['explain 403', await boot(throwingExplain(denial)).explainPost()],
+            [
+                'explain 404',
+                await boot(throwingExplain(
+                    Object.assign(new Error('unknown object'), { code: 'OBJECT_NOT_FOUND', status: 404 }),
+                )).explainPost(),
+            ],
             ['explain 500', await boot(throwingExplain(new Error('boom'))).explainPost()],
             ['delegable 401', await boot({ describeDelegableScope: vi.fn() }, SYSTEM_NO_USER).delegable()],
             ['delegable 501', await boot(undefined).delegable()],

@@ -108,9 +108,9 @@ Inline aggregation for an object-bound chart
 | **title** | `string \| Record<string, string>` | optional | Chart title |
 | **subtitle** | `string \| Record<string, string>` | optional | Chart subtitle |
 | **description** | `string \| Record<string, string>` | optional | Accessibility description — announced to screen readers as the chart’s label |
-| **xAxis** | `{ field: string; title?: string \| Record<string, string>; format?: string; min?: number; … }` | optional | X-Axis configuration |
-| **yAxis** | `{ field: string; title?: string \| Record<string, string>; format?: string; min?: number; … }[]` | optional | Y-Axis configuration (support dual axis) |
-| **series** | `{ name: string; label?: string \| Record<string, string>; type?: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| …>; color?: string; … }[]` | optional | Defined series configuration |
+| **xAxis** | `{ field: string; title?: string \| Record<string, string>; format?: string; min?: number; … }` | optional | X-Axis configuration. Structure, not appearance — authorable where the chart has inline data; refused by name on a dataset-bound dashboard widget, where the dataset decides it (ADR-0021). |
+| **yAxis** | `{ field: string; title?: string \| Record<string, string>; format?: string; min?: number; … }[]` | optional | Y-Axis configuration (support dual axis). Structure, not appearance — authorable where the chart has inline data; refused by name on a dataset-bound dashboard widget, where the dataset decides it (ADR-0021). |
+| **series** | `{ name: string; label?: string \| Record<string, string>; type?: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| …>; color?: string; … }[]` | optional | Defined series configuration. Structure, not appearance — authorable where the chart has inline data; refused by name on a dataset-bound dashboard widget, where the dataset decides it (ADR-0021). |
 | **colors** | `string[] \| Record<string, string>` | optional | Color palette (string[]) or value→color map (`{ value: color }`) |
 | **height** | `number` | optional | Fixed plot height in pixels (overrides the container default) |
 | **showLegend** | `boolean` | optional (default: `true`) | Display legend |

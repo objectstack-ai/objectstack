@@ -14,6 +14,8 @@ import {
     type TriggerLogger,
 } from './index.js';
 import { TimeRelativeTriggerPlugin } from './time-relative-plugin.js';
+import { withScheduledWorkOff, withScheduledWorkOn } from './deployment-switch.test-support.js';
+import { SCHEDULED_WORK_ENV } from '@objectstack/types';
 
 // ─── Test doubles ───────────────────────────────────────────────────
 
@@ -208,6 +210,10 @@ describe('buildWindowWhere', () => {
 // ─── TimeRelativeTrigger ─────────────────────────────────────────────
 
 describe('TimeRelativeTrigger', () => {
+    // [#17396] These assertions are about a deployment that RUNS
+    // package-authored scheduled work; the OFF state is its own suite.
+    withScheduledWorkOn('single');
+
     it('schedules a daily sweep with the explicit schedule descriptor', async () => {
         const job = fakeJobService();
         const { engine } = fakeDataEngine([]);
@@ -498,6 +504,10 @@ function fakeClaimLedger() {
 }
 
 describe('TimeRelativeTrigger dispatch idempotency (#10220)', () => {
+    // [#17396] These assertions are about a deployment that RUNS
+    // package-authored scheduled work; the OFF state is its own suite.
+    withScheduledWorkOn('single');
+
     const JOB = 'flow-time-relative:renewal_alert';
 
     it('offset mode: two sweeps over the same window dispatch once', async () => {
@@ -700,6 +710,10 @@ describe('computeWindowClaimScopes', () => {
 // ─── TimeRelativeTriggerPlugin ──────────────────────────────────────
 
 describe('TimeRelativeTriggerPlugin', () => {
+    // [#17396] These assertions are about a deployment that RUNS
+    // package-authored scheduled work; the OFF state is its own suite.
+    withScheduledWorkOn('single');
+
     function fakePluginCtx(services: Record<string, unknown>) {
         const readyHandlers: Array<() => Promise<void> | void> = [];
         return {
@@ -789,6 +803,10 @@ describe('TimeRelativeTriggerPlugin', () => {
 // worse. Both halves are pinned below.
 
 describe('TimeRelativeTrigger — the acting-organization refusal (#16659)', () => {
+    // [#17396] `isolated` — this refusal exists behind a WALL, and under
+    // `single` the same binding is armed instead. See the switch suite below.
+    withScheduledWorkOn('isolated');
+
     const DESC = { object: 'contracts', dateField: 'end_date', withinDays: 60 };
 
     function recordingLogger(): { logger: TriggerLogger; errors: string[]; warns: string[] } {
@@ -1032,5 +1050,488 @@ describe('TimeRelativeTrigger — the acting-organization refusal (#16659)', () 
             log.warns.filter((l) => l.includes('does NOT narrow this sweep')),
             'an ordinary object must not be warned about — that would train operators to ignore the line',
         ).toHaveLength(0);
+    });
+});
+
+// ─── the deployment switch: the sweep's three bind states (#17396) ──
+//
+// The sweep's stakes differ from the plain schedule flow's, and both are
+// pinned. Its SELECTION is the thing the organization bounds, so an unscoped
+// sweep has to be a deployment state someone chose rather than a state the
+// trigger fell into — and when the deployment has not chosen scheduled work at
+// all, no query is issued and no window is claimed.
+describe('TimeRelativeTrigger — the deployment switch is OFF (#17396)', () => {
+    withScheduledWorkOff();
+
+    const DESC = { object: 'contracts', dateField: 'end_date', withinDays: 60 };
+
+    it('arms no sweep and issues no query, whatever the flow declares', async () => {
+        const job = fakeJobService();
+        const data = fakeDataEngine([]);
+        const trigger = new TimeRelativeTrigger(() => job.service, () => data.engine, silentLogger(), NOW);
+
+        expect(() => trigger.start(binding(DESC), async () => {})).toThrow(/deployment policy/);
+        await flush();
+        expect(job.jobs.size, 'no job').toBe(0);
+        expect(data.calls, 'and no read — the sweep never ran a tick').toHaveLength(0);
+    });
+
+    it('refuses BEFORE the descriptor is judged', () => {
+        // A sweep's descriptor diagnostics are long and specific; sending an
+        // operator to fix one on a deployment that was never going to run the
+        // sweep is the wrong remedy at the wrong door.
+        const job = fakeJobService();
+        const data = fakeDataEngine([]);
+        const warns: string[] = [];
+        const trigger = new TimeRelativeTrigger(
+            () => job.service,
+            () => data.engine,
+            { info: () => {}, debug: () => {}, warn: (m: string) => void warns.push(String(m)) },
+            NOW,
+        );
+
+        expect(() => trigger.start(binding({ object: 'contracts' }), async () => {})).toThrow(/deployment policy/);
+        expect(
+            warns.filter((w) => w.includes('no valid `timeRelative` descriptor')),
+            'the descriptor verdict must not be reported — it was never reached',
+        ).toHaveLength(0);
+    });
+
+    it('names the switch and ⛔ never says the binding failed', () => {
+        const job = fakeJobService();
+        const infos: string[] = [];
+        const trigger = new TimeRelativeTrigger(
+            () => job.service,
+            () => fakeDataEngine([]).engine,
+            { info: (m: string) => void infos.push(String(m)), warn: () => {}, debug: () => {} },
+            NOW,
+        );
+
+        expect(() => trigger.start(binding(DESC), async () => {})).toThrow();
+        const said = infos.join('\n');
+        expect(said).toContain(SCHEDULED_WORK_ENV);
+        expect(said).toContain('renewal_alert');
+        expect(said).not.toMatch(/binding failed/);
+    });
+});
+
+describe('TimeRelativeTrigger — switched ON under `single` (#17396)', () => {
+    withScheduledWorkOn('single');
+
+    const DESC = { object: 'contracts', dateField: 'end_date', withinDays: 60 };
+    const orgLess = () => binding(DESC, { organization: undefined, config: { timeRelative: DESC } });
+
+    it('arms a sweep that declares NO organization', () => {
+        const job = fakeJobService();
+        const trigger = new TimeRelativeTrigger(
+            () => job.service,
+            () => fakeDataEngine([]).engine,
+            silentLogger(),
+            NOW,
+        );
+        trigger.start(orgLess(), async () => {});
+        expect(job.jobs.size).toBe(1);
+    });
+
+    it("the sweep's own query carries NO scope — the key is absent, not undefined", async () => {
+        const job = fakeJobService();
+        const data = fakeDataEngine([{ id: 'c1', end_date: '2026-07-25T00:00:00.000Z' }]);
+        const trigger = new TimeRelativeTrigger(() => job.service, () => data.engine, silentLogger(), NOW);
+
+        trigger.start(orgLess(), async () => {});
+        await flush();
+        await job.fire('flow-time-relative:renewal_alert');
+
+        expect(data.calls.length, 'control: the sweep really did query').toBeGreaterThan(0);
+        for (const call of data.calls) {
+            expect(call.context?.isSystem, 'the sweep still runs elevated').toBe(true);
+            // ⛔ Not `toBeUndefined()`: the ruling says the query carries no
+            // scope, and "scoped to nothing" is a spelling a reader can
+            // misread. The key must not be there.
+            expect('tenantId' in (call.context ?? {}), 'no tenantId key on the find context').toBe(false);
+        }
+    });
+
+    it('the launched run carries no organization either', async () => {
+        const job = fakeJobService();
+        const data = fakeDataEngine([{ id: 'c1', end_date: '2026-07-25T00:00:00.000Z' }]);
+        const trigger = new TimeRelativeTrigger(() => job.service, () => data.engine, silentLogger(), NOW);
+        const seen: AutomationContext[] = [];
+
+        trigger.start(orgLess(), async (ctx) => void seen.push(ctx));
+        await flush();
+        await job.fire('flow-time-relative:renewal_alert');
+
+        expect(seen).toHaveLength(1);
+        expect('tenantId' in seen[0]).toBe(false);
+        expect(seen[0].record, 'the matched record still reaches the run').toMatchObject({ id: 'c1' });
+    });
+
+    it('⛔ never fills the organization from the swept RECORD', async () => {
+        // The limb the 2026-09-08 ruling forbids outright, and the one an
+        // unscoped sweep makes reachable for the first time: rows from several
+        // organizations can now match, and none of their `organization_id`
+        // values may become the run's identity.
+        const job = fakeJobService();
+        const data = fakeDataEngine([
+            { id: 'a1', end_date: '2026-07-25T00:00:00.000Z', organization_id: TEST_ORG },
+            { id: 'b1', end_date: '2026-07-26T00:00:00.000Z', organization_id: 'org_other' },
+        ]);
+        const trigger = new TimeRelativeTrigger(() => job.service, () => data.engine, silentLogger(), NOW);
+        const seen: AutomationContext[] = [];
+
+        trigger.start(orgLess(), async (ctx) => void seen.push(ctx));
+        await flush();
+        await job.fire('flow-time-relative:renewal_alert');
+
+        expect(seen.length, 'both rows matched — the sweep is unscoped here').toBe(2);
+        for (const ctx of seen) expect('tenantId' in ctx).toBe(false);
+    });
+
+    it('a DECLARED organization still scopes the query and the run', async () => {
+        // `single` removes the requirement, not the capability.
+        const job = fakeJobService();
+        const data = tenantScopedDataEngine([
+            { id: 'a1', end_date: '2026-07-25T00:00:00.000Z', organization_id: TEST_ORG },
+            { id: 'b1', end_date: '2026-07-26T00:00:00.000Z', organization_id: 'org_other' },
+        ]);
+        const trigger = new TimeRelativeTrigger(() => job.service, () => data.engine, silentLogger(), NOW);
+        const seen: AutomationContext[] = [];
+
+        trigger.start(binding(DESC), async (ctx) => void seen.push(ctx));
+        await flush();
+        await job.fire('flow-time-relative:renewal_alert');
+
+        expect(seen.map((c) => (c.record as { id?: unknown }).id)).toEqual(['a1']);
+        expect(seen[0].tenantId).toBe(TEST_ORG);
+    });
+
+    it('says on the BIND line that the sweep is unscoped, and names the posture', async () => {
+        // An operator reading the boot log is owed the difference between
+        // "sees one organization's rows" and "sees every row this install
+        // holds" — it is not inferable from the metadata, because the metadata
+        // is identical in both deployments.
+        const job = fakeJobService();
+        const infos: string[] = [];
+        const trigger = new TimeRelativeTrigger(
+            () => job.service,
+            () => fakeDataEngine([]).engine,
+            { info: (m: string) => void infos.push(String(m)), warn: () => {}, debug: () => {} },
+            NOW,
+        );
+
+        trigger.start(orgLess(), async () => {});
+        await flush();
+
+        const bindLine = infos.find((l) => l.includes('bound flow'));
+        expect(bindLine, 'the bind line is the channel this fact belongs on').toBeDefined();
+        expect(bindLine).toContain('NO acting organization');
+        expect(bindLine).toContain("posture 'single'");
+    });
+
+    it("⛔ does not warn that a declaration 'does NOT narrow this sweep' when there is none", async () => {
+        // That warning is a DISCLOSURE about a declaration the author made. On
+        // a flow that declared nothing it would invent a containment claim
+        // nobody made, which is the direction this file already refuses to
+        // train operators in.
+        const job = fakeJobService();
+        const warns: string[] = [];
+        const data = fakeDataEngine([]);
+        const trigger = new TimeRelativeTrigger(
+            () => job.service,
+            () => data.engine,
+            { info: () => {}, debug: () => {}, warn: (m: string) => void warns.push(String(m)) },
+            NOW,
+        );
+
+        trigger.start(orgLess(), async () => {});
+        await flush();
+        expect(warns.filter((w) => w.includes('does NOT narrow this sweep'))).toHaveLength(0);
+    });
+});
+
+/**
+ * [#18378, ruling A′] Per-record acting organizations under `group`.
+ *
+ * ## The discriminating number, stated before the cases
+ *
+ * ⚠️ THE ASSERTION THAT DISCRIMINATES IS THE **SET** OF ORGANIZATIONS ACROSS THE
+ * RUNS ONE TICK LAUNCHED — never "a run was stamped". The defect this replaces
+ * stamped every run in the batch ALIKE (with the declaration, or with nothing),
+ * so a pin reading only "the run carries an organization" passes on the old
+ * behaviour too. The fixture therefore puts matching rows in TWO organizations
+ * and reads the set as `['org_plant_a', 'org_plant_b']`, which is a value no
+ * previous behaviour could produce.
+ *
+ * ## Why the double carries `getSchema`
+ *
+ * `createRecordWallOrganizationResolver` resolves the organization COLUMN from
+ * the object's registered schema — the WALL precedence (`tenancy.enabled:
+ * false` ⇒ nothing, then a declared `tenancy.tenantField`, then the kernel's
+ * `organization_id`; ⛔ the stamp key `tenancy.organizationField` is NOT a limb
+ * of it) — and answers `null` without one, so
+ * a double lacking `getSchema` would make every case below pass vacuously with
+ * no organization resolved, which is the shape of the defect rather than the
+ * fix. `TimeRelativeDataEngine` is a TYPE-level narrowing; the runtime object a
+ * host mounts is the real engine, which has `getSchema`. The degradation case
+ * is pinned separately, last.
+ */
+describe('TimeRelativeTrigger — switched ON under `group` (#18378)', () => {
+    withScheduledWorkOn('group');
+
+    const DESC = { object: 'contracts', dateField: 'end_date', withinDays: 60 };
+    const orgLess = () => binding(DESC, { organization: undefined, config: { timeRelative: DESC } });
+
+    const PLANT_A = 'org_plant_a';
+    const PLANT_B = 'org_plant_b';
+
+    /** Two plants' contracts, both inside the window. The group-wide dataset. */
+    const twoPlants = (): Row[] => [
+        { id: 'a1', end_date: '2026-07-25T00:00:00.000Z', organization_id: PLANT_A },
+        { id: 'b1', end_date: '2026-07-26T00:00:00.000Z', organization_id: PLANT_B },
+    ];
+
+    /**
+     * The unscoped double plus the `getSchema` the record resolver reads. The
+     * schema declares no `tenancy` block, so the resolver takes its DEFAULT
+     * limb (`organization_id`) — the ordinary case for an app object.
+     */
+    function groupDataEngine(rows: Row[]) {
+        const base = fakeDataEngine(rows);
+        const engine = {
+            ...base.engine,
+            getSchema(name: string) {
+                return name === 'contracts'
+                    ? { name, fields: { id: {}, end_date: {}, organization_id: {} } }
+                    : undefined;
+            },
+        } as TimeRelativeDataEngine;
+        return { engine, calls: base.calls };
+    }
+
+    it('arms an undeclared sweep — it is not refused', () => {
+        const job = fakeJobService();
+        const trigger = new TimeRelativeTrigger(
+            () => job.service,
+            () => groupDataEngine([]).engine,
+            silentLogger(),
+            NOW,
+        );
+        expect(() => trigger.start(orgLess(), async () => {})).not.toThrow();
+        expect(job.jobs.size).toBe(1);
+    });
+
+    it("the sweep's query stays group-wide — no scope key, so every plant's rows match", async () => {
+        // ADR-0105 D1 makes group-wide READ reach inherent to the posture; A′
+        // changes ownership of the WRITES, not the reach of the reads.
+        const job = fakeJobService();
+        const data = groupDataEngine(twoPlants());
+        const trigger = new TimeRelativeTrigger(() => job.service, () => data.engine, silentLogger(), NOW);
+
+        trigger.start(orgLess(), async () => {});
+        await flush();
+        await job.fire('flow-time-relative:renewal_alert');
+
+        expect(data.calls.length, 'control: the sweep really did query').toBeGreaterThan(0);
+        for (const call of data.calls) {
+            expect(call.context?.isSystem, 'the sweep still runs elevated').toBe(true);
+            expect('tenantId' in (call.context ?? {}), 'no scope key on the find context').toBe(false);
+        }
+    });
+
+    it('⇒ each launched run acts as ITS OWN swept record’s organization', async () => {
+        const job = fakeJobService();
+        const data = groupDataEngine(twoPlants());
+        const trigger = new TimeRelativeTrigger(() => job.service, () => data.engine, silentLogger(), NOW);
+        const seen: AutomationContext[] = [];
+
+        trigger.start(orgLess(), async (ctx) => void seen.push(ctx));
+        await flush();
+        await job.fire('flow-time-relative:renewal_alert');
+
+        expect(seen.length, 'both plants’ rows matched — the sweep is group-wide').toBe(2);
+        // ⚠️ THE DISCRIMINATING ASSERTION. Two DIFFERENT organizations from one
+        // tick is a value neither the old `group` behaviour (refused at bind,
+        // zero runs) nor the `single` behaviour (two runs, both org-less) nor a
+        // declaration (two runs, both the declared org) can produce.
+        expect(seen.map((c) => c.tenantId).sort()).toEqual([PLANT_A, PLANT_B]);
+        // …and each run is stamped with the organization of the row it is ABOUT,
+        // not merely with "some organization" — the pairing is the point.
+        expect(
+            seen.map((c) => [(c.record as { id?: unknown }).id, c.tenantId]).sort(),
+        ).toEqual([
+            ['a1', PLANT_A],
+            ['b1', PLANT_B],
+        ]);
+    });
+
+    it('a DECLARED organization still outranks the record — declaring narrows, it does not widen', async () => {
+        // A declaration bounds SELECTION as well as identity, so honouring the
+        // record over it would silently widen a flow the author scoped — the
+        // #16659 defect. Declaration wins, and the sweep sees one plant only.
+        const job = fakeJobService();
+        const base = tenantScopedDataEngine(twoPlants());
+        const engine = {
+            ...base.engine,
+            getSchema: (name: string) =>
+                name === 'contracts' ? { name, fields: { id: {}, end_date: {}, organization_id: {} } } : undefined,
+        } as TimeRelativeDataEngine;
+        const trigger = new TimeRelativeTrigger(() => job.service, () => engine, silentLogger(), NOW);
+        const seen: AutomationContext[] = [];
+
+        trigger.start(binding(DESC, { organization: PLANT_A, config: { timeRelative: DESC } }), async (ctx) =>
+            void seen.push(ctx),
+        );
+        await flush();
+        await job.fire('flow-time-relative:renewal_alert');
+
+        expect(seen.map((c) => (c.record as { id?: unknown }).id)).toEqual(['a1']);
+        expect(seen[0].tenantId).toBe(PLANT_A);
+    });
+
+    it('⛔ a row carrying NO organization stamps nothing — it does not fall back', async () => {
+        // The rejected arm of the card, pinned negatively. A row with no owner
+        // yields a run with no `tenantId` key, and the tenancy guard refuses
+        // its writes downstream; ⛔ it must NOT acquire the bootstrap
+        // organization, the first `sys_organization` row, or a sibling row's.
+        const job = fakeJobService();
+        const data = groupDataEngine([
+            { id: 'orphan', end_date: '2026-07-25T00:00:00.000Z' },
+            { id: 'b1', end_date: '2026-07-26T00:00:00.000Z', organization_id: PLANT_B },
+        ]);
+        const trigger = new TimeRelativeTrigger(() => job.service, () => data.engine, silentLogger(), NOW);
+        const seen: AutomationContext[] = [];
+
+        trigger.start(orgLess(), async (ctx) => void seen.push(ctx));
+        await flush();
+        await job.fire('flow-time-relative:renewal_alert');
+
+        const orphan = seen.find((c) => (c.record as { id?: unknown }).id === 'orphan');
+        const owned = seen.find((c) => (c.record as { id?: unknown }).id === 'b1');
+        expect('tenantId' in (orphan ?? {}), 'the orphan run carries no organization key').toBe(false);
+        // Live control: the SAME tick stamped the owned row, so the negative
+        // above is evidence about the orphan and not about an inert harness.
+        expect(owned?.tenantId).toBe(PLANT_B);
+    });
+
+    it('an object whose tenancy is disabled resolves nothing — the column, not the value, decides', async () => {
+        // `tenancy: { enabled: false }` (ADR-0066) means the object is
+        // platform-global and has no organization of its own, even if a stray
+        // column is present on the row. The shared resolver owns that
+        // precedence; this pin is here so a future local column read fails.
+        const job = fakeJobService();
+        const base = fakeDataEngine([
+            { id: 'g1', end_date: '2026-07-25T00:00:00.000Z', organization_id: PLANT_A },
+        ]);
+        const engine = {
+            ...base.engine,
+            getSchema: (name: string) =>
+                name === 'contracts'
+                    ? { name, tenancy: { enabled: false }, fields: { id: {}, end_date: {}, organization_id: {} } }
+                    : undefined,
+        } as TimeRelativeDataEngine;
+        const trigger = new TimeRelativeTrigger(() => job.service, () => engine, silentLogger(), NOW);
+        const seen: AutomationContext[] = [];
+
+        trigger.start(orgLess(), async (ctx) => void seen.push(ctx));
+        await flush();
+        await job.fire('flow-time-relative:renewal_alert');
+
+        expect(seen).toHaveLength(1);
+        expect('tenantId' in seen[0]).toBe(false);
+    });
+
+    it('a declared `tenancy.organizationField` is NOT an acting identity — the stamp key is not read here', async () => {
+        // ⭐ The discriminating pin for the wall/stamp split (#18378 round 2).
+        // This is `sys_api_key`'s shape, the ONE shipped object that declares
+        // the key: `tenancy: { enabled: false, organizationField: '…' }`, the
+        // column present on the schema AND carrying a value on the row.
+        //
+        // The STAMP resolver answers `active_organization_id` here by design —
+        // limb 0 wins over the ADR-0066 opt-out, which is exactly what the audit
+        // trail wants ("who is this row ABOUT"). A sweep asking "who does this
+        // run ACT AS" must not get that answer: the declaration says the object
+        // is deliberately unwalled (#8287), so acting as the organization it
+        // names would be an identity derived from an annotation that never meant
+        // one. Resolving NOTHING sends the run into the `walled-posture` refusal
+        // at its first tenant-scoped write, which is the honest outcome.
+        //
+        // ⛔ This pin fails the moment someone points the sweep back at
+        // `createRecordOrganizationResolver` — which is the whole point of it.
+        const job = fakeJobService();
+        const base = fakeDataEngine([
+            {
+                id: 'k1',
+                end_date: '2026-07-25T00:00:00.000Z',
+                active_organization_id: PLANT_A,
+            },
+        ]);
+        const engine = {
+            ...base.engine,
+            getSchema: (name: string) =>
+                name === 'contracts'
+                    ? {
+                          name,
+                          tenancy: { enabled: false, organizationField: 'active_organization_id' },
+                          fields: { id: {}, end_date: {}, active_organization_id: {} },
+                      }
+                    : undefined,
+        } as TimeRelativeDataEngine;
+        const trigger = new TimeRelativeTrigger(() => job.service, () => engine, silentLogger(), NOW);
+        const seen: AutomationContext[] = [];
+
+        trigger.start(orgLess(), async (ctx) => void seen.push(ctx));
+        await flush();
+        await job.fire('flow-time-relative:renewal_alert');
+
+        expect(seen).toHaveLength(1);
+        expect('tenantId' in seen[0], 'the stamp key must not become an acting organization').toBe(false);
+    });
+
+    it('says on the BIND line that ownership is per-record, and names the posture', async () => {
+        const job = fakeJobService();
+        const infos: string[] = [];
+        const trigger = new TimeRelativeTrigger(
+            () => job.service,
+            () => groupDataEngine([]).engine,
+            { info: (m: string) => void infos.push(String(m)), warn: () => {}, debug: () => {} },
+            NOW,
+        );
+
+        trigger.start(orgLess(), async () => {});
+        await flush();
+
+        const bindLine = infos.find((l) => l.includes('bound flow'));
+        expect(bindLine).toBeDefined();
+        expect(bindLine).toContain('per-record acting organization');
+        expect(bindLine).toContain("posture 'group'");
+    });
+
+    it('warns ONCE when the engine exposes no `getSchema` — the misleading-diagnosis seam', async () => {
+        // Without `getSchema` nothing resolves, every run carries no
+        // organization and every tenant-scoped write is refused with a message
+        // about the WRITE — which sends the operator to the flow when the cause
+        // is the composition. The degradation is functional (the writes are
+        // still refused loudly, nothing is silently lost), so `warn` is the
+        // level AGENTS.md prescribes.
+        const job = fakeJobService();
+        const warns: string[] = [];
+        const data = fakeDataEngine(twoPlants()); // ⛔ deliberately NO getSchema
+        const trigger = new TimeRelativeTrigger(
+            () => job.service,
+            () => data.engine,
+            { info: () => {}, warn: (m: string) => void warns.push(String(m)), debug: () => {} },
+            NOW,
+        );
+        const seen: AutomationContext[] = [];
+
+        trigger.start(orgLess(), async (ctx) => void seen.push(ctx));
+        await flush();
+        await job.fire('flow-time-relative:renewal_alert');
+
+        const hits = warns.filter((w) => w.includes('no `getSchema`'));
+        expect(hits.length, 'said once per engine, not once per record').toBe(1);
+        expect(hits[0]).toContain('will be refused');
+        for (const ctx of seen) expect('tenantId' in ctx).toBe(false);
     });
 });

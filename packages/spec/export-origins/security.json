@@ -40,12 +40,15 @@
     "FieldPermission": "src/security/permission.zod.ts#FieldPermission (type)",
     "FieldPermissionParsed": "src/security/permission.zod.ts#FieldPermissionParsed (type)",
     "FieldPermissionSchema": "src/security/permission.zod.ts#FieldPermissionSchema (const)",
+    "OBJECT_PERMISSION_VERBS": "src/security/permission.zod.ts#OBJECT_PERMISSION_VERBS (const)",
+    "OBJECT_PERMISSION_VERB_NAMES": "src/security/permission.zod.ts#OBJECT_PERMISSION_VERB_NAMES (const)",
     "OWDModel": "src/security/sharing.zod.ts#OWDModel (type)",
     "ObjectAccessScope": "src/security/permission.zod.ts#ObjectAccessScope (type)",
     "ObjectAccessScopeSchema": "src/security/permission.zod.ts#ObjectAccessScopeSchema (const)",
     "ObjectPermission": "src/security/permission.zod.ts#ObjectPermission (type)",
     "ObjectPermissionParsed": "src/security/permission.zod.ts#ObjectPermissionParsed (type)",
     "ObjectPermissionSchema": "src/security/permission.zod.ts#ObjectPermissionSchema (const)",
+    "ObjectPermissionVerbTarget": "src/security/permission.zod.ts#ObjectPermissionVerbTarget (type)",
     "OrgScopingEntitlement": "src/security/tenancy-posture.ts#OrgScopingEntitlement (interface)",
     "OrgScopingEntitlementSchema": "src/security/tenancy-posture.ts#OrgScopingEntitlementSchema (const)",
     "PLATFORM_CAPABILITIES": "src/security/capabilities.ts#PLATFORM_CAPABILITIES (const)",
@@ -83,9 +86,11 @@
     "describeAnchorForbiddenBits": "src/security/high-privilege.ts#describeAnchorForbiddenBits (function)",
     "describeHighPrivilegeBits": "src/security/high-privilege.ts#describeHighPrivilegeBits (function)",
     "normalizeTenancyPosture": "src/security/tenancy-posture.ts#normalizeTenancyPosture (function)",
+    "objectPermissionGrants": "src/security/permission.zod.ts#objectPermissionGrants (function)",
     "permissionForm": "src/security/permission.form.ts#permissionForm (const)",
     "postureEnforcesWall": "src/security/tenancy-posture.ts#postureEnforcesWall (function)",
     "postureStampsOrganization": "src/security/tenancy-posture.ts#postureStampsOrganization (function)",
-    "postureUsesUnionScope": "src/security/tenancy-posture.ts#postureUsesUnionScope (function)"
+    "postureUsesUnionScope": "src/security/tenancy-posture.ts#postureUsesUnionScope (function)",
+    "resolveObjectPermissionVerb": "src/security/permission.zod.ts#resolveObjectPermissionVerb (function)"
   }
 }

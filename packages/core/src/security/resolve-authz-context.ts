@@ -45,10 +45,11 @@ import { AuthzStoreUnavailableError } from './authz-store-unavailable.js';
 // it to `@objectstack/types` — which core already depends on — rather than let a
 // second copy of a security-relevant classifier exist. See `tryFind`'s catch.
 //
-// [#13667] `resolveTenancyPosture` is the REQUESTED tenancy posture. It is read at
-// exactly one place below (§6b-config) to key the legacy-grant deprecation pointer
+// [#13667 / #11663 L5] `resolveTenancyPosture` is the REQUESTED tenancy posture. It
+// is read at exactly one place below (§6b) to key the LEGACY unscoped-grant anchor
 // to the same walled postures the BOOT-side detector already keys on — the same
 // module, the same function, the same fail-stricter direction that detector reads.
+// It asks the ENVIRONMENT, never the engine, so the gate adds no query.
 import { isMissingTableError, resolveTenancyPosture } from '@objectstack/types';
 import {
   mapMembershipRole,
@@ -65,11 +66,7 @@ import { resolveApiKeyAdmission } from './api-key.js';
 import type { ApiKeyRefusalReason } from './api-key.js';
 import { isGrantActive, nextGrantValidityBoundary } from './grant-validity.js';
 import { openUserGrantsCache } from './resolve-user-grants-cache.js';
-import {
-  matchesConfiguredPlatformAdmin,
-  reportLegacyPlatformAdminGrant,
-  resolvePlatformAdminEmails,
-} from './platform-admin.js';
+import { matchesConfiguredPlatformAdmin, resolvePlatformAdminEmails } from './platform-admin.js';
 import { derivePosture } from './posture-ladder.js';
 import { isRowActive } from './row-active.js';
 
@@ -480,7 +477,7 @@ export async function resolveAuthzContext(input: ResolveAuthzInput): Promise<Res
   // The block above asks "is this stamped organization still backed by a
   // membership?" and, until this card, asked it ONLY of an API key. A browser
   // session's `activeOrganizationId` reached `ctx.tenantId` unread: measured on
-  // a live `isolated` boot with the real cloud-private `Organizations` plugin,
+  // a live `isolated` boot with the real licence-gated `Organizations` plugin,
   // a session whose owner had been removed through better-auth's OWN
   // `/organization/remove-member` (driven by the org owner, 200, the
   // `sys_member` row really deleted) went on READING that organization's rows
@@ -842,6 +839,30 @@ export async function resolveUserAuthzGrants(
       .map((r) => r.permission_set_id ?? r.permissionSetId)
       .filter(Boolean),
   );
+  // [#11663 L5] …and under a WALLED posture it no longer is. This is the EXIT of
+  // the migration window L4 opened: the walled half of the legacy unscoped anchor
+  // is RETIRED, so on a walled rig platform standing is config-derived
+  // (`OS_PLATFORM_OWNER_EMAIL`, §6b-config) and nothing else. Read ADR-0131 D5 as
+  // amended 2026-09-17 (#18413) before widening this: the anchor retires here for
+  // the WALLED half only.
+  //
+  // ⛔ The `single` posture is deliberately NOT gated, and this is the whole of why
+  // the flag exists rather than a plain deletion. Under `single` — the DEFAULT, what
+  // a deployment that configured no tenancy at all resolves to — `bootstrapPlatformAdmin`
+  // MINTS this very row for the first human user, and that promotion is ruled correct
+  // and unchanged (Choice 4A, #11974; maintainer 2026-09-08 on #16682, verbatim: "The
+  // rest of Choice 4A (#11974, 2026-08-25) stands: retiring the walled write must not
+  // retire the `single` one"). A development environment started for a moment cannot be
+  // asked to declare an administrator first, so deleting the row route for every posture
+  // would leave every zero-config rig with NO platform administrator at all. The
+  // `single` half's own disposition is Choice 4B (#11979) — ⛔ a different card.
+  //
+  // The REQUESTED posture is the input, not the effective one — the same source and the
+  // same fail-stricter direction the boot side reads: a deployment that ASKED for a wall
+  // stays walled here even while running degraded (`OS_ALLOW_DEGRADED_TENANCY=1`).
+  // `resolveTenancyPosture()` asks the ENVIRONMENT, so this gate issues no query and the
+  // pinned batch-equivalence query multiset cannot move whichever way it answers.
+  const legacyGrantAnchorRetired = postureEnforcesWall(resolveTenancyPosture());
   let hasPlatformAdminGrant = false;
 
   // 5b. [ADR-0090 D5] Audience anchor: every AUTHENTICATED member implicitly
@@ -925,7 +946,19 @@ export async function resolveUserAuthzGrants(
     const mergedTabs: Record<string, 'visible' | 'hidden' | 'default_on' | 'default_off'> = {};
     for (const ps of psRows) {
       if (ps.name && !grants.permissions.includes(ps.name)) grants.permissions.push(ps.name);
-      if (ps.name === ADMIN_FULL_ACCESS && unscopedUserPsIds.has(ps.id)) hasPlatformAdminGrant = true;
+      // [#11663 L5] `legacyGrantAnchorRetired` gates the ANCHOR, not the grant: the
+      // set's own name and capabilities are pushed above exactly as for any other
+      // held set, on every posture. What a walled rig stops deriving from the row is
+      // PLATFORM_ADMIN STANDING — the rung, the built-in `platform_admin` position
+      // and everything downstream of them. The row itself is untouched here; its
+      // ownership is ADR-0131 C3's, on the v18 line.
+      if (
+        ps.name === ADMIN_FULL_ACCESS
+        && unscopedUserPsIds.has(ps.id)
+        && !legacyGrantAnchorRetired
+      ) {
+        hasPlatformAdminGrant = true;
+      }
       const sysPerms = typeof ps.system_permissions === 'string'
         ? safeJsonParse(ps.system_permissions, [])
         : (ps.system_permissions ?? ps.systemPermissions);
@@ -967,9 +1000,12 @@ export async function resolveUserAuthzGrants(
   //
   //     ADDITIVE, never subtractive: nothing above is revoked here (design §5
   //     step 3). A deployment that has declared no administrators resolves
-  //     exactly as it did — `platformAdminConfig.emails` is empty, the branch
-  //     short-circuits before it looks at any row, and the legacy grant read
-  //     above remains the only anchor.
+  //     exactly as it did — `platformAdminConfig.emails` is empty and the branch
+  //     short-circuits before it looks at any row. Under `single` the legacy grant
+  //     read above then remains the only anchor; under a WALLED posture [#11663 L5]
+  //     that read is retired, so an undeclared walled rig has NO platform
+  //     administrator — which is the fail-closed answer the boot-side backstop in
+  //     `plugin-security` announces at startup.
   const configConfersPlatformAdmin =
     platformAdminConfig.emails.length > 0
     && matchesConfiguredPlatformAdmin(await getUserRow(), platformAdminConfig);
@@ -986,45 +1022,17 @@ export async function resolveUserAuthzGrants(
     for (const p of ADMIN_FULL_ACCESS_CAPABILITIES.systemPermissions ?? []) {
       if (!grants.systemPermissions.includes(p)) grants.systemPermissions.push(p);
     }
-  } else if (hasPlatformAdminGrant) {
-    // [#11663 P5] Standing rests on the LEGACY grant row alone. Honoured — the
-    // migration is loud, not breaking — with a once-per-process pointer at the
-    // config line that re-anchors it. The row is read only if it was already
-    // loaded, so this notice never adds a query (and so never moves the pinned
-    // query multiset for a deployment that declared nothing). The posture read
-    // below keeps that property: it reads the environment, never the engine.
-    //
-    // [#13667] …and the pointer is POSTURE-KEYED, matching the BOOT-side
-    // detector (`plugin-security/src/bootstrap-platform-admin.ts` §2, which
-    // spells the same `postureEnforcesWall(resolveTenancyPosture())`). Under
-    // `single` — the DEFAULT posture — `bootstrapPlatformAdmin` MINTS this very
-    // row to promote the first human user, and Choice 4A rules that promotion,
-    // and its row, correct and UNCHANGED. Both halves of the notice are
-    // therefore false for such a rig: the row is not "removed in a later
-    // release", and re-anchoring through the config line gets the operator
-    // nothing, because the `single` promotion is pinned NEVER to consult that
-    // variable (`bootstrap-platform-admin-walled-owner.test.ts`, "never
-    // consults the owner-email variable"). That holds whichever way Choice 4B
-    // (#11979) is eventually ruled: under 4A the row is that rig's permanent
-    // anchor, and under 4B the advice only becomes true once 4B actually lands.
-    // So the migration window's loudness is scoped to the rigs actually in it —
-    // the walled ones, where the row really is the LEGACY anchor.
-    //
-    // ⛔ This gates the NOTICE and nothing else. Standing is derived by the
-    // `if (configConfersPlatformAdmin) / else if (hasPlatformAdminGrant)` chain
-    // this sits inside, and that chain is deliberately untouched — the
-    // condition is nested WITHIN the arm precisely so no arm of it can change
-    // shape. A `single` rig keeps exactly the PLATFORM_ADMIN it had; it simply
-    // stops being told to migrate off an anchor that is not going anywhere.
-    //
-    // The REQUESTED posture is the input, not the effective one — the same
-    // source and the same fail-stricter direction the boot side reads: a
-    // deployment that ASKED for a wall stays inside the migration window even
-    // while running degraded (`OS_ALLOW_DEGRADED_TENANCY=1`).
-    if (postureEnforcesWall(resolveTenancyPosture())) {
-      reportLegacyPlatformAdminGrant({ userId, email: userRow?.email });
-    }
   }
+  // [#11663 L5] ⛔ There is no `else if (hasPlatformAdminGrant)` arm any more. It
+  // carried ONE thing — the once-per-process deprecation pointer L4 started firing
+  // — and the migration window that pointer announced has now closed: on a walled
+  // rig the row it pointed away from no longer confers anything to migrate off, and
+  // on a `single` rig it never pointed anywhere (the notice was posture-keyed by
+  // #13667). Its two symbols, `reportLegacyPlatformAdminGrant` and
+  // `resetLegacyPlatformAdminGrantReport`, are removed from `@objectstack/core`.
+  // ⛔ Do not reintroduce a notice here: a walled holder is told by the BOOT-side
+  // fail-closed line (`plugin-security/src/bootstrap-platform-admin.ts`), which is
+  // where an operator can act on it, not inside the per-request authorization path.
 
   // 6c. Project the derived platform_admin built-in role (leads the list).
   if (hasPlatformAdminGrant && !grants.positions.includes(BUILTIN_IDENTITY_PLATFORM_ADMIN)) {

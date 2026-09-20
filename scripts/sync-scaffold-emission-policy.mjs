@@ -66,6 +66,31 @@
 // The template set is DISCOVERED by walking `src/templates/` — reused from
 // `sync-template-versions.mjs` rather than restated, for the reason its header
 // gives: a hand-kept list is what let the sibling drift.
+//
+// ## The second hand-written carrier, and why it is CHECK-ONLY
+//
+// The bundled template was never the only hand-written restatement of this
+// policy. The other one is the "Complete Working Example" `package.json` fence
+// in `skills/objectstack-platform/SKILL.md` — the copy-paste manifest every
+// agent that loads that skill reads — and no gate read it (#16767). It sat at
+// the retired `^6.0.0` longer than the bundled template did, for the ordinary
+// reason: the carrier with no reader is where the next drift lands.
+//
+// That fence is enforced here under `--check` ONLY, and the asymmetry with the
+// bundled templates is deliberate on two counts:
+//
+//   * `skills/**` is a governed surface (AGENTS.md Prime Directive #14). A
+//     generator writing into a governed published file needs its own ruling,
+//     which this leg does not have and does not ask for. Reading a governed
+//     file is not governing it, so the check leg stays an ordinary devx change;
+//   * the write run is what `packages/create-objectstack`'s `build` invokes.
+//     Reading a published skill file there would make the on-ramp's build
+//     depend on it, for no gain — a build cannot fix a drift it must not write.
+//
+// So the remedy this script prints for a drifted restatement is NOT
+// `pnpm gen:scaffold-emission-policy`: it is a hand edit to the fence, landed
+// the way that governed surface is landed. Making the drift LOUD is the whole
+// job of this leg; fixing it is not.
 
 import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync, cpSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -119,8 +144,35 @@ export const POLICY_STAMPS = [
   },
 ];
 
+/**
+ * The hand-written restatements this script READS but never writes.
+ *
+ * A row is a (file, fence, keys) triple. Unlike the bundled templates there is
+ * no directory to walk — these are published prose files that happen to carry a
+ * manifest — so the table is hand-kept, and the self-test pins it non-empty and
+ * pins every key it names to a `POLICY_STAMPS` row, which is what a walk would
+ * otherwise give for free.
+ *
+ * `keys` is a SUBSET of the stamps on purpose: this fence declares no `engines`
+ * block, and demanding one would be inventing a requirement rather than
+ * enforcing the policy. A key the carrier DOES declare and this table omits is
+ * the mute spot to avoid — add the key, never a second table.
+ */
+export const PUBLISHED_RESTATEMENTS = [
+  {
+    path: 'skills/objectstack-platform/SKILL.md',
+    heading: '## Complete Working Example',
+    label: '**`package.json`**:',
+    fence: 'json',
+    keys: ['devDependencies.typescript'],
+  },
+];
+
 /** Repo-relative, always POSIX-separated: these paths are git pathspecs downstream. */
 const rel = (p) => relative(root, p).split(sep).join('/');
+
+/** Escape a literal for embedding in a RegExp — the labels carry `*` and `.`. */
+const escapeRe = (literal) => literal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /**
  * Read one `export const <NAME> = '<value>';` out of the policy source.
@@ -282,11 +334,145 @@ export function stampPolicy(text, policy, { label = TEMPLATE_PKG_FILE } = {}) {
 
 // ---------------------------------------------------------------------------
 
+/**
+ * The restatement table, refused if it could only produce a vacuous green.
+ *
+ * Zero rows, or a row naming zero keys, reads exactly like "nothing restates
+ * the policy" and means "the table was emptied" — the same refusal
+ * `stampedPolicyPaths` makes for a moved template directory.
+ */
+export function restatementRows(rows = PUBLISHED_RESTATEMENTS) {
+  if (rows.length === 0) {
+    throw new Error(
+      'sync-scaffold-emission-policy: PUBLISHED_RESTATEMENTS is empty. A published restatement is\n' +
+        'enforced by this table alone — an empty one reports "checked everything" while checking\n' +
+        'nothing. Restore the row, or delete this leg deliberately.',
+    );
+  }
+  for (const row of rows) {
+    if (!Array.isArray(row.keys) || row.keys.length === 0) {
+      throw new Error(
+        `sync-scaffold-emission-policy: restatement row ${row.path} names no keys; a row that checks\n` +
+          'nothing is a carrier silently exempted from the policy.',
+      );
+    }
+  }
+  return rows;
+}
+
+/**
+ * Return the body of the single fenced block a restatement row names.
+ *
+ * Located by CONTENT — heading, then the label line inside that section, then
+ * the first fence after it — never by line number: the one thing already
+ * measured about this carrier is that its line number moves (608 the day the
+ * gap was filed, 613 on the card, 608 again after the drift fix landed).
+ *
+ * Every step demands EXACTLY ONE match and throws otherwise. A renamed heading,
+ * a label that grew a twin or a fence whose language tag changed must RED here;
+ * degrading into "no restatement found" and a green run is the mute-failure
+ * class this whole script exists to close.
+ */
+export function readRestatementFence(text, row, { label = row.path } = {}) {
+  const headings = [...text.matchAll(new RegExp(`^${escapeRe(row.heading)}[ \\t]*$`, 'gm'))];
+  if (headings.length !== 1) {
+    throw new Error(
+      `sync-scaffold-emission-policy: ${label} carries the heading \`${row.heading}\` ` +
+        `${headings.length} time(s); exactly one is required so the fence can be located by content. ` +
+        'A renamed section must red here rather than silently stop being enforced.',
+    );
+  }
+  const from = headings[0].index + headings[0][0].length;
+  const nextHeading = text.slice(from).search(/^## /m);
+  const section = nextHeading === -1 ? text.slice(from) : text.slice(from, from + nextHeading);
+
+  const labels = [...section.matchAll(new RegExp(`^${escapeRe(row.label)}[ \\t]*$`, 'gm'))];
+  if (labels.length !== 1) {
+    throw new Error(
+      `sync-scaffold-emission-policy: ${label} — the \`${row.heading}\` section carries the label ` +
+        `\`${row.label}\` ${labels.length} time(s); exactly one is required.`,
+    );
+  }
+  const after = section.slice(labels[0].index + labels[0][0].length);
+
+  const opener = after.match(/^```([a-zA-Z0-9_-]*)[ \t]*\r?$/m);
+  if (!opener) {
+    throw new Error(
+      `sync-scaffold-emission-policy: ${label} — no fenced block follows \`${row.label}\` in the ` +
+        `\`${row.heading}\` section.`,
+    );
+  }
+  if (opener[1] !== row.fence) {
+    throw new Error(
+      `sync-scaffold-emission-policy: ${label} — the first fenced block after \`${row.label}\` is ` +
+        `tagged \`${opener[1] || '(untagged)'}\`, not \`${row.fence}\`; refusing to read a block this ` +
+        'script cannot identify.',
+    );
+  }
+  const body = after.slice(after.indexOf('\n', opener.index) + 1);
+  const closer = body.match(/^```[ \t]*\r?$/m);
+  if (!closer) {
+    throw new Error(`sync-scaffold-emission-policy: ${label} — the \`${row.heading}\` fence is unterminated.`);
+  }
+  return body.slice(0, closer.index);
+}
+
+/**
+ * Compare one restatement's fence against the policy.
+ *
+ * ⛔ Reads only. The caller never writes these files — see the header: a
+ * generator writing into a governed published file needs its own ruling.
+ *
+ * @returns {Array<{ key: string, from: string, to: string, constant: string }>}
+ */
+export function checkRestatement(text, policy, row, { label = row.path } = {}) {
+  const fence = readRestatementFence(text, row, { label });
+  let parsed;
+  try {
+    parsed = JSON.parse(fence);
+  } catch (err) {
+    throw new Error(
+      `sync-scaffold-emission-policy: ${label} — the \`${row.heading}\` ${row.fence} fence could not be ` +
+        `read as ${row.fence.toUpperCase()}: ${err.message}`,
+    );
+  }
+  const drift = [];
+  for (const key of row.keys) {
+    const stamp = POLICY_STAMPS.find((s) => s.key === key);
+    if (!stamp) {
+      throw new Error(
+        `sync-scaffold-emission-policy: restatement row ${row.path} names \`${key}\`, which no ` +
+          'POLICY_STAMPS row owns. A restatement can only be checked against a DECLARED policy value — ' +
+          'add the stamp, never a second source of truth.',
+      );
+    }
+    const expected = policy[stamp.constant];
+    if (typeof expected !== 'string' || expected === '') {
+      throw new Error(`sync-scaffold-emission-policy: no policy value for ${stamp.constant}.`);
+    }
+    const declared = parsed?.[stamp.block]?.[stamp.field];
+    if (typeof declared !== 'string') {
+      throw new Error(
+        `sync-scaffold-emission-policy: ${label} — the \`${row.heading}\` fence declares no \`${key}\`.\n` +
+          'This carrier is enforced by the PUBLISHED_RESTATEMENTS row alone, so a fence that drops a\n' +
+          'checked key would be silently exempt from the policy. Restore the key in the fence, or drop\n' +
+          'it from the row deliberately.',
+      );
+    }
+    if (declared !== expected) drift.push({ key, from: declared, to: expected, constant: stamp.constant });
+  }
+  return drift;
+}
+
 /** @param {{ check: boolean, base?: string }} options */
 export function run({ check, base = root }) {
   const policy = readEmissionPolicy(join(base, POLICY_SOURCE));
   const paths = stampedPolicyPaths({ root: base });
+  // ⛔ CHECK-ONLY. The write run neither reads nor writes these files — a
+  // generator writing into a governed published file needs its own ruling.
+  const rows = check ? restatementRows() : [];
   const drifted = [];
+  const restated = [];
   let clean = 0;
 
   for (const path of paths) {
@@ -310,6 +496,22 @@ export function run({ check, base = root }) {
     }
   }
 
+  for (const row of rows) {
+    const abs = join(base, row.path);
+    let text;
+    try {
+      text = readFileSync(abs, 'utf8');
+    } catch (err) {
+      throw new Error(`sync-scaffold-emission-policy: cannot read ${row.path}: ${err.message}`);
+    }
+    const drift = checkRestatement(text, policy, row);
+    if (drift.length === 0) {
+      console.log(`  ${row.path} (${row.heading}) already restates the shared policy`);
+      continue;
+    }
+    for (const d of drift) restated.push({ path: row.path, row, ...d });
+  }
+
   const declared = Object.entries(policy)
     .map(([name, value]) => `${name}=${value}`)
     .join(', ');
@@ -329,12 +531,36 @@ export function run({ check, base = root }) {
         '\n  and commit the result. To change what a scaffolded project DECLARES, move the\n' +
         `  constant in ${POLICY_SOURCE} — all three scaffolders follow it.\n`,
     );
-    return 1;
   }
+
+  if (restated.length > 0) {
+    console.error(
+      `\n✗ a published restatement of the shared emission policy has drifted.\n` +
+        `  Policy source: ${POLICY_SOURCE} (${declared})\n`,
+    );
+    for (const d of restated) {
+      console.error(
+        `  ${d.path} — the \`${d.row.heading}\` ${d.row.label} fence: ` +
+          `${d.key} is "${d.from}" but ${d.constant} declares "${d.to}"`,
+      );
+    }
+    console.error(
+      '\n  ⛔ `pnpm gen:scaffold-emission-policy` does NOT fix this one. These fences live in\n' +
+        '  governed published files, and a generator writing into one needs its own ruling — so\n' +
+        '  this gate READS them and never writes them. Close the drift by hand, in the fence, in a\n' +
+        '  PR landed the way that governed surface is landed. To change what the policy DECLARES,\n' +
+        `  move the constant in ${POLICY_SOURCE} and bring every carrier with it.\n`,
+    );
+  }
+
+  // The write run REWRITES template drift and reports it as work done, so only
+  // `--check` turns it into a verdict; a restatement can only ever be a verdict.
+  if ((check && drifted.length > 0) || restated.length > 0) return 1;
 
   console.log(
     check
-      ? `✓ check:scaffold-emission-policy: ${paths.length} bundled template(s) emit the shared policy (${declared}).`
+      ? `✓ check:scaffold-emission-policy: ${paths.length + rows.length} carrier(s) emit the shared policy ` +
+          `— ${paths.length} bundled template(s) + ${rows.length} published restatement(s) (${declared}).`
       : `✓ sync-scaffold-emission-policy: ${paths.length} bundled template(s) in lockstep with ${POLICY_SOURCE} ` +
           `(${declared}); ${clean} already clean, ${drifted.length} value(s) rewritten.`,
   );
@@ -367,8 +593,10 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'E: an unparseable template package.json exits 1 naming it': 2,
   'F: zero templates refuses a vacuous green': 2,
   'G: the stamp table and the sibling rewriter do not both own a value': 2,
+  'H: the PUBLISHED restatement is READ — and never written': 16,
+  'I: the restatement table cannot go vacuous or invent a policy value': 4,
 });
-const SELF_TEST_BATTERY_FLOOR = 7;
+const SELF_TEST_BATTERY_FLOOR = 9;
 const UNATTRIBUTED_BATTERY = '(no battery open)';
 const SELF_TEST_VERDICT = 'sync-scaffold-emission-policy self-test reached its verdict';
 
@@ -399,7 +627,52 @@ function templatePkg(policy) {
   )}\n`;
 }
 
-function buildFixture(dir, { templates = ['blank', 'second'], policy = SELF_TEST_POLICY, templatePolicy = policy } = {}) {
+/**
+ * A fixture stand-in for a published restatement carrier: prose, other
+ * sections, and ONE labelled fence — the shape the real skill page has.
+ */
+function restatementDoc({
+  range,
+  heading = PUBLISHED_RESTATEMENTS[0].heading,
+  label = PUBLISHED_RESTATEMENTS[0].label,
+  fence = PUBLISHED_RESTATEMENTS[0].fence,
+  omitKey = false,
+} = {}) {
+  const devDependencies = { '@objectstack/cli': '^17.0.0' };
+  if (!omitKey) devDependencies.typescript = range;
+  const pkg = {
+    name: 'my-todo-app',
+    type: 'module',
+    dependencies: { '@objectstack/spec': '^17.0.0' },
+    devDependencies,
+  };
+  return [
+    '# fixture published skill',
+    '',
+    '## An Earlier Section',
+    '',
+    'Prose that names package.json and carries no fence at all.',
+    '',
+    heading,
+    '',
+    'A minimal but complete project from scratch:',
+    '',
+    label,
+    '```' + fence,
+    JSON.stringify(pkg, null, 2),
+    '```',
+    '',
+    '## A Later Section',
+    '',
+    'More prose, so the section walk has somewhere to stop.',
+    '',
+  ].join('\n');
+}
+
+function buildFixture(
+  dir,
+  { templates = ['blank', 'second'], policy = SELF_TEST_POLICY, templatePolicy = policy, restatement = {} } = {},
+) {
   const scripts = join(dir, 'scripts');
   mkdirSync(scripts, { recursive: true });
   for (const file of ['sync-scaffold-emission-policy.mjs', 'sync-template-versions.mjs', 'invoked-as.mjs']) {
@@ -411,6 +684,9 @@ function buildFixture(dir, { templates = ['blank', 'second'], policy = SELF_TEST
     mkdirSync(join(dir, TEMPLATE_DIR, template), { recursive: true });
     writeFileSync(join(dir, TEMPLATE_DIR, template, TEMPLATE_PKG_FILE), templatePkg(templatePolicy));
   }
+  const carrier = join(dir, PUBLISHED_RESTATEMENTS[0].path);
+  mkdirSync(dirname(carrier), { recursive: true });
+  writeFileSync(carrier, restatementDoc({ range: policy.SCAFFOLD_TYPESCRIPT_RANGE, ...restatement }));
   return join(scripts, 'sync-scaffold-emission-policy.mjs');
 }
 
@@ -530,6 +806,75 @@ function selfTest() {
     'no row claims an @objectstack/* range — those belong to sync-template-versions.mjs',
   );
 
+  open('H: the PUBLISHED restatement is READ — and never written');
+  const CARRIER = PUBLISHED_RESTATEMENTS[0];
+  const readCarrier = (dir) => readFileSync(join(dir, CARRIER.path), 'utf8');
+  sandbox((dir, script) => {
+    const check = runFixture(script, ['--check']);
+    ok(check.status === 0, 'a clean restatement exits 0');
+    ok(check.output.includes('already restates the shared policy'), 'the run REACHED the carrier and judged it clean');
+    ok(
+      check.output.includes('3 carrier(s)') && check.output.includes('2 bundled template(s) + 1 published restatement(s)'),
+      'the verdict COUNTS the restatement as a carrier — a leg that never ran would report the templates alone',
+    );
+    const before = readCarrier(dir);
+    const write = runFixture(script);
+    ok(write.status === 0, 'the write run exits 0');
+    ok(readCarrier(dir) === before, 'the WRITE run leaves the carrier BYTE-IDENTICAL — check-only, by contract');
+    ok(!write.output.includes(CARRIER.path), 'the write run does not even REACH the carrier');
+  });
+  sandbox(
+    (dir, script) => {
+      const r = runFixture(script, ['--check']);
+      ok(r.status === 1, 'a DRIFTED restatement EXITS 1');
+      ok(r.output.includes(CARRIER.path), 'the failure names the carrier file');
+      ok(r.output.includes(CARRIER.heading), 'the failure names the fence it read, not just the file');
+      ok(r.output.includes('is "^1.0.0"'), 'the failure names the value the fence declares');
+      ok(r.output.includes('"^9.9.9"'), 'the failure names the value the policy declares');
+      ok(
+        r.output.includes('does NOT fix this one'),
+        'the remedy REFUSES to point at gen: — this carrier is governed and read-only here',
+      );
+      ok(readCarrier(dir).includes('^1.0.0'), '--check WROTE NOTHING to the carrier');
+      ok(runFixture(script).status === 0, 'the write run stays GREEN through restatement drift it must not fix');
+    },
+    { restatement: { range: STALE.SCAFFOLD_TYPESCRIPT_RANGE } },
+  );
+  sandbox(
+    (dir, script) => {
+      const r = runFixture(script, ['--check']);
+      ok(r.status === 1, 'a fence that DROPS the stamped key exits 1 — never a silent exemption');
+      ok(r.output.includes('declares no `devDependencies.typescript`'), 'the failure names the missing key');
+    },
+    { restatement: { omitKey: true } },
+  );
+  sandbox(
+    (dir, script) => {
+      const r = runFixture(script, ['--check']);
+      ok(r.status === 1, 'a RENAMED heading EXITS 1 rather than finding no fence and passing');
+      ok(r.output.includes('0 time(s)'), 'the failure says the heading was not found, not that there was nothing to check');
+    },
+    { restatement: { heading: '## Renamed Section' } },
+  );
+
+  open('I: the restatement table cannot go vacuous or invent a policy value');
+  ok(PUBLISHED_RESTATEMENTS.length > 0, 'the restatement table is non-empty — an empty one makes battery H vacuous');
+  ok(
+    PUBLISHED_RESTATEMENTS.every((r) => Array.isArray(r.keys) && r.keys.length > 0),
+    'every row names at least one key',
+  );
+  ok(
+    PUBLISHED_RESTATEMENTS.every((r) => r.keys.every((k) => POLICY_STAMPS.some((st) => st.key === k))),
+    'every key a row names is owned by a POLICY_STAMPS row — a restatement introduces no second version authority',
+  );
+  let refusedEmpty = false;
+  try {
+    restatementRows([]);
+  } catch {
+    refusedEmpty = true;
+  }
+  ok(refusedEmpty, 'an EMPTY table is refused rather than reported as "everything checked"');
+
   const missing = Object.keys(SELF_TEST_BATTERIES).filter((n) => !opened.has(n));
   const extra = [...opened.keys()].filter((n) => !(n in SELF_TEST_BATTERIES));
   const below = [...opened].filter(([n, c]) => n in SELF_TEST_BATTERIES && c < SELF_TEST_BATTERIES[n]);
@@ -551,7 +896,9 @@ function selfTest() {
     `✓ sync-scaffold-emission-policy --self-test: ${checked} assertions over temp fixtures, running the real CLI. ` +
       'A CLEAN corpus is observed REACHED, byte-identical and UNWRITTEN; DRIFT is observed reddening --check ' +
       'BEFORE the rewrite and green after it; and a renamed policy constant, a template omitting a stamped key, ' +
-      'an unparseable template and an empty templates directory are each observed exiting 1 and naming the path.',
+      'an unparseable template and an empty templates directory are each observed exiting 1 and naming the path. ' +
+      'The PUBLISHED restatement is observed COUNTED in the verdict, reddening --check when its fence drifts, ' +
+      'naming that fence, and left byte-identical and unreached by the write run.',
   );
   return SELF_TEST_VERDICT;
 }

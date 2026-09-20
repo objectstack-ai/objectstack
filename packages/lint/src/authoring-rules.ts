@@ -103,6 +103,7 @@ import { validateFunctionalCompleteness } from './validate-functional-completene
 import { validateManagedApiMethods } from './validate-managed-api-methods.js';
 import { validateViewContainers } from './validate-view-containers.js';
 import { validateWidgetBindings } from './validate-widget-bindings.js';
+import { validateDatasetMeasureAggregates } from './validate-dataset-measure-aggregates.js';
 import { validateDashboardActionRefs } from './validate-dashboard-action-refs.js';
 import { validateFilterTokens } from './validate-filter-tokens.js';
 import { validateFlowFilterTokens } from './validate-flow-filter-tokens.js';
@@ -601,6 +602,48 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     runtimeTypes: ['dashboard'],
     run: (stack) => validateWidgetBindings(stack),
   },
+  // #16354 — the AUTHORING-TIME leg of the aggregate × field-type contract
+  // (director ruling, decision batch #59, 2026-09-06: "both legs, table in
+  // spec"; the table is `AGGREGATE_FIELD_TYPE_COMPATIBILITY` in
+  // `@objectstack/spec`, #16353). The compile leg (`dataset-compiler`,
+  // `service-analytics`) refuses a refused pair with `400 DATASET_INVALID`
+  // when a query is built; this one refuses it while the author still has the
+  // document open. `parsed`, the same tier as `validateWidgetBindings` above,
+  // because the two read the SAME positions (`datasets[].measures[]`) and must
+  // not be handed two different documents to judge.
+  {
+    name: 'validateDatasetMeasureAggregates',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-dataset-measure-aggregates.ts',
+    // [#19143] The door this rule was written for, finally reachable. The
+    // previous `surfaceReason` here was never RUNTIME_NEEDS_FULL_SNAPSHOT —
+    // the two collections this rule reads, `objects` and `datasets`, are BOTH
+    // carried (#7529). What held it off was the TYPE axis: the metadata type
+    // that carries the declaration is `dataset` (`allowRuntimeCreate: true`),
+    // and `TYPE_TO_STACK_KEY` had no `dataset` row, so a dataset write built
+    // no per-write snapshot and nothing could be dispatched for it. That row
+    // lands in the same commit as this declaration, which is the order the
+    // `seed: 'data'` note demands: never a mapping without a reading rule,
+    // never a declaration without a mapping.
+    //
+    // ⛔ `runtimeTypes: ['dataset']` and nothing else, still. Declaring another
+    // type would only re-judge a STORED dataset, which the #4463 D4
+    // differential cancels as somebody else's pre-existing condition — wired,
+    // and enforcing nothing. The written dataset is the only one this door may
+    // answer for.
+    //
+    // ⚠️ A REFUSAL widening on a door that previously refused nothing: a
+    // runtime dataset write whose measure pairs an aggregate with an
+    // incompatible field type is now 422 rather than silently stored. MEASURED
+    // over the shipped dataset corpus before crossing, at the door's own
+    // snapshot shape: 11 datasets (platform-objects 5, showcase 4, crm 1,
+    // todo 1) — 0 findings, with a lit synthetic probe refused.
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['dataset'],
+    run: (stack) => validateDatasetMeasureAggregates(stack),
+  },
   // ADR-0049 / #3367 — a dashboard header action naming a dead target ships a
   // button that renders and refuses (or does nothing) on click: a `script`
   // target must name a defined action, a `modal` target must name a declared
@@ -770,8 +813,39 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // The gate's differential keeps it honest in the one direction that
     // matters: a STORED sibling already in violation is never charged to this
     // write (#4463 D4).
+    // [#19143] `dataset` joins, and the same granularity mechanism keeps it a
+    // NARROW crossing: this entry says a `dataset` write dispatches the suite;
+    // the suite's per-member `runtimeTypes` says exactly TWO members judge that
+    // snapshot — `validateDatasetReferences` (the dimension / measure / include
+    // / filter-key existence rules, #14105) and `validateObjectReferences`
+    // (whose `datasets[].object` rung owns the base-object name, deliberately
+    // split off from the rule above so it gets the curated
+    // `PLATFORM_PROVIDED_OBJECT_NAMES` ladder). Both resolve only against
+    // `stack.objects` and `stack.datasets`, the two collections a per-write
+    // snapshot carries, so neither has a missing-collection false-positive
+    // channel. Every other member keeps its existing declaration and does not
+    // run on a dataset write.
+    //
+    // The two cross TOGETHER on #7220's reading: they judge the SAME document
+    // and their split is an implementation detail of the severity ladder, so an
+    // author refused for a dangling dimension field and waved through for a
+    // dangling base object could not predict the door.
+    //
+    // The measured state that forced it: `runtimeAuthoringRulesFor('dataset')`
+    // dispatched NOTHING — zero rules, on a type every tenant may create at
+    // runtime and whose own existence rules state their failure mode as a chart
+    // that renders successfully with empty or wrong numbers.
+    //
+    // ⚠️ A REFUSAL widening, like #15254's: a dataset republished with a
+    // pre-existing dangling field path is now refused (422) rather than stored
+    // silently. The gate's differential keeps it honest in the one direction
+    // that matters — a STORED sibling already in violation is never charged to
+    // this write (#4463 D4). MEASURED over the shipped dataset corpus before
+    // crossing, at the door's own snapshot shape: 11 datasets
+    // (platform-objects 5, showcase 4, crm 1, todo 1) — 0 findings, with a lit
+    // synthetic probe refused.
     surfaces: CLI_AND_RUNTIME,
-    runtimeTypes: ['flow', 'view', 'object'],
+    runtimeTypes: ['flow', 'view', 'object', 'dataset'],
     run: (stack, ctx) => validateReferenceIntegrity(stack, ctx),
   },
   // ADR-0078 / #5068 — the SDUI component-props gate. `PageComponent.properties`
@@ -933,12 +1007,12 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // that one is ambiguity of intent, not a dead flow).
   //
   // #16659 added a sixth id, `flow-schedule-organization-missing`, at
-  // `warning`: a time-triggered flow declaring no `config.organization` is
-  // refused at bind, so on the criterion above it belongs with the four — and
-  // it is held at `warning` because an `error` gates `objectstack build`, and
-  // the repo's own shipped example apps carry such flows with no authorable
-  // repair (the only legal value is a `sys_organization.id` minted per install
-  // at runtime). Its own docblock in the rule file records that.
+  // `warning`; #17396 RETIRED it. The criterion above is what retired it: this
+  // stack is not enough to know the flow is dead, because a deployment-level
+  // switch and the tenancy posture decide whether the key is required, and
+  // neither is metadata this file can read. The bind-time near-miss diagnostic
+  // stays — it fires only under a walled posture with the switch on, where the
+  // key really is required.
   {
     name: 'validateFlowTriggerReadiness',
     tier: 'gating',
@@ -1258,20 +1332,34 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // ADR-0087 conversion that would otherwise strip it (`permission-allow-
   // restore-purge-removed`) is `retiredFromLoadPath: true`, so it does not run
   // inside `normalizeStackInput` and the key reaches this tier intact.
+  //
+  // [#17936] Crossed onto the runtime publish gate for `permission` writes, and
+  // the measurement the previous `surfaceReason` held it back for is TAKEN. That
+  // reason asked one question — does the gate's `body` reach this rule BEFORE
+  // the per-type `safeParse`, whose residue stage strips the only evidence it
+  // reads? It does, and not by luck: `saveMetaItem` keeps the AUTHORED body
+  // verbatim by design (`parsed.data` would strip the Studio-only auxiliary
+  // fields an overlay rides with) and grafts back exactly two normalizations,
+  // each a walk over the authored keys that adds and removes nothing else. So
+  // `assertRuntimeAuthoringRules` is handed the raw document, the gate passes it
+  // straight through as `item`, and the residue is present in the snapshot this
+  // rule reads. Pinned end to end at the door
+  // (`metadata-protocol`'s `protocol.runtime-authoring-gate.test.ts`, #17936
+  // block) and at this layer (`runtime-gate.permission-residue.test.ts`) — the
+  // phantom-check risk that reason named is answered by measurement, not by
+  // argument. Why it had to cross at all: ruling D's population — a Studio /
+  // REST `/meta` / MCP author who never runs `os lint` — has no other door.
+  // Advisory only, so it rides the 2xx the write earns and can never refuse one.
+  // `permission` is the only declared type because `stack.permissions` is the
+  // only collection the rule reads.
   {
     name: 'validateRetiredPermissionResidue',
     tier: 'advisory',
     input: 'normalized',
     commands: ALL,
     source: 'packages/lint/src/validate-retired-permission-residue.ts',
-    surfaces: CLI_ONLY,
-    surfaceReason:
-      'Ruled scope: the signal belongs at the authoring door over RAW SOURCE, which is ' +
-      'where the authored and the built path are distinguishable. Crossing it needs a measurement ' +
-      "this round did not take — whether the gate's `body` reaches it BEFORE the per-type " +
-      '`safeParse`, whose residue stage strips the only evidence this rule reads. Post-parse the ' +
-      'rule is structurally silent, so wiring it there without that reading would publish a ' +
-      'phantom check, not coverage.',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['permission'],
     run: (stack) =>
       validateRetiredPermissionResidue(stack).map((f) => ({
         severity: f.severity,

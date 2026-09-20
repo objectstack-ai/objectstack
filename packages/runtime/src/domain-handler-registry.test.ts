@@ -579,9 +579,19 @@ describe('HttpDispatcher extracted domains (PR-5: packages)', () => {
     it('POST /packages rejects a duplicate id with 409 unless ?overwrite=true (data-loss footgun guard)', async () => {
         const objectql = qlWithRegistry({ getPackage: vi.fn().mockReturnValue({ id: 'pkg-a' }) });
         const dispatcher = withPkgCaller(makeDispatcher({ objectql }));
-        const dup = await dispatcher.dispatch('POST', '/packages', { id: 'pkg-a', name: 'A' }, {}, {} as any);
+        // [#19120] `version` added to a fixture that never carried one. The
+        // subject here is the duplicate-id guard and its `?overwrite=true`
+        // bypass, ⛔ not manifest completeness — but `ManifestSchema` has always
+        // declared `version` required, so this body was never a legal input to
+        // the door it drives. Since the install door started parsing that leg,
+        // the fixture's own defect is what the case would report.
+        // ⚠️ The repair is owed whatever order the new gate sits in: the
+        // `forced` limb asserts `201`, which an under-specified manifest must
+        // never reach — so no placement of that gate leaves this fixture valid.
+        const manifest = { id: 'pkg-a', name: 'A', version: '1.0.0' };
+        const dup = await dispatcher.dispatch('POST', '/packages', manifest, {}, {} as any);
         expect(dup.response?.status).toBe(409);
-        const forced = await dispatcher.dispatch('POST', '/packages', { id: 'pkg-a', name: 'A' }, { overwrite: 'true' }, {} as any);
+        const forced = await dispatcher.dispatch('POST', '/packages', manifest, { overwrite: 'true' }, {} as any);
         expect(forced.response?.status).toBe(201);
     });
 
@@ -733,6 +743,34 @@ describe('HttpDispatcher extracted domains (PR-6: automation)', () => {
             name: 'nurture', enabled: true, bound: false,
             status: 'active', triggerType: 'on_create', object: 'sales_lead',
         });
+    });
+
+    /**
+     * [#18235] Ruled item 6's third surface is this door. The engine records WHY
+     * a flow is unarmed; this route is the only way that sentence reaches a
+     * console, and it reaches it by passing the row through — so the pin is that
+     * `reason` is NOT dropped on the way out, beside a row that carries none.
+     */
+    it('/automation/_status carries the unbound reason, and omits it where there is none', async () => {
+        const automation = {
+            listFlows: vi.fn(),
+            getFlow: vi.fn(),
+            getFlowRuntimeStates: vi.fn().mockReturnValue([
+                {
+                    name: 'daily_digest', enabled: true, bound: false, status: 'active', triggerType: 'schedule',
+                    reason: 'disabled by deployment policy — package-authored scheduled work is off on this deployment',
+                },
+                { name: 'nurture', enabled: true, bound: true, status: 'active', triggerType: 'on_create', object: 'sales_lead' },
+            ]),
+        };
+        const result = await makeDispatcher({ automation, auth }).dispatch('GET', '/automation/_status', undefined, {}, {} as any);
+        expect(result.response?.status).toBe(200);
+        const flows = result.response?.body?.data?.flows as Array<Record<string, unknown>>;
+        expect(flows?.[0]?.reason, 'the policy sentence must survive the door').toMatch(/deployment policy/);
+        expect(String(flows?.[0]?.reason)).not.toMatch(/binding failed/);
+        // ⭐ DARK control: the healthy row is unchanged — no key appears on a
+        // row the producer did not put one on.
+        expect(Object.keys(flows?.[1] ?? {})).not.toContain('reason');
     });
 });
 

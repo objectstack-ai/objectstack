@@ -74,6 +74,13 @@ import {
   reportPermissionSetNameCollisions,
   type PermissionSetNameCollisionDiagnostic,
 } from './permission-set-name-collision.js';
+// [#18091] This seeder's two remaining refusals, each with its own wording,
+// token and record, over the one shared delivery rule.
+import {
+  permissionSetDeclarationUnownedDiagnostic,
+  reportPermissionSetDeclarationUnowned,
+  reportPermissionSetRowsUnreadable,
+} from './seed-refusal-diagnostics.js';
 
 export type { PermissionSeedOutcome } from './permission-set-projection.js';
 
@@ -228,7 +235,19 @@ export async function upsertPackagePermissionSet(
   // undefined again — the exact ambiguity ADR-0086 D3 exists to remove — so a
   // set with no resolvable owner is skipped rather than materialized unowned.
   if (!packageId) {
-    logger?.warn?.('[security] permission set has no owning package — not materialized', { name: ps.name });
+    // [#18091] ⛔ The refusal is unchanged — an unowned row would re-create the
+    // ADR-0086 D3 ambiguity. What changed is that it arrives. Measured on the
+    // pre-fix tree with no logger, through BOTH doors that reach this branch
+    // (the boot loop and the ADR-0086 P2 publish materializer, which passes no
+    // collector): author-visible console lines = 0, and this branch moves no
+    // counter either, so the outcome said nothing about it.
+    //
+    // Its own wording, because the consequence is not the capability axis':
+    // the declared set stays runtime-enforced and only the RECORD is missing.
+    reportPermissionSetDeclarationUnowned(logger, permissionSetDeclarationUnownedDiagnostic({
+      name: String(ps.name),
+      ...(opts?.organizationId ? { organizationId: opts.organizationId } : {}),
+    }));
     return out;
   }
 
@@ -422,10 +441,13 @@ export async function bootstrapDeclaredPermissions(
     // Said once, with the count: these sets were neither seeded nor reconciled
     // because the record could not be READ. Silence here would read exactly
     // like "everything was already in order".
-    options.logger?.warn?.(
-      '[security] declared permission sets left untouched — their records could not be read',
-      { unreadable: out.unreadable, total: sets.length, ...(organizationId ? { organization: organizationId } : {}) },
-    );
+    // [#18091] …and said even when no logger was injected: silence here reads
+    // exactly like "everything was already in order", which is the whole defect.
+    reportPermissionSetRowsUnreadable(options.logger, {
+      unreadable: out.unreadable,
+      total: sets.length,
+      ...(organizationId ? { organizationId } : {}),
+    });
   }
 
   options.logger?.info?.('[security] declared permission sets seeded into sys_permission_set (ADR-0086 D5)', {

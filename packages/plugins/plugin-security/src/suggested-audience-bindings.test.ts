@@ -17,7 +17,7 @@ import {
 /** In-memory ObjectQL stub (same shape as audience-anchors.test.ts) with an
  *  installed-package registry and insert-call recording so tests can assert
  *  WHICH context a write carried. */
-function makeQl(packages: any[] = []) {
+function makeQl(packages: any[] = [], declaredCapabilities: any[] = []) {
   const tables: Record<string, any[]> = {
     sys_position: [{ id: 'pos_everyone', name: 'everyone' }, { id: 'pos_guest', name: 'guest' }],
     sys_permission_set: [],
@@ -30,7 +30,10 @@ function makeQl(packages: any[] = []) {
     insertCalls,
     registry: {
       getAllPackages: () => packages,
-      listItems: (_type: string) => [],
+      // [#18535] The ADR-0066 D1 capability declarations, served off the SAME
+      // registry door the seeder reads them by (`readDeclared`) — so a pin
+      // written here exercises the shipped read, not a transcription of it.
+      listItems: (type: string) => (type === 'capability' ? declaredCapabilities : []),
     },
     async find(object: string, opts: any) {
       const where = opts?.where ?? {};
@@ -315,6 +318,73 @@ describe('confirmAudienceBindingSuggestion', () => {
     expect(ql.tables.sys_position_permission_set).toHaveLength(0);
     // still pending — the admin can retry after the package fixes the set
     expect(ql.tables.sys_audience_binding_suggestion[0].status).toBe('pending');
+  });
+
+  // ── [#18535] ADR-0090 D5: 「平台系统权限;带 package provenance 的应用声明
+  // capability 令牌不计」 ─────────────────────────────────────────────────
+  //
+  // The confirm path's early gate is the FRIENDLY RENDITION of the engine
+  // middleware that re-enforces the same predicate on the insert below it, so
+  // it must ask the identical question: it now passes the stack's declared
+  // capabilities as `AnchorBindingContext.declaredCapabilities`. Three cases,
+  // because "the declared token binds" alone is equally satisfied by a gate
+  // that stopped judging `systemPermissions` at all.
+  const tokenPackage = (token: string) => ({
+    enabled: true,
+    manifest: {
+      id: 'com.example.crm',
+      permissions: [
+        {
+          name: 'crm_member_default',
+          isDefault: true,
+          systemPermissions: [token],
+          objects: { crm_account: { allowRead: true } },
+        },
+      ],
+    },
+  });
+
+  it('binds an isDefault set whose systemPermissions token THIS stack declares', async () => {
+    const ql = makeQl([tokenPackage('crm.export_pipeline')], [{ name: 'crm.export_pipeline', label: 'Export Pipeline' }]);
+    const deps = makeDeps(ql);
+    const { suggestions } = await listAudienceBindingSuggestions(deps, ADMIN_CTX, {});
+
+    const { bindingCreated, suggestion } = await confirmAudienceBindingSuggestion(deps, ADMIN_CTX, suggestions[0].id);
+
+    expect(bindingCreated).toBe(true);
+    expect(suggestion.status).toBe('confirmed');
+    // The row itself, not just the return flag: the anchor really carries it.
+    const binding = ql.tables.sys_position_permission_set.find((r: any) => r.position_id === 'pos_everyone');
+    expect(binding).toBeTruthy();
+    // …and the set that got bound is the one carrying the token — a pin that
+    // would still pass if the token had been dropped on the way in is no pin.
+    const setRow = ql.tables.sys_permission_set.find((r: any) => r.id === binding.permission_set_id);
+    expect(JSON.parse(setRow.system_permissions)).toEqual(['crm.export_pipeline']);
+  });
+
+  it('still refuses an UNDECLARED systemPermissions token — the control for the case above', async () => {
+    // A real declaration list naming a DIFFERENT capability: membership is what
+    // excuses a token, never the presence of declarations on the stack.
+    const ql = makeQl([tokenPackage('crm.settle_ledger')], [{ name: 'crm.export_pipeline', label: 'Export Pipeline' }]);
+    const deps = makeDeps(ql);
+    const { suggestions } = await listAudienceBindingSuggestions(deps, ADMIN_CTX, {});
+
+    await expect(confirmAudienceBindingSuggestion(deps, ADMIN_CTX, suggestions[0].id))
+      .rejects.toThrow(/cannot be bound to the 'everyone' audience anchor/);
+    expect(ql.tables.sys_position_permission_set).toHaveLength(0);
+    expect(ql.tables.sys_audience_binding_suggestion[0].status).toBe('pending');
+  });
+
+  it('still refuses a PLATFORM capability even when the stack declares a capability of that name', async () => {
+    // The platform floor, inside the predicate: declaring `manage_users` must
+    // not launder it past the anchor gate.
+    const ql = makeQl([tokenPackage('manage_users')], [{ name: 'manage_users', label: 'Not Yours' }]);
+    const deps = makeDeps(ql);
+    const { suggestions } = await listAudienceBindingSuggestions(deps, ADMIN_CTX, {});
+
+    await expect(confirmAudienceBindingSuggestion(deps, ADMIN_CTX, suggestions[0].id))
+      .rejects.toThrow(/cannot be bound to the 'everyone' audience anchor/);
+    expect(ql.tables.sys_position_permission_set).toHaveLength(0);
   });
 
   it('refuses when the set name is owned by a different package (ADR-0086 D4)', async () => {

@@ -47,7 +47,9 @@
  *     never displaces a declared 4xx, a sandboxed producer keeps the unwrap
  *     door's sentence on BOTH doors (#11588 / #7543; the single door's mirror
  *     defect was closed by #14704, which FLIPPED that case's verdict here from
- *     ACCEPTED DIVERGENCE to CONVERGED rather than deleting it), and the one
+ *     ACCEPTED DIVERGENCE to CONVERGED rather than deleting it; #17273 flipped
+ *     the sandboxed-CRASH case the same way, and added the 5xx band and the
+ *     refusal negative control beside it), and the one
  *     status this card DOES move
  *     — a sandboxed 5xx carrying `OBJECT_NOT_FOUND` / `INVALID_FIELD` — is
  *     pinned rather than described;
@@ -561,7 +563,33 @@ describe('#14541 · structured arms are consulted by BOTH doors', () => {
             expect(bulk.body).not.toHaveProperty('dependentObject');
         });
 
-        it('ACCEPTED DIVERGENCE (#15071 widens it): a sandboxed CRASH that DECLARED a 4xx status', () => {
+        /**
+         * FLIPPED by #17273, deliberately and in that card's PR, from
+         * `ACCEPTED DIVERGENCE (#15071 widens it)` to `CONVERGED` — the same
+         * discipline #14704 used on the sentence case above and #15071 used on
+         * `error-response-sandbox-arm-message.test.ts` §4. ⛔ The case is not
+         * DELETED: it is the only thing that would notice the divergence coming
+         * back, and what changes is its verdict, not its existence.
+         *
+         * ## What the old verdict bought, and why it had to change
+         *
+         * `ACCEPTED DIVERGENCE` bought "the next reader knows this is
+         * unconverged" — never "nothing is wrong here". #15071 could not take
+         * this shape because closing it means moving the STATUS
+         * `resolveErrorResponse`'s passthrough decided, the #11588-fenced
+         * contract question, so it recorded the boundary IN the pin and had the
+         * residue carded rather than pretending to be done. #17273 is that
+         * card, so the spelling moves with the fact.
+         *
+         * ## What moved on the wire
+         *
+         * The bulk door alone, and in the shrinking direction: `409` →
+         * `500`, the declared `DELETE_RESTRICTED` → the catalog's
+         * `INTERNAL_ERROR`, and the runner's `hook 'guard' threw: TypeError: …`
+         * debug wrapper → the generic sentence. Nothing is added to the body.
+         * The single door is byte-identical to what #15071 left.
+         */
+        it('CONVERGED (#17273): a sandboxed CRASH that DECLARED a 4xx status is the fault terminal at both doors', () => {
             const err: any = new Error("hook 'guard' threw: TypeError: x is not a function");
             err.innerMessage = 'TypeError: x is not a function';
             err.code = 'DELETE_RESTRICTED';
@@ -569,16 +597,79 @@ describe('#14541 · structured arms are consulted by BOTH doors', () => {
             err.object = 'account';
             const bulk = bulkDoor(err, 'account');
             const single = singleDoor(err, 'account');
-            // The single door: what this card ruled — a crash is a fault.
+            // The single door: what #15071 ruled — a crash is a fault.
             expect(single.status).toBe(500);
             expect(single.body.code).toBe('INTERNAL_ERROR');
             expect(String(single.body.error)).not.toContain('threw:');
-            // The bulk door: unchanged by this card, and still the shape §7 of
-            // `rest-hook-refusal-message-parity.test.ts` records. ⛔ Green on
-            // both sides of the fix: it documents the gap, it does not bless it.
+            // The bulk door: this card's flip. It read 409 /
+            // `DELETE_RESTRICTED` / a body CONTAINING `threw:` before.
+            expect(bulk.status).toBe(500);
+            expect(bulk.body.code).toBe('INTERNAL_ERROR');
+            expect(String(bulk.body.error)).not.toContain('threw:');
+            // CONVERGED is asserted on the BODY, not just the status — the
+            // verdict this case is labelled with is the §4 contract (a case
+            // labelled CONVERGED whose bodies are unequal has to say where and
+            // why, and this one has nothing to say).
+            expect(bulk.body).toEqual(single.body);
+            expect(bulk.body).not.toHaveProperty('dependentObject');
+        });
+
+        /**
+         * [#17273] The band the card did NOT name, pinned because the repair
+         * reaches it rather than left for someone to rediscover.
+         *
+         * The crash terminal in `resolveErrorResponse` is deliberately not
+         * band-scoped: scoping it to 4xx would have converged the shape above
+         * while minting a NEW divergence one band over — the single door has
+         * answered `500 INTERNAL_ERROR` for this error since #15071, and the
+         * bulk door's 5xx arm would have kept `503` with the declared code.
+         *
+         * ⛔ This is NOT a narrowing of the 5xx arm's unconditional prose-drop
+         * (#5437 / #5582 / #5907): the fault terminal withholds prose too, so
+         * nothing about disclosure moves — only the status and the declared
+         * `code`, both toward the sanitised pair. The guard-1 case below is the
+         * control that says so: a producer-declared 5xx that is NOT a crash
+         * still keeps the passthrough's arm, status and code intact.
+         */
+        it('CONVERGED (#17273): a sandboxed CRASH that DECLARED a 5xx is the fault terminal at both doors', () => {
+            const err: any = new Error("hook 'guard' threw: TypeError: x is not a function");
+            err.innerMessage = 'TypeError: x is not a function';
+            err.code = 'DELETE_RESTRICTED';
+            err.status = 503;
+            err.object = 'account';
+            const bulk = bulkDoor(err, 'account');
+            const single = singleDoor(err, 'account');
+            expect(single.status).toBe(500);
+            expect(bulk.status).toBe(500);
+            expect(bulk.body.code).toBe('INTERNAL_ERROR');
+            expect(String(bulk.body.error)).not.toContain('threw:');
+            expect(bulk.body).toEqual(single.body);
+        });
+
+        /**
+         * [#17273] The negative control the flip makes mandatory, at the door
+         * the flip moved. An implementation that degraded every SANDBOX-origin
+         * error to the fault terminal would turn both cases above green while
+         * deleting the whole sandbox-refusal surface on the bulk door —
+         * #15071's ruling fences exactly that: *"Ordinary declared refusals (a
+         * hook that throws a business error carrying a code, no crash) are
+         * **untouched** — only the crash branch moves."*
+         *
+         * The refusal case is asserted at the top of §4 as well; it is repeated
+         * HERE, one `innerMessage` away from its crash sibling, because the
+         * only difference between a green flip and a deleted surface is which
+         * of those two sentences the field carries.
+         */
+        it('#17273 negative control: a sandboxed REFUSAL declaring the same 4xx keeps the passthrough on the bulk door', () => {
+            const err: any = new Error("hook 'guard' threw: Error: Opportunity is closed.");
+            err.innerMessage = 'Opportunity is closed.';
+            err.code = 'DELETE_RESTRICTED';
+            err.status = 409;
+            err.object = 'account';
+            const bulk = bulkDoor(err, 'account');
             expect(bulk.status).toBe(409);
             expect(bulk.body.code).toBe('DELETE_RESTRICTED');
-            expect(String(bulk.body.error)).toContain('threw:');
+            expect(bulk.body.error).toBe('Opportunity is closed.');
         });
 
         it('ACCEPTED DIVERGENCE (guard 1): a producer-declared 5xx keeps the passthrough on the bulk door', () => {

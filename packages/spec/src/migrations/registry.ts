@@ -4587,13 +4587,16 @@ const step17: MigrationStep = {
       surface: 'ai.tool.requiresConfirmation',
       replacement:
         'put the operation behind an ACTION and set `ai.requiresConfirmation: true` there — the '
-        + 'flag the platform confirmation CONTRACT is written against. That contract DECLARES '
-        + 'that an AI-facing call on an action declaring the flag must carry an explicit '
-        + 'confirmation member on the request and is to be refused without it with '
-        + '`ACTION_CONFIRMATION_REQUIRED`, the refusal naming the action and the exact member to '
-        + 'set. A gate, not a queue: nothing is parked. ⚠ The refusal is DECLARED, not yet '
-        + 'performed — the runtime door lands in #15942, so until then the flag stops nothing on '
-        + 'its own and the human in the loop is still yours to arrange',
+        + 'flag the platform confirmation CONTRACT is written against, and that contract is '
+        + 'ENFORCED. An AI-facing call on an action declaring the flag must carry the '
+        + 'confirmation member `confirm: true` on the request and is REFUSED without it with '
+        + '`ACTION_CONFIRMATION_REQUIRED` (428), the refusal naming the action and the exact '
+        + 'member to set. A gate, not a queue: nothing is parked, and a refused call did not '
+        + 'run — no record was read and none was written. ⚠ Two bounds: the enforced set is the '
+        + 'doors that enforce the author\'s `ai.exposed` opt-in, today the action door reached '
+        + 'from the MCP `run_action` tool, while REST `/actions` is not `ai.exposed`-gated and '
+        + 'sits outside the gate; and `confirm: true` is an unverifiable caller claim, so the '
+        + 'gate makes forgetting loud without proving a human approved',
       reason:
         '`ToolSchema.requiresConfirmation` accepted `true` and no execution path ever read it: '
         + 'not the LLM tool set (a tool reaches the model as name / description / parameters '
@@ -4626,13 +4629,18 @@ const step17: MigrationStep = {
         + 'load-bearing half is what happens NEXT, and no gate can check it for you: for every '
         + 'tool that carried the flag, decide whether that operation genuinely needs a human in '
         + 'the loop. If it does, move it behind an action carrying `ai.requiresConfirmation: '
-        + 'true`, which is what the confirmation contract (#16293) gates on. ⛔ Do NOT try to '
-        + '"prove the gate" by invoking the operation without the confirmation member: the '
-        + 'runtime door that refuses lands in #15942, so before that ships the call is not '
-        + 'refused, it RUNS the destructive operation. Until then the declaration is a contract '
-        + 'and the human in the loop is still yours to arrange — which is the decision this '
-        + 'criterion is asking you to make, not a test to run. If the operation does not need '
-        + 'a human, delete the key knowingly. '
+        + 'true`, which is what the confirmation contract (#16293) gates on — and that gate is '
+        + 'PERFORMED: invoking the operation over an AI-exposed door without the confirmation '
+        + 'member is REFUSED with `ACTION_CONFIRMATION_REQUIRED` (428) and nothing runs, so '
+        + 'that call is a real check you can make rather than a destructive experiment. ⚠ Two '
+        + 'bounds on what it proves: the enforced set is the doors that enforce the author\'s '
+        + '`ai.exposed` opt-in — today the action door reached from the MCP `run_action` tool '
+        + '— while REST `/actions` is not `ai.exposed`-gated and sits outside the gate, so an '
+        + 'agent holding an API key on that route is still yours to put a human in front of; '
+        + 'and `confirm: true` is an unverifiable caller claim, so the gate makes forgetting '
+        + 'loud without proving a human approved. The decision above is still the one this '
+        + 'criterion asks you to make. If the operation does not need a human, delete the key '
+        + 'knowingly. '
         + 'Deleting it without that decision leaves exactly the state the retirement exists to '
         + 'end: a destructive tool nobody is approving, now without even the false flag to show '
         + 'that somebody once meant to.',
@@ -5501,7 +5509,20 @@ const step18: MigrationStep = {
     + 'from all three authored sites (`dashboards[].widgets[].chartConfig`, `reports[].chart`, '
     + '`reports[].blocks[].chart`) as a pure lossless delete — it never had an effect to lose. '
     + 'The two alias spellings that pointed at it, `accessibility` and `ariaProps`, became '
-    + 'refusals carrying the same prescription rather than renames onto a tombstone.',
+    + 'refusals carrying the same prescription rather than renames onto a tombstone. '
+    + 'It also states, and enforces, who owns a dataset-bound chart\'s STRUCTURE '
+    + '(ADR-0021; maintainer ruling 2026-09-12, decision batch #121 item 1): the dataset '
+    + 'decides which series exist and which column each one reads, `chartConfig` carries '
+    + 'appearance, and `dashboard.widgets[].chartConfig`\'s `type`, `xAxis`, `yAxis` and '
+    + '`series` are refused by name on that carrier — the widget\'s own `type` is the chart '
+    + 'family and `dimensions`/`values` are the selection. An authored `yAxis[].field` was a '
+    + 'live membership channel: the renderer synthesised a series from it when the chart '
+    + 'declared none, so one authored axis could silently re-point a dataset-bound series at '
+    + 'another column and the chart still drew. The D2 conversion strips the four keys from '
+    + 'dashboard widgets only — `ReportChartSchema` and the inline-data react `<ObjectChart>` '
+    + 'tier keep their own axes — and the paired semantic entry carries what the stripped '
+    + 'keys were saying, because an authored axis field may name a column the widget never '
+    + 'selected and no walker can move that intent into the dataset.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5511,6 +5532,7 @@ const step18: MigrationStep = {
     'field-column-lists-canonicalized',
     'metric-filters-removed',
     'cube-sub-day-granularities-removed',
+    'cube-join-sql-and-relationship-removed',
     'record-highlights-field-icon-removed',
     'mapping-lookup-params-removed',
     'translation-component-submit-label-removed',
@@ -5532,6 +5554,7 @@ const step18: MigrationStep = {
     'list-view-sort-string-clause-to-array',
     'page-assigned-profiles-removed',
     'chart-config-aria-removed',
+    'dashboard-widget-chart-config-structure-removed',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
@@ -5580,6 +5603,49 @@ const step18: MigrationStep = {
         + 'button once per declared action against a multi-row selection and confirm the number of '
         + 'dispatches matches the declaration (N for per-record, one for aggregate) — a mismatch that '
         + 'used to be silent is what this key exists to surface.',
+    },
+    // The action facade's `find` took the `where` HALF of a query while every other
+    // `find` on the platform took the whole envelope. The rewrite is mechanical and
+    // lossless, but it lives in an action HANDLER's source — a TypeScript function
+    // body, not a keyed metadata document — so `objectstack migrate meta` cannot
+    // reach it and it is a semantic entry rather than a D2 conversion.
+    {
+      id: 'action-engine-facade-find-query-envelope',
+      surface: 'Action handler body — `ctx.engine.find(object, filter)` '
+        + '(`ActionEngineFacade.find`, `@objectstack/spec/ui`)',
+      replacement: '`ctx.engine.find(object, { where: filter })` — the engine\'s own query envelope '
+        + '(`EngineQueryOptions`), the same options bag `IDataEngine.find` takes. The filter moves under '
+        + '`where` verbatim: `find(\'task\', { status: \'open\' })` → '
+        + '`find(\'task\', { where: { status: \'open\' } })`. An unfiltered `find(object, {})` is unchanged, '
+        + 'and the rest of the envelope — `fields`, `orderBy`, `limit`, `offset`, `expand` — becomes '
+        + 'reachable from a handler for the first time. A caller-supplied `context` is ignored: the '
+        + 'facade is trusted and stamps its own elevated one.',
+      reason:
+        'The rewrite itself is lossless and mechanical, but it is not automatable here: an action handler '
+        + 'is authored TypeScript, and the chain rewrites stored metadata by key, so no `os migrate meta` '
+        + 'step can reach a call expression inside a function body. The change is a WITHDRAWAL of the '
+        + 'parameter shape #14175 chose, ruled by the director seat (decision batch #123 item 3, '
+        + '2026-09-12, 「同意」) on the long-term axis 「one platform, one query shape」. The facade had been '
+        + 'given a shape different from the engine\'s — the `where` half alone — which made the most '
+        + 'natural spelling the wrong one: an author who passed the engine\'s envelope got '
+        + '`{ where: { where: … } }`, matching no row and resolving to `[]` with no error, while an '
+        + 'unfiltered `{}` kept working under either belief so a dead handler looked partially alive. The '
+        + 'alternative — refusing `where` at the top level with an intersection — was rejected because it '
+        + 'asserts a vocabulary fact the spec declares nowhere, reserving the field name `where` across '
+        + 'every customer\'s data model to buy one parameter\'s compile-time check.',
+      acceptanceCriteria:
+        'Every `ctx.engine.find(...)` in the app\'s action handlers passes an envelope. Where the handler '
+        + 'is annotated with the PUBLISHED `ActionHandlerContext`, `tsc --noEmit` finds every unmigrated '
+        + 'call on its own — a bare filter is a compile error there, an object literal failing the '
+        + 'excess-property check and a `FilterCondition` variable failing TS2559. ⚠️ Where it is NOT — a '
+        + 'handler in an `objectstack.config.js` / `.mjs`, one annotated with a local copy of the context '
+        + 'type, or a `(ctx: any)` handler — the type reaches nothing and a type-check alone proves '
+        + 'nothing: those callers are refused at RUNTIME by the facade arm, with the same prescription, so '
+        + 'the migration is complete for them only once each such handler has actually been RUN. Then '
+        + 'confirm the reads that were already SILENTLY EMPTY: any handler that had been passing the '
+        + 'envelope was resolving to `[]` on every call, so a suite written against the mistake passed and '
+        + 'the row count is the only witness — re-run each migrated handler against seeded data and assert '
+        + 'it now returns the rows its filter selects, rather than asserting it still resolves.',
     },
     {
       id: 'address-location-value-unknown-keys-refused',
@@ -6674,6 +6740,51 @@ const step18: MigrationStep = {
         + 'widening a local mirror of the enum.',
     },
     {
+      id: 'cube-join-sql-and-relationship-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+      // span AND a table cell.
+      surface:
+        'analyticsCubes[].joins.<alias>.sql / analyticsCubes[].joins.<alias>.relationship — the '
+        + 'authored ON clause and the declared cardinality on a cube join',
+      replacement:
+        'analyticsCubes[].joins.<alias>.name alone. The ON clause is DERIVED from the declared '
+        + 'relationship between the two cubes\' objects, as a foreign-key equality: NativeSQLStrategy '
+        + 'emits the LEFT JOIN and its ON from the dotted member path, and ObjectQLStrategy lowers the '
+        + 'same alias to a relationship traversal with no ON clause at all. The record KEY is the '
+        + 'foreign-key FIELD on the base object, never a second spelling of the object the join '
+        + 'reaches.',
+      reason:
+        'The KEYS convert mechanically and do: the paired D2 conversion '
+        + '`cube-join-sql-and-relationship-removed` deletes both from every join, which is lossless '
+        + 'because neither ever had an effect to lose, and names the cube in each notice. What does '
+        + 'NOT convert is the INTENT. `sql` was REQUIRED and documented as the ON clause, and no '
+        + 'reader ever consulted it: an authored condition was REPLACED by the synthesised '
+        + 'foreign-key equality and the aggregate came back under a 200, joined on something the '
+        + 'author had not asked for. `relationship` carried a `.default(\'many_to_one\')` that nothing '
+        + 'dispatched on, so `one_to_many` parsed, changed no SQL, and kept the many-to-one '
+        + 'arithmetic. Deleting the keys restores honesty but does not give an author who wanted a '
+        + 'non-FK join the thing they wanted, and it does not re-check the numbers the replaced join '
+        + 'already produced. That is why this entry is a TODO addressed to them rather than a claim '
+        + 'that the strip finished the job. A custom join condition is a capability card with its '
+        + 'injection / allow-list boundary decided first, which the ruling deferred deliberately.',
+      acceptanceCriteria:
+        'Delete `sql` and `relationship` from every entry of every cube `joins` map; keep `name`. '
+        + 'The paired D2 conversion `cube-join-sql-and-relationship-removed` performs that same '
+        + 'strip mechanically wherever the chain is replayed — including over metadata already at '
+        + 'rest, so a deployed artifact keeps booting while you do. Then check three things. (1) Did any deleted `sql` express something OTHER than the foreign-key '
+        + 'equality between the two objects — a filtered join, a non-key column, a literal predicate? '
+        + 'If so, the query you were getting was already the FK-equality answer and not the one you '
+        + 'wrote, so re-read the numbers that join produced before assuming this change moved them; the '
+        + 'fix is to model the relationship on the object, or to open a capability request for an '
+        + 'authorable join condition. (2) Did any deleted `relationship` say anything but '
+        + '`many_to_one`? If so, the aggregate was already computed as many-to-one and still is — this '
+        + 'change alters no result, it only stops the declaration from claiming otherwise. (3) Is each '
+        + 'join KEYED by a foreign-key field of the cube\'s own base object? The key is the column the '
+        + 'derived ON clause reads, so a join keyed after the object it REACHES never resolved at all. '
+        + 'Nothing else regresses: `joins.<alias>.name` is unchanged, and it is what both the joined '
+        + 'table and the per-object RLS/tenant read scope are resolved from.',
+    },
+    {
       id: 'dashboard-header-modal-target-page-only',
       surface:
         'dashboard `header.actions[]` entries with `actionType: \'modal\'` — an `actionUrl` naming '
@@ -6705,6 +6816,167 @@ const step18: MigrationStep = {
         + 'buttons meant to open an object\'s form declare `actionType: \'form\'` with an '
         + '`<object>.<view>` target instead. Clicking each converted button opens the intended '
         + 'page or form rather than a refusal dialog.',
+    },
+    // The judgement half of `dashboard-widget-chart-config-structure-removed`. The
+    // D2 conversion strips the four keys mechanically; what they CARRIED cannot be
+    // moved by a walker, because the intent lands one level up in a selection the
+    // stripped widget may not hold — an authored `xAxis.field` can name a dataset
+    // dimension the widget never selected, and a `series[]` entry can name a
+    // measure outside `values` entirely.
+    {
+      id: 'dashboard-widget-chart-config-structure-refused',
+      surface:
+        '`dashboard.widgets[].chartConfig.type` / `.xAxis` / `.yAxis` / `.series` — the four keys '
+        + 'that said which chart family to draw, which series exist and which column each one reads '
+        + 'on a DATASET-BOUND widget (REMOVED)',
+      replacement:
+        'the widget’s own `type` and its ADR-0021 dataset selection. `chartConfig.type` becomes the '
+        + 'widget’s `type` (the chart family has always been the widget’s — the dashboard renderer '
+        + 'maps the widget type to the chart family and never read the chart config’s). '
+        + '`chartConfig.xAxis.field` becomes an entry in the widget’s `dimensions`: the dataset '
+        + 'dimension the category axis plots. Each `chartConfig.yAxis[].field` becomes an entry in '
+        + 'the widget’s `values`: the dataset measure that axis plots, one entry per mark, and a '
+        + 'second axis is a second measure rather than a second axis declaration. Each '
+        + '`chartConfig.series[].name` is the same measure name, so a series list that matched '
+        + '`values` needs nothing and one that did not was already being ignored. What has NO '
+        + 'replacement, and is the reason this is a TODO rather than a rewrite: the PRESENTATION '
+        + 'those objects carried alongside the binding — `ChartAxis.title` / `format` / `min` / '
+        + '`max` / `stepSize` / `showGridLines` / `position` / `logarithmic`, and '
+        + '`ChartSeries.label` / `color` / `type` / `yAxis` / `stack` / `dashArray` / `opacity`. '
+        + 'The dataset’s own dimension and measure declarations are what label and format a '
+        + 'dataset-bound chart now; `colors` on the same chart config remains the palette channel, '
+        + 'and a per-series mark type (the combo chart a widget could author through '
+        + '`series[].type`) has no authoring channel on this face at all.',
+      reason:
+        'Maintainer ruling 2026-09-12, decision batch #121 item 1, verbatim 「同意」, on options '
+        + 'C+D together: the protocol states the ownership split AND refuses the structural keys by '
+        + 'name, because stating it without refusing them leaves the declared-but-inert shape '
+        + 'ADR-0049 exists to end, and refusing them without stating it leaves an author with no '
+        + 'reason. The defect being closed is not cosmetic: an authored `yAxis[].field` was a LIVE '
+        + 'MEMBERSHIP CHANNEL — the renderer synthesised a series from the authored axes when the '
+        + 'chart declared none — so one authored axis could silently re-point a dataset-bound '
+        + 'series at a different column while the chart still drew, which reads as a true statement '
+        + 'about the data. ⛔ Not mechanically convertible: the D2 conversion can delete the keys '
+        + 'from a stored widget, but moving what they MEANT into the dataset selection needs facts '
+        + 'the item does not carry — whether the dataset declares a dimension by that name, whether '
+        + 'the measure is in the dataset at all, and whether the author wanted the axis they wrote '
+        + 'or the one the selection derives. An authored field naming a column outside the '
+        + 'selection is exactly the case where a walker guessing would produce a different chart '
+        + 'rather than a refused one. The keys are NOT retired from the chart config itself: '
+        + '`ReportChartSchema` keeps its own `xAxis`/`yAxis` (narrowed to its bound dataset’s '
+        + 'dimension and measure names), and the react `<ObjectChart data={…}>` tier keeps all '
+        + 'four, because an inline-data chart has no dataset to derive structure from and the '
+        + 'author’s axes are the only ones there are.',
+      acceptanceCriteria:
+        'Measured against the shipped schema, not restated from the card. (1) No dashboard widget '
+        + 'carries `chartConfig.type`, `.xAxis`, `.yAxis` or `.series`: the D2 conversion '
+        + '`dashboard-widget-chart-config-structure-removed` strips them from authored sources on a '
+        + 'chain replay and `os migrate meta --stored --apply` covers rows already at rest, and a '
+        + 'value that reaches a parse is refused at that key’s own path with the prescription '
+        + 'naming the dataset selection. (2) For every widget that carried one, the chart it draws '
+        + 'after the migration is the chart the author meant: the family is the widget’s `type`, '
+        + 'the category axis plots the dimension named in `dimensions`, and there is one mark per '
+        + 'measure named in `values` — verified by rendering the dashboard, not by reading the '
+        + 'metadata, because the pre-migration chart may have been plotting a column the selection '
+        + 'never named. (3) A widget whose authored axes AGREED with its selection renders '
+        + 'identically before and after, and that is the expected case; a widget that renders '
+        + 'differently was relying on the membership channel this removes and is the case the '
+        + 'ruling was made about. (4) Axis titles, number formats, axis bounds, grid lines and '
+        + 'per-series labels/colours/mark types are gone from the widget and are NOT expected back: '
+        + 'a dataset-bound chart takes them from the dataset’s dimension and measure declarations. '
+        + 'A combo chart that was authored through `series[].type` on a dataset-bound widget has no '
+        + 'authoring channel on this face after the change — that capability loss is ruled, not '
+        + 'incidental, and an inline-data react `<ObjectChart>` is where a per-series mark type is '
+        + 'still authored.',
+    },
+    {
+      id: 'dashboard-widget-metric-family-multi-measure-refused',
+      surface: 'dashboard widget measure arity — `dashboard.widgets[].values` '
+        + '(`DashboardWidgetSchema.values`) on a widget whose `type` is one of the metric '
+        + 'FAMILY (`metric` / `kpi` / `gauge` / `solid-gauge` / `bullet`), INCLUDING a widget '
+        + 'that declares no `type` at all and so resolves to the `metric` default',
+      replacement: 'ONE measure per tile. Keep the measure the tile is actually for — in '
+        + 'practice `values[0]`, which is the only one that has ever rendered — and give each '
+        + 'of the others its OWN widget: a new `id`, the same `dataset`, that one measure in '
+        + '`values`, and its own `layout` if the dashboard pins grid positions. ⛔ The '
+        + 'migration does not do this for you and no conversion could: N tiles need N ids and '
+        + 'N boxes on a 12-column grid, which is a LAYOUT decision about a dashboard the '
+        + 'registry has never seen. If several numbers in ONE widget is what was meant, that '
+        + 'is a different visual and the arity rule is not in its way: `type: \'table\'` '
+        + 'renders a row of measures, and the chart families (`bar` / `line` / `area` / '
+        + '`combo`) render one mark per measure — all of them keep the unbounded `values` '
+        + 'they have always had.',
+      reason:
+        'objectui#8894 ruling D (decision batch #119 item 4, 2026-09-12 「同意」) on the '
+        + 'maintainer\'s standing rule 「协议不正确的应该先修改协议。」 — judge the protocol '
+        + 'wrong rather than invent display semantics for `values[1..]`. Measured on '
+        + 'objectui#7293 defect 1: `values` was `z.array(z.string()).min(1)` with NO upper '
+        + 'bound on every widget type, so a `metric` tile could declare three measures; the '
+        + 'dataset query selected and computed all three, and the tile rendered `values[0]`. '
+        + 'The other two were queried and dropped on the floor — the declared≠delivered shape '
+        + 'ADR-0049 exists to end, kept alive by a runtime warning rather than closed. '
+        + 'objectui PR #8887 (merged) added the sub-caption, and the seat\'s second half made '
+        + 'the tile SAY that the extra measures are not rendered: that makes the tile honest '
+        + 'about dropping them, it does not make the document legal. A metric tile answers ONE '
+        + 'number — that is what the family means on every mainstream dashboard product, and '
+        + '`ChartTypeSchema` groups these five under "Performance (single value)" in its own '
+        + 'words. Several numbers is a DIFFERENT visual, not a variant of this one, so the '
+        + 'repair is an accept-set narrowing and not a renderer feature. ⛔ NOT the other arm '
+        + '(`objectstack-ai/duly#109`\'s wish for several numbers on one tile): under this '
+        + 'ruling that is a request for a different widget type, and it stays reachable '
+        + 'through `table` / the chart families, which this narrowing does not touch. '
+        + 'Ships at once, no deprecation window: there is no window in which a queried-and-'
+        + 'discarded measure does anything. Widening later (a real gauge renderer that draws '
+        + 'a target band, say) costs an author nothing and needs no second migration — a '
+        + 'narrowing that is later relaxed is free, while leaving the key unbounded costs '
+        + 'them a tile that silently drops what they declared.',
+      acceptanceCriteria:
+        '⚠️ WHICH DOOR: this refusal is the PUBLISH door\'s, not the editor\'s. Every stored '
+        + 'dashboard carrying more than one measure on a metric-family widget is refused the '
+        + 'next time it is parsed THROUGH `@objectstack/spec` — `os build` / `os lint`, the '
+        + 'metadata publish path, and any server-side door that parses the spec schema — with '
+        + 'ONE `custom` issue at `widgets[N].values` naming the widget\'s `id`, the number of '
+        + 'measures it declared, and the authored `type`. It is NOT refused by objectui\'s '
+        + 'client-side authoring door: `@object-ui/types` builds its own '
+        + '`DashboardWidgetSchema` from `specFieldsExcept(SpecDashboardWidgetSchema.shape, '
+        + '…).extend({…}).strict()`, and a `.shape` spread carries the FIELDS while dropping '
+        + 'every object-level check, so until that package imports and chains '
+        + '`checkDashboardWidgetMetricMeasureArity` the dashboard EDITOR keeps accepting three '
+        + 'measures on a `metric` and the author meets the refusal later, at publish. ⇒ Do not '
+        + 'read a green editor as a clean dashboard; re-parse through the spec. '
+        + '⚠️ AND THE TODO CANNOT NAME YOUR MEASURES: a `SemanticMigration` is static prose '
+        + 'emitted once per hop — `applyMetaMigrations` maps `step.semantic` straight onto the '
+        + 'result with no per-document interpolation and no filtering by whether the stack '
+        + 'even carries the shape — so `os migrate meta` prints THIS paragraph, not a list of '
+        + 'your dropped measures. The refusal is what names them, per widget, on the re-parse. '
+        + 'Drive the fix off `os build`, not off the migrate output. '
+        + 'WHAT IS REFUSED, exactly: two or more `values` members on `metric`, `kpi`, `gauge`, '
+        + '`solid-gauge` or `bullet`, and on a widget that declares no `type` (it resolves to '
+        + '`metric`, and the message says so rather than claiming you wrote it). '
+        + 'WHAT IS NOT, so this is not read as complete: a single-measure tile of any of those '
+        + 'five types parses byte-identically to before; all fifteen OTHER members of '
+        + '`ChartTypeSchema` — `bar`, `horizontal-bar`, `column`, `line`, `area`, `pie`, '
+        + '`donut`, `funnel`, `scatter`, `treemap`, `sankey`, `combo`, `radar`, `table`, '
+        + '`pivot` — keep accepting three measures, unmoved; an EMPTY `values` keeps the '
+        + 'field\'s own `too_small` from `.min(1)` and gains no second issue ("exactly one" is '
+        + 'the conjunction of that lower bound and this upper one, so a mirror re-attaching '
+        + 'this export onto a shape without `.min(1)` gets the upper bound only); a widget '
+        + 'whose `type` is outside `ChartTypeSchema` reports the TYPE refusal ALONE (zod treats '
+        + 'that `invalid_value` as aborting and skips object-level checks), so the arity '
+        + 'refusal arrives on the next parse and the two are never seen together; and whether '
+        + 'the surviving measure EXISTS in the bound dataset is still unreachable from this '
+        + 'schema — a tile naming one measure nobody declared parses exactly as it did before. '
+        + 'Nothing new is broken for consumers that DERIVE this schema: '
+        + '`.omit()`/`.pick()`/`.partial()` already threw on it before this change, because it '
+        + 'already carried `checkDashboardWidgetStageOrder`; `.extend()` is unaffected — except '
+        + 'that zod 4.4.3 refuses an `.extend()` which OVERWRITES a key on a refined object '
+        + '("Cannot overwrite keys on object schemas containing refinements. Use `.safeExtend()` '
+        + 'instead"), which was already true here and is why a per-`type` union arm was not the '
+        + 'spelling chosen. VERIFY by re-parsing each dashboard and reading the widget count: '
+        + 'a dashboard that had one three-measure `metric` tile should end with three '
+        + 'single-measure tiles and the same three numbers on screen — check the rendered grid '
+        + 'afterwards, because the two new tiles are numbers the dashboard was ALREADY paying '
+        + 'to compute and had never shown.',
     },
     {
       id: 'dashboard-widget-stage-order-non-funnel-refused',
@@ -7821,6 +8093,122 @@ const step18: MigrationStep = {
         + 'two former defaults. ⚠️ Runtime behaviour is deliberately UNCHANGED and must be '
         + 'verified as such: nothing ever read the keys, so removing them removes no behaviour.',
     },
+    // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+    // span already, and a nested backtick would close it.
+    {
+      id: 'evaluated-expression-slots-source-required',
+      surface:
+        'every EVALUATED expression slot in the spec — the 34 declaring positions of the #15811 census '
+        + 'that survive into this major, enumerated by identity and not by a name scan: the formula '
+        + 'Field.expression; the predicate '
+        + 'keys visibleWhen / visibleOn / readonlyWhen / requiredWhen / visibility / disabledWhen / '
+        + 'visible / disabled / condition / when, on Field, SelectOption, InlineGridColumn, '
+        + 'ScriptValidation, CrossFieldValidation, ConditionalValidation, Hook, ObjectFieldGroup, '
+        + 'RowCrudActionOverride, CriteriaSharingRule, PluginPermission.filter, MultiVersionSupport '
+        + 'routing, Action and ActionParam (including each param option), BaseNavItem, BulkActionDef, '
+        + 'PageComponent, PageTabs items, RecordAlert, ListViewShape, FormFieldBase, FormSection and the '
+        + 'settings-manifest Specifier and manifest visible — authored either '
+        + 'as an expression envelope carrying only ast ({ dialect: \'cel\', ast: … } with no source), '
+        + 'or with a source that is blank after trimming, through the envelope key '
+        + '({ dialect: \'cel\', source: \'   \' }) or the bare-string shorthand for it. ⚠️ The census '
+        + 'this entry was written against counted 36, and the two that are deliberately absent here are '
+        + 'the ServiceLevelIndicator successCriteria and TraceSamplingConfig composite condition '
+        + 'expression arms. They are not lost: they were RETIRED OUTRIGHT in this same unpublished '
+        + 'major by the observability-cel-predicates-retired entry of this step, under ADR-0049 '
+        + 'enforce-or-remove, because nothing evaluated either. Both entries first ship together, so an '
+        + 'upgrader never meets those two slots under THIS rule — the composite of the two changes is '
+        + 'the retirement alone, and stating the narrowing for a slot that no longer accepts an '
+        + 'expression at all would send the upgrader to author one. That absorption is the only reason '
+        + 'the count here is not the census figure the #15811 card records. The published '
+        + 'TypeScript interface RowCrudPredicates narrows with the two slots it mirrors. Reachable '
+        + 'wherever metadata is authored or stored: defineStack sources, an exported stack passed to '
+        + 'objectstack validate, a POST body on any of these metadata types, and a row already sitting '
+        + 'in sys_metadata',
+      replacement:
+        'a non-blank `source`. ⭐ For an `ast`-only envelope the recovery is MECHANICAL and lossless '
+        + 'for `cel`, which is the one dialect in this population that has an AST at all: '
+        + '`printCelAst(ast)` from `@objectstack/formula` (#15811, the inverse of `parseCelToAst`) '
+        + 'prints the AST back to surface syntax, and the recovered string is the new `source` — keep '
+        + 'the `ast` beside it if you want, an `ast` BESIDE a string `source` is untouched and stays '
+        + 'admitted everywhere. ⚠️ Lossless is about MEANING, not bytes: the printer re-renders from '
+        + 'the parse tree, so single-quoted literals come back double-quoted '
+        + '(`record.p == \'x\'` → `record.p == "x"`) and parentheses the parser dropped do not come '
+        + 'back. It answers `null` — never a guess — for an `ast` it cannot round-trip through the '
+        + 'platform\'s own bounded parser; that `null` is the hand-migration case. '
+        + 'For a BLANK `source` there is nothing to print from, so this entry delegates the judgment, '
+        + 'and it is the same fork #15807 named: author the predicate the slot was meant to carry, or '
+        + 'REMOVE the key entirely. ⚠️ Those two are not interchangeable and the choice is per slot, '
+        + 'not per file. A refused predicate reached its evaluator and faulted, and what the fault DID '
+        + 'differs by slot: on the fail-closed ones (`ObjectFieldGroup.visibleWhen`, '
+        + '`RowCrudActionOverride.visibleWhen`, `BulkActionDef.visible`, the two settings-manifest '
+        + '`visible` slots) it HID or EXCLUDED, so removing the key REVEALS what was hidden; on the '
+        + 'fail-soft ones (the rest) it left the gate open, so removing the key preserves what was '
+        + 'happening. Removing to clear the refusal is therefore safe on one half of the population '
+        + 'and a silent disclosure on the other',
+      reason:
+        'Card #15811, ruled 2026-09-12 (director seat, decision batch #122 item 2): the rule #15430 '
+        + 'set for the flow-node ledger and #15807 carried to `FlowEdgeSchema.condition` generalises '
+        + 'to every other slot an engine evaluates. Each of those slots now composes '
+        + '`EvaluatedExpressionInputSchema` instead of `ExpressionInputSchema`, so an evaluated slot '
+        + 'is held to what the engine can actually run. The engine reads `source` alone '
+        + '(`cel-engine.ts` `evaluate`: "AST-only evaluation not yet supported; persist `source`"), so '
+        + 'both refused spellings landed in its fault arm on every release that carried them — and '
+        + 'measured at the chokepoint, the engine never silently SUCCEEDS on either: it returns a '
+        + '`parse` fault, and what happened next was decided entirely by the slot\'s fail policy. '
+        + 'Nothing between the author\'s keystroke and that fault said a word — the authoring lint '
+        + '`validateVisibilityPredicates` measured 0 findings on an `ast`-only envelope and 0 on a '
+        + 'blank `source`, against two control legs that each measured 1. The refusal is one rule with '
+        + 'one sentence, `EVALUATED_EXPRESSION_SOURCE_REQUIRED`. '
+        + '⚠️ `ExpressionSchema` / `ExpressionInputSchema` are deliberately NOT narrowed and neither is '
+        + 'their alias `PredicateInputSchema`: they are the PERSISTENCE contract (`source` OR `ast`) '
+        + 'and stay wide by the same ruling\'s item 2. The narrowing is at the evaluated slots only. '
+        + '⚠️ Why this is a D3 entry and not a D2 conversion, even though a printer now exists. The '
+        + 'conversion layer lives in `packages/spec`, which is dependency-free by Prime Directive #2 '
+        + 'and carries no engine — `packages/formula`\'s own `normalize.ts` header states the same '
+        + 'boundary from the other side ("Spec layer cannot do step 2 because it must remain '
+        + 'dependency-free; this package owns the engine import"). A conversion that had to call the '
+        + 'CEL printer could not live where conversions live, and a conversion that guessed without '
+        + 'one would be the platform inventing a predicate. So the printer ships as a named, tested '
+        + 'export the migration PRESCRIBES, and the judgment the printer cannot make — a blank '
+        + '`source`, an opaque `ast` that does not round-trip, any future dialect with no printer — '
+        + 'stays here as the structured TODO, naming the object, field and slot. '
+        + '⚠️ And for a row ALREADY STORED the consequence is wider than the key. '
+        + '`applyConversionsToStoredItem` replays the conversion chain on rehydration, but no '
+        + 'conversion can supply a `source` that was never written, so a stored row carrying either '
+        + 'spelling now fails its schema parse at the seam that loads it rather than parsing and '
+        + 'faulting later. That is the intended direction — the refusal moves from run time, where it '
+        + 'was invisible on the fail-soft slots and destructive on the fail-closed ones, to load time, '
+        + 'where it names the row. ADR-0087, ADR-0058, ADR-0049.',
+      acceptanceCriteria:
+        'Sweep every authored metadata source and every `sys_metadata` row for the two spellings on '
+        + 'the slots named in `surface`: an expression envelope with no `source` key, and a `source` '
+        + '(or bare-string shorthand) that is empty after trimming. ⚠️ Sweep by SLOT, not by key name '
+        + '— `visible` is on this list for actions, action params, nav items, bulk actions, record '
+        + 'alerts and settings manifests, and is NOT an expression slot elsewhere; and ONE of the '
+        + 'positions is a union member, `RecordAlertProps.visible`, whose sibling arm is untouched: it '
+        + 'still takes a boolean literal, so a boolean there is not a hit. ⚠️ The two OTHER union '
+        + 'members the #15811 census listed — `ServiceLevelIndicator.successCriteria` and '
+        + '`TraceSamplingConfig.composite[].condition` — are deliberately NOT on this sweep, because '
+        + 'their expression arms were retired outright in this same major (see `surface`). Sweep those '
+        + 'two under `observability-cel-predicates-retired` instead, whose instruction is the opposite '
+        + 'of this one: there, an expression is not repaired, it is replaced by the structured shape or '
+        + 'moved out of application metadata. For each hit: if it carries an `ast`, run '
+        + '`printCelAst(ast)`; a string result IS the migration and needs no judgment beyond reading '
+        + 'it back. A `null` result, or a blank `source`, is the hand-migration case — decide per the '
+        + '`replacement` note whether the slot was meant to carry a predicate (author the `source`) or '
+        + 'to be ungated (remove the key), and ⛔ do not default to removal on a fail-closed slot, '
+        + 'where removal reveals rather than preserves. Two proofs. (1) `objectstack validate` is '
+        + 'clean on a stack authored in config files: each offender is located by path with the '
+        + '`EVALUATED_EXPRESSION_SOURCE_REQUIRED` sentence — one `invalid_union` issue at the slot for '
+        + 'an `ast`-only envelope or a blank bare string, one `custom` issue at `source` for a blank '
+        + '`source` inside an envelope. There is no CLI verb that lowers a stored row back into a '
+        + 'config file, so this proof does not reach metadata that exists only in `sys_metadata`. '
+        + '(2) For stored rows, load the tenant and confirm every metadata item of the affected types '
+        + 'still rehydrates: a row carrying either spelling now fails its parse at the load seam and '
+        + 'is reported there, naming the object, the field and the slot. A row whose every evaluated '
+        + 'slot carries a non-blank `source` parses byte-identically to before — the narrowing removes '
+        + 'accepted shapes and adds none.',
+    },
     {
       id: 'event-name-schema-retired',
       surface:
@@ -8126,6 +8514,92 @@ const step18: MigrationStep = {
         + 'fields declaring neither key are untouched. Stored `sys_metadata` rows carrying a '
         + 'malformed value keep loading (the rehydration seam replays the conversion, which drops '
         + 'the meaningless key).',
+    },
+    // The authoring-door half of the class #13495 ruled at the matcher. That card
+    // taught driver-memory what to do with a missing bound; this one decides what
+    // the SCHEMA does with one.
+    {
+      id: 'filter-between-blank-endpoint-refused',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span already, and a nested backtick would close it.
+      surface:
+        'either endpoint of a $between range, authored BLANK — the empty string, or an absent '
+        + '(undefined) bound — on any carrier of FieldOperatorsSchema / RangeOperatorSchema: a view '
+        + 'or dashboard widget filter, a dataset filter, a report runtimeFilter, a page or component '
+        + 'filter, a rollup filter, and the NormalizedFilter AST the query faces validate against. '
+        + 'ARITY is not what changed: a blank bound is a well-formed TWO-element range one of whose '
+        + 'elements means nothing',
+      replacement:
+        'two endpoints that are present and non-empty — the bound the author meant, written out. '
+        + 'If only ONE side is genuinely bounded, that is not a range at all: drop `$between` and '
+        + 'write the side you have as a scalar comparison, `{"$gte": min}` for a lower bound and '
+        + '`{"$lte": max}` for an upper one, which every backend already answers. ⛔ There is no '
+        + 'replacement that can be DERIVED from what was written: the bound the author did not type '
+        + 'is not recoverable from the one they did, and picking either reading (drop the operator, '
+        + 'or treat the blank side as unbounded) would be the platform inventing a filter. `null` '
+        + 'bounds are a different entry: they were already refused by the 2026-08-31 ruling, whose '
+        + 'message prescribes the null predicate because a `null` author was reaching for absence, '
+        + 'not for a bound',
+      reason:
+        'Maintainer ruling A on #18012 (decision batch #146 item 5, 2026-09-17 「146 同意」). '
+        + '`FieldOperatorsSchema.safeParse({ $between: [1, \'\'] })` answered `success: true` — '
+        + 'measured on the card against the installed spec 17.4.0 and re-measured on `origin/main` '
+        + 'before the change. This is a NEW RULE narrowing a published face, ⛔ not a pull-back to a '
+        + 'declared one: the endpoint contract shared by both bounds says verbatim that "Each '
+        + 'endpoint is a number, a Date, or a string", and the empty string is a string, so the '
+        + 'acceptance was conformant. What made it wrong is the other half of the same contract — '
+        + '"Closed interval [min, max]" — which no backend can honour against a blank: driver-sql '
+        + 'binds it into `whereBetween`, the JS matchers compare it as a value, and the range stops '
+        + 'bounding on that side while still reading as a complete range. #13495 had already taught '
+        + 'the reference matcher to survive the null-bound form of exactly this (a bounded range '
+        + 'answered EVERY valued row, because both of the arm\'s comparisons are false against a '
+        + 'missing bound); the door that admitted it was never addressed. The only producer ever '
+        + 'measured is a UI builder padding a HALF-TYPED pair with `\'\'` so that a length-based '
+        + 'completeness check passes it — nobody WANTS a blank bound, which is why it is refused '
+        + 'rather than given a published meaning (option B was declined: a semantics nobody asked '
+        + 'for, to be honoured per driver). The refusal names the blank SIDE (MIN / MAX plus the '
+        + 'index) because with a padded pair both bounds are present and the author is the one '
+        + 'person who cannot see which is empty. Scope is the empty string and `undefined` and '
+        + 'nothing wider: whitespace-only endpoints are deliberately NOT judged, since narrowing a '
+        + 'published face further than the ruling is the seat call this card\'s whole history '
+        + 'refuses to make. Ships at once, no grace window and no dual spelling (2026-08-27 '
+        + 'maintainer ruling 「短期不考虑渐进」). '
+        + '⚠️ No D2 conversion and no stored-metadata rewrite, and the load path was MEASURED rather '
+        + 'than assumed: `applyConversionsToStoredItem` — the one primitive every stored-row '
+        + 'rehydration seam calls — never throws and never validates, and replays only the '
+        + 'positively-recognised lossless transforms in the conversion registry; measured on '
+        + '`origin/main`, a stored view carrying `{ close_date: { $between: [\'2026-01-01\', \'\'] } }` '
+        + 'comes back as the SAME object reference. So the load path today neither drops a refused '
+        + 'operator nor refuses the row, and no conversion in the registry drops a filter OPERATOR '
+        + '(the three filter-adjacent entries are key strips and a key rename). That is also the '
+        + 'precedent the two nearest narrowings of this same surface set — '
+        + '`filter-preset-ordering-comparand-refused` and '
+        + '`analytics-date-range-array-two-bounds-required` — both of which decline a D2 conversion '
+        + 'on the ground that rewriting would be the platform guessing which bound was meant. '
+        + 'Dropping the operator would be worse than guessing: it deletes a constraint the author '
+        + 'wrote and WIDENS the result set silently, the failure mode `$nin` carries in the same '
+        + 'file. The read path does not re-validate stored rows, so no stored view becomes '
+        + 'unreadable; what changes is that RE-SAVING one is refused, at the key\'s own path, with '
+        + 'the blank side named. The objectui half — the builder stops padding a half-typed pair, so '
+        + 'the console never meets this refusal mid-typing — is objectui#9695 and lands on its own '
+        + 'schedule, either side of this one. ADR-0049 / ADR-0078 / ADR-0087.',
+      acceptanceCriteria:
+        'Grep every authored `$between` array — view and dashboard widget filters, dataset filters, '
+        + 'report runtimeFilters, page and component filters, rollup filters, saved AST filters, SDK '
+        + 'and MCP callers — and read BOTH of its elements. A range with two present, non-empty '
+        + 'endpoints parses byte-identically to before, numbers, Dates, ISO days, UTC instants, '
+        + 'clock times and non-temporal text included, and `[\'0\', \'9\']` and `[0, 100]` are '
+        + 'untouched (the rule is blankness, not falsiness). An empty-string or absent bound now '
+        + 'answers one prescriptive issue at that endpoint\'s own path (`$between.0` / `$between.1`) '
+        + 'naming MIN or MAX, so `FieldOperatorsSchema.safeParse` and re-saving the document both '
+        + 'make the sweep mechanical; a range blank on BOTH sides reports both positions. Nothing is '
+        + 'normalised on the way through — no bound is trimmed, defaulted or copied from its '
+        + 'neighbour — so an accepted range arrives byte-identical to what was written. ⚠️ Do not '
+        + 'assume a converted range was previously showing the window it named: a blank bound stopped '
+        + 'bounding on that side at every backend, so the surface was reading a wider set than its '
+        + 'filter claimed. Decide the window from what the surface was SUPPOSED to show, and if only '
+        + 'one side was ever meant, write it as `$gte` / `$lte` rather than inventing a second bound. '
+        + '`null` bounds are unaffected by this entry and keep their own refusal and prescription.',
     },
     {
       id: 'filter-preset-ordering-comparand-refused',
@@ -9085,6 +9559,49 @@ const step18: MigrationStep = {
         + 'duration key — which is not a reader of this schema and is unchanged.',
     },
     {
+      id: 'list-view-navigation-view-retired',
+      surface: 'view.list.navigation.view',
+      replacement:
+        'page assignment — assign a `record` page to the object and let `isDefault` pick the one '
+        + 'that opens. That is the machinery that resolves a detail layout by name; a list view\'s '
+        + '`navigation` block decides only HOW the detail is surfaced (`mode`, `size`, '
+        + '`preventNavigation`, `openNewTab`, `width`), and every one of those keys is unchanged',
+      reason:
+        'DECLARED, CONSUMED, AND WRONG — which is why this is a semantic TODO rather than a '
+        + 'mechanical strip. The key\'s describe promised "the form view to use for details" and '
+        + 'no layer from spec to console ever resolved a view by name. Its only read in the '
+        + 'shipped console put the value in the SECOND argument of `onNavigate`, the slot that '
+        + 'otherwise carries the navigation-MODE token: an authored `view` did not select a view, '
+        + 'it SUBSTITUTED for the mode. At least one consumer in the same bundle reads that '
+        + 'argument against a closed two-value vocabulary (`edit` / `view`), so any other authored '
+        + 'value matched neither branch — invisible on grids whose handler takes one argument, a '
+        + 'dead row click on the ones that do not. The enumeration behind the removal was '
+        + 'exhaustive rather than sampled: every `.view` property read in the bundle (three) and '
+        + 'every `formViews` read, and NO read anywhere is keyed by an authored view name, so '
+        + 'there is no path by which this key or any sibling could have resolved one. '
+        + 'ADR-0049 enforce-or-remove; zero authored instances in this repo and the one external '
+        + 'author removed its occurrence, so the pull that would justify ENFORCE is zero. '
+        + 'A mechanical D2 strip was weighed and declined with the direction: deleting the key '
+        + 'silently discards the author\'s actual intent — "open the detail in THIS layout" — and '
+        + 'leaves no record of which list view carried it, which is exactly the judgement a '
+        + 'semantic TODO exists to hand back. Should "open the detail in a chosen view" ever be '
+        + 'pulled, it belongs to the page-assignment machinery (`record` pages, `isDefault`), not '
+        + 'to a string on a list view.',
+      acceptanceCriteria:
+        'For EACH list view that declared `navigation.view` — the TODO names the surface, you name '
+        + 'the view: delete the key from that view\'s `navigation` block, then decide whether the '
+        + 'detail layout it asked for was ever actually delivered. It was not, so nothing regresses '
+        + 'by deleting it: confirm the record detail opens exactly as it did before (the surviving '
+        + '`mode` and `size` decide that, and both are untouched). If the named layout is one you '
+        + 'still want, publish it as a `record` page on that object and mark the one that should '
+        + 'open `isDefault`. Done when no `navigation` block in your sources carries `view`; a block '
+        + 'that still does fails to parse with the removal prescription, at `ListViewSchema`, at '
+        + '`ObjectListViewSchema` and at the `PUT /api/v1/meta/view` overlay door, and authoring it '
+        + 'is a `tsc` error at the call site. ⚠️ Nothing else in the block moves — a `navigation` '
+        + 'that carries only live keys (`{ mode: \'drawer\', size: \'lg\' }`) parses byte-for-byte '
+        + 'as it did before.',
+    },
+    {
       id: 'logging-durations-unit-in-key',
       surface: 'HttpDestinationConfig `batch.flushInterval` / `retry.initialDelay` / `timeout` and '
         + 'LoggingConfig `buffer.flushInterval` (system/logging.zod.ts)',
@@ -9641,6 +10158,86 @@ const step18: MigrationStep = {
         + 'drift window carrying `indexes[].where` is rejected with the database-layer prescription '
         + 'rather than saved with the key silently dropped.',
     },
+    // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+    // span already, and a nested backtick would close it.
+    {
+      id: 'observability-cel-predicates-retired',
+      surface:
+        'metrics.slis[].successCriteria, the CEL predicate arm of the union (the structured '
+        + '{ threshold, operator, percentile? } arm is untouched) / tracing.sampling.composite[].'
+        + 'condition, the CEL predicate arm of the union (the structured filter arm is untouched). '
+        + 'Both arms were reachable in two spellings: the bare-string shorthand and the '
+        + '{ dialect: \'cel\', source } envelope. Reachable wherever metadata is authored or stored: '
+        + 'defineStack sources, an exported stack passed to objectstack validate, a POST body on a '
+        + 'metrics or tracing config, and a row already sitting in sys_metadata',
+      replacement:
+        'the structured arm each slot already carried, or your observability infrastructure. On '
+        + '`successCriteria` write the threshold rule — `{ threshold: 300, operator: \'lt\', '
+        + 'percentile: 0.95 }` — which is the shape an SLO product consumes. On a composite sampling '
+        + '`condition` write a structured filter: a plain object of match criteria carrying no '
+        + '`dialect` key, e.g. `{ service: \'api\', attributes: { \'http.route\': \'/v1/orders\' } }`. '
+        + '⚠️ Neither replacement is mechanical, and neither is a like-for-like: a criterion or a '
+        + 'sampling rule the structured shape cannot express has no home in application metadata at '
+        + 'all and belongs in the SLO product or the OpenTelemetry sampler configuration that '
+        + 'actually evaluates it',
+      reason:
+        'DECLARED, DOCUMENTED, AND EVALUATED BY NOTHING — which is why this is a semantic TODO '
+        + 'rather than a mechanical strip. Both arms parsed, normalized a bare string to '
+        + '`{ dialect: \'cel\', source }`, registered and were served back, and no service, plugin, '
+        + 'runtime or CLI path ever read either key: an identity scan over the whole tree finds every '
+        + 'hit for `successCriteria`, `ServiceLevelIndicatorSchema` and `TraceSamplingConfigSchema` '
+        + 'outside `packages/spec/src` to be a generated artefact or prose, and inside it the only '
+        + 'readers are the schemas\' own unit tests plus the two census tests that enumerate '
+        + 'expression slots. So an author — very often an AI reading the generated reference page, '
+        + 'ADR-0033 — who wrote `successCriteria: \'p95 < 300ms\'` got a green parse and no signal, '
+        + 'indistinguishable from a predicate that ran and answered. ADR-0049 enforce-or-remove, '
+        + 'ruled A by the maintainer on 2026-09-18 (director decision batch #160 item 3): by the '
+        + 'standing criterion that a declared-but-unread capability is kept only when mainstream '
+        + 'platforms in the domain have it, application platforms do not carry SLI success criteria '
+        + 'or trace-sampling conditions as authorable application metadata — that lives in '
+        + 'observability infrastructure (SLO products, OTel sampling policy) and is structured there, '
+        + 'not a free expression. The `cron-declared-unwired` family was retired outright under the '
+        + 'same ADR after the same measurement. A mechanical D2 strip was weighed and declined: a '
+        + 'predicate is an intent no threshold/operator pair or attribute filter records, so '
+        + 'stripping the key would delete what the author meant and leave no trace of which SLI or '
+        + 'which sampling branch lost it — exactly the judgment a semantic TODO exists to hand back. '
+        + '⚠️ And a strip here is not merely lossy, it is INVALID: `successCriteria` is a REQUIRED '
+        + 'key, so removing it leaves an SLI that no longer parses, and a composite sampling branch '
+        + 'that loses its `condition` declares no condition at all — inert today, and the moment a '
+        + 'sampler is wired it reads as UNCONDITIONAL. That is the difference from the '
+        + 'two error-map precedents this retirement copies its MECHANISM from — `crypto.hash` on '
+        + 'HookBodyCapability and `managedBy: \'system\'` — both of which also registered a D2 '
+        + 'conversion, because for each of them a mechanical rewrite existed. Here none does, which is '
+        + 'what makes D3 the right disposition rather than merely an available one. '
+        + '⚠️ The structured arm of each union is NOT decided here: it is equally unread today, and '
+        + 'it is measured on its own card. ADR-0087, ADR-0058 D7, ADR-0049.',
+      acceptanceCriteria:
+        'Sweep every authored metadata source and every `sys_metadata` row of the metrics and '
+        + 'tracing config types for a CEL predicate at the two slots — in BOTH spellings: a bare '
+        + 'string, and an object carrying a `dialect` key. For each hit, decide per the `replacement` '
+        + 'note whether the intent is expressible as the structured shape (write it) or belongs in '
+        + 'your observability stack (delete the key and move the rule there). ⛔ Do not translate a '
+        + 'predicate into a threshold by guessing the number — nothing was evaluating it, so there is '
+        + 'no behaviour to preserve and a wrong number is worse than an absent one. Two proofs. '
+        + '(1) `objectstack validate` is clean on a stack authored in config files: a surviving '
+        + 'predicate is refused at the slot with the retirement prescription. ⚠️ TWO CHANNELS, and '
+        + 'they do not cover the same set — measured, not assumed. `tsc` catches the BARE-STRING '
+        + 'spelling at both slots, and the `{ dialect, source }` envelope at `successCriteria` only '
+        + '(the structured arm is a closed object literal, so the envelope is an excess-property '
+        + 'error). It does NOT catch the envelope at `condition`: the surviving arm there is a record '
+        + 'of string to unknown, which admits `{ dialect, source }` structurally, so that one spelling '
+        + 'compiles and is refused at PARSE by the arm\'s `dialect` rule. ⛔ Do not read a clean '
+        + '`tsc` as a clean sweep of `condition`. The PRESCRIPTION divides differently again: it '
+        + 'reaches the author for every refused spelling at `condition`, and for the string spelling '
+        + 'only at `successCriteria`, where the envelope is refused by the structured arm\'s own '
+        + 'missing-key issues (`threshold`, `operator`). All three legs are pinned in the schemas\' '
+        + 'unit tests. (2) For stored rows, load the tenant and confirm every '
+        + 'metrics and tracing config still rehydrates: a row carrying a predicate at either slot now '
+        + 'fails its parse at the load seam and is reported there, naming the slot. A row whose '
+        + '`successCriteria` is a structured rule and whose sampling `condition` objects carry no '
+        + '`dialect` key parses byte-identically to before — the retirement removes accepted shapes '
+        + 'and adds none.',
+    },
     {
       id: 'package-rollback-response-retired',
       surface:
@@ -9691,6 +10288,80 @@ const step18: MigrationStep = {
         + 'behaviour.',
     },
     {
+      id: 'packages-list-pagination-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface:
+        'api.listPackages limit and cursor — the two query parameters of '
+        + 'GET /api/v1/packages declared by ListInstalledPackagesRequestSchema. The same entry '
+        + 'covers the limit default: the request schema no longer declares default(50)',
+      replacement:
+        'the `status` and `type` filters — this route answers the whole installed set and has '
+        + 'no page 2. There is no replacement for `cursor`, deliberately: nothing ever minted '
+        + 'one, so no caller holds a value to carry over, and the response `nextCursor` it '
+        + 'would have paired with was never emitted. Callers that looped on it were re-reading '
+        + 'the first and only page. For the removed `limit` default, there is nothing to send '
+        + 'instead and nothing to restore: the server has never capped this list, so a caller '
+        + 'that omitted the key received every installed row before this change and receives '
+        + 'every installed row after it. A client that sized a buffer to the declared 50 should '
+        + 'size it to the installed set instead',
+      reason:
+        'One capability, both halves, never half-deleted (director seat, decision batch #126 '
+        + 'item 1, maintainer 「同意」 2026-09-13, route 2 of three; routes 1 — build paging — '
+        + 'and 3 — refuse unknown names — were considered and refused). `limit` and `cursor` '
+        + 'were declared on the request and honoured on neither: the serving door filters on '
+        + '`status` and `type` and then returns every remaining row, and no emit site has ever '
+        + 'written the response half `nextCursor`. `limit` is the sharper of the two because '
+        + "the repo's own ingress rule names it as the parameter whose silent drop is worst, "
+        + 'and it is the silent-WIDENING half that was live: a caller asking for one row was '
+        + 'handed the whole table alongside a `hasMore: false` that agreed with it. '
+        + 'The `.default(50)` goes with the key because the FICTION WAS THE MECHANISM, not the '
+        + 'number: nothing parses a query string through this schema, so the default has never '
+        + 'stamped anything onto anything, while a reader of the published contract was '
+        + 'entitled to believe an unparameterised list is capped. Re-spelling it as the real '
+        + 'cap was not available — there is no cap. '
+        + 'Pagination was removed rather than implemented because the installed-packages list '
+        + 'is a small bounded collection and paging is not part of its meaning: route 1 would '
+        + 'have grown a cursor protocol for a table of tens of rows, and the dispatch checked '
+        + 'first whether a platform-wide cursor convention already existed that this door could '
+        + 'have joined by reuse. It does not — no REST list door in the tree paginates, the one '
+        + 'encode/decode cursor pair in the repo belongs to the storage-adapter list contract '
+        + 'and is imported by no door, and the travel of this platform is the other way: '
+        + '`data.query.cursor` (#4286) and `api/ListNotificationsRequest:cursor` (#6361) were '
+        + 'both retired before this one, for the same reason. '
+        + 'Route 2, and the bookkeeping splits exactly as #6361 did. There IS a tombstone: the '
+        + 'schema is non-strict, so a bare deletion would have made Zod SILENTLY STRIP whatever '
+        + "a generated client kept sending — a clean parse and a parameter that never takes "
+        + "effect, which is this issue's own defect re-created one layer down (ADR-0104). So "
+        + 'both keys are `retiredKey()`, typed `never` for tsc and raising the prescription at '
+        + 'any parse, and both are registered in RETIRED_KEYS_BY_MAJOR[18]. There is NO D2 '
+        + 'conversion: a conversion rewrites an authored source or a stored `sys_metadata` row, '
+        + 'and this shape is HTTP-only — nobody authors a `ListInstalledPackagesRequest` and '
+        + 'nothing persists one. There is no `acceptRetiredDefaultResidue` stage either, for '
+        + 'the same reason one layer along: nothing ever parsed this schema, so the retired '
+        + 'default materialized into no artifact and there is no residue to accept. '
+        + 'The same card closes the divergence in the OTHER direction, which is not a migration '
+        + 'for anyone and is recorded here only so the two are not read apart: `type` (list), '
+        + '`version` (by-id) and `keepData` (uninstall) are query parameters the doors already '
+        + 'executed and no request schema declared, and they are now declared where they are '
+        + 'executed. No accept set moves — the doors served them before and serve them '
+        + 'identically now. ADR-0049 / ADR-0087, #17667.',
+      acceptanceCriteria:
+        'No caller sends `limit` or `cursor` to `GET /api/v1/packages`: writing either on a '
+        + '`ListInstalledPackagesRequest` is a `tsc` error (the input type is `never`), which '
+        + 'is the enforced channel, and any value reaching a parse raises the prescription '
+        + 'rather than a generic unrecognized-key issue. '
+        + '⚠️ Behaviour on the wire is deliberately UNCHANGED and must be verified as such: a '
+        + 'request still carrying `?limit=1&cursor=x` is IGNORED, not refused — the door reads '
+        + 'named query keys and no route validates this query against a schema, so an unknown '
+        + 'key has never produced a 400 and does not start doing so here. The declaration '
+        + 'stopped promising what the wire never did; the wire did not change. `hasMore` stays '
+        + 'the constant `false` it already was and is now true by construction rather than by '
+        + 'coincidence — with no request-side way to ask for a page there can be no next one — '
+        + 'and `nextCursor` stays absent. A caller that omitted `limit` receives every '
+        + 'installed row, exactly as it did before.',
+    },
+    {
       id: 'page-assigned-profiles-audience-to-permission-set',
       surface: '`page.assignedProfiles` — the per-page audience list (REMOVED)',
       replacement:
@@ -9719,6 +10390,61 @@ const step18: MigrationStep = {
         + 'reads — verified against the running deployment, not against the metadata alone. A caller '
         + 'who was previously outside an `assignedProfiles` list and could nonetheless open the page '
         + 'is the pre-existing state, not a regression introduced by the removal.',
+    },
+    {
+      id: 'platform-timezone-columns-iana-domain-refused',
+      surface:
+        'The two platform audit time-zone columns — `sys_job.timezone` and '
+        + '`sys_report_schedule.timezone` — carrying a string that is not a member of the '
+        + 'IANA time-zone database (`Asia/Shangai`, `Europe/Munich`, `UTC+8`, `PST`).',
+      replacement:
+        'The canonical IANA zone id the deployment meant, written in the spelling the tzdb '
+        + 'uses: `Asia/Shanghai`, `Europe/Berlin`, `America/Los_Angeles`. `UTC` is a member '
+        + 'and is admitted — membership is the shared `Intl.DateTimeFormat` probe, never the '
+        + '`Intl.supportedValuesOf(\'timeZone\')` enumeration, which omits `UTC` and would '
+        + 'refuse the one fallback this contract names. ⚠️ A non-member is RE-AUTHORED, never '
+        + 'repaired on the deployment\'s behalf: the correct zone behind a typo is a fact only '
+        + 'the deployment holds, which is what makes this entry semantic rather than a D2 '
+        + 'conversion.',
+      reason:
+        '#16296 gave both columns `valueDomain: \'iana_time_zone\'`, which had been declared '
+        + 'on `sys_business_unit.timezone` / `sys_organization.timezone` since #14238. It is a '
+        + 'WRITE-TIME narrowing of the `min`/`max`/`maxLength` transition-gate class: a value '
+        + 'already stored outside the domain is never re-read against it, no DDL is planned, '
+        + 'and `objectstack migrate meta` has nothing to rewrite — the changeset that shipped '
+        + 'it says so in those words, and this entry does not contradict it. What the '
+        + 'changeset had no way to carry is that a deployment holding such a value now has '
+        + 'WORK TO DO: the next write of that row is refused with the ADR-0114 field code '
+        + '`value_domain`, and until then `sys_report_schedule.timezone` keeps doing the thing '
+        + 'the narrowing exists to stop — `ReportService.nextRunAt` hands a non-member zone to '
+        + 'croner, whose throw was caught and turned into a silent fall back to '
+        + '`interval_minutes`, so "every weekday 09:00 Asia/Shanghai" became "every 1440 '
+        + 'minutes, forever". Not a throw and not a fall back to UTC: the wrong instant, '
+        + 'permanently. ⛔ It went out with NO `**BREAKING**` marker, so the repo\'s own '
+        + 'breaking-change detector classified it non-breaking and asked for no ADR-0087 '
+        + 'disposition at all — measured on the shipped changeset. #16421 closed that hole '
+        + '(the declaration now carries a `(narrowing)` arm the gate reads instead of a prose '
+        + 'banner) and this row is the other half of the same ruling: the narrowing that '
+        + 'already shipped is RECORDED, ⛔ not re-released and ⛔ not ratified in silence. '
+        + 'Maintainer ruling, director summon #17, decision batch #2 item 1, option B '
+        + '(objectstack#16421 comment 5572145955, 2026-09-07), verbatim and untranslated: 「同意」. The direct precedents for registering a change '
+        + 'no transform can apply are `schedule-flow-acting-organization-required` (protocol '
+        + '18) and `rest-requireauth-default-flip` (protocol 12) — behaviour-only, a '
+        + 'deployment judgement, registered anyway because the prescription is real.',
+      acceptanceCriteria:
+        'Every `sys_job.timezone` and `sys_report_schedule.timezone` value stored in the '
+        + 'deployment is an IANA member. The one-line fix per offending row: write the '
+        + 'canonical zone id (`UPDATE … SET timezone = \'Asia/Shanghai\'`), or clear the '
+        + 'column — `sys_report_schedule` documents a `UTC` default and `sys_job` has no '
+        + 'reader at all. Rows already holding a member parse and behave byte-identically to '
+        + 'before; rows holding none are readable, are returned unchanged, and fail only on '
+        + 'their next WRITE. A report schedule that was silently running on '
+        + '`interval_minutes` resumes its cron cadence once its zone is a member — that '
+        + 'resumption, not the absence of an error, is how the fix is verified. ⚠️ The two '
+        + 'columns\' `maxLength` (100 vs 64) and defaults (none vs `UTC`) are deliberately '
+        + 'still unconverged and are NOT part of this entry; no member is longer than 32 '
+        + 'characters on the current Node baseline, so neither bound admits anything the '
+        + 'domain does not.',
     },
     {
       id: 'plugin-auto-restart-never-reinitialised',
@@ -10281,61 +11007,137 @@ const step18: MigrationStep = {
         'The START NODE `config.organization` key of every time-triggered flow — a `type: '
         + "'schedule'` flow carrying a `config.schedule` cadence, and the `timeRelative` sweep "
         + 'that carries its cadence in the same slot (`FlowTriggerKind` `schedule` / '
-        + '`time_relative`). Nothing is renamed, retired or re-typed: the start node\'s `config` '
-        + 'is an OPEN record (ADR-0018), so the key is an ADDITION to a slot that already '
-        + 'accepted it, and every flow that parses today parses byte-identically after the '
-        + 'change. What narrows is the BIND-time accept set and the RUN-time data plane.',
+        + '`time_relative`) — TOGETHER WITH the deployment variable that decides whether such a '
+        + 'flow arms at all, `OS_AUTOMATION_SCHEDULED_WORK_ENABLED`. Nothing is renamed, retired '
+        + 'or re-typed: the start node\'s `config` is an OPEN record (ADR-0018), so the key is an '
+        + 'ADDITION to a slot that already accepted it, and every flow that parses today parses '
+        + 'byte-identically after the change. What narrows is the BIND-time accept set and the '
+        + 'RUN-time data plane — and what the 2026-09-12 and 2026-09-16 amendments narrow further '
+        + 'is WHERE that narrowing applies: the declaration is required under tenancy posture '
+        + '`isolated` only, is OPTIONAL under `group` (where an undeclared run acts as the swept '
+        + "record's own organization), is not read under `single`, and no time-triggered flow arms "
+        + 'anywhere until the deployment switches package-authored scheduled work on.',
       replacement:
-        'Declare the organization the flow runs as, on the start node beside the cadence: '
+        'Two deployment decisions, in this order. (1) DECIDE WHETHER THIS DEPLOYMENT RUNS '
+        + 'PACKAGE-AUTHORED SCHEDULED WORK AT ALL: `OS_AUTOMATION_SCHEDULED_WORK_ENABLED=true` '
+        + 'arms time-triggered flows and packaged `defineJob` cron jobs; unset — the global '
+        + 'default, in every posture and every kernel — arms neither, and every such flow is '
+        + 'listed by `getTriggerBindingAudit()` and the CLI startup summary as DISABLED BY '
+        + 'DEPLOYMENT POLICY rather than as a binding failure. Platform-internal jobs '
+        + '(approvals escalation, the lifecycle Reaper, the messaging dispatch loop, membership '
+        + 'backfill) are NOT gated by it: the boundary is "authored by a package", not "runs on '
+        + 'the job service". (2) ONLY IF THE SWITCH IS ON AND THE POSTURE IS `isolated`, declare '
+        + 'the organization each flow runs as, on the start node beside the cadence: '
         + "`config: { schedule: { … }, organization: '<sys_organization.id>' }`. There is "
         + 'deliberately NO fan-out — a sweep wanted in N organizations is N flows, one per '
         + 'organization — and deliberately no fallback: nothing on this path ever chooses an '
         + 'organization, because a wrong `organization_id` is silently authoritative to every '
         + 'report, export and cleanup that filters by organization, while a refusal is visible '
-        + 'at boot and names its flow. ⚠️ Three consequences of the split that the declaration '
-        + 'itself does not carry, and each is deployment work: (1) rows whose tenant column is '
-        + 'NULL stay visible to a scoped read (`org = :tenant OR org IS NULL`), so after the '
-        + 'split each such row is matched ONCE PER FLOW — N runs and N notifications for one '
-        + 'row, each acting as a different organization; (2) the dispatch-claim key embeds the '
-        + 'flow name (`schedule:<flowName>:<window>`, '
-        + '`time-relative:<flowName>:<scope>:<recordId>`), so renaming one flow into N abandons '
-        + "the current window's claims and a window already delivered under the old name can "
-        + 'deliver once more under the new ones; (3) a run SUSPENDED before the upgrade '
-        + 'rehydrates its context from `context_json`, which carries no `tenantId`, so it '
-        + 'resumes org-less — drain or accept in-flight suspended runs rather than assuming the '
-        + 'upgrade confines them retroactively.',
+        + 'at boot and names its flow. Under the `single` posture with the switch on, declare '
+        + 'NOTHING: the run carries no organization and every tenant-scoped insert beneath it '
+        + 'resolves the deployment\'s one organization through the #8844 guard. Under the `group` '
+        + 'posture with the switch on, declaring is OPTIONAL and both shapes are supported: a '
+        + 'declared flow behaves exactly as under `isolated` (the declaration bounds SELECTION and '
+        + 'identity alike), while an UNDECLARED flow arms, reads group-wide — which ADR-0105 D1 '
+        + 'makes inherent to the posture — and stamps each run it launches with the SWEPT '
+        + "RECORD's own organization, the same subject-first order `sys_automation_run` already "
+        + 'uses. ⚠️ An undeclared `group` flow that reaches a tenant-scoped write with NO record '
+        + 'to derive from — a record-less cron emitting a notification — is REFUSED at that write '
+        + '(`walled-posture`, ADR-0112), loudly and by name; declare `config.organization` on that '
+        + 'flow, which is the remedy the refusal itself prints. ⚠️ Three '
+        + 'consequences apply to an `isolated` deployment that splits one flow into N, and each is '
+        + 'deployment work: (1) rows whose tenant column is NULL stay visible to a scoped read '
+        + '(`org = :tenant OR org IS NULL`), so after the split each such row is matched ONCE '
+        + 'PER FLOW — N runs and N notifications for one row, each acting as a different '
+        + 'organization; (2) the dispatch-claim key embeds the flow name '
+        + '(`schedule:<flowName>:<window>`, `time-relative:<flowName>:<scope>:<recordId>`), so '
+        + "renaming one flow into N abandons the current window's claims and a window already "
+        + 'delivered under the old name can deliver once more under the new ones; (3) a run '
+        + 'SUSPENDED before the upgrade rehydrates its context from `context_json`, which '
+        + 'carries no `tenantId`, so it resumes org-less — drain or accept in-flight suspended '
+        + 'runs rather than assuming the upgrade confines them retroactively.',
       reason:
-        'Maintainer ruling, 2026-09-08, verbatim, untranslated: '
+        'Three maintainer rulings, all verbatim and untranslated, in the order they were given. '
+        + '2026-09-08: '
         + '「多组织定时任务本来只能在组织内运行，应该带组织ID，不允许跨组织的定时任务。」 A time-triggered '
         + 'run is launched from a job tick and a job tick carries no identity, so the run reached '
         + 'the tenancy guard with nothing to offer it: the notification wrote '
         + '`organization_id = NULL`, every tenant-scoped row beneath it was refused, and the tick '
-        + 'still summarised itself as healthy. ⛔ NOT losslessly convertible, and the reason is '
-        + 'that the remedy is a value only the deployment holds: an organization id is minted per '
-        + 'install at runtime, so there is no authored artifact and no stored representation a '
-        + 'transform could rewrite — `objectstack migrate meta` cannot know which organization a '
-        + 'given sweep belongs to, and inventing one is precisely what the ruling forbids. '
-        + 'Registered under ADR-0087 D3 rather than left silent because the change DOES carry a '
-        + 'prescription — "declare one flow per organization, no fan-out" is deployment work a '
-        + 'human must do, which is what D3 says a structured TODO is for. The direct precedent is '
+        + 'still summarised itself as healthy. 2026-09-12, on the same surface: '
+        + '「schedule 是风险很大的模型，尤其在云端，无算是单独多租户还是每库一租户，可能造成极大的资源浪费。'
+        + '对于单租户或着集团版私有部署，我觉得不需要做限制。定时任务 如果不好处理，现在也没想清楚，'
+        + '有没有可能定义为一个环境变量，根据环境变量控制？」 and 「group 默认也关，云端每库一租户全局默认关」. '
+        + 'Whether clock-driven work is affordable is a fact about the DEPLOYMENT — its database, '
+        + 'its tenants, its budget — that no author can know and no metadata key should ask them '
+        + 'for, so the gate is a deployment variable read at boot and the global default is OFF. '
+        + '2026-09-16, reopening the `group` half of that amendment and nothing else: '
+        + '「group 模式是本地部署的，运行 schedule 应该是可以的，但是你没有权限，可以单独开一个决策卡」 — '
+        + 'ruled A′ on #18378. The 2026-09-08 ruling was made for the MULTI-TENANT shape, and '
+        + '`group` is not one: ADR-0105 D1 defines it as one legal group over one database with '
+        + 'group-wide visibility and cross-org workflow INHERENT to the shape, so a group-level '
+        + 'batch job is a capability of the posture rather than the cross-organization task the '
+        + 'ruling forbids. What was genuinely unanswered — recorded as unanswered by ruling G item '
+        + '3 — was which organization such a run\'s inserts belong to, and the answer is the one '
+        + '`sys_automation_run` was already ruled to use: the SUBJECT RECORD\'s organization, with '
+        + 'the acting context as the fallback and never the primary. Filling the acting context '
+        + 'the same way makes the inbox, delivery and history rows of one run agree about its '
+        + 'owner; leaving them to disagree was the defect, not the fix. ⛔ The rejected arm is '
+        + 'recorded too, because it is the one a later reader will re-propose: falling back to the '
+        + "bootstrap organization (`slug='default'`) for a record-less run. Under a wall that "
+        + 'organization is minted ADMIN-KEYED by the enterprise organizations runtime and may not '
+        + 'exist at all, and where it does it is whichever organization the platform owner '
+        + 'registered under — plausibly one plant of many. That is the silently-authoritative '
+        + 'wrong owner this entry already forbids, so a record-less undeclared run is refused '
+        + 'instead. Where the switch is on, the 2026-09-08 ruling therefore stands unchanged under '
+        + '`isolated`, is satisfied per-record under `group`, and is moot under `single`, which '
+        + 'holds exactly one organization and therefore has no cross-organization task to forbid. '
+        + '⛔ NOT losslessly convertible, and the reason is '
+        + 'that both remedies are values only the deployment holds: an organization id is minted '
+        + 'per install at runtime and the switch is an operator decision about cost, so there is '
+        + 'no authored artifact and no stored representation a transform could rewrite — '
+        + '`objectstack migrate meta` cannot know which organization a given sweep belongs to, '
+        + 'nor whether this deployment wants scheduled work at all, and inventing either is '
+        + 'precisely what the rulings forbid. Registered under ADR-0087 D3 rather than left '
+        + 'silent because the change DOES carry a prescription — "decide the switch, then declare '
+        + 'one flow per organization under a wall" is deployment work a human must do, which is '
+        + 'what D3 says a structured TODO is for. The direct precedent is '
         + '`rest-requireauth-default-flip` (protocol 12): behaviour-only, no shape moved, a '
         + 'deployment judgement no transform can make, registered anyway.',
       acceptanceCriteria:
-        'Every `schedule` / `time_relative` flow in the stack declares a non-empty '
-        + '`config.organization` on its start node. `os lint` reports '
-        + '`flow-schedule-organization-missing` for none of them (severity `warning`, so it does '
-        + 'NOT gate a build — an unfixed flow is silently unarmed, which is why the lint run is '
-        + 'part of the criteria rather than the build), and boot logs no '
-        + '`[schedule] NOT BOUND` / `[time-relative] NOT BOUND` line: '
-        + '`getFlowRuntimeStates()` reports `bound: true` and `getTriggerBindingAudit()` lists '
-        + 'no time-triggered flow. A deployment that ran ONE flow across all organizations has '
-        + 'split it into one flow per organization and has re-checked the three consequences '
-        + 'above — NULL-tenant rows, abandoned dispatch claims, suspended runs. ⚠️ '
-        + '`@objectstack/driver-memory` has NO legal configuration for a time-triggered flow '
-        + 'that touches per-organization data: it refuses any call handed a tenant scope '
-        + '(`MEMORY_MULTI_TENANT_UNSUPPORTED`), so a declared flow is refused per call while an '
-        + 'undeclared one is not armed at all. Multi-organization deployments use '
-        + '`@objectstack/driver-sql`.',
+        'The deployment has DECIDED the switch, and the decision is visible: `os doctor` prints '
+        + 'the effective `OS_AUTOMATION_SCHEDULED_WORK_ENABLED` value. A deployment that leaves '
+        + 'it unset — the default — accepts that no packaged time-triggered flow and no packaged '
+        + '`defineJob` runs, and confirms that every such flow appears in '
+        + '`getTriggerBindingAudit()` and the CLI startup summary with the reason DISABLED BY '
+        + 'DEPLOYMENT POLICY and NOT as "binding failed"; no boot line reads '
+        + '`[schedule] NOT BOUND` / `[time-relative] NOT BOUND`, because nothing was refused for '
+        + 'a declaration. A deployment that sets it to `true` under posture `single` confirms '
+        + 'that its time-triggered flows are armed while declaring no `config.organization`, and '
+        + 'that the runs they launch carry none. A deployment that sets it to `true` under posture '
+        + '`group` confirms the shape it wants PER FLOW: for a flow it left undeclared, that boot '
+        + 'logs the bind line naming per-record ownership, that a sweep tick launches runs stamped '
+        + "with each swept record's own organization (NOT one organization for the batch), and "
+        + 'that any record-less cron among them either declares `config.organization` or is '
+        + 'accepted to fail loudly at its first tenant-scoped write; for a flow it declared, the '
+        + '`isolated` criteria below apply unchanged. ⚠️ The discriminating observation for the '
+        + 'undeclared case is the SET of organizations across the runs one tick launched — a pin '
+        + 'that reads only "a run was stamped" passes on the defect too, which stamped them all '
+        + 'alike. A deployment that sets it to `true` under posture `isolated` '
+        + 'confirms that every `schedule` / `time_relative` '
+        + 'flow in the stack declares a non-empty `config.organization` on its start node, that '
+        + 'boot logs no `NOT BOUND` line, that `getFlowRuntimeStates()` reports `bound: true` and '
+        + 'that `getTriggerBindingAudit()` lists no time-triggered flow — and, where it ran ONE '
+        + 'flow across all organizations, that it has split it into one flow per organization and '
+        + 're-checked the three consequences above (NULL-tenant rows, abandoned dispatch claims, '
+        + 'suspended runs). ⛔ There is NO authoring-time lint for the declaration: it was '
+        + 'retired with this amendment because neither the switch nor the posture is knowable '
+        + 'from a stack, so `os lint` reporting nothing is the criterion being met, not a check '
+        + 'that was skipped. ⚠️ `@objectstack/driver-memory` has NO legal configuration for a '
+        + 'time-triggered flow that touches per-organization data under a wall: it refuses any '
+        + 'call handed a tenant scope (`MEMORY_MULTI_TENANT_UNSUPPORTED`), so a declared flow is '
+        + 'refused per call, an undeclared `isolated` one is not armed at all, and an undeclared '
+        + '`group` one arms and sweeps unscoped but is refused at the first write it derives an '
+        + 'organization for. Multi-organization deployments use `@objectstack/driver-sql`.',
     },
     {
       id: 'scim-provider-object-retired',
@@ -10799,6 +11601,80 @@ const step18: MigrationStep = {
         + 'the contract. Runtime behaviour is unchanged: the bridge\'s #11833 '
         + 'parse-and-refuse accepts and rejects exactly the same sets before and after, '
         + 'and no stored metadata or document needs editing.',
+    },
+    {
+      id: 'structured-region-body-pause-and-end-refused',
+      surface:
+        'The BODY of every ADR-0031 structured region — `loop.config.body`, each '
+        + '`parallel.config.branches[]`, and `try_catch.config.try` / `.catch` — at every depth the '
+        + 'flow parse walks. Two node populations become undeclarable there: a node whose TYPE parks '
+        + 'the run on EVERY execution (`screen`, `wait`, `approval`, `approval_revise`) and an '
+        + '`end` node, whatever its `outcome`. ⛔ `subflow` and `map` are NOT in the population, '
+        + 'although their executors also declare `supportsPause: true`: they pause exactly when the '
+        + 'child flow their `config.flowName` names pauses, which is a DIFFERENT metadata record and '
+        + 'is not in hand while this flow is parsed. Refusing them by type would also refuse '
+        + '`loop { map(synchronous child) }`, a shape that runs correctly today, so a region-nested '
+        + '`map` or `subflow` still parses and is met at RUN time instead.',
+      replacement:
+        'Move the node onto the TOP-LEVEL graph and route the region\'s exit to it. For an `end`: '
+        + 'delete it from the body, give the region a normal exit, and put the terminator (with its '
+        + '`outcome` / `message`) on the top-level graph — `loop { body: [ …, end ] }` becomes '
+        + '`loop { body: [ … ] } → end`. For a pausing node: hoist it out of the container — '
+        + '`loop { body: [ try_catch { try: [ approval ] } ] }` becomes a top-level `approval` with '
+        + 'the loop fanning out around it, or the pausing half of the branch is split into a '
+        + '`subflow` the top-level graph calls; where the repetition is genuinely needed, make the '
+        + 'TOP-LEVEL graph the repeating construct with the pause on it rather than nesting the '
+        + 'pause inside a region. A `try_catch` whose only purpose was to contain the region\'s '
+        + 'refusal has nothing left to contain and is deleted with it.',
+      reason:
+        'Maintainer ruling, decision batch #145 item 5, verbatim and untranslated: 「同意,其他也同'
+        + '意」, carrying the presented option C; extended by batch #146 「146 同意」, which attached '
+        + 'the `end` half (the absorbed #18112) and recorded that #3267 is ruled 禁 — structured '
+        + 'regions do not support durable pause and a region body cannot terminate the run, so this '
+        + 'is that limit\'s authoring-time enforcement rather than an interim. The POPULATION was '
+        + 'then fixed by decision batch #153 item 1, letter D (maintainer 「其他同意」): 「inside '
+        + '`loop` / `parallel` branch / `try_catch` (try and catch) bodies at any depth, the node '
+        + 'types `screen`, `wait`, `approval`, `approval_revise` and `end` are refused by '
+        + '`FlowSchema.superRefine` … `map` and `subflow` are ⛔ not refused by type.」 A parse-time '
+        + 'rule refuses what is STATICALLY wrong; refusing `map` / `subflow` by type would refuse a '
+        + 'correct working shape on a guess about another record. The refusal already existed AT RUN '
+        + 'TIME and said nothing an author could act on: the engine converts a suspension raised '
+        + 'inside a region into an error at the region boundary, AFTER the executor has written its '
+        + 'progress state into the enclosing scope, so a `try_catch` that contains that error leaves '
+        + 'residue the next entry reads back as progress. Measured on a real `AutomationEngine`, '
+        + '`loop { try_catch { map(pausing child) } }` over 3 iterations x 2 items: not one item\'s '
+        + 'subflow ever completed, only two of three iterations reached the catch, and iteration 3 '
+        + 'read `started === collection.length`, ran nothing, and returned SUCCESS with '
+        + '`summary.failed = 0`. ⚠️ Read that measurement for the MECHANISM: the shape it was taken '
+        + 'on is a `map`, which this parse rule deliberately does not reach — making the run-time '
+        + 'refusal of a region-contained node that durably suspends LOUD is the second half of '
+        + 'ruling D and ships as its own `domain:services` change. ⛔ NOT losslessly convertible: '
+        + 'hoisting a node out of a region is a GRAPH REWRITE — new edges, a changed exit, sometimes '
+        + 'a deleted container — and which of several shapes the author meant is an intent no '
+        + 'artifact records, so a transform that picked one would be inventing the design. That '
+        + 'leaves D3, a structured TODO naming each node to edit. ⚠️ Two further boundaries this '
+        + 'refusal deliberately does NOT reach, because a parse cannot: a pausing node type '
+        + 'contributed by a PLUGIN (ADR-0018 left the node-type namespace open and a parse has no '
+        + 'registry), and a region nested past `MAX_REGION_DEPTH` (32), where the walk stops. For '
+        + 'both, the engine\'s run-time refusal is still the only one — unchanged by this step, not '
+        + 'fixed by it.',
+      acceptanceCriteria:
+        'No `screen` / `wait` / `approval` / `approval_revise` node and no `end` node sits inside '
+        + 'any `loop` body, `parallel` branch or `try_catch` try/catch region in the stack, at any '
+        + 'depth. `FlowSchema.parse` (and therefore `defineFlow`, `registerFlow`, `os validate` and '
+        + 'a Studio publish) accepts the stack: a node still nested is refused with the node AND the '
+        + 'region named in one message '
+        + "(`A \\`approval\\` node may not sit inside a structured region — \\`loop 'sweep' body → "
+        + "try_catch 'guard' try\\` is a region body …`), anchored at "
+        + '`nodes[i].config.body.nodes[j].type` so a designer can jump to it. ⛔ A region-nested '
+        + '`map` or `subflow` is NOT part of this migration and needs no edit to load — if such a '
+        + 'flow reports `success` having processed nothing, that is the run-time half of the same '
+        + 'ruling and not a stack edit. Behaviour to re-check after editing, because the fix CHANGES '
+        + 'IT deliberately: a region-nested `end` was a no-op, so moving it to the top level makes '
+        + 'the run actually TERMINATE there — check that the nodes after the container were not '
+        + 'relying on continuing past it. A hoisted `approval` / `wait` / `screen` now parks the run '
+        + 'where the enclosing graph can see it, so anything that polled for the sweep to finish '
+        + 'sees a suspended run instead of a green-but-empty one.',
     },
     {
       id: 'sys-account-issuer-retired',
@@ -11592,6 +12468,62 @@ const step18: MigrationStep = {
         + 'authoring-path save (zero such documents were measured to exist); on refusal the '
         + 'author re-gates by record state or moves the gate to an app surface.',
     },
+    // The sibling axis of `ui-list-view-grouping-field-padded-refused` (#17360),
+    // which scoped this one out by name. Same defect, same refusal, one difference
+    // that changes the author's options: `kanban.groupByField` is REQUIRED, so a
+    // padded value there cannot be withdrawn by omitting the key.
+    {
+      id: 'ui-list-view-groupbyfield-padded-refused',
+      surface: 'list-view group-by field names — `kanban.groupByField` (`KanbanConfigSchema`, '
+        + 'REQUIRED), `gantt.groupByField` and `timeline.groupByField` (`GanttConfigSchema` / '
+        + '`TimelineConfigSchema`, both optional) — values carrying leading or trailing whitespace',
+      replacement: 'the field name written with no leading and no trailing whitespace — the same '
+        + 'spelling the object declares and the server answers under. A padded value is RE-AUTHORED, '
+        + 'never trimmed on the author\'s behalf: `\' stage\'` becomes `\'stage\'`. The refusal names '
+        + 'the offending spelling verbatim, so the whitespace an author cannot see in an editor is '
+        + 'visible in the message, next to the name to write instead.',
+      reason:
+        '#17499. All three keys were a bare `z.string()`, so a padded group-by name was valid '
+        + 'authored metadata all the way to the renderers. The name is a LOOKUP KEY on every row, '
+        + 'measured in objectui at `dda8f3815`: the kanban board resolves its lane as '
+        + '`laneField = groupByField || groupField || detectStatusField(objectDef)` and buckets cards '
+        + 'by `card[laneField]`; `ObjectGantt`\'s `groupByAccessor` splits the name on `.` and walks '
+        + 'the backing record (`resolvePath(task.data, field)`); the timeline groups its rows the same '
+        + 'way. The server answers under the unpadded name, so every per-row lookup reads `undefined` '
+        + 'and the board collapses into one `Uncategorized` lane — the gantt and the timeline into one '
+        + 'ungrouped bucket — holding every record. That is a silent wrong answer that reads as a true '
+        + 'statement about the data: one giant bucket is indistinguishable from a dataset where the '
+        + 'field genuinely is empty, which is why nothing weaker than a parse refusal is honest here. '
+        + '`packages/lint`\'s `validate-list-view-field-refs` already grades this position `error` for '
+        + 'the same consequence, but it only runs where an app is validated against its object '
+        + 'definitions; the producer accepted the value regardless. ⛔ NOT a `.trim()`: a trimming '
+        + 'schema makes `\' stage\'` and `\'stage\'` silently equivalent, the consumer-tolerance '
+        + 'direction AGENTS.md #0.1 refuses — and on the REQUIRED kanban key the author cannot '
+        + 'withdraw the value by omitting the key, so a normalising producer would be their only '
+        + 'feedback channel and it would say nothing. The narrowing is non-padded ONLY and '
+        + 'deliberately not the snake_case machine-name grammar `/^[a-z_][a-z0-9_]*$/` this package '
+        + 'spells inline for object/field/tool NAMES: a `groupByField` is authored as a field '
+        + 'REFERENCE and a dotted relationship path (`owner.name`) is an in-tree spelling of one. '
+        + 'Ships at once, no deprecation window (2026-08-27 maintainer ruling 「短期不考虑渐进」).',
+      acceptanceCriteria:
+        'Measured against the shipped schemas, not restated from the card. Every stored view whose '
+        + '`kanban.groupByField`, `gantt.groupByField` or `timeline.groupByField` carries leading or '
+        + 'trailing whitespace is refused on its next authoring-path save, with a `custom` issue at '
+        + 'that key\'s own path (`groupByField`, or `kanban.groupByField` when the view is parsed '
+        + 'whole) naming the offending spelling verbatim and the trimmed name to write instead; a '
+        + 'value that is nothing but whitespace is refused with the remedy "Name the field to group '
+        + 'by" rather than a trimmed name, since there is none. Refused: leading, trailing and both; '
+        + 'a tab, a newline and a non-breaking space in those positions; whitespace-only. NOT refused, '
+        + 'on purpose: whitespace INSIDE the name (`\'Group by field\'` parses), and the EMPTY string '
+        + '(unchanged on all three keys, this narrowing covers the silent case only). Nothing is '
+        + 'normalised on the way through — an accepted name arrives byte-identical, `\'owner.name\'` '
+        + 'included — so a consumer proves the migration by re-saving each view and seeing either a '
+        + 'refusal naming the field or a value it can compare byte-for-byte with what it wrote. Every '
+        + '`groupByField` spelling in the repo at the time of the change parses unchanged: 14 distinct '
+        + 'literals harvested across every `.ts` / `.tsx` / `.mdx` / `.json` / `.mjs` outside '
+        + '`node_modules`, zero of them padded, so no fixture had to be rewritten to keep the tree '
+        + 'green.',
+    },
     {
       id: 'ui-list-view-grouping-field-padded-refused',
       surface: 'list-view grouping level names — `grouping.fields[].field` '
@@ -11671,6 +12603,45 @@ const step18: MigrationStep = {
         + 'type. Any remaining authored key on the widget is deleted (it never configured '
         + 'anything), and behaviour that seems to need one is a renderer capability request '
         + 'against objectui, not a metadata key.',
+    },
+    {
+      id: 'ui-object-grid-page-size-positive-integer-refused',
+      surface: '`object-grid` page-component page sizes '
+        + "(`ComponentPropsMap['object-grid']` — `pagination.pageSize`, each "
+        + '`pagination.pageSizeOptions[]` entry, and the flat `pageSize` shorthand) — '
+        + 'zero, negative and non-integer values (`pagination: { pageSize: 0 }`, '
+        + '`pageSize: 25.5`)',
+      replacement: 'a positive integer, or no declaration at all. A page size of `0` has no '
+        + 'defined meaning on this surface and never had one: delete the key to take the '
+        + "renderer's own default, or write the page size that was meant (`pageSize: 0` "
+        + 'authored to mean "no paging" is `showPagination: false` with no `pagination` bag, '
+        + "since the bag's PRESENCE is what enables paging)",
+      reason:
+        '#19046: this door carried the pre-#7751 read-point shape — `pagination: z.unknown()` '
+        + 'and `pageSize: z.number()` — after the view arm converged on '
+        + '`z.number().int().positive()`. So the SAME authored member carried two accept sets '
+        + 'and renderers read the looser one: `PaginationConfigSchema` (`view.zod.ts`) refuses '
+        + '`pageSize: 0` and pins that refusal by name, and every other `pageSize` the package '
+        + 'declares is bounded with its own throwing pin (`kernel/metadata-plugin.zod.ts`, '
+        + '`marketplace/marketplace.zod.ts`) — the component arm was the only one that '
+        + 'accepted `0`. The value is LIVE: measured at objectui#9853, an authored '
+        + '`pagination.pageSize: 0` reached `ObjectGrid`, went out on the wire as `$top: 0` '
+        + 'and rendered ZERO ROWS, with no grouping needed to trigger it, and it reached the '
+        + 'renderer through this arm. objectui#9896 repaired the consumer half (a resolver at '
+        + 'every read point, fail-soft, one loud diagnostic); this is the declaration half, '
+        + 'and it is not a prerequisite for that repair. '
+        + '⚠️ The `pagination` bag itself stays OPEN (`z.looseObject`): only the two members '
+        + 'whose value is a page size are bounded, and sibling keys parse and pass through '
+        + 'exactly as before. `PaginationConfigSchema` on the view arm is a closed shape and '
+        + 'is unchanged by this entry.',
+      acceptanceCriteria:
+        'Every `object-grid` node declaring a page size — inside `pagination` or through the '
+        + 'flat shorthand — carries a positive integer. Well-formed values (`10`, `25`, `50`) '
+        + 'parse byte-identically to before, a `pagination` bag carrying sibling keys parses '
+        + 'and keeps them, and absence stays absence. A stored page whose `object-grid` node '
+        + 'carries `pageSize: 0` is refused on its next authoring-path save with a per-key '
+        + 'issue at `pagination.pageSize`; the author deletes the key or writes the page size '
+        + 'they meant.',
     },
     {
       id: 'ui-react-list-view-binding-aliases-retired',
@@ -11904,8 +12875,12 @@ export const MIGRATION_MAJORS: readonly number[] = Object.keys(MIGRATIONS_BY_MAJ
  * gate stays red:
  *
  * - **Check (b)**, the retirement gate: a key that flips live → retired must
- *   appear here, by exact set membership, or the build fails. (Check (b2) is its
- *   inverse: an entry naming a key this build still emits as LIVE is rejected.)
+ *   appear here, by exact set membership, or the build fails. Two companions
+ *   read the table in the other direction: check (b2) refuses an entry naming a
+ *   key this build still emits as LIVE, and check (b3) — nested rows only —
+ *   refuses a dotted entry whose def this build emits but whose path it does
+ *   not (#17969). See "Lifecycle" below for what each of them means for a row
+ *   already in the table.
  * - **Check (c)**, the baseline-deletion gate (#4650): the major recorded here
  *   is what starts a tombstone's ~two-major aging clock, so it is also what
  *   eventually lets its `authorable-surface/` line be deleted. Since #5898 —
@@ -11970,14 +12945,39 @@ export const MIGRATION_MAJORS: readonly number[] = Object.keys(MIGRATIONS_BY_MAJ
  *
  * ## Lifecycle
  *
- * Entries are permanent. A declared tombstone ages out after ~two majors and its
- * line may then leave `authorable-surface.json` (check (c)); its entry here
- * stays, and then names a key the build no longer emits — the expected steady
- * state, not an error. The one state the gate rejects is an entry naming a key
- * that is still LIVE: a registration nothing consumed, pre-approving a
- * retirement that has not happened.
+ * A TRUE entry is permanent. A declared TOP-LEVEL tombstone ages out after ~two
+ * majors and its line may then leave `authorable-surface.json` (check (c)); its
+ * entry here stays, and then names a key the build no longer emits — the
+ * expected steady state, not an error. A NESTED row never reaches that file at
+ * all (0 dotted entries on the shipped surface), so it has no aging clock and
+ * "the build no longer emits it" is never that steady state for one.
  *
- * @see scripts/build-schemas.ts — checks (b)/(b2)/(c), the only consumers
+ * Two states are rejected. A row is read as a PATH only when its `name` half
+ * carries a dot AND this build emits no top-level property of that exact name,
+ * so a live dotted TOP-LEVEL key (`@odata.context`, a SCIM extension URN) stays
+ * on the map check (b2) has always judged it on:
+ *
+ * - **Still LIVE** (check (b2)): the entry names a key this build still emits as
+ *   writable — a registration nothing consumed, pre-approving a retirement that
+ *   has not happened. Remedy: tombstone the key, or delete the entry.
+ * - **Nested and unresolvable** (check (b3), #17969): the entry's def IS emitted
+ *   and the dotted path is not in it. Because checks (a0)/(a)/(b)/(c) are
+ *   structurally blind to a nested key, no gated route can produce this state —
+ *   the row is wrong (a typo'd def, a typo'd path, a stale key name). Remedy:
+ *   fix the spelling against the emitted schema, or delete the entry. A row
+ *   whose DEF this build does not emit is NOT this state: that is the whole-def
+ *   removal steady state, registered in {@link RETIRED_DEFS_BY_MAJOR}.
+ *
+ * ⛔ "Delete the entry" and "entries are permanent" do not conflict, and reading
+ * one as licence to drop the other is the way to lose a retirement. A row that
+ * was ever TRUE of some build is history and is never deleted; a row check (b2)
+ * or (b3) refuses was never true of any build, so deleting it removes a false
+ * claim rather than a record. Check (b3) can also not yet tell a wrong row apart
+ * from every truthful one — its refusal text enumerates the shapes it knows it
+ * cannot see — and for those the remedy is to teach the check the shape, ⛔ never
+ * to delete a row that is telling the truth.
+ *
+ * @see scripts/build-schemas.ts — checks (b)/(b2)/(b3)/(c), the only consumers
  */
 export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> = {
   // The first entries since #4659 built this table (#5552). ONE tombstone
@@ -12387,6 +13387,60 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // seam; the semantic entry `api-error-retry-after-unit-in-key` carries the
     // prescription.
     'api/EnhancedApiError:retryAfter',
+    // #17667 — ADR-0049 enforce-or-remove (director seat, decision batch #126
+    // item 1, maintainer 「同意」 2026-09-13, route 2). The other half of the
+    // pagination capability `GET /api/v1/packages` never had; see the sibling
+    // entry `api/ListInstalledPackagesRequest:limit` for the full record. Two
+    // keys, one prescription: `PACKAGES_LIST_PAGINATION_REMOVED` in
+    // `api/package-api.zod.ts` is the single string both rejection sites raise.
+    //
+    // `cursor` was the more inert of the two and the less forgiving to keep. No
+    // emit site has ever written the response half's `nextCursor`, so a caller
+    // looping "until the cursor runs out" would have re-read the first and only
+    // page forever, with no error and no 400 — and there is no ordering key on
+    // this collection a resume could have been built from, so the key had nothing
+    // to carry even if something had read it.
+    //
+    // Same registration shape as its sibling: major 18 (the removal ships on the
+    // 17.x line; the prescription lives at the major boundary), no D2 conversion
+    // because the shape is HTTP-only, and the D3 semantic entry
+    // `packages-list-pagination-retired` carries the prescription to
+    // `spec-changes.json`, the generated upgrade guide and `os migrate meta`.
+    'api/ListInstalledPackagesRequest:cursor',
+    // #17667 — ADR-0049 enforce-or-remove (director seat, decision batch #126
+    // item 1, maintainer 「同意」 2026-09-13, route 2). One capability, both
+    // halves, never half-deleted: `limit` and `cursor` retire together and share
+    // one prescription, `PACKAGES_LIST_PAGINATION_REMOVED` in
+    // `api/package-api.zod.ts`.
+    //
+    // `GET /api/v1/packages` declared a window it has never applied. The serving
+    // door filters on `status` / `type` and returns every remaining row, so a
+    // caller asking for one row was handed the whole table together with a
+    // `hasMore: false` that agreed with it — the silent-widening half of the
+    // ingress rule that names this exact parameter as the one whose drop is worst.
+    //
+    // This key is the sharper of the two because it carried `.default(50)`: a
+    // reader of the published schema — an SDK, codegen, an AI client — was
+    // entitled to believe an unparameterised list is capped at 50 rows. Nothing
+    // parses a query string through this schema, so that default has never been
+    // materialized anywhere, which is why the retirement needs no
+    // `acceptRetiredDefaultResidue` stage: there is no residue population. The
+    // `authorable-defaults/api.json` line goes with the key rather than through
+    // DEFAULT_CHANGES_BY_MAJOR, which excludes retirements by name.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut long before this, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look (the `ui/ListView:pageName`
+    // precedent). Registered here but NOT in `src/conversions/registry.ts`, and
+    // that asymmetry is the point rather than an omission: a D2 conversion
+    // rewrites an authored source or a stored `sys_metadata` row, and this shape
+    // is HTTP-only — nobody authors a `ListInstalledPackagesRequest` and nothing
+    // persists one. The prescription reaches consumers as the D3 semantic entry
+    // `packages-list-pagination-retired` plus this tombstone, the disposition
+    // `api/ListNotificationsRequest:cursor` (#6361) already took for the same
+    // shape one route over.
+    'api/ListInstalledPackagesRequest:limit',
     // #14691 — ADR-0049 enforce-or-remove on the `RestServerConfig` sub-objects,
     // executing the #14369 liveness census (15 `dead` rows across the `crud` /
     // `metadata` / `batch` / `routes` sub-schemas; 0 read sites in `packages/rest`
@@ -12689,6 +13743,51 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // covered by `memory-persistence-auto-save-interval-to-ms`, which converts both
     // arms in one pass.
     'data/AutoPersistenceConfig:autoSaveInterval',
+    // #18612 — ADR-0049 enforce-or-remove, the same ruling and the same diff as
+    // `data/CubeJoin:sql`. `CubeJoin.relationship` carried a
+    // `.default('many_to_one')` and nothing dispatched on the cardinality, so
+    // `one_to_many` parsed, changed no SQL, and the aggregate silently kept the
+    // many-to-one arithmetic. Two service-analytics fixtures authored
+    // `relationship: 'belongsTo'` — a value the enum never declared — which is its
+    // own evidence that nothing validated or read the key.
+    //
+    // Same route and same registration reasoning as the `sql` entry beside this
+    // one: strict deletion plus a `guidance` prescription on the `strictObject`,
+    // registered under 18. The D2 conversion
+    // `cube-join-sql-and-relationship-removed` strips this key too, and it is owed
+    // for the mirror-image reason: the key was DEFAULTED, so the value was
+    // MATERIALIZED into every cube artifact the old schema ever parsed, whether or
+    // not its author typed it.
+    'data/CubeJoin:relationship',
+    // #18612 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-18, director
+    // batch #154 item 4, letter 2). `CubeJoin.sql` was REQUIRED and described itself
+    // as the `ON` clause, and nothing ever read it: both analytics strategies
+    // SYNTHESISE the join, so an authored condition was not ignored but REPLACED by
+    // a foreign-key equality, returned under a 200 with a plausible number attached
+    // (the #10298 shape). Measured with a positive control — zero reads of a join's
+    // `sql` in any non-test source, against eight reads of the neighbouring
+    // `cube.joins?.[alias]?.name` in native-sql-strategy.ts, objectql-strategy.ts
+    // and analytics-service.ts.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look (the `data/Metric:filters`
+    // precedent, one shape over in the same file). `CubeJoinSchema` is a
+    // `strictObject`, so the route is strict deletion plus a `guidance` entry
+    // carrying the prescription — no `retiredKey()` tombstone, the key is out of
+    // the walked shape entirely, and its liveness-ledger row left with it.
+    //
+    // A D2 conversion DOES cover this surface: `cube-join-sql-and-relationship-removed`
+    // (`toMajor: 18`, `retiredFromLoadPath: true`) strips the key wherever the chain
+    // is replayed. It is owed because the key was REQUIRED, so every cube artifact
+    // ever written from the old schema's parse output carries it and would meet the
+    // boot door's refusal with no remedy short of hand-editing JSON. The guidance
+    // prescription therefore closes with the house `os migrate meta --from 17`
+    // sentence, and the D3 semantic entry `cube-join-sql-and-relationship-retired`
+    // carries the judgement the strip cannot: an author who wrote a non-FK
+    // condition wanted a join this runtime does not perform.
+    'data/CubeJoin:sql',
     // #14478 — maintainer ruling 2026-09-02 ("ruled B"): the unit of a
     // duration-shaped `z.number()` key lives in the key name, and no existing
     // offender is grandfathered. `DriverOptions.timeout` said "Timeout in ms" in
@@ -14596,6 +15695,78 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // actually ships the rename; until then the renderer sees an absent key and
     // does not start its timer.
     'ui/Dashboard:refreshInterval',
+    // ADR-0021 (the dataset is the single author-facing analytics shape on the
+    // dashboard face) + ADR-0049 enforce-or-remove; maintainer ruling 2026-09-12,
+    // decision batch #121 item 1, verbatim 「同意」. On a dataset-bound widget the
+    // dataset decides which series exist and which column each one reads, and
+    // `chartConfig` carries appearance — so this structure key is tombstoned on the
+    // widget carrier. `series[].name` named which dataset measure a series read —
+    // series MEMBERSHIP, which follows from `values` and the split in `dimensions`
+    // — and an entry naming a measure outside the selection was ignored, so the
+    // declaration and what rendered could differ silently.
+    // Select the measures and the split instead.
+    // ⚠️ Scoped to THIS carrier. The same key stays authorable on the base
+    // `ChartConfigSchema` (the react `<ObjectChart data={…}>` tier publishes it in
+    // that block's `dataProps`, and an inline-data chart has no dataset to derive
+    // it from) and `ReportChartSchema` keeps its own narrowed `xAxis`/`yAxis`. The
+    // tombstone therefore registers under `ui/DashboardWidgetChartConfig` only.
+    // D2: `dashboard-widget-chart-config-structure-removed`; D3 semantic:
+    // `dashboard-widget-chart-config-structure-refused`.
+    'ui/DashboardWidgetChartConfig:series',
+    // ADR-0021 (the dataset is the single author-facing analytics shape on the
+    // dashboard face) + ADR-0049 enforce-or-remove; maintainer ruling 2026-09-12,
+    // decision batch #121 item 1, verbatim 「同意」. On a dataset-bound widget the
+    // dataset decides which series exist and which column each one reads, and
+    // `chartConfig` carries appearance — so this structure key is tombstoned on the
+    // widget carrier. Nothing on this face ever read it: the dashboard renderer
+    // maps the WIDGET's own `type` to the chart family, and the presentation
+    // lowering carries no `type` branch at all — so an author who wrote a family
+    // here got the widget's.
+    // Write the family on the widget instead.
+    // ⚠️ Scoped to THIS carrier. The same key stays authorable on the base
+    // `ChartConfigSchema` (the react `<ObjectChart data={…}>` tier publishes it in
+    // that block's `dataProps`, and an inline-data chart has no dataset to derive
+    // it from) and `ReportChartSchema` keeps its own narrowed `xAxis`/`yAxis`. The
+    // tombstone therefore registers under `ui/DashboardWidgetChartConfig` only.
+    // D2: `dashboard-widget-chart-config-structure-removed`; D3 semantic:
+    // `dashboard-widget-chart-config-structure-refused`.
+    'ui/DashboardWidgetChartConfig:type',
+    // ADR-0021 (the dataset is the single author-facing analytics shape on the
+    // dashboard face) + ADR-0049 enforce-or-remove; maintainer ruling 2026-09-12,
+    // decision batch #121 item 1, verbatim 「同意」. On a dataset-bound widget the
+    // dataset decides which series exist and which column each one reads, and
+    // `chartConfig` carries appearance — so this structure key is tombstoned on the
+    // widget carrier. `xAxis.field` named the plotted column, which the widget's
+    // `dimensions` selection already names — and it was a LIVE membership channel:
+    // the renderer synthesised a series from an authored axis when the chart
+    // declared none, so one authored field could silently re-point a dataset-bound
+    // series at another column.
+    // Select the dimension instead.
+    // ⚠️ Scoped to THIS carrier. The same key stays authorable on the base
+    // `ChartConfigSchema` (the react `<ObjectChart data={…}>` tier publishes it in
+    // that block's `dataProps`, and an inline-data chart has no dataset to derive
+    // it from) and `ReportChartSchema` keeps its own narrowed `xAxis`/`yAxis`. The
+    // tombstone therefore registers under `ui/DashboardWidgetChartConfig` only.
+    // D2: `dashboard-widget-chart-config-structure-removed`; D3 semantic:
+    // `dashboard-widget-chart-config-structure-refused`.
+    'ui/DashboardWidgetChartConfig:xAxis',
+    // ADR-0021 (the dataset is the single author-facing analytics shape on the
+    // dashboard face) + ADR-0049 enforce-or-remove; maintainer ruling 2026-09-12,
+    // decision batch #121 item 1, verbatim 「同意」. On a dataset-bound widget the
+    // dataset decides which series exist and which column each one reads, and
+    // `chartConfig` carries appearance — so this structure key is tombstoned on the
+    // widget carrier. Each `yAxis[].field` named a plotted measure, which the
+    // widget's `values` selection already names; the array length also declared
+    // the secondary axis, which follows from the measures selected.
+    // Select the measures instead.
+    // ⚠️ Scoped to THIS carrier. The same key stays authorable on the base
+    // `ChartConfigSchema` (the react `<ObjectChart data={…}>` tier publishes it in
+    // that block's `dataProps`, and an inline-data chart has no dataset to derive
+    // it from) and `ReportChartSchema` keeps its own narrowed `xAxis`/`yAxis`. The
+    // tombstone therefore registers under `ui/DashboardWidgetChartConfig` only.
+    // D2: `dashboard-widget-chart-config-structure-removed`; D3 semantic:
+    // `dashboard-widget-chart-config-structure-refused`.
+    'ui/DashboardWidgetChartConfig:yAxis',
     // #9220 — ADR-0049 enforce-or-remove at ELEMENT grain. `element:filter` never
     // had a renderer or reader anywhere: objectui registers none (its
     // renderers/basic/elements.tsx header deferred the element to "owning plugins"
@@ -14925,6 +16096,29 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // which is a different key on a different surface and has always rendered. D2:
     // `view-page-mount-removed`.
     'ui/ListView:pageName',
+    // #16885 — the list view's `navigation.view` binding, retired under ADR-0049
+    // enforce-or-remove by maintainer ruling 2026-09-13 (director decision batch
+    // #126 item 4, verbatim 「同意」, option B). The key's describe promised "the
+    // form view to use for details" and no layer from spec to console ever
+    // resolved a view BY NAME: its one read in the shipped console passed the
+    // value into the SECOND argument of `onNavigate` — the slot that otherwise
+    // carries the navigation-mode token — so an authored name substituted for the
+    // mode rather than selecting a view, and a consumer reading that argument
+    // against its closed `edit`/`view` vocabulary matched neither branch. Zero
+    // authored instances in this repo; the one external author deleted its
+    // occurrence. ONE key and one entry: `NavigationConfigSchema` is reused BY
+    // REFERENCE (`ListViewSchema.navigation` is its only referent), so the walked
+    // shape has a single `ui/NavigationConfig` def and the baseline marks one line
+    // `[RETIRED]`.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, and deliberately:
+    // the ruling's disposition is a D3 SEMANTIC entry
+    // (`list-view-navigation-view-retired`). A mechanical strip would delete the
+    // key without telling anyone which list view lost it, and an author who wrote
+    // it wanted a named detail layout — a want that page assignment serves and a
+    // stripped key does not record. So the prescription reaches consumers as that
+    // semantic TODO plus this tombstone.
+    'ui/NavigationConfig:view',
     // #11805 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-25,
     // decision-inbox batch 4: 「#11805 退役 defaultSort,不需要major」; the producer
     // half of objectui#5861, under the objectui#4869 「接受所有」 direction).

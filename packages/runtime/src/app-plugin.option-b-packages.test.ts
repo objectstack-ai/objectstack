@@ -29,6 +29,7 @@ import {
     collectBundleFunctionEntries,
     collectBundleHooks,
 } from './app-plugin.js';
+import { withScheduledWorkOn } from './scheduled-work.test-support.js';
 
 const field = { name: 'name', type: 'text', label: 'Name' } as const;
 
@@ -100,6 +101,13 @@ const additiveBundle = (extra: Record<string, unknown> = {}) => {
         ...extra,
     };
 };
+
+// [#17396] `AppPlugin` schedules package-authored jobs only where the
+// deployment runs package-authored scheduled work, and that switch is OFF by
+// default in every posture. These suites measure the READER, not the
+// deployment, so without this line every assertion below fails for a reason
+// that has nothing to do with its subject.
+withScheduledWorkOn();
 
 describe('#15005 — runtime collectors resolve `packages[]`', () => {
     it('reads actions — global AND object-embedded — out of `packages[]`', () => {

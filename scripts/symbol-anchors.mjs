@@ -88,6 +88,44 @@
  *
  *     (`scripts/symbol-anchors.mjs#extractAnchors`, `#defineCorpus`)
  *
+ * ### Three corpus-declared variations on the SAME three forms (#18107, #18592)
+ *
+ * None changes what an anchor means; all three are DELIMITER and POPULATION
+ * declarations a corpus makes about its own documents, defaulted OFF so a
+ * corpus that says nothing reads exactly the text it read before.
+ *
+ *   `unspannedAnchors: true`  The anchor is written WITHOUT a code span. A code
+ *       span is a markdown device, and a corpus whose documents are DATA cannot
+ *       write one -- inside a JSON string value a backtick is payload. The
+ *       platform checklist is the measured case: 634 anchors under its own
+ *       forked detector against 8 under the spanned grammar. Unspanned, the
+ *       path must carry a DIRECTORY and the left boundary refuses an
+ *       identifier character, `@`, `-` or `/`, which is what keeps an issue
+ *       reference, a JSON-pointer fragment and a scoped package specifier out.
+ *
+ *   `excludeDirs: ['runs']`   A directory NAME the walker does not descend into,
+ *       at any depth. A corpus is a body of AUTHORED documents; the checklist's
+ *       `runs/` holds OUTPUTS, and holding a past run record to today's
+ *       authoring rules would make the rule unfixable. `docPattern` is a regex
+ *       on the BASENAME and cannot see a directory, so this shape had no
+ *       spelling before -- which is precisely why that corpus stayed forked.
+ *
+ *   `pathlessLineCitations: true`  The two LINE CITATIONS that carry no path of
+ *       their own are judged: a bare colon continuation written without a code
+ *       span (`id :140 and version :202`) and an `L` pin (`~L7246-7331`), both
+ *       continuing a filename named earlier in the same sentence. This is the
+ *       LAST half of the checklist's fork (#18592); the symbol half left at
+ *       #18107. ⛔ Default OFF is a measurement, and ⛔ a corpus declaring a
+ *       `docProjection` may not declare it AT ALL: `defineCorpus` refuses that
+ *       pair by name (#18845), because a projection has already said the judged
+ *       text is prose and in PROSE a colon before digits is punctuation. What
+ *       the option admits there is re-measured below.
+ *
+ * ⭐ A dotted `#Outer.member` is also part of the grammar, and `sweepCorpus`
+ * requires EVERY segment to resolve. Admitting it was additive: a dotted symbol
+ * could not be written inside a code span at all before, so nothing that
+ * resolved can stop resolving.
+ *
  * Rules the forms exist to satisfy:
  *
  *   (a) MECHANICALLY VERIFIABLE. `#symbol` is checked against the target file's
@@ -99,9 +137,11 @@
  *       knows from URLs, and it survives copy-paste into a GitHub link.
  *
  * ⛔ A LINE NUMBER IS NOT AN ANCHOR FORM. `<file>.ts:4901`, `<file>.ts:341-400`,
- * `<file>.ts:459–463` (en dash) and a bare continuation -- a backticked `:`
- * followed by a line spec, `2933` -- are all findings. ⚠️ The angle brackets
- * are deliberate: this file is itself inside the `scripts/**` corpus, so an
+ * `<file>.ts:459–463` (en dash), `<file>.tsx:~605-615` (the approximation
+ * tilde) and a bare continuation -- a backticked `:` followed by a line spec,
+ * `2933` -- are all findings, and so are the two PATH-LESS spellings a corpus
+ * declaring `pathlessLineCitations` admits. ⚠️ The angle brackets are
+ * deliberate: this file is itself inside the `scripts/**` corpus, so an
  * illustration written path-shaped would be a citation of its own.
  *
  * ### The one escape hatch, and who may use it
@@ -192,16 +232,61 @@ export const ANCHOR_GRAMMAR = [
 ].join('\n  ');
 
 /* Extensions an anchor may name. Deliberately the same list the #13556 census
- * extracted with, so a token that census counted is a token this gate sees. */
+ * extracted with, so a token that census counted is a token this gate sees.
+ *
+ * ⭐ `html` joined it when the platform checklist's forked LINE-CITATION
+ * grammar was folded in (#18592). That fork's own vocabulary was not a subset
+ * of this one: it carried `html` where this list did not, so a citation into a
+ * template or a fixture page was a citation ONE of the two graders could read.
+ * Widening here is the exit the checklist gate's own header already prescribed
+ * -- widen the shared vocabulary, ⛔ never re-fork a private extension set --
+ * and it was measured additive before it landed: across all five registered
+ * corpora, ZERO `.html` tokens are read as an anchor or as a line citation
+ * today, so nothing that passed can start failing on this row alone.
+ *
+ * ⚠️ One hazard stated rather than discovered: `.html` is the extension that
+ * appears in an ordinary external URL more than any other, and a corpus
+ * declaring `unspannedAnchors` reads a path-shaped token out of running text.
+ * That class is not new -- a `<host>/<path>.md#<frag>` URL has always been
+ * readable as an anchor by the same rule -- and this row extends it rather
+ * than opening it. */
 export const ANCHORABLE_EXTENSIONS = [
   'ts', 'tsx', 'mts', 'cts', 'js', 'jsx', 'mjs', 'cjs',
   'sh', 'yaml', 'yml', 'json', 'jsonc', 'md', 'mdx',
-  'sql', 'css', 'scss', 'py', 'rs', 'go', 'toml', 'prisma',
+  'sql', 'css', 'scss', 'py', 'rs', 'go', 'toml', 'prisma', 'html',
 ];
 
 const EXT_ALT = ANCHORABLE_EXTENSIONS.join('|');
 const PATHISH = `[A-Za-z0-9_@.\\-]+(?:/[A-Za-z0-9_@.\\-]+)*\\.(?:${EXT_ALT})`;
-const SYMBOL = `[A-Za-z_$][A-Za-z0-9_$]*`;
+/* A path that CARRIES A SLASH. Only the unspanned form needs it: inside a code
+ * span the backticks are the boundary, but unspanned a bare `<file>.ts#<symbol>`
+ * in running text is indistinguishable from prose, so the directory half is
+ * what makes the token an anchor. ⚠️ That placeholder spelling is the same
+ * `dispatch-gates: no-path-population` discipline the grammar block above
+ * states: this file is inside the `scripts/**` corpus, so an illustration
+ * written path-shaped is a citation of its own and reds this module's own
+ * gate. */
+/* ⚠️ And its FIRST character may not be `@`. `PATHISH` admits one because a
+ * spanned anchor's backticks already bound the token; unspanned, an `@`-opened
+ * first segment is a scoped PACKAGE SPECIFIER — an npm import, never a path in
+ * this tree — and reading one as an anchor reports a module as a missing file.
+ * The left-boundary lookbehind cannot do this half: at the very start of a line
+ * there is no preceding character for it to refuse. */
+const DIR_PATHISH = `[A-Za-z0-9_.\\-][A-Za-z0-9_@.\\-]*(?:/[A-Za-z0-9_@.\\-]+)+\\.(?:${EXT_ALT})`;
+/* ⭐ DOTTED SEGMENTS are part of the symbol, and every segment is resolved
+ * (`sweepCorpus` splits on the dot and requires each). `Foo.bar` naming a
+ * member that was dropped is the same rot as `Foo` being dropped, and passing
+ * the anchor because its head survived is fail-open one level down.
+ *
+ * ⚠️ Widening this was ADDITIVE and was measured as such before it landed: a
+ * dotted symbol could not be written inside a code span at all before (the span
+ * has to close right after the symbol, and the dot ended the match), so nothing
+ * that resolved before can stop resolving. Measured on the tree this landed
+ * against: 0 new anchors across all three corpora registered at the time
+ * (`docs/adr/**` 139 files, `scripts/**` 261 files through `commentProse`, and
+ * the system-context page). The corpus that needs it is the platform checklist,
+ * whose own forked grammar carried dotted symbols before it was registered. */
+const SYMBOL = `[A-Za-z_$][A-Za-z0-9_$]*(?:\\.[A-Za-z_$][A-Za-z0-9_$]*)*`;
 
 /* A code span carrying an anchor. `repo:` prefix is optional and only ever a
  * bare word, so a Windows-style drive letter or a URL scheme cannot be read as
@@ -212,6 +297,41 @@ const ANCHOR_SPAN = new RegExp(
 );
 /* A continuation: a code span that is ONLY a fragment. */
 const CONTINUATION_SPAN = new RegExp('`#(?<symbol>' + SYMBOL + ')`', 'g');
+
+/* ⭐ THE UNSPANNED ANCHOR, and it is OPT-IN per corpus (`unspannedAnchors`).
+ *
+ * A code span is a MARKDOWN device. A corpus whose documents are DATA — the
+ * platform checklist's `areas/*.json`, where every citation lives inside a JSON
+ * string value — cannot write one: a backtick there is a literal character in
+ * the payload, not a span. Measured on that corpus before it was registered:
+ * its own forked detector found 634 anchors where the spanned grammar found 8,
+ * and that 626-anchor gap is the whole reason the corpus stayed forked.
+ *
+ * ⛔ So this is NOT a loosening of what an anchor MEANS — the path, the `#` and
+ * the symbol are the same three parts, resolved by the same rule. It is the
+ * DELIMITER being made a corpus's declaration instead of a hard assumption, and
+ * a corpus that does not declare it is byte-for-byte unaffected.
+ *
+ * ⚠️ Unspanned, the left boundary is the whole safety margin, and it is the one
+ * the checklist's forked detector had already proved out against a ledger dense
+ * with `#`-shaped text that is not an anchor: an issue reference (`#13788`,
+ * `objectui#2563`), a JSON-pointer fragment (`schema.json#/$defs/x`), a
+ * scoped package specifier (an `@`-prefixed `<scope>/<dir>/<file>.ts#<symbol>`)
+ * and a hyphenated word carrying a tail (`release-15.1#B2`) — every one of them
+ * pinned by name in the registered corpus's own self-test. The path half
+ * therefore requires a DIRECTORY, and the lookbehind refuses a preceding
+ * identifier character, `@`, `-` or `/`.
+ *
+ * The `repo:` prefix is carried here too, because it is one of the three forms
+ * the grammar declares and leaving it out would not make a cross-repo citation
+ * invisible — it would make it read as a LOCAL path, which is the fabrication
+ * direction: a target in another repository reported as a missing file in this
+ * one. A URL scheme cannot be mistaken for it, since a path may not open with a
+ * slash. */
+const UNSPANNED_ANCHOR = new RegExp(
+  '(?<![A-Za-z0-9_$@\\-/])(?:(?<repo>[a-z][a-z0-9-]*):)?(?<path>' + DIR_PATHISH + ')#(?<symbol>' + SYMBOL + ')',
+  'g',
+);
 
 /* ⛔ The forms the migration deleted. Matched on the SAME text the anchor
  * extractor sees, so a line number cannot hide behind a spelling the extractor
@@ -235,7 +355,18 @@ const CONTINUATION_SPAN = new RegExp('`#(?<symbol>' + SYMBOL + ')`', 'g');
  * that slash list. A line number is rot wherever it is written; the only thing
  * excluded is a FENCED block, which is quoted material, not an anchor. */
 const LINE_SPEC = '\\d+(?:\\s*[-–—]\\s*\\d+)?(?:\\s*[,/]\\s*\\d+(?:\\s*[-–—]\\s*\\d+)?)*\\+?';
-const LINE_ANCHOR = new RegExp('(?<![\\w/.-])(' + PATHISH + '):(' + LINE_SPEC + ')(?![\\w-])', 'g');
+/* ⭐ A TENTH spelling, folded in from the checklist's private grammar (#18592):
+ * the approximation tilde written INSIDE the colon form, `<file>.tsx:~605-615`
+ * for "about line 605". It is the same rot wearing the same hat as the
+ * open-ended `<file>.ts:NNN+` form -- an author hedging a number does not make
+ * the number survive an edit -- and
+ * the two graders disagreed about it, which is the drift the fold closes.
+ *
+ * ⛔ The tilde is the ONLY thing admitted here, and ⛔ no whitespace with it: a
+ * `:` followed by a SPACE and then digits is ordinary prose punctuation
+ * (`**Date**: 2026-04-19`, `exit contract: 1`), and admitting it was measured
+ * to fire 26 times across `docs/adr/**` alone, every one a false positive. */
+const LINE_ANCHOR = new RegExp('(?<![\\w/.-])(' + PATHISH + '):~?(' + LINE_SPEC + ')(?![\\w-])', 'g');
 const LINE_CONTINUATION = new RegExp('`\\s*[:,]\\s*(' + LINE_SPEC + ')`', 'g');
 
 /* `// <dir>/<file>.ts:378` — a comment that is nothing but a path. */
@@ -253,6 +384,69 @@ const FENCED_HEADER = new RegExp('^\\s*(?://|#|\\*|/\\*)\\s*' + PATHISH + ':\\d'
  * than papered over: an untilded bare number is migrated by hand but NOT
  * gated. */
 const TILDE_LINE = /~\s*`(\d{2,5})`/g;
+
+/* ⭐ THE PATH-LESS LINE CITATION, and it is OPT-IN per corpus
+ * (`pathlessLineCitations`). Folded in from the platform checklist's private
+ * grammar (#18592), which is the LAST half of that fork -- the symbol-anchor
+ * half became a registration at #18107 and this one stayed behind.
+ *
+ * Two spellings, and neither carries a path of its own:
+ *
+ *     `ManifestSchema id :140 and version :202`   bare colon continuation
+ *     `registerRecordShareEndpoints ~L7246-7331`  the `L` line pin
+ *
+ * Both continue a filename named EARLIER in the same sentence, which is how a
+ * data ledger writes a second pointer into a file it has already named. The
+ * bare half is the worse half of the class the #13556 migration deleted: it
+ * carries no path at all, only a number, so nothing can even report WHICH file
+ * rotted out from under it.
+ *
+ * ⛔ DEFAULT OFF, and that is a MEASUREMENT, not caution -- RE-TAKEN on
+ * `b0b5f31cc6` in this repository, because the first reading of it travelled
+ * onto three cards as the whole cost argument and had never been run twice.
+ * Turned on for the three registered corpora that read prose, these two admit
+ * 112 and 25 citations across `docs/adr/**`, `scripts/**` and
+ * `packages/spec/src/**`: a dev-server port written as a parenthesised
+ * colon-port, a two-character scenario label, a docblock pointing back at a
+ * dated read position in a sibling repository's file, and this module's own
+ * header teaching the spellings it bans. ⚠️ The figures that travelled as 222
+ * and 23 count RAW REGEX MATCHES over the same text (230 and 25 when re-run
+ * that way on the same tree): they subtract neither the fenced blocks the
+ * extractor skips nor the citations the path-anchored passes already recorded,
+ * so they overstate what the option actually admits by about a half.
+ *
+ * ⭐ The sharper half of the same re-take, and the half that makes this a RULE
+ * rather than advice: of the 120 admitted in the two PROJECTED corpora, ZERO
+ * inherit a path this tree tracks. Both of those corpora decline what they
+ * cannot resolve, so opting in there buys unjudged residual -- the `scripts/**`
+ * gate's own waived count goes 15 to 65 -- and NOT ONE finding an author could
+ * act on, at exit 0, with nothing red to notice it by. That is the combination
+ * `defineCorpus` now refuses outright (#18845).
+ *
+ * In this checklist's DATA, where every citation lives inside a JSON string
+ * value beside the filename it continues, it is a line pin. Which of the two a
+ * corpus is, is the corpus's declaration to make -- exactly as
+ * `unspannedAnchors` is -- but a corpus declaring a `docProjection` has already
+ * made it.
+ *
+ * ⚠️ The numeric shape here is deliberately TIGHTER than `LINE_SPEC`: a plain
+ * run of digits with one optional hyphen range, no comma list, no slash list,
+ * no trailing `+` and ⛔ no internal whitespace. With a path in front of it a
+ * line spec is unambiguous and can afford the long form; with nothing in front
+ * of it the left boundary is the entire safety margin, and the forked grammar
+ * had already proved this exact shape out against a ledger dense with the
+ * neighbours it must refuse -- an HTTP status (`status:409`), a config literal
+ * (`{maxRetries:3}`), a URL port (`localhost:3000`), a clock time (`08:00`)
+ * and JSON quoted in prose (`{"scannedTypes":1}`) -- every one of them pinned
+ * by name in the self-test below.
+ *
+ * ⚠️ The `L` form needs a left boundary of its own so an identifier ending in
+ * a capital L before digits (`SQL2019`, `TTL3600`) is not read as a line pin,
+ * and a TWO-DIGIT floor so a lane label (`L1`) and an i18n token (`L10n`) are
+ * not either. */
+const PATHLESS_LINE_SPEC = '\\d+(?:-\\d+)?';
+const PATHLESS_COLON_CITATION = new RegExp('(?<![A-Za-z0-9_"]):~?(' + PATHLESS_LINE_SPEC + ')', 'g');
+const PATHLESS_L_CITATION = new RegExp('(?<![A-Za-z0-9_])~?L(\\d{2,}(?:-\\d+)?)(?![A-Za-z0-9_])', 'g');
 
 const EXEMPT_MARKER = /<!--\s*anchor-exempt:\s*(HISTORICAL|EXTERNAL)\b[^>]*-->/;
 export const EXEMPT_CLASSES = ['HISTORICAL', 'EXTERNAL'];
@@ -395,13 +589,55 @@ export function symbolResolutionClass(source, filePath, symbol) {
   return scriptSymbolClass(source, symbol);
 }
 
+/**
+ * Which DOT-SEPARATED SEGMENTS of an anchor's symbol do not resolve.
+ *
+ * ⛔ THIS IS NOT A SECOND RULE. Every segment is put to
+ * `symbolResolutionClass` above and nothing here decides what "present" means;
+ * the split is the GRAMMAR's (a dotted symbol is a sequence of names), which is
+ * why it lives beside the grammar instead of in a corpus gate.
+ *
+ * Every segment must be present: `Foo.bar` naming a member that was dropped is
+ * the same rot as `Foo` being dropped, and reporting the anchor as present
+ * because its head survived is the fail-open one level down.
+ *
+ * @param {string} source raw target text
+ * @param {string} filePath repo-relative path of the cited file
+ * @param {string} symbol the anchor's symbol, dots allowed
+ * @returns {{absent: string[], class: 'declaration'|'literal'|null}} `class` is
+ *   the WEAKEST class across the segments, so a dotted anchor resting on one
+ *   `literal` segment is not reported as a `declaration`.
+ */
+export function symbolSegmentResolution(source, filePath, symbol) {
+  const absent = [];
+  let weakest = 'declaration';
+  for (const seg of symbol.split('.')) {
+    const cls = symbolResolutionClass(source, filePath, seg);
+    if (!cls) absent.push(seg);
+    else if (cls === 'literal') weakest = 'literal';
+  }
+  return { absent, class: absent.length ? null : weakest };
+}
+
 /* ───────────────────────── document-side: extraction ───────────────────── */
 
 /**
  * Every anchor and every surviving line anchor in one document.
  * `line` is 1-based, so a finding can be clicked.
+ *
+ * @param {string} markdown the document text (already projected, if the corpus
+ *   declares a `docProjection`)
+ * @param {{unspannedAnchors?: boolean, pathlessLineCitations?: boolean}} [options]
+ *   `unspannedAnchors` admits the UNSPANNED form beside the spanned one, for a
+ *   corpus whose documents are data rather than markdown.
+ *   `pathlessLineCitations` admits the two line citations that carry no path of
+ *   their own -- the bare `:NNN` continuation and the `L` pin -- for a corpus
+ *   that writes a second pointer into a file it has already named.
+ *   ⛔ Both default OFF: a prose corpus that never opted in reads exactly the
+ *   text it read before.
  */
-export function extractAnchors(markdown) {
+export function extractAnchors(markdown, options = {}) {
+  const { unspannedAnchors = false, pathlessLineCitations = false } = options;
   const anchors = [];
   const lineAnchors = [];
   const lines = markdown.split('\n');
@@ -447,10 +683,29 @@ export function extractAnchors(markdown) {
       return best;
     };
     let lastPath = null;
+    const spannedRanges = [];
     for (const m of text.matchAll(ANCHOR_SPAN)) {
       const { repo, path, symbol } = m.groups;
       lastPath = path;
-      anchors.push({ line: lineNo, index: m.index, raw: m[0], repo: repo ?? null, path, symbol: symbol ?? null, continuation: false });
+      spannedRanges.push([m.index, m.index + m[0].length]);
+      anchors.push({ line: lineNo, index: m.index, raw: m[0], repo: repo ?? null, path, symbol: symbol ?? null, continuation: false, unspanned: false });
+    }
+    /* The unspanned pass runs over the SAME text, so an anchor that is already
+     * inside a code span would be found twice — once with its backticks and
+     * once without. It is ONE citation either way, and counting it twice would
+     * inflate a corpus's floor by however many of its anchors happen to be
+     * spanned. Overlap with a span already recorded is therefore dropped, which
+     * also keeps the spanned reading (the one that carries `repo`) as the
+     * authoritative record of that occurrence. */
+    if (unspannedAnchors) {
+      for (const m of text.matchAll(UNSPANNED_ANCHOR)) {
+        const start = m.index;
+        const end = start + m[0].length;
+        if (spannedRanges.some(([s, e]) => start < e && end > s)) continue;
+        const { repo, path, symbol } = m.groups;
+        lastPath = path;
+        anchors.push({ line: lineNo, index: start, raw: m[0], repo: repo ?? null, path, symbol, continuation: false, unspanned: true });
+      }
     }
     for (const m of text.matchAll(CONTINUATION_SPAN)) {
       const before = text.slice(0, m.index);
@@ -462,17 +717,45 @@ export function extractAnchors(markdown) {
         symbol: m.groups.symbol, continuation: true,
       });
     }
+    /* The spans every line citation recorded on this line occupies. The
+     * path-less pass below runs over the SAME text and its two spellings are
+     * SUFFIXES of forms already recorded here -- a backticked continuation
+     * ENDS in the bare colon form the pass below looks for -- so without this
+     * it would report ONE citation twice, and
+     * a corpus counting citations would read the duplicate as a second defect.
+     * Same reasoning, and same remedy, as the unspanned anchor pass above. */
+    const lineAnchorRanges = [];
+    const pushLineAnchor = (entry, length) => {
+      lineAnchorRanges.push([entry.index, entry.index + length]);
+      lineAnchors.push(entry);
+    };
     for (const m of text.matchAll(LINE_ANCHOR)) {
       const ex = exemptionFor(m.index + m[0].length);
-      lineAnchors.push({ line: lineNo, index: m.index, raw: m[0], path: m[1], cited: parseInt(m[2], 10), exempt: ex?.class ?? null, exemptRaw: ex?.raw ?? null });
+      pushLineAnchor({ line: lineNo, index: m.index, raw: m[0], path: m[1], cited: parseInt(m[2], 10), exempt: ex?.class ?? null, exemptRaw: ex?.raw ?? null }, m[0].length);
     }
     for (const m of text.matchAll(TILDE_LINE)) {
       const ex = exemptionFor(m.index + m[0].length);
-      lineAnchors.push({ line: lineNo, index: m.index, raw: m[0], path: lastPath, cited: parseInt(m[1], 10), exempt: ex?.class ?? null, exemptRaw: ex?.raw ?? null, tilde: true });
+      pushLineAnchor({ line: lineNo, index: m.index, raw: m[0], path: lastPath, cited: parseInt(m[1], 10), exempt: ex?.class ?? null, exemptRaw: ex?.raw ?? null, tilde: true }, m[0].length);
     }
     for (const m of text.matchAll(LINE_CONTINUATION)) {
       const ex = exemptionFor(m.index + m[0].length);
-      lineAnchors.push({ line: lineNo, index: m.index, raw: m[0], path: lastPath, cited: parseInt(m[1], 10), exempt: ex?.class ?? null, exemptRaw: ex?.raw ?? null, continuation: true });
+      pushLineAnchor({ line: lineNo, index: m.index, raw: m[0], path: lastPath, cited: parseInt(m[1], 10), exempt: ex?.class ?? null, exemptRaw: ex?.raw ?? null, continuation: true }, m[0].length);
+    }
+    if (pathlessLineCitations) {
+      const alreadyRecorded = (start, end) => lineAnchorRanges.some(([s, e]) => start < e && end > s);
+      /* The bare colon form IS a continuation -- it continues the filename
+       * named before it -- so it is REPORTED as one, and `declinedShape` names
+       * it by how it was written rather than by the path it borrowed. */
+      for (const m of text.matchAll(PATHLESS_COLON_CITATION)) {
+        if (alreadyRecorded(m.index, m.index + m[0].length)) continue;
+        const ex = exemptionFor(m.index + m[0].length);
+        pushLineAnchor({ line: lineNo, index: m.index, raw: m[0], path: lastPath, cited: parseInt(m[1], 10), exempt: ex?.class ?? null, exemptRaw: ex?.raw ?? null, continuation: true, pathless: true }, m[0].length);
+      }
+      for (const m of text.matchAll(PATHLESS_L_CITATION)) {
+        if (alreadyRecorded(m.index, m.index + m[0].length)) continue;
+        const ex = exemptionFor(m.index + m[0].length);
+        pushLineAnchor({ line: lineNo, index: m.index, raw: m[0], path: lastPath, cited: parseInt(m[1], 10), exempt: ex?.class ?? null, exemptRaw: ex?.raw ?? null, pathless: true }, m[0].length);
+      }
     }
   });
   return { anchors, lineAnchors };
@@ -528,7 +811,8 @@ export function commentProse(source) {
 export function defineCorpus(spec) {
   const {
     id, label, docRoots, docPattern = /\.mdx?$/, crossRepos = {}, checkBarePaths = false,
-    docProjection = null, judgeUntrackedLineAnchors = true,
+    docProjection = null, judgeUntrackedLineAnchors = true, excludeDirs = [],
+    unspannedAnchors = false, pathlessLineCitations = false,
   } = spec;
   if (!id || !label) throw new Error('defineCorpus: `id` and `label` are required');
   if (!Array.isArray(docRoots) || docRoots.length === 0) throw new Error('defineCorpus: `docRoots` must be a non-empty array');
@@ -538,15 +822,79 @@ export function defineCorpus(spec) {
   if (docProjection !== null && typeof docProjection !== 'function') {
     throw new Error('defineCorpus: `docProjection` must be a function or null');
   }
-  return { id, label, docRoots, docPattern, crossRepos, checkBarePaths, docProjection, judgeUntrackedLineAnchors };
+  /* ⛔ The same refusal, for the same reason: an `excludeDirs` that is not an
+   * array of names is an exclusion that silently does not happen, and a corpus
+   * would then sweep a subtree its registration says it does not. A directory
+   * name carrying a separator is refused too — this matches a NAME at any
+   * depth, and a caller who writes `runs/2026` would otherwise get an
+   * exclusion that matches nothing and reads as though it matched. */
+  if (!Array.isArray(excludeDirs) || excludeDirs.some((d) => typeof d !== 'string' || d === '' || d.includes('/'))) {
+    throw new Error('defineCorpus: `excludeDirs` must be an array of plain directory NAMES (no separators)');
+  }
+  /* ⛔ A corpus that declares a PROJECTION may not declare `pathlessLineCitations`,
+   * and the pair is refused at REGISTRATION because the two declarations say
+   * opposite things about the same document. A projection is the corpus saying
+   * the judged text is authored PROSE carved out of something else; the two
+   * path-less spellings are a DATA corpus's way of writing a second pointer
+   * beside a filename it has already named. The cost of getting that backwards
+   * is measured in the header above, and it is paid SILENTLY -- a projected
+   * corpus that opts in declines every one of the citations it admits, so the
+   * gate stays green while its unjudged residual grows.
+   *
+   * ⭐ Keyed on ANY projection, ⛔ not on one projection function's identity.
+   * Both readings name the same two corpora today, so this is a choice about
+   * whom the rule governs LATER, and the two failure directions are not
+   * symmetric: an identity test is evaded by a wrapper of the same function, or
+   * by the next projection of the same kind, silently and with nobody deciding
+   * it; this one over-refuses a hypothetical PROJECTED DATA corpus loudly, at
+   * registration, and the ruling this module implements already names that exit
+   * -- widen the core rather than fork the rule. */
+  if (docProjection !== null && pathlessLineCitations) {
+    throw new Error(
+      `defineCorpus: corpus \`${id}\` declares a \`docProjection\` AND \`pathlessLineCitations: true\`. `
+        + 'A projection declares the judged text is authored PROSE, where a colon before digits is punctuation; '
+        + 'the two path-less spellings are for a DATA corpus writing a second pointer beside a filename it has '
+        + 'already named. Drop one of the two: sweep the raw document if this corpus is data, or leave '
+        + '`pathlessLineCitations` off and keep citing a path.',
+    );
+  }
+  return {
+    id, label, docRoots, docPattern, crossRepos, checkBarePaths, docProjection,
+    judgeUntrackedLineAnchors, excludeDirs, unspannedAnchors, pathlessLineCitations,
+  };
 }
 
-function walk(dir, pattern, out = []) {
+/**
+ * The corpus walker.
+ *
+ * ## Why an exclusion belongs here (#18107)
+ *
+ * A corpus is a body of AUTHORED documents, and a directory tree does not
+ * always hold only those. The platform checklist is the measured case: its
+ * family is `docs/qa/platform-checklist/**` MINUS `runs/`, because a run record
+ * is an OUTPUT — written by a runner against whatever the ledger said at the
+ * time — and holding a past record to today's authoring rules would make the
+ * rule unfixable. That shape could not be said through `docRoots` or
+ * `docPattern` (a regex on the basename, which cannot see the directory), and
+ * the corpus therefore stayed forked with a private walker of its own.
+ *
+ * ⭐ The ruling this module implements names that exit directly: 「if a corpus
+ * needs behaviour this core lacks, **widen the core**」. Excluding is a
+ * DECLARATION of population, never a softening of the grammar — everything the
+ * walker does reach is judged by exactly the same rule as before.
+ *
+ * Matching is on the directory NAME at any depth, which is what the corpus's
+ * own walker did before it was registered; `defineCorpus` refuses a name
+ * carrying a separator rather than let a path-shaped entry match nothing.
+ */
+function walk(dir, pattern, out = [], excludeDirs = []) {
   if (!existsSync(dir)) return out;
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry);
-    if (statSync(full).isDirectory()) walk(full, pattern, out);
-    else if (pattern.test(entry)) out.push(full);
+    if (statSync(full).isDirectory()) {
+      if (excludeDirs.includes(entry)) continue;
+      walk(full, pattern, out, excludeDirs);
+    } else if (pattern.test(entry)) out.push(full);
   }
   return out;
 }
@@ -591,21 +939,23 @@ function trackedFiles(root) {
  * same four words, and a residual list can be grouped without re-deriving the
  * classification from the raw text.
  *
- * Order is load-bearing: a continuation and a tilde form BOTH inherit whatever
- * path preceded them on the line, so they must be named by how they were
- * written, never by the path they borrowed.
+ * Order is load-bearing: a continuation, a tilde form and a path-less citation
+ * ALL inherit whatever path preceded them on the line, so they must be named by
+ * how they were written, never by the path they borrowed.
  */
 export function declinedShape(la) {
   if (la.tilde) return 'tilde';
   if (la.continuation) return 'continuation';
+  if (la.pathless) return 'pathless';
   if (la.path?.includes('/')) return 'directory-qualified';
   return 'bare-filename';
 }
 
 /**
- * Sweep one corpus. Returns findings, the counts a report needs, and the
- * citations a corpus declined to judge (`declined`, empty unless the corpus
- * sets `judgeUntrackedLineAnchors: false`).
+ * Sweep one corpus. Returns findings, the counts a report needs, the citations
+ * a corpus declined to judge (`declined`, empty unless the corpus sets
+ * `judgeUntrackedLineAnchors: false`) and `byDoc` — the same count object per
+ * swept document, which is what a corpus holding a PER-FILE floor ratchets.
  *
  * Finding kinds:
  *   line-anchor        a `path:NNN` survived the migration                (RED)
@@ -613,27 +963,53 @@ export function declinedShape(la) {
  *   unresolved-symbol  the file is there, the symbol is not               (RED)
  *   bad-exemption      an exemption marker names no valid class           (RED)
  *   cross-repo-skipped no checkout for that repo -- reported, never red
+ *
+ * An `unresolved-symbol` and an `unresolved-path` also carry `path`, `symbol`
+ * and (for the former) the `absent` segments, so a corpus can key a ledger of
+ * its own on the anchor rather than re-parsing the rendered `raw` text.
  */
 export function sweepCorpus(corpus, root = process.cwd()) {
   const tracked = trackedFiles(root);
   const findings = [];
   const declined = [];
   const counts = { docs: 0, anchors: 0, symbol: 0, fileLevel: 0, declaration: 0, literal: 0, crossRepo: 0, exempt: 0, continuation: 0, unresolvableLineCitation: 0 };
+  /* ── PER-DOCUMENT counts, beside the corpus-wide ones ─────────────────────
+   * A corpus that ratchets its anchor population cannot do it on a total: a
+   * total stays put while one file is emptied and another grows, which is
+   * exactly the dodge a shrink-never floor exists to close. `byDoc` is the same
+   * count object per document, and the corpus-wide `counts` is their sum — so
+   * the two can never disagree about what was swept. */
+  const byDoc = new Map();
   const sourceCache = new Map();
   const readTarget = (p) => {
     if (!sourceCache.has(p)) sourceCache.set(p, readFileSync(join(root, p), 'utf8'));
     return sourceCache.get(p);
   };
 
-  const docs = corpus.docRoots.flatMap((r) => walk(join(root, r), corpus.docPattern)).sort();
+  const docs = corpus.docRoots
+    .flatMap((r) => walk(join(root, r), corpus.docPattern, [], corpus.excludeDirs ?? []))
+    .sort();
   for (const abs of docs) {
     const rel = relative(root, abs);
     counts.docs += 1;
+    const docCounts = { anchors: 0, symbol: 0, fileLevel: 0, declaration: 0, literal: 0, crossRepo: 0, exempt: 0, continuation: 0, unresolvableLineCitation: 0 };
+    byDoc.set(rel, docCounts);
+    /* ⛔ ONE call site per counter, so a count can never move on the total
+     * while standing still per document. Every `counts.x += 1` below became a
+     * `bump('x')`; a new counter that forgets this is a counter the floor
+     * cannot see. */
+    const bump = (key) => { counts[key] += 1; docCounts[key] += 1; };
     const rawDoc = readFileSync(abs, 'utf8');
-    const { anchors, lineAnchors } = extractAnchors(corpus.docProjection ? corpus.docProjection(rawDoc) : rawDoc);
+    const { anchors, lineAnchors } = extractAnchors(
+      corpus.docProjection ? corpus.docProjection(rawDoc) : rawDoc,
+      {
+        unspannedAnchors: corpus.unspannedAnchors ?? false,
+        pathlessLineCitations: corpus.pathlessLineCitations ?? false,
+      },
+    );
 
     for (const la of lineAnchors) {
-      if (la.exempt && EXEMPT_CLASSES.includes(la.exempt)) { counts.exempt += 1; continue; }
+      if (la.exempt && EXEMPT_CLASSES.includes(la.exempt)) { bump('exempt'); continue; }
       /* A corpus may decline to judge a citation that names NO FILE IN THIS
        * TREE, and `docs/adr/**` leaves this ON while a `scripts/**` gate-header
        * corpus turns it OFF. That is the same call `checkBarePaths` makes one
@@ -661,7 +1037,7 @@ export function sweepCorpus(corpus, root = process.cwd()) {
        * it waived (`--list-unresolvable`) and the residual stays a list rather
        * than a number nobody can act on. */
       if (!corpus.judgeUntrackedLineAnchors && !tracked.has(la.path ?? '')) {
-        counts.unresolvableLineCitation += 1;
+        bump('unresolvableLineCitation');
         declined.push({ doc: rel, line: la.line, raw: la.raw, path: la.path ?? null, shape: declinedShape(la) });
         continue;
       }
@@ -679,10 +1055,10 @@ export function sweepCorpus(corpus, root = process.cwd()) {
     }
 
     for (const a of anchors) {
-      counts.anchors += 1;
-      if (a.continuation) counts.continuation += 1;
+      bump('anchors');
+      if (a.continuation) bump('continuation');
       if (a.repo) {
-        counts.crossRepo += 1;
+        bump('crossRepo');
         const checkout = corpus.crossRepos[a.repo];
         const base = checkout && process.env[checkout.checkoutEnv];
         if (!base || !existsSync(join(base, a.path))) {
@@ -693,8 +1069,15 @@ export function sweepCorpus(corpus, root = process.cwd()) {
           continue;
         }
         const src = readFileSync(join(base, a.path), 'utf8');
-        if (a.symbol && !symbolResolutionClass(src, a.path, a.symbol)) {
-          findings.push({ kind: 'unresolved-symbol', doc: rel, line: a.line, raw: a.raw, detail: `\`${a.symbol}\` has no declaration site in ${a.repo}:${a.path}` });
+        if (a.symbol) {
+          const { absent } = symbolSegmentResolution(src, a.path, a.symbol);
+          if (absent.length) {
+            findings.push({
+              kind: 'unresolved-symbol', doc: rel, line: a.line, raw: a.raw,
+              path: a.path, symbol: a.symbol, repo: a.repo, absent,
+              detail: `${absent.map((s) => `\`${s}\``).join(' and ')} ${absent.length > 1 ? 'have' : 'has'} no declaration site in ${a.repo}:${a.path}`,
+            });
+          }
         }
         continue;
       }
@@ -713,29 +1096,37 @@ export function sweepCorpus(corpus, root = process.cwd()) {
          * under a corpus-wide cleanup nobody ruled on. It is recorded as a
          * follow-up finding instead. A corpus whose citations are uniform
          * (#13788's checklist rows) can switch this on and get the check. */
-        counts.fileLevel += 1;
+        bump('fileLevel');
         if (corpus.checkBarePaths && !tracked.has(a.path)) {
           findings.push({ kind: 'unresolved-path', doc: rel, line: a.line, raw: a.raw, detail: `no tracked file at \`${a.path}\`` });
         }
         continue;
       }
       if (!tracked.has(a.path)) {
-        findings.push({ kind: 'unresolved-path', doc: rel, line: a.line, raw: a.raw, detail: `no tracked file at \`${a.path}\` (named by anchor \`#${a.symbol}\`)` });
-        continue;
-      }
-      counts.symbol += 1;
-      const cls = symbolResolutionClass(readTarget(a.path), a.path, a.symbol);
-      if (!cls) {
         findings.push({
-          kind: 'unresolved-symbol', doc: rel, line: a.line, raw: a.raw,
-          detail: `\`${a.symbol}\` has no declaration site or string-literal token in \`${a.path}\``,
+          kind: 'unresolved-path', doc: rel, line: a.line, raw: a.raw,
+          path: a.path, symbol: a.symbol,
+          detail: `no tracked file at \`${a.path}\` (named by anchor \`#${a.symbol}\`)`,
         });
         continue;
       }
-      counts[cls] += 1;
+      bump('symbol');
+      const { absent, class: cls } = symbolSegmentResolution(readTarget(a.path), a.path, a.symbol);
+      if (!cls) {
+        findings.push({
+          kind: 'unresolved-symbol', doc: rel, line: a.line, raw: a.raw,
+          path: a.path, symbol: a.symbol, absent,
+          detail: `${absent.map((s) => `\`${s}\``).join(' and ')} ${absent.length > 1 ? 'have' : 'has'} no declaration site or string-literal token in \`${a.path}\``,
+        });
+        continue;
+      }
+      bump(cls);
     }
   }
-  return { findings, counts, declined };
+  /* Corpus-wide only, and deliberately NOT in `byDoc`: it counts DISTINCT
+   * cited target files, and a distinct count does not sum across documents. */
+  counts.citedSources = sourceCache.size;
+  return { findings, counts, declined, byDoc };
 }
 
 export function formatFindings(findings) {
@@ -773,8 +1164,30 @@ function assert(cond, msg) { if (!cond) { console.error(`❌ symbol-anchors --se
 // 69 → 93 when the member-modifier spellings gained a case EACH, every one of
 //         them paired with its own negative control, after `override` was found
 //         missing from the hand-enumerated accept set (#16821).
+// 93 → 122 when the core was widened so the platform checklist could join by
+//          REGISTRATION instead of staying forked (#18107): the unspanned
+//          anchor form and every `#`-shaped neighbour it must refuse, the
+//          dotted symbol segments, and `excludeDirs` driven in both directions
+//          on one fixture. Each option carries its DEFAULT-OFF control, which
+//          is the case that says an already-registered corpus did not move.
+// 122 → 149 when the LAST half of that same fork was folded in (#18592): the
+//           path-less line citation as a third corpus declaration, the
+//           approximation tilde inside the colon form and `html` in the shared
+//           vocabulary. The 19 cases that pinned the checklist's private
+//           line-citation grammar moved here — every spelling it caught and
+//           every colon-then-digit neighbour it refused — and the de-duplication
+//           pair, the inheritance pair and the default-off control joined them.
+// 149 → 156 when `defineCorpus` began REFUSING a `docProjection` beside
+//           `pathlessLineCitations` (#18845): the refusal, the two things its
+//           message must name, the wrapped-projection row that pins the rule to
+//           the declaration rather than to one function's identity, and three
+//           controls — the live DATA opt-in, a projected corpus that never
+//           mentions the option, and the option declared OFF beside a
+//           projection. ⛔ The cases ride the file's ONE battery on purpose:
+//           the roster is per SECTION BANNER and this file carries none, which
+//           is why a single hoisted battery is its landed shape.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'symbol-anchors self-test': 93,
+  'symbol-anchors self-test': 156,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1024,6 +1437,208 @@ export function selfTest() {
     'a continuation is a CONTINUATION even when a path preceded it on the line');
   check(declinedShape({ path: 'a/b.ts' }) === 'directory-qualified', 'a path with a slash is directory-qualified');
   check(declinedShape({ path: 'b.ts' }) === 'bare-filename', 'a path with no slash is a bare filename — the shape no resolver can bind');
+
+  // 11b. ⭐ THE UNSPANNED ANCHOR (#18107). Every row is driven in BOTH
+  //      directions against the SAME text, because the whole risk of dropping
+  //      the code span is over-firing: unspanned, the only thing separating an
+  //      anchor from ordinary prose is the left boundary and the required
+  //      directory. The DEFAULT-OFF control is the first case, and it is the
+  //      one that says an existing prose corpus reads what it always read.
+  const unspannedDoc = 'the refusal lives at packages/core/src/x.ts#parseEmails today';
+  check(extractAnchors(unspannedDoc).anchors.length === 0,
+    'DEFAULT: an unspanned anchor is NOT read — a corpus that never declared `unspannedAnchors` reads exactly the text it read before');
+  const un = (s) => extractAnchors(s, { unspannedAnchors: true }).anchors;
+  const unspanned = un(unspannedDoc);
+  check(unspanned.length === 1 && unspanned[0].path === 'packages/core/src/x.ts'
+    && unspanned[0].symbol === 'parseEmails' && unspanned[0].unspanned === true,
+  `OPT-IN: an unspanned anchor is read, split into path and symbol, and marked unspanned — got ${JSON.stringify(unspanned)}`);
+  check(un('(packages/rest/src/rest-server.ts#buildRouter).')[0]?.symbol === 'buildRouter',
+    'trailing punctuation is not part of an unspanned symbol');
+  check(un('a/b/x.ts#alpha + a/b/y.tsx#beta').length === 2, 'two unspanned anchors on one line are both found');
+  check(un('p/q/f.mjs#sym').length === 1 && un('p/q/f.json#sym').length === 1,
+    'the unspanned form reads the SHARED extension vocabulary, not a set of its own');
+  // ⛔ The negatives — every `#`-shaped neighbour a data ledger is full of.
+  check(un('the objectui#2563 regression').length === 0, 'a cross-repo ISSUE reference is not an unspanned anchor');
+  check(un('closed by #13786 and #13482').length === 0, 'a bare issue reference is not an unspanned anchor');
+  check(un('https://example.com/schema.json#/$defs/Item').length === 0, 'a JSON-pointer URL fragment is not an unspanned anchor');
+  check(un('ADR-0025 §3.3, ADR-0090 D4').length === 0, 'an ADR section reference is not an unspanned anchor');
+  check(un('release-15.1#B2').length === 0, 'an anchor-shaped tail on a hyphenated word with no slash is not an unspanned anchor');
+  check(un('@objectstack/spec/src/x.ts#Y').length === 0, 'a scoped package specifier is not an unspanned anchor — the `@` is refused by the left boundary');
+  check(un('a bare filename x.ts#sym carries no directory').length === 0,
+    'an unspanned anchor REQUIRES a directory — a bare filename unspanned is prose');
+  check(un('packages/objectql/src/search-filter.ts (each latin term ORs)').length === 0,
+    'a BARE citation with no `#` is not an anchor');
+  // The repo prefix survives unspanned, so a sibling-repo target is not
+  // reported as a missing file in THIS tree.
+  const unRepo = un('see objectui:packages/types/src/layout.ts#BaseSchema for the shape');
+  check(unRepo.length === 1 && unRepo[0].repo === 'objectui' && unRepo[0].path === 'packages/types/src/layout.ts',
+    `an unspanned CROSS-REPO anchor keeps its repo — got ${JSON.stringify(unRepo)}`);
+  // ⭐ DE-DUPLICATION. With the option on, a SPANNED anchor must still be ONE
+  // occurrence: counting it twice would inflate by however many of a corpus's
+  // anchors happen to be spanned, and a per-file floor reads that as growth.
+  const mixed = un('spanned `packages/a/b.ts#one` and unspanned packages/a/c.ts#two');
+  check(mixed.length === 2 && mixed.filter((a) => a.unspanned).length === 1,
+    `a spanned anchor must not be counted a second time by the unspanned pass — got ${JSON.stringify(mixed.map((a) => [a.path, a.unspanned]))}`);
+
+  // 11c. ⭐ DOTTED SYMBOL SEGMENTS, and the additive control beside them.
+  const dotted = un('packages/spec/src/data/object.zod.ts#ObjectSchema.shape');
+  check(dotted.length === 1 && dotted[0].symbol === 'ObjectSchema.shape',
+    `a dotted anchor keeps BOTH segments — got ${JSON.stringify(dotted.map((a) => a.symbol))}`);
+  const dottedSpan = extractAnchors('a span `packages/a/b.ts#Outer.member` here').anchors;
+  check(dottedSpan.length === 1 && dottedSpan[0].symbol === 'Outer.member',
+    `a dotted symbol inside a code span is read too — got ${JSON.stringify(dottedSpan.map((a) => a.symbol))}`);
+  const segSrc = ['export const PolicyShape = {', "  mode: 'strict',", '};'].join('\n');
+  check(symbolSegmentResolution(segSrc, 'x.ts', 'PolicyShape.mode').absent.length === 0,
+    'both segments of a live dotted anchor resolve');
+  check(symbolSegmentResolution(segSrc, 'x.ts', 'PolicyShape.strictness').absent.join(',') === 'strictness',
+    'a dotted anchor whose SECOND segment is gone names that segment — ⛔ it is not passed on the first');
+  check(symbolSegmentResolution(segSrc, 'x.ts', 'Missing.mode').absent.join(',') === 'Missing',
+    'a dotted anchor whose FIRST segment is gone names that segment');
+  check(symbolSegmentResolution(segSrc, 'x.ts', 'PolicyShape').class === 'declaration',
+    'an undotted symbol still reports its class');
+  check(symbolSegmentResolution("const names = ['sys_metadata'];", 'x.ts', 'sys_metadata').class === 'literal',
+    'the WEAKEST class is what a segmented anchor reports — a `literal` is never promoted to `declaration`');
+
+  // 11d. ⭐ `excludeDirs`, BOTH DIRECTIONS on ONE fixture (#18107). A sweeper
+  //      that reached neither subtree would satisfy the exclusion half alone,
+  //      so the included subtree is swept in the same call and must still
+  //      resolve — that control is what makes the exclusion a reading.
+  const exclDir = mkdtempSync(join(tmpdir(), 'symbol-anchors-excl-'));
+  let exclKept = null;
+  let exclAll = null;
+  let exclThrew = false;
+  try {
+    mkdirSync(join(exclDir, 'docs/areas'), { recursive: true });
+    mkdirSync(join(exclDir, 'docs/runs'), { recursive: true });
+    mkdirSync(join(exclDir, 'pkg'), { recursive: true });
+    writeFileSync(join(exclDir, 'pkg', 'a.ts'), 'export function handler() { return 1; }\n');
+    /* ⭐ THE SAME ANCHOR TEXT in both subtrees, so the only variable is WHERE
+     * it lives. The symbol is deliberately one that does NOT resolve, because
+     * an excluded file must produce no finding while an included one must. */
+    const judged = 'the read lives at `pkg/a.ts#goneFromThisFile`.\n';
+    writeFileSync(join(exclDir, 'docs/areas', 'kept.md'), judged);
+    writeFileSync(join(exclDir, 'docs/runs', 'record.md'), judged);
+    execFileSync('git', ['init', '-q'], { cwd: exclDir, env: gitFreeEnv() });
+    execFileSync('git', ['add', '-A'], { cwd: exclDir, env: gitFreeEnv() });
+    exclKept = sweepCorpus(defineCorpus({ id: 'excl', label: 'excl', docRoots: ['docs'], excludeDirs: ['runs'] }), exclDir);
+    exclAll = sweepCorpus(defineCorpus({ id: 'all', label: 'all', docRoots: ['docs'] }), exclDir);
+  } finally {
+    rmSync(exclDir, { recursive: true, force: true });
+  }
+  check(exclKept?.counts.docs === 1 && [...exclKept.byDoc.keys()].join(',') === join('docs', 'areas', 'kept.md'),
+    `\`excludeDirs\` must keep the walker out of that subtree — swept ${JSON.stringify([...(exclKept?.byDoc.keys() ?? [])])}`);
+  check(exclKept?.findings.filter((f) => f.doc.includes('runs')).length === 0,
+    'an excluded document must produce NO finding — its anchors are not judged at all');
+  check(exclKept?.findings.filter((f) => f.kind === 'unresolved-symbol').length === 1,
+    `CONTROL: the INCLUDED subtree is still swept by the same call — got ${JSON.stringify(exclKept?.findings.map((f) => f.kind))}`);
+  check(exclAll?.counts.docs === 2 && exclAll.findings.filter((f) => f.kind === 'unresolved-symbol').length === 2,
+    `CONTROL: with no \`excludeDirs\` the SAME sweeper reaches both — got ${exclAll?.counts.docs} doc(s), ${exclAll?.findings.length} finding(s)`);
+  check(exclKept?.byDoc instanceof Map && exclKept.byDoc.get(join('docs', 'areas', 'kept.md'))?.anchors === 1,
+    'the per-document counts are returned beside the corpus-wide ones');
+  try { defineCorpus({ id: 'x', label: 'x', docRoots: ['a'], excludeDirs: ['runs/2026'] }); } catch { exclThrew = true; }
+  check(exclThrew, 'defineCorpus must refuse an `excludeDirs` entry carrying a separator — it would match nothing while reading as though it matched');
+  check(defineCorpus({ id: 'x', label: 'x', docRoots: ['a'] }).excludeDirs.length === 0
+    && defineCorpus({ id: 'x', label: 'x', docRoots: ['a'] }).unspannedAnchors === false
+    && defineCorpus({ id: 'x', label: 'x', docRoots: ['a'] }).pathlessLineCitations === false,
+  'excluding nothing, requiring a code span and requiring a path are the DEFAULTS — an existing corpus must not be moved by adding any of the three options');
+
+  // 11e. ⭐ THE PATH-LESS LINE CITATION (#18592), and the whole battery that
+  //      used to pin the platform checklist's forked grammar, transplanted.
+  //      ⛔ A case is not deleted by moving; it is deleted by stopping. Every
+  //      row below fired in that fork and must fire here, and every silent
+  //      neighbour it refused must stay silent here — that pair is what makes
+  //      the fold a fold rather than a rewrite.
+  //
+  //      Driven in BOTH directions against the SAME text, because the whole
+  //      risk of dropping the path is over-firing: with nothing in front of the
+  //      number, the left boundary is the entire safety margin.
+  const plDoc = 'ManifestSchema id :140 and version :202';
+  check(extractAnchors(plDoc).lineAnchors.length === 0,
+    'DEFAULT: a path-less citation is NOT read — a corpus that never declared `pathlessLineCitations` reads exactly the text it read before');
+  const pl = (s) => extractAnchors(s, { pathlessLineCitations: true }).lineAnchors;
+  const plRaw = (s) => pl(s).map((l) => l.raw);
+  // ⭐ FIRES — every spelling the forked grammar caught and this core did not.
+  check(pl(plDoc).length === 2, `OPT-IN: a bare continuation citation is caught, once per number — got ${JSON.stringify(plRaw(plDoc))}`);
+  check(plRaw('Ada Auditor holds ONLY auditor (:395)').join() === ':395', 'a PARENTHESISED bare citation is caught');
+  check(plRaw('computeAuthGate ~:5084-5160').join() === ':5084-5160', 'an approximate `~:` bare citation is caught — the tilde sits OUTSIDE the token, exactly as the fork read it');
+  check(plRaw('computeAuthGate :~5084-5160').join() === ':~5084-5160', 'and the other tilde placement, INSIDE the colon form, is caught too');
+  check(plRaw('registerRecordShareEndpoints ~L7246-7331').join() === '~L7246-7331', 'a `~L` line pin is caught');
+  check(plRaw('the evaluate leg L7477-7493').join() === 'L7477-7493', 'a bare `L` line pin is caught, tilde or no tilde');
+  check(pl('a run at :241-243 and :255 and :267').length === 3, 'each bare citation in a chained run is its own hit');
+  // ⭐ The citation INHERITS the filename named before it — that is the whole
+  //   reason the shape exists, and reporting it with no path at all would make
+  //   the finding unactionable.
+  const plInherit = pl('`packages/a/b.ts#one` then id :140');
+  check(plInherit.length === 1 && plInherit[0].path === 'packages/a/b.ts' && plInherit[0].pathless === true,
+    `a path-less citation inherits the path named before it and is marked path-less — got ${JSON.stringify(plInherit)}`);
+  check(declinedShape({ pathless: true, path: 'packages/a/b.ts' }) === 'pathless',
+    'a path-less citation is named by how it was WRITTEN, never by the path it borrowed');
+  check(declinedShape({ continuation: true, pathless: true, path: 'packages/a/b.ts' }) === 'continuation',
+    'the bare COLON form is a continuation and reports as one — it continues the filename before it');
+  // ⭐ DE-DUPLICATION, both ways. A path-anchored citation and a backticked
+  //   continuation both END in a `:NNN`, so the path-less pass must not report
+  //   either of them a second time: a corpus counting citations would read the
+  //   duplicate as a second defect in a file that has one.
+  check(plRaw('packages/a/b.ts:4901').join() === 'packages/a/b.ts:4901',
+    `a PATH-ANCHORED citation stays ONE hit with the option on — got ${JSON.stringify(plRaw('packages/a/b.ts:4901'))}`);
+  check(plRaw('`packages/a/b.ts#s` and `:2933` after').join() === '`:2933`',
+    `a BACKTICKED continuation stays ONE hit with the option on — got ${JSON.stringify(plRaw('`packages/a/b.ts#s` and `:2933` after'))}`);
+  check(plRaw('about ~`326` there').join() === '~`326`', 'the tilde bare-number form is untouched by the option');
+  // ⛔ STAYS SILENT — the colon-then-digit neighbours a real ledger is full of.
+  //   Each of these was pinned by name in the fork and is pinned by name here.
+  check(pl("thrown {code:'DELETE_RESTRICTED', status:409}").length === 0, 'an HTTP status in prose is not a citation');
+  check(pl('retry {maxRetries:3, backoffMs:1000}').length === 0, 'a config literal is not a citation');
+  check(pl('probe http://localhost:3000/_console/').length === 0, 'a URL port is not a citation');
+  check(pl('daily 08:00 UTC; today() == 2026-08-31T00:00:00Z').length === 0, 'a clock time is not a citation');
+  check(pl('a 200 {"scannedTypes":1,"stats":{}}').length === 0, 'JSON quoted in prose is not a citation');
+  check(pl('ADR-0025 §3.3 and #13479').length === 0, 'an ADR section reference is not a citation');
+  check(pl('never pin a bare colon-NNN').length === 0, 'prose that DESCRIBES the ban is not itself a citation');
+  check(pl('SQL2019 and a TTL3600 budget').length === 0, 'a capital L ending an identifier before digits is not a line pin');
+  check(pl('the L10n bundle').length === 0, 'an i18n-style token is not a line pin');
+  check(pl('lane L1 of the queue').length === 0, 'a one-digit `L` reference is not a line pin — the floor is two digits');
+  check(pl('**Date**: 2026-04-19 and exit contract: 1').length === 0,
+    '⛔ a colon followed by a SPACE is prose punctuation, not a citation — admitting it fires 26 times in `docs/adr/**` alone');
+  // ⭐ And the spelling the fold added to the PATH-ANCHORED form, which is NOT
+  //   behind the option: every corpus catches it.
+  const tildeInColon = extractAnchors('a pin at packages/a/AiChatPage.tsx:~605-615 here').lineAnchors;
+  check(tildeInColon.length === 1 && tildeInColon[0].cited === 605,
+    `the approximation tilde INSIDE the colon form is a line anchor for EVERY corpus — got ${JSON.stringify(tildeInColon.map((l) => l.raw))}`);
+  check(extractAnchors('a template at packages/a/page.html:42 here').lineAnchors.length === 1,
+    '`html` is in the shared anchorable vocabulary — a citation into a template page is read like any other');
+
+  // 11f. ⭐ WHO MAY DECLARE `pathlessLineCitations` (#18845). The option is a
+  //      DATA corpus's declaration, and a corpus declaring a `docProjection`
+  //      has already said its documents are prose — so the pair is refused at
+  //      REGISTRATION instead of being left to whoever writes the next corpus.
+  //      ⛔ Driven in BOTH directions on the SAME two spellings, because a
+  //      refusal that also bit the one LIVE opt-in would delete a working
+  //      corpus: the control rows below are that corpus's exact shape (no
+  //      projection, the option on) and the two prose corpora's exact shape (a
+  //      projection, the option never mentioned).
+  const proseSpec = { id: 'prose-corpus', label: 'prose', docRoots: ['a'], docProjection: commentProse };
+  let pairError = null;
+  try { defineCorpus({ ...proseSpec, pathlessLineCitations: true }); } catch (err) { pairError = err; }
+  check(pairError !== null,
+    'a corpus declaring BOTH a `docProjection` and `pathlessLineCitations: true` must be REFUSED at registration');
+  check(String(pairError && pairError.message).includes('prose-corpus'),
+    `the refusal must NAME the corpus — got ${JSON.stringify(String(pairError && pairError.message).slice(0, 140))}`);
+  check(String(pairError && pairError.message).includes('docProjection')
+    && String(pairError && pairError.message).includes('pathlessLineCitations'),
+  'the refusal must name BOTH declarations — an author told only that something is wrong cannot know which of the two to drop');
+  check(defineCorpus({ id: 'data-corpus', label: 'data', docRoots: ['a'], unspannedAnchors: true, pathlessLineCitations: true }).pathlessLineCitations === true,
+    'CONTROL: a DATA corpus — no projection — may still declare `pathlessLineCitations`; this rule bites PROSE only');
+  check(defineCorpus(proseSpec).docProjection === commentProse,
+    'CONTROL: a projected corpus that never mentions the option registers exactly as it did before');
+  check(defineCorpus({ ...proseSpec, pathlessLineCitations: false }).pathlessLineCitations === false,
+    'CONTROL: the refusal is about the PAIR — declaring the option OFF beside a projection is not a refusal');
+  // ⭐ Keyed on ANY projection, ⛔ never on one function's identity: an identity
+  //   test is evaded by a wrapper around the very same projection, silently.
+  let wrappedError = null;
+  try {
+    defineCorpus({ id: 'wrapped-corpus', label: 'wrapped', docRoots: ['a'], docProjection: (src) => commentProse(src), pathlessLineCitations: true });
+  } catch (err) { wrappedError = err; }
+  check(wrappedError !== null && String(wrappedError.message).includes('wrapped-corpus'),
+    'a projection WRAPPED in another function is refused too — the rule reads the DECLARATION, not one projection function\'s identity');
 
   // 12. ⛔ THE ENVIRONMENT ISOLATION PIN (#16624), and it is the one case here
   //     that spawns `git`. `sweepCorpus` resolves through `git ls-files`, and

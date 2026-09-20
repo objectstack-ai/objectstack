@@ -218,6 +218,17 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         confirmText: "このユーザーとして代理ログインを開始しますか？正当なサポート対応時のみ使用してください。操作は監査ログに記録されます。",
         successMessage: "代理ログイン中"
       },
+      set_user_manager: {
+        label: "マネージャーを設定",
+        description: "このユーザーのマネージャーを設定します。レポートラインは承認ルーティングと own_and_reports のレコード範囲を決定します。",
+        successMessage: "マネージャーを更新しました",
+        params: {
+          managerId: {
+            label: "マネージャー",
+            helpText: "このユーザーの直属の上長。組織が異なるマネージャー、自分自身の指定、レポートラインが循環する、または深さの上限を超える指定はサーバー側で拒否されます。"
+          }
+        }
+      },
       update_my_profile: {
         label: "プロフィール更新",
         successMessage: "プロフィールを更新しました"

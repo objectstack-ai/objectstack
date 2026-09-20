@@ -37,12 +37,38 @@
  * GET /organization/list-members?organizationId=<foreign>&filterField=userId&filterValue=<self>
  *                                                        -> 403 YOU_ARE_NOT_A_MEMBER_OF_THIS_ORGANIZATION
  * GET /get-session          (signed in)                  -> 200 {user:{id,…}, session:{…}}   (BARE, no envelope)
- * GET /get-session          (anonymous)                  -> 200 null
+ * GET /get-session          (anonymous)                  -> 200 null   <- SUPERSEDED, see below
  * GET /organization/list-members  (anonymous)            -> 401 UNAUTHORIZED
  * ```
  *
  * The two rows the fixture serves differ in `id` **and** `organizationId`, so
  * "answered the wrong organisation" is a value difference an assertion can see.
+ *
+ * ## ⚠️ The anonymous `/get-session` row is RE-ANCHORED, not restamped
+ *
+ * It is the one line of the drive above the product no longer produces. #17881
+ * (`374d9d3afa`) landed `plugin-auth`'s `refuseAnonymousSession`, which converts
+ * better-auth's `200` + literal `null` on this ONE route into the declared
+ * ADR-0112 refusal envelope before it leaves the process (#17238):
+ *
+ * ```
+ * GET /get-session          (anonymous)                  -> 401 {"success":false,"error":{"code":"UNAUTHENTICATED","message":"Sign in first"}}
+ * ```
+ *
+ * The drive is NOT re-run here, so that row is anchored to the PRODUCER rather
+ * than restamped onto a measurement that did not take it:
+ * `anonymous-session-refusal.ts` derives the code from
+ * `standardErrorCodeForHttpStatus(401)` and takes the message from
+ * `PLATFORM_ADMIN_REFUSAL_MESSAGES[401]`. Every other row above is still the
+ * 2026-09-08 drive, untouched — including the `list-members` 401, which is
+ * better-auth's own session middleware and answers `UNAUTHORIZED`, a DIFFERENT
+ * code from the seam above. That difference is load-bearing in case ⑥.
+ *
+ * Case ⑥ moved with the row. Before #17881 its `signedIn: false` leg modelled an
+ * answer the runtime had stopped producing: the double served `200 null`, the
+ * SDK walked on to `list-members`, and the 401 the case asserted came from a
+ * SECOND request a real anonymous caller never reaches — so the case could not
+ * fail for the reason it existed. The refusal now arrives on request ONE.
  *
  * ## Why this file cannot pass for the wrong reason
  *
@@ -54,6 +80,10 @@
  * they pin the request BYTES, which is what the card's finding was ultimately
  * about, and they fail on a filter that is dropped or misspelled even if some
  * future double got lucky on the row.
+ *
+ * The anonymous leg (⑥) carries the same property on its own axis: the two
+ * refusals in play answer DIFFERENT codes, so the case discriminates on a value
+ * and not only on how many requests were made.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -85,7 +115,11 @@ const ROWS: Record<string, OrganizationMemberWithUserWire[]> = {
 interface DoubleOptions {
   /** `null` models a signed-in session with no active organisation. */
   activeOrganizationId: string | null;
-  /** `false` models an anonymous caller: `/get-session` answers the literal `null`. */
+  /**
+   * `false` models an anonymous caller: since #17881 `/get-session` answers the
+   * declared ADR-0112 refusal envelope at 401, which is where such a caller now
+   * stops — it is no longer a `200` the SDK reads a missing user out of.
+   */
   signedIn?: boolean;
 }
 
@@ -116,9 +150,16 @@ function betterAuthDouble(options: DoubleOptions): Drive {
       const q = parsed.searchParams;
 
       if (parsed.pathname === '/api/v1/auth/get-session') {
-        // Measured: the BARE `{ user, session }` body for a signed-in caller,
-        // and the literal `null` — at 200, not 401 — for an anonymous one.
-        if (!signedIn) return json(200, null);
+        // Measured: the BARE `{ user, session }` body for a signed-in caller.
+        // The anonymous arm is the platform's own refusal seam rather than
+        // better-auth's retired `200 null` — shaped exactly like
+        // `refuseAnonymousSession`'s output, code and message included.
+        if (!signedIn) {
+          return json(401, {
+            success: false,
+            error: { code: 'UNAUTHENTICATED', message: 'Sign in first' },
+          });
+        }
         return json(200, {
           user: { ...USER, emailVerified: false, createdAt: '2026-09-08T02:34:14.6Z', updatedAt: '2026-09-08T02:34:14.6Z' },
           session: { id: 'ses_1', userId: USER.id, token: 'tok', activeOrganizationId: options.activeOrganizationId, activeTeamId: null },
@@ -127,7 +168,11 @@ function betterAuthDouble(options: DoubleOptions): Drive {
 
       if (!signedIn) {
         // Every organisation route sits behind better-auth's session
-        // middleware, which refuses before any handler reads the query.
+        // middleware, which refuses before any handler reads the query. Kept
+        // although an anonymous caller no longer gets this far through the SDK:
+        // it answers `UNAUTHORIZED`, not the `/get-session` seam's
+        // `UNAUTHENTICATED`, so a regression that swallowed the first refusal
+        // and walked on is caught on the CODE in case ⑥, not only on a URL count.
         return json(401, { message: 'Unauthorized', code: 'UNAUTHORIZED' });
       }
 
@@ -243,19 +288,36 @@ describe('[#16568] organizations.getActiveMember addresses the organisation the 
     expect(error?.httpStatus).toBe(403);
   });
 
-  it('⑥ an anonymous caller is still refused 401 by the server, not by an invented client-side error', async () => {
+  it('⑥ an anonymous caller is refused by the server on the FIRST request, not by an invented client-side error', async () => {
     const { client, urls } = betterAuthDouble({ activeOrganizationId: ORG_A, signedIn: false });
 
     const error = await client.organizations
       .getActiveMember(ORG_B)
       .then(() => null, (e: unknown) => e as { code?: string; httpStatus?: number });
 
-    expect(error?.code).toBe('UNAUTHORIZED');
+    // The SERVER's own ADR-0112 envelope, propagated verbatim. Asserted as code
+    // + status rather than as a bare `toThrow()`: a method that threw a plain
+    // `Error` for its own reasons would satisfy `toThrow` and say nothing about
+    // who refused, which is the whole question here.
+    expect(error?.code).toBe('UNAUTHENTICATED');
     expect(error?.httpStatus).toBe(401);
-    // The refusal comes from the second request — the SDK does not short-circuit
-    // on the `null` session and substitute a diagnostic of its own.
-    expect(urls).toHaveLength(2);
-    expect(urls[1]).toContain('/organization/list-members');
+    // Step 1 is terminal for an anonymous caller since #17881: `/get-session`
+    // refuses, the SDK's shared `fetch` wrapper throws on the non-2xx, and
+    // `list-members` never reaches the wire. Asserted as the WHOLE list so a
+    // silent extra request cannot hide behind a length check.
+    expect(urls).toEqual([`${AUTH}/get-session`]);
+
+    // Guard the guard: the walk-on this case rules out is REAL in the fixture.
+    // Drive `list-members` anonymously through the same double and watch it
+    // answer better-auth's own `UNAUTHORIZED` — a DIFFERENT code from the one
+    // asserted above — so "the SDK swallowed the first refusal and walked on"
+    // fails on the VALUE, not merely on the request count.
+    const raw = await (client as unknown as {
+      fetchImpl: (input: string) => Promise<Response>;
+    }).fetchImpl(`${AUTH}/organization/list-members?organizationId=${ORG_B}`);
+
+    expect(raw.status).toBe(401);
+    expect(await raw.json()).toMatchObject({ code: 'UNAUTHORIZED' });
   });
 
   it('⑦ the double really can serve the wrong row — guard the guard', async () => {
