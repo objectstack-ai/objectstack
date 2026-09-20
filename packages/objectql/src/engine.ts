@@ -10270,7 +10270,29 @@ export class ObjectQL implements IObjectQLEngine {
       });
       return;
     }
-    this.logger.error('Find operation failed', error as Error, { object });
+    // [#17212] The LEVEL is `warn`, not `error`, for the same reason #17052
+    // moved the three write doors: the next statement in `find`'s catch is
+    // `throw e`, so AGENTS.md's third legal answer applies — "a failure handed
+    // to the CALLER is not a degradation at all". The requester IS told; an
+    // `error` line is a second, louder report of a fact the caller already has.
+    //
+    // Measured for this card, and it retires the "only operator-facing copy"
+    // argument the card left open. `SqlDriver.backendStatementFault`'s own
+    // measured table (live PG 16.13 + better-sqlite3) covers EVERY read-path
+    // dialect fault including `connection, timeout, ACL`, and puts each one in
+    // front of a reader on the driver's own `logger.warn`. The one read-path
+    // class with no driver-channel sibling is the filter COMPILER's refusals
+    // (`uncompilableFieldReferenceError`, `unresolvableFilterColumnRefusal`),
+    // raised before the statement executes — and those are rejected requests
+    // carrying a declared status, which is precisely the path the gate's own
+    // remedy text names as the mirror-image failure.
+    //
+    // ⛔ Demoted, not deleted. What still observes a `find` failure: the
+    // rethrow one frame up (unconditional, level-independent, the caller's
+    // answer), this line, and the driver's `warn` for the whole backend-fault
+    // class. `writeFailureLogMeta` keeps the message and the stack, which
+    // `warn(message, meta?)` has no Error slot for (see its header).
+    this.logger.warn('Find operation failed', writeFailureLogMeta(error, { object }));
   }
 
   /**
