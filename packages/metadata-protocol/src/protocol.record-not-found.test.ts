@@ -161,6 +161,29 @@ describe('[#4435] deleteData reports what actually happened', () => {
     await expect(p.deleteData({ object: 'task', id: 'whatever' } as any))
       .resolves.toMatchObject({ success: true });
   });
+
+  it('a row that MATCHED and was NOT removed answers `success: false`, not a deletion', async () => {
+    // The same measurement one outcome over. `success` stayed a LITERAL for
+    // every answer that was not the contract's `false`, so a write that found
+    // its row and deliberately did not remove it still reported a deletion.
+    //
+    // `sys_permission_set` is the shipped case: deleting a package-declared
+    // set is an ADR-0005 RESET — the record re-projects to the declared body
+    // instead of vanishing — and its envelope was byte-identical to a real
+    // delete's, so a UI fired a success toast and showed the row again on
+    // refresh. The engine's delete result declares a COUNT arm beside the
+    // driver boolean, and zero rows removed is the one value that positively
+    // means "the row is still there".
+    const engine = {
+      registry: { getObject: () => SCHEMA },
+      delete: vi.fn(async () => 0),
+    };
+    const p = new ObjectStackProtocolImplementation(engine as any);
+    const res = await p.deleteData({ object: 'task', id: 'still_there' } as any);
+    // Not a 404 either: the caller can still GET this record, so reading zero
+    // as not-found would trade one wrong answer for a louder one.
+    expect(res).toEqual({ object: 'task', id: 'still_there', success: false });
+  });
 });
 
 describe('[#4435] deleteManyData reports per id, not per request', () => {
