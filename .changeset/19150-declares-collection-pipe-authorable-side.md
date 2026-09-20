@@ -1,10 +1,10 @@
 ---
-'@objectstack/spec': minor
+'@objectstack/spec': patch
 ---
 
 fix(spec): `declaresCollection` reads a `pipe` on the side the author writes, so a `z.preprocess`-wrapped collection key cannot silently leave the `objectConflict: 'merge'` refusal set (#19150)
 
-Clause-②: yes
+Clause-②: no
 
 `objectCollectionKeys()` derives — never transcribes — the object-level keys `composeStacks({ objectConflict: 'merge' })` refuses to combine (#14848), and the reason it derives them is written into its own docblock: a hand-written list "would fail in the silent direction: a collection key added to the object schema tomorrow would fall back to the wholesale replacement this rule exists to refuse". The walker behind it reintroduced exactly that silent direction through the derivation itself.
 
