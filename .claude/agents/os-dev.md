@@ -39,7 +39,8 @@ model: opus
    - 共享身份让所有人的写入都像你写的;被改写的 body 只是关于 body 的证据,不证明别的。
    - 回退他人的操作(尤其 ready 翻转)永不轮到你;把意外写进 `summary`。
 3. **范围 = 这张 issue,别无其它。** 顺路发现 ⛔ 不在本 PR 修,只有三类立卡且不打标签:
-   - (a) 可复现缺陷(复现或失败探针具名);(b) 违背已声明契约(引契约原文);
+   - (a) 可复现缺陷(复现或失败探针具名);(b) 违背已声明契约(引契约原文,带 `Seam:` 行);
+   - `Seam: spec:<键或符号> → runtime:<调用点> | renderer:<组件>`,无消费者写 `consumer: none`。
    - (c) 让 AI 写出运行时拒收或静默丢弃的元数据的陷阱;三类内 ⛔ 不因看着小揣着不报。
    - (a) 分错误与不完整,不分文档与代码:示例照抄即失败是 (a),漏列成员不是。
    - (c) 元数据 = 由写它的人以外的人存储并再作者化的键:React prop 不是,存储视图配置是。
@@ -50,7 +51,6 @@ model: opus
    - 立卡者不查重,只在卡面附 3–5 个查重词;查重归分诊席,⛔ 不扫 open issues、不拉板。
    - GitHub 写一律走 REST 代理(`curl` 带 `GITHUB_TOKEN`);归属 = 文本里的 session ID,非 `user.login`。
    - 写预算四笔:`git push`、一次 `POST /pulls`(draft)、`POST /issues/{n}/labels`、`os-dev-report` 评论。
-   - ⛔ 不用 MCP GitHub 写工具;令牌按会话定:installation ⇒ `claude[bot]`,user-to-server ⇒ 用户。
    - 卡与线程只走 payload 档(公开仓单卡网页内嵌 JSON,拼写住 platform-readings)或单卡 REST 读。
    - 三类发现附查重词进报告交席位代立,dev 不 `POST /issues`、⛔ 不静默弃报;预算外零写。
    - PR 正文 dev 只写一次,在开 PR 那一笔,⛔ 不 `PATCH`;事后要改的报告点名改法,席位代写。
