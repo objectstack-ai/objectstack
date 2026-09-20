@@ -246,8 +246,6 @@ const EXTRA_ENTRIES = {
       'The Zod schemas are themselves the contract (Prime Directive #1); downstream code imports them directly, so these sources are product rather than build input. Narrowed to *.zod.ts so no test or helper rides along.',
     'api-surface':
       'Export snapshot used by downstream compatibility checks — one file per published entry point since #5837.',
-    'api-surface-declarations':
-      'The same snapshot one axis deeper (#16045): the .d.ts declaration TEXT of every export, per entry point, so a compatibility check reading two published tarballs can see WHICH declared shape moved between releases and not merely which names survived — the question api-surface cannot answer. 12 MiB of text, 1.02 MiB of the tarball.',
     'spec-changes.json': 'Machine-readable spec change log driving the upgrade guide.',
   },
 };

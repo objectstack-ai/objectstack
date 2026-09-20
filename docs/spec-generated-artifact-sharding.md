@@ -41,12 +41,7 @@ arithmetic composes on a merge and the judgement does not).
 
 - **`spec-changes.json`** — keyed by version, so two PRs append under different majors.
   Never a conflict surface worth splitting.
-- **`api-surface-signatures.json`** — RETIRED at #16045, and the one row here whose reason
-  did not survive its own artifact. It was 1.3KB, one line per `defineX` factory, so it was
-  never worth splitting. Its replacement is the opposite shape: `api-surface-declarations/`
-  holds the declaration TEXT of every export (12 MiB across 17 shards on the tree that
-  landed it), so it is sharded per entry point from the day it arrived, for the same
-  merge-queue reason `api-surface/` is.
+- **`api-surface-signatures.json`** — 1.3KB, one line per `defineX` factory.
 - **`authorable-surface.base.json`** — the #5235 deletion-gate anchor. Nothing but an
   explicit `gen:authorable-surface-base` writes it (#5358), so it was never on the churn
   path that made the other three the queue's serialization point. It also carries **one**
