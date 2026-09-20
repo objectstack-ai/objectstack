@@ -44,9 +44,43 @@ afterEach(async () => {
   }
 });
 
-/** A node of the app's real flow, by id. */
+/**
+ * A node of the app's real flow, by id — searched at EVERY depth.
+ *
+ * [#19206] `notify_owner` and `update_priority` now live inside the `loop`
+ * container's `config.body` region (that is what binds `currentTask` at all),
+ * so a search of the top-level `nodes[]` alone reports them as gone. The walk
+ * below descends the ADR-0031 region slots — `loop.config.body`,
+ * `try_catch.config.try` / `.catch`, `parallel.config.branches[]` — because the
+ * question this suite asks is about the node's CONFIG, which is unchanged by
+ * where the node is nested.
+ */
 function node(id: string): { type?: string; config?: Record<string, unknown> } {
-  const found = OverdueEscalationFlow.nodes?.find((n) => n.id === id);
+  type AnyNode = { id?: string; type?: string; config?: Record<string, unknown> };
+  const regionsOf = (cfg: Record<string, unknown> | undefined): AnyNode[][] => {
+    const out: AnyNode[][] = [];
+    for (const slot of ['body', 'try', 'catch']) {
+      const region = cfg?.[slot] as { nodes?: AnyNode[] } | undefined;
+      if (Array.isArray(region?.nodes)) out.push(region!.nodes!);
+    }
+    const branches = cfg?.branches as Array<{ nodes?: AnyNode[] }> | undefined;
+    if (Array.isArray(branches)) {
+      for (const branch of branches) if (Array.isArray(branch?.nodes)) out.push(branch.nodes!);
+    }
+    return out;
+  };
+  const walk = (nodes: AnyNode[] | undefined): AnyNode | undefined => {
+    for (const n of nodes ?? []) {
+      if (n?.id === id) return n;
+      for (const region of regionsOf(n?.config)) {
+        const hit = walk(region);
+        if (hit) return hit;
+      }
+    }
+    return undefined;
+  };
+
+  const found = walk(OverdueEscalationFlow.nodes as AnyNode[] | undefined);
   if (!found) throw new Error(`#18584 harness: node '${id}' is gone from overdue_escalation`);
   return found as { type?: string; config?: Record<string, unknown> };
 }
