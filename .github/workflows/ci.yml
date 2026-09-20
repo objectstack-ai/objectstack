@@ -735,7 +735,66 @@ jobs:
               # step is load-bearing for this flag: a sliced package whose build
               # never ran fails LOUDLY here (its imports resolve to a missing
               # dist), never as a silent green.
-              set -- pnpm turbo run test "--filter=$PKG" --only --concurrency=4 --summarize --log-order=stream -- "--shard=$SLICE"
+              #
+              # ⛔ `--force` (#18671) IS NOT REDUNDANT BESIDE `--only` -- do not
+              # delete it as a no-op. Read the paragraph above backwards: if
+              # `--only` is what stops turbo re-hashing the `^build` closure,
+              # then under `--only` this task's hash NO LONGER CARRIES that
+              # closure, and the one path by which a change in a dependency
+              # reaches this task is gone with it. What is left is the package's
+              # own files plus the hand-declared `$TURBO_ROOT$` inputs in
+              # turbo.json. So a slice that IS in the affected set -- and this
+              # shard's package set is exactly the affected set, computed two
+              # steps up -- can match a main-seeded cache entry across the very
+              # change that put it in that set, and be replayed instead of run.
+              #
+              # That is not a hypothetical. Run 34746808828 replayed
+              # `@objectstack/cli:test` on this leg -- `Cached: 1 cached, 1
+              # total`, `73ms >>> FULL TURBO` -- out of a log a main push run
+              # had produced ~15 minutes earlier, on a commit that did not
+              # contain the PR under test. All six shards reported success,
+              # `check-test-completeness` graded the replay OK, and the shard
+              # attestation said "ran to completion". Neither of those two can
+              # tell a run from a replay; the red reached `main`.
+              #
+              # Measured on this tree (turbo 2.10.10) with a package whose
+              # `test` task has the same shape (`dependsOn: ["^build"]`), after
+              # a source change in an upstream package PLUS the closure rebuild
+              # the step above performs -- i.e. exactly this job's sequence:
+              #
+              #   --only              (before)  1 task   `1 cached, 1 total`   81ms >>> FULL TURBO   <- NOT RUN
+              #   --only --force      (here)    1 task   `0 cached, 1 total`   1.15s                 <- runs
+              #   no --only           (option)  6 tasks  `0 cached, 6 total`   1m54.963s             <- runs, and rebuilds the closure
+              #
+              # The third row is why the repair is `--force` rather than
+              # "drop `--only`": dropping it re-executes the closure the step
+              # above just built, which is #16395's bill paid twice per job.
+              # That bill re-measured TODAY at cli's real scale, same tree,
+              # `--dry=json` against a cache the passthrough-free build had
+              # just filled: the `--only` leg plans 1 task; dropping `--only`
+              # plans 60 and every one of the 60 is a cache MISS, against 57
+              # HIT / 3 MISS for the same plan without the passthrough (2 of
+              # those 3 are `#build` tasks for packages that declare no `build`
+              # script, so they never execute; the real miss is the test). Cost
+              # of re-executing that closure here, `--concurrency=2` on a
+              # SHARED container: 5m11.262s, against 60ms `>>> FULL TURBO` for
+              # the same command when its hashes are left alone.
+              #
+              # `--force` re-executes THIS ONE TASK and nothing else, which is
+              # why `--only` stays: the two are a pair. Precedent, for the same
+              # reason in one sentence -- a gate must not be satisfiable by a
+              # replayed artifact -- is the docs-build gate's `TURBO_FORCE`
+              # below. Two things fall out of it that are worth keeping:
+              # `--summarize` now records a REAL duration for the sliced
+              # package (measure-test-shard-timings.mjs refuses to read one
+              # from a replay), and the log says `cache bypass, force
+              # executing <hash>` where it used to say `cache hit, replaying
+              # logs <hash>`.
+              #
+              # ⚠ What `--force` does NOT do is make the hash honest. It stays
+              # blind to the closure, so nothing in this repo yet fails when a
+              # slice leg's hash stops moving for an upstream source change.
+              set -- pnpm turbo run test "--filter=$PKG" --only --force --concurrency=4 --summarize --log-order=stream -- "--shard=$SLICE"
             fi
             LOGS="$LOGS $LOG"
             node scripts/run-with-stall-guard.mjs --log "$LOG" --stall-minutes 10 \
