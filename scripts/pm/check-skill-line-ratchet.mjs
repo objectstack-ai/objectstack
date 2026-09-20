@@ -1435,7 +1435,35 @@ export const CEILINGS = new Map([
   // 并按实测行数抬上限」; recorded by the director on #15410 comment 5682595374, which
   // also refuses option D). AGENTS.md is not a CROSS_FILE_MOVES destination, so no
   // `ruledRaises` record applies. Landed count, headroom 0, same convention.
-  ['AGENTS.md', 1099],
+  //
+  // 1099 → 1109 (card #16233): § Degradation log levels' third-legal-answer
+  // paragraph brought to the instrument, per letter C — a `catch` that delivers by
+  // RETURNING an outcome object (`return { ok: false, error }`, a `failed` receipt)
+  // has no callee to declare, so it is ⛔ never added to
+  // `DURABILITY_CRITICAL_CALLEES` or to either `FAILURE_PROPAGATION_*` map,
+  // ⛔ never baselined and ⛔ never log-bolted to green the checker; it is pinned by
+  // its own file's test and its population read from
+  // `scripts/measure-return-propagating-durability-seams.mjs`. Until this line the
+  // text prescribed, for all 12 censused seams, the two remedies the gate's own
+  // header refuses — correct code reds the gate, and the only two ways to green it
+  // were the two it forbids. +10 lines, measured: the paragraph goes 10 → 20
+  // physical lines and the file 1099 → 1109, and it is bought by CONTENT, not by
+  // bad wrapping. Re-measured on the merged tree with this gate's own `wrapLine`,
+  // at the width the section is actually typeset at (median 85 B, p90 89 B, max
+  // 90 B — inside the ≤91-byte ASCII-prose convention the 120-byte cap above
+  // codifies): a greedy rewrap returns exactly the 20 lines the paragraph already
+  // occupies at 90 B, and 21 at 88 B ⇒ 0 lossless-rewrap headroom. Lines come back
+  // only by re-typesetting ASCII prose ABOVE that convention (18 at 100 B, 15 at
+  // 120 B; the whole section 88 → 69 at 120 B), which is the reflow that cap
+  // documents itself as NOT imposing — and re-wrap funding is refused per the
+  // 2026-08-17 rule in any case. Maintainer ruling, verbatim and untranslated:
+  // 「1. #19214 / 卡 #16233 —— AGENTS.md 行预算, A 批 +10(1099→1109)」
+  // — the maintainer's live instruction to `session_019srGWGCBBCBHqcDoRZpQRh`,
+  // recorded on #16233 comment 5750261694; it rules the line budget that the
+  // standing letter-C ruling 5716260390 left unruled when it named the text.
+  // AGENTS.md is not a CROSS_FILE_MOVES destination, so no `ruledRaises` record
+  // applies. Landed count, headroom 0, same convention.
+  ['AGENTS.md', 1109],
   // #9965: root CLAUDE.md is the other repo-root instruction file — same read
   // path (every seat session), same governance (Prime Directive #14). It is
   // structurally growth-prone in the way the ratchet is built for: it exists to
