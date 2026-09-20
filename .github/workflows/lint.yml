@@ -192,6 +192,19 @@ jobs:
       # gate whose transport depends on repository visibility is a gate that
       # goes red on a settings change no file here can assert.
       issues: read
+      # ⭐ AND `pull-requests`, which is NOT redundant with the row above —
+      # MEASURED, on run 35495222460 of `half-state-patrol.yml`, whose token
+      # carries `issues` and NOT this scope: its census reported 3,628
+      # unresolvable citation sites where a full-scope read of the same tree
+      # reported 2,168, and the difference is 1,460 — EXACTLY the
+      # `resolves-as-pull-request` tally. `GET /repos/{owner}/{repo}/issues`
+      # answers with the pull requests omitted, so every citation naming a PR
+      # number reads as a number the board never had. On THIS blocking step
+      # that is a false RED on a correct citation, and the frontier probe
+      # (`?per_page=1&sort=created&direction=desc`) is read from the same
+      # response — so an understated frontier turns later numbers into
+      # `never-issued` too. ⛔ Do not drop this row as tidying.
+      pull-requests: read
 
     steps:
       - name: Checkout repository

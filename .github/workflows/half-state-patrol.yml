@@ -164,9 +164,21 @@ on:
 # `issues: write` is the narrowest scope GitHub offers for that edit; the job
 # never uses it for labels, comments, assignees or state, and the sweeper it
 # calls is read-only against the API by construction.
+#
+# `pull-requests: read` is READ-ONLY and buys one thing, for the citation
+# census step only — MEASURED on run 35495222460, this workflow's own
+# pull_request run WITHOUT this row: the census reported 3,628 unresolvable
+# citation sites where a full-scope read of the same tree reported 2,168, and
+# the difference is 1,460 — EXACTLY the `resolves-as-pull-request` tally.
+# `GET /repos/{owner}/{repo}/issues` answers with the pull requests omitted
+# unless this scope is held, so every citation naming a PR number was reported
+# as a number the board never had. A report-only reading that is wrong by 67%
+# is still a machine-readable surface telling a lie. ⛔ Do not drop this row
+# as tidying, and ⛔ do not widen it to `write`: nothing here writes a PR.
 permissions:
   contents: read
   issues: write
+  pull-requests: read
 
 # One patrol at a time. A scheduled run overlapping a manual dispatch would have
 # two runs racing to rewrite the same body, and the loser's findings would vanish
