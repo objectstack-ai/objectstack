@@ -540,3 +540,97 @@ describe('#13137 `FieldSchema` REFUSES the legacy target spellings, it does not 
         });
     }
 });
+
+/**
+ * [#18550] The picker's field-def fallback must refuse a `reference` carrier it
+ * cannot READ, rather than reporting the target as MISSING.
+ *
+ * This was one of the measured residue sites of ruling letter E item 2 on
+ * #18095: `referenceObject = def?.reference` read the carrier raw, INSIDE the
+ * metadata fetch's `catch {}`. Two things followed from that, and both are
+ * pinned below.
+ *
+ *  - An object-valued carrier is TRUTHY, so it passed the
+ *    `if (!referenceObject)` gate and was forwarded verbatim as
+ *    `query.object` into `findData` — the route asked the data layer to search
+ *    an object whose name was an object.
+ *  - Moving the read through the arbiter alone would not have been enough:
+ *    inside that `catch` the refusal would have been swallowed and the route
+ *    would have answered `500 LOOKUP_TARGET_MISSING` — "no target is declared"
+ *    — for a def that declares one this reader cannot read. The two want
+ *    different fixes from whoever owns the metadata, so the field def is
+ *    hoisted out of the swallow and the carrier is read after it.
+ *
+ * Absence keeps its answer: `undefined`, `null` and `''` all still reach
+ * `LOOKUP_TARGET_MISSING`, which is the envelope this route has always used to
+ * say "nothing names the target".
+ */
+describe('#18550 an UNREADABLE `reference` carrier is refused, not reported as a missing target', () => {
+    const NO_OBJECT_PICKER = { displayFields: ['name', 'email'], maxResults: 10 };
+    const savedWithoutObject = () => persistedBody(studioForm([{ field: 'owner', publicPicker: NO_OBJECT_PICKER }]));
+    const ownerDefIs = (ownerDef: unknown) => ({ ...leadObject, fields: { ...leadObject.fields, owner: ownerDef } });
+
+    it('an object-valued carrier does NOT answer LOOKUP_TARGET_MISSING, and never reaches findData', async () => {
+        const stored = await savedWithoutObject();
+        // The engine holds a row a resolving route WOULD return, so the red
+        // state is a 200 carrying data rather than an empty 200.
+        const { findData, lookup } = routesOver(
+            stored,
+            [{ id: 'usr_1', name: 'Ada', email: 'ada@example.com' }],
+            ownerDefIs({ type: 'lookup', reference: { object: 'sys_user' }, label: 'Owner' }),
+        );
+        const res = mockRes();
+        await lookup.handler({ params: { slug: 'contact', field: 'owner' }, query: {} } as any, res);
+
+        // ⛔ The load-bearing NEGATIVE, and the whole point of hoisting the def
+        // out of the fetch's swallow: an unreadable carrier must not be
+        // reported as an absent one.
+        expect(res.body.code).not.toBe('LOOKUP_TARGET_MISSING');
+        // What it IS instead, measured: the handler's outer `catch` classifies
+        // the throw and `logError`s it, so the carrier's unreadability reaches
+        // the operator's log and the caller gets the sanitised fault envelope
+        // (#5437/#7543 — a crash's `TypeError: …` text is never disclosed to
+        // the caller). ⚠️ The refusal is loud in the LOG; on the wire it is a
+        // 500 that is merely DISTINGUISHABLE from the missing-target 500.
+        expect(res.statusCode).toBe(500);
+        expect(res.body.code).toBe('INTERNAL_ERROR');
+        // …and the object-valued carrier is never forwarded as `query.object`.
+        expect(findData).not.toHaveBeenCalled();
+    });
+
+    it('control: an ABSENT carrier is STILL LOOKUP_TARGET_MISSING — the envelope absence has always had', async () => {
+        const stored = await savedWithoutObject();
+        const { findData, lookup } = routesOver(
+            stored,
+            [{ id: 'usr_1', name: 'Ada', email: 'ada@example.com' }],
+            ownerDefIs({ type: 'lookup', label: 'Owner' }),
+        );
+        const res = mockRes();
+        await lookup.handler({ params: { slug: 'contact', field: 'owner' }, query: {} } as any, res);
+
+        expect(res.statusCode).toBe(500);
+        expect(res.body.code).toBe('LOOKUP_TARGET_MISSING');
+        expect(findData).not.toHaveBeenCalled();
+    });
+
+    it('control: a NULL carrier is absence too (`StrictField` declares it nullable) — same envelope, no throw', async () => {
+        const stored = await savedWithoutObject();
+        const { lookup } = routesOver(stored, [], ownerDefIs({ type: 'lookup', reference: null, label: 'Owner' }));
+        const res = mockRes();
+        await lookup.handler({ params: { slug: 'contact', field: 'owner' }, query: {} } as any, res);
+
+        expect(res.statusCode).toBe(500);
+        expect(res.body.code).toBe('LOOKUP_TARGET_MISSING');
+    });
+
+    it('control: the canonical STRING carrier still resolves and answers 200 — the routing did not break the live path', async () => {
+        const stored = await savedWithoutObject();
+        const { findData, lookup } = routesOver(stored, [{ id: 'usr_1', name: 'Ada', email: 'ada@example.com' }]);
+        const res = mockRes();
+        await lookup.handler({ params: { slug: 'contact', field: 'owner' }, query: {} } as any, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(findData).toHaveBeenCalledTimes(1);
+        expect(findData.mock.calls[0][0].object).toBe('sys_user');
+    });
+});

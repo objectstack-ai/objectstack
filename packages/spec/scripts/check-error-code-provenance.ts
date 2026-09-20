@@ -369,9 +369,86 @@ function run(report: boolean): number {
 // Self-test — the red leg, pinned per pattern and per waiver direction
 // ---------------------------------------------------------------------------
 
+// Set by `selfTest()` only after its verdict line prints, and read at the
+// dispatch at the foot of this file.
+//
+// ⛔ AN EXIT CODE IS NOT A HANDSHAKE, and in this file that is worth spelling
+// out, because the code travels further than it does in the template this is
+// copied from: `selfTest()` RETURNS a number and the dispatch hands it straight
+// to `process.exit()`. A 0 rides that path just as happily when it comes from a
+// `return` placed above the verdict — printing nothing, exiting 0, reporting a
+// self-test that never finished as one that passed. The flag is the thing an
+// early return cannot carry with it.
+let selfTestReachedVerdict = false;
+
+// ── The self-test's own battery roster and floor ───────────────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line: the verdict
+// names `STAMP_PATTERNS.length` and the waiver directions, neither of which
+// moves when a `check()` call stops being reached. The shrink was measured on
+// the sibling `check-exported-any.ts`, whose self-test has the same anatomy —
+// deleting one name from a fixture name list de-registers that case and the run
+// still prints its verdict byte-identically and still exits 0.
+//
+// Closed the way `scripts/check-agent-model-declared.mjs` and its TypeScript
+// ports (`scripts/check-test-typecheck.mts`, `check-duration-unit-keys.ts` in
+// this directory) closed it — COPIED and ⛔ never imported, because every
+// self-test has to keep running standalone as
+// `tsx scripts/check-error-code-provenance.ts --self-test`, and a shared
+// assertion module would be one point of failure for every instrument at once.
+// What is pinned is the registered NAMES, not a number.
+//
+// A BATTERY HERE IS A SECTION: this self-test is a sequence of `check()` calls
+// grouped by what they hold, so each group opens with `battery('<name>')` and
+// every `check()` after it is attributed to that name until the next opens.
+//
+// ⛔ A pinned TOTAL is not the repair — a battery falling from 4 cases to 1
+// keeps a total "right" the moment a sibling grows — and ⛔ neither is a roster
+// DERIVED from the run: a count taken from the cases that ran can never notice
+// one that stopped.
+//
+// The counts are a FLOOR, not an equality: adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running.
+const SELF_TEST_BATTERIES: Readonly<Record<string, number>> = Object.freeze({
+  'each published STAMP pattern catches its own spelling': 4,
+  'the population boundary and comment masking: what is NOT a site': 2,
+  'the reconciliation: an unlisted stamper reddens, a listed one is green': 2,
+  'a waiver admits EXACTLY its (package, code) pair': 2,
+  'every stale-waiver direction reddens': 3,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 5;
+
+// The key a case is filed under when no battery is open. It is not a declared
+// battery, so it reds by the same set difference rather than silently inflating
+// whichever battery happened to open last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 function selfTest(): number {
   const failures: string[] = [];
+  // The battery ledger this self-test's floor is evaluated against.
+  // `battery()` opens a battery; every `check()` below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  //
+  // Registration is the FIRST statement of `check()`, before the outcome is
+  // consulted, because the floor asserts REACH: a case that runs and FAILS
+  // still registers, and only a case that never runs at all goes missing from
+  // the ledger. Routing registration through the failure sink instead would
+  // register a case only when it failed — a fully green run would register 0 and
+  // every battery would read DID NOT RUN, the floor inverted rather than
+  // installed.
+  const seen = new Map<string, number>();
+  let openBattery: string | undefined;
+  const battery = (name: string): void => {
+    openBattery = name;
+  };
   const check = (name: string, ok: boolean): void => {
+    const attributedTo = openBattery ?? UNATTRIBUTED_BATTERY;
+    seen.set(attributedTo, (seen.get(attributedTo) ?? 0) + 1);
     if (!ok) failures.push(name);
   };
   // ⚠️ The fixture code spellings are REAL registered codes on purpose, driven
@@ -398,6 +475,7 @@ function selfTest(): number {
   const ledger = { '@objectstack/owner': [CODE_A, CODE_B] } as const;
 
   // Each published pattern catches its spelling (red leg, per pattern).
+  battery('each published STAMP pattern catches its own spelling');
   check(
     'objlit catches a stamp',
     scanSourceText(`return { code: '${CODE_A}' };`, registered).some((h) => h.pattern === 'objlit'),
@@ -416,6 +494,7 @@ function selfTest(): number {
   );
   // Population boundary: a code outside the registered set is the sibling
   // gate's subject, never a site here.
+  battery('the population boundary and comment masking: what is NOT a site');
   check(
     'a code outside the registered set is out of population',
     scanSourceText(`return { code: '${CODE_OUT}' };`, registered).length === 0,
@@ -426,6 +505,7 @@ function selfTest(): number {
     scanSourceText(`// answers { code: '${CODE_A}' } on refusal\nconst x = 1;`, registered).length === 0,
   );
   // A synthetic unlisted stamper is caught THROUGH the real reconciliation.
+  battery('the reconciliation: an unlisted stamper reddens, a listed one is green');
   {
     const { violations } = deriveFindings([site('@objectstack/rogue', CODE_A)], ledger, []);
     check('unlisted stamper is a violation', violations.length === 1);
@@ -436,6 +516,7 @@ function selfTest(): number {
     check('listed stamper is green', violations.length === 0 && listed.length === 1);
   }
   // A waiver admits exactly its (package, code) pair — and only that pair.
+  battery('a waiver admits EXACTLY its (package, code) pair');
   {
     const waiver: ProvenanceWaiver = {
       package: '@objectstack/rogue',
@@ -454,6 +535,7 @@ function selfTest(): number {
     check('waiver does not admit a different code', other.violations.length === 1);
   }
   // Stale-waiver directions, each red.
+  battery('every stale-waiver direction reddens');
   {
     const noSite = deriveFindings([], ledger, [{
       package: '@objectstack/rogue',
@@ -478,15 +560,80 @@ function selfTest(): number {
     check('row + waiver is dead weight', deadWeight.waiverProblems.some((p) => p.includes('dead weight')));
   }
 
-  if (failures.length > 0) {
-    console.error(`self-test FAILED: ${failures.join('; ')}`);
+  // ── The floor: every declared battery RAN, and ran its cases ─────────────
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered EQUALS the set declared, each at or above its own
+  // count. A set difference names WHICH battery stopped; a count says only that
+  // something did — and, before this block existed, not even that.
+  const floorProblems: string[] = [];
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorProblems.push(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of seen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorProblems.push(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — a case attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = seen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorProblems.push(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — ${SELF_TEST_BATTERIES[name] - count} case(s) that used to run no longer do.`,
+    );
+  }
+  if (floorProblems.length > 0) {
+    for (const problem of floorProblems) console.error(`✗ self-test floor: ${problem}`);
+    console.error(
+      '✗ self-test floor: A battery below its floor means cases STOPPED RUNNING — the battery is the ' +
+        'bug, not the number. Find what stopped registering (a deleted check, a guard that now skips, ' +
+        'an early return) and restore it.',
+    );
+  }
+
+  if (failures.length > 0 || floorProblems.length > 0) {
+    if (failures.length > 0) console.error(`self-test FAILED: ${failures.join('; ')}`);
     return 1;
   }
-  console.log(`self-test OK — ${STAMP_PATTERNS.length} patterns and every waiver direction pinned`);
+  // The case count is printed because a reader had to hand-tally the `check()`
+  // calls to get one, and it is printed AFTER the floor rather than instead of
+  // it: the number is evidence, the floor is the proof.
+  const registeredCases = [...seen.values()].reduce((a, b) => a + b, 0);
+  console.log(`self-test OK — ${STAMP_PATTERNS.length} patterns and every waiver direction pinned; ` +
+    `${registeredCases} case(s) across ${declaredBatteries.length} batteries, every battery at or above its pinned floor`);
+  selfTestReachedVerdict = true;
   return 0;
 }
 
 if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   const args = process.argv.slice(2);
-  process.exit(args.includes('--self-test') ? selfTest() : run(args.includes('--report')));
+  if (args.includes('--self-test')) {
+    const selfTestCode = selfTest();
+    // The handshake. Without it a `return` above the verdict prints nothing and
+    // hands back a 0 that travels `selfTest()` → `process.exit()` unchanged,
+    // reporting a self-test that never finished as one that passed. The
+    // self-test's own exit code stays load-bearing — this only refuses to
+    // believe a SILENT one.
+    if (!selfTestReachedVerdict) {
+      console.error(
+        '\n✗ check-error-code-provenance self-test: selfTest() returned without reaching its verdict,\n' +
+          'so no verdict line was printed. Exiting 0 here would report a self-test that never\n' +
+          'finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
+    process.exit(selfTestCode);
+  }
+  process.exit(run(args.includes('--report')));
 }

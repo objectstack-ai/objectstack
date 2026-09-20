@@ -103,6 +103,7 @@ import { validateFunctionalCompleteness } from './validate-functional-completene
 import { validateManagedApiMethods } from './validate-managed-api-methods.js';
 import { validateViewContainers } from './validate-view-containers.js';
 import { validateWidgetBindings } from './validate-widget-bindings.js';
+import { validateDatasetMeasureAggregates } from './validate-dataset-measure-aggregates.js';
 import { validateDashboardActionRefs } from './validate-dashboard-action-refs.js';
 import { validateFilterTokens } from './validate-filter-tokens.js';
 import { validateFlowFilterTokens } from './validate-flow-filter-tokens.js';
@@ -600,6 +601,40 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['dashboard'],
     run: (stack) => validateWidgetBindings(stack),
+  },
+  // #16354 — the AUTHORING-TIME leg of the aggregate × field-type contract
+  // (director ruling, decision batch #59, 2026-09-06: "both legs, table in
+  // spec"; the table is `AGGREGATE_FIELD_TYPE_COMPATIBILITY` in
+  // `@objectstack/spec`, #16353). The compile leg (`dataset-compiler`,
+  // `service-analytics`) refuses a refused pair with `400 DATASET_INVALID`
+  // when a query is built; this one refuses it while the author still has the
+  // document open. `parsed`, the same tier as `validateWidgetBindings` above,
+  // because the two read the SAME positions (`datasets[].measures[]`) and must
+  // not be handed two different documents to judge.
+  {
+    name: 'validateDatasetMeasureAggregates',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-dataset-measure-aggregates.ts',
+    // NOT RUNTIME_NEEDS_FULL_SNAPSHOT: the two collections this rule reads —
+    // `objects` and `datasets` — are both carried (#7529). What holds it off
+    // the door is the type axis: the metadata type that CARRIES the
+    // declaration is `dataset` (`allowRuntimeCreate: true`), and
+    // `TYPE_TO_STACK_KEY` in `runtime-gate.ts` has no `dataset` row, so a
+    // dataset write builds no per-write snapshot and no rule can be dispatched
+    // for it. Declaring another type here would only re-judge a STORED
+    // dataset, which the #4463 D4 differential cancels as someone else's
+    // pre-existing condition — wired, and enforcing nothing. Mapping the
+    // `dataset` type at the gate is its own card (every rule reading
+    // `stack.datasets` gains the door at once, including the existence rules).
+    surfaces: CLI_ONLY,
+    surfaceReason:
+      'The declaring metadata type is `dataset`, which `runtime-gate.ts`\'s TYPE_TO_STACK_KEY does '
+      + 'not map — a dataset write builds no per-write snapshot, so nothing can dispatch this rule '
+      + 'there; declaring any other type would only re-judge a stored dataset, which the publish '
+      + 'gate\'s differential cancels as somebody else\'s pre-existing condition.',
+    run: (stack) => validateDatasetMeasureAggregates(stack),
   },
   // ADR-0049 / #3367 — a dashboard header action naming a dead target ships a
   // button that renders and refuses (or does nothing) on click: a `script`

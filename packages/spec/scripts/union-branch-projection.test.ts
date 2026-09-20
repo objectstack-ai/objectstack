@@ -26,11 +26,14 @@ import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 
 import {
+  UNPROJECTABLE_BRANCHES_KEY,
   UNPROJECTABLE_MARK,
+  auditUnprojectableBranchRecord,
   findSurvivingMark,
   markUnprojectableNodes,
   projectByPruningUnionBranches,
   pruneMarkedUnionBranches,
+  type BranchProjection,
   type PrunedBranch,
 } from './lib/union-branch-projection';
 import { PUBLISHED_JSON_SCHEMA_TARGET } from './lib/refinement-projection';
@@ -289,5 +292,138 @@ describe('the four filter exports #16431 measured, and the boundary beside them'
     // The population the #16431 ratchet holds closed must not be emptied by a
     // projection that publishes shapes nobody authors.
     expect(projectByPruningUnionBranches(PersistenceAdapterSchema)).toBeNull();
+  });
+});
+
+describe('auditUnprojectableBranchRecord — the published record gets a READER', () => {
+  // `x-unprojectable-branches` is written by `build-schemas.ts` onto every
+  // artifact this projection publishes, and `packages/spec/package.json` ships
+  // `json-schema/` — so it is a PUBLISHED field. It had one writer and no
+  // reader (#17107): nothing anywhere could tell a faithful record from one
+  // naming branches the projection never dropped, which is the same class of
+  // silence as a pin that has never been observed to fail.
+
+  /** What `build-schemas.ts` writes, spelled once here as it spells it. */
+  function publish(projection: BranchProjection): Record<string, unknown> {
+    return {
+      ...projection.schema,
+      [UNPROJECTABLE_BRANCHES_KEY]: projection.pruned.map((b) => ({ at: b.at, type: b.type })),
+    };
+  }
+
+  /** The record on `published`, as the mutable array a tamper needs. */
+  function recordOf(published: Record<string, unknown>): Array<{ at: string; type: string }> {
+    return published[UNPROJECTABLE_BRANCHES_KEY] as Array<{ at: string; type: string }>;
+  }
+
+  const comparand = () =>
+    projectByPruningUnionBranches(z.object({ $gt: z.union([z.number(), z.date(), z.string()]).optional() }))!;
+
+  it('accepts the record build-schemas.ts actually writes, for every export #16431 measured', () => {
+    for (const [name, schema] of [
+      ['ComparisonOperatorSchema', ComparisonOperatorSchema],
+      ['RangeOperatorSchema', RangeOperatorSchema],
+      ['FieldOperatorsSchema', FieldOperatorsSchema],
+      ['NormalizedFilterSchema', NormalizedFilterSchema],
+    ] as const) {
+      const projection = projectByPruningUnionBranches(schema as z.ZodType);
+      expect(projection, name).not.toBeNull();
+      // Non-vacuity: there IS a record to audit on each of these.
+      expect(projection!.pruned.length, name).toBeGreaterThan(0);
+      expect(auditUnprojectableBranchRecord(publish(projection!), projection!), name).toEqual([]);
+    }
+  });
+
+  it('refuses a pointer whose index shifted — the hazard the prune records PRE-removal to avoid', () => {
+    // `pruneMarkedUnionBranches` records the index a branch had BEFORE any
+    // sibling was removed. Recording the post-removal index instead is a
+    // one-character change that leaves every other pin in this file green.
+    const projection = comparand();
+    const published = publish(projection);
+    expect(recordOf(published)).toEqual([{ at: '#/properties/$gt/anyOf/1', type: 'date' }]);
+    recordOf(published)[0].at = '#/properties/$gt/anyOf/0';
+    expect(auditUnprojectableBranchRecord(published, projection).join(' ')).toMatch(
+      /is marked|does not say so|does not\s+reproduce/,
+    );
+  });
+
+  it('refuses a record that under-reports, and one that invents a branch', () => {
+    const under = comparand();
+    const underPublished = publish(under);
+    recordOf(underPublished).length = 0;
+    expect(auditUnprojectableBranchRecord(underPublished, under)).toEqual([
+      expect.stringContaining('not the non-empty array of dropped branches'),
+    ]);
+
+    const over = comparand();
+    const overPublished = publish(over);
+    recordOf(overPublished).push({ at: '#/properties/$gt/anyOf/0', type: 'date' });
+    expect(auditUnprojectableBranchRecord(overPublished, over).join(' ')).toContain(
+      '#/properties/$gt/anyOf/0',
+    );
+  });
+
+  it('refuses a record that renames what was dropped', () => {
+    const projection = comparand();
+    const published = publish(projection);
+    recordOf(published)[0].type = 'function';
+    expect(auditUnprojectableBranchRecord(published, projection)).toEqual([
+      '#/properties/$gt/anyOf/1 is marked "date", recorded as "function"',
+      '#/properties/$gt/anyOf/1 was dropped as "date" and the record does not say so',
+    ]);
+  });
+
+  it('refuses a malformed record before it tries to replay one', () => {
+    const projection = comparand();
+    for (const entry of [{ at: '#/properties/$gt', type: 'date' }, { at: 42, type: 'date' }, { at: '#/anyOf/1' }]) {
+      const published = publish(projection);
+      recordOf(published)[0] = entry as { at: string; type: string };
+      expect(auditUnprojectableBranchRecord(published, projection)).toEqual([
+        expect.stringContaining('is not a { at: <union member pointer>, type } pair'),
+      ]);
+    }
+  });
+
+  it('tolerates the annotations build-schemas.ts decorates the file with, and nothing else', () => {
+    // The generator adds `$id`, `x-spec-version` and (in one direction) `x-io`
+    // to the projection before writing it. Those are root ANNOTATION — every
+    // validator ignores an `x-` keyword — so they are not a disagreement. A
+    // STRUCTURAL key the record cannot account for is, and this pins the
+    // carve-out to annotations rather than to "extra keys".
+    const projection = comparand();
+    const decorated = publish(projection);
+    decorated['$id'] = 'https://schemas.objectstack.ai/data/ComparisonOperator.json';
+    decorated['x-spec-version'] = '17.4.0';
+    decorated['x-io'] = 'input';
+    expect(auditUnprojectableBranchRecord(decorated, projection)).toEqual([]);
+
+    const widened = publish(projection);
+    widened['additionalProperties'] = true;
+    expect(auditUnprojectableBranchRecord(widened, projection)).toEqual([
+      expect.stringContaining('does not account for what this projection dropped'),
+    ]);
+  });
+
+  it('reads the record of a union that collapsed INSIDE a surviving branch', () => {
+    // The one shape the replay alone cannot audit: a union whose every member
+    // is unprojectable is removed WHOLE by its parent, so the members inside it
+    // reproduce the published schema whether the record names them or not.
+    // That is what the completeness sweep is for, and this asserts it fires.
+    const collapsing = z.union([z.union([z.date(), z.function()]), z.string(), z.number()]);
+    const projection = projectByPruningUnionBranches(collapsing);
+    expect(projection).not.toBeNull();
+    const published = publish(projection!);
+    expect(auditUnprojectableBranchRecord(published, projection!)).toEqual([]);
+
+    // Drop every entry BELOW the collapsed union. The replay still reproduces
+    // the published schema — the outer removal subsumes them — so only the
+    // completeness direction can report the loss.
+    const inner = recordOf(published).filter((entry) => entry.type !== 'union');
+    expect(inner.length).toBeGreaterThan(0);
+    const thinned = publish(projection!);
+    thinned[UNPROJECTABLE_BRANCHES_KEY] = recordOf(thinned).filter((entry) => entry.type === 'union');
+    expect(auditUnprojectableBranchRecord(thinned, projection!)).toEqual(
+      inner.map((entry) => `${entry.at} was dropped as ${JSON.stringify(entry.type)} and the record does not say so`),
+    );
   });
 });

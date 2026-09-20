@@ -242,26 +242,92 @@ export const DimensionSchema = lazySchema(() => strictObject(
 ));
 
 /**
+ * The ON clause a cube join used to let an author write, and the cardinality it
+ * used to let them declare. Both were REMOVED (#18612, ADR-0049
+ * enforce-or-remove); the prescriptions are `guidance` entries on
+ * {@link CubeJoinSchema}, shared with the `on` spelling that used to be an alias
+ * for `sql`.
+ *
+ * The derivation they point at is not a plan — it is what both strategies have
+ * always done:
+ * `packages/services/service-analytics/src/strategies/native-sql-strategy.ts#qualifyAndRegisterJoin`
+ * emits `LEFT JOIN <name> <alias> ON "<parent>"."<segment>" = "<alias>"."id"` from the
+ * dotted member path alone, and
+ * `packages/services/service-analytics/src/strategies/objectql-strategy.ts#isCrossObjectField`
+ * resolves the join through `cube.joins?.[alias]?.name` and lowers it to a
+ * relationship traversal with no ON clause at all.
+ */
+const CUBE_JOIN_DERIVED_ON =
+  'A cube join has no authorable ON clause: it is DERIVED from the declared relationship '
+  + 'between the two cubes\' objects, as a foreign-key equality. `joins.<alias>.name` names the '
+  + 'joined object and is the whole of the contract.';
+
+const CUBE_JOIN_MIGRATE =
+  'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+
+const CUBE_JOIN_SQL_REMOVED =
+  '`joins.<alias>.sql` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — it '
+  + 'never had an effect, and the absence of effect was not visible: both strategies SYNTHESISE '
+  + 'the ON clause and neither ever read this key, so an authored join condition was silently '
+  + 'REPLACED by a foreign-key equality and the aggregate came back under a 200, joined on '
+  + 'something the author had not asked for. Delete the key. '
+  + CUBE_JOIN_DERIVED_ON + ' ' + CUBE_JOIN_MIGRATE;
+
+const CUBE_JOIN_RELATIONSHIP_REMOVED =
+  '`joins.<alias>.relationship` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) '
+  + '— it never had an effect: nothing dispatched on the cardinality, so `one_to_many` parsed, '
+  + 'changed no SQL, and the aggregate silently kept the many-to-one arithmetic. Delete the key. '
+  + CUBE_JOIN_DERIVED_ON + ' ' + CUBE_JOIN_MIGRATE;
+
+const CUBE_JOIN_ON_REMOVED =
+  '`joins.<alias>.on` is not a cube-join key, and `sql` — the key it used to be the curated '
+  + 'near-miss for — was itself removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove). '
+  + 'Delete the key. ' + CUBE_JOIN_DERIVED_ON + ' ' + CUBE_JOIN_MIGRATE;
+
+/**
  * Join Schema
- * Defines how this cube relates to others.
+ * Declares that this cube can reach another cube's object, and under which alias.
+ *
+ * The ON clause is **derived**, never authored: the runtime builds a foreign-key
+ * equality from the declared relationship between the two cubes' objects. That is
+ * why `name` is the whole shape — see {@link CUBE_JOIN_DERIVED_ON}.
  *
  * Strict as of #4001 batch D — same doors as {@link MetricSchema}. Before the
  * close, a join authored with `relationshipp:` (or any near-miss) parsed clean
  * and fell back to the `many_to_one` default — a different join shape than the
- * author declared, under a successful parse.
+ * author declared, under a successful parse. #18612 then removed `relationship`
+ * and `sql` outright (ADR-0049 enforce-or-remove, maintainer-ruled batch #154):
+ * the near-miss was the smaller half of the defect, because the DECLARED
+ * spellings were being replaced just as silently. `MetricSchema.filters` above
+ * took the same route one shape over — every cube shape is a `strictObject`, so
+ * the route is strict deletion plus a `guidance` entry carrying the prescription,
+ * never a `retiredKey()` tombstone (the key leaves the walked shape entirely).
  */
 export const CubeJoinSchema = lazySchema(() => strictObject(
   {
     surface: 'this cube join',
     history: 'Until this shape was closed, an undeclared join key was silently dropped — a typo\'d '
       + '`relationship` fell back to the `many_to_one` default.',
-    // The join condition is spelled `sql` here (its doc says "ON clause").
-    aliases: { on: 'sql' },
+    // No `aliases` entry for `on` any more: it pointed at `sql`, and #18612
+    // removed that key. An alias naming a key the shape cannot accept is the
+    // `triggerPhrase` failure `strict-object.ts` records — it answers the author
+    // with a second rejection — so `on` carries its own prescription below.
+    guidance: {
+      sql: CUBE_JOIN_SQL_REMOVED,
+      relationship: CUBE_JOIN_RELATIONSHIP_REMOVED,
+      on: CUBE_JOIN_ON_REMOVED,
+    },
   },
   {
-    name: z.string().describe('Target cube name'),
-    relationship: z.enum(['one_to_one', 'one_to_many', 'many_to_one']).default('many_to_one'),
-    sql: z.string().describe('Join condition (ON clause)'),
+    name: z.string().describe(
+      'Target cube name — the object this join reaches. The ON clause is DERIVED from the '
+      + 'declared relationship between the two cubes\' objects (a foreign-key equality) and is '
+      + 'never authored. The KEY this join is declared under in the `joins` record is the '
+      + 'FOREIGN-KEY FIELD on this cube\'s own object, not a second spelling of the object it '
+      + 'reaches: the runtime emits `LEFT JOIN <name> <key> ON <base>.<key> = <key>.id` and '
+      + 'resolves a member written `<key>.<field>` through that alias. A join keyed after the '
+      + 'TARGET object joins on a column the base object does not have, so nothing resolves.'
+    ),
   },
 ));
 
@@ -376,15 +442,38 @@ export type AnalyticsDateRangePreset = z.input<typeof AnalyticsDateRangePresetSc
  * carry for every array — is FALSE for `['2026-01-01']`, `[]` and
  * `[a, b, c]`. The arity and the bad bound are named separately, and neither is
  * claimed when it is not true.
+ *
+ * ⚠️ And the arm judges a bound's TYPE, never its VALUE (#18278), so the
+ * two-bound window with an EMPTY bound passes every schema door and is refused
+ * PAST it, by each face's own empty-bound check (`service-analytics`'
+ * `date-range-array-arm.ts`, `driver-memory`'s `memory-analytics.ts`) — the
+ * residue `analyticsDateRangeUnrecognizedError`'s header in `@objectstack/core`
+ * names as `['', '']`. Its author used to read "received a two-element array",
+ * the shape they had already written, with nothing said about what was wrong
+ * with it. So an empty bound is named here too, and named at the bound that is
+ * empty.
  */
 function describeRefusedDateRange(input: unknown): string {
   if (input === null) return 'null';
   if (!Array.isArray(input)) return typeof input;
   const hasNonStringBound = input.some((bound) => typeof bound !== 'string');
   if (input.length === 2) {
-    // Two bounds is the arity the contract asks for, so the only way such an
-    // array reaches a refusal is a bound that is not a string.
-    return hasNonStringBound ? 'an array with a non-string bound' : 'a two-element array';
+    // Two bounds is the arity the contract asks for, so what is left to be
+    // wrong with such an array is a BOUND — one that is not a string, or one
+    // that is the empty string every face refuses past the schema door
+    // (#18278). ⛔ Never "the only way such an array reaches a refusal is a
+    // bound that is not a string": this clause asserted that while `['', '']`
+    // was reaching it and being told only its own shape back.
+    if (hasNonStringBound) return 'an array with a non-string bound';
+    const [start, end] = input as [string, string];
+    if (start === '' && end === '') return 'a two-element array whose bounds are both empty strings';
+    if (start === '' || end === '') {
+      return `a two-element array whose ${start === '' ? 'start' : 'end'} bound is an empty string`;
+    }
+    // Two non-empty string bounds: the shape the contract asks for, refused for
+    // something this clause cannot see — an unparseable bound VALUE, say, which
+    // carries its own envelope. Describing the shape is all that is true here.
+    return 'a two-element array';
   }
   const arity = input.length === 0 ? 'an empty array' : `a ${input.length}-element array`;
   return hasNonStringBound

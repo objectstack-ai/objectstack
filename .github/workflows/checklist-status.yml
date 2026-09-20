@@ -1,0 +1,233 @@
+name: Platform Checklist Status
+
+# Publishes the platform's capability list AND its implementation status — the
+# maintainer's 「一个可以人工阅读确认的入口」 for 「平台真的功能清单,以及实现状态」.
+#
+# ## Why a schedule publishing to the WIKI, and not a page in the tree
+#
+# The entry point is GENERATED, never hand-written: the source is
+# `docs/qa/platform-checklist/areas/*.json`, and `pnpm gen:checklist-status` is
+# the only thing that ever states a count. Three shapes were ruled out on the
+# card before this one, and each rejection is load-bearing here:
+#
+#   * a `STATUS.md` committed to this tree — a third artifact to keep fresh,
+#     whose stale copy reads exactly as authoritative as a current one;
+#   * a `check:checklist-status` gate pairing that page against the generator —
+#     ⛔ explicitly ruled out: staleness here is TOLERATED, not gated, and an
+#     unrelated PR is never blocked by checklist drift (the same standing
+#     decision that keeps `check:platform-checklist` out of per-PR CI);
+#   * a regen-on-edit rule on whoever touches an area JSON — a rule nobody can
+#     enforce is a rule that silently stops being followed.
+#
+# What is left is a schedule. The wiki is one stable URL, outside branch
+# protection and the merge queue, so publishing there costs no review and
+# blocks no pull request. ⛔ This workflow therefore writes to the WIKI ONLY —
+# it never commits to this repository, never opens an issue, never labels
+# anything.
+#
+# ## The page set — one area JSON, one wiki page
+#
+# One INDEX page (`Platform-Checklist`): a row per area — which is a row per
+# definition item — carrying its active count, its planned count and a link.
+# Plus one `Checklist-<area>` page per area listing every item as
+# `id · title · priority · status · personas`, with the `planned` items in their
+# OWN section, FIRST. The count of pages is a property of the ledger and is
+# never asserted here: the generator writes what it reads.
+#
+# ## ⛔ Why this file lands by a human merge
+#
+# `.github/workflows/**` is not on the governed register, but the seat token
+# that opens this PR lacks the `workflow` scope, so the maintainer merges it by
+# hand. It is deliberately the ONLY thing in its pull request — the ledger
+# change it reports on lands separately, through the merge queue.
+#
+# ⚠️ ORDERING: `pnpm gen:checklist-status` is added by that sibling PR. Merging
+# this file first leaves a scheduled job that fails until the sibling lands —
+# loudly, which is the right direction, but it is avoidable by merging the
+# ledger PR first.
+
+# This workflow is paths-filtered (the `pull_request:` trigger below), so
+# `scripts/pm/dispatch-gates.mjs` requires it to discover a `check:` family or
+# say why it has none. It has none, and that is the maintainer's ruling rather
+# than an omission: the whole point of publishing on a schedule is that the
+# paired gate was refused. The declaration is the one line under this
+# paragraph — it owns that line alone, so ⛔ do not wrap its reason or write a
+# comment directly beneath it; a continuation line is read as a CUT reason and
+# refused by name.
+# dispatch-gates: no-check-families -- the only step that runs anything is `pnpm gen:checklist-status`, a GENERATOR that renders the wiki pages; a paired `check:checklist-status` was explicitly ruled out (staleness of this reading entry is tolerated, not gated), so no named local check family exists for this workflow to discover
+on:
+  schedule:
+    # Weekly, as ruled. The ledger moves at the pace of platform capabilities,
+    # not of pull requests, and this page is a reading entry rather than an
+    # alarm — a day of staleness on it costs nothing a reader can trip over.
+    #
+    # The minute is offset off the top of the hour ON PURPOSE (scheduled
+    # workflows queue behind everyone else's `:00` cron) and off the sibling
+    # patrols' minutes, so two scheduled jobs never contend for one runner
+    # minute.
+    - cron: '37 3 * * 1'
+  # The manual fire — and the smoke test this card is accepted on.
+  workflow_dispatch: {}
+  # ⛔ PATHS-FILTERED TO THIS ONE FILE, and that filter is the whole reason this
+  # trigger may exist. It fires only on a pull request editing this workflow, so
+  # it blocks no unrelated pull request at all — the posture every patrol in
+  # this repo keeps. ⛔ Do NOT widen this list: a second path would put this job
+  # on the critical path of pull requests that have nothing to do with it.
+  #
+  # ⛔ A pull_request run NEVER writes to the wiki. It proves the generator, the
+  # invocation and the rendering on a real runner, and stops there — see the
+  # `if:` on the publish step.
+  pull_request:
+    paths:
+      - '.github/workflows/checklist-status.yml'
+  # ⛔ NO `merge_group:` and ⛔ NO `pull_request_target:` here, ever. Neither is
+  # made safe by a `paths:` filter, and this job holds a token that can write.
+
+# Least privilege. `contents: write` is what pushing to the repository wiki
+# needs; this job writes nothing else — no issue, no label, no comment, and no
+# commit to the repository itself.
+permissions:
+  contents: write
+
+# One publisher at a time. A scheduled run overlapping a manual dispatch would
+# have two clones racing to push the same pages, and the loser would fail on a
+# non-fast-forward for no reason a reader could act on.
+concurrency:
+  group: checklist-status-publish
+  cancel-in-progress: false
+
+env:
+  # The index page's name, which `docs/qa/platform-checklist/README.md` links
+  # and the generator writes. Restated here only so the publish step can report
+  # the URL it wrote; the generator is the authority on the file names.
+  INDEX_PAGE: Platform-Checklist
+
+jobs:
+  publish:
+    # ⛔ This job is NOT a required context and must never become one: it runs on
+    # no pull request except one editing this file, so a ruleset naming it would
+    # block every other PR forever on a check that cannot report.
+    name: Publish the checklist status pages
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      # Kept as this job's own step rather than folded into the composite below:
+      # `scripts/check-node-version.mjs` scans `.github/workflows/*.yml` only and
+      # reports how many setup-node steps it audited, so a step moved out of
+      # sight would silently shrink its census.
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      # `pnpm` itself is the requirement, NOT the workspace. The generator is
+      # invoked through its PACKAGE SCRIPT (`pnpm gen:checklist-status`), which
+      # runs its `--self-test` first: an inlined `node scripts/...` copy would
+      # drop that leg, and the whole product of this job is a page full of
+      # numbers that nothing downstream disagrees with.
+      - name: Setup pnpm
+        uses: ./.github/actions/setup-pnpm
+
+      # No `pnpm install`. The generator imports `node:` builtins and one
+      # repo-local module — no npm dependency — so installing the workspace
+      # would buy nothing and would give an unattended weekly run a lockfile it
+      # could fail on.
+      - name: Generate the status report and the wiki pages
+        id: gen
+        run: |
+          set +e
+          pnpm gen:checklist-status --out "$RUNNER_TEMP/wiki-pages" \
+            > "$RUNNER_TEMP/status.out" 2> "$RUNNER_TEMP/status.err"
+          code=$?
+          set -e
+          # Captured with NO pipe in between. `cmd | tail` reports the PIPE's
+          # status -- `tail` essentially never fails -- so a red generator and a
+          # green one would both read as 0.
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          echo "pnpm gen:checklist-status exited $code"
+          if [ "$code" -ne 0 ]; then
+            cat "$RUNNER_TEMP/status.out" "$RUNNER_TEMP/status.err" 2>/dev/null || true
+            exit "$code"
+          fi
+          pages=$(find "$RUNNER_TEMP/wiki-pages" -maxdepth 1 -name '*.md' | wc -l | tr -d ' ')
+          echo "pages=$pages" >> "$GITHUB_OUTPUT"
+          # A refusal, not a pass. "the ledger is empty" and "the generator
+          # stopped reading it" produce the same zero, and the second one must
+          # never be published as the platform's capability list.
+          if [ "$pages" -lt 2 ]; then
+            echo "gen:checklist-status produced $pages page(s): an index plus one page per area is at least 2."
+            echo "This is a REFUSAL, not a pass -- publishing here would replace the wiki with a reading nobody took."
+            exit 1
+          fi
+
+      - name: Mirror the report into the job summary
+        # Always: this makes the run self-contained for whoever opens it, and on
+        # a pull_request run (which publishes nothing) it IS the whole product.
+        if: always()
+        run: |
+          {
+            echo "### Platform checklist status — generator exit ${{ steps.gen.outputs.exit_code }}"
+            echo
+            if [ "${{ github.event_name }}" = "pull_request" ]; then
+              echo "_Wiki write skipped: a pull_request run proves the generator without publishing anything._"
+              echo
+            fi
+            echo '```'
+            cat "$RUNNER_TEMP/status.out" 2>/dev/null || echo '(no stdout captured)'
+            cat "$RUNNER_TEMP/status.err" 2>/dev/null || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish the pages to the repository wiki
+        # ⛔ NEVER on a pull_request run, whatever the generator said.
+        if: steps.gen.outputs.exit_code == '0' && github.event_name != 'pull_request'
+        env:
+          WIKI_URL: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.wiki.git
+        run: |
+          set -euo pipefail
+          # Absence must be LOUD (AGENTS.md "Route & surface ownership" §3): an
+          # uninitialised wiki cannot be cloned, and a job that quietly skipped
+          # the publish would report success forever while nothing was ever
+          # published. Name the remedy instead.
+          if ! git clone --depth 1 "$WIKI_URL" "$RUNNER_TEMP/wiki" 2> "$RUNNER_TEMP/clone.err"; then
+            sed -E 's#x-access-token:[^@]*@#x-access-token:***@#g' "$RUNNER_TEMP/clone.err" || true
+            echo "Could not clone the repository wiki."
+            echo "REMEDY: the wiki must exist before it can be written to. Open the repository's Wiki tab and create the first page once (any content); every run after that overwrites the generated pages."
+            exit 1
+          fi
+          cd "$RUNNER_TEMP/wiki"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          # Remove the pages this generator OWNS and no others: an area deleted
+          # from the ledger must not leave its page standing, and a hand-written
+          # wiki page must not be collateral. Ownership is the naming rule the
+          # generator uses, and nothing else.
+          find . -maxdepth 1 -type f \
+            \( -name "${INDEX_PAGE}.md" -o -name 'Checklist-*.md' \) -delete
+          cp "$RUNNER_TEMP"/wiki-pages/*.md .
+
+          if git diff --quiet && git diff --cached --quiet && [ -z "$(git status --porcelain)" ]; then
+            echo "wiki already matches the ledger — nothing to publish."
+            exit 0
+          fi
+          git add -A
+          git commit \
+            -m 'docs(wiki): regenerate the platform checklist status pages' \
+            -m "Generated by .github/workflows/checklist-status.yml from docs/qa/platform-checklist/areas/*.json at ${GITHUB_SHA}. Do not edit these pages -- edits go to the area JSON."
+          git push origin HEAD
+          echo "published ${{ steps.gen.outputs.pages }} page(s) to ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/wiki/${INDEX_PAGE}"
+
+      - name: Fail the run if the generator left no reading
+        # LAST, on purpose, and narrow: the one state that must never render as
+        # a healthy run is a generate step that finished without recording an
+        # exit code at all. Nothing downstream could tell that apart from
+        # `exit_code=0`, and "the ledger was not read" must never publish as
+        # "the platform has no capabilities".
+        if: always() && steps.gen.outputs.exit_code == ''
+        run: |
+          echo "the generate step recorded no exit code, so this run is NOT a reading about the checklist. See this run's summary."
+          exit 1

@@ -6,6 +6,7 @@ import {
   type DriverCapabilities,
   type DriverInterface,
   type DriverOptions,
+  driverSupportsTransactions,
 } from './driver.zod';
 
 /**
@@ -48,8 +49,22 @@ const RETIRED_BITS = [
   'queryCache',
 ] as const;
 
-/** The bits that survive — each with a named engine reader. */
-const LIVE_BITS = ['queryDateGranularity', 'autonumber', 'batchSchemaSync'] as const;
+/**
+ * The bits that survive — each with a named engine reader.
+ *
+ * [#18063] `transactionsUnsupported` is the fourth, and it arrived under the
+ * SAME rule that removed thirty-one: a bit exists here only where method
+ * presence cannot carry the signal, and only WITH the reader that dispatches on
+ * it. `transactions` was retired because no code read it; this one is read by
+ * `driverSupportsTransactions`, which every transaction entrance in the engine
+ * now calls. It is not that key revived — see the tombstone pin below.
+ */
+const LIVE_BITS = [
+  'queryDateGranularity',
+  'autonumber',
+  'batchSchemaSync',
+  'transactionsUnsupported',
+] as const;
 
 describe('DriverCapabilitiesSchema', () => {
   it('accepts the live capability bits', () => {
@@ -57,6 +72,7 @@ describe('DriverCapabilitiesSchema', () => {
       queryDateGranularity: { day: true, week: false, month: true, quarter: true, year: true },
       autonumber: true,
       batchSchemaSync: true,
+      transactionsUnsupported: true,
     };
 
     expect(() => DriverCapabilitiesSchema.parse(capabilities)).not.toThrow();
@@ -69,9 +85,12 @@ describe('DriverCapabilitiesSchema', () => {
     // the default forced every capability object to spell out dead weight.
     expect(parsed).not.toHaveProperty('batchSchemaSync');
     expect(parsed).not.toHaveProperty('autonumber');
+    // [#18063] Absence is the whole point for `transactionsUnsupported`: a
+    // driver that declares nothing keeps the transactions it has today.
+    expect(parsed).not.toHaveProperty('transactionsUnsupported');
   });
 
-  it('declares exactly the audited shape: 3 live bits + 31 tombstones', () => {
+  it('declares exactly the audited shape: 4 live bits + 31 tombstones', () => {
     const shape = (DriverCapabilitiesSchema as unknown as { shape: Record<string, unknown> }).shape;
     const keys = Object.keys(shape).sort();
     expect(keys).toEqual([...RETIRED_BITS, ...LIVE_BITS].slice().sort());
@@ -102,9 +121,24 @@ describe('[#4634] the 31 inert capability bits are tombstoned, not stripped', ()
     );
   });
 
-  it('the transactions prescription points at method presence, not a replacement bit', () => {
+  it('the transactions prescription points at the DECLARATION gate, not method presence alone, and says the live bit is not it restored', () => {
+    // [#18996] Anchored on what #18890 made load-bearing: the NEGATION and the
+    // predicate that replaced method presence. An anchor on `METHOD PRESENCE`
+    // alone matched this prescription's PREVIOUS, now-false opening ('gated on
+    // METHOD PRESENCE — `driver.beginTransaction`') exactly as happily as the
+    // true one, so it could not fail on the one shape it exists to catch. ⛔ Not
+    // a ban on the phrase — `schemaSync`'s own 'gated on METHOD PRESENCE'
+    // sentence is true of the runtime and stays.
     expect(() => DriverCapabilitiesSchema.parse({ transactions: true })).toThrow(
-      /DriverCapabilities\.transactions.*removed.*METHOD PRESENCE.*beginTransaction.*Delete the key/s,
+      /DriverCapabilities\.transactions.*removed.*no longer on METHOD PRESENCE.*driverSupportsTransactions.*beginTransaction.*Delete the key/s,
+    );
+    // [#18063] The trap this sentence exists to close: a reader who sees a live
+    // `transactionsUnsupported` and concludes the retired key came back. It did
+    // not — the retired one CLAIMED support nothing checked, the live one
+    // DENIES support the engine checks — and the tombstone still refuses, so
+    // the two cannot be confused by writing one and getting the other.
+    expect(() => DriverCapabilitiesSchema.parse({ transactions: false })).toThrow(
+      /transactionsUnsupported.*NOT this key restored/s,
     );
   });
 
@@ -156,7 +190,8 @@ describe('[#4634] tsc channel: the retired bits are unwritable in DriverCapabili
     const capsType = checker.getDeclaredTypeOfSymbol(capsAlias!);
     const props = new Map(capsType.getProperties().map((p) => [p.getName(), p]));
 
-    // Anti-vacuity: the walked shape is the audited 34-key shape.
+    // Anti-vacuity: the walked shape is the audited key set — 31 tombstones
+    // plus the live bits (4 since #18063 added `transactionsUnsupported`).
     expect([...props.keys()].sort()).toEqual([...RETIRED_BITS, ...LIVE_BITS].slice().sort());
 
     const decl = capsAlias!.declarations?.[0];
@@ -380,5 +415,39 @@ describe('DriverOptions.timeout → DriverOptions.timeoutMs (#14478)', () => {
     expect(bad).toBeDefined();
     const good: DriverOptions = { timeoutMs: 5000 };
     expect(good.timeoutMs).toBe(5000);
+  });
+});
+
+// ===========================================================================
+// [#18063] driverSupportsTransactions — the one definition of the gate
+// ===========================================================================
+
+describe('[#18063] driverSupportsTransactions', () => {
+  const withMethod = { beginTransaction: async () => ({}) };
+
+  it('is false for a driver with no beginTransaction — the pre-existing gate, unchanged', () => {
+    expect(driverSupportsTransactions({})).toBe(false);
+    expect(driverSupportsTransactions(undefined)).toBe(false);
+    expect(driverSupportsTransactions(null)).toBe(false);
+    // A non-callable member is not a door: the old gate was truthiness on the
+    // property, which a stray string would have passed.
+    expect(driverSupportsTransactions({ beginTransaction: 'yes' as unknown as () => void })).toBe(false);
+  });
+
+  it('is true for a driver with the method and no declaration — every driver today', () => {
+    expect(driverSupportsTransactions(withMethod)).toBe(true);
+    expect(driverSupportsTransactions({ ...withMethod, supports: {} })).toBe(true);
+    expect(driverSupportsTransactions({ ...withMethod, supports: { transactionsUnsupported: false } })).toBe(true);
+  });
+
+  it('is FALSE for a driver that inherited the method and declared it cannot honour it', () => {
+    // The shape this bit exists for: the method IS present — it is inherited —
+    // so the old method-presence gate answered `true` and the engine opened a
+    // transaction the transport could not carry.
+    expect(driverSupportsTransactions({ ...withMethod, supports: { transactionsUnsupported: true } })).toBe(false);
+  });
+
+  it('only the literal `true` denies — an absent or undefined bit is not a denial', () => {
+    expect(driverSupportsTransactions({ ...withMethod, supports: { transactionsUnsupported: undefined } })).toBe(true);
   });
 });

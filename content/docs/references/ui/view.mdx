@@ -199,13 +199,13 @@ Column footer summary configuration
 | **required** | `boolean` | optional | Required override |
 | **hidden** | `boolean` | optional | Hidden override |
 | **colSpan** | `integer` | optional | Absolute column span (1-4). The renderer clamps it to the form grid's current column count, so the cell starts at a real column boundary at every surface width and never overflows (`colSpan: 4` in a 3-column grid renders as 3); a `colSpan` within the column count renders as authored, and `colSpan: 1` emits no span class at all. |
-| **span** | `Enum<'auto' \| 'full'>` | optional (default: `"auto"`) | Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count (wide widgets like textarea/richtext/json/file/subform take the whole row). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at the `.objectui-sha` pin `53ded82bf7` only the widest tier's class is emitted (`@2xl:col-span-3` for a 3-column grid), so at intermediate widths the field took a single cell, not the row (one of two at the 720px modal width; measured in Chromium at viewport widths 390, 720 and 1700). |
+| **span** | `Enum<'auto' \| 'full'>` | optional (default: `"auto"`) | Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `53ded82bf7`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin only the widest tier's class is emitted (`@2xl:col-span-3` for a 3-column grid), so at intermediate widths the field takes a single cell, not the row (one of two at the 720px modal width; measured in Chromium at viewport widths 390, 720 and 1700). |
 | **widget** | `string` | optional | Custom widget/component name (overrides type-based inference) |
 | **language** | `string` | optional | Code editor language (for type=code) |
 | **keyField** | `{ field?: string; label?: string \| Record<string, string>; placeholder?: string \| Record<string, string>; helpText?: string \| Record<string, string>; … }` | optional | Key column config for record-typed fields |
 | **dependsOn** | `string` | optional | Parent field name for cascading |
-| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — field shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. `current_user` (and the ADR-0068 aliases `user` / `ctx.user` / `os.user`) resolves here — CLIENT-SIDE only: nothing server-side evaluates a form-view field `visibleWhen`, so a role test here hides the control and protects no data (declare permission-set field-level security for that), and on the public `/f/:slug` route no host publishes a scope, so the root is unbound and the predicate faults open. No `features.*` on ANY form-view predicate — refused at parse (ruled 2026-08-27): the root is unbound on the standalone form routes (`/forms/:name`, `/f/:slug`) and the predicate would fault open there. Inside a repeater `data` is the ROW, but it is still spelled `data` — a bare identifier is unbound and faults open too. e.g. P`record.priority == 'urgent'` |
-| **visibleOn** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | [DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse. |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — field shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. `current_user` (and the ADR-0068 aliases `user` / `ctx.user` / `os.user`) resolves here — CLIENT-SIDE only: nothing server-side evaluates a form-view field `visibleWhen`, so a role test here hides the control and protects no data (declare permission-set field-level security for that), and on the public `/f/:slug` route no host publishes a scope, so the root is unbound and the predicate faults open. No `features.*` on ANY form-view predicate — refused at parse (ruled 2026-08-27): the root is unbound on the standalone form routes (`/forms/:name`, `/f/:slug`) and the predicate would fault open there. Inside a repeater `data` is the ROW, but it is still spelled `data` — a bare identifier is unbound and faults open too. e.g. P`record.priority == 'urgent'` |
+| **visibleOn** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | [DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse. |
 | **disclosure** | `Enum<'inline' \| 'popover'>` | optional | Composite rendering: inline bordered box (default) or a summary line + gear popover (progressive disclosure). |
 | **fields** | `[FormField](#formfield)[]` | optional | Sub-fields for composite/repeater/record types |
 
@@ -271,7 +271,7 @@ Form-view select option — the object-field option shape minus the per-option `
 | **value** | `string` | ✅ | Stored value (lowercase machine identifier) |
 | **description** | `string` | optional | Optional secondary/help text for this option. Lookup option search matches it in addition to the label; renderers may show it as supporting text. |
 | **color** | `string` | optional | Color code for badges/charts |
-| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Env: the live `record` plus the host predicate scope, which binds `current_user`. The one VISIBILITY predicate the SERVER also enforces — the rule validator refuses a write of a value whose predicate is false — so a user-gated CHOICE belongs here. e.g. P`record.country == 'cn'` or P`'admin' in current_user.positions` |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Env: the live `record` plus the host predicate scope, which binds `current_user`. The one VISIBILITY predicate the SERVER also enforces — the rule validator refuses a write of a value whose predicate is false — so a user-gated CHOICE belongs here. e.g. P`record.country == 'cn'` or P`'admin' in current_user.positions` |
 
 ### Nested Shape: `FormField.publicPicker`
 
@@ -333,8 +333,8 @@ View filter rule
 | **description** | `string` | optional | Optional description rendered under the section header. |
 | **collapsible** | `boolean` | optional (default: `false`) |  |
 | **collapsed** | `boolean` | optional (default: `false`) |  |
-| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — section shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. `current_user` (and the ADR-0068 aliases `user` / `ctx.user` / `os.user`) resolves here too — CLIENT-SIDE only: nothing server-side evaluates a form-view section `visibleWhen`, so a role test here hides the controls and protects no data (declare permission-set field-level security for that), and on the public `/f/:slug` route no host publishes a scope, so the root is unbound and the predicate faults open. No `features.*` on ANY form-view predicate — refused at parse (ruled 2026-08-27): unbound on the standalone form routes, where the predicate would fault open. |
-| **visibleOn** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | [DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Hides the whole section when false. Normalized to `visibleWhen` at parse. |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — section shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. `current_user` (and the ADR-0068 aliases `user` / `ctx.user` / `os.user`) resolves here too — CLIENT-SIDE only: nothing server-side evaluates a form-view section `visibleWhen`, so a role test here hides the controls and protects no data (declare permission-set field-level security for that), and on the public `/f/:slug` route no host publishes a scope, so the root is unbound and the predicate faults open. No `features.*` on ANY form-view predicate — refused at parse (ruled 2026-08-27): unbound on the standalone form routes, where the predicate would fault open. |
+| **visibleOn** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | [DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Hides the whole section when false. Normalized to `visibleWhen` at parse. |
 | **columns** | `Enum<'1' \| '2' \| '3' \| '4'> \| 1 \| 2 \| 3 \| 4` | optional (default: `1`) |  |
 | **pane** | `Enum<'primary' \| 'secondary'>` | optional | Split pane this section renders in (split forms only; a parse error elsewhere). Omitted → first section 'primary', others 'secondary'. |
 | **group** | `string` | optional | Field group key (snake_case) whose members and presentation this section inherits, from the bound object's `fieldGroups` (ADR-0085 §5 `deriveFieldGroupLayout`). Mutually exclusive with `fields`, and with every key the group itself declares (`name`, `label`, `description`, `collapsible`, `collapsed`, `visibleWhen`/`visibleOn`). Not valid on a wizard step. Must name a declared group — checked by reference diagnostics. |
@@ -364,13 +364,13 @@ View filter rule
 | **required** | `boolean` | optional | Required override |
 | **hidden** | `boolean` | optional | Hidden override |
 | **colSpan** | `integer` | optional | Absolute column span (1-4). The renderer clamps it to the form grid's current column count, so the cell starts at a real column boundary at every surface width and never overflows (`colSpan: 4` in a 3-column grid renders as 3); a `colSpan` within the column count renders as authored, and `colSpan: 1` emits no span class at all. |
-| **span** | `Enum<'auto' \| 'full'>` | optional (default: `"auto"`) | Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count (wide widgets like textarea/richtext/json/file/subform take the whole row). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at the `.objectui-sha` pin `53ded82bf7` only the widest tier's class is emitted (`@2xl:col-span-3` for a 3-column grid), so at intermediate widths the field took a single cell, not the row (one of two at the 720px modal width; measured in Chromium at viewport widths 390, 720 and 1700). |
+| **span** | `Enum<'auto' \| 'full'>` | optional (default: `"auto"`) | Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `53ded82bf7`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin only the widest tier's class is emitted (`@2xl:col-span-3` for a 3-column grid), so at intermediate widths the field takes a single cell, not the row (one of two at the 720px modal width; measured in Chromium at viewport widths 390, 720 and 1700). |
 | **widget** | `string` | optional | Custom widget/component name (overrides type-based inference) |
 | **language** | `string` | optional | Code editor language (for type=code) |
 | **keyField** | `{ field?: string; label?: string \| Record<string, string>; placeholder?: string \| Record<string, string>; helpText?: string \| Record<string, string>; … }` | optional | Key column config for record-typed fields |
 | **dependsOn** | `string` | optional | Parent field name for cascading |
-| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — field shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. `current_user` (and the ADR-0068 aliases `user` / `ctx.user` / `os.user`) resolves here — CLIENT-SIDE only: nothing server-side evaluates a form-view field `visibleWhen`, so a role test here hides the control and protects no data (declare permission-set field-level security for that), and on the public `/f/:slug` route no host publishes a scope, so the root is unbound and the predicate faults open. No `features.*` on ANY form-view predicate — refused at parse (ruled 2026-08-27): the root is unbound on the standalone form routes (`/forms/:name`, `/f/:slug`) and the predicate would fault open there. Inside a repeater `data` is the ROW, but it is still spelled `data` — a bare identifier is unbound and faults open too. e.g. P`record.priority == 'urgent'` |
-| **visibleOn** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | [DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse. |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — field shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. `current_user` (and the ADR-0068 aliases `user` / `ctx.user` / `os.user`) resolves here — CLIENT-SIDE only: nothing server-side evaluates a form-view field `visibleWhen`, so a role test here hides the control and protects no data (declare permission-set field-level security for that), and on the public `/f/:slug` route no host publishes a scope, so the root is unbound and the predicate faults open. No `features.*` on ANY form-view predicate — refused at parse (ruled 2026-08-27): the root is unbound on the standalone form routes (`/forms/:name`, `/f/:slug`) and the predicate would fault open there. Inside a repeater `data` is the ROW, but it is still spelled `data` — a bare identifier is unbound and faults open too. e.g. P`record.priority == 'urgent'` |
+| **visibleOn** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | [DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse. |
 | **disclosure** | `Enum<'inline' \| 'popover'>` | optional | Composite rendering: inline bordered box (default) or a summary line + gear popover (progressive disclosure). |
 | **fields** | `{ field: string; type?: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>; options?: object[]; reference?: string; … }[]` | optional | Sub-fields for composite/repeater/record types |
 
@@ -389,7 +389,7 @@ Form-view select option — the object-field option shape minus the per-option `
 | **value** | `string` | ✅ | Stored value (lowercase machine identifier) |
 | **description** | `string` | optional | Optional secondary/help text for this option. Lookup option search matches it in addition to the label; renderers may show it as supporting text. |
 | **color** | `string` | optional | Color code for badges/charts |
-| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Env: the live `record` plus the host predicate scope, which binds `current_user`. The one VISIBILITY predicate the SERVER also enforces — the rule validator refuses a write of a value whose predicate is false — so a user-gated CHOICE belongs here. e.g. P`record.country == 'cn'` or P`'admin' in current_user.positions` |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Env: the live `record` plus the host predicate scope, which binds `current_user`. The one VISIBILITY predicate the SERVER also enforces — the rule validator refuses a write of a value whose predicate is false — so a user-gated CHOICE belongs here. e.g. P`record.country == 'cn'` or P`'admin' in current_user.positions` |
 
 
 ---
@@ -465,8 +465,8 @@ Form-view select option — the object-field option shape minus the per-option `
 | **description** | `string` | optional | Optional description rendered under the section header. |
 | **collapsible** | `boolean` | optional (default: `false`) |  |
 | **collapsed** | `boolean` | optional (default: `false`) |  |
-| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — section shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. `current_user` (and the ADR-0068 aliases `user` / `ctx.user` / `os.user`) resolves here too — CLIENT-SIDE only: nothing server-side evaluates a form-view section `visibleWhen`, so a role test here hides the controls and protects no data (declare permission-set field-level security for that), and on the public `/f/:slug` route no host publishes a scope, so the root is unbound and the predicate faults open. No `features.*` on ANY form-view predicate — refused at parse (ruled 2026-08-27): unbound on the standalone form routes, where the predicate would fault open. |
-| **visibleOn** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | [DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Hides the whole section when false. Normalized to `visibleWhen` at parse. |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — section shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. `current_user` (and the ADR-0068 aliases `user` / `ctx.user` / `os.user`) resolves here too — CLIENT-SIDE only: nothing server-side evaluates a form-view section `visibleWhen`, so a role test here hides the controls and protects no data (declare permission-set field-level security for that), and on the public `/f/:slug` route no host publishes a scope, so the root is unbound and the predicate faults open. No `features.*` on ANY form-view predicate — refused at parse (ruled 2026-08-27): unbound on the standalone form routes, where the predicate would fault open. |
+| **visibleOn** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | [DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Hides the whole section when false. Normalized to `visibleWhen` at parse. |
 | **columns** | `Enum<'1' \| '2' \| '3' \| '4'> \| 1 \| 2 \| 3 \| 4` | optional (default: `1`) |  |
 | **pane** | `Enum<'primary' \| 'secondary'>` | optional | Split pane this section renders in (split forms only; a parse error elsewhere). Omitted → first section 'primary', others 'secondary'. |
 | **group** | `string` | optional | Field group key (snake_case) whose members and presentation this section inherits, from the bound object's `fieldGroups` (ADR-0085 §5 `deriveFieldGroupLayout`). Mutually exclusive with `fields`, and with every key the group itself declares (`name`, `label`, `description`, `collapsible`, `collapsed`, `visibleWhen`/`visibleOn`). Not valid on a wizard step. Must name a declared group — checked by reference diagnostics. |
@@ -481,8 +481,8 @@ Form-view select option — the object-field option shape minus the per-option `
 | **description** | `string` | optional | Optional description rendered under the section header. |
 | **collapsible** | `boolean` | optional (default: `false`) |  |
 | **collapsed** | `boolean` | optional (default: `false`) |  |
-| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — section shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. `current_user` (and the ADR-0068 aliases `user` / `ctx.user` / `os.user`) resolves here too — CLIENT-SIDE only: nothing server-side evaluates a form-view section `visibleWhen`, so a role test here hides the controls and protects no data (declare permission-set field-level security for that), and on the public `/f/:slug` route no host publishes a scope, so the root is unbound and the predicate faults open. No `features.*` on ANY form-view predicate — refused at parse (ruled 2026-08-27): unbound on the standalone form routes, where the predicate would fault open. |
-| **visibleOn** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | [DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Hides the whole section when false. Normalized to `visibleWhen` at parse. |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — section shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. `current_user` (and the ADR-0068 aliases `user` / `ctx.user` / `os.user`) resolves here too — CLIENT-SIDE only: nothing server-side evaluates a form-view section `visibleWhen`, so a role test here hides the controls and protects no data (declare permission-set field-level security for that), and on the public `/f/:slug` route no host publishes a scope, so the root is unbound and the predicate faults open. No `features.*` on ANY form-view predicate — refused at parse (ruled 2026-08-27): unbound on the standalone form routes, where the predicate would fault open. |
+| **visibleOn** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | [DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Hides the whole section when false. Normalized to `visibleWhen` at parse. |
 | **columns** | `Enum<'1' \| '2' \| '3' \| '4'> \| 1 \| 2 \| 3 \| 4` | optional (default: `1`) |  |
 | **pane** | `Enum<'primary' \| 'secondary'>` | optional | Split pane this section renders in (split forms only; a parse error elsewhere). Omitted → first section 'primary', others 'secondary'. |
 | **group** | `string` | optional | Field group key (snake_case) whose members and presentation this section inherits, from the bound object's `fieldGroups` (ADR-0085 §5 `deriveFieldGroupLayout`). Mutually exclusive with `fields`, and with every key the group itself declares (`name`, `label`, `description`, `collapsible`, `collapsed`, `visibleWhen`/`visibleOn`). Not valid on a wizard step. Must name a declared group — checked by reference diagnostics. |
@@ -545,6 +545,7 @@ Gallery/card view configuration
 | **cardSize** | `Enum<'small' \| 'medium' \| 'large'>` | optional (default: `"medium"`) | Card size in gallery view |
 | **titleField** | `string` | optional | Field to display as card title |
 | **visibleFields** | `string[]` | optional | Fields to display on card body |
+| **limit** | `integer` | optional (default: `100`) | Row ceiling — the most cards the gallery fetches and draws, sent as the query `$top`; default 100 when the key is absent. When the ceiling APPLIES (the filtered set is larger than it), the renderer must show a visible truncation signal saying what is on screen is not the whole set — a bounded view that looks complete is worse than an unbounded one. |
 
 
 ---
@@ -700,6 +701,7 @@ HTTP methods a view data source may request — the subset of `HttpMethod` witho
 | **summarizeField** | `string` | optional | Field to sum at top of column (e.g. amount) |
 | **titleField** | `string` | optional | Field displayed as the card title. Omit to fall back to the record display name (ADR-0079 resolver chain) |
 | **columns** | `string[]` | ✅ | Fields to show on cards |
+| **limit** | `integer` | optional (default: `100`) | Row ceiling — the most records the board fetches across all its lanes, sent as the query `$top`; default 100 when the key is absent. When the ceiling APPLIES (the filtered set is larger than it), the renderer must show a visible truncation signal saying what is on screen is not the whole set — a bounded view that looks complete is worse than an unbounded one. |
 
 
 ---
@@ -801,7 +803,7 @@ Map view configuration
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
 | **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
-| **kanban** | `{ groupByField: string; summarizeField?: string; titleField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
+| **kanban** | `{ groupByField: string; summarizeField?: string; titleField?: string; columns: string[]; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
@@ -938,6 +940,7 @@ View filter rule
 | **summarizeField** | `string` | optional | Field to sum at top of column (e.g. amount) |
 | **titleField** | `string` | optional | Field displayed as the card title. Omit to fall back to the record display name (ADR-0079 resolver chain) |
 | **columns** | `string[]` | ✅ | Fields to show on cards |
+| **limit** | `integer` | optional (default: `100`) | Row ceiling — the most records the board fetches across all its lanes, sent as the query `$top`; default 100 when the key is absent. When the ceiling APPLIES (the filtered set is larger than it), the renderer must show a visible truncation signal saying what is on screen is not the whole set — a bounded view that looks complete is worse than an unbounded one. |
 
 ### Nested Shape: `ListView.calendar`
 
@@ -992,6 +995,7 @@ View filter rule
 | **cardSize** | `Enum<'small' \| 'medium' \| 'large'>` | optional (default: `"medium"`) | Card size in gallery view |
 | **titleField** | `string` | optional | Field to display as card title |
 | **visibleFields** | `string[]` | optional | Fields to display on card body |
+| **limit** | `integer` | optional (default: `100`) | Row ceiling — the most cards the gallery fetches and draws, sent as the query `$top`; default 100 when the key is absent. When the ceiling APPLIES (the filtered set is larger than it), the renderer must show a visible truncation signal saying what is on screen is not the whole set — a bounded view that looks complete is worse than an unbounded one. |
 
 ### Nested Shape: `ListView.timeline`
 
@@ -1003,6 +1007,7 @@ View filter rule
 | **groupByField** | `string` | optional | Field to group timeline rows. NO leading or trailing whitespace: the renderer reads this name off every row verbatim, so a padded spelling drops every row into one ungrouped band. |
 | **colorField** | `string` | optional | Field to derive each item color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the timeline default marker color |
 | **scale** | `Enum<'hour' \| 'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional (default: `"week"`) | Default timeline scale |
+| **limit** | `integer` | optional (default: `100`) | Row ceiling — the most rows the timeline fetches onto its rail, sent as the query `$top`; default 100 when the key is absent. When the ceiling APPLIES (the filtered set is larger than it), the renderer must show a visible truncation signal saying what is on screen is not the whole set — a bounded view that looks complete is worse than an unbounded one. |
 
 ### Nested Shape: `ListView.chart`
 
@@ -1069,7 +1074,7 @@ View filter rule
 | **params** | `({ name: string; label?: string; help?: string; type: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>; … } & Record<string, any>)[]` | optional | Inputs collected once before the run. Omit to skip the params step and go straight to confirm. |
 | **confirmText** | `string` | optional | Confirmation text shown above the affected-record summary. |
 | **confirmLabel** | `string` | optional | Custom Confirm button label (default: "Run"). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Eligibility predicate (CEL) — a string or a `{dialect, source}` envelope, i.e. `action.visible` without its boolean-literal arm: a per-record predicate has nothing to say as a constant. Evaluated once PER SELECTED RECORD with that record bound: the button is offered when at least one passes, the run covers only those, and the rest are reported as skipped. A record-free predicate (`features.x`, `current_user.y`) therefore behaves as a plain button-level gate. Fail-closed — a predicate that faults excludes the record. |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Eligibility predicate (CEL) — a string or a `{dialect, source}` envelope, i.e. `action.visible` without its boolean-literal arm: a per-record predicate has nothing to say as a constant. Evaluated once PER SELECTED RECORD with that record bound: the button is offered when at least one passes, the run covers only those, and the rest are reported as skipped. A record-free predicate (`features.x`, `current_user.y`) therefore behaves as a plain button-level gate. Fail-closed — a predicate that faults excludes the record. |
 | **requiredPermissions** | `string[]` | optional | [ADR-0066 D4] Capability gate on the button, `action.requiredPermissions` semantics verbatim: absent or empty always passes, several are AND-ed, and a client that cannot resolve the caller's capabilities fails OPEN (the server stays the authority). This key exists for INLINE defs — notably the `update`/`delete` data-plane forms, which dispatch no action and so have nothing to inherit a gate from; a def promoted from `bulkActions: ['<name>']` (or an aggregate def naming a declared action) inherits the action's own declaration instead. On a data-plane def the gate governs visibility only — the write itself is still authorized by the data API's object permissions and server hooks. |
 | **maxRecords** | `integer` | optional | Selection size above which the run is blocked. Set it on defs whose server work is expensive — an aggregate def carries every selected id in one request. |
 | **batchSize** | `integer` | optional | Records per executor batch (default 200). Data-plane operations only — an aggregate run is a single call by definition. |
@@ -1078,7 +1083,7 @@ View filter rule
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL) to evaluate. |
+| **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL) to evaluate. |
 | **style** | `Record<string, string>` | ✅ | CSS styles to apply when condition is true |
 
 ### Nested Shape: `ListView.exportOptions`
@@ -1209,7 +1214,7 @@ Tab configuration for multi-tab view interface
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
 | **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
-| **kanban** | `{ groupByField: string; summarizeField?: string; titleField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
+| **kanban** | `{ groupByField: string; summarizeField?: string; titleField?: string; columns: string[]; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
@@ -1337,6 +1342,7 @@ View filter rule
 | **summarizeField** | `string` | optional | Field to sum at top of column (e.g. amount) |
 | **titleField** | `string` | optional | Field displayed as the card title. Omit to fall back to the record display name (ADR-0079 resolver chain) |
 | **columns** | `string[]` | ✅ | Fields to show on cards |
+| **limit** | `integer` | optional (default: `100`) | Row ceiling — the most records the board fetches across all its lanes, sent as the query `$top`; default 100 when the key is absent. When the ceiling APPLIES (the filtered set is larger than it), the renderer must show a visible truncation signal saying what is on screen is not the whole set — a bounded view that looks complete is worse than an unbounded one. |
 
 ### Nested Shape: `ObjectListView.calendar`
 
@@ -1391,6 +1397,7 @@ View filter rule
 | **cardSize** | `Enum<'small' \| 'medium' \| 'large'>` | optional (default: `"medium"`) | Card size in gallery view |
 | **titleField** | `string` | optional | Field to display as card title |
 | **visibleFields** | `string[]` | optional | Fields to display on card body |
+| **limit** | `integer` | optional (default: `100`) | Row ceiling — the most cards the gallery fetches and draws, sent as the query `$top`; default 100 when the key is absent. When the ceiling APPLIES (the filtered set is larger than it), the renderer must show a visible truncation signal saying what is on screen is not the whole set — a bounded view that looks complete is worse than an unbounded one. |
 
 ### Nested Shape: `ObjectListView.timeline`
 
@@ -1402,6 +1409,7 @@ View filter rule
 | **groupByField** | `string` | optional | Field to group timeline rows. NO leading or trailing whitespace: the renderer reads this name off every row verbatim, so a padded spelling drops every row into one ungrouped band. |
 | **colorField** | `string` | optional | Field to derive each item color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the timeline default marker color |
 | **scale** | `Enum<'hour' \| 'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional (default: `"week"`) | Default timeline scale |
+| **limit** | `integer` | optional (default: `100`) | Row ceiling — the most rows the timeline fetches onto its rail, sent as the query `$top`; default 100 when the key is absent. When the ceiling APPLIES (the filtered set is larger than it), the renderer must show a visible truncation signal saying what is on screen is not the whole set — a bounded view that looks complete is worse than an unbounded one. |
 
 ### Nested Shape: `ObjectListView.chart`
 
@@ -1468,7 +1476,7 @@ View filter rule
 | **params** | `({ name: string; label?: string; help?: string; type: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>; … } & Record<string, any>)[]` | optional | Inputs collected once before the run. Omit to skip the params step and go straight to confirm. |
 | **confirmText** | `string` | optional | Confirmation text shown above the affected-record summary. |
 | **confirmLabel** | `string` | optional | Custom Confirm button label (default: "Run"). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Eligibility predicate (CEL) — a string or a `{dialect, source}` envelope, i.e. `action.visible` without its boolean-literal arm: a per-record predicate has nothing to say as a constant. Evaluated once PER SELECTED RECORD with that record bound: the button is offered when at least one passes, the run covers only those, and the rest are reported as skipped. A record-free predicate (`features.x`, `current_user.y`) therefore behaves as a plain button-level gate. Fail-closed — a predicate that faults excludes the record. |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Eligibility predicate (CEL) — a string or a `{dialect, source}` envelope, i.e. `action.visible` without its boolean-literal arm: a per-record predicate has nothing to say as a constant. Evaluated once PER SELECTED RECORD with that record bound: the button is offered when at least one passes, the run covers only those, and the rest are reported as skipped. A record-free predicate (`features.x`, `current_user.y`) therefore behaves as a plain button-level gate. Fail-closed — a predicate that faults excludes the record. |
 | **requiredPermissions** | `string[]` | optional | [ADR-0066 D4] Capability gate on the button, `action.requiredPermissions` semantics verbatim: absent or empty always passes, several are AND-ed, and a client that cannot resolve the caller's capabilities fails OPEN (the server stays the authority). This key exists for INLINE defs — notably the `update`/`delete` data-plane forms, which dispatch no action and so have nothing to inherit a gate from; a def promoted from `bulkActions: ['<name>']` (or an aggregate def naming a declared action) inherits the action's own declaration instead. On a data-plane def the gate governs visibility only — the write itself is still authorized by the data API's object permissions and server hooks. |
 | **maxRecords** | `integer` | optional | Selection size above which the run is blocked. Set it on defs whose server work is expensive — an aggregate def carries every selected id in one request. |
 | **batchSize** | `integer` | optional | Records per executor batch (default 200). Data-plane operations only — an aggregate run is a single call by definition. |
@@ -1477,7 +1485,7 @@ View filter rule
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL) to evaluate. |
+| **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL) to evaluate. |
 | **style** | `Record<string, string>` | ✅ | CSS styles to apply when condition is true |
 
 ### Nested Shape: `ObjectListView.exportOptions`
@@ -1655,6 +1663,7 @@ Timeline view configuration
 | **groupByField** | `string` | optional | Field to group timeline rows. NO leading or trailing whitespace: the renderer reads this name off every row verbatim, so a padded spelling drops every row into one ungrouped band. |
 | **colorField** | `string` | optional | Field to derive each item color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the timeline default marker color |
 | **scale** | `Enum<'hour' \| 'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional (default: `"week"`) | Default timeline scale |
+| **limit** | `integer` | optional (default: `100`) | Row ceiling — the most rows the timeline fetches onto its rail, sent as the query `$top`; default 100 when the key is absent. When the ceiling APPLIES (the filtered set is larger than it), the renderer must show a visible truncation signal saying what is on screen is not the whole set — a bounded view that looks complete is worse than an unbounded one. |
 
 
 ---
@@ -1808,7 +1817,7 @@ Tab configuration for multi-tab view interface
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
 | **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
-| **kanban** | `{ groupByField: string; summarizeField?: string; titleField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
+| **kanban** | `{ groupByField: string; summarizeField?: string; titleField?: string; columns: string[]; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
@@ -1893,7 +1902,7 @@ Tab configuration for multi-tab view interface
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
 | **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
-| **kanban** | `{ groupByField: string; summarizeField?: string; titleField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
+| **kanban** | `{ groupByField: string; summarizeField?: string; titleField?: string; columns: string[]; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
@@ -2134,7 +2143,7 @@ This schema accepts one of the following structures:
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
 | **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
-| **kanban** | `{ groupByField: string; summarizeField?: string; titleField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
+| **kanban** | `{ groupByField: string; summarizeField?: string; titleField?: string; columns: string[]; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
@@ -2310,7 +2319,7 @@ This schema accepts one of the following structures:
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
 | **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
-| **kanban** | `{ groupByField: string; summarizeField?: string; titleField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
+| **kanban** | `{ groupByField: string; summarizeField?: string; titleField?: string; columns: string[]; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |

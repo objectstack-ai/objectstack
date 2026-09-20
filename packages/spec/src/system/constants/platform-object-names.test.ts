@@ -129,7 +129,7 @@ describe('PLATFORM_PROVIDED_OBJECT_NAMES — conformance with what packages regi
   });
 
   it('cloud-only names are registered but not declared in this repo', () => {
-    // They live in @objectstack/service-tenant (cloud repo, ADR-0003). If one
+    // They live in @objectstack/service-tenant (cloud repo, cloud ADR-0003). If one
     // ever moves here, the group assertions above would flag it as unregistered.
     const allDeclared = new Set([...declared.values()].flatMap((s) => [...s]));
     for (const name of CLOUD_PROVIDED_OBJECT_NAMES) {

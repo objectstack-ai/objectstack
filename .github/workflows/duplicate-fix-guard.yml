@@ -78,11 +78,17 @@ jobs:
 
             // Branch-name convention (advisory, never red): a fix branch named
             // `claude/issue-<n>-<slug>` is discoverable by the next session
-            // with one `git ls-remote | grep issue-<n>`. #4555 vs #4559
-            // happened partly because the branches shared no token to grep.
+            // with one `git ls-remote --heads origin | grep -E 'issue-<n>(-|$)'`.
+            // #4555 vs #4559 happened partly because the branches shared no
+            // token to grep. Both spellings delimit the number on the RIGHT:
+            // undelimited, `issue-186` matches `claude/issue-18611-x`, so the
+            // advisory stays silent for a branch naming a DIFFERENT card —
+            // the false negative. The `$` arm keeps the slug-less spelling
+            // `claude/issue-186` matching; `issue-` anchors the left, so
+            // `issue-1186` and `issue-0186` do not match card 186 either.
             // Warning only — existing branches must not go red retroactively.
             const branch = pr.head.ref;
-            if (![...mine].some((n) => branch.includes(`issue-${n}`))) {
+            if (![...mine].some((n) => new RegExp(`issue-${n}(-|$)`).test(branch))) {
               core.warning(
                 `Branch \`${branch}\` does not name any declared issue. ` +
                 `Convention: claude/issue-<n>-<slug> (e.g. claude/issue-${[...mine][0]}-short-slug) ` +

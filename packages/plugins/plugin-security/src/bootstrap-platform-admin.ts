@@ -29,12 +29,19 @@
  *         this bootstrap still owns under walled postures is reporting: it
  *         logs the resolved admin list's standing (the same answer the
  *         read-only `platformAdmin` service serves — see
- *         `platform-admin-service.ts`), and points any LEGACY unscoped grant
- *         holder at the config path via the shared once-per-process
- *         deprecation reporter (`reportLegacyPlatformAdminGrant`, pin #5:
- *         loud migration, never a silent dual-track). Undeclared/blank/
- *         refused config still refuses loudly (fail-closed backstop; the
- *         boot-refusal half lives in plugin-auth `init()`).
+ *         `platform-admin-service.ts`). Undeclared/blank/refused config still
+ *         refuses loudly (fail-closed backstop; the boot-refusal half lives in
+ *         plugin-auth `init()`).
+ *
+ *         [#11663 L5] ⛔ The legacy-grant deprecation pointer is GONE. L4 opened
+ *         a time-boxed migration window and pointed any pre-existing unscoped
+ *         `admin_full_access` holder at the config path; L5 is its EXIT. Under a
+ *         walled posture that row is no longer an anchor at all — the derivation
+ *         site stopped reading it (`core/src/security/resolve-authz-context.ts`
+ *         §6b) — so there is nothing to migrate off and nothing to point at. The
+ *         consequence carried below: a walled rig holding such a row and
+ *         declaring nobody now has ZERO platform administrators, so the
+ *         fail-closed line fires for it too instead of being skipped.
  *
  * The "create a Default Organization for the freshly-promoted admin"
  * behavior moved to `@objectstack/organizations` (see
@@ -75,11 +82,7 @@ import {
   PLATFORM_OWNER_EMAIL_ENV,
   resolveTenancyPosture,
 } from '@objectstack/types';
-import {
-  normalizePlatformAdminEmail,
-  reportLegacyPlatformAdminGrant,
-  resolvePlatformAdminEmails,
-} from '@objectstack/core';
+import { normalizePlatformAdminEmail, resolvePlatformAdminEmails } from '@objectstack/core';
 import type { SeedSettlementSnapshot } from '@objectstack/spec/contracts';
 import { claimSeedOwnership } from './claim-seed-ownership.js';
 import {
@@ -87,7 +90,151 @@ import {
   reportSeedWriteRefusals,
   type SeedWriteRefusals,
 } from './per-organization-catalog.js';
-import { resolvePlatformAdminStanding } from './platform-admin-service.js';
+import {
+  resolvePlatformAdminStanding,
+  type PlatformAdminStandingEntry,
+} from './platform-admin-service.js';
+import {
+  buildPlatformAdminStandingRow,
+  platformAdminStandingChanged,
+  platformAdminStandingSnapshot,
+  PLATFORM_ADMIN_STANDING_ACTION,
+  PLATFORM_ADMIN_STANDING_LEDGER,
+  readRecordedStandingSnapshot,
+  serializePlatformAdminStandingSnapshot,
+} from './platform-admin-standing-audit.js';
+
+/**
+ * The order the standing-audit read states TO THE DRIVER.
+ *
+ * `created_at` and not `id`: `sys_audit_log` ids carry no ordering, while
+ * `created_at` is the field every shipped list view on that object already
+ * sorts by, and it is the column the row's own meaning rests on. The read is
+ * capped at one row, and a capped read without an order returns whichever row
+ * that driver produced first — see {@link tryFind}.
+ */
+const STANDING_AUDIT_SCAN_ORDER: { field: string; order: 'asc' | 'desc' }[] = [
+  { field: 'created_at', order: 'desc' },
+];
+
+/**
+ * [#18412] Record a CHANGE of platform-admin standing on the existing audit
+ * ledger, and write nothing when nothing changed.
+ *
+ * ## Three states, and the third is the one a two-valued read would lose
+ *
+ * - the ledger is not mounted → SKIP, silently. `sys_audit_log` belongs to the
+ *   OPTIONAL `@objectstack/plugin-audit`; a host that never mounted it
+ *   (`serve --preset minimal`, an EE host that composes no audit) has not
+ *   FAILED to write a row, it declined to have a ledger. Attempting the insert
+ *   would throw and be reported as a degradation on a deployment behaving
+ *   exactly as composed — the #18368 lesson, one file over.
+ * - the ledger is mounted and the last row is readable → compare, and write
+ *   only on a difference.
+ * - ⛔ the read was REFUSED → write NOTHING and say so. A refusal is not
+ *   「no record exists」: reading it that way writes a fresh baseline on every
+ *   boot, which is precisely the per-boot noise the ruling rejected. The
+ *   record stays silent for this boot and the next successful read catches up,
+ *   because the comparison is against the ledger rather than against a memo.
+ *
+ * Best-effort throughout: an audit write must never be what stops a deployment
+ * booting, and this runs after the bootstrap has already done its work.
+ */
+async function recordPlatformAdminStandingChange(
+  ql: any,
+  standing: readonly PlatformAdminStandingEntry[],
+  logger?: BootstrapOptions['logger'] & { debug?: (message: string) => void },
+): Promise<void> {
+  // ⛔ Ask before writing, and only an engine that ANSWERS licenses the skip.
+  // `getSchema` is an ObjectQL member, not an `IDataEngine` one, so an engine
+  // that does not carry it has told us NOTHING about the ledger — that case
+  // leaves the write attempted rather than skipped.
+  const getSchema = ql?.getSchema;
+  let ledgerSchema: any;
+  if (typeof getSchema === 'function') {
+    try {
+      ledgerSchema = ql.getSchema(PLATFORM_ADMIN_STANDING_LEDGER);
+    } catch {
+      ledgerSchema = undefined;
+    }
+    if (ledgerSchema == null) return;
+  }
+
+  const declared: string[] = Array.isArray(ledgerSchema?.fields)
+    ? ledgerSchema.fields.map((f: any) => f?.name).filter(Boolean)
+    : ledgerSchema?.fields && typeof ledgerSchema.fields === 'object'
+      ? Object.keys(ledgerSchema.fields)
+      : [];
+  const declaresField = (field: string): boolean => declared.includes(field);
+
+  let refused: unknown;
+  const previousRows = await tryFind(
+    ql,
+    PLATFORM_ADMIN_STANDING_LEDGER,
+    { action: PLATFORM_ADMIN_STANDING_ACTION },
+    1,
+    STANDING_AUDIT_SCAN_ORDER,
+    undefined,
+    (e) => {
+      refused = e;
+    },
+  );
+  if (refused !== undefined) {
+    const message =
+      '[security] platform-admin standing was NOT recorded on this boot: the audit ledger ' +
+      `(${PLATFORM_ADMIN_STANDING_LEDGER}) refused the read of the last recorded snapshot, so ` +
+      'this boot cannot tell whether standing changed. ⛔ Nothing was written — writing a ' +
+      'baseline here would file a fresh row on every boot. The next boot whose read succeeds ' +
+      'records the current standing. Cause: ' +
+      String((refused as any)?.message ?? refused);
+    if (logger?.error) logger.error(message);
+    else logger?.warn?.(message);
+    return;
+  }
+
+  const snapshot = platformAdminStandingSnapshot(standing);
+  const serialized = serializePlatformAdminStandingSnapshot(snapshot);
+  const previousSerialized = readRecordedStandingSnapshot(previousRows[0]);
+  if (!platformAdminStandingChanged(previousSerialized, serialized)) {
+    // ⛔ The card id stays in this comment and out of the STRING: a runtime
+    // line reaches operators, who have no tracker to resolve `#NNNN` against
+    // (#18412; `check:doc-authoring`).
+    logger?.debug?.(
+      '[security] platform-admin standing is unchanged since the last recorded entry — no ' +
+        'audit row written. One entry per CHANGE of standing is the recorded shape.',
+    );
+    return;
+  }
+
+  const row = buildPlatformAdminStandingRow({
+    snapshot,
+    previousSerialized,
+    declaresOrganizationId: declaresField('organization_id'),
+    declaresActor: declaresField('actor'),
+  });
+  // ⛔ Through this file's ONE write door, not a second `ql.insert` beside it.
+  // `tryInsert` already threads the system execution context every write here
+  // needs, and a second door with identical semantics would be a second place
+  // for that context to be forgotten — it is also a second row on the
+  // tenant-audit write-call-site census for one write.
+  let insertRefusal: unknown;
+  await tryInsert(ql, PLATFORM_ADMIN_STANDING_LEDGER, row, undefined, (e) => {
+    insertRefusal = e;
+  });
+  if (insertRefusal !== undefined) {
+    // The ledger IS mounted (or could not be asked) and the insert still
+    // failed, which is AGENTS.md's durability degradation to the letter: the
+    // deployment's administrators just changed and the record that was
+    // supposed to outlive the process is missing. Loud, and never fatal.
+    const message =
+      '[security] platform-admin standing CHANGED and the audit row was NOT written — the ' +
+      'durable record of who administers this deployment is missing for this change, and ' +
+      'nothing retries it. Boot itself is unaffected. Cause: ' +
+      String((insertRefusal as any)?.message ?? insertRefusal);
+    if (logger?.error) logger.error(message);
+    else logger?.warn?.(message);
+  }
+}
 
 interface BootstrapOptions {
   /** Logger from PluginContext. */
@@ -223,6 +370,13 @@ async function tryFind(
   limit = 100,
   orderBy?: { field: string; order: 'asc' | 'desc' }[],
   offset?: number,
+  // ⛔ "Refused" and "empty" are not the same answer, and on most call sites in
+  // this file the difference is harmless because `[]` is the conservative
+  // reading. On the standing-audit read below it is NOT: `[]` would read as
+  // "no record has ever been written", which writes a duplicate baseline on
+  // every boot of a rig whose driver refused the query. A caller that cannot
+  // afford that conflation passes this and is told.
+  onRefusal?: (error: unknown) => void,
 ): Promise<any[]> {
   try {
     const query: Record<string, any> = { where, limit };
@@ -230,7 +384,8 @@ async function tryFind(
     if (offset !== undefined) query.offset = offset;
     const rows = await ql.find(object, query, { context: SYSTEM_CTX });
     return Array.isArray(rows) ? rows : [];
-  } catch {
+  } catch (e) {
+    onRefusal?.(e);
     return [];
   }
 }
@@ -243,11 +398,16 @@ async function tryFind(
 // boots. See `reportSeedWriteRefusals` in `per-organization-catalog.ts`.
 async function tryInsert(
   ql: any, object: string, data: any, refusals?: SeedWriteRefusals,
+  // Symmetric with {@link tryFind}'s observer, and for the same reason: a
+  // caller outside the SEED pass needs the refusal itself, not a `null` that
+  // the seed reporter will later summarize on a channel that is not its own.
+  onRefusal?: (error: unknown) => void,
 ): Promise<any | null> {
   try {
     return await ql.insert(object, data, { context: SYSTEM_CTX });
   } catch (e) {
     refusals?.record(object, e);
+    onRefusal?.(e);
     return null;
   }
 }
@@ -682,8 +842,10 @@ export async function bootstrapPlatformAdmin(
   const grantScanCounts = { adminGrantRowsExamined };
 
   // `single`: a platform admin "already exists" — the promotion is a no-op
-  // forever. Under walled postures that same row is the LEGACY anchor and gets
-  // the deprecation pointer below instead of a silent early exit.
+  // forever, and under Choice 4A that row IS this rig's anchor. [#11663 L5]
+  // Under walled postures the same row is no longer an anchor at all, so the
+  // walled branch below does not take this early exit: it goes on to report
+  // config-derived standing, or to refuse fail-closed when nobody is declared.
   if (!walled && unscopedHolder) {
     return {
       seeded: seededCount,
@@ -701,20 +863,19 @@ export async function bootstrapPlatformAdmin(
   if (walled) {
     // [#11974 / #11663 L4, Choice 5A first half] The walled promotion is
     // RETIRED: no `sys_user_permission_set` row is minted, whatever accounts
-    // exist. Nothing is revoked either — an existing legacy grant still
-    // confers (P5's honoured window, enforced at the derivation site) — but
-    // it is now the OLD anchor, so its holder is pointed at the config path
-    // ONCE per process through the same latch the derivation-site reporter
-    // uses (`reportLegacyPlatformAdminGrant`): boot-time detection here and
-    // request-time detection there can never add up to two lines.
-    if (unscopedHolder) {
-      const holder = unscopedHolder;
-      const holderRows = await tryFind(ql, 'sys_user', { id: holder.user_id }, 1);
-      reportLegacyPlatformAdminGrant({
-        userId: String(holder.user_id),
-        email: holderRows[0]?.email,
-      });
-    }
+    // exist.
+    //
+    // [#11663 L5] …and the row is no longer READ either. L4 left an existing
+    // legacy grant conferring, inside a time-boxed window it announced once per
+    // process. That window has closed: the derivation site
+    // (`core/src/security/resolve-authz-context.ts` §6b) stops deriving
+    // PLATFORM_ADMIN from an unscoped `admin_full_access` row under a walled
+    // posture, so on these rigs standing is CONFIG-DERIVED and nothing else.
+    //
+    // ⛔ Nothing here writes, deletes or re-owns that row — its ownership is
+    // ADR-0131 C3's, on the v18 line. `unscopedHolder` therefore still means
+    // exactly what it meant: a row exists. What changed is what the row BUYS,
+    // which under a wall is now nothing.
 
     // Fail-closed backstop for an unusable config (unset, blank, or a list
     // REFUSED for an unparseable entry — #11663 Choice 2B folds all three
@@ -722,24 +883,40 @@ export async function bootstrapPlatformAdmin(
     // process). The startup half (walled + undeclared ⇒ REFUSE BOOT, naming
     // the variable) lives in plugin-auth's `init()`; this is the
     // defense-in-depth line for paths that reach the bootstrap without that
-    // guard (`os meta resync`, embeddings without plugin-auth). With a legacy
-    // holder present the deprecation pointer above already carries the
-    // remedy, so the extra error line is skipped — the deployment HAS an
-    // administrator, on the old anchor.
+    // guard (`os meta resync`, embeddings without plugin-auth).
+    //
+    // [#11663 L5] ⛔ This line is no longer skipped when a legacy holder exists.
+    // It used to be, and the reason it used to be has expired: L4's skip was
+    // justified by 「the deployment HAS an administrator, on the old anchor」 and
+    // by the deprecation pointer carrying the remedy instead. Both premises died
+    // with the walled dual read. A walled rig holding an unscoped
+    // `admin_full_access` row and declaring nobody now has ZERO platform
+    // administrators — exactly the state this line exists to announce — so
+    // staying quiet for it would be the silent half of a fail-closed guard.
     const platformAdminConfig = resolvePlatformAdminEmails();
     if (platformAdminConfig.emails.length === 0) {
-      if (!unscopedHolder) {
-        const message =
-          `[security] tenancy posture is walled but ${PLATFORM_OWNER_EMAIL_ENV} declares no usable ` +
-          'platform administrator (unset, blank, or refused for an unparseable entry) — ' +
-          'this deployment has ZERO config-derived platform administrators. Under walled ' +
-          'postures the first registrant is never promoted and no grant row is written; ' +
-          `platform admin standing is derived from ${PLATFORM_OWNER_EMAIL_ENV} at request ` +
-          "time. Set it to the operator's email address (or a comma-separated list of " +
-          'addresses) and make sure the account verifies its email.';
-        if (logger?.error) logger.error(message);
-        else logger?.warn?.(message);
-      }
+      const message =
+        `[security] tenancy posture is walled but ${PLATFORM_OWNER_EMAIL_ENV} declares no usable ` +
+        'platform administrator (unset, blank, or refused for an unparseable entry) — ' +
+        'this deployment has ZERO config-derived platform administrators. Under walled ' +
+        'postures the first registrant is never promoted and no grant row is written; ' +
+        `platform admin standing is derived from ${PLATFORM_OWNER_EMAIL_ENV} at request ` +
+        "time. Set it to the operator's email address (or a comma-separated list of " +
+        'addresses) and make sure the account verifies its email.' +
+        // [#11663 L5] The migration window's last word, said where an operator can
+        // act on it. This rig HAS an unscoped `admin_full_access` row and used to
+        // be administered through it; under a wall that row stopped conferring
+        // when the dual read retired, so saying only "declare somebody" would hide
+        // the fact that somebody has just lost standing.
+        (unscopedHolder
+          ? " This deployment also holds a legacy unscoped 'admin_full_access' grant row" +
+            ` (user ${String(unscopedHolder.user_id)}). Under a walled posture that row is NO LONGER` +
+            ` an anchor for platform admin standing — the migration window announced since 17.3.0 has` +
+            ` closed — so declaring that account's verified address in ${PLATFORM_OWNER_EMAIL_ENV} is` +
+            ' what restores it. The row itself is left exactly as it is.'
+          : '');
+      if (logger?.error) logger.error(message);
+      else logger?.warn?.(message);
       return {
         seeded: seededCount,
         adminPromoted: false,
@@ -769,6 +946,13 @@ export async function bootstrapPlatformAdmin(
         `at request time. ${summary}`,
       { standing: standing.map((s) => ({ ...s })) },
     );
+    // [#18412] …and the SAME answer, recorded durably. The log line above is
+    // the operator's first sight of it and nothing else: it is not queryable,
+    // it does not survive the process, and an auditor asking 「who held
+    // administrator standing three months ago, and since when」 cannot read it.
+    // This is the write that makes that question answerable — one entry per
+    // CHANGE of standing, plus the first-boot baseline.
+    await recordPlatformAdminStandingChange(ql, standing, logger);
     return {
       seeded: seededCount,
       adminPromoted: false,

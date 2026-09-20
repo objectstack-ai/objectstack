@@ -53,7 +53,7 @@ import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { strictObject, strictObjectError } from '../shared/strict-object';
 import { SnakeCaseIdentifierSchema, QUALIFIED_ITEM_NAME_PATTERN } from '../shared/identifiers.zod';
-import { ExpressionInputSchema } from '../shared/expression.zod';
+import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
 import { normalizeVisibleWhen, VISIBILITY_STRICT_OPTIONS } from '../shared/visibility';
 import { SELECT_OPTION_EDITABILITY_GUIDANCE, VISIBILITY_ONLY_STRICT_OPTIONS } from '../shared/editability-boundary';
 // [#13855] The section → field-group reference form, shared with the
@@ -1128,6 +1128,99 @@ export const GroupingConfigSchema = lazySchema(() => strictObject({
   + 'AND-ed into the view filter. Compiled by `compileListViewGroupQuery` / `compileListViewGroupRowsQuery`',
 ));
 
+/*
+ * ---------------------------------------------------------------------------
+ * `limit` — the author-settable row ceiling of the page-shaped views (#17393)
+ * ---------------------------------------------------------------------------
+ *
+ * Declared here because the PROTOCOL was the thing that was wrong: two
+ * renderers already cap by author choice, and the key they read was never a
+ * protocol key. Measured in objectui at `dda8f3815d`:
+ *
+ *   - `ObjectKanban.tsx:573` fetches `$top: schema.limit ?? DEFAULT_KANBAN_LIMIT`
+ *     (`= 100` at `:84`), and that `limit` is declared in `@object-ui/types`
+ *     alone (`zod/objectql.zod.ts:1762`, `z.number().int().positive().optional()`);
+ *   - `ObjectTimeline.tsx:328` fetches `$top: schema.limit ?? DEFAULT_TIMELINE_LIMIT`
+ *     (`= 100` at `:29`), with `limit` on that component's own props interface
+ *     (`:129`) and on no published schema at all;
+ *   - `ObjectGallery.tsx` sends no `$top` and reads no ceiling at all — the
+ *     unbounded fetch objectui#7390 is ruled to close by reading this key.
+ *
+ * Consumer-local author-settable keys the protocol never declared are the
+ * divergence the contract-first directive forbids, so the knob enters the
+ * protocol first and the three spellings come under one declaration (the
+ * director seat's amendment of 2026-09-10T11:0xZ on objectui#7390, on the
+ * maintainer's principle 「我们的项目以objectstack 协议为准，文档应该以实际实现
+ * 为准。协议不正确的应该先修改协议。」).
+ *
+ * ## Why on the per-view config blocks, and not as a member of the list view
+ *
+ * The alternative shape — one row ceiling on {@link ListViewShapeSchema}
+ * itself — is rejected on three properties of this tree:
+ *
+ *   1. The base shape ALREADY carries the row-bounding knob every view type
+ *      reaches: `pagination.pageSize` ({@link PaginationConfigSchema}, default
+ *      25). A second base-level row key would leave one view with two
+ *      base-level row bounds and no declared precedence between them — and the
+ *      `virtualScroll` tombstone at the bottom of this same shape prescribes
+ *      `pagination` for exactly that question.
+ *   2. A base member is reachable from EVERY `type`, the non-grid four
+ *      (gantt / calendar / map / tree) included. Their ceiling is a platform
+ *      constant the renderer owns (objectui#7210) and this card does not touch
+ *      them, so a base member would publish an authorable ceiling on four view
+ *      kinds no renderer reads — declared-but-unenforced on the day it lands.
+ *   3. The per-kind block is what actually REACHES the renderer: objectui's
+ *      `ListView` merges `schema.<kind>` into the generated node — its kanban
+ *      branch spreads the rest of the block flat onto `object-kanban`, so
+ *      `kanban.limit` lands exactly where `schema.limit` is read — while a
+ *      base-level key is forwarded into no per-kind node at all.
+ *
+ * The NAME is `limit` for the same reason: it is the name the consumer already
+ * reads, so this declaration absorbs the two consumer-local keys instead of
+ * buying a second divergence spelled differently.
+ *
+ * ⚠️ NOT the kanban LANE's `limit`. objectui's node-level
+ * `ObjectKanbanLaneSchema.limit` is a WIP warning threshold that never reaches
+ * a query; no lane object exists on this face at all
+ * ({@link KanbanConfigSchema}'s `columns` is a list of card FIELD names), so
+ * the two cannot be confused here.
+ */
+export const DEFAULT_VIEW_ROW_LIMIT = 100;
+
+/** What a page-shaped view's ceiling bounds, per view type. */
+const ROW_LIMIT_SUBJECT = {
+  gallery: 'cards the gallery fetches and draws',
+  kanban: 'records the board fetches across all its lanes',
+  timeline: 'rows the timeline fetches onto its rail',
+} as const;
+
+/** The three view configs that cap by AUTHOR choice (not by platform ceiling). */
+type RowLimitView = keyof typeof ROW_LIMIT_SUBJECT;
+
+/**
+ * The `limit` declaration for one page-shaped view config.
+ *
+ * The default is APPLIED, not merely described: a `.describe()` naming a
+ * default the schema does not apply is a second contract that nothing
+ * enforces, and the two drift the first time either is edited. The agreement
+ * is pinned from both sides in `view.test.ts` (#17393) — the parsed default is
+ * compared against the number the describe text states.
+ *
+ * ⛔ The truncation signal is the renderer's half and cannot be enforced from
+ * here; it is stated in the describe because a bounded-and-silent view reads
+ * as complete, which is worse than the unbounded-and-silent one this key
+ * replaces — the author needs to know the cap is visible, and the renderer
+ * author needs to know it is owed.
+ */
+const rowLimitKey = (view: RowLimitView) =>
+  z.number().int().positive().default(DEFAULT_VIEW_ROW_LIMIT).describe(
+    `Row ceiling — the most ${ROW_LIMIT_SUBJECT[view]}, sent as the query \`$top\`; default `
+    + `${DEFAULT_VIEW_ROW_LIMIT} when the key is absent. When the ceiling APPLIES (the filtered `
+    + 'set is larger than it), the renderer must show a visible truncation signal saying what is '
+    + 'on screen is not the whole set — a bounded view that looks complete is worse than an '
+    + 'unbounded one.',
+  );
+
 /**
  * Gallery View Configuration (Airtable-style)
  * Configures card layout for gallery/card views.
@@ -1141,6 +1234,7 @@ export const GalleryConfigSchema = lazySchema(() => strictObject({
   cardSize: z.enum(['small', 'medium', 'large']).default('medium').describe('Card size in gallery view'),
   titleField: z.string().optional().describe('Field to display as card title'),
   visibleFields: z.array(z.string()).optional().describe('Fields to display on card body'),
+  limit: rowLimitKey('gallery'),
 }).describe('Gallery/card view configuration'));
 
 /**
@@ -1163,6 +1257,7 @@ export const TimelineConfigSchema = lazySchema(() => strictObject({
     ),
   colorField: z.string().optional().describe('Field to derive each item color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the timeline default marker color'),
   scale: z.enum(['hour', 'day', 'week', 'month', 'quarter', 'year']).default('week').describe('Default timeline scale'),
+  limit: rowLimitKey('timeline'),
 }).describe('Timeline view configuration'));
 
 /**
@@ -1466,6 +1561,7 @@ export const KanbanConfigSchema = lazySchema(() => strictObject({
    */
   titleField: z.string().optional().describe('Field displayed as the card title. Omit to fall back to the record display name (ADR-0079 resolver chain)'),
   columns: z.array(z.string()).describe('Fields to show on cards'),
+  limit: rowLimitKey('kanban'),
 }));
 
 /**
@@ -1743,9 +1839,45 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  * (same collision, same resolution as `ListChartConfigSchema` vs the
  * `chart.zod.ts` `ChartConfigSchema`).
  *
- * Closed (strict) from the start: the map renderer's read set is itself closed
- * — it validates `schema.map` against a local zod schema with exactly these
- * keys, so an extra key here would be dropped there. That parity was one key
+ * Closed (strict) from the start, and the strictness stands on its own: it does
+ * NOT rest on the renderer refusing an undeclared key, because nothing
+ * downstream refuses one. Measured at the `.objectui-sha` pin `53ded82b` by
+ * EXECUTING the pinned declarations, not by reading them — and each anchor
+ * below quotes the line it was read at, so the next pin bump reds instead of
+ * rotting (`check:objectui-pin-citations`):
+ *
+ * - **The block this face feeds is FLATTENED, not forwarded.** `ListView`
+ *   (`packages/plugin-list/src/ListView.tsx:113` first line
+ *   `function resolveListMapConfig(schema: { map?: unknown; options?: { map?: unknown } }): Record<string, unknown> {`)
+ *   and `ObjectView` (`packages/plugin-view/src/ObjectView.tsx:1381` first line
+ *   `case 'map':`) copy it through a HAND-LISTED whitelist
+ *   (`packages/plugin-list/src/ListView.tsx:67` first line
+ *   `export const FLAT_MAP_CONFIG_KEYS = [`) — this block's keys minus
+ *   `style` — and emit those as flat props. An undeclared key IS dropped
+ *   there, but by a whitelist and in SILENCE: no parse, no warning, no
+ *   diagnostic of any kind.
+ * - **The renderer's own zod schema does not close the set.**
+ *   `packages/types/src/zod/objectql.zod.ts:562` first line
+ *   `export const ObjectMapConfigSchema = z.object({` — a plain `z.object`,
+ *   NOT strict, so an undeclared key parses clean there: zero issues, no
+ *   warning. `getMapConfig` consults that `safeParse`
+ *   (`packages/plugin-map/src/ObjectMap.tsx:373` first line
+ *   `const result = ObjectMapConfigSchema.safeParse(config);`) only to decide
+ *   whether to `console.warn`, then returns a spread of the AUTHORED block
+ *   (`:378` first line `return { ...config, style: config.style || style };`),
+ *   undeclared key and all. That spread is reached by objectui's own
+ *   component-node `map` prop, never by this face's flatten product ("neither
+ *   flattener emits a `map` key at all", `getMapConfig`).
+ *
+ * ⛔ So relaxing this block to `passthrough` would hand the extra key to no
+ * checker at all: it dies in the whitelist without a word, and the one schema
+ * that could have reported it is open and warn-only. And this parse is the only
+ * place an author is told ANYWHERE: `map` is not in objectui's
+ * `LIST_VIEW_LOCAL_OVERRIDES` (`packages/types/src/zod/objectql.zod.ts:313`
+ * first line `const LIST_VIEW_LOCAL_OVERRIDES = [`), so objectui's own
+ * `ListViewSchema` imports THIS block by reference and the document check on
+ * that side is this same schema. The two key sets MIRROR each other, key for
+ * key. That parity was one key
  * SHORT until the `style` row below landed: the renderer's own
  * `ObjectMapConfigSchema` declares `style` and `getMapConfig` reads it
  * (`schema.map?.style`) while this block did not declare it, so strictness here
@@ -2358,7 +2490,7 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
       color: 'Row colouring by field value has its own block — see `rowColor` on this list view. To set a CSS colour from a predicate, put it in `style`: `{ condition, style: { color: "#b91c1c" } }`.',
     },
   }, {
-    condition: ExpressionInputSchema.describe('Predicate (CEL) to evaluate.'),
+    condition: EvaluatedExpressionInputSchema.describe('Predicate (CEL) to evaluate.'),
     style: z.record(z.string(), z.string()).describe('CSS styles to apply when condition is true'),
   })).optional().describe('Conditional formatting rules for list rows'),
 
@@ -2790,7 +2922,7 @@ const FormFieldBaseSchema = lazySchema(() => {
    * multi-column tier, making 'full' the whole row at every multi-column tier
    * — re-read this block at the pin bump that absorbs it.
    */
-  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count (wide widgets like textarea/richtext/json/file/subform take the whole row). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at the `.objectui-sha` pin `53ded82bf7` only the widest tier's class is emitted (`@2xl:col-span-3` for a 3-column grid), so at intermediate widths the field took a single cell, not the row (one of two at the 720px modal width; measured in Chromium at viewport widths 390, 720 and 1700)."),
+  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `53ded82bf7`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin only the widest tier's class is emitted (`@2xl:col-span-3` for a 3-column grid), so at intermediate widths the field takes a single cell, not the row (one of two at the 720px modal width; measured in Chromium at viewport widths 390, 720 and 1700)."),
 
   /** Custom widget override — only needed when auto-inference is insufficient */
   widget: z.string().optional().describe('Custom widget/component name (overrides type-based inference)'),
@@ -2888,9 +3020,9 @@ const FormFieldBaseSchema = lazySchema(() => {
    * this one is ENFORCED: see {@link checkFormViewPredicateFeaturesRoot} for
    * the ruling and the scanner.
    */
-  visibleWhen: ExpressionInputSchema.optional().describe("Visibility predicate (CEL) — field shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. `current_user` (and the ADR-0068 aliases `user` / `ctx.user` / `os.user`) resolves here — CLIENT-SIDE only: nothing server-side evaluates a form-view field `visibleWhen`, so a role test here hides the control and protects no data (declare permission-set field-level security for that), and on the public `/f/:slug` route no host publishes a scope, so the root is unbound and the predicate faults open. No `features.*` on ANY form-view predicate — refused at parse (ruled 2026-08-27): the root is unbound on the standalone form routes (`/forms/:name`, `/f/:slug`) and the predicate would fault open there. Inside a repeater `data` is the ROW, but it is still spelled `data` — a bare identifier is unbound and faults open too. e.g. P`record.priority == 'urgent'`"),
+  visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Visibility predicate (CEL) — field shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. `current_user` (and the ADR-0068 aliases `user` / `ctx.user` / `os.user`) resolves here — CLIENT-SIDE only: nothing server-side evaluates a form-view field `visibleWhen`, so a role test here hides the control and protects no data (declare permission-set field-level security for that), and on the public `/f/:slug` route no host publishes a scope, so the root is unbound and the predicate faults open. No `features.*` on ANY form-view predicate — refused at parse (ruled 2026-08-27): the root is unbound on the standalone form routes (`/forms/:name`, `/f/:slug`) and the predicate would fault open there. Inside a repeater `data` is the ROW, but it is still spelled `data` — a bare identifier is unbound and faults open too. e.g. P`record.priority == 'urgent'`"),
   /** @deprecated ADR-0089 — use `visibleWhen`. Accepted and normalized to `visibleWhen` at parse. */
-  visibleOn: ExpressionInputSchema.optional().describe('[DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse.'),
+  visibleOn: EvaluatedExpressionInputSchema.optional().describe('[DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse.'),
   disclosure: z.enum(['inline', 'popover']).optional().describe('Composite rendering: inline bordered box (default) or a summary line + gear popover (progressive disclosure).'),
   };
   return z.object(shape, {
@@ -3095,9 +3227,9 @@ export const FormSectionSchema = lazySchema(() => strictObject({
    * refused at parse (ruled 2026-08-27, objectui#6262; see
    * {@link checkFormViewPredicateFeaturesRoot}).
    */
-  visibleWhen: ExpressionInputSchema.optional().describe('Visibility predicate (CEL) — section shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. `current_user` (and the ADR-0068 aliases `user` / `ctx.user` / `os.user`) resolves here too — CLIENT-SIDE only: nothing server-side evaluates a form-view section `visibleWhen`, so a role test here hides the controls and protects no data (declare permission-set field-level security for that), and on the public `/f/:slug` route no host publishes a scope, so the root is unbound and the predicate faults open. No `features.*` on ANY form-view predicate — refused at parse (ruled 2026-08-27): unbound on the standalone form routes, where the predicate would fault open.'),
+  visibleWhen: EvaluatedExpressionInputSchema.optional().describe('Visibility predicate (CEL) — section shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. `current_user` (and the ADR-0068 aliases `user` / `ctx.user` / `os.user`) resolves here too — CLIENT-SIDE only: nothing server-side evaluates a form-view section `visibleWhen`, so a role test here hides the controls and protects no data (declare permission-set field-level security for that), and on the public `/f/:slug` route no host publishes a scope, so the root is unbound and the predicate faults open. No `features.*` on ANY form-view predicate — refused at parse (ruled 2026-08-27): unbound on the standalone form routes, where the predicate would fault open.'),
   /** @deprecated ADR-0089 — use `visibleWhen`. Accepted and normalized to `visibleWhen` at parse. */
-  visibleOn: ExpressionInputSchema.optional().describe('[DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Hides the whole section when false. Normalized to `visibleWhen` at parse.'),
+  visibleOn: EvaluatedExpressionInputSchema.optional().describe('[DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Hides the whole section when false. Normalized to `visibleWhen` at parse.'),
   columns: z.union([
     z.enum(['1', '2', '3', '4']),
     z.literal(1),
@@ -5801,6 +5933,8 @@ export type CalendarConfig = z.input<typeof CalendarConfigSchema>;
 export type GanttConfig = z.input<typeof GanttConfigSchema>;
 export type GanttQuickFilter = z.input<typeof GanttQuickFilterSchema>;
 export type KanbanConfig = z.input<typeof KanbanConfigSchema>;
+/** Post-parse shape of {@link KanbanConfig} — defaults applied, transforms run (ADR-0122). */
+export type KanbanConfigParsed = z.infer<typeof KanbanConfigSchema>;
 export type ListMapConfig = z.input<typeof ListMapConfigSchema>;
 export type NavigationMode = z.input<typeof NavigationModeSchema>;
 export type TreeConfig = z.input<typeof TreeConfigSchema>;

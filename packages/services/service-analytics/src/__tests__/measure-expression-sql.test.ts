@@ -87,7 +87,7 @@ describe('custom-expression measures emit their expression', () => {
 describe('an expression containing a dot is not mistaken for a join path', () => {
   const dotted: Cube = {
     ...cube,
-    joins: { account: { name: 'account', relationship: 'belongsTo', sql: '' } },
+    joins: { account: { name: 'account' } },
     measures: {
       ...cube.measures,
       // A dot inside a function call — an expression, not `relation.column`.

@@ -41,9 +41,25 @@ import { retiredKey } from '../shared/retired-key';
  * the calls a connector makes *out*. Do **not** substitute `shared`'s
  * `RateLimitConfig` — that is the inbound limiter and would cap the wrong direction.
  * **Until an outbound throttle exists, rate-limit at the connector provider or
- * upstream gateway.** What L3 does declare for a rate-limited upstream is
- * `retryConfig` — whose `retryableStatusCodes` default `[408, 429, 500, 502, 503,
- * 504]` includes `429` — and `health.circuitBreaker`. The full removal reasoning is
+ * upstream gateway.** **And do not reach for `retryConfig` instead.** This
+ * paragraph used to end "what L3 does declare for a rate-limited upstream is
+ * `retryConfig` — whose `retryableStatusCodes` default `[408, 429, 500, 502,
+ * 503, 504]` includes `429` — and `health.circuitBreaker`", which reads as a
+ * remedy. It is not one: both keys are **declared but currently
+ * unimplemented**. `packages/spec/liveness/connector.json` records every
+ * `retryConfig` sub-key and every `health.circuitBreaker` sub-key as `dead`,
+ * and outside `packages/spec` nothing reads either — no retry loop consumes a
+ * strategy, a backoff, a jitter or that status-code list, so the `429` in it
+ * never causes a retry, and no breaker ever opens. They are **not retired**:
+ * both are still declared and still parse, so an author can write them and see
+ * no error. They are **not left to the host** either —
+ * `ConnectorProviderContext` (`integration/connector-provider.ts`) carries
+ * exactly `name`, `label`, `description`, `icon`, `type`, `providerConfig`,
+ * `auth` and `loadPackageFile`, so a provider factory is never handed either
+ * key and has no way to honour it. ADR-0049 owes these keys a decision
+ * (retire / implement / declare as a host contract); until it rules, the
+ * advice above is the whole advice — retry and throttle **at the connector
+ * provider or upstream gateway**. The full removal reasoning is
  * recorded at the removal site: the "REMOVED: outbound rate limiting" block in
  * `integration/connector.zod.ts`, and `packages/spec/docs/SYNC_ARCHITECTURE.md`.
  *

@@ -2,7 +2,7 @@
 
 /**
  * @objectstack/cloud-connection — the runtime-side client for an ObjectStack
- * cloud control plane (ADR-0008).
+ * cloud control plane (cloud ADR-0008).
  *
  * Connects any ObjectStack runtime — vanilla `objectstack dev`, a self-hosted
  * single-environment deployment, or a multi-tenant fleet — to a control plane
@@ -36,7 +36,7 @@ export { MarketplaceProxyPlugin } from './marketplace-proxy-plugin.js';
 export type { MarketplaceProxyPluginConfig } from './marketplace-proxy-plugin.js';
 export { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
 export type { MarketplaceInstallLocalPluginConfig } from './marketplace-install-local-plugin.js';
-// ADR-0007 step ⑤ — the local desired-state ledger, exported as a first-class
+// cloud ADR-0007 step ⑤ — the local desired-state ledger, exported as a first-class
 // seam so hosts/reconcilers can read the same ledger without going through HTTP.
 export { LocalManifestSource, DEFAULT_INSTALLED_PACKAGES_DIR } from './local-manifest-source.js';
 // The RETURN CONTRACTS of both read paths are part of that seam. `list()`
@@ -74,7 +74,7 @@ export {
     DEFAULT_REPLAYS_ON_ERROR_SAMPLE_RATE,
 } from './telemetry-posture.js';
 export type { RuntimeTelemetryPosture, ClientErrorReportingConfig } from './telemetry-posture.js';
-// ADR-0008 consumption side — the self-hosted credential ledger (bind
+// cloud ADR-0008 consumption side — the self-hosted credential ledger (bind
 // persists the oscc_ bearer here; forwards present it to the control plane).
 export { ConnectionCredentialStore, DEFAULT_CONNECTION_CREDENTIAL_PATH } from './connection-credential-store.js';
 export type { StoredConnectionCredential } from './connection-credential-store.js';

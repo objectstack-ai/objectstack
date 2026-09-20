@@ -95,7 +95,7 @@ that silently does not happen.
 
 | # | Behaviour when `isSystem` | Package | What you get / what you lose | Anchor |
 |:--|:---|:---|:---|:---|
-| 1 | **The whole security middleware short-circuits** before any gate runs | plugin-security | Get: every CRUD/FLS/tenant/owner gate below skipped in one branch. Lose: all of rows 2–7 at once — this is the single largest behaviour on the page | `packages/plugins/plugin-security/src/security-plugin.ts#start` |
+| 1 | **The whole security middleware short-circuits** before any gate runs | plugin-security | Get: every CRUD/FLS/tenant/owner gate below skipped in one branch. Lose: every gate under it in this lane at once, down to and including the write-bypass row that widens the effective write scope to `org` (row 7) — this is the single largest behaviour on the page | `packages/plugins/plugin-security/src/security-plugin.ts#start` |
 | 2 | **`owner_id` is not auto-stamped on INSERT** (the step 3.5 anchor guard is inside the block row 1 skips) | plugin-security | Lose: the row lands `owner_id = NULL`, so the default `owner_only_writes` policy hides it **from its own creator**. Get: nothing — this is a gap, not a capability | the step 3.5 guard block and the short-circuit that skips it are both inside `packages/plugins/plugin-security/src/security-plugin.ts#start` |
 | 3 | Row-level read filter resolves to "no filter" | plugin-security | Get: unscoped reads. Lose: row-level scoping entirely | `packages/plugins/plugin-security/src/security-plugin.ts#getReadFilter` |
 | 4 | Field-level security returns **all** fields | plugin-security | Get: every column readable. Lose: field masking | `packages/plugins/plugin-security/src/security-plugin.ts#computeReadableFields` |
@@ -468,4 +468,4 @@ that introduces it — CI will say so if it is not.
 - [Authorization Architecture](/docs/permissions/authorization) — the six-gate enforcement chain this flag short-circuits
 - [Security & Access Control](/docs/protocol/objectql/security) — the `readonly` write strip and its exemptions
 - [State Machine](/docs/protocol/objectql/state-machine) — `skipStateMachine`, `preserveAudit`, `treatAsHistorical`
-- [Sharing Rules](/docs/permissions/sharing-rules) — what row 31 is skipping
+- [Sharing Rules](/docs/permissions/sharing-rules) — what row 31 is skipping on the record-`afterDelete` hook

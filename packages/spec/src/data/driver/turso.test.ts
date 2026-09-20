@@ -11,6 +11,7 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { findClosestMatches } from '../../shared/suggestions.zod';
 import { DatasourceSchema } from '../datasource.zod';
 import { validateDriverConfig } from './config-registry.zod';
 import { TursoConfigSchema, TursoDriverSpec } from './turso.zod';
@@ -69,6 +70,42 @@ describe('TursoConfigSchema', () => {
     const result = TursoConfigSchema.safeParse({ filename: './data/objectstack.db' });
     expect(result.success).toBe(false);
     expect(JSON.stringify(result.error?.issues)).toContain('url');
+  });
+
+  // The alias block above this shape's keys used to be headed "the spellings
+  // edit distance cannot reach", which is true of five of its six rows and
+  // false of `uri`. The two roles are pinned separately because they fail
+  // differently: drop a GAP row and the author gets silence, drop the `uri`
+  // row and nothing observable changes today — its value is that it keeps
+  // answering `url` if this shape ever gains a key within 2 of `uri`.
+  describe('the alias table, by role', () => {
+    const rename = (key: string, value: unknown) => {
+      const result = TursoConfigSchema.safeParse({ url: 'libsql://x.turso.io', [key]: value });
+      expect(result.success).toBe(false);
+      const issue = result.error!.issues.find((i) => i.code === 'unrecognized_keys');
+      expect(issue, 'the refusal carries an unrecognized-keys issue').toBeDefined();
+      return issue!.message;
+    };
+
+    it('`dsn` is the GAP case — 3 edits from `url` against a budget of 2', () => {
+      // Nothing declared on this shape is within 2 of `dsn`, so without the
+      // row the refusal names the key and stops.
+      expect(rename('dsn', 'libsql://x.turso.io')).toContain('`dsn` → `url`');
+    });
+
+    it('`uri` is NOT — the bare fallback already reaches `url` at distance 1', () => {
+      // `uri` is 3 characters, so the budget is `Math.max(2, floor(3 / 3))` = 2
+      // and `uri`/`url` differ by exactly 1. The row and the fallback agree, so
+      // this message is what an author sees either way — which is the whole
+      // point: the entry is not what makes the suggestion possible.
+      //
+      // `shape` is a conservative SUPERSET of the candidate list the error map
+      // spends (that one drops the `authToken`/`timeout` tombstones via
+      // `acceptsNothing`); extra candidates can only crowd `url` out, never
+      // help it, so a pass here holds for the real list too.
+      expect(findClosestMatches('uri', Object.keys(TursoConfigSchema.shape), 2, 1)).toEqual(['url']);
+      expect(rename('uri', 'libsql://x.turso.io')).toContain('`uri` → `url`');
+    });
   });
 });
 

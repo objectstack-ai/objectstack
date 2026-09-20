@@ -31,6 +31,15 @@
  * the implementation here does not open the key: it closes the excuse for a
  * fourth copy.
  *
+ * ⭐ [#18378] This module now answers TWO questions, and only the first reads
+ * that key. {@link resolveRecordOrganizationField} is the STAMP answer ("who is
+ * this row about"), consumers still the three above;
+ * {@link resolveRecordWallOrganizationField} is the WALL answer ("what is this
+ * row scoped by", and so which organization work launched from it acts as),
+ * which skips limb 0 entirely. A caller of the second is not a fourth consumer
+ * of the key — it never reads it — and the split is what keeps the scope-pin
+ * from being widened by callers who only ever wanted the wall.
+ *
  * A platform row is stamped from the organization the record is ABOUT (#8287's
  * ruling). To do that the writer has to know which column holds it, and
  * `organization_id` is not universally the answer: `sys_api_key` carries
@@ -200,12 +209,80 @@ export function resolveRecordOrganizationField(
   objectDef: unknown,
   hasField: (field: string) => boolean,
 ): string | null {
+  return resolveOrganizationField(objectDef, hasField, { readStampKey: true });
+}
+
+/**
+ * [#18378] The WALL-side sibling: "which column is this object tenant-scoped
+ * by?" — limbs 1 to 4 of the precedence above, with limb 0 deliberately NOT
+ * consulted.
+ *
+ * ⭐ Same limbs from the same source, because the two questions differ in
+ * exactly one place. "Which column says who this row is ABOUT" (stamping) and
+ * "which column is this row WALLED by" (scope, and therefore the organization
+ * work launched from the row acts as) coincide on every ordinary object, and
+ * come apart only where an author declared `tenancy.organizationField` — which
+ * is ONE shipped object, `sys_api_key`, whose whole point is that it is not
+ * walled (#8287).
+ *
+ * ⛔ It does not read `tenancy.organizationField`, and that is the contract
+ * rather than an omission. The key's consumers stay pinned to the THREE
+ * platform-row writers the cloud#1395 ruling names; a caller asking the WALL
+ * question is not a fourth consumer of the stamp key, it is a caller of a
+ * different question. Reading limb 0 here would take a declaration meaning "the
+ * audit trail should follow this row's own organization even though nothing
+ * walls it" and turn it into an ACTING IDENTITY — a sweep over `sys_api_key`
+ * would then launch runs acting as an organization derived from an annotation
+ * that never meant "act as this". These limbs resolve `null` there instead, and
+ * the caller takes the existing `walled-posture` refusal at its first
+ * tenant-scoped write (ADR-0112), loudly and by name.
+ *
+ * ⚠️ The twin of `@objectstack/objectql`'s `resolveTenantFieldName`, which says
+ * the same of `SqlDriver.computeTenantField` — three spellings of one rule is
+ * one too many, and this is the sinkable one (this package is `spec` + zod,
+ * which is why the stamp resolver was sunk here at all). Converging them is its
+ * own change with its own blast radius: #18378 adds no FOURTH spelling — it
+ * shares limbs 1 to 4 with the stamp face below, pinned in this package's own
+ * suite ("the two faces agree everywhere limb 0 is absent") — and leaves the
+ * existing two where they are.
+ *
+ * ⛔ No cross-package parity pin is added here, deliberately and not by
+ * oversight: `@objectstack/objectql` is registered in `check:test-source-alias`
+ * as still resolving `@objectstack/metadata-core` through `dist/`, so a pin
+ * living there would be a verdict about build state rather than about either
+ * checkout — the passing-test failure that gate exists to catch. The
+ * convergence, and the alias it needs, belong to the card that does it.
+ */
+export function resolveRecordWallOrganizationField(
+  objectDef: unknown,
+  hasField: (field: string) => boolean,
+): string | null {
+  return resolveOrganizationField(objectDef, hasField, { readStampKey: false });
+}
+
+/**
+ * The limbs themselves, in ONE place — `readStampKey` selects limb 0 alone.
+ *
+ * A parameter rather than two bodies because limbs 1 to 4 are shared BY
+ * CONTRACT: the precedence doc above states at length that a platform row's
+ * stamp must agree with the wall the row is later read through. Two bodies
+ * would let them answer differently on the day one of them is fixed, which is
+ * the exact failure the promotion ruling was written against.
+ */
+function resolveOrganizationField(
+  objectDef: unknown,
+  hasField: (field: string) => boolean,
+  { readStampKey }: { readStampKey: boolean },
+): string | null {
   if (!objectDef || typeof objectDef !== 'object') return null;
   const tenancy = (objectDef as { tenancy?: { organizationField?: unknown; tenantField?: unknown } }).tenancy;
   // Limb 0 — the explicit stamp-only declaration (#8778) wins over everything,
-  // the ADR-0066 opt-out below included: see the precedence doc above.
-  const stampField = tenancy?.organizationField;
-  if (typeof stampField === 'string' && stampField.length > 0 && hasField(stampField)) return stampField;
+  // the ADR-0066 opt-out below included: see the precedence doc above. Reached
+  // by the three sanctioned platform-row writers and by nobody else.
+  if (readStampKey) {
+    const stampField = tenancy?.organizationField;
+    if (typeof stampField === 'string' && stampField.length > 0 && hasField(stampField)) return stampField;
+  }
   if (isTenancyDisabled(objectDef)) return null;
   const declared = tenancy?.tenantField;
   if (typeof declared === 'string' && declared.length > 0 && hasField(declared)) return declared;
@@ -245,6 +322,29 @@ export interface RecordOrganizationResolver {
  * context fallback instead of failing the write.
  */
 export function createRecordOrganizationResolver(engine: unknown): RecordOrganizationResolver {
+  return createResolver(engine, resolveRecordOrganizationField);
+}
+
+/**
+ * [#18378] The WALL-side face, over the same glue — what a caller asking "which
+ * organization does this record BELONG to, and therefore which one does work
+ * launched from it act as" holds.
+ *
+ * Same memoization, same value reading, same best-effort posture as the stamp
+ * face above; the one difference is which precedence it binds
+ * ({@link resolveRecordWallOrganizationField}, i.e. limb 0 skipped). Built over
+ * a shared builder rather than copied, for the reason the interface docblock
+ * already gives: a per-caller copy of "read the resolved column off the record,
+ * treating empty as absent" is where the next drift starts.
+ */
+export function createRecordWallOrganizationResolver(engine: unknown): RecordOrganizationResolver {
+  return createResolver(engine, resolveRecordWallOrganizationField);
+}
+
+function createResolver(
+  engine: unknown,
+  resolveField: (objectDef: unknown, hasField: (field: string) => boolean) => string | null,
+): RecordOrganizationResolver {
   const hasField = createFieldPresenceProbe(engine);
   const columnCache = new Map<string, string | null>();
   const organizationFieldFor = (objectName: string): string | null => {
@@ -257,7 +357,7 @@ export function createRecordOrganizationResolver(engine: unknown): RecordOrganiz
     } catch {
       /* ignore — best-effort; absence just means the caller falls back */
     }
-    const resolved = resolveRecordOrganizationField(objectDef, (field) => hasField(objectName, field));
+    const resolved = resolveField(objectDef, (field) => hasField(objectName, field));
     columnCache.set(objectName, resolved);
     return resolved;
   };

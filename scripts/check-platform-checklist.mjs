@@ -127,11 +127,235 @@ function familyFiles(dir, prefix = '') {
   return out;
 }
 
-const STATUSES = new Set(['active', 'draft', 'retired']);
+const STATUSES = new Set(['active', 'draft', 'planned', 'retired']);
+
+// ── Which statuses CARRY coverage ───────────────────────────────────────────
+// The capability-coverage ratchet below asks "does the checklist test this
+// governed metadata kind?". `planned` is the ledger's answer to "the definition
+// requires this capability and nothing verifies it yet" — a promise, not a
+// test. So a planned item is a legal MAP TARGET (that is how a capability-gap
+// card gets somewhere to point) and contributes ZERO coverage: a kind whose
+// only items are planned is UNMAPPED, exactly as if the entry were empty.
+// ⛔ Folding `planned` in here is the one edit that would turn this ratchet
+// into a way to green a kind by promising to test it.
+const COVERAGE_BEARING_STATUSES = new Set(['active', 'draft']);
+
 const PRIORITIES = new Set(['P0', 'P1', 'P2']);
 const SURFACES = new Set(['browser', 'api', 'cli', 'build', 'mixed']);
 const ORACLES = new Set(['api', 'network', 'screenshot', 'dom', 'log', 'test', 'build']);
 const BLOCKED_BY = new Set(['fixture', 'environment', 'dependency', 'product-bug']);
+
+const RELEASE_RE = /^v\d+(\.\d+)?$/;
+
+/**
+ * The field rules an item's `status` implies, as a pure function so the battery
+ * can drive every status through it with no tree to read.
+ *
+ * `planned` is the only status that RELAXES anything, and it relaxes exactly
+ * the three fields that cannot honestly exist before the capability does:
+ * `since` (no release has introduced it), `steps` (nothing to drive) and
+ * `acceptance` (no oracle to consult — handled at its own site below). In
+ * exchange it REQUIRES `personas`: who the capability is for is what makes a
+ * gap readable to the next sweep, and it is knowable the day the gap is found.
+ *
+ * ⚠️ On `since` the claim is kept as narrow as the enforcement. What is checked
+ * is the SHAPE — `null`, or a release-looking string. Whether the release named
+ * has already SHIPPED is not checkable here and is not checked: this ledger
+ * holds no release timeline and `RELEASE_RE` is a spelling rule. A planned item
+ * targeting a release that is already out is an authoring error, and it passes.
+ * Saying otherwise in the refusal would advertise a check that does not exist,
+ * which is the one thing a refusal must never do.
+ *
+ * @param {{status?: string, since?: unknown, steps?: unknown, personas?: unknown}} item
+ * @returns {string[]}
+ */
+function statusFieldProblems(item) {
+  const problems = [];
+  const isRelease = typeof item.since === 'string' && RELEASE_RE.test(item.since);
+  const hasSteps = Array.isArray(item.steps) && item.steps.length > 0;
+
+  if (item.status === 'planned') {
+    if (!(item.since === null || isRelease)) {
+      problems.push('"since" on a planned item must be null (no target release chosen yet) or a TARGET release, e.g. "v18". ⛔ Only the SHAPE is checked here: this ledger holds no release timeline, so a target naming a release that already shipped PASSES and is an authoring error no gate can see');
+    }
+    if (hasSteps) {
+      problems.push('a planned item carries NO "steps" — there is nothing to drive yet. Steps arrive in the PR that implements the capability, in the same edit that promotes it to "active"');
+    }
+    if (!Array.isArray(item.personas) || item.personas.length === 0) {
+      problems.push('a planned item must name its "personas" — who the capability is for is what makes the gap readable before anything exists to run');
+    }
+    return problems;
+  }
+
+  if (!isRelease) problems.push('"since" must be the release that introduced the capability, e.g. "v16" or "v16.0"');
+  if (!hasSteps) problems.push('"steps" must be a non-empty array of strings');
+  return problems;
+}
+
+/**
+ * One `coverage.json` entry's `items` list, judged. Pure, and the ONE place the
+ * ratchet decides what counts — so the battery can drive both directions of the
+ * planned rule without a tree, and so there is no second opinion to drift from.
+ *
+ * The two directions that matter, and why the second is the load-bearing one:
+ *
+ *   - a kind mapped to an ACTIVE item is covered, and stays covered when a
+ *     planned item is listed beside it (the planned id is where the next
+ *     capability-gap card points; it must not turn a green kind red);
+ *   - a kind whose ONLY items are planned is UNMAPPED. The platform has the
+ *     capability on its definition list, the checklist records that nothing
+ *     verifies it, and the ratchet must say so — otherwise `planned` becomes
+ *     the cheapest way to green an untested kind, and the ratchet measures
+ *     intentions instead of tests.
+ *
+ * @param {string[]} ids the entry's `items`
+ * @param {(id: string) => string|undefined} statusOf item id -> status, undefined when unknown
+ * @returns {{problems: string[], bearing: number}} `bearing` = items that CARRY coverage
+ */
+function coverageEntryProblems(ids, statusOf) {
+  const problems = [];
+  let bearing = 0;
+  for (const id of ids) {
+    const status = statusOf(id);
+    if (status === undefined) {
+      problems.push(`maps to unknown item id "${id}"`);
+      continue;
+    }
+    if (status === 'retired') {
+      problems.push(`maps to retired item "${id}" — point at its successor or re-waive the kind`);
+      continue;
+    }
+    if (COVERAGE_BEARING_STATUSES.has(status)) bearing += 1;
+  }
+  if (bearing === 0) {
+    problems.push(
+      'UNMAPPED — nothing here CARRIES coverage: every item mapped to this kind is `planned` (or does not resolve).'
+        + ' A planned item records that the definition requires the capability and that nothing verifies it yet — it is a promise, not a test,'
+        + ' and counting it would let any kind go green by promising to cover it. Add an item that RUNS, or waive the kind with a reason.',
+    );
+  }
+  return { problems, bearing };
+}
+
+/**
+ * ⭐ The BINDING of the two predicates above into the walks that judge the
+ * ledger, read out of this file's own source so it can be driven ON and OFF.
+ *
+ * ## The hole this closes, measured rather than supposed
+ *
+ * `statusFieldProblems` and `coverageEntryProblems` are pure, which is what
+ * lets the battery drive them on fixtures — and a pure function's battery says
+ * NOTHING about whether anything calls it. Both severings were run on this
+ * file:
+ *
+ *   - revert the coverage call site to the pre-`planned` loop so
+ *     `coverageEntryProblems` is never called → `--self-test` exit 0 with all
+ *     207 assertions passing, the live gate green, and a fixture kind whose
+ *     ONLY item is planned green too;
+ *   - drop `statusFieldProblems(item)` from the item walk → `--self-test`
+ *     exit 0 with 207, and an ACTIVE item carrying `since: null` and no
+ *     `steps` green.
+ *
+ * ⇒ a severed call site left every instrument in this file reporting success.
+ * That is worse here than it would be almost anywhere else: the subject of
+ * these two functions IS a ratchet, so a ratchet whose binding nothing pins is
+ * one that can be switched off without a single number moving.
+ *
+ * The remedy is the one the line-citation limb already uses below — a source
+ * read driven BOTH ways over ONE text, so a green is the binding holding and
+ * not a read that matched everything, or nothing.
+ *
+ * ## ⛔ WHAT THIS PIN CANNOT SEE — read this before trusting it
+ *
+ * It is a TEXT pin over comment-masked source. It answers one question — "is
+ * this call site still written, in live code, exactly once?" — and ⛔ it is not
+ * a proof that the call EXECUTES. Three ordinary severings walk straight past
+ * it, and all three were measured leaving `--self-test` at exit 0 and the live
+ * gate at exit 0 on this file:
+ *
+ *   - **shadowing** — `const statusFieldProblems = () => [];` above the call,
+ *     which stays written and starts returning nothing;
+ *   - **a dead helper** — the call moved into a function nobody invokes;
+ *   - **a dead branch** — the call left under a condition that never holds.
+ *
+ * Those are SEMANTIC, and no text pin can reach them: the spelling is intact in
+ * every one. Closing them needs the walk driven over a fixture ledger, which
+ * needs a root knob (`AREAS_DIR` is fixed from `import.meta.url`) or the walk
+ * factored into a callable. That is deliberately NOT built here, and this
+ * paragraph is the disclosure that makes the omission a recorded trade rather
+ * than an implied guarantee. ⛔ Do not describe this function as proving the
+ * bindings execute.
+ *
+ * What masking DOES close is the form that defeated the first version of this
+ * pin: **commenting the call out in place**. The commented line was the one
+ * occurrence, the raw-source count read 1, and everything stayed green — the
+ * exact "commented-out draft" this function's own decoy note already named.
+ * `maskComments` is applied before counting for that reason, and three OFF legs
+ * below drive it.
+ *
+ * ⚠️ This pin is SPELLING-SENSITIVE on purpose, and that is its whole cost:
+ * rewording a call site reds it. ⛔ The repair is to update the pinned spelling
+ * in the same edit — ⛔ never to delete the row, which is indistinguishable
+ * from severing the call it guards.
+ *
+ * Readings quoted above were taken on `claude/issue-19157-checklist-planned-status`
+ * at `b835196bc1` (this repo) — a count without the tree it came from is not a
+ * reading.
+ *
+ * @param {string} source this module's own text, raw; comments are masked here
+ * @returns {string[]} one message per binding that is not present in LIVE code
+ */
+function statusBindingProblems(source) {
+  const problems = [];
+  // ⭐ Comments are masked BEFORE counting, and that one call is the whole
+  // difference between a pin that fires on a commented-out call site and one
+  // that does not. It also fixes the decoy rule's own blind spot in the right
+  // direction: a copy of a pinned spelling sitting in a comment is not a live
+  // call site, so it must neither satisfy the count nor inflate it.
+  // ⛔ Do not switch this back to raw `source` to make a reword green.
+  const live = maskComments(String(source));
+  /**
+   * EXACTLY ONE occurrence in LIVE code, not "at least one" — and the second
+   * direction is the one this was rewritten for. The OFF legs below sever a
+   * call site over a copy of this text, so anything that leaves a SECOND
+   * literal copy of a pinned spelling in live code (a needle written out
+   * longhand, a doc example in a template string) keeps this check green after
+   * the real call is gone. That is a decoy, and the first draft of this very
+   * function shipped one: its severing needles were plain string literals, the
+   * predicate matched THOSE, and both OFF legs read as passes. The OFF legs
+   * caught it.
+   *
+   * A copy inside a COMMENT is neither a decoy nor a call site — masking removes
+   * it from both sides of the count, which is the only consistent reading: the
+   * same commented line must not satisfy the rule when the real call is gone.
+   */
+  const bound = (re, what) => {
+    const hits = live.match(re)?.length ?? 0;
+    if (hits === 1) return;
+    problems.push(
+      hits === 0
+        ? what
+        : `${what} — and this spelling occurs ${hits} times in LIVE code; a second literal copy of a pinned call site is a DECOY that holds this check green after the real one is severed`,
+    );
+  };
+  bound(
+    /for \(const msg of statusFieldProblems\(item\)\) where\(msg\);/g,
+    'the item walk does not consume `statusFieldProblems(item)` — every status-keyed field rule (a planned item\'s `since`/`steps`/`personas`, and the release-and-steps rules for every other status) is then declared and never applied',
+  );
+  bound(
+    /const \{ problems, bearing \} = coverageEntryProblems\(entry\.items, statusOf\);/g,
+    'the capability-coverage limb does not call `coverageEntryProblems(entry.items, statusOf)` — the planned-items-are-not-coverage rule is then declared and never applied',
+  );
+  bound(
+    /for \(const msg of problems\) err\('coverage\.json', kind, msg\);/g,
+    'the capability-coverage limb computes `problems` and never reports them — an UNMAPPED kind is then found and swallowed',
+  );
+  bound(
+    /if \(bearing > 0\) mappedCount\+\+;/g,
+    'the capability-coverage limb does not gate `mappedCount` on `bearing` — a kind mapped only to planned items is then counted as covered on the OK line',
+  );
+  return problems;
+}
 
 const errors = [];
 const err = (file, id, msg) => errors.push(`${file}${id ? ` · ${id}` : ''}: ${msg}`);
@@ -775,6 +999,7 @@ let unreferencedReachedVerdict = false;
 let metaCallReachedVerdict = false;
 let lineCitationsReachedVerdict = false;
 let symbolAnchorsReachedVerdict = false;
+let plannedStatusReachedVerdict = false;
 
 // ── The self-test's own battery roster and floor (#13489, adopted here) ────
 //
@@ -805,6 +1030,7 @@ const BATTERY_UNREFERENCED_RECIPES = 'selfTestUnreferencedRecipes: the reverse d
 const BATTERY_META_CALL_SPELLING = 'selfTestMetaCallSpelling: the folded `/meta` plural, read from the live contract';
 const BATTERY_LINE_CITATION_BINDING = 'selfTestLineCitationBinding: the corpus declaration, the absent fork, and the binding driven both ways';
 const BATTERY_SYMBOL_ANCHORS = 'selfTestSymbolAnchors: the corpus registration, the binding to the shared resolver, the residual and the floor';
+const BATTERY_PLANNED_STATUS = 'selfTestPlannedStatus: the `planned` accept set, the fields it relaxes, and the coverage ratchet driven BOTH ways';
 
 const SELF_TEST_BATTERIES = Object.freeze({
   [BATTERY_TRAP_VOCABULARY]: 22,
@@ -828,8 +1054,28 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // exclusion in both directions, and every re-judged #16898 case, which
   // ⛔ survives the transplant unchanged in verdict.
   [BATTERY_SYMBOL_ANCHORS]: 42,
+  // New with the `planned` status. Set at its landed count (headroom 0, the
+  // convention every entry above uses). The load-bearing third of it is the
+  // coverage direction: the live ledger carries ZERO planned items today, so
+  // nothing but these fixtures can tell a working ratchet rule from a deleted
+  // one — the unreferenced-recipe argument, applied to a rule whose subject
+  // population is empty on purpose rather than by luck.
+  //
+  // 28 → 38: the fixtures above drive two PURE functions and so could say
+  // nothing about whether anything CALLS them. Both call sites were severed and
+  // measured green at 207/207 (this branch, `22453417e1`), so the G-rows pin the
+  // BINDINGS by a source read driven ON and OFF, and two F-rows pin the `since`
+  // rule's own limit in the direction it deliberately does not go.
+  //
+  // 38 → 42: that first pin counted RAW source, so commenting a pinned call out
+  // IN PLACE left it green — the commented line was the one occurrence. Counting
+  // over comment-MASKED source closes it; G9–G11 are what keep the mask, and
+  // G12 records in an assertion what the pin still cannot see. Measured on this
+  // branch at `b835196bc1`: reverting the mask reds G9, G10 and G11 and nothing
+  // else.
+  [BATTERY_PLANNED_STATUS]: 42,
 });
-const SELF_TEST_BATTERY_FLOOR = 6;
+const SELF_TEST_BATTERY_FLOOR = 7;
 
 /**
  * @param {Record<string, number>} ran battery name -> assertions it reported
@@ -1621,11 +1867,12 @@ const CORPUS = defineCorpus({
 //   string-substring   the symbol survives only INSIDE a longer string token:
 //                      `saveItem` in `client: 'meta.saveItem'`, `:shareId` in a
 //                      route pattern, a name inside an `it(...)` title or a
-//                      `.describe(...)` sentence. 29 rows, the largest class.
+//                      `.describe(...)` sentence. 12 rows, still the largest
+//                      class.
 //   import-only        the cited file IMPORTS the symbol; the declaration is in
-//                      another file. 9 rows.
+//                      another file. 6 rows.
 //   member-access      the symbol survives only as `x.symbol` on some other
-//                      object — `manifest.objectExtensions`. 3 rows.
+//                      object — `manifest.objectExtensions`. 2 rows.
 //   json-value-not-key the `.json` target carries the symbol as a VALUE; the
 //                      shared rule reads JSON KEYS. 3 rows.
 //   regex-literal      the symbol survives only inside a regex literal. 1 row.
@@ -1635,13 +1882,63 @@ const CORPUS = defineCorpus({
 //                      truncated an item-id reference at its first hyphen and
 //                      produced a phantom `#access`, which the permissive rule
 //                      then resolved against the spelling `access-security`.
-//                      1 row — the sharpest single illustration of what a
-//                      looser second resolver buys.
+//                      the sharpest single illustration of what a looser second
+//                      resolver buys. 0 rows — DRAINED by the second slice, and
+//                      the reading is kept because the shape is not: its one row
+//                      was `bad-citation` BY VERDICT, and `shape` only ever said
+//                      why the withdrawn rule used to resolve it. ⚠️ A reader who
+//                      takes the shape for the disposition is sent at the
+//                      DETECTOR, which since #18107 is `scripts/symbol-anchors.mjs`
+//                      — the file this card forbids by name. Repaired
+//                      citation-side like the other twelve: the truncation was
+//                      not even happening any more — the citation's fragment
+//                      was followed by a SPACE — so the symbol it named was
+//                      simply a key `areas/access-security.json` does not
+//                      declare. ⚠️ That fragment is spelled in WORDS here and
+//                      not in a code span: a lone fragment span is a
+//                      CONTINUATION anchor, so writing it would file this
+//                      comment as the citation the row was.
+//
+// ⭐ THE DRAIN (#18104). The `bad-citation` half is a population with an owner,
+// and it leaves this ledger ONE WAY: the citation is re-pointed at what the
+// cited file actually declares, the row goes, and the ceiling below comes down
+// by the same number in the same edit. ⛔ Never by raising the ceiling, ⛔ never
+// by widening `scripts/symbol-anchors.mjs`, ⛔ never by lowering a file floor —
+// a repair moves an anchor from `residual` to `resolved` and leaves the floor
+// population untouched, which is why draining costs no floor headroom at all.
+//
+// ⚠️ The binding measurement above (56 of 633, at #16898) is a DATED READING of
+// the tree it was taken against and is left standing as one. It is not this
+// ledger's current size: the drain lands per area file, so read the live count
+// off `SHARED_RESOLVER_RESIDUAL.length` and the console line, never off that
+// paragraph. First slice landed (#18104): `areas/access-security.json`,
+// `areas/api-backend.json` and `areas/automation.json` — 9 rows, all of them
+// citations naming a route table's client-method names or route path
+// parameters where the declaration the item means is the ledger export itself.
+// Second slice landed (#18104): `areas/identity-auth.json` — 13 rows, the
+// largest single-file block, the same reading applied plus three of its own: an
+// import-only persona whose constant had MOVED to another file (the path was
+// re-pointed, not the symbol), a `.json` cross-area citation re-pointed at the
+// `items` block it means, and the `detector-artifact` row above. ⚠️ That file
+// still carries its 2 `accept-set` rows and that is CORRECT, not half-done:
+// they are #18101's, and reaching them means widening the shared core.
+// Third slice landed (#18104): `areas/cli.json`, `areas/platform-core.json`
+// and `areas/records-forms.json` — 15 rows, the three largest remaining
+// `bad-citation` blocks taken together. Two classes recur from the slices
+// above (a route PATH PARAMETER re-pointed at the ledger export, a symbol the
+// cited file only IMPORTS re-pointed at what it declares) and three are this
+// slice's own: an error code cited in the LOWER-CASE spelling where the test
+// pins the ADR-0112 SCREAMING_SNAKE one, a manifest VALUE re-pointed at the
+// `scripts.dev` key pair that carries it, and a member read off a manifest or
+// a capability re-pointed at the function whose body does the reading.
+// ⚠️ `areas/records-forms.json` still carries its 2 `accept-set` rows, for
+// the same reason `areas/identity-auth.json` does: that file mixes both
+// verdicts, so a slice judges it ROW BY ROW BY VERDICT, never by file.
 //
 // `verdict` is the classification #16898's acceptance asks for, and there are
 // exactly two:
 //
-//   bad-citation  (47 rows) the anchor names a symbol the cited file does not
+//   bad-citation  (10 rows) the anchor names a symbol the cited file does not
 //                 declare. The repair is in the LEDGER: re-point the anchor at
 //                 what the file carries, or drop to a bare citation. ⚠️ Dropping
 //                 costs the file an anchor and most floors have no headroom, so
@@ -1656,57 +1953,20 @@ const CORPUS = defineCorpus({
 //                 the core to reach them: it is shared with four other corpora
 //                 and widening it would export this defect to all of them.
 const SHARED_RESOLVER_RESIDUAL = Object.freeze([
-  { doc: 'areas/access-security.json', anchor: 'packages/rest/src/rest-route-ledger.ts#saveItem', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/access-security.json', anchor: 'packages/rest/src/rest-route-ledger.ts#shareId', shape: 'string-substring', verdict: 'bad-citation' },
   { doc: 'areas/ai.json', anchor: 'packages/mcp/src/plugin.ts#OS_MCP_SERVER_ENABLED', shape: 'string-substring', verdict: 'bad-citation' },
   { doc: 'areas/ai.json', anchor: 'packages/runtime/src/domains/ai.ts#capabilityUnavailable', shape: 'import-only', verdict: 'bad-citation' },
-  { doc: 'areas/api-backend.json', anchor: 'packages/rest/src/rest-route-ledger.ts#REST', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/api-backend.json', anchor: 'packages/runtime/src/route-ledger.ts#getLegalNextStates', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/api-backend.json', anchor: 'packages/triggers/trigger-api/src/trigger-api-route-ledger.ts#flowName', shape: 'string-substring', verdict: 'bad-citation' },
   { doc: 'areas/approvals.json', anchor: 'examples/app-showcase/src/security/seed-approval-demo.ts#AUDITOR_DEMO_USER', shape: 'import-only', verdict: 'bad-citation' },
   { doc: 'areas/attachments-storage.json', anchor: 'packages/spec/liveness/field.json#live', shape: 'json-value-not-key', verdict: 'bad-citation' },
-  { doc: 'areas/automation.json', anchor: 'examples/app-showcase/objectstack.config.ts#ConnectorRestPlugin', shape: 'import-only', verdict: 'bad-citation' },
-  { doc: 'areas/automation.json', anchor: 'packages/runtime/src/route-ledger.ts#getRuntimeStatus', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/automation.json', anchor: 'packages/runtime/src/route-ledger.ts#getScreen', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/automation.json', anchor: 'packages/runtime/src/route-ledger.ts#runId', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/cli.json', anchor: 'packages/cli/src/commands/compile.ts#emitJson', shape: 'import-only', verdict: 'bad-citation' },
-  { doc: 'areas/cli.json', anchor: 'packages/cli/src/commands/doctor-deprecation-hint-commands.test.ts#Doctor', shape: 'import-only', verdict: 'bad-citation' },
-  { doc: 'areas/cli.json', anchor: 'packages/cli/src/utils/format.exit-code.test.ts#emitJson', shape: 'import-only', verdict: 'bad-citation' },
-  { doc: 'areas/cli.json', anchor: 'packages/create-objectstack/src/templates/blank/package.json#objectstack', shape: 'json-value-not-key', verdict: 'bad-citation' },
-  { doc: 'areas/cli.json', anchor: 'packages/verify/src/verify.ts#VALIDATION_FAILED', shape: 'regex-literal', verdict: 'bad-citation' },
   { doc: 'areas/dashboards.json', anchor: 'examples/app-showcase/src/data/seed/index.ts#sales_region', shape: 'inline-key', verdict: 'accept-set' },
   { doc: 'areas/dashboards.json', anchor: 'examples/app-showcase/src/data/seed/index.ts#signed_on', shape: 'inline-key', verdict: 'accept-set' },
-  { doc: 'areas/identity-auth.json', anchor: 'docs/qa/platform-checklist/areas/access-security.json#access', shape: 'detector-artifact', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'examples/app-showcase/src/security/seed-approval-demo.ts#PHONE_DEMO_USER', shape: 'import-only', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/platform-objects/src/identity/sys-member.object.ts#BUILTIN_MEMBERSHIP_ROLE_OPTIONS', shape: 'import-only', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/platform-objects/src/identity/sys-oauth-application.object.ts#OAuth', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/plugins/plugin-auth/src/auth-route-ledger.ts#bootstrapStatus', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/plugins/plugin-auth/src/auth-route-ledger.ts#linkSocial', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/plugins/plugin-auth/src/auth-route-ledger.ts#revokeOthers', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/plugins/plugin-auth/src/auth-route-ledger.ts#sendVerificationEmail', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/plugins/plugin-auth/src/auth-route-ledger.ts#setActive', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/plugins/plugin-auth/src/auth-route-ledger.ts#updateUser', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/plugins/plugin-security/src/security-plugin.ts#__referentialFieldClear', shape: 'member-access', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/qa/dogfood/test/membership-role-vocabulary.dogfood.test.ts#PermissionSet', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/rest/src/rest-route-ledger.ts#describeDelegableScope', shape: 'string-substring', verdict: 'bad-citation' },
   { doc: 'areas/identity-auth.json', anchor: 'packages/spec/src/kernel/public-auth-features.ts#sys_invitation', shape: 'dotted-string-head', verdict: 'accept-set' },
   { doc: 'areas/identity-auth.json', anchor: 'packages/spec/src/kernel/public-auth-features.ts#sys_user', shape: 'dotted-string-head', verdict: 'accept-set' },
   { doc: 'areas/integration-system.json', anchor: 'examples/app-showcase/objectstack.config.ts#declarativeStdio', shape: 'inline-key', verdict: 'accept-set' },
   { doc: 'areas/integration-system.json', anchor: 'examples/app-showcase/src/system/datasources/showcase-external.datasource.ts#onMismatch', shape: 'inline-key', verdict: 'accept-set' },
   { doc: 'areas/integration-system.json', anchor: 'packages/services/service-messaging/src/messaging-service.ts#PreferenceResolver', shape: 'import-only', verdict: 'bad-citation' },
   { doc: 'areas/integration-system.json', anchor: 'packages/spec/liveness/email_template.json#requireVars', shape: 'json-value-not-key', verdict: 'bad-citation' },
-  { doc: 'areas/platform-core.json', anchor: 'packages/objectql/src/engine.ts#objectExtensions', shape: 'member-access', verdict: 'bad-citation' },
-  { doc: 'areas/platform-core.json', anchor: 'packages/plugins/plugin-auth/src/auth-plugin.ts#Providers', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/platform-core.json', anchor: 'packages/qa/dogfood/test/package-first-authoring.dogfood.test.ts#writable_package_required', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/platform-core.json', anchor: 'packages/runtime/src/domains/notifications.ts#markRead', shape: 'member-access', verdict: 'bad-citation' },
-  { doc: 'areas/platform-core.json', anchor: 'packages/runtime/src/route-ledger.ts#commitId', shape: 'string-substring', verdict: 'bad-citation' },
   { doc: 'areas/records-forms.json', anchor: 'examples/app-showcase/src/data/objects/business-unit.object.ts#allowCreate', shape: 'inline-key', verdict: 'accept-set' },
-  { doc: 'areas/records-forms.json', anchor: 'examples/app-showcase/src/data/seed/index.ts#Specimen', shape: 'string-substring', verdict: 'bad-citation' },
   { doc: 'areas/records-forms.json', anchor: 'examples/app-showcase/src/ui/actions/index.ts#maxSize', shape: 'inline-key', verdict: 'accept-set' },
-  { doc: 'areas/records-forms.json', anchor: 'packages/lint/src/validate-action-locations.ts#action', shape: 'local-binding', verdict: 'bad-citation' },
-  { doc: 'areas/records-forms.json', anchor: 'packages/rest/src/rest-route-ledger.ts#jobId', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/records-forms.json', anchor: 'packages/spec/src/data/object.zod.ts#FEEDS_DISABLED', shape: 'string-substring', verdict: 'bad-citation' },
-  { doc: 'areas/records-forms.json', anchor: 'packages/spec/src/data/object.zod.ts#query', shape: 'string-substring', verdict: 'bad-citation' },
   { doc: 'areas/studio-authoring.json', anchor: 'packages/objectql/src/overlay-precedence.test.ts#not_overridable', shape: 'string-substring', verdict: 'bad-citation' },
   { doc: 'areas/studio-authoring.json', anchor: 'packages/rest/src/meta-write-actor-identity.test.ts#Actor', shape: 'string-substring', verdict: 'bad-citation' },
   { doc: 'areas/studio-authoring.json', anchor: 'packages/rest/src/rest-route-ledger.ts#getHistory', shape: 'string-substring', verdict: 'bad-citation' },
@@ -1717,7 +1977,7 @@ const SHARED_RESOLVER_RESIDUAL = Object.freeze([
 // fail), so this is the belt on the braces: a silent append — the one edit that
 // would turn a closed ledger back into a permissive rule, one row at a time —
 // refuses here rather than validating.
-const SHARED_RESOLVER_RESIDUAL_CEILING = 55;
+const SHARED_RESOLVER_RESIDUAL_CEILING = 18;
 
 const residualKey = (doc, anchor) => `${doc}::${anchor}`;
 const SHARED_RESOLVER_RESIDUAL_INDEX = new Map(
@@ -2005,6 +2265,246 @@ function selfTestSymbolAnchors() {
   return { checked, failures };
 }
 
+/**
+ * The `planned` status, both of its halves, and the ratchet direction that is
+ * the whole point of it.
+ *
+ * ## Why this battery exists at all
+ *
+ * `planned` RELAXES an authored surface: an area JSON carrying it is refused by
+ * the landed gate and accepted by this one. Every relaxation buys a way to be
+ * wrong, and here the dangerous one is not the schema — it is the coverage
+ * ratchet. If a planned item ever counted as coverage, "凡是有的能力, 都要测试"
+ * would become "凡是有的能力, 都要打算测试", and the ratchet would go green on
+ * a kind nothing runs against. So the ratchet direction is pinned BOTH ways,
+ * on fixtures, not on the tree: the live ledger carries zero planned items and
+ * is expected to for a while, which means the real data cannot tell "this rule
+ * works" from "this rule was deleted" — the same silent-success argument the
+ * unreferenced-recipe battery above makes.
+ */
+function selfTestPlannedStatus() {
+  const failures = [];
+  let checked = 0;
+  const t = (what, ok, note = '') => {
+    checked++;
+    if (!ok) failures.push(`${what}${note ? ` — ${note}` : ''}`);
+  };
+
+  // ── the live ledger, read FIRST so every count below is derived ───────────
+  // ⛔ Read here rather than from the item walk: this battery runs before that
+  // walk on every invocation, and behind `--self-test` the walk never runs.
+  // ⛔ And nothing below may TYPE a count of this ledger. A hand-typed 264 in an
+  // assertion label reads false on the 265th item and nothing moves — the same
+  // rot the census docblock in `scripts/pm/dispatch-gates.mjs` warns about.
+  const liveStatuses = new Set();
+  let liveItems = 0;
+  for (const f of readdirSync(AREAS_DIR).filter((n) => n.endsWith('.json'))) {
+    for (const it of JSON.parse(readFileSync(join(AREAS_DIR, f), 'utf8')).items ?? []) {
+      liveItems += 1;
+      liveStatuses.add(it.status);
+    }
+  }
+
+  // ── the accept set ────────────────────────────────────────────────────────
+  t('S1 `planned` is an accepted status — the widening this rule is', STATUSES.has('planned'));
+  t('S2 the statuses that were accepted before still are — a widening that narrowed something else is a different change',
+    ['active', 'draft', 'retired'].every((s) => STATUSES.has(s)));
+  t('S3 the set is still CLOSED — a typo like `planed` is refused, not read as a fourth status', !STATUSES.has('planed'));
+
+  // ── the field rules `planned` relaxes, and the one it adds ────────────────
+  const planned = (over = {}) => statusFieldProblems({ status: 'planned', since: null, personas: ['admin'], ...over });
+  const active = (over = {}) => statusFieldProblems({ status: 'active', since: 'v16', steps: ['do a thing'], ...over });
+
+  t('F1 a planned item with `since: null`, no steps and personas is clean', planned().length === 0, planned().join('; '));
+  t('F2 `since` may instead name the TARGET release', planned({ since: 'v18' }).length === 0);
+  t('F3 a `since` that is neither null nor a release is refused', planned({ since: 'someday' }).length === 1);
+  t('F4 and that message names the two legal spellings rather than only the release one',
+    planned({ since: 'someday' })[0]?.includes('null') && planned({ since: 'someday' })[0]?.includes('TARGET release'));
+  t('F5 steps on a planned item are refused — nothing is implemented to drive', planned({ steps: ['open the page'] }).length === 1);
+  t('F6 and that message sends them to the promotion edit, not to a workaround',
+    planned({ steps: ['open the page'] })[0]?.includes('promotes it to "active"'));
+  t('F7 an empty steps array is not steps — a planned item may carry the key', planned({ steps: [] }).length === 0);
+  t('F8 a planned item with no personas is refused — the gap must say who it is for', planned({ personas: undefined }).length === 1);
+  t('F9 an empty personas array is refused the same way', planned({ personas: [] }).length === 1);
+
+  t('F10 an ACTIVE item is judged exactly as before — release `since`, non-empty steps', active().length === 0, active().join('; '));
+  t('F11 an active item may NOT use `since: null` — the relaxation is scoped to planned', active({ since: null }).length === 1);
+  t('F12 an active item still owes steps', active({ steps: [] }).length === 1);
+  t(`F13 an active item owes NO personas — this battery did not widen a requirement onto the ${liveItems} live items`,
+    active({ personas: undefined }).length === 0);
+  t('F14 a planned item is never asked for steps AND a release at once — the two relaxations compose',
+    planned({ since: null, steps: undefined }).length === 0);
+
+  // ── the `since` rule's own LIMIT, pinned in the direction it does NOT go ──
+  // The shape is enforced; the release TIMELINE is not, because this ledger
+  // holds none. Recorded as an assertion rather than left to prose, so the
+  // unenforced direction is a measured fact — and so that anyone who later adds
+  // a real floor finds a row that reds and tells them to move it.
+  t('F15 a planned item whose `since` names an already-shipped release PASSES — the shape is all this rule checks, and that is deliberate',
+    planned({ since: 'v1' }).length === 0);
+  t('F16 and the refusal says so, so an author is never told this gate checks a timeline it cannot read',
+    planned({ since: 'someday' })[0]?.includes('Only the SHAPE is checked'));
+
+  // ── the coverage ratchet, both directions ────────────────────────────────
+  // A miniature ledger: one kind's worth of ids, each with a status.
+  const LEDGER = new Map([
+    ['area.runs', 'active'],
+    ['area.drafted', 'draft'],
+    ['area.promised', 'planned'],
+    ['area.promised-two', 'planned'],
+    ['area.gone', 'retired'],
+  ]);
+  const cov = (ids) => coverageEntryProblems(ids, (id) => LEDGER.get(id));
+
+  const activeOnly = cov(['area.runs']);
+  t('C1 DIRECTION A — a kind mapped to an active item is covered, silently', activeOnly.problems.length === 0 && activeOnly.bearing === 1,
+    activeOnly.problems.join('; '));
+  const mixed = cov(['area.runs', 'area.promised']);
+  t('C2 a planned item listed BESIDE an active one changes nothing — that is where a capability-gap card points, and it must not red a covered kind',
+    mixed.problems.length === 0 && mixed.bearing === 1, mixed.problems.join('; '));
+
+  const plannedOnly = cov(['area.promised']);
+  t('C3 DIRECTION B — a kind whose ONLY item is planned is UNMAPPED', plannedOnly.problems.length === 1 && plannedOnly.bearing === 0);
+  t('C4 and it is reported as UNMAPPED, in the vocabulary the unclassified-kind message already uses',
+    plannedOnly.problems[0]?.startsWith('UNMAPPED'));
+  t('C5 the message says WHY, so the cheap fix (promote it) is visibly not the fix',
+    plannedOnly.problems[0]?.includes('promise, not a test'));
+  const plannedTwo = cov(['area.promised', 'area.promised-two']);
+  t('C6 two planned items are not one active item — coverage does not accumulate from promises',
+    plannedTwo.problems.length === 1 && plannedTwo.bearing === 0);
+
+  t('C7 a draft item still carries coverage — this change moved ONE status, not the ratchet\'s meaning',
+    cov(['area.drafted']).problems.length === 0 && cov(['area.drafted']).bearing === 1);
+  const retiredOnly = cov(['area.gone']);
+  t('C8 a retired-only mapping keeps its own message AND is now also reported as uncovered',
+    retiredOnly.problems.length === 2 && retiredOnly.problems.some((p) => p.includes('retired item')) && retiredOnly.bearing === 0);
+  const unknown = cov(['area.never-existed']);
+  t('C9 an unresolvable id is still named as unknown', unknown.problems.some((p) => p.includes('unknown item id')) && unknown.bearing === 0);
+  t('C10 ⛔ the bearing set does not contain `planned` — folding it in is the ONE edit that turns this ratchet into a way to green an untested kind',
+    !COVERAGE_BEARING_STATUSES.has('planned') && !COVERAGE_BEARING_STATUSES.has('retired'));
+
+  // ── ⭐ the BINDING, driven ON and OFF over ONE text ───────────────────────
+  //
+  // Everything above drives two PURE functions, and a pure function's battery
+  // cannot see whether anything calls it. Both call sites were severed and
+  // measured: the self-test stayed at 207/207 green, the live gate stayed
+  // green, and even a fixture kind whose only item is planned stayed green.
+  // So these rows pin the CALL SITES, the way the line-citation limb below
+  // pins its own binding — the ON leg says the bindings are there, and each
+  // OFF leg severs exactly one of them over a COPY of this source and requires
+  // the predicate to notice. Without the OFF legs this would be a check that
+  // can never fail, which is the thing it exists to refuse.
+  const OWN_SOURCE = readFileSync(new URL(import.meta.url).pathname, 'utf8');
+  /**
+   * Sever ONE spelling over a COPY; `changed` is what says the cut landed.
+   *
+   * ⛔ The needle arrives in TWO halves and is joined here, and that is not
+   * style: written out longhand it would be a second literal copy of the very
+   * call site being pinned, sitting in this file forever. `statusBindingProblems`
+   * counts occurrences precisely so such a decoy reds — and the split keeps this
+   * battery from being the thing that trips it. Each break falls INSIDE an
+   * identifier, so no contiguous copy exists in the source at rest.
+   *
+   * ⚠️ ORDER-SENSITIVE: `String.replace` with a string needle cuts the FIRST
+   * occurrence. Were a decoy copy ever to appear ABOVE the real call site, the
+   * cut would land on the decoy and the real call would survive — the leg still
+   * reds, but through the exactly-one row rather than the one it was written
+   * for. ⛔ Read the failure TEXT of a red leg, never just its exit code.
+   */
+  const sever = (head, tail) => {
+    const text = OWN_SOURCE.replace(head + tail, '/* severed for the OFF leg */');
+    return { text, changed: text !== OWN_SOURCE };
+  };
+  /**
+   * Comment a line out IN PLACE — the severing gesture a RAW-text count misses
+   * entirely, because the commented line is still the one occurrence. Same
+   * two-half needle and the same first-occurrence caveat as `sever`.
+   */
+  const commentOut = (head, tail) => {
+    const needle = head + tail;
+    const text = OWN_SOURCE.replace(needle, `// ${needle}`);
+    return { text, changed: text !== OWN_SOURCE };
+  };
+
+  t('G1 ON — every binding these rules ride on is present in this file',
+    statusBindingProblems(OWN_SOURCE).length === 0,
+    statusBindingProblems(OWN_SOURCE).join(' | '));
+
+  const offWalk = sever('for (const msg of statusField', 'Problems(item)) where(msg);');
+  t('G2 the item-walk severing really landed on a copy — an anchor that missed would make G3 a pass about nothing', offWalk.changed);
+  t('G3 OFF — with `statusFieldProblems(item)` gone from the walk the binding check FIRES. Measured before this row existed: that severing left `--self-test` at 207/207 and an ACTIVE item with `since: null` and no `steps` green',
+    statusBindingProblems(offWalk.text).some((p) => p.includes('statusFieldProblems(item)')),
+    statusBindingProblems(offWalk.text).join(' | '));
+
+  const offCov = sever('const { problems, bearing } = coverageEntry', 'Problems(entry.items, statusOf);');
+  t('G4 the coverage-call severing really landed on a copy', offCov.changed);
+  t('G5 OFF — with `coverageEntryProblems` never called the binding check FIRES. Measured before this row existed: that severing left the live gate green on a kind whose ONLY item is planned',
+    statusBindingProblems(offCov.text).some((p) => p.includes('coverageEntryProblems')),
+    statusBindingProblems(offCov.text).join(' | '));
+
+  const offReport = sever("for (const msg of problems) err('cover", "age.json', kind, msg);");
+  t('G6 OFF — a coverage limb that computes the problems and never reports them FIRES: found and swallowed is not found',
+    offReport.changed && statusBindingProblems(offReport.text).some((p) => p.includes('swallowed')));
+
+  const offCount = sever('if (bearing > 0) mapped', 'Count++;');
+  t('G7 OFF — an ungated `mappedCount` FIRES: a kind mapped only to promises would otherwise be counted as covered on the OK line',
+    offCount.changed && statusBindingProblems(offCount.text).some((p) => p.includes('mappedCount')));
+
+  t('G8 CONTROL — the same read reaches this file and finds a landmark that is NOT one of the four pinned spellings, so G1 is the bindings holding rather than a read that matches anything it is handed',
+    OWN_SOURCE.length > 10000 && /const COVERAGE_BEARING_STATUSES = new Set/.test(OWN_SOURCE),
+    `${OWN_SOURCE.length} bytes read`);
+
+  // ── the COMMENT-OUT forms, which a raw-text count misses entirely ─────────
+  //
+  // Measured on this file before masking landed: commenting a pinned call out
+  // IN PLACE left `--self-test` at exit 0 with all 217 assertions passing AND
+  // the live gate at exit 0 over 264 active items, because the commented line
+  // IS the one occurrence a raw count finds. `maskComments` is what closes it,
+  // and these rows are what keep it closed — reverting the mask reds G9–G11
+  // instead of quietly restoring the hole.
+  const outWalk = commentOut('for (const msg of statusField', 'Problems(item)) where(msg);');
+  t('G9 OFF — commenting the item-walk call out IN PLACE FIRES, because the count is taken over comment-MASKED source',
+    outWalk.changed && statusBindingProblems(outWalk.text).some((p) => p.includes('statusFieldProblems(item)')),
+    statusBindingProblems(outWalk.text).join(' | '));
+
+  // ⭐ The nastiest of the set: comment the GATE out and add an ungated
+  // increment below it. The spelling survives in the comment, the behaviour
+  // inverts, and a kind mapped only to planned items is counted as covered on
+  // the OK line — silently, in the one number a reader trusts.
+  const gateLine = `if (bearing > 0) mapped${'Count++;'}`;
+  const ungated = `mapped${'Count++;'}`;
+  const outGateThenAdd = OWN_SOURCE.replace(gateLine, `// ${gateLine}\n        ${ungated}`);
+  t('G10 OFF — commenting the `mappedCount` gate out and adding an UNGATED increment in its place FIRES: the spelling survives in the comment while the behaviour inverts, and a kind mapped only to planned items would be counted as covered on the OK line',
+    outGateThenAdd !== OWN_SOURCE
+      && outGateThenAdd.includes(`// ${gateLine}`)
+      && maskComments(outGateThenAdd).includes(ungated)
+      && statusBindingProblems(outGateThenAdd).some((p) => p.includes('mappedCount')),
+    statusBindingProblems(outGateThenAdd).join(' | '));
+
+  t('G11 a copy of a pinned spelling inside a COMMENT neither satisfies the rule nor inflates it — the same masked line must not stand in for a call site that is gone',
+    statusBindingProblems(`${OWN_SOURCE}\n// for (const msg of statusField${'Problems(item)) where(msg);'}`).length === 0
+      && statusBindingProblems(`${outWalk.text}\n// a second commented copy changes nothing`).some((p) => p.includes('statusFieldProblems(item)')));
+
+  // ⛔ And the disclosure, asserted rather than left to the docblock: the three
+  // SEMANTIC severings this pin cannot see. Each keeps the spelling intact, so
+  // the predicate reports no problem — that is the honest answer, and the row
+  // exists so nobody reads a green G1 as "the bindings execute".
+  const shadowed = `const statusFieldProblems = () => [];\n${OWN_SOURCE}`;
+  t('G12 DISCLOSED LIMIT — a shadowing redefinition leaves the spelling intact and this pin reports NOTHING. It is a TEXT pin; ⛔ never read it as proof the call executes',
+    statusBindingProblems(shadowed).length === 0);
+
+  // ── the live control ──────────────────────────────────────────────────────
+  // The fixtures prove the rules; this reads the ledger the gate actually
+  // validates and proves they are pointed at IT. Every assertion above would
+  // pass just as well against a `planned` no area file could ever carry.
+  t('L1 every status on the live ledger is one this gate accepts — the control that says the assertions above are about THIS ledger',
+    liveItems > 0 && [...liveStatuses].every((s) => STATUSES.has(s)),
+    `${liveItems} items, statuses: ${[...liveStatuses].sort().join(', ')}`);
+
+  plannedStatusReachedVerdict = true;
+  return { checked, failures, liveItems };
+}
+
 if (process.argv.slice(2).includes('--self-test')) {
   const trap = selfTestTrapVocabulary();
   const prov = selfTestProvisioningUse();
@@ -2012,12 +2512,14 @@ if (process.argv.slice(2).includes('--self-test')) {
   const metaCall = selfTestMetaCallSpelling();
   const cites = selfTestLineCitationBinding();
   const anchors = selfTestSymbolAnchors();
+  const plannedStatus = selfTestPlannedStatus();
   requireReachedVerdict('selfTestTrapVocabulary', trapReachedVerdict);
   requireReachedVerdict('selfTestProvisioningUse', provisioningReachedVerdict);
   requireReachedVerdict('selfTestUnreferencedRecipes', unreferencedReachedVerdict);
   requireReachedVerdict('selfTestMetaCallSpelling', metaCallReachedVerdict);
   requireReachedVerdict('selfTestLineCitationBinding', lineCitationsReachedVerdict);
   requireReachedVerdict('selfTestSymbolAnchors', symbolAnchorsReachedVerdict);
+  requireReachedVerdict('selfTestPlannedStatus', plannedStatusReachedVerdict);
   const rosterFailures = batteryRosterFailures({
     [BATTERY_TRAP_VOCABULARY]: trap.checked,
     [BATTERY_PROVISIONING_USE]: prov.checked,
@@ -2025,16 +2527,18 @@ if (process.argv.slice(2).includes('--self-test')) {
     [BATTERY_META_CALL_SPELLING]: metaCall.checked,
     [BATTERY_LINE_CITATION_BINDING]: cites.checked,
     [BATTERY_SYMBOL_ANCHORS]: anchors.checked,
+    [BATTERY_PLANNED_STATUS]: plannedStatus.checked,
   });
-  const failures = [...trap.failures, ...prov.failures, ...unref.failures, ...metaCall.failures, ...cites.failures, ...anchors.failures, ...rosterFailures];
+  const failures = [...trap.failures, ...prov.failures, ...unref.failures, ...metaCall.failures, ...cites.failures, ...anchors.failures, ...plannedStatus.failures, ...rosterFailures];
   if (failures.length === 0) {
     console.log(
-      `✓ check-platform-checklist --self-test: ${trap.checked + prov.checked + unref.checked + metaCall.checked + cites.checked + anchors.checked} assertions — the trap-table extractor reads a good table and REFUSES an empty/renamed/reshaped one;` +
+      `✓ check-platform-checklist --self-test: ${trap.checked + prov.checked + unref.checked + metaCall.checked + cites.checked + anchors.checked + plannedStatus.checked} assertions — the trap-table extractor reads a good table and REFUSES an empty/renamed/reshaped one;` +
         ' `fixtures.provisioning.use` resolves both spellings (own-area key and `<area>:<recipe>`) and fires on all three dangling shapes;' +
         ' the unreferenced-recipe direction fires on a recipe nobody uses while leaving a cross-area consumer, a retired consumer and a `$`-annotation alone;' +
         ' and the `/meta` call-spelling refusal reads its vocabulary out of the live generated contract, fires on every folded spelling a `call` can instruct, and stays silent on the canonical singular, on parameter placeholders, and on the `why`/`expect`/`source`/`requires` prose that narrates the fold;' +
         ' and the line-citation limb DETECTS NOTHING ITSELF EITHER: the last forked grammar in this file went into the shared core at #18592, so what is pinned here is the BINDING — the corpus declaring `pathlessLineCitations`, a source read finding no citation regex and no detector while the same read DOES find the declaration, the binding driven ON and OFF against ONE text so the green is the declaration working rather than a text that would have matched anyway, the DARK case that a citation both grammars already agreed on keeps its verdict either way, the refusal to over-fire on this ledger\'s own HTTP statuses, config literals, URL ports, clock times and quoted JSON, and the live zero with the control that says it is a reading;' +
-        ' and the symbol-anchor limb DETECTS NOTHING AND RESOLVES NOTHING ITSELF: it is a registered corpus (#18107), so the grammar, the walk and the verdict are all `scripts/symbol-anchors.mjs`\'s, pinned here by a source read that finds no local extension set, no anchor regex and no detector while the same read DOES find the registration, by the anchorable-extension vocabulary being the shared OBJECT rather than a copy of it, by the `runs/` exclusion driven three ways on the live corpus (the subtree holds files, none is swept, the areas beside it still are, and dropping the exclusion puts them back), and by the #16898 binding re-taken through the registration — a call site / import / local parameter / string-substring all reading ABSENT, the positive control that a declaration and a complete quoted token still resolve, a `.json` key resolving where a `.json` value does not, an INLINE object-literal key reading absent where one at the start of a line resolves — with the closed, grow-never residual and the per-file anchor floor held in both directions beside it.',
+        ' and the symbol-anchor limb DETECTS NOTHING AND RESOLVES NOTHING ITSELF: it is a registered corpus (#18107), so the grammar, the walk and the verdict are all `scripts/symbol-anchors.mjs`\'s, pinned here by a source read that finds no local extension set, no anchor regex and no detector while the same read DOES find the registration, by the anchorable-extension vocabulary being the shared OBJECT rather than a copy of it, by the `runs/` exclusion driven three ways on the live corpus (the subtree holds files, none is swept, the areas beside it still are, and dropping the exclusion puts them back), and by the #16898 binding re-taken through the registration — a call site / import / local parameter / string-substring all reading ABSENT, the positive control that a declaration and a complete quoted token still resolve, a `.json` key resolving where a `.json` value does not, an INLINE object-literal key reading absent where one at the start of a line resolves — with the closed, grow-never residual and the per-file anchor floor held in both directions beside it;' +
+        ` and the \`planned\` status is driven on fixtures rather than on a ledger that carries none of it — the accept set widened without losing its closure, \`since: null\`/no-steps/personas relaxed for planned alone while the ${plannedStatus.liveItems} live items are judged exactly as before, and the coverage ratchet held BOTH ways: a planned item beside an active one is silent, a kind whose only items are planned is UNMAPPED, and the bearing set is pinned NOT to contain \`planned\`; and the two CALL SITES those rules ride on are pinned by a source read over comment-MASKED source driven ON and OFF, because severing either one — by deletion OR by commenting it out in place — left this very self-test green; \u26d4 that pin is a TEXT pin and G12 records the three semantic severings it cannot see.`,
     );
     process.exit(0);
   }
@@ -2113,6 +2617,18 @@ if (symbolAnchorControl.failures.length) {
   for (const f of symbolAnchorControl.failures) console.error(`  ✗ ${f}`);
   process.exit(1);
 }
+// And for the `planned` status. Its schema half is exercised by the tree the
+// moment anyone authors a planned item; its COVERAGE half is not, and will not
+// be for as long as the ledger's planned count is the 0 this gate prints. A
+// deleted ratchet rule and an honest ledger print the same green, so the
+// fixtures below it are the only thing that can tell them apart.
+const plannedStatusControl = selfTestPlannedStatus();
+requireReachedVerdict('selfTestPlannedStatus', plannedStatusReachedVerdict);
+if (plannedStatusControl.failures.length) {
+  console.error("check-platform-checklist: the `planned` status check's own positive control FAILED — a metadata kind whose only checklist items are PLANNED would report as covered, which turns this ratchet from 'the platform tests what it has' into 'the platform intends to'.\n");
+  for (const f of plannedStatusControl.failures) console.error(`  ✗ ${f}`);
+  process.exit(1);
+}
 const inlineRosterFailures = batteryRosterFailures({
   [BATTERY_TRAP_VOCABULARY]: trapControl.checked,
   [BATTERY_PROVISIONING_USE]: provisioningControl.checked,
@@ -2120,6 +2636,7 @@ const inlineRosterFailures = batteryRosterFailures({
   [BATTERY_META_CALL_SPELLING]: metaCallControl.checked,
   [BATTERY_LINE_CITATION_BINDING]: citationControl.checked,
   [BATTERY_SYMBOL_ANCHORS]: symbolAnchorControl.checked,
+  [BATTERY_PLANNED_STATUS]: plannedStatusControl.checked,
 });
 if (inlineRosterFailures.length) {
   console.error('check-platform-checklist: the self-test battery roster FAILED — assertions stopped running, and every leg below would read the smaller count as a pass.\n');
@@ -2219,9 +2736,7 @@ for (const { file, stem, doc } of parsed) {
     if (!STATUSES.has(item.status)) where(`"status" must be one of ${[...STATUSES].join('|')}`);
     if (!PRIORITIES.has(item.priority)) where(`"priority" must be one of ${[...PRIORITIES].join('|')}`);
     if (!SURFACES.has(item.surface)) where(`"surface" must be one of ${[...SURFACES].join('|')}`);
-    if (typeof item.since !== 'string' || !/^v\d+(\.\d+)?$/.test(item.since)) {
-      where('"since" must be the release that introduced the capability, e.g. "v16" or "v16.0"');
-    }
+    for (const msg of statusFieldProblems(item)) where(msg);
 
     if (!Number.isInteger(item.revision) || item.revision < 1) where('"revision" must be an integer >= 1');
     if (!Array.isArray(item.history) || item.history.length === 0) {
@@ -2238,8 +2753,6 @@ for (const { file, stem, doc } of parsed) {
         }
       }
     }
-
-    if (!Array.isArray(item.steps) || item.steps.length === 0) where('"steps" must be a non-empty array of strings');
 
     for (const msg of trapProblems(item, TRAPS)) where(msg);
 
@@ -2262,7 +2775,12 @@ for (const { file, stem, doc } of parsed) {
       if (typeof item.retiredReason !== 'string' || !item.retiredReason) where('retired items must carry "retiredReason"');
     } else {
       if (!Array.isArray(item.acceptance) || item.acceptance.length === 0) {
-        where('active/draft items must have at least one acceptance clause');
+        // A planned item has no oracle to consult yet — that is what `planned`
+        // MEANS. Requiring a clause here would buy one written against a
+        // capability nobody has implemented, which is the ticking-on-vibes this
+        // ledger exists to refuse. Clauses it DOES carry are still validated
+        // below, so an early draft of the acceptance cannot rot unchecked.
+        if (item.status !== 'planned') where('active/draft items must have at least one acceptance clause');
       } else {
         item.acceptance.forEach((c, i) => {
           if (typeof c.clause !== 'string' || !c.clause) where(`acceptance[${i}] missing "clause"`);
@@ -2443,16 +2961,10 @@ if (!existsSync(COVERAGE_FILE)) {
         continue;
       }
       if (hasItems) {
-        mappedCount++;
-        for (const id of entry.items) {
-          if (!allIds.has(id)) err('coverage.json', kind, `maps to unknown item id "${id}"`);
-          else {
-            const mapped = allItems.find((r) => r.item.id === id);
-            if (mapped?.item.status === 'retired') {
-              err('coverage.json', kind, `maps to retired item "${id}" — point at its successor or re-waive the kind`);
-            }
-          }
-        }
+        const statusOf = (id) => allItems.find((r) => r.item.id === id)?.item.status;
+        const { problems, bearing } = coverageEntryProblems(entry.items, statusOf);
+        for (const msg of problems) err('coverage.json', kind, msg);
+        if (bearing > 0) mappedCount++;
       } else {
         waivedCount++;
       }
@@ -2605,18 +3117,23 @@ if (errors.length) {
 
 const total = allItems.length;
 const active = allItems.filter(({ item }) => item.status === 'active').length;
+// Printed beside `active` so the ledger's implementation status is visible from
+// the gate itself, not only from `pnpm gen:checklist-status`. A planned count
+// that climbs while `active` stands still is the ledger doing its job; one that
+// climbs while coverage stays green would be this gate failing at its.
+const planned = allItems.filter(({ item }) => item.status === 'planned').length;
 // Counted, not inferred. On this path it necessarily equals `recipeTotal` —
 // an unreferenced recipe would have exited above — but a line that RESTATES a
 // constant reports nothing, and this direction's whole risk is a green that
 // looks the same whether it ran or not.
 const recipesReferenced = [...recipesByArea].reduce((n, [area, keys]) => n + keys.filter((k) => referencedByArea.get(area)?.has(k)).length, 0);
 console.log(
-  `check-platform-checklist: OK — ${files.length} areas, ${total} items (${active} active); coverage: ${mappedCount} kinds mapped, ${waivedCount} waived;` +
+  `check-platform-checklist: OK — ${files.length} areas, ${total} items (${active} active, ${planned} planned); coverage: ${mappedCount} kinds mapped, ${waivedCount} waived;` +
     ` traps: ${TRAPS.size} documented, ${usedTraps.size} in use;` +
     ` provisioning: ${recipeTotal} area recipes, ${recipeRefs} item references resolved (${qualifiedRefs} area-qualified), ${recipesReferenced}/${recipeTotal} recipes referenced;` +
     ` meta-URL spelling: ${metaCallsScanned} \`call\` strings scanned against ${FOLDED_META_SPELLINGS.size} folded spellings;` +
     ` line citations: 0 survive across ${sweep.counts.docs} swept documents — \`file:line\`, a bare \`:NNN\` continuation and an \`L\` pin are all judged by \`symbol-anchors.mjs\`, through the same registration;` +
     ` symbol anchors: ${anchorsResolved}/${anchorsScanned} resolved by \`symbol-anchors.mjs\` (the ONE resolver, reached as a REGISTERED corpus) across ${sweep.counts.docs} swept documents against ${sweep.counts.citedSources} cited sources` +
     `, ${anchorsResidual} on the named #16898 residual, ${Object.keys(anchorFloors).length} file floors held;` +
-    ` (self-checks: ${trapControl.checked} trap-vocabulary + ${provisioningControl.checked} provisioning-resolve + ${unreferencedControl.checked} unreferenced-recipe + ${metaCallControl.checked} meta-call-spelling + ${citationControl.checked} line-citation-binding + ${symbolAnchorControl.checked} symbol-anchor assertions).`,
+    ` (self-checks: ${trapControl.checked} trap-vocabulary + ${provisioningControl.checked} provisioning-resolve + ${unreferencedControl.checked} unreferenced-recipe + ${metaCallControl.checked} meta-call-spelling + ${citationControl.checked} line-citation-binding + ${symbolAnchorControl.checked} symbol-anchor + ${plannedStatusControl.checked} planned-status assertions).`,
 );

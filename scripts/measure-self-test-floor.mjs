@@ -66,6 +66,42 @@
  *   ACCIDENT  exit != 0 AND it printed nothing -- a non-zero exit with no
  *             refusal behind it. NOT counted among HELD, ever.
  *
+ * ## TWO injection points, because ONE of them issued a false clearance (#18987)
+ *
+ * The point above is `return;` as the FIRST statement of the dispatched
+ * function. A handshake set ABOVE the block that function RETURNS therefore
+ * stays unset under it, the dispatch refuses, and the row reads HELD -- while
+ * the SAME `return;` one statement lower, inside that block, leaves the
+ * handshake set and the run silent at exit 0. The 2026-09 census cleared
+ * `scripts/check-single-claim-paths.mjs` HELD exactly that way, on the revision
+ * that carried that ordering defect (#18940; the census doc's row for it).
+ *
+ * So a file whose dispatched function RETURNS a block is read at TWO points and
+ * HELD requires BOTH:
+ *
+ *   point 1  `return;` as the first statement of the dispatched function.
+ *   point 2  `return;` as the first statement of the block it RETURNS -- the
+ *            only place statements that run after the handshake can be.
+ *
+ *   HELD                   both points refused out loud.
+ *   HANDSHAKE-ABOVE-BLOCK  point 1 refused, point 2 exited 0. The handshake is
+ *                          reached before the work the dispatch waits for, so
+ *                          every early exit inside that block goes undiagnosed.
+ *                          NOT counted among HELD, ever.
+ *
+ * ⛔ Point 2 is the RETURNED block and nothing else. An `await (async () => {`
+ * in the MIDDLE of the body is a different question: an early return there
+ * skips a battery while the self-test still reaches its own verdict, which is
+ * HOLE 1, and the two holes are never summed. A file with no returned block has
+ * one point to read -- its whole body -- and its row says so.
+ *
+ * ⛔ And point 2 cannot read work whose failure is SILENT. Measured on this
+ * base: `scripts/check-system-context-census.mjs` sets its handshake 48 lines
+ * above its own battery floor, which prints only when it fails, so a mutation
+ * there changes no byte of either run and the probe correctly reports that it
+ * observed nothing. Ordering that only a FAILING case would expose is a STATIC
+ * property, and no mutation of a passing tree can stand in for reading it.
+ *
  * A FOURTH reading sits UNDER all three, and it is a PRECONDITION rather than a
  * verdict: if the UNMUTATED file already exits non-zero, this tree cannot run
  * it at all, so the mutation had nothing to defeat and NOTHING WAS MEASURED.
@@ -358,9 +394,19 @@ export function selfTestDefs(src) {
  * copy parses and runs -- measured by hand, exit 1 and `selfTest() returned
  * without reaching its verdict`. The row it leaves is still NOT MEASURED, but
  * for a reason the probe now states itself: see that row.
+ *
+ * `point: 'inner'` injects at the SECOND point instead -- the first statement of
+ * the block `name` returns (see `returnedBlockAnchor`) -- and returns null when
+ * there is no such block. Neither point can stand in for the other:
+ * `probeVerdictPoints` reads both and says which one decided.
  */
-export function injectEarlyReturn(src, name) {
+export function injectEarlyReturn(src, name, { point = 'top' } = {}) {
   const code = maskCommentsAndLiterals(src);
+  if (point === 'inner') {
+    const at = returnedBlockAnchor(code, name);
+    if (at === null) return null;
+    return `${src.slice(0, at)}\n  return; /*${PROBE_MARKER}*/\n${src.slice(at)}`;
+  }
   const pats = [
     new RegExp(
       `^[ \\t]*(?:export\\s+(?:default\\s+)?)?(?:async\\s+)?function\\s+${name}\\s*\\([^)]*\\)` +
@@ -374,6 +420,54 @@ export function injectEarlyReturn(src, name) {
     if (!m) continue;
     const at = m.index + m[0].length;
     return `${src.slice(0, at)}\n  return; /*${PROBE_MARKER}*/\n${src.slice(at)}`;
+  }
+  return null;
+}
+
+/**
+ * THE SECOND INJECTION POINT: the block the dispatched function RETURNS.
+ *
+ * One spelling is admitted, the one with a carrier in this tree --
+ * `return (async () => {` at the function's own statement level, which is how
+ * `scripts/check-single-claim-paths.mjs` closes its self-test. Its rules are the
+ * anchor's above, plus one this point needs of its own:
+ *
+ *   MASKED      read over `maskCommentsAndLiterals`, so the convention quoted in
+ *               a docblock and the same line inside a fixture template are gone.
+ *   LINE-START  the `return` must begin a line. An async IIFE handed to an
+ *               assertion as a VALUE is data, not the body's control flow.
+ *   DEPTH 0     directly in the dispatched function's own body. A `return
+ *               (async () => {` inside an `if` block is a branch, and the
+ *               statements after the handshake are not in it.
+ *
+ * ⛔ Deliberately UNADMITTED, each for its own reason rather than for lack of a
+ * regex: an `await (async () => {` at statement level (an early return there
+ * leaves the self-test reaching its own verdict -- HOLE 1, never this one), a
+ * `.then(<callback>)` in a returned chain and an `async function` expression
+ * (no carrier in this tree today; widen with a control in both directions and
+ * publish the delta, the protocol every criterion in this file follows).
+ */
+const RETURNED_ASYNC_BLOCK = /^[ \t]*return\s*\(\s*async\s*\(\s*\)\s*=>\s*\{/gm;
+
+/**
+ * The offset just after the `{` of the block `name` returns, or null.
+ *
+ * Takes the MASKED text, as `definitionSpan` and the injection anchor do, and
+ * reads only inside `name`'s own body -- a returned block in some other function
+ * is not this function's.
+ */
+export function returnedBlockAnchor(code, name) {
+  const span = definitionSpan(code, name);
+  if (span === null) return null;
+  const body = code.slice(span.at, span.end);
+  for (const m of body.matchAll(RETURNED_ASYNC_BLOCK)) {
+    let depth = 0;
+    for (let i = 0; i < m.index; i += 1) {
+      if (body[i] === '{') depth += 1;
+      else if (body[i] === '}') depth -= 1;
+    }
+    if (depth !== 0) continue;
+    return span.at + m.index + m[0].length;
   }
   return null;
 }
@@ -539,14 +633,21 @@ export function relocateSource(source, absFile) {
  * `timeoutMs` in `ENTRY_BY_HAND`, with the reading it came from. `main()`
  * passes that through; nothing else may.
  */
-export function probeEarlyReturn(absFile, entry, { timeout = 120000, placement = 'relocated' } = {}) {
+export function probeEarlyReturn(absFile, entry, { timeout = 120000, placement = 'relocated', point = 'top' } = {}) {
   const src = readFileSync(absFile, 'utf8');
-  const mutated = injectEarlyReturn(src, entry);
-  if (mutated === null) return { verdict: 'NOT MEASURED', why: `no injectable definition of ${entry}` };
+  const mutated = injectEarlyReturn(src, entry, { point });
+  if (mutated === null) {
+    return {
+      verdict: 'NOT MEASURED',
+      why: point === 'inner'
+        ? `no block returned by ${entry} to enter`
+        : `no injectable definition of ${entry}`,
+    };
+  }
   if (src.includes(PROBE_MARKER)) return { verdict: 'NOT MEASURED', why: 'marker already present in source' };
 
   const relocation = placement === 'beside' ? { source: mutated, blocked: [] } : relocateSource(mutated, absFile);
-  const probeName = `.self-test-floor-probe-${basename(absFile)}`;
+  const probeName = `.self-test-floor-probe-${point}-${basename(absFile)}`;
   let probeDir = null;
   let probePath = join(dirname(absFile), probeName);
   let text = mutated;
@@ -693,6 +794,62 @@ const HANDSHAKE_RETURN_COMPARED =
 const LITERAL_OPERAND = /^(?:undefined|null|true|false|NaN)$/;
 
 /**
+ * SENTINEL, SECOND SPELLING -- the return value is BOUND first and the
+ * comparison reads that binding, or ONE PROPERTY of it:
+ *
+ *   const verdict = selfTest();   if (verdict !== SELF_TEST_VERDICT)
+ *   const r = selfTest();         if (r.verdict !== SELF_TEST_VERDICT)
+ *
+ * Three files landed this way while the recogniser read only the direct
+ * comparison above: `scripts/check-workflow-step-name-quoting.mjs` (the plain
+ * binding) and `scripts/pm/check-expected-skips.mjs` /
+ * `scripts/pm/check-prior-rulings.mjs` (the record, whose other field is the
+ * exit code the dispatch then hands to `process.exit`). All three read `none`
+ * -- the flattering direction -- and the live completeness check below refused
+ * the whole census over that gap, on every invocation, for three days (#18329).
+ *
+ * The boundaries are the ones the direct spelling already draws, and they are
+ * what keep an ordinary local decision from reading as a handshake:
+ *
+ *   CROSSES   the binding AND the comparison sit OUTSIDE every self-test body.
+ *             A value bound and compared inside one is that function's own
+ *             business; nothing was handed back to a dispatch.
+ *   NAMED     the right operand is an IDENTIFIER and not a word literal, for
+ *             the reason the direct spelling excludes them: a comparison
+ *             against a literal is the ACCIDENT shape, decided by the
+ *             arithmetic of a missing return value rather than by anything
+ *             noticing.
+ *   NO ARGS   the call is `<name>()`, as the direct spelling requires. A
+ *             dispatched self-test TAKING arguments has no carrier in this tree
+ *             today and stays unadmitted rather than written blind.
+ *   GUARDED   the comparison heads an `if (...)` condition. This one is not
+ *             symmetry with the direct spelling, it is a MEASURED boundary:
+ *             `scripts/check-plugin-teardown-shape.mjs` binds
+ *             `const selfTestCode = selfTest();`, refuses on the FLAG one line
+ *             later, and then compares that binding against
+ *             `EXIT_PREREQUISITE_NOT_MET` inside `process.exit(<cmp> ? a : b)`
+ *             to pick WHICH code to exit with. Read without this half, a
+ *             flag-shaped file answers `sentinel` -- a wrong answer in the one
+ *             column #14968 exists to make checkable. Choosing a value is not
+ *             asking a question; the control below pins it.
+ *
+ * ⚠️ What the recogniser answers is WHICH SPELLING a file is written in, never
+ * whether the refusal it spells actually prints. In the record form the early
+ * return makes the binding `undefined`, so `r.verdict` THROWS before the
+ * dispatch can print its own message: a real non-zero exit that speaks with a
+ * stack trace rather than with the sentence the author wrote. That reading
+ * belongs to the probe, which publishes `mutatedHead` verbatim, and it is the
+ * same division of labour the header draws for every other shape here.
+ */
+const HANDSHAKE_RETURN_BOUND =
+  /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:await\s+)?([A-Za-z_$][\w$]*)\s*\(\s*\)/g;
+const boundComparedInGuard = (name) =>
+  new RegExp(
+    String.raw`if\s*\(\s*${name}\b(?:\.[A-Za-z_$][\w$]*)?\s*(?:!==|===|!=|==)\s*([A-Za-z_$][\w$]*)\b`,
+    'g',
+  );
+
+/**
  * The FLAG and HELPER shapes share one carrier and differ only in WHO reads it.
  *
  * The carrier is a variable that CROSSES THE BOUNDARY out of the self-test: a
@@ -764,14 +921,23 @@ const handedToCall = (name) => new RegExp(String.raw`([A-Za-z_$][\w$]*)\s*\(\s*[
 export function classifyHandshake(src) {
   const code = maskCommentsAndLiterals(src);
 
-  for (const m of code.matchAll(HANDSHAKE_RETURN_COMPARED)) {
-    if (/self.?test/i.test(m[1]) && !LITERAL_OPERAND.test(m[2])) return 'sentinel';
-  }
-
+  // Read before the sentinel spellings, not after: the BOUND spelling's whole
+  // boundary is that the value crosses OUT of the self-test, so it needs this
+  // predicate too. The spans are a pure reading of the same masked text.
   const spans = selfTestDefs(src)
     .map((name) => definitionSpan(code, name))
     .filter((s) => s !== null);
   const insideSelfTest = (at) => spans.some((s) => at >= s.at && at < s.end);
+
+  for (const m of code.matchAll(HANDSHAKE_RETURN_COMPARED)) {
+    if (/self.?test/i.test(m[1]) && !LITERAL_OPERAND.test(m[2])) return 'sentinel';
+  }
+  for (const m of code.matchAll(HANDSHAKE_RETURN_BOUND)) {
+    if (!/self.?test/i.test(m[2]) || insideSelfTest(m.index)) continue;
+    for (const c of code.matchAll(boundComparedInGuard(m[1]))) {
+      if (!insideSelfTest(c.index) && !LITERAL_OPERAND.test(c[1])) return 'sentinel';
+    }
+  }
 
   const moduleLevel = new Set([...code.matchAll(MODULE_LEVEL_BINDING)].map((m) => m[1]));
   const carried = new Set();
@@ -1168,6 +1334,284 @@ const EARLY_BRACE_GATE = [
   '}',
   '',
 ].join('\n');
+
+
+/**
+ * The BOUND sentinel, reduced: the return value held in a variable and compared
+ * one statement later. This is `scripts/check-workflow-step-name-quoting.mjs`,
+ * whose `--self-test` runs in lint.yml and which read `none` until #18329.
+ */
+const BOUND_SENTINEL_GATE = [
+  '#!/usr/bin/env node',
+  "const SELF_TEST_VERDICT = 'reached';",
+  'function selfTest() {',
+  '  const failures = [];',
+  "  if (1 !== 1) failures.push('x');",
+  "  if (failures.length) { console.error(failures.join(String.fromCharCode(10))); process.exit(1); }",
+  "  console.log('fixture self-test: 1 case passes');",
+  '  return SELF_TEST_VERDICT;',
+  '}',
+  "if (process.argv.includes('--self-test')) {",
+  '  const verdict = selfTest();',
+  '  if (verdict !== SELF_TEST_VERDICT) {',
+  "    console.error('fixture: selfTest returned without reaching its verdict');",
+  '    process.exit(1);',
+  '  }',
+  '}',
+  '',
+].join('\n');
+
+/** The comparison this fixture IS, the anchor its negative variants replace. */
+const BOUND_SENTINEL_COMPARISON = 'verdict !== SELF_TEST_VERDICT';
+
+/**
+ * The BOUND RECORD sentinel, reduced: the self-test hands back its verdict AND
+ * its exit code, and the dispatch reads one field of each. Two files land this
+ * way (`scripts/pm/check-expected-skips.mjs`, `scripts/pm/check-prior-rulings.mjs`).
+ *
+ * ⚠️ In this spelling the early return makes the binding `undefined`, so the
+ * property read THROWS before the dispatch prints its own sentence: the refusal
+ * is real and loud, but the words are the runtime's. The recogniser answers
+ * WHICH SPELLING, and the probe publishes whatever the mutated run said.
+ */
+const BOUND_RECORD_SENTINEL_GATE = [
+  '#!/usr/bin/env node',
+  "const SELF_TEST_VERDICT = 'reached';",
+  'const EXIT_OK = 0;',
+  'function selfTest() {',
+  '  const failures = [];',
+  "  if (1 !== 1) failures.push('x');",
+  "  console.log('fixture self-test: 1 case passes');",
+  '  return { code: EXIT_OK, verdict: SELF_TEST_VERDICT };',
+  '}',
+  "if (process.argv.includes('--self-test')) {",
+  '  const r = selfTest();',
+  '  if (r.verdict !== SELF_TEST_VERDICT) {',
+  "    console.error('fixture: selfTest returned without reaching its verdict');",
+  '    process.exit(1);',
+  '  }',
+  '  process.exit(r.code);',
+  '}',
+  '',
+].join('\n');
+
+/** The record comparison, the anchor the literal-operand variant replaces. */
+const BOUND_RECORD_COMPARISON = 'r.verdict !== SELF_TEST_VERDICT';
+
+/**
+ * The EXIT-CODE SELECTION gate, reduced, and it is a fixture about a BOUNDARY
+ * rather than about a shape: `scripts/check-plugin-teardown-shape.mjs` binds the
+ * self-test's return value, refuses on its FLAG, and then compares that binding
+ * against a named constant to choose WHICH code to exit with. Read without the
+ * guard half of the bound spelling, this file answers `sentinel` -- the wrong
+ * spelling reported for a flag-shaped gate, in the one column #14968 exists to
+ * make checkable. Measured: it is the only row in this census that moved when
+ * the bound spelling was admitted without that half.
+ */
+const EXIT_CODE_SELECTION_GATE = [
+  '#!/usr/bin/env node',
+  'const EXIT_PREREQUISITE_NOT_MET = 3;',
+  'let selfTestReachedVerdict = false;',
+  'function selfTest() {',
+  '  const failures = [];',
+  "  if (1 !== 1) failures.push('x');",
+  "  console.log('fixture self-test: 1 case passes');",
+  '  selfTestReachedVerdict = true;',
+  '  return failures.length;',
+  '}',
+  "if (process.argv.includes('--self-test')) {",
+  '  const selfTestCode = selfTest();',
+  '  if (!selfTestReachedVerdict) {',
+  "    console.error('fixture: selfTest returned without reaching its verdict');",
+  '    process.exit(selfTestCode === EXIT_PREREQUISITE_NOT_MET ? EXIT_PREREQUISITE_NOT_MET : 1);',
+  '  }',
+  '  process.exit(selfTestCode);',
+  '}',
+  '',
+].join('\n');
+
+/**
+ * The bound spelling read and compared INSIDE the self-test: a sub-battery's
+ * completion checked by the self-test itself. Nothing crossed out to a
+ * dispatch, so it is a local decision and not a handshake.
+ */
+const BOUND_INSIDE_SELF_TEST_GATE = [
+  '#!/usr/bin/env node',
+  "const SUBTOTAL_VERDICT = 'subtotal reached';",
+  'function selfTestSubtotal() {',
+  '  return SUBTOTAL_VERDICT;',
+  '}',
+  'function selfTest() {',
+  '  const subtotal = selfTestSubtotal();',
+  "  if (subtotal !== SUBTOTAL_VERDICT) { console.error('fixture: the subtotal did not finish'); process.exit(1); }",
+  "  console.log('fixture self-test: 1 case passes');",
+  '}',
+  "if (process.argv.includes('--self-test')) selfTest();",
+  '',
+].join('\n');
+
+/**
+ * The bound spelling spelled ONLY in a comment -- the convention described, not
+ * performed. Un-hidden by deleting the marker, the same text is the dispatch,
+ * which is what makes the verdict below a reading of the MASK.
+ */
+const BOUND_SENTINEL_DECOY_GATE = [
+  '#!/usr/bin/env node',
+  "const SELF_TEST_VERDICT = 'reached';",
+  '// const verdict = selfTest(); if (verdict !== SELF_TEST_VERDICT) process.exit(1);',
+  'function selfTest() {',
+  "  console.log('fixture self-test: 1 case passes');",
+  '  return SELF_TEST_VERDICT;',
+  '}',
+  "if (process.argv.includes('--self-test')) selfTest();",
+  '',
+].join('\n');
+
+
+/**
+ * THE RETURNED-BLOCK PAIR (#18987), and the pair is the control: ONE fixture,
+ * the handshake line MOVED, nothing else different.
+ *
+ * `ABOVE` is `scripts/check-single-claim-paths.mjs` reduced -- the flag set as
+ * the last statement before the block the self-test RETURNS. The first injection
+ * point leaves the flag unset and the dispatch refuses (HELD); the same
+ * `return;` one statement lower leaves it SET, and the run prints nothing and
+ * exits 0. That is the reading the 2026-09 census did not take, and the HELD it
+ * published for this shape is the false clearance this card was filed about.
+ *
+ * `INSIDE` is #18940's repair: the same line as the block's LAST statement,
+ * after the success line prints. Both points then refuse.
+ *
+ * ⛔ Not `process.exit(1)` in the dispatch's refusal: `PRODUCES_FAILURE` is not
+ * what either verdict reads, and the fixtures below stay the shapes they are
+ * reduced from.
+ */
+const RETURNED_BLOCK_GATE_ABOVE = [
+  '#!/usr/bin/env node',
+  'let selfTestReachedVerdict = false;',
+  'const settle = () => new Promise((resolve) => { setTimeout(resolve, 1); });',
+  'function selfTest() {',
+  '  const failures = [];',
+  "  if (1 !== 1) failures.push('x');",
+  '  selfTestReachedVerdict = true;',
+  '  return (async () => {',
+  '    await settle();',
+  "    if (failures.length) { console.error(failures.join(String.fromCharCode(10))); process.exit(1); }",
+  "    console.log('fixture self-test: 1 case passes');",
+  '  })();',
+  '}',
+  "if (process.argv.includes('--self-test')) {",
+  '  await selfTest();',
+  '  if (!selfTestReachedVerdict) {',
+  "    console.error('fixture self-test: selfTest() returned without reaching its verdict');",
+  '    process.exit(1);',
+  '  }',
+  '}',
+  '',
+].join('\n');
+
+/** The one line whose POSITION is the whole difference between the pair. */
+const RETURNED_BLOCK_FLAG_LINE = '  selfTestReachedVerdict = true;\n';
+/** Where it goes in the repaired ordering: the block's last statement. */
+const RETURNED_BLOCK_SUCCESS_LINE = "    console.log('fixture self-test: 1 case passes');\n";
+
+const RETURNED_BLOCK_GATE_INSIDE = RETURNED_BLOCK_GATE_ABOVE
+  .replace(RETURNED_BLOCK_FLAG_LINE, '')
+  .replace(RETURNED_BLOCK_SUCCESS_LINE, `${RETURNED_BLOCK_SUCCESS_LINE}  ${RETURNED_BLOCK_FLAG_LINE}`);
+
+/**
+ * The AWAITED mid-body block, reduced: `scripts/pm/check-half-states.mjs` and
+ * `scripts/pm/check-governed-queue-guard.mjs` both carry one. It is the shape
+ * the second point deliberately does NOT read: an early return inside it skips
+ * a battery while the self-test goes on to reach its own verdict, so what it
+ * costs is HOLE 1 (the floor), which is measured by the roster and never by
+ * this mutation. Reading it here would sum the two holes this file prints
+ * separately, and would report a perfectly ordered handshake as broken.
+ *
+ * READ, never spawned: the anchor is a pure function of text.
+ */
+const AWAITED_BLOCK_GATE = [
+  '#!/usr/bin/env node',
+  'let selfTestReachedVerdict = false;',
+  'async function selfTest() {',
+  '  const failures = [];',
+  '  await (async () => {',
+  "    if (1 !== 1) failures.push('x');",
+  '  })();',
+  "  if (failures.length) { console.error(failures.join(String.fromCharCode(10))); process.exit(1); }",
+  "  console.log('fixture self-test: 1 case passes');",
+  '  selfTestReachedVerdict = true;',
+  '}',
+  "if (process.argv.includes('--self-test')) {",
+  '  await selfTest();',
+  '  if (!selfTestReachedVerdict) { console.error(\'no verdict\'); process.exit(1); }',
+  '}',
+  '',
+].join('\n');
+
+/**
+ * The SECOND POINT's decoys, all five inside the self-test's own body and all
+ * ahead of the real returned block, one per rule the anchor applies:
+ *
+ *   1. the convention quoted in a COMMENT                    -- MASKED
+ *   2. the same line inside a fixture TEMPLATE                -- MASKED
+ *   3. an async IIFE returned MID-LINE, from a nested arrow   -- LINE-START
+ *   4. an `await (async () => {` at statement level           -- not a RETURN
+ *   5. a one-line guarded return, MID-LINE at depth 0         -- LINE-START
+ *   6. a returned block inside an `if` BRANCH, line-anchored  -- DEPTH 0
+ *
+ * Decoys 5 and 6 are what make each rule load-bearing ON ITS OWN, and they were
+ * added because the first fixture could not tell them apart: with only decoy 3,
+ * which is mid-line AND nested, deleting the LINE-START rule moved no verdict
+ * at all -- the depth rule covered for it, and an ablation of a real rule came
+ * back green. Decoy 5 is mid-line at depth 0, so only LINE-START excludes it;
+ * decoy 6 begins its line, so only DEPTH does. Both are branches that a
+ * normally-passing run never enters, which is why neither is the block whose
+ * statements run after the handshake.
+ *
+ * Then the real one. READ, never spawned.
+ */
+const INNER_ANCHOR_DECOY_GATE = [
+  '#!/usr/bin/env node',
+  'let selfTestReachedVerdict = false;',
+  'async function selfTest() {',
+  '  // the convention this tree writes:',
+  '  //   return (async () => {',
+  '  const FIXTURE = `',
+  '  return (async () => {',
+  "    console.log('a fixture this gate scans, not its own control flow');",
+  '  })();',
+  '`;',
+  '  const held = () => { return (async () => { return FIXTURE.length; })(); };',
+  '  await (async () => { void held; })();',
+  '  if (FIXTURE.length < 0) return (async () => { return 0; })();',
+  '  if (FIXTURE.length < 1) {',
+  '    return (async () => {',
+  "      console.error('the fixture text went missing');",
+  '      process.exit(1);',
+  '    })();',
+  '  }',
+  '  return (async () => {',
+  "    console.log('fixture self-test: 1 case passes');",
+  '    selfTestReachedVerdict = true;',
+  '  })();',
+  '}',
+  "if (process.argv.includes('--self-test')) {",
+  '  await selfTest();',
+  '  if (!selfTestReachedVerdict) { console.error(\'no verdict\'); process.exit(1); }',
+  '}',
+  '',
+].join('\n');
+
+/** The decoy text the six decoys and the real block share, line-anchored. */
+const INNER_ANCHOR_TEXT = 'return (async () => {';
+
+/**
+ * The block an UNANCHORED, DEPTH-BLIND reading takes -- kept here as the thing
+ * the controls measure against, never as a second implementation:
+ * `returnedBlockAnchor` does not use it.
+ */
+const NAIVE_INNER_ANCHOR = /return\s*\(\s*async\s*\(\s*\)\s*=>\s*\{/;
 
 /**
  * The SLOW gate, reduced: a self-test that outlasts the budget it is probed
@@ -1591,6 +2035,127 @@ export function runControls() {
   say(classifyHandshake(EARLY_BRACE_GATE) === 'flag',
     `BODY EXTENT CONTROL FAILED: a self-test whose body contains a column-0 \`});\` read ${classifyHandshake(EARLY_BRACE_GATE)}; its flag is set INSIDE the function and the body extent is what says so -- three live files carry exactly this and read none without brace counting`);
 
+
+  // ⭐ THE BOUND SENTINEL SPELLING (#18329), in both directions and on both its
+  // carriers' shapes. What was at stake is not a classification but the CENSUS:
+  // three landed files read `none`, the live completeness check below saw the
+  // disagreement, and every invocation of this instrument refused -- the probe
+  // included, so nothing could be measured at all until this was widened.
+  const matches = (re, text) => [...text.matchAll(re)].length > 0;
+  say(classifyHandshake(BOUND_SENTINEL_GATE) === 'sentinel',
+    `HANDSHAKE CONTROL FAILED: a return value BOUND and then compared against a named verdict read ${classifyHandshake(BOUND_SENTINEL_GATE)}, not sentinel`);
+  say(classifyHandshake(BOUND_RECORD_SENTINEL_GATE) === 'sentinel',
+    `HANDSHAKE CONTROL FAILED: a return value bound as a RECORD, with its verdict field compared, read ${classifyHandshake(BOUND_RECORD_SENTINEL_GATE)}, not sentinel`);
+  // ... and neither fixture matches the DIRECT comparison, so the two verdicts
+  // above can only be the new half being read.
+  say(!matches(HANDSHAKE_RETURN_COMPARED, maskCommentsAndLiterals(BOUND_SENTINEL_GATE))
+    && !matches(HANDSHAKE_RETURN_COMPARED, maskCommentsAndLiterals(BOUND_RECORD_SENTINEL_GATE)),
+    'CONTROL FIXTURE INVALID: a bound-sentinel fixture also carries a DIRECT `selfTest() !== VERDICT` comparison, so the verdicts above would pass without the bound spelling being read at all');
+  // The LITERAL operand, both shapes: the ACCIDENT boundary the direct spelling
+  // already draws, one binding (and one property) deeper.
+  say(classifyHandshake(BOUND_SENTINEL_GATE.replace(BOUND_SENTINEL_COMPARISON, 'verdict !== undefined')) === 'none',
+    'HANDSHAKE CONTROL FAILED: a bound return value compared against a word LITERAL read as a handshake; that is the accident shape, where a missing return value decides the comparison and nothing notices anything');
+  say(classifyHandshake(BOUND_RECORD_SENTINEL_GATE.replace(BOUND_RECORD_COMPARISON, 'r.verdict !== null')) === 'none',
+    'HANDSHAKE CONTROL FAILED: a bound RECORD field compared against a word literal read as a handshake');
+  // ⛔ The GUARD half, which is a measured boundary and not symmetry: a binding
+  // compared to pick an EXIT CODE is choosing a value, not asking whether the
+  // self-test finished -- and the file that does it carries the FLAG shape.
+  say(classifyHandshake(EXIT_CODE_SELECTION_GATE) === 'flag',
+    `BOUNDARY CONTROL FAILED: a flag-shaped gate that also compares its self-test's bound return value to choose an exit code read ${classifyHandshake(EXIT_CODE_SELECTION_GATE)}, not flag; the bound spelling must read a GUARD, not any comparison of the binding`);
+  say(matches(HANDSHAKE_RETURN_BOUND, maskCommentsAndLiterals(EXIT_CODE_SELECTION_GATE)),
+    'CONTROL FIXTURE INVALID: the exit-code fixture no longer binds its self-test\'s return value at all, so the verdict above says nothing about the GUARD half -- the binding half would be carrying it');
+  // The CROSSES half: bound and compared INSIDE the self-test is a sub-battery's
+  // own bookkeeping, and nothing was handed back to a dispatch.
+  say(classifyHandshake(BOUND_INSIDE_SELF_TEST_GATE) === 'none',
+    `CROSSING CONTROL FAILED: a value bound from a self-test-shaped helper and compared INSIDE the self-test read ${classifyHandshake(BOUND_INSIDE_SELF_TEST_GATE)}; a decision taken and consumed within one function crosses no boundary`);
+  say(matches(HANDSHAKE_RETURN_BOUND, maskCommentsAndLiterals(BOUND_INSIDE_SELF_TEST_GATE)),
+    'CONTROL FIXTURE INVALID: the inside-the-body fixture no longer carries a bound call this criterion would otherwise match, so the verdict above passes for the wrong reason');
+  // The MASK, and the un-hiding that makes it a reading of the mask: the same
+  // text as a comment, then as the dispatch.
+  say(classifyHandshake(BOUND_SENTINEL_DECOY_GATE) === 'none',
+    `HANDSHAKE DECOY CONTROL FAILED: the bound spelling written only in a COMMENT was recognised as ${classifyHandshake(BOUND_SENTINEL_DECOY_GATE)}`);
+  say(classifyHandshake(BOUND_SENTINEL_DECOY_GATE.replace('// ', '')) === 'sentinel',
+    'CONTROL FIXTURE INVALID: with its comment marker removed the bound decoy is still not recognised, so it was never a handshake spelling and the decoy verdict passes for the wrong reason');
+  // ... and NAME-INDEPENDENCE on both new fixtures, the direction #14968 is about.
+  say(classifyHandshake(renamed(BOUND_SENTINEL_GATE)) === 'sentinel'
+    && classifyHandshake(renamed(BOUND_RECORD_SENTINEL_GATE)) === 'sentinel',
+    'NAME-INDEPENDENCE CONTROL FAILED: a bound-sentinel fixture stopped reading sentinel once its verdict constant was renamed; the recogniser is keyed on a NAME, which is the defect one level up');
+
+
+  // ⭐ THE SECOND INJECTION POINT'S ANCHOR (#18987), against every text that
+  // reads like the block a self-test returns without being it. What is at stake
+  // is the same wrong reading the top anchor's decoys are about, one level in: an
+  // injection into a fixture template makes the copy a SyntaxError, whose
+  // non-zero exit and stack trace this file's verdict scores HELD.
+  const innerFlags = scanSource(INNER_ANCHOR_DECOY_GATE);
+  const innerMasked = maskCommentsAndLiterals(INNER_ANCHOR_DECOY_GATE);
+  const commentBlock = INNER_ANCHOR_DECOY_GATE.indexOf(INNER_ANCHOR_TEXT);
+  const literalBlock = INNER_ANCHOR_DECOY_GATE.indexOf(INNER_ANCHOR_TEXT, commentBlock + 1);
+  const midLineBlock = INNER_ANCHOR_DECOY_GATE.indexOf('{ return (async () => { return FIXTURE.length');
+  const awaitedBlock = INNER_ANCHOR_DECOY_GATE.indexOf('await (async () => { void held');
+  const guardedLine = INNER_ANCHOR_DECOY_GATE.indexOf('if (FIXTURE.length < 0) return (async');
+  const guardedBlock = INNER_ANCHOR_DECOY_GATE.indexOf(INNER_ANCHOR_TEXT, guardedLine);
+  const branchBlock = INNER_ANCHOR_DECOY_GATE.indexOf(`    ${INNER_ANCHOR_TEXT}`);
+  const realBlock = INNER_ANCHOR_DECOY_GATE.lastIndexOf(`\n  ${INNER_ANCHOR_TEXT}`) + 1;
+  say(commentBlock >= 0 && literalBlock > commentBlock && midLineBlock > literalBlock
+    && awaitedBlock > midLineBlock && guardedBlock > awaitedBlock && branchBlock > guardedBlock
+    && realBlock > branchBlock,
+    'CONTROL FIXTURE INVALID: the six second-point decoys no longer all stand AHEAD of the real returned block, so an anchor taking the first text that reads like one would reach it anyway and every verdict below passes for the wrong reason');
+  say(innerFlags.comment[commentBlock] === 1,
+    'CONTROL FIXTURE INVALID: the first second-point decoy is not COMMENT content, so it no longer reads the comment half of the mask');
+  say(innerFlags.literal[literalBlock] === 1,
+    'CONTROL FIXTURE INVALID: the second second-point decoy is not LITERAL content, so it no longer reads the half whose failure makes the copy a SyntaxError and earns a false HELD');
+  say(innerFlags.comment[midLineBlock] === 0 && innerFlags.literal[midLineBlock] === 0,
+    'CONTROL FIXTURE INVALID: the MID-LINE decoy is masked away, so it reads the mask a second time instead of the LINE-START rule it is there for');
+  // ⛔ ... and the two decoys that ISOLATE the two rules. Without them an
+  // ablation of either one comes back green: each covers for the other on a decoy
+  // that is both mid-line and nested, and a rule nothing measures is a rule the
+  // next author deletes.
+  say(innerFlags.comment[guardedBlock] === 0 && innerFlags.literal[guardedBlock] === 0
+    && !/^[ \t]*return/.test(INNER_ANCHOR_DECOY_GATE.slice(guardedLine, guardedBlock + 1).split('\n').pop() ?? ''),
+    'CONTROL FIXTURE INVALID: the one-line GUARDED return is masked away or no longer mid-line, so the LINE-START rule has nothing isolating it and deleting that rule moves no verdict');
+  // Depth is read the way the anchor reads it: over the MASKED body, from the
+  // definition's own `{`. Counted over raw text it would be a different number
+  // -- every brace in the fixture template and the comments is still there.
+  const innerBody = definitionSpan(innerMasked, 'selfTest');
+  const depthAt = (end) => {
+    let depth = 0;
+    for (let i = innerBody.at; i < end; i += 1) {
+      if (innerMasked[i] === '{') depth += 1;
+      else if (innerMasked[i] === '}') depth -= 1;
+    }
+    return depth;
+  };
+  say(innerBody !== null && depthAt(guardedBlock) === 0,
+    'CONTROL FIXTURE INVALID: the one-line guarded return is no longer at the self-test body\'s own depth, so the DEPTH rule would exclude it too and the LINE-START rule is again unmeasured');
+  say(depthAt(branchBlock) === 1
+    && INNER_ANCHOR_DECOY_GATE[branchBlock - 1] === '\n'
+    && /^[ \t]*return/.test(INNER_ANCHOR_DECOY_GATE.slice(branchBlock, branchBlock + 30)),
+    'CONTROL FIXTURE INVALID: the `if` BRANCH decoy is no longer a line-anchored return one level deep, so the DEPTH rule has nothing isolating it and deleting that rule moves no verdict');
+  say(innerMasked.search(NAIVE_INNER_ANCHOR) < guardedBlock && innerMasked.search(NAIVE_INNER_ANCHOR) < realBlock,
+    'CONTROL FIXTURE INVALID: an unanchored, depth-blind reading no longer lands on a DECOY ahead of the real block, so neither rule is what the anchor verdict below is reading');
+  say(returnedBlockAnchor(innerMasked, 'selfTest') === INNER_ANCHOR_DECOY_GATE.indexOf('{', realBlock) + 1,
+    `INNER ANCHOR CONTROL FAILED: the second injection point did not land on the block the self-test RETURNS at its own statement level (got ${returnedBlockAnchor(innerMasked, 'selfTest')}, want ${INNER_ANCHOR_DECOY_GATE.indexOf('{', realBlock) + 1}); a comment, a fixture template, a mid-line IIFE, an awaited block or an \`if\` branch was preferred over it`);
+  say(injectEarlyReturn(INNER_ANCHOR_DECOY_GATE, 'selfTest', { point: 'inner' })
+    ?.includes(`  return (async () => {\n  return; /*${PROBE_MARKER}*/\n\n    console.log(`) === true,
+    'INNER ANCHOR CONTROL FAILED: the second point\'s `return;` was not injected as the FIRST statement inside the returned block');
+  // ⛔ ... and the shape this point must NOT read, with its reason: an early
+  // return inside an AWAITED mid-body block leaves the self-test reaching its own
+  // verdict, so what it costs is a battery -- hole 1, measured by the roster.
+  say(returnedBlockAnchor(maskCommentsAndLiterals(AWAITED_BLOCK_GATE), 'selfTest') === null,
+    'INNER ANCHOR CONTROL FAILED: an `await (async () => {` in the MIDDLE of the body was taken as the block the function returns; an early return there is a skipped battery (hole 1) and reading it here would report a correctly ordered handshake as broken');
+  say(returnedBlockAnchor(maskCommentsAndLiterals(SOUND_GATE), 'selfTest') === null
+    && injectEarlyReturn(SOUND_GATE, 'selfTest', { point: 'inner' }) === null,
+    'INNER ANCHOR CONTROL FAILED: a self-test that returns no block was given a second injection point; a file whose every statement is above the first point has ONE point to read');
+  // ... and the PAIR below differs by the POSITION of one line and nothing else.
+  say(RETURNED_BLOCK_GATE_INSIDE !== RETURNED_BLOCK_GATE_ABOVE
+    && RETURNED_BLOCK_GATE_ABOVE.split(RETURNED_BLOCK_FLAG_LINE.trim()).length === 2
+    && RETURNED_BLOCK_GATE_INSIDE.split(RETURNED_BLOCK_FLAG_LINE.trim()).length === 2,
+    'CONTROL FIXTURE INVALID: the returned-block pair no longer carries the handshake line exactly once each, so the two spawned verdicts below are not a reading of WHERE it sits');
+  say(RETURNED_BLOCK_GATE_ABOVE.indexOf(RETURNED_BLOCK_FLAG_LINE.trim()) < RETURNED_BLOCK_GATE_ABOVE.indexOf(INNER_ANCHOR_TEXT)
+    && RETURNED_BLOCK_GATE_INSIDE.indexOf(RETURNED_BLOCK_FLAG_LINE.trim()) > RETURNED_BLOCK_GATE_INSIDE.indexOf(INNER_ANCHOR_TEXT),
+    'CONTROL FIXTURE INVALID: the pair does not put the handshake line ABOVE the returned block in one fixture and INSIDE it in the other, which is the whole difference the verdicts below read');
+
   // Instrument 1, both directions.
   say(classifyFloor(maskComments(HOLED_GATE)) === 'NONE',
     'POSITIVE CONTROL FAILED: a self-test deciding success by failures.length alone was not classified NONE');
@@ -1787,6 +2352,46 @@ export function runControls() {
     // is only reachable through a green baseline) and this one exits 1.
     say(wk.baselineExit === 0 && wkBeside.baselineExit === 1,
       `CONTROL FIXTURE INVALID: the two placements did not separate the fixture's own baseline (relocated exit ${wk.baselineExit}, beside exit ${wkBeside.baselineExit}); with both alike, the verdicts above say nothing about WHERE the copy was written`);
+
+
+    // ⭐ THE TWO INJECTION POINTS, against real processes, on a pair that differs
+    // by the POSITION of one line (#18987). This is the reading the 2026-09
+    // census did not take: both fixtures refuse an early return at the TOP of the
+    // self-test, and only one of them notices the same `return;` inside the block
+    // it returns.
+    const aboveBlock = join(dir, 'returned-block-gate-above.mjs');
+    const insideBlock = join(dir, 'returned-block-gate-inside.mjs');
+    writeFileSync(aboveBlock, RETURNED_BLOCK_GATE_ABOVE);
+    writeFileSync(insideBlock, RETURNED_BLOCK_GATE_INSIDE);
+    const above = probeVerdictPoints(aboveBlock, 'selfTest');
+    const inside = probeVerdictPoints(insideBlock, 'selfTest');
+    say(above.first?.verdict === 'HELD' && inside.first?.verdict === 'HELD',
+      `CONTROL FIXTURE INVALID: the returned-block pair did not both HELD at the FIRST injection point (above ${above.first?.verdict}, inside ${inside.first?.verdict}); with either one failing there the second point's verdicts below say nothing about the second point`);
+    say(above.verdict === 'HANDSHAKE-ABOVE-BLOCK',
+      `POSITIVE CONTROL FAILED: a handshake set ABOVE the block the self-test returns read ${above.verdict} (${above.why ?? ''}); one injection point calls that gate held, which is the false clearance this point exists to end`);
+    say(above.second?.verdict === 'DEFEATED' && above.second?.mutatedExit === 0 && above.second?.mutatedBytes === 0,
+      `POSITIVE CONTROL FAILED: the second injection point did not read the measured shape (verdict ${above.second?.verdict}, exit ${above.second?.mutatedExit}, ${above.second?.mutatedBytes} byte(s)); the flag is already set, so the run says NOTHING and exits 0`);
+    say(above.points === 2 && above.mutatedBytes === 0,
+      'POSITIVE CONTROL FAILED: the HANDSHAKE-ABOVE-BLOCK row does not publish two points with the DECIDING leg on top; `mutatedHead` must quote the run the verdict came from');
+    say(inside.verdict === 'HELD' && inside.points === 2 && inside.second?.verdict === 'HELD',
+      `NEGATIVE CONTROL FAILED: the SAME fixture with its handshake moved inside the block read ${inside.verdict} (second point ${inside.second?.verdict}, ${inside.second?.why ?? ''}); that ordering is the repair, and HELD is what it must earn`);
+    say(inside.second?.mutatedSpoke === true && (inside.second?.mutatedHead ?? '').includes('without reaching its verdict'),
+      `NEGATIVE CONTROL FAILED: the repaired fixture's second point printed ${JSON.stringify((inside.second?.mutatedHead ?? '').slice(0, 60))}; HELD at a point means the dispatch REFUSED out loud there`);
+    // ... and a file with no second point keeps its one-point reading EXACTLY,
+    // so admitting this point moved no row that has only one.
+    const onePoint = probeVerdictPoints(sound, 'selfTest');
+    say(onePoint.verdict === s.verdict && onePoint.points === 1 && onePoint.mutatedHead === s.mutatedHead,
+      `COMPOSITION CONTROL FAILED: a self-test returning no block read ${onePoint.verdict} through the two-point composer but ${s.verdict} through the probe itself; the second point must be an addition and never a re-reading of the first`);
+    say(typeof onePoint.secondPoint === 'string' && onePoint.second === undefined,
+      'COMPOSITION CONTROL FAILED: a one-point row does not SAY why it has one point; a missing field is what a row published before this point existed, so the two must not look alike');
+    // ... and a row DEFEATED at the first point is not probed a second time: two
+    // more spawns to re-learn an answer already given, on every sweep.
+    let legs = 0;
+    const counted = probeVerdictPoints(holed, 'selfTest', {
+      probe: (abs, entry, opts) => { legs += 1; return probeEarlyReturn(abs, entry, opts); },
+    });
+    say(counted.verdict === 'DEFEATED' && legs === 1 && counted.points === 1,
+      `COMPOSITION CONTROL FAILED: a row read ${counted.verdict} at the first point was probed ${legs} time(s); a file already defeated has its answer, and the second pair of spawns buys nothing`);
 
     // ⭐ THE SELECTOR THROUGH THE SHIPPED PROBE (#15759). Everything above drives
     // `probeEarlyReturn` directly; this drives `probeRows`, the loop body `main()`
@@ -2174,15 +2779,77 @@ export function selectRows(rows, selectors) {
 }
 
 /**
+ * ⭐ BOTH INJECTION POINTS, composed into the row's ONE verdict (#18987).
+ *
+ * HELD means every point this file HAS refused out loud. The composition is
+ * where that is enforced, and each step is a cost as much as a rule:
+ *
+ *   1. Point 1 first. A row that is not HELD there is already answered --
+ *      DEFEATED is DEFEATED, and NOT MEASURED means the baseline the second leg
+ *      would need is the same red baseline. The second pair of spawns is NOT
+ *      run, so an uninstalled checkout costs exactly what it used to.
+ *   2. Then ASK whether there is a second point at all, statically. Most files
+ *      have none: their dispatched function's every statement is above the
+ *      dispatch's reading, so point 1 IS the whole reading and the row says so
+ *      in `secondPoint` rather than by omitting a field.
+ *   3. Only then the second pair of spawns. DEFEATED there is
+ *      HANDSHAKE-ABOVE-BLOCK -- point 1's refusal stands, and it is not a hold.
+ *      ACCIDENT and NOT MEASURED carry over from the deciding leg with the leg
+ *      named, because a HELD published over an unmeasured second point is the
+ *      false clearance this whole card is about.
+ *
+ * The row publishes `first` and `second` whenever both ran; the top-level
+ * fields are the DECIDING leg's, so `mutatedHead` always quotes the run the
+ * verdict came from. `probe` is the controls' injection point, and it is the
+ * whole composer rather than one leg: a control can then count row probes
+ * exactly as it did before this point existed.
+ */
+export function probeVerdictPoints(absFile, entry, { timeout, placement, probe = probeEarlyReturn } = {}) {
+  const first = probe(absFile, entry, { timeout, placement });
+  if (first.verdict !== 'HELD') {
+    return { ...first, points: 1, secondPoint: `not asked -- the first injection point read ${first.verdict}` };
+  }
+  if (returnedBlockAnchor(maskCommentsAndLiterals(readFileSync(absFile, 'utf8')), entry) === null) {
+    return {
+      ...first,
+      points: 1,
+      secondPoint: `${entry} returns no block, so its whole body is above the first point`,
+    };
+  }
+  const second = probe(absFile, entry, { timeout, placement, point: 'inner' });
+  const both = (verdict, decided, why) => ({
+    ...decided,
+    verdict,
+    points: 2,
+    first,
+    second,
+    ...(why === undefined ? {} : { why }),
+  });
+  if (second.verdict === 'HELD') return both('HELD', first);
+  if (second.verdict === 'DEFEATED') return both('HANDSHAKE-ABOVE-BLOCK', second);
+  if (second.verdict === 'ACCIDENT') {
+    return both('ACCIDENT', second, 'the SECOND injection point exited non-zero having printed nothing');
+  }
+  return both(
+    'NOT MEASURED',
+    second,
+    `the first injection point HELD; the second was not measured (${second.why})`,
+  );
+}
+
+/**
  * THE SWEEP'S LOOP BODY, lifted so the `--only` path and the full sweep are the
  * same code and not two readings of it (#15759). Assigns each row's `probe`.
  *
  * `plan` and `probe` are injection points for the controls ONLY -- `main()` passes
  * neither, so the shipped sweep and the shipped selector both run the real
- * `probePlan` and the real `probeEarlyReturn`. A control that could not count the
+ * `probePlan` and the real `probeVerdictPoints`. A control that could not count the
  * probe's calls could not tell "ran one row" from "ran the row and swept the rest".
+ *
+ * ONE call per row, still: the two injection points live inside
+ * `probeVerdictPoints`, so what a control counts here is rows and not spawns.
  */
-export function probeRows(rows, { plan = probePlan, probe = probeEarlyReturn } = {}) {
+export function probeRows(rows, { plan = probePlan, probe = probeVerdictPoints } = {}) {
   for (const r of rows) {
     const p = plan(r);
     if (p.entry === undefined) { r.probe = { verdict: 'NOT MEASURED', why: p.why }; continue; }
@@ -2283,8 +2950,10 @@ function main() {
   }
   const defeated = probed.filter((r) => r.probe.verdict === 'DEFEATED');
   const held = probed.filter((r) => r.probe.verdict === 'HELD');
+  const aboveBlock = probed.filter((r) => r.probe.verdict === 'HANDSHAKE-ABOVE-BLOCK');
   const accidents = probed.filter((r) => r.probe.verdict === 'ACCIDENT');
   const unmeasured = probed.filter((r) => r.probe.verdict === 'NOT MEASURED');
+  const twoPoint = probed.filter((r) => r.probe.points === 2);
   // ⛔ The restriction is announced BEFORE its numbers, never inferred from them:
   // `0 DEFEATED, 0 HELD` over one selected row and over the whole census are the
   // same three digits, and only one of them is a survey.
@@ -2299,16 +2968,34 @@ function main() {
   // (#15573).
   const timedOut = unmeasured.filter((r) => r.probe.timedOut === true);
   console.log('\nHole 2 -- silently defeated by an early `return` in the self-test (MEASURED):');
-  console.log(`  ${defeated.length} DEFEATED, ${held.length} HELD, ${accidents.length} ACCIDENT, ${unmeasured.length} NOT MEASURED.`);
+  console.log(
+    `  ${defeated.length} DEFEATED, ${held.length} HELD, ${aboveBlock.length} HANDSHAKE-ABOVE-BLOCK, `
+      + `${accidents.length} ACCIDENT, ${unmeasured.length} NOT MEASURED.`,
+  );
+  // ⛔ How much of this sweep is a TWO-POINT reading, printed even when it is
+  // zero: HELD means every point a file has refused, so a reader cannot tell what
+  // a HELD is worth without knowing how many points it was taken over (#18987).
+  console.log(`  ${twoPoint.length} of the ${probed.length} probed return a block and were read at BOTH injection points;`);
+  console.log(`   the other ${probed.length - twoPoint.length} have ONE point, which is their whole body.`);
   console.log(`  of the defeated, ${defeated.filter((r) => r.probe.mutatedBytes === 0).length} printed NOTHING at all and still exited 0.`);
   console.log(`  of the NOT MEASURED, ${timedOut.length} outlasted the probe's own budget and was killed --`);
   console.log('   a shrink of this survey by a number THIS TOOL chose, not a property of those files.');
-  for (const r of held) console.log(`    HELD  ${r.file} -- ${r.probe.mutatedHead.slice(0, 96)}`);
+  for (const r of held) console.log(`    HELD${r.probe.points === 2 ? '2' : ' '} ${r.file} -- ${r.probe.mutatedHead.slice(0, 96)}`);
+  for (const r of aboveBlock) {
+    console.log(`    HAB   ${r.file} -- point 1 refused (${r.probe.first.mutatedHead.slice(0, 60)})`);
+    console.log(`          point 2, inside the block it returns: exited ${r.probe.mutatedExit} printing ${r.probe.mutatedBytes} byte(s)`);
+  }
   for (const r of accidents) console.log(`    ACC   ${r.file} -- exited ${r.probe.mutatedExit} printing ${r.probe.mutatedBytes} byte(s); no refusal, so NOT a hold`);
   for (const r of unmeasured) console.log(`    n/m   ${r.file} -- ${r.probe.why}`);
   if (accidents.length) {
     console.log(`\n⚠ ACCIDENT is not a hold. Those ${accidents.length} file(s) exit non-zero because a comparison`);
     console.log('   against a missing return value happened to be false, not because anything noticed.');
+  }
+  if (aboveBlock.length) {
+    console.log(`\n⚠ HANDSHAKE-ABOVE-BLOCK is not a hold either. Those ${aboveBlock.length} file(s) refuse an early`);
+    console.log('   `return` at the TOP of the self-test and notice NOTHING when the same `return;` is one');
+    console.log('   statement lower, inside the block the function returns: the handshake is reached before');
+    console.log('   the work the dispatch waits for, so every early exit in that block is undiagnosed.');
   }
   console.log('\n⛔ The two numbers are ORTHOGONAL and are never summed: a gate with a perfect');
   console.log('   floor is still defeated by hole 2, because the floor never runs either.');

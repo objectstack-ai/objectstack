@@ -500,19 +500,4 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     ],
     note: 'EXPERIMENTAL — declared policy conditions with no runtime evaluator yet (ADR-0056 D8 / ADR-0049 tracking). This row is why `unevaluated` was minted: it carried `fail-closed` — a RUNTIME refusal — while its own `enforcement` cell said `(no runtime consumer yet)`, so on a security-flavoured row the ledger read as a security guarantee over a slot nothing evaluates. `fail-closed` here was the one borrowing with a consequence past legibility, and spreading it to the other four unwired rows was refused for that reason.',
   },
-  {
-    // The other half of #17630's first classifications. Same tier as the row
-    // above and as `template-prompt` / `cron-knowledge-refresh`: an existing
-    // classification applied to two more instances, not a new category.
-    id: 'cel-declared-unwired-observability',
-    summary: 'observability config predicates — SLI success criteria and composite trace-sampling condition (declared, documented, nothing reads them)',
-    dialect: 'cel', mode: 'interpret', state: 'experimental', failPolicy: 'unevaluated',
-    enforcement:
-      'PARSE ONLY — each slot is `z.union([<a structured arm>, ExpressionInputSchema])`, so the envelope arm normalizes a bare string to `{dialect:"cel",source}` and refuses a blank one; NO EVALUATOR FOUND for either. Measured on `a26a114d7` by identity over the whole tree: `successCriteria`, `ServiceLevelIndicatorSchema` and `TraceSamplingConfigSchema` have ZERO hits outside `packages/spec/src` that are not generated artefacts — `packages/spec/{api-surface,authorable-surface,declaration-map,export-origins,json-schema.manifest}`, `content/docs/references/system/{metrics,tracing}.mdx`, a CHANGELOG and one `skills/objectstack-formula/SKILL.md` prose row. Inside the spec the only readers are the two schemas\' own unit tests. No service, plugin or runtime reads either key',
-    covers: [
-      'system/metrics.zod.ts:ServiceLevelIndicatorSchema.successCriteria',
-      'system/tracing.zod.ts:TraceSamplingConfigSchema.condition',
-    ],
-    note: 'EXPERIMENTAL — a published, documented, author-facing predicate that nothing evaluates, which is the class the `unevaluated` tier exists for, and the class this ratchet exists to surface. This ratchet did not surface them: both positions mount the roster schema as a UNION MEMBER on its own line, so head-anchored discovery never saw them and the ledger read complete over them. ⛔ NOT a synonym for `experimental` in the "we have not looked" sense — the absence above is measured in this checkout, over the whole tree, and stated in the `enforcement` cell as the tier requires. Whether either key should instead be RETIRED under ADR-0049 enforce-or-remove is a separate decision on its own card: this row classifies what is there, and the card that widened discovery deliberately changed no behaviour and retired no key. The structured arm of each union is out of scope here — it is not an expression surface and carries no dialect.',
-  },
 ];

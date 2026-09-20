@@ -97,13 +97,21 @@ const PACKAGE_ROOTS = ['packages', 'apps', 'examples'];
  * The instrument can only express a SUBTREE: `hintCovers` collapses globs, so a
  * declared hint names every tracked file beneath it and there is no way to spell
  * "the package manifests under this root". That makes the two sides of this gate
- * completely different trades, and both were measured on this tree:
+ * completely different trades, and both were measured at `f29e89717`
+ * (2026-08-22):
  *
- *   skills/**       49 of 50 tracked files are skill directories this gate
+ *   skills/**       49 of 50 tracked files were skill directories this gate
  *                   reads — 98% precision over a 50-file subtree.
  *   packages/**     73 package.json files out of 4903 tracked files — 1.5%,
  *                   pasted into every packages/** dispatch prompt in the repo.
  *   apps/**         1 of 35 (2.9%) · examples/**  4 of 238 (1.7%).
+ *
+ * ⛔ Those four readings are deliberately pinned to that commit and NOT
+ * refreshed in place. Every term moves with the tree, nothing reprints them,
+ * and what decides the trade is the ORDER of magnitude between the two sides —
+ * which is why a figure restored in the present tense would be a new decaying
+ * claim rather than a better one. `node scripts/pm/bare-root-worklist.mjs`
+ * carries this gate's rows for the three package roots, with their own dates.
  *
  * The three package roots are therefore the +139084 fabrication one level up —
  * the very measurement in `hintCovers`' docblock, which prices accepting bare

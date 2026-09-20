@@ -40,6 +40,7 @@ import type {
 } from '@objectstack/spec/security';
 import type { PermissionEvaluator } from './permission-evaluator.js';
 import { superuserBypassBitForOperation } from './permission-evaluator.js';
+import { ExplainObjectNotFoundError } from './errors.js';
 import { RLS_DENY_FILTER } from './rls-compiler.js';
 import {
   unresolvedPostureExplainDetail,
@@ -1218,6 +1219,32 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
 
   // ── posture shared by later layers ────────────────────────────────────
   const secMeta = await deps.getObjectSecurityMeta(object);
+  // [#18253] A name nobody declared is not a verdict — REFUSE instead of
+  // walking nine layers and reporting `denies`.
+  //
+  // Every machine-readable channel of the report (`allowed: false`,
+  // `object_crud: 'denies'`, HTTP 200) was byte-identical to a genuine
+  // permission denial, so a misspelled API name reached the administrator as a
+  // permission decision about a record that does not exist. Only the layer
+  // PROSE differed (#10401/#10424), and no client branches on prose. The
+  // maintainer ruling of 2026-09-17 (letter B): "a typo must not look like a
+  // permission decision".
+  //
+  // ⚠️ The condition is the `'unknown'` CAUSE, not `unresolved` alone. The
+  // other two causes are not absent objects and must keep the explanation they
+  // have: an `'unpublished_draft'` declaration EXISTS (its remedy is "publish
+  // it"), and `'metadata_unavailable'` is a read that did not answer, where
+  // claiming absence would state as fact the half the outage made unknowable.
+  // An absent `unresolvedCause` defaults to `'unknown'` — the same reading the
+  // prose path has always given it (`unresolvedPostureExplainDetail`), so a
+  // deps bag wired before #10401 is not silently exempted from the fix.
+  //
+  // This lives in the ENGINE rather than at the REST door so every caller of
+  // `ISecurityService.explain` gets the same refusal: the door owns the
+  // transport mapping (404 `OBJECT_NOT_FOUND`), never the judgement.
+  if (secMeta.unresolved === true && (secMeta.unresolvedCause ?? 'unknown') === 'unknown') {
+    throw new ExplainObjectNotFoundError(object, operation);
+  }
   let schema: any = null;
   try { schema = deps.ql?.getSchema?.(object) ?? null; } catch { schema = null; }
 

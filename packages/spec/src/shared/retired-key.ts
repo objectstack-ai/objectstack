@@ -3,6 +3,13 @@
 /**
  * Tombstones for RETIRED authorable keys (#3855).
  *
+ * This file carries BOTH retirement axes: a retired **key** ({@link retiredKey},
+ * plus {@link acceptRetiredDefaultResidue} for one that carried a default), and a
+ * retired **value** — one member of a `z.enum` ({@link enumWithRetiredValues},
+ * #17109). Everything below is the KEY-level rule; the value-level one is
+ * documented on its own helper and differs in what it registers, never in how
+ * the prescription reads.
+ *
  * Removing a key an author can write has one hard requirement: the removal must
  * be **audible**. When these tombstones were introduced, none of the schemas
  * carrying a deprecated alias was `.strict()`, so deleting the key from the Zod
@@ -208,4 +215,151 @@ export function acceptRetiredDefaultResidue<S extends z.ZodObject<z.ZodRawShape>
     get: () => schema.shape,
   });
   return pipe as unknown as z.ZodType<z.output<S>, z.input<S>> & { readonly shape: S['shape'] };
+}
+
+// ============================================================================
+// VALUE-level retirement — the sibling axis (#17109)
+// ============================================================================
+
+/**
+ * Retired enum MEMBER → the prescription an author who writes it meets.
+ *
+ * Free text, exactly like {@link retiredKey}'s `guidance`, and written to the
+ * same five conventions (the `spec-property-retirement` skill, §2 "guidance
+ * 字符串怎么写"): the fully-qualified name in backticks first, the version and
+ * ADR that removed it, a clause saying why it went, an imperative fix, and —
+ * where an ADR-0087 conversion covers the surface — the house `os migrate
+ * meta` sentence. That sentence is pinned class-wide by
+ * `retired-key-migrate-sentence.test.ts`, a plain TEXT scan over string
+ * literals with no dependency on `retiredKey()` — so a value retirement's
+ * prescription is judged by the same pin as a key retirement's, for free and
+ * with no change to the pin. Its walk yields non-test `.ts` only, which is
+ * the right boundary (a fixture is not a shipped prescription) and is why
+ * this helper's own test fixture is NOT evidence the pin fires: planting the
+ * withdrawn spelling there was measured to leave the pin green.
+ *
+ * ⛔ Not a structured `{ from, to }` record. The machine-readable channel for
+ * a retirement already exists one layer out — the ADR-0087 conversion registry
+ * and the generated upgrade guide — and the message's job is the one thing
+ * those cannot do: reach the author standing in front of a parse error. A
+ * second vocabulary for the same fact is how the two drift apart.
+ */
+export type RetiredValueGuidance = Readonly<Record<string, string>>;
+
+/**
+ * Declare an enum whose vocabulary has been NARROWED: `z.enum(values)` with a
+ * named refusal carrying the migration prescription for each member the
+ * narrowing retired (#17109, maintainer ruling 2026-09-09 — the generic
+ * helper, ⛔ deliberately not a refinement on the one enum that surfaced it).
+ *
+ * ## The gap this closes
+ *
+ * {@link retiredKey} retires a **key**. It has no counterpart for a **value**,
+ * and the three removal routes in the `spec-property-retirement` skill (§2)
+ * all address keys — none applies to "the def survives, one member leaves".
+ * Two enums had already reached for the same hand-rolled shape independently
+ * (`data/hook-body.zod.ts` `HookBodyCapability.crypto.hash`, `data/object.zod.ts`
+ * `managedBy: 'system'`), each re-deriving the same judgement in its own
+ * comment; meanwhile `spec-changes.json` twice records the opposite
+ * conclusion — "a removed ENUM MEMBER cannot carry a retiredKey() fix-it
+ * error the way an authorable object key can" (`data.field.changed`, #4673;
+ * `owd-full-alias-removed`) — and those two retirements shipped with no
+ * prescription at all. One mechanism, so the diagnosis reads the same
+ * everywhere and the next narrowing does not have to re-decide.
+ *
+ * ## Both authoring channels, same as a key tombstone
+ *
+ *   1. **`tsc`.** The retired member is absent from `values`, so `z.input` no
+ *      longer admits it and writing it fails to compile at the authoring site.
+ *      This falls out of the shape rather than being added to it — the retired
+ *      member is declared in `retired`, never in `values`, and the helper
+ *      refuses the two lists overlapping.
+ *   2. **The parse.** A value reaching the runtime raises the prescription
+ *      itself instead of zod's anonymous `Invalid option: expected one of …`.
+ *      Only the retired member gets it: everything else keeps zod's own
+ *      message, which already lists the legal tokens — telling the author of
+ *      `variant: 'headng'` that their value "was removed" would misinform.
+ *
+ * ## What composes, and what it does about a default
+ *
+ * The return value is a plain `ZodEnum`, so `.describe()`, `.optional()`,
+ * `.default(…)`, `.meta()` and every schema walker behave exactly as they do
+ * on `z.enum(…)` — the retirement rides on the enum's own error map and adds
+ * no wrapper for anything to resolve through. On a **defaulted** enum an
+ * omitted key still materializes the default untouched (absence never meets
+ * the refusal); an explicitly authored retired member still refuses. The one
+ * case this helper does NOT cover is a retired member that WAS the default —
+ * then every artifact a released toolchain built carries it materialized, and
+ * the judgement for that population is {@link acceptRetiredDefaultResidue}'s,
+ * not this one's.
+ *
+ * ## Registration
+ *
+ * Nothing here registers itself, and the key-level ledgers have no row shape
+ * for a value: `RETIRED_KEYS_BY_MAJOR` is keyed `'<defKey>:<name>'` (a key),
+ * and the liveness ledger is walked per schema PROPERTY, which a member is
+ * not. Per the skill's §2 table, an enum-value narrowing is also byte-invisible
+ * to all four generated ratchets — the def, its exports and its key are all
+ * unchanged. So the declaration channels a narrowing owes are its ADR-0087
+ * conversion and its changeset, and the prescription below is the only one an
+ * author meets directly. ⚠️ Declaring a member retired here does not narrow
+ * anything by itself: delete it from `values` in the same edit, which is what
+ * the construction-time refusal enforces.
+ *
+ * @param values - The enum's LIVE vocabulary, retired members already removed.
+ * @param retired - Retired member → its prescription. Must be non-empty, and
+ *   must not name anything still in `values`.
+ *
+ * @example
+ * ```ts
+ * export const HookBodyCapability = enumWithRetiredValues(
+ *   ['api.read', 'api.write', 'api.transaction', 'crypto.uuid', 'log'],
+ *   { 'crypto.hash': CRYPTO_HASH_RETIRED },
+ * );
+ * ```
+ */
+export function enumWithRetiredValues<const T extends readonly [string, ...string[]]>(
+  values: T,
+  retired: RetiredValueGuidance,
+) {
+  const names = Object.keys(retired);
+  if (names.length === 0) {
+    throw new Error(
+      'enumWithRetiredValues: no retired member declared — a retirement wrapper that can never fire '
+      + 'is a declaration with no enforcement; call `z.enum()` directly instead.',
+    );
+  }
+  const live = new Set<string>(values);
+  const overlap = names.filter((name) => live.has(name));
+  if (overlap.length > 0) {
+    throw new Error(
+      `enumWithRetiredValues: ${overlap.map((n) => `'${n}'`).join(', ')} declared retired but still listed `
+      + 'in the enum — the enum accepts the value, so the prescription can never fire. Delete the member '
+      + 'from `values`; the retirement is what removes it.',
+    );
+  }
+  const blank = names.filter((name) => retired[name]?.trim() === '' || retired[name] === undefined);
+  if (blank.length > 0) {
+    throw new Error(
+      `enumWithRetiredValues: ${blank.map((n) => `'${n}'`).join(', ')} declared retired with an empty `
+      + 'prescription — the prescription IS the migration doc for whoever hits it. State what replaced '
+      + 'the member, the version that removed it, and the one-line fix.',
+    );
+  }
+  return z.enum(values, {
+    // `hasOwnProperty`, never a bare `retired[input]`: a plain object literal
+    // inherits `constructor`, `toString` and friends from Object.prototype, so
+    // the bare lookup answers an author's `variant: 'constructor'` with a
+    // FUNCTION where this map's contract is `string | undefined`. Measured on
+    // zod 4.4.3: zod ignores a non-string return and falls back to its own
+    // message, so the guard buys nothing OBSERVABLE today — it keeps the map
+    // honest instead of resting on that leniency, and the pin for it asks this
+    // map directly rather than through a parse. `typeof === 'string'` guards
+    // the same lookup against a non-string input (a number, an object).
+    error: (issue) =>
+      (typeof issue.input === 'string'
+      && Object.prototype.hasOwnProperty.call(retired, issue.input)
+        ? retired[issue.input]
+        : undefined),
+  });
 }

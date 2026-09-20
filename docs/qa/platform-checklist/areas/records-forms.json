@@ -49,7 +49,7 @@
             }
           },
           "expect": "2xx. `enable.feeds` is stated EXPLICITLY false — unlike files it cannot be omitted, because omission means the spec default `true` (object.zod.ts) and would give a feeds-ENABLED object that scores both probes green for the wrong reason. `sharingModel` is public_read_write ON PURPOSE: the probes must be refused by the CAPABILITY gate, not by record access, and a caller who can read and edit this parent isolates FEEDS_DISABLED from the sibling RECORD_NOT_ACCESSIBLE refusal (packages/plugins/plugin-audit/src/comment-access-hooks.ts).",
-          "source": "`enable.feeds` is the #2707 opt-out, default true (packages/spec/src/data/object.zod.ts#Record: 'Record comments/collaboration feed. Default on; explicit false hides the feed UI and rejects any write that makes a comment target this object (403 FEEDS_DISABLED) — a new comment and an update that re-threads an existing one alike'). `sharingModel` is a TOP-LEVEL object key, enum ['private','public_read','public_read_write','controlled_by_parent'] (packages/spec/src/data/object.zod.ts#query; ADR-0090 D4). `?package=` is read as `query.package` and threaded to saveMetaItem as packageId (packages/runtime/src/domains/meta.ts)"
+          "source": "`enable.feeds` is the #2707 opt-out, default true (packages/spec/src/data/object.zod.ts#Record: 'Record comments/collaboration feed. Default on; explicit false hides the feed UI and rejects any write that makes a comment target this object (403 FEEDS_DISABLED) — a new comment and an update that re-threads an existing one alike'). `sharingModel` is a TOP-LEVEL object key, enum ['private','public_read','public_read_write','controlled_by_parent'] (packages/spec/src/data/object.zod.ts#sharingModel; ADR-0090 D4 — re-pointed #18104: query is not a key this schema declares, and sharingModel is the key this sentence is about). `?package=` is read as `query.package` and threaded to saveMetaItem as packageId (packages/runtime/src/domains/meta.ts)"
         }
       ],
       "teardown": "DELETE /api/v1/packages/com.objectstack.qa.feeds (client `packages.uninstall`, ledgered at rest-route-ledger.ts) — or simply discard the isolated file DB, which is the cheaper path and the one an isolated boot makes free. Any throwaway qa_nofeeds record and any sys_comment row created against it go with the package.",
@@ -349,7 +349,7 @@
       "source": [
         "packages/spec/src/data/field.zod.ts#FieldType (FieldType enum — 49 members, listed exhaustively in variants)",
         "examples/app-showcase/src/data/objects/field-zoo.object.ts",
-        "examples/app-showcase/src/data/seed/index.ts#Specimen (Specimen rows; expense/invoice roll-up expectations)",
+        "examples/app-showcase/src/data/seed/index.ts#fieldZoo (Specimen rows; expense/invoice roll-up expectations — re-pointed #18104: Specimen survives in this file only inside the record names, a substring of a longer string; the rows this item means are the ones the fieldZoo seed declares, with invoices / expenseReports carrying the roll-up expectations)",
         "packages/qa/dogfood/test/field-zoo.matrix.ts",
         "objectui: e2e/live/summary-rollup.spec.ts"
       ],
@@ -1581,7 +1581,7 @@
       "source": [
         "packages/spec/src/ui/action.zod.ts#ACTION_LOCATIONS (ACTION_LOCATIONS — the canonical 6-value enum, single source of truth; `global_nav` was the 7th until #6888 retired it — no product surface rendered it)",
         "examples/app-showcase/src/ui/actions/index.ts#locations (per-location fixture fleet + the record:quick_actions filter note + the two headless `locations: []` declarations)",
-        "packages/lint/src/validate-action-locations.ts#action (the `action-no-placement` rule — this repo's codification of the current contract: an action with no `locations` renders nowhere and is therefore inert, while `locations: []` is the deliberate headless declaration and is NOT flagged)",
+        "packages/lint/src/validate-action-locations.ts#ACTION_NO_PLACEMENT (the `action-no-placement` rule — re-pointed #18104: action is a LOCAL BINDING inside this file's walk, not a declared surface; ACTION_NO_PLACEMENT is the exported rule id — this repo's codification of the current contract: an action with no `locations` renders nowhere and is therefore inert, while `locations: []` is the deliberate headless declaration and is NOT flagged)",
         "objectui: packages/types/src/ui-action.ts `actionRendersAt` (the single placement predicate — a membership test, so an undeclared or empty `locations` matches nothing) + packages/.../action-bar.tsx, its consumer since objectui#3142",
         "cross-ref: bulk dispatch-count semantics live in records-forms.list-view-capabilities (bulk-actions variant); param dialogs in records-forms.action-param-widgets"
       ],
@@ -2441,7 +2441,7 @@
         "objectui: packages/plugin-detail/src/{RecordChatterPanel,CommentInput,MentionAutocomplete,extractMentions}.tsx (compose + @mention)",
         "objectui: packages/app-shell/src/views/RecordDetailView.tsx (mergeFeedRows union-by-id, sys_comment + sys_activity fetch/merge, mentionSuggestions), packages/plugin-detail/src/renderers/recordActivityFeed.ts (activity→feed map)",
         "objectui: packages/collaboration/src/useMentionNotifications.ts (recipient-scoped bell, unreadCount)",
-        "framework: packages/spec/src/data/object.zod.ts#FEEDS_DISABLED (enable.feeds default true → FEEDS_DISABLED, 'a new comment and an update that re-threads an existing one alike'); PENDING-GAPS §B record-discussion-mentions",
+        "framework: packages/spec/src/data/object.zod.ts#enable.feeds (enable.feeds default true → FEEDS_DISABLED — re-pointed #18104: FEEDS_DISABLED is named in this file only inside a describe() string and a comment; the key this item means is enable.feeds, 'a new comment and an update that re-threads an existing one alike'); PENDING-GAPS §B record-discussion-mentions",
         "framework: packages/plugins/plugin-audit/src/audit-writers.ts#enforceFeedsCapability (enforceFeedsCapability, registered on beforeInsert AND beforeUpdate per #10170), packages/plugins/plugin-audit/src/comment-access-hooks.ts#RECORD_NOT_ACCESSIBLE (RECORD_NOT_ACCESSIBLE — the sibling refusal the probes isolate against), packages/plugins/plugin-audit/src/objects/sys-comment.object.ts#thread_id (thread_id is conventionally `{object}:{record_id}`)",
         "framework: packages/spec/src/data/feed.zod.ts#FeedFilterMode (FeedFilterMode, 4 members — pinned above),+ (SYS_ACTIVITY_BUILTIN_TYPES + the #11507 open-vocabulary ruling: built-ins are the floor, never the ceiling); packages/plugins/plugin-audit/src/objects/sys-activity.object.ts#apiMethods (apiMethods ['get','list'] — why the probe cannot direct-POST)",
         "objectui: packages/plugin-detail/src/RecordActivityTimeline.tsx (FeedFilterMode imported from the spec), (the four filter options), (filterItems); packages/plugin-detail/src/renderers/recordActivityFeed.ts (ACTIVITY_TYPE_TO_FEED_TYPE superset map + UNMAPPED_ACTIVITY_FEED_TYPE fallback + its diagnostic; drift held by the objectui#5969 two-directional pin, recordActivityFeed.test.ts)"
@@ -3006,7 +3006,7 @@
         "ref": "objectui: e2e/import-console/import-console-undo.spec.ts, e2e/import-harness/import-undo.spec.ts (both self-gate)"
       },
       "source": [
-        "framework: packages/rest/src/rest-route-ledger.ts#jobId (POST /data/:object/import/jobs; /import/jobs/:jobId/{cancel,undo,results}; GET /import/jobs[/:jobId])",
+        "framework: packages/rest/src/rest-route-ledger.ts#REST_ROUTE_LEDGER (POST /data/:object/import/jobs; /import/jobs/:jobId/{cancel,undo,results}; GET /import/jobs[/:jobId] — re-pointed #18104: jobId is a route PATH PARAMETER, carried in this file only inside a route string)",
         "objectui: e2e/import-console/import-console-undo.spec.ts, e2e/import-harness/import-undo.spec.ts",
         "PENDING-GAPS §C import-job-undo-cancel"
       ],

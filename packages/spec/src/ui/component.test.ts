@@ -24,7 +24,9 @@ import {
   ObjectKanbanPropsSchema,
 } from './component.zod';
 import { PageComponentSchema, PageSchema, PageComponentType, ElementDataSourceSchema, RETIRED_PAGE_COMPONENT_TYPES } from './page.zod';
-import { GanttConfigSchema, TreeConfigSchema, ListMapConfigSchema } from './view.zod';
+import { GanttConfigSchema, TreeConfigSchema, ListMapConfigSchema, ListColumnSchema, ListViewSchema } from './view.zod';
+import { FieldSchema } from '../data/field.zod';
+import { ALL_CONVERSIONS } from '../conversions/registry';
 import { strictObjectDeclarations } from '../shared/strict-object';
 
 describe('PageHeaderProps', () => {
@@ -855,6 +857,168 @@ describe('RecordRelatedListProps', () => {
     const props = { objectName: 'contact', relationshipField: 'account_id' };
     expect(() => RecordRelatedListProps.parse(props)).not.toThrow();
     expect(RecordRelatedListProps.parse(props).columns).toBeUndefined();
+  });
+});
+
+// ===========================================================================
+// #18639 — `record:related_list.columns` IS the saved-view `ListColumn` union
+// ===========================================================================
+/**
+ * Ruling A on objectui#9593 (decision batch #144 item 3, maintainer verbatim
+ * 「9593 A，其他同意」): `RecordRelatedListProps.columns` declares the SAME
+ * union as the saved-view key `listViews[].columns`, because objectui composes
+ * a saved view's columns onto this block VERBATIM (`dataSource.view` →
+ * `composeElementDataSource` → `savedViewColumns`). Before it, two published
+ * declarations disagreed about one key.
+ *
+ * What is pinned here:
+ *
+ *   1. both spellings parse, and the decoration SURVIVES the parse — a
+ *      `describe()` promising decoration a parse strips would be the defect
+ *      class this card exists to close, one layer over;
+ *   2. it is the same DECLARATION, not a lookalike: the object arm is the
+ *      `ListColumnSchema` binding itself (reference identity, and the refusal
+ *      text carries that schema's own surface word), and block and view give
+ *      every fixture the same verdict;
+ *   3. what it still REFUSES — an unknown member on a column object, a MIXED
+ *      array (the arms are exclusive), a non-array, an identity-less object;
+ *   4. the prose↔schema agreement, so the two cannot drift apart silently;
+ *   5. the ruling's two scope fences, held by measurement rather than intent.
+ */
+describe('RecordRelatedListProps.columns — the saved-view ListColumn union (#18639)', () => {
+  const base = { objectName: 'contact', relationshipField: 'account_id' };
+  const parse = (columns: unknown) => RecordRelatedListProps.safeParse({ ...base, columns });
+  /** Refuse `columns` and hand back the issues as a searchable string. */
+  const refusalOf = (columns: unknown): string => {
+    const r = parse(columns);
+    expect(r.success, `expected REJECTION of ${JSON.stringify(columns)}`).toBe(false);
+    return JSON.stringify(r.error?.issues ?? []);
+  };
+
+  it('still accepts the legacy field-name string array', () => {
+    const r = parse(['name', 'email']);
+    expect(r.success, JSON.stringify(r.error?.issues)).toBe(true);
+    expect(r.data?.columns).toEqual(['name', 'email']);
+  });
+
+  it("accepts a saved view's decorated columns, and the decoration survives the parse", () => {
+    const decorated = [
+      { field: 'name', label: 'Name', link: true },
+      { field: 'amount', width: 120, align: 'right', summary: 'sum' },
+      { field: 'internal_note', hidden: true, sortable: false },
+    ];
+    const r = parse(decorated);
+    expect(r.success, JSON.stringify(r.error?.issues)).toBe(true);
+    // Not just "it parsed": the keys the ruling wants on the screen are still
+    // there afterwards. A strip would satisfy `success` and lose the point.
+    expect(r.data?.columns).toMatchObject(decorated);
+  });
+
+  it('is the SAME union the saved-view key declares — the object arm IS ListColumnSchema', () => {
+    /** The element schema of a `columns` union's object arm, both carriers. */
+    const objectArmElement = (schema: unknown): unknown => {
+      const def = (schema as { _zod: { def: Record<string, unknown> } })._zod.def;
+      const union = (def.type === 'optional'
+        ? (def.innerType as { _zod: { def: Record<string, unknown> } })._zod.def
+        : def) as { type: string; options: Array<{ _zod: { def: { element: unknown } } }> };
+      expect(union.type).toBe('union');
+      expect(union.options).toHaveLength(2);
+      return union.options[1]._zod.def.element;
+    };
+    const blockArm = objectArmElement((RecordRelatedListProps as unknown as {
+      shape: Record<string, unknown>;
+    }).shape.columns);
+    const viewArm = objectArmElement((ListViewSchema as unknown as {
+      shape: Record<string, unknown>;
+    }).shape.columns);
+    // Reference identity, not structural resemblance: one def, two carriers.
+    expect(blockArm).toBe(ListColumnSchema);
+    expect(viewArm).toBe(ListColumnSchema);
+    expect(blockArm).toBe(viewArm);
+  });
+
+  it('agrees with `listViews[].columns` on every fixture — one union, two carriers', () => {
+    const fixtures: unknown[] = [
+      ['name', 'email'],
+      [{ field: 'amount', label: 'Amount', width: 120 }],
+      [{ field: 'amount', summary: { type: 'avg', field: 'total' } }],
+      [{ field: 'name', prefix: { field: 'status', type: 'badge' } }],
+      [{ field: 'amount', bogus: 1 }],
+      ['name', { field: 'amount' }],
+      [{ field: 'name', prefix: { field: 'status', type: 'chip' } }],
+      [{}],
+      'name',
+      { field: 'name' },
+    ];
+    for (const columns of fixtures) {
+      const view = (ListViewSchema as unknown as {
+        safeParse: (v: unknown) => { success: boolean };
+      }).safeParse({ columns });
+      expect(
+        parse(columns).success,
+        `block and saved view disagree about ${JSON.stringify(columns)}`,
+      ).toBe(view.success);
+    }
+  });
+
+  it("refuses an unknown member on a column object — through ListColumnSchema's own strictness", () => {
+    const text = refusalOf([{ field: 'amount', bogus: 1 }]);
+    expect(text).toContain('"code":"unrecognized_keys"');
+    expect(text).toContain('bogus');
+    // The named-surface refusal is ListColumnSchema's own text. A re-spelled
+    // lookalike would refuse too, and would not say this.
+    expect(text).toContain('this list column');
+  });
+
+  it('refuses a MIXED array — the two arms are exclusive, exactly as the describe says', () => {
+    const text = refusalOf(['name', { field: 'amount' }]);
+    expect(text).toContain('"code":"invalid_union"');
+  });
+
+  it('refuses a non-array, and an object entry with no resolvable field', () => {
+    refusalOf('name');
+    refusalOf({ field: 'name' });
+    refusalOf([{}]);
+    refusalOf([{ label: 'Amount' }]);
+  });
+
+  it('the describe() says what the schema does — override chain and the ListColumn spelling', () => {
+    const text = String((RecordRelatedListProps as unknown as {
+      shape: Record<string, { description?: string }>;
+    }).shape.columns.description);
+    // The override chain the ruling asked the describe to name …
+    expect(text).toContain('Override chain: child highlightFields → field-level relatedListColumns');
+    // … that a view-supplied list may arrive in the ListColumn spelling …
+    expect(text).toContain('`ListColumn`');
+    expect(text).toContain('listViews[].columns');
+    expect(text).toContain('verbatim');
+    // … and the exclusivity the schema really enforces (pinned above).
+    expect(text).toContain('the two arms are exclusive');
+  });
+});
+
+describe('#18639 scope fences — held by measurement, not by intent', () => {
+  it('`field.relatedListColumns` is still strings-only — a ListColumn entry is refused at the field door', () => {
+    const lookup = { name: 'project', label: 'Project', type: 'lookup', reference: 'showcase_project' };
+    const field = (relatedListColumns: unknown) =>
+      FieldSchema.safeParse({ ...lookup, relatedListColumns });
+    expect(field(['status', 'amount']).success).toBe(true);
+    const refused = field([{ field: 'amount', label: 'Amount', width: 120 }]);
+    expect(refused.success, 'the sibling key stays strings-only by ruling').toBe(false);
+    expect(JSON.stringify(refused.error?.issues)).toContain('FIELD-NAME strings');
+  });
+
+  it('the `field-column-lists-canonicalized` conversion is unchanged — object entries still fold to the identity string', () => {
+    const entry = ALL_CONVERSIONS.find((c) => c.id === 'field-column-lists-canonicalized');
+    expect(entry, 'the ruling keeps this conversion exactly as it is').toBeDefined();
+    expect(entry?.surface).toBe('field.inlineColumns[].field / field.relatedListColumns[] object entries');
+    const after = entry?.fixture.after as {
+      objects: Array<{ fields: Record<string, { relatedListColumns?: unknown }> }>;
+    };
+    // `{ field: 'status', label: 'Status' }` → `'status'`: the decoration is
+    // still DROPPED on this key, which is precisely what widening the block
+    // sibling does NOT do.
+    expect(after.objects[0].fields.project.relatedListColumns).toEqual(['status', 'amount', 'issued_on']);
   });
 });
 
