@@ -200,7 +200,27 @@ const DEFAULT_MEMBER_RUNTIME_TYPES: readonly string[] = ['flow'];
  * member plus that type's own false-positive measurement, never automatic.
  */
 export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
-  { name: 'validateObjectReferences', run: validateObjectReferences },
+  // [#19143] `dataset` joins the frozen `['flow']` default on this member, for
+  // ONE rung: `datasets[].object`, the dataset's base object (#14105). That
+  // rung lives here rather than beside the dataset field checks precisely
+  // because the reference is an object NAME and needs this rule's curated
+  // `PLATFORM_PROVIDED_OBJECT_NAMES` ladder — the platform's own
+  // `system.datasets.ts` declares five datasets over `sys_*` objects, three of
+  // which live in packages a narrower stack cannot see, and a local
+  // "not in this stack ⇒ error" check would report all five. The ladder is
+  // exactly what makes the crossing safe: it resolves against `stack.objects`,
+  // which every per-write snapshot carries, so there is no
+  // missing-collection false-positive channel, and its other rungs (views,
+  // pages, apps, nav) find no such collection on a dataset snapshot and
+  // contribute nothing — rungs that are ABSENT, not rungs that read dead.
+  // MEASURED before crossing, through the door's own shape (per-write snapshot,
+  // evaluated differentially as `runtime-gate.ts` does), over every dataset
+  // shipped in this monorepo: 11 datasets (platform-objects 5 over `sys_*`,
+  // showcase 4, crm 1, todo 1) against 52 platform objects plus each app's own
+  // — 0 findings, precision 1.0. The zero is a fact about the corpus AND the
+  // door: `rulesRun` read 2 on every one, and the same harness's synthetic
+  // probe is refused (`runtime-gate.dataset-writes.test.ts` makes it permanent).
+  { name: 'validateObjectReferences', runtimeTypes: ['flow', 'dataset'], run: validateObjectReferences },
   // [#9313] `runtimeTypes` gains `view` on this member and its sort sibling:
   // both judge a LIST VIEW's field references, and a standalone list view is
   // written through `PUT /api/v1/meta/view` — the only door a Studio tenant or
@@ -370,7 +390,20 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // at real columns. Its base-object sibling is `validateObjectReferences`
   // (rung ①, and the reason this member skips a dataset whose object does not
   // resolve rather than repeating the typo once per position).
-  { name: 'validateDatasetReferences', run: validateDatasetReferences },
+  //
+  // [#19143] `dataset` joins the frozen `['flow']` default, and this member is
+  // the reason the card exists: the rule judges positions ON the dataset
+  // document, its own module states the failure mode it prevents as a surface
+  // that «renders successfully with empty or wrong numbers», and until the
+  // `dataset` type was mapped at the gate a runtime dataset write dispatched
+  // nothing at all. It resolves against `stack.objects` and `stack.datasets` —
+  // both carried by a per-write snapshot — so the crossing has no
+  // missing-collection false-positive channel, and its three documented skips
+  // (an object this stack does not define, one with no readable field map, a
+  // registry-injected system column) are what keep a partial snapshot from
+  // manufacturing a refusal. Crossed TOGETHER with its base-object sibling
+  // `validateObjectReferences` on #7220's reading, never one without the other.
+  { name: 'validateDatasetReferences', runtimeTypes: ['flow', 'dataset'], run: validateDatasetReferences },
   { name: 'validateNavAccess', run: validateNavAccess },
   // Nav targets that are NOT object names — page/report/dashboard. Restores the
   // coverage `defineStack`'s own cross-reference block switches off whenever the
