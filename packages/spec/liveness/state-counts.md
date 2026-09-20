@@ -64,6 +64,6 @@ for both corollaries.
 | `route_generation` | 0 | 0 | 0 | 4 | 0 | 4 |
 | `realtime_subscription` | 0 | 0 | 0 | 6 | 0 | 6 |
 | `sharing_rule` | 16 | 0 | 0 | 0 | 1 | 17 |
-| `connector` | 20 | 0 | 0 | 53 | 1 | 74 |
+| `connector` | 29 | 0 | 0 | 44 | 1 | 74 |
 | `analytics_cube` | 17 | 0 | 0 | 10 | 0 | 27 |
-| **total** | **915** | **5** | **1** | **160** | **11** | **1092** |
+| **total** | **924** | **5** | **1** | **151** | **11** | **1092** |
