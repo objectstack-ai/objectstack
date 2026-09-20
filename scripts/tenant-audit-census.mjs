@@ -147,8 +147,8 @@
  * invisible. ⭐ The subtraction is not the defect; the two arms printing the same
  * thing is.
  *
- * ⇒ {@link NON_ENGINE_REASONS} is now a closed set of seven, five of which name a
- *   fact that DEFENDS the subtraction and two of which admit the census could not
+ * ⇒ {@link NON_ENGINE_REASONS} is now a closed set of eight, five of which name a
+ *   fact that DEFENDS the subtraction and three of which admit the census could not
  *   place the receiver's type. The undefended ones are printed per site on every
  *   run, carried per site in `--json`, and counted under ENFORCEMENT in both
  *   artefacts -- so a type that leaves the index lands in the diff by name instead
@@ -178,6 +178,34 @@
  *   means a door-shaped receiver reached the subtraction anyway, i.e. this hole has
  *   reopened.
  *
+ * ## ⭐ The census's OWN round trip is the census's own problem
+ *
+ * A declared type's text is stored whitespace-collapsed, and the door rule above
+ * is read off it by re-parsing it as a synthetic alias
+ * (`type CensusReceiver = <the stored text>;`). A type literal may separate its
+ * members by a NEWLINE alone -- legal TypeScript -- and the collapse turns that
+ * separator into nothing, so the synthesis does not parse. Through
+ * {@link parseSourceFile} that did not fail the SITE: it ended the process, so
+ * one receiver's unanswerable question became no answer for any site, under a
+ * refusal naming `census-receiver-type.ts`, a file that does not exist in the
+ * tree.
+ *
+ * ⇒ The synthesis goes through `parseDerivedText` instead, which hands the
+ *   verdict back rather than ending the run -- and the verdict is ACTED ON, never
+ *   swallowed. The site is classified `type-text-not-round-trippable`, an
+ *   UNDEFENDED arm: printed against its own file and line with the parse failure
+ *   under it, carried per site in `--json`, counted under ENFORCEMENT in both
+ *   artefacts, and REFUSED by `check-tenant-audit-census.mjs` -- which is the
+ *   reading CI takes, since `lint.yml` invokes the gate and never this
+ *   generator.
+ *
+ * ⛔ The exchange is a loud process exit for a loud per-site refusal, ⛔ never for
+ * a quiet subtraction: localising the failure into an exit 0 would be the same
+ * floor drop wearing the other costume. ⚠️ And the CORPUS door is untouched --
+ * sources are still read through {@link parseSourceFile}, so a source that does
+ * not parse still ends the run. Only text THIS PROCESS SYNTHESISED is returnable,
+ * and only from an origin that door already certified.
+ *
  * ## Refusals, never quiet passes (#4690)
  *
  * A corpus of zero sources, an object registry of zero declarations, a source
@@ -195,7 +223,7 @@ import { requireDefaultExport } from './import-prerequisite.mjs';
 const ts = await requireDefaultExport('typescript', () => import('typescript'), import.meta.url);
 
 import { isEntrypoint } from './invoked-as.mjs';
-import { parseSourceFile } from './ts-parse.mjs';
+import { parseDerivedText, parseSourceFile } from './ts-parse.mjs';
 
 export const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 
@@ -581,7 +609,7 @@ export function resolveReceiver(recvNode, sf, decls, index, depth = 0) {
     if (entry.type && /^(any|unknown)$/.test(entry.type.trim())) {
       return { kind: 'unresolved', how: `${how}:any`, detail: entry.type };
     }
-    if (entry.type) return inlineEngineDoorOrOther(entry.type, how);
+    if (entry.type) return inlineEngineDoorOrOther(entry.type, how, sf);
     if (entry.init) {
       const t2 = nameOf(entry.init);
       if (t2) return { kind: 'engine', type: t2, how: `${how}/init` };
@@ -610,7 +638,7 @@ export function resolveReceiver(recvNode, sf, decls, index, depth = 0) {
       if (via.kind !== 'unresolved') return { ...via, how: `as-any/${via.how}` };
       return { kind: 'unresolved', how: 'as-any', detail: receiverKey(r.expression, sf) };
     }
-    return inlineEngineDoorOrOther(r.type.getText(sf), 'as');
+    return inlineEngineDoorOrOther(r.type.getText(sf), 'as', sf);
   }
   if (ts.isPropertyAccessExpression(r) && r.expression.kind === ts.SyntaxKind.ThisKeyword) {
     return fromEntry(decls.thisProps.get(r.name.text), `this.${r.name.text}`);
@@ -629,7 +657,7 @@ export function resolveReceiver(recvNode, sf, decls, index, depth = 0) {
     if (mt) {
       const t = nameOf(mt);
       if (t) return { kind: 'engine', type: t, how: `member ${r.name.text}` };
-      return inlineEngineDoorOrOther(mt, `member ${r.name.text}`);
+      return inlineEngineDoorOrOther(mt, `member ${r.name.text}`, sf);
     }
   }
   if (ts.isCallExpression(r)) {
@@ -651,7 +679,7 @@ export function resolveReceiver(recvNode, sf, decls, index, depth = 0) {
       if (mt) {
         const t = nameOf(mt);
         if (t) return { kind: 'engine', type: t, how: `${fname}() return` };
-        return inlineEngineDoorOrOther(mt, `${fname}() return`);
+        return inlineEngineDoorOrOther(mt, `${fname}() return`, sf);
       }
     }
     const entry = fname ? decls.fnReturns.get(fname) : null;
@@ -696,11 +724,11 @@ const TYPE_SYNTAX_WORDS = new Set([
 
 /**
  * ⭐ WHY a write call was subtracted as non-engine -- a CLOSED set in which exactly
- * two arms admit the census could not tell.
+ * three arms admit the census could not tell.
  *
  * The subtraction itself is old and correct: a same-named call on something that is
  * not a data engine must not enter a tenancy population, and `.delete()` alone
- * answers ~250 sites in this corpus. What was missing is that ONE of these seven
+ * answers ~250 sites in this corpus. What was missing is that ONE of these eight
  * answers was reaching the count for two incompatible reasons. `kind: 'other'` was
  * produced both by "I read the receiver's declared type and it is a `Set`" and by
  * "I looked the receiver's declared type up and the index does not hold it" -- and
@@ -708,10 +736,10 @@ const TYPE_SYNTAX_WORDS = new Set([
  * untracked, generated, or a dependency's. Same row, same exit code, no diagnostic:
  * the population shrank, and the part that shrank was invisible.
  *
- * ⇒ Five arms name a fact that DEFENDS the subtraction. Two -- `type-not-in-corpus`
- *   and `anonymous-type` -- say the census could not place the receiver's type, and
- *   those are reported per site, in both artefacts, by receiver and by the type text
- *   it could not place. ⛔ A subtraction is never *withdrawn* on this basis: that
+ * ⇒ Five arms name a fact that DEFENDS the subtraction. Three -- `type-not-in-corpus`,
+ *   `anonymous-type` and `type-text-not-round-trippable` -- say the census could not
+ *   place the receiver's type, and those are reported per site, in both artefacts, by
+ *   receiver and by the type text it could not place. ⛔ A subtraction is never *withdrawn* on this basis: that
  *   would be the census guessing in the other direction. It is DECLARED.
  *
  * ⚠️ `anonymous-type` is now the RESIDUE of a rule that runs first: an inline type
@@ -729,10 +757,33 @@ export const NON_ENGINE_REASONS = Object.freeze({
   'ledger-row': 'an `UNTYPED_RECEIVERS` row says what the receiver is',
   'type-not-in-corpus': '⚠️ UNDEFENDED -- no declaration of that name exists in the TRACKED corpus (untracked, generated, or a dependency\'s)',
   'anonymous-type': '⚠️ UNDEFENDED -- the declared type is an inline literal, so there is no name for the index to be keyed on',
+  'type-text-not-round-trippable': '⚠️ UNDEFENDED -- the declared type text, stored whitespace-collapsed, does not re-parse as a type alias, so the door rule could not be read off it at all',
 });
 
-/** The two arms that admit the census could not place the receiver's type. */
-export const UNDEFENDED_REASONS = Object.freeze(['type-not-in-corpus', 'anonymous-type']);
+/**
+ * The three arms that admit the census could not place the receiver's type.
+ *
+ * ⭐ The third is not a variant of the first two. They say the type could not be
+ * looked UP; it says the census could not READ BACK its own stored spelling of
+ * that type, which is a fact about this tool rather than about the corpus -- and
+ * it is the one arm `censusRefusals` in `check-tenant-audit-census.mjs` REFUSES
+ * on, because the alternative to a process-wide exit must be a loud per-site
+ * verdict and never a quiet subtraction.
+ */
+export const UNDEFENDED_REASONS = Object.freeze([
+  'type-not-in-corpus', 'anonymous-type', 'type-text-not-round-trippable',
+]);
+
+/**
+ * The subtractions whose stored type text did not round-trip, in ONE spelling.
+ *
+ * Read by this module's `main()` for its diagnostics and exit code and by
+ * `check-tenant-audit-census.mjs` for its refusal, because two spellings of
+ * "which sites are these" is how the generator and its gate drift apart.
+ */
+export function notRoundTrippableSites(census) {
+  return (census.undefendedSubtractions ?? []).filter((u) => u.reason === 'type-text-not-round-trippable');
+}
 
 /**
  * Does this receiver's type text itself declare an ObjectQL write door?
@@ -749,9 +800,46 @@ export const UNDEFENDED_REASONS = Object.freeze(['type-not-in-corpus', 'anonymou
  * -- and this predicate is kept as that invariant's alarm: a door-shaped
  * subtraction reaching the artefacts means the placement rule has a hole again.
  */
-export function typeTextDeclaresEngineDoor(typeText) {
-  if (typeof typeText !== 'string' || !/\b(insert|update|delete)\b/.test(typeText)) return false;
-  const sf = parseSourceFile('census-receiver-type.ts', `type CensusReceiver = ${typeText};\n`);
+export function typeTextDeclaresEngineDoor(typeText, origin) {
+  return readTypeTextDoor(typeText, origin).door;
+}
+
+/**
+ * The door rule read off a type text, with the ROUND TRIP reported separately.
+ *
+ * Three verdicts, not two: the text states a write door, it states none, or the
+ * census could not read back the text it stored -- and the third is the one this
+ * reader exists to keep distinguishable. The stored spelling is
+ * whitespace-collapsed, a type literal may separate its members by a newline
+ * alone, and a collapsed member list with no separators is not a parseable type
+ * alias. That is a fact about THIS TOOL's re-serialisation: the source it came
+ * from parsed, and this module read it.
+ *
+ * ⇒ so the synthesis goes through `parseDerivedText`, whose failure comes BACK
+ *   ({@link https://github.com/objectstack-ai/objectstack/issues/19077}). ⛔ It is
+ *   not a `false`: a `false` here is "read it, no write door", and answering that
+ *   about text nobody could read is the quiet subtraction this card refuses.
+ *   Callers branch on `failure` and the census declares the site.
+ *
+ * ⚠️ The verb gate runs FIRST and is unchanged, so a type text naming no write
+ * verb is never synthesised, never parsed, and cannot reach this arm -- the
+ * repair's reach is exactly the defect's reach.
+ *
+ * @param {string} typeText  The stored, whitespace-collapsed declared type text.
+ * @param {ts.SourceFile} origin  The tree that text was read out of, as
+ *   `parseSourceFile` returned it. `parseDerivedText` refuses an origin this
+ *   process never certified, so an unreadable SOURCE cannot reach the returnable
+ *   door -- by construction, not by review.
+ * @returns {{ door: boolean, failure: null|{ message: string, line: number,
+ *   column: number, count: number, report: string } }}
+ */
+export function readTypeTextDoor(typeText, origin) {
+  if (typeof typeText !== 'string' || !/\b(insert|update|delete)\b/.test(typeText)) {
+    return { door: false, failure: null };
+  }
+  const derived = parseDerivedText(origin, 'census-receiver-type.ts', `type CensusReceiver = ${typeText};\n`);
+  if (derived.failure) return { door: false, failure: derived.failure };
+  const sf = derived.sourceFile;
   let door = false;
   const visit = (node) => {
     if (ts.isTypeLiteralNode(node)) {
@@ -764,7 +852,7 @@ export function typeTextDeclaresEngineDoor(typeText) {
     ts.forEachChild(node, visit);
   };
   visit(sf);
-  return door;
+  return { door, failure: null };
 }
 
 /**
@@ -801,8 +889,8 @@ const INLINE_ENGINE_TYPE = 'inline type literal stating an engine door';
  * ⛔ `how` is not carried onto a PLACED site, so what `--json` shows for one of
  * these is its `engineType`, the sentence above.
  */
-function inlineEngineDoorOrOther(typeText, how) {
-  if (typeTextDeclaresEngineDoor(typeText)) {
+function inlineEngineDoorOrOther(typeText, how, origin) {
+  if (typeTextDeclaresEngineDoor(typeText, origin)) {
     return { kind: 'engine', type: INLINE_ENGINE_TYPE, how: `${how}/inline-door` };
   }
   return { kind: 'other', type: typeText, how };
@@ -815,24 +903,34 @@ function inlineEngineDoorOrOther(typeText, how) {
  * corpus's type-name set, so it cannot reach a fact the classifier itself could
  * not reach, and it can never move a verdict -- it explains one.
  */
-export function nonEngineReason(res, typeNames) {
+export function nonEngineReason(res, typeNames, origin) {
   const raw = typeof res?.type === 'string' ? res.type : '';
-  if (raw.startsWith('node: builtin')) return { reason: 'builtin-import', names: [], doorShaped: false };
+  if (raw.startsWith('node: builtin')) return { reason: 'builtin-import', names: [], doorShaped: false, failure: null };
   if (/^new\s/.test(raw) || /\/new$/.test(String(res?.how ?? ''))) {
-    return { reason: 'constructed-locally', names: [], doorShaped: false };
+    return { reason: 'constructed-locally', names: [], doorShaped: false, failure: null };
+  }
+  // ⭐ The door rule is read ONCE here, and its round-trip verdict is read BEFORE
+  // any arm is chosen. A type text this census stored and cannot read back is not
+  // an index miss and not "an inline literal the door rule rejected" -- both of
+  // those are answers about a text somebody read. ⛔ Folding it into either would
+  // subtract the site under a reason that is false about it, which is the silent
+  // half of the failure this arm exists to make loud.
+  const read = readTypeTextDoor(raw, origin);
+  if (read.failure) {
+    return { reason: 'type-text-not-round-trippable', names: [], doorShaped: false, failure: read.failure };
   }
   // String literals inside a type (an `import('…')` specifier, a literal union)
   // carry no type NAMES, and their words would read as unplaceable identifiers.
   const text = raw.replace(/'[^']*'|"[^"]*"|`[^`]*`/g, "''");
   if (text.includes('{')) {
-    return { reason: 'anonymous-type', names: [], doorShaped: typeTextDeclaresEngineDoor(raw) };
+    return { reason: 'anonymous-type', names: [], doorShaped: read.door, failure: null };
   }
   const ids = [...new Set(text.match(/[A-Za-z_$][\w$]*/g) ?? [])]
     .filter((id) => !PLATFORM_TYPES.has(id) && !TYPE_SYNTAX_WORDS.has(id));
-  if (ids.length === 0) return { reason: 'platform-type', names: [], doorShaped: false };
+  if (ids.length === 0) return { reason: 'platform-type', names: [], doorShaped: false, failure: null };
   const unseen = ids.filter((id) => !typeNames.has(id));
-  if (unseen.length === 0) return { reason: 'corpus-type', names: ids, doorShaped: false };
-  return { reason: 'type-not-in-corpus', names: unseen, doorShaped: false };
+  if (unseen.length === 0) return { reason: 'corpus-type', names: ids, doorShaped: false, failure: null };
+  return { reason: 'type-not-in-corpus', names: unseen, doorShaped: false, failure: null };
 }
 
 /**
@@ -1314,12 +1412,15 @@ export function runCensus({ root = ROOT, roots = SURFACE_ROOTS } = {}) {
         if (kind === 'other') {
           nonEngineCalls += 1;
           // ⭐ The subtraction is unchanged; what is new is that it now SAYS what
-          // it rests on. Two of the seven arms admit the census could not place
+          // it rests on. Three of the eight arms admit the census could not place
           // the receiver's type -- those are the ones that used to be spelled
           // exactly like "read it, not an engine", and they are reported per site.
+          // ⚠️ The source's own tree goes in as the ORIGIN: the door rule re-parses
+          // a text derived from it, and a verdict about a synthesis must be
+          // attributable to the site it was synthesised from.
           const why = byLedger
-            ? { reason: 'ledger-row', names: [], doorShaped: false }
-            : nonEngineReason(res, typeNames);
+            ? { reason: 'ledger-row', names: [], doorShaped: false, failure: null }
+            : nonEngineReason(res, typeNames, sf);
           nonEngineReasons.set(why.reason, (nonEngineReasons.get(why.reason) ?? 0) + 1);
           if (UNDEFENDED_REASONS.includes(why.reason)) {
             undefendedSubtractions.push({
@@ -1329,6 +1430,11 @@ export function runCensus({ root = ROOT, roots = SURFACE_ROOTS } = {}) {
               reason: why.reason,
               names: why.names,
               doorShaped: why.doorShaped === true,
+              // The located parse verdict for the one arm that has one, so the
+              // run can print it against THIS site. ⛔ Not part of any artefact
+              // key: `undefendedRows` aggregates on (file, receiver, verb,
+              // reason, type, doorShaped), so a diagnostic cannot move a count.
+              derivedFailure: why.failure ?? null,
             });
           }
         }
@@ -1514,6 +1620,12 @@ export function renderUndefendedSubtractions(census, heading, { withRows = true 
   out.push('index is built from TRACKED sources only, deliberately. An untracked, generated');
   out.push('or dependency-owned declaration is one this census never saw, and «never saw it»');
   out.push('must not be spelled the same way as «read it, not an engine».');
+  out.push('');
+  out.push('⚠️ One arm here says something else again: `type-text-not-round-trippable` is a');
+  out.push('receiver whose declared type the census STORED whitespace-collapsed and could');
+  out.push('not read back — the source parsed, the re-serialisation of it did not, so the');
+  out.push('door rule could never be read off it. That is a fault in this tool rather than');
+  out.push('a fact about the corpus, and it is the one row here that also fails the gate.');
   out.push('');
   out.push('| what | count |', '| :--- | ---: |');
   out.push(`| write calls subtracted with no defensible reason | **${rows.reduce((n, r) => n + r.count, 0)}** |`);
@@ -1921,10 +2033,17 @@ export function selfTest() {
   // asserted only in prose is one nothing holds. So both directions are pinned
   // here: membership of the tracked corpus is the ONLY difference between the two
   // cases in each pair, and the verdicts must differ.
+  // The door rule re-parses a text DERIVED from a source, so every probe hands
+  // it the tree that source was read into -- the same thing `runCensus` hands it.
+  // ⛔ Not a formality: `parseDerivedText` refuses an origin this process never
+  // certified, which is what keeps an unreadable SOURCE out of the returnable
+  // door, so a probe that could skip the origin would not be exercising the door
+  // the census actually uses.
+  const probeOrigin = parseSourceFile('selftest-origin.ts', 'export const x = 1;\n');
   const reasonOf = (type, how, names) =>
-    nonEngineReason({ kind: 'other', type, how }, new Set(names)).reason;
+    nonEngineReason({ kind: 'other', type, how }, new Set(names), probeOrigin).reason;
   const namesOf = (type, how, names) =>
-    nonEngineReason({ kind: 'other', type, how }, new Set(names)).names.join(',');
+    nonEngineReason({ kind: 'other', type, how }, new Set(names), probeOrigin).names.join(',');
 
   t('⭐ a receiver type the TRACKED corpus declares is one the door rule READ and rejected',
     reasonOf('IProbeEngine', 'probe', ['IProbeEngine']), 'corpus-type');
@@ -1955,13 +2074,13 @@ export function selfTest() {
   t('an anonymous type literal is undefended -- there is no name to look up',
     reasonOf('{ delete(key: string): void }', 'e/as', []), 'anonymous-type');
   t('⭐ an anonymous literal whose own text declares a write door says so',
-    String(nonEngineReason({ kind: 'other', type: '{ update(object: string, data: unknown): Promise<void> }', how: 'e/as' }, new Set()).doorShaped),
+    String(nonEngineReason({ kind: 'other', type: '{ update(object: string, data: unknown): Promise<void> }', how: 'e/as' }, new Set(), probeOrigin).doorShaped),
     'true');
   t('⛔ …and one that declares no door does NOT claim one',
-    String(nonEngineReason({ kind: 'other', type: '{ delete(key: string): void }', how: 'e/as' }, new Set()).doorShaped),
+    String(nonEngineReason({ kind: 'other', type: '{ delete(key: string): void }', how: 'e/as' }, new Set(), probeOrigin).doorShaped),
     'false');
   t('a door named `find` is not a WRITE door',
-    String(nonEngineReason({ kind: 'other', type: '{ find(object: string): Promise<void> }', how: 'e/as' }, new Set()).doorShaped),
+    String(nonEngineReason({ kind: 'other', type: '{ find(object: string): Promise<void> }', how: 'e/as' }, new Set(), probeOrigin).doorShaped),
     'false');
 
   // ⭐⭐ The whole card in one pair: ONE source text, ONE receiver, and the index
@@ -1981,7 +2100,7 @@ export function selfTest() {
           && WRITE_VERBS.includes(node.expression.name.text)) {
         const res = resolveReceiver(node.expression.expression, sf, decls, index);
         out = res.kind === 'other'
-          ? `other/${nonEngineReason(res, new Set()).reason}`
+          ? `other/${nonEngineReason(res, new Set(), sf).reason}`
           : `${res.kind}/${res.type ?? ''}`;
       }
       ts.forEachChild(node, visit);
@@ -2012,7 +2131,7 @@ export function selfTest() {
           && WRITE_VERBS.includes(node.expression.name.text)) {
         const res = resolveReceiver(node.expression.expression, sf, decls, index);
         out = res.kind === 'other'
-          ? `other/${nonEngineReason(res, new Set()).reason}`
+          ? `other/${nonEngineReason(res, new Set(), sf).reason}`
           : `${res.kind}/${res.type ?? ''}`;
       }
       ts.forEachChild(node, visit);
@@ -2034,6 +2153,59 @@ export function selfTest() {
     resolveInline('IProbeEngine | { insert(object: string): Promise<void> }', ['IProbeEngine']),
     'engine/IProbeEngine');
 
+  // ── ⭐⭐ THE CENSUS'S OWN ROUND TRIP, in both directions (#19077) ──────────
+  // A type literal may separate its members by a NEWLINE alone -- legal
+  // TypeScript. The census stores a declared type whitespace-collapsed, so that
+  // separator becomes NOTHING and the synthetic alias it re-parses is not a
+  // parseable type alias. Through `parseSourceFile` that did not fail this
+  // receiver: it ended the process, and every other site in the corpus lost its
+  // verdict with it. ⭐ Both cases below run the REAL round trip -- the source is
+  // parsed, `declaredTypesIn` collapses the declared type exactly as the census
+  // does, and the resolver reads the door off the stored text.
+  const NEWLINE_DOOR = '{\n'
+    + '  insert(object: string, data: unknown): Promise<void>\n'
+    + '  find(object: string, query: unknown): Promise<void>\n'
+    + '}';
+  const SEMICOLON_DOOR = '{ insert(object: string, data: unknown): Promise<void>;'
+    + ' find(object: string, query: unknown): Promise<void>; }';
+  t('⭐⭐ a receiver whose inline literal separates its members by a NEWLINE is CLASSIFIED, not a takedown',
+    resolveInline(NEWLINE_DOOR), 'other/type-text-not-round-trippable');
+  t('⭐ LIT CONTROL: the SEMICOLON spelling of the SAME literal is still PLACED -- the collapse is the defect, not the shape',
+    resolveInline(SEMICOLON_DOOR), `engine/${INLINE_ENGINE_TYPE}`);
+  t('⛔ the arm is DECLARED undefended, so the site lands in both artefacts instead of dropping out in silence',
+    String(UNDEFENDED_REASONS.includes('type-text-not-round-trippable')), 'true');
+  t('⛔ CONTROL: a DEFENSIBLE arm is not in that set -- "declared" and "undefended" are not the same word',
+    String(UNDEFENDED_REASONS.includes('corpus-type')), 'false');
+
+  // The verdict has to be ATTRIBUTABLE, or localising the failure only moves the
+  // mystery: the report names the source the text was derived from, not just the
+  // synthetic `census-receiver-type.ts` that never existed in the tree.
+  const roundTrip = nonEngineReason(
+    { kind: 'other', type: NEWLINE_DOOR.replace(/\s+/g, ' '), how: 'e/as' }, new Set(), probeOrigin,
+  );
+  t('⭐ the failure is carried as DATA, located, so the run can print it against the site',
+    String(roundTrip.failure !== null && roundTrip.failure.count >= 1 && roundTrip.failure.line === 1), 'true');
+  t('⭐ …and it names the SOURCE the text was derived from, not only the synthetic file name',
+    String(roundTrip.failure?.report.includes('selftest-origin.ts') === true), 'true');
+  t('⛔ a site on this arm claims NO door -- an unreadable text is never scored as "read it, no door"',
+    String(roundTrip.doorShaped), 'false');
+
+  // ⛔ THE OTHER HALF OF ACCEPTANCE: a GENUINELY unparseable text is still
+  // refused. Without it, "the round trip is repaired" and "the door rule was
+  // switched off" are the same green.
+  const GARBAGE_DOOR = '{ insert(object: string, data: unknown): Promise<void> ]]] )';
+  t('⛔ a genuinely unparseable type text is REFUSED on the same arm, never read as a door',
+    reasonOf(GARBAGE_DOOR, 'e/as', []), 'type-text-not-round-trippable');
+  t('⛔ …and no door is read off it: text that did not parse cannot place a site',
+    String(readTypeTextDoor(GARBAGE_DOOR, probeOrigin).door), 'false');
+
+  // ⚠️ THE BOUNDARY, so the arm cannot quietly widen: the verb gate runs first,
+  // so a newline-separated literal naming no WRITE verb is never synthesised and
+  // never parsed. The repair's reach is exactly the defect's reach.
+  t('⛔ a newline-separated literal with no write verb never reaches the synthesis',
+    reasonOf('{\n  find(object: string): Promise<void>\n  count(object: string): Promise<number>\n}'.replace(/\s+/g, ' '), 'e/as', []),
+    'anonymous-type');
+
   const failed = cases.filter((c) => !c.ok);
   for (const c of failed) console.error(`  ✗ ${c.name} -- ${c.detail}`);
   if (failed.length > 0) {
@@ -2050,7 +2222,11 @@ export function selfTest() {
     + 'receiver, one source text, and index membership the only variable, reading `engine` in '
     + 'the index and a subtraction that NAMES the unplaceable type out of it -- and the door '
     + 'rule read off a type with no NAME at all, placing an inline literal that states a write '
-    + 'door while still subtracting one that states none).',
+    + 'door while still subtracting one that states none -- and the census\'s OWN round trip in both '
+    + 'directions: a receiver whose inline literal separates its members by a newline is CLASSIFIED '
+    + 'under a declared arm with the parse verdict attached, the semicolon spelling of the same '
+    + 'literal is still PLACED, and a genuinely unparseable text is still refused and still places '
+    + 'nothing).',
   );
   return 0;
 }
@@ -2105,6 +2281,10 @@ function main(argv) {
   // owes is to stop being SILENT: every run now names the receiver and the type it
   // could not place, and both artefacts carry the count under enforcement.
   for (const u of c.undefendedSubtractions) {
+    // ⛔ The round-trip arm is NOT printed here: every word of the sentence below
+    // ("not in the engine type index", "TRACKED sources only") is false about it.
+    // It gets its own ERROR, with the located parse verdict under it.
+    if (u.reason === 'type-text-not-round-trippable') continue;
     process.stderr.write(`::warning::[receiver-type-not-placed] ${u.file}:${u.line} \`${u.receiver}\`.${u.verb}() -- `
       + `SUBTRACTED from the certified population: its declared type \`${u.type}\` is not in the engine `
       + `type index [${u.reason}${u.names.length > 0 ? `: ${u.names.join(', ')}` : ''}]. The index is built from `
@@ -2116,7 +2296,27 @@ function main(argv) {
     process.stderr.write(`::error::[stale-ledger-row] UNTYPED_RECEIVERS names ${r.file} (receiver `
       + `\`${r.receiver}\`) but no such write call exists -- delete the row.\n`);
   }
-  return c.unledgered.length === 0 && c.staleLedgerRows.length === 0 ? 0 : 1;
+  // ⭐ An ERROR, and it counts toward the exit code below -- the deliberate
+  // opposite of the warning above it. Before this repair such a site ended the
+  // whole process through `parseSourceFile`, so a localisation that let the run
+  // exit 0 would have traded a loud takedown for a quiet subtraction. What
+  // changed is the BLAST RADIUS: every other site is classified and reported,
+  // and this one is named, located, and carries the parse verdict under it.
+  // ⚠️ CI reads `check-tenant-audit-census.mjs`, never this generator, so the
+  // same class is refused there too -- through `notRoundTrippableSites`, the one
+  // spelling both of them import.
+  for (const u of notRoundTrippableSites(c)) {
+    process.stderr.write(`::error::[type-text-not-round-trippable] ${u.file}:${u.line} \`${u.receiver}\`.${u.verb}() -- `
+      + `SUBTRACTED from the certified population: the census stored this receiver's declared type `
+      + `whitespace-collapsed and cannot re-parse it as a type alias, so the door rule could not be read `
+      + `off it and the census cannot say whether this site is an engine write at all. The SOURCE parsed; `
+      + `what did not is this tool's own re-serialisation of \`${u.type}\`. Give the receiver a NAMED type `
+      + `the engine type index can be keyed on, or spell the literal's members with \`;\` separators so the `
+      + `stored text round-trips.\n`);
+    if (u.derivedFailure?.report) process.stderr.write(u.derivedFailure.report);
+  }
+  return c.unledgered.length === 0 && c.staleLedgerRows.length === 0
+    && notRoundTrippableSites(c).length === 0 ? 0 : 1;
 }
 
 if (isEntrypoint(import.meta.url)) process.exit(main(process.argv.slice(2)));

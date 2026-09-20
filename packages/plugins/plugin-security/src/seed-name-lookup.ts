@@ -116,9 +116,26 @@
  *
  * A pass with no organization (the `single`-posture carve-out) is unchanged in
  * every respect: nothing is threaded, and the first row is the row.
+ *
+ * ## Where the degradation line goes (#18570)
+ *
+ * The degradation above is only worth writing if somebody READS it, and the
+ * doubly-optional `logger?.warn?.(…)` this site used to spell evaluates to
+ * NOTHING when the caller injected no sink: the batched read failed, the oracle
+ * quietly switched to the slow path, and no human was told. That is the same
+ * shape repaired on the permission-set axis (#17516), the capability axis
+ * (#18023) and the two declared-metadata seeders' five sites (#18091) — this is
+ * its sixth instance, and it takes the derivation #18091 landed for exactly
+ * this rule ({@link reportThroughSink}) rather than a sixth hand-written copy.
+ *
+ * ⚠️ Delivery only. The wording, the structured meta and the two named causes
+ * are axis-specific and stay here, which is the split `seed-refusal-sink.ts`
+ * documents. Nothing about WHEN this site reports changes: a read that answered
+ * is as silent as it always was, on every channel.
  */
 
 import { resolveOwnOrganizationRow, seedCtx as lookupCtx } from './per-organization-catalog.js';
+import { reportThroughSink, type CollisionReportSink } from './seed-refusal-sink.js';
 
 
 
@@ -449,7 +466,16 @@ export async function buildExistingByName(
       // database is an outage, while a truncated page is an install whose
       // catalog carries more rows per name than this read budgets for, and the
       // only cost is the round trips the batching removed.
-      logger?.warn?.(
+      //
+      // [#18570] Delivered through the ONE derivation, so a caller that injected
+      // no sink still hears it. `SeedLookupLogger.warn` is OPTIONAL where
+      // `CollisionReportSink.warn` is not, so the host is handed over only once
+      // it really carries a callable `warn` — the same `typeof` question
+      // `reportThroughSink` itself asks, moved one frame up so the declared
+      // types stay honest rather than being asserted past. A host with no usable
+      // `warn` therefore takes the console arm instead of buying silence.
+      reportThroughSink(
+        typeof logger?.warn === 'function' ? (logger as CollisionReportSink) : undefined,
         outcome.cause === 'truncated'
           ? '[security] batched seed existence read TRUNCATED — more rows carry these names than one page holds, so the page cannot answer; falling back to one read per item'
           : '[security] batched seed existence read failed — falling back to one read per item',
