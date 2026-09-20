@@ -41,27 +41,34 @@ import { retiredKey } from '../shared/retired-key';
  * the calls a connector makes *out*. Do **not** substitute `shared`'s
  * `RateLimitConfig` — that is the inbound limiter and would cap the wrong direction.
  * **Until an outbound throttle exists, rate-limit at the connector provider or
- * upstream gateway.** **And do not reach for `retryConfig` instead.** This
- * paragraph used to end "what L3 does declare for a rate-limited upstream is
- * `retryConfig` — whose `retryableStatusCodes` default `[408, 429, 500, 502,
- * 503, 504]` includes `429` — and `health.circuitBreaker`", which reads as a
- * remedy. It is not one: both keys are **declared but currently
- * unimplemented**. `packages/spec/liveness/connector.json` records every
- * `retryConfig` sub-key and every `health.circuitBreaker` sub-key as `dead`,
- * and outside `packages/spec` nothing reads either — no retry loop consumes a
- * strategy, a backoff, a jitter or that status-code list, so the `429` in it
- * never causes a retry, and no breaker ever opens. They are **not retired**:
- * both are still declared and still parse, so an author can write them and see
- * no error. They are **not left to the host** either —
- * `ConnectorProviderContext` (`integration/connector-provider.ts`) carries
- * exactly `name`, `label`, `description`, `icon`, `type`, `providerConfig`,
- * `auth` and `loadPackageFile`, so a provider factory is never handed either
- * key and has no way to honour it. ADR-0049 owes these keys a decision
- * (retire / implement / declare as a host contract); until it rules, the
- * advice above is the whole advice — retry and throttle **at the connector
- * provider or upstream gateway**. The full removal reasoning is
- * recorded at the removal site: the "REMOVED: outbound rate limiting" block in
- * `integration/connector.zod.ts`, and `packages/spec/docs/SYNC_ARCHITECTURE.md`.
+ * upstream gateway.**
+ *
+ * **What you MAY reach for is `retryConfig` — ADR-0049 ruled `实现` and the
+ * platform now executes it.** A connector's declared policy is applied at the
+ * one place the platform makes an outbound call, `shared/resilientFetch`, via
+ * the single mapping in `integration/connector-fetch-policy.ts`: the backoff
+ * shape (`strategy`, `initialDelayMs`, `backoffMultiplier`, `maxDelayMs`,
+ * `jitter`), the attempt count (`maxAttempts`, which counts TOTAL calls with
+ * the first included), what is retried (`retryableStatusCodes`, whose default
+ * `[408, 429, 500, 502, 503, 504]` includes `429`, and `retryOnNetworkError`),
+ * and `requestTimeoutMs` as each attempt's deadline. It reaches a provider
+ * factory through `ConnectorProviderContext`, so a custom provider doing its
+ * own I/O honours the same policy the built-in HTTP providers honour by
+ * construction. ⚠️ Retrying a `429` is not throttling it: a retry policy
+ * spaces out the calls you already made, it does not cap the rate, so the
+ * sentence above about rate limiting stands unchanged.
+ *
+ * ⛔ **Two exceptions, both still inert and both still `dead` in
+ * `packages/spec/liveness/connector.json`.** `health.circuitBreaker`: every
+ * sub-key is unread and no breaker ever opens — implement circuit breaking in
+ * the connector provider. `connectionTimeoutMs`: it is carried to a provider
+ * factory but the platform does not enforce it, because a WHATWG `fetch`
+ * exposes one `AbortSignal` over the whole operation and never the connection
+ * phase alone; `requestTimeoutMs` is the bound the platform can keep, and
+ * ADR-0049 owes this one key a narrower decision. The full removal reasoning
+ * for the rate-limit shape is recorded at the removal site: the "REMOVED:
+ * outbound rate limiting" block in `integration/connector.zod.ts`, and
+ * `packages/spec/docs/SYNC_ARCHITECTURE.md`.
  *
  * **Field mapping does not transform values.** This header used to offer "field
  * mapping and transformations"; only the first half was ever true.
