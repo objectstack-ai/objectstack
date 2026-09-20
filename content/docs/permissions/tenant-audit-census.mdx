@@ -261,6 +261,12 @@ index is built from TRACKED sources only, deliberately. An untracked, generated
 or dependency-owned declaration is one this census never saw, and «never saw it»
 must not be spelled the same way as «read it, not an engine».
 
+⚠️ One arm here says something else again: `type-text-not-round-trippable` is a
+receiver whose declared type the census STORED whitespace-collapsed and could
+not read back — the source parsed, the re-serialisation of it did not, so the
+door rule could never be read off it. That is a fault in this tool rather than
+a fact about the corpus, and it is the one row here that also fails the gate.
+
 | what | count |
 | :--- | ---: |
 | write calls subtracted with no defensible reason | **1** |
@@ -290,11 +296,11 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-09-18 at `30def652e`.
+Measured on 2026-09-20 at `215840f43`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 573 |
+| tracked non-test sources scanned | 576 |
 | engine-shaped types recognised | 63 |
 | declared objects in the registry | 117 |
 | same-named calls subtracted as non-engine | 144 |
