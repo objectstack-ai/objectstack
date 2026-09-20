@@ -133,7 +133,6 @@ import { RetryPolicySchema } from '../shared/retry-policy.zod';
  * 
  * @example Metadata Sync Job (Cron)
  * {
- *   id: "job_sync_meta",
  *   name: "sync_metadata_nightly",
  *   schedule: {
  *     type: "cron",

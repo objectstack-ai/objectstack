@@ -210,7 +210,19 @@ describe('composeStacks — the other two strategies are unchanged', () => {
 });
 
 describe('the refusal set is derived from ObjectSchema.shape — pinned in both directions', () => {
-  /** Independent walk: strip wrappers, read through lazy/pipe, any union member counts. */
+  /**
+   * Independent walk: strip wrappers, read through lazy/pipe, any union
+   * member counts.
+   *
+   * [objectstack#17852] A `pipe`'s two sides read differently depending on
+   * which combinator built it: `.pipe(x)` puts the ORIGINAL type in `in` and
+   * a derived one in `out`, while `z.preprocess(fn, schema)` puts a
+   * transform STAGE in `in` and the real, validated schema in `out` — the
+   * exact shape `ObjectSchema.fields` is wrapped in now (the pre-parse
+   * `__proto__` guard). Checking only `in`, as this walk did before, found a
+   * `transform` node for `fields` and silently stopped reporting it as a
+   * record. Checking both sides covers either convention.
+   */
   function isCollection(schema: unknown, depth = 0): boolean {
     if (depth > 8) return false;
     const def = (schema as { _zod?: { def?: Record<string, unknown> } })._zod?.def;
@@ -219,7 +231,7 @@ describe('the refusal set is derived from ObjectSchema.shape — pinned in both 
     if (type === 'array' || type === 'record') return true;
     if (['optional', 'nullable', 'default', 'prefault', 'readonly', 'nonoptional', 'catch'].includes(type)) return isCollection(def!.innerType, depth + 1);
     if (type === 'lazy') return isCollection((def!.getter as () => unknown)(), depth + 1);
-    if (type === 'pipe') return isCollection(def!.in, depth + 1);
+    if (type === 'pipe') return isCollection(def!.in, depth + 1) || isCollection(def!.out, depth + 1);
     if (type === 'union') return (def!.options as unknown[]).some((o) => isCollection(o, depth + 1));
     return false;
   }
