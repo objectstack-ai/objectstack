@@ -1177,10 +1177,14 @@
  * hunk. Every one of the four forms puts its members inside a `[`, so
  * {@link closedSetMembership} asks that `[`'s head which construct opened it
  * and answers in three states — `declared` (one of the closed-set
- * constructors, BY NAME and under any receiver), `refused` (a call that closes
- * no set and derives none) and `unread` (everything else). ⛔ Only `refused`
+ * constructors, BY NAME and under any receiver, with a TRANSPARENT wrapper such
+ * as `Object.freeze(` read through to the head left of it), `refused` (a call
+ * whose name is one of a CLOSED vocabulary positively known to close no set)
+ * and `unread` (everything else, an unknown callee included). ⛔ Only `refused`
  * takes a row away, and only on positive, hunk-local evidence, which is the
- * shape of every decline in this file.
+ * shape of every decline in this file — so a name the reader does not know
+ * leaves the tell where it was, the direction {@link PARAMETER_LIST_HEAD} takes
+ * for the same reason.
  *
  * ⭐ `unread` is the answer that keeps this repair honest, and it is the COMMON
  * one. An opener above the hunk, a `CORE_PLUGIN_TYPES`-shaped `as const` array
@@ -1255,20 +1259,117 @@
  *     silent on BOTH instruments — the silence is bought by the construct, never
  *     by the harness.
  *
- * ⚠️ The quiet direction this buys, stated rather than left to be discovered: a
- * genuine closed set CONSTRUCTED THROUGH A CALL. `z.enum(Object.keys(X))` has
- * no per-member line at all, but three shapes do have one and still decline —
- * `new Set([…])` spread into an enum, an array built inside `Object.freeze([…])`
- * and handed to `z.enum`, and the FOURTH FORM WRAPPED, `Object.freeze([… ] as
- * const)`, whose `as const` sits below its members exactly as the bare form's
- * does while `freeze` closes no set. ⛔ That is not zero risk, and the last of
- * the three is the one a reader is most likely to write by accident. It is
- * pinned as a STATED silence rather than left to be rediscovered. What still
- * catches one: the enum's own opener line, which fires as an opener row; and
- * `check:authorable-surface` plus `check:api-surface` on anything the resulting
- * set publishes. Measured over the window above: 0 of the 12 declines is such a
- * set, and `Object.freeze` accounts for 65 of the tree's 92 refusals — 9 of
- * which this window exercises, all near-miss key spellings a schema REFUSES.
+ * ## ⛔ AND EVERY CENSUS ABOVE WAS BOUNDED BY A CLONE HORIZON NOBODY STATED
+ *
+ * ⚠️ Read the three counts above as WINDOWED, never as history. The first two
+ * were taken in a container cloned 1,441 commits deep (oldest commit
+ * 2026-09-06) and the third in one 2,169 deep — and that third reading called
+ * its oldest commit `3c1bbd2a87` "the root". It is not a root: it is a SHALLOW
+ * GRAFT BOUNDARY, `.git/shallow` names it, and 12,310 commits lay beyond it.
+ * Every "0 exceptions, checked row by row" any of them printed is a statement
+ * about its window. The count moved 12 → 14 on the second deepening alone, and
+ * the two commits it gained are the two ACCEPT SETS this round had to name.
+ *
+ * ⇒ So this round unshallowed first (`git fetch --unshallow`; no `.git/shallow`
+ * remains) and re-took both censuses over the whole history: 14,479 commits
+ * reachable from `origin/main` at `8e368dc3b9`, root `1598cabe4a`, 2026-01-18.
+ * ⛔ A census that cannot contain the failure is not evidence of its absence,
+ * and a depth nobody states is a census nobody can re-take.
+ *
+ *   ① THE LANDED POPULATION — 2,640 non-merge commits touching the four
+ *     surfaces this file declares in this repo, 10,364 file diffs,
+ *     `git show --unified=3` split per file by this file's own
+ *     `splitUnifiedDiff`, all three instruments over the SAME rows
+ *     (`readSource` stubbed to `null` on all three alike, so #18702's factory
+ *     resolution is out of every reading rather than out of one). Base 29,580
+ *     rows (T1 16,498 · T2 5,993 · T3 6,141 · T4 948); the failed head 29,480;
+ *     this reading 29,552. ⭐ Base → here: 29,552 stand, **28 decline, 0 begin**,
+ *     5,164 change only their sentence. All 28 are T2 and all 28 were re-read
+ *     THROUGH THIS READER rather than by eye: callee `Set` on 28 of 28, 0
+ *     exceptions, across nine bindings — the three `field-value.zod.ts` value
+ *     classes, `VALUE_DOMAIN_FIELD_TYPES`, `TEXT_OPERATOR_DOOR_PASSING_TYPES`,
+ *     `IMPORT_REFERENCE_TYPES`, `PUBLIC_FORM_SERVER_MANAGED_FIELDS`,
+ *     `CONTAINER_ISSUE_CODES`, `VIEW_WRITE_PATH_IDENTITY_KEYS`,
+ *     `TITLE_INELIGIBLE_TYPES` and `VALID_AST_OPERATORS`. ⭐ Failed head →
+ *     here: 0 decline and **72 BEGIN**, every one of them `Object.freeze(`,
+ *     over five bindings (`PLATFORM_CAPABILITY_TOKENS` 28,
+ *     `REGISTRY_DECLARED_META_TYPES` 27, `SCHEDULE_ORGANIZATION_NEAR_MISSES` 9,
+ *     `FLOW_TRIGGER_KINDS` 4, `PLATFORM_ALWAYS_ON_CAPABILITIES` 4). ⛔ The
+ *     earlier record's "the 9 declines it protects" was one binding seen
+ *     through a window; the freeze silence cost 72 rows, not 9. T1, T3 and T4
+ *     are identical on all three instruments across all 10,364 diffs.
+ *   ② THE CONTAINING POPULATION, synthetic by construction because the landed
+ *     one cannot hold the failure — the tree has no bare element under a
+ *     `makeEnum([` at all. Every bare-element line in `packages/spec/src`
+ *     (6,553 over 1,014 files) rebuilt as a one-member addition with three
+ *     lines of REAL context; the 716 whose opener stands in that context are
+ *     the ones whose callee decides the verdict, and each was re-spelled. Per
+ *     spelling, failed head → this reading, counted as SILENT: `makeEnum([`
+ *     710 → 0, `stringEnum([` 710 → 0, `Object.freeze([` 710 → 0, `z.tuple([`
+ *     710 → 0, and `new Set([` 710 → 710, which is the residual stated below
+ *     and the only one. The lit control that makes it a reading rather than a
+ *     hope: re-spelt to `z.enum([` the same sites read MEASURED on both, 710 of
+ *     716, and the 6 that never move are hunks the walk reports it could not
+ *     read. ⛔ As written, this tree has 19 sites where the base instrument
+ *     fires and this reading does not — `Set` 11, `default` 8 — and they are
+ *     named one by one below.
+ *
+ * ## ⛔ THE REFUSAL WAS OPEN-VOCABULARY, AND AN OPEN VOCABULARY IS NOT EVIDENCE
+ *
+ * The reading above answered `refused` for EVERY callee that was not one of the
+ * four — which is a decline drawn from the absence of a name rather than from
+ * the presence of one, the exact inversion of "positive, hunk-local evidence".
+ * Measured on the shape a real PR carries (three lines of context), base
+ * instrument → that reading: `makeEnum([` 4 → 0, `stringEnum([` 4 → 0, a fifth
+ * `FLOW_TRIGGER_KINDS` kind under `Object.freeze([` 4 → 0, a whole freeze array
+ * added in one diff 2 rows → 0, a member under `z.enum(Object.freeze([` 4 → 0,
+ * a frozen array fed to `z.enum(KINDS)` on the next line 4 → 0. Any helper
+ * nobody had enumerated silenced a genuine set, and `Object.freeze` silenced
+ * the FOURTH FORM ITSELF.
+ *
+ * ⛔ The mitigation this header used to claim for the freeze case — "the enum's
+ * own opener line, which fires as an opener row" — is FALSE BY TEST: a
+ * member-adding diff carries no opener line at all, and a frozen array handed
+ * to `z.enum(KINDS)` on the next line raises 0 rows. It was a documented
+ * defect, not an honest stated silence, and it is repaired rather than
+ * disclosed: {@link TRANSPARENT_ARRAY_CALLEE_NAMES} reads `freeze` THROUGH to
+ * the head left of it, and {@link NON_SET_CALLEE_NAMES} is now the whole,
+ * CLOSED list of names that buy a silence.
+ *
+ * ⚠️ THE ONE RESIDUAL, NAMED COMPLETELY RATHER THAN CHARACTERISED. `new Set([`
+ * still declines, because PR #19314's seven `_zod.def.type` discriminants are
+ * one and an at-tier review ruled all seven false positives — and the same
+ * spelling carries REAL ACCEPT SETS in this tree, which is a known wrong answer
+ * rather than a risk. Measured on this tree, every site where the previous
+ * reading fires and this one does not: NINETEEN, `new Set(` 11 and `.default(`
+ * 8, and here they all are —
+ *
+ *   `new Set([`: `CALENDAR_DATE_TYPES`, `INSTANT_TYPES`, `CLOCK_TIME_TYPES`
+ *     (`data/field-value.zod.ts`), `VALUE_DOMAIN_FIELD_TYPES`
+ *     (`data/field.zod.ts`, read by `.has(field.type)` in a `superRefine` that
+ *     REFUSES what an author wrote, and again on the write path in
+ *     `record-validator.ts`), `TEXT_OPERATOR_DOOR_PASSING_TYPES`
+ *     (`data/filter-text-operator-declared-type.ts`), `IMPORT_REFERENCE_TYPES`
+ *     (`data/import-coercion.ts`), `PUBLIC_FORM_SERVER_MANAGED_FIELDS`
+ *     (`security/public-form.ts`, read by four seams of `rest-server.ts` to
+ *     refuse a visitor's value), `CONTAINER_ISSUE_CODES`
+ *     (`shared/union-branch-policy.ts`) and `VIEW_WRITE_PATH_IDENTITY_KEYS`
+ *     (`ui/view.zod.ts`). ⛔ At least three of those decide what an authored
+ *     document may say.
+ *   `.default([`: `allowedLicenses` and `prohibitedLicenses`
+ *     (`kernel/plugin-security.zod.ts`) and `redact` (`system/logging.zod.ts`)
+ *     — a default VALUE list, which is the one member of this vocabulary whose
+ *     silence is sound.
+ *
+ * ⛔ And the rationale this file used to give for the `Set` half — "a set of
+ * internal discriminants is not an accept set, no author's document is ever
+ * parsed against it" — is FALSE of the sets above. The honest statement is
+ * that `new Set([` and a `z.enum([` are byte-indistinguishable INSIDE A HUNK
+ * once the head is the same (`ReadonlySet<string> = new Set([` carries both an
+ * accept set and #19314's private walk vocabulary), so what separates them is
+ * CONSUMPTION — a FILE-level fact this hunk-shaped reader cannot reach and must
+ * not pretend to. It is a different reading's card; this file states the
+ * silence, names every site it covers, and pins both directions.
  *
  * ⛔ What is NOT in that list any more, because the vocabulary is read by NAME:
  * the receiver and the type arguments. `z.enum(`, `zod.enum(`, a chain-wrapped
@@ -1559,8 +1660,17 @@ const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 //
 // The counts are a FLOOR, not an equality — adding cases is ordinary work and
 // must not red. A battery BELOW its floor means cases stopped running.
+//
+// ⛔ AND EVERY FLOOR SITS AT ITS BATTERY'S OWN REGISTERED COUNT, never below it.
+// A floor with slack is not a pin: the at-tier record on #19384 deleted a
+// registered case outright and the suite stayed GREEN at 572, because 45 was
+// pinned against 48 registered. Slack is indistinguishable from a battery that
+// has quietly stopped running that many cases, so the only honest reading of
+// "this case is pinned" is a floor that the deletion of ONE case breaches.
+// Measured when this was written: three other batteries carried the same slack
+// (4, 9 and 2 cases) and are seated at their counts here too.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'the patch reader: added lines, and the line numbers they carry': 17,
+  'the patch reader: added lines, and the line numbers they carry': 21,
   'the unified-diff splitter, for the local `git diff` path': 15,
   'the local path composed: an unread diff is not a narrow diff': 7,
   'the surfaces, imported rather than restated': 11,
@@ -1583,17 +1693,17 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the declared registry rows still exist in this tree': 4,
   '#17112 — the count is split: examined is not examinable': 23,
   '#17217 — the CLI can be told which board it judges': 22,
-  '#18560 — the declaring vocabulary is a NAMED list, every form pinned by a counterfactual fixture': 32,
-  '#18640 — an inline closed set RE-SPELLED at the same binding is not a set that gained a value': 20,
+  '#18560 — the declaring vocabulary is a NAMED list, every form pinned by a counterfactual fixture': 41,
+  '#18640 — an inline closed set RE-SPELLED at the same binding is not a set that gained a value': 22,
   '#18702 — a declaring factory PRIVATE to one file, resolved through its own DEFINITION': 54,
   "#18721 — a hunk's LEADING CONTEXT is not a reason to abandon the parameter reading": 14,
   '#19099 — the enclosing-delimiter walk says when it STOPPED READING and started guessing': 15,
-  '#19384 — a bare element is not a member until the hunk shows one of the four forms above it': 45,
+  '#19384 — a bare element is not a member until the hunk shows one of the four forms above it': 64,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 16;
+const SELF_TEST_BATTERY_FLOOR = 29;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -2273,21 +2383,6 @@ const SCHEMA_PROPERTY = new RegExp(
  */
 const CLOSED_SET_CONSTRUCTOR_NAMES = Object.freeze(['enum', 'union', 'discriminatedUnion', 'literal']);
 
-/**
- * The callee NAMES that DERIVE one closed set from another — `Full.extract([…])`
- * and `Full.exclude([…])`, zod's two sub-enum builders (`ui/view.zod.ts` spells
- * one today).
- *
- * ⛔ They are NOT the four forms and this file never says they are: an element
- * the hunk shows inside one reads `'unread'`, so the row FIRES carrying the
- * sentence that names what was not measured. What they must never read is
- * `'refused'`. An `extract` list gains a value exactly as an `enum` list does;
- * an `exclude` list gaining one is the same edit in the opposite DIRECTION,
- * which this file has never claimed to read — and a reader with no notion of
- * direction may not spend that ignorance on a SILENCE.
- */
-const SET_DERIVING_CALLEE_NAMES = Object.freeze(['extract', 'exclude']);
-
 /** T2 — a closed set DECLARED or re-written on one line. */
 const CLOSED_SET_OPENER = new RegExp(`z\\.(?:${CLOSED_SET_CONSTRUCTOR_NAMES.join('|')})\\(`);
 
@@ -2344,8 +2439,17 @@ const CONTINUATION_TAIL = /(?<!\+)\+[ \t]*$/;
  * same line (`z.enum(['a', 'b'])`). Group 1 is everything left of the
  * constructor — `export const AnyComponentSchema = ` — which is what makes two
  * openers the same DECLARATION rather than merely the same shape.
+ *
+ * ⛔ Built from {@link CLOSED_SET_CONSTRUCTOR_NAMES}, like every other reading
+ * of the vocabulary in this file. It used to hand-copy the four names, which
+ * made it a FOURTH spelling of a list held once on purpose — the very drift
+ * the single list exists to prevent, and the one reading that would still have
+ * said `enum | union | discriminatedUnion | literal` on the day a fifth form
+ * was admitted.
  */
-const CLOSED_SET_OPENER_HEAD = /^(.*?)z\.(?:enum|union|discriminatedUnion|literal)\([^[\]]*\[[ \t]*(?:\/\/.*)?$/;
+const CLOSED_SET_OPENER_HEAD = new RegExp(
+  `^(.*?)z\\.(?:${CLOSED_SET_CONSTRUCTOR_NAMES.join('|')})\\([^[\\]]*\\[[ \\t]*(?:\\/\\/.*)?$`,
+);
 
 /** The binding an opener-only line declares, or `null` if it is not one. */
 export function closedSetOpenerBinding(text) {
@@ -2767,9 +2871,6 @@ const constructorArgumentHead = (names) => new RegExp(
 /** T2 — the head of a `[` one of the FOUR closed-set forms opened. */
 const CLOSED_SET_ARGUMENT_HEAD = constructorArgumentHead(CLOSED_SET_CONSTRUCTOR_NAMES);
 
-/** T2 — the head of a `[` a sub-enum BUILDER opened; see {@link SET_DERIVING_CALLEE_NAMES}. */
-const SET_DERIVING_ARGUMENT_HEAD = constructorArgumentHead(SET_DERIVING_CALLEE_NAMES);
-
 /**
  * The CALLEE NAME of the call a `[`-frame head ends in, or `null` when the head
  * is not a call at all — the reading the REFUSAL stands on.
@@ -2788,15 +2889,92 @@ const SET_DERIVING_ARGUMENT_HEAD = constructorArgumentHead(SET_DERIVING_CALLEE_N
 const CALL_HEAD_CALLEE = /(?:\bnew[ \t]+)?(?:[A-Za-z_$][\w$]*[ \t]*\.[ \t]*)*([A-Za-z_$][\w$]*)[ \t]*(?:<[^<>]*>)?[ \t]*\($/;
 
 /**
+ * The call a frame head ends in — its callee NAME and the text LEFT OF the
+ * whole call expression — or `null` when the head is not a call.
+ *
+ * ⭐ `before` is what makes a TRANSPARENT wrapper readable: the slice starts at
+ * the `new` keyword when there is one, so `const S = new Set(` answers
+ * `{ callee: 'Set', before: 'const S = ' }` and never a `before` still carrying
+ * `new `. That is the whole job of the `(?:\bnew[ \t]+)?` prefix in
+ * {@link CALL_HEAD_CALLEE} — the NAME is found either way, because the pattern
+ * is unanchored at its start, so the prefix is load-bearing here and nowhere
+ * else.
+ *
+ * @param {string} head — a frame's `head`, the text left of its delimiter
+ * @returns {{ callee: string, before: string }|null}
+ */
+export function callHeadOfFrame(head) {
+  const s = String(head ?? '');
+  const m = CALL_HEAD_CALLEE.exec(s);
+  return m === null ? null : { callee: m[1], before: s.slice(0, m.index) };
+}
+
+/**
  * The callee name a frame head ends in, or `null` when the head is not a call.
  *
  * @param {string} head — a frame's `head`, the text left of its delimiter
  * @returns {string|null}
  */
 export function calleeOfFrameHead(head) {
-  const m = CALL_HEAD_CALLEE.exec(String(head ?? ''));
-  return m === null ? null : m[1];
+  return callHeadOfFrame(head)?.callee ?? null;
 }
+
+/**
+ * The callee names that say NOTHING about what the array they receive IS —
+ * read THROUGH, never as evidence.
+ *
+ * `Object.freeze` is the measured instance and the ruling that put this list
+ * here: freeze takes an array and answers that same array, so every one of the
+ * four forms survives it. `z.enum(Object.freeze([…]))` IS a `z.enum`, and
+ * `Object.freeze([… ] as const)` bound to a name IS the fourth form — the
+ * construct stands one slice to the LEFT of the wrapper, and a reader that
+ * stopped at `freeze` was refusing on the wrapper's own name while the thing it
+ * wraps went unread. Measured before this reading existed, each on the shape a
+ * real PR carries: a fifth `FLOW_TRIGGER_KINDS` kind base exit 4 / exit 0, a
+ * whole freeze array added in one diff base 2 rows / 0, a member under
+ * `z.enum(Object.freeze([` base 4 / 0, and a frozen array fed to `z.enum(KINDS)`
+ * on the next line base 4 / 0.
+ *
+ * ⛔ TRANSPARENT is not UNKNOWN, and the difference is the direction each one
+ * fails in: an unknown callee leaves the row FIRING, while a transparent one is
+ * stripped off the head and the head is judged again — so a wrapper can only
+ * ever reveal a construct, never hide one.
+ */
+const TRANSPARENT_ARRAY_CALLEE_NAMES = Object.freeze(['freeze']);
+
+/**
+ * The CLOSED vocabulary of callee names a `[` frame may be REFUSED on — the
+ * whole of it, and the only silence T2 buys from a frame head.
+ *
+ * ⛔ NOT "every name that is not one of the four". That open-vocabulary refusal
+ * is the defect this list replaces: it silenced a genuine set under every
+ * helper nobody had enumerated — `makeEnum([`, `stringEnum([`, both measured
+ * base exit 4 / exit 0 — while the file's own doctrine says the opposite, in
+ * {@link PARAMETER_LIST_HEAD}'s words: a prefix the reader does not know
+ * "leaves the tell where it was". A name earns a place here only by being
+ * positive evidence that the delimiter's list is not an accept set:
+ *
+ *   `Set` — a `new Set([…])` of internal discriminants. PR #19314's seven
+ *     `_zod.def.type` names are the measured carrier and an at-tier review
+ *     ruled all seven false positives. ⚠️ This one keeps a KNOWN WRONG ANSWER;
+ *     {@link closedSetMembership} states it and names its two carriers.
+ *   `default` — a `.default([…])` argument is a default VALUE, so its elements
+ *     are values the accept set already admits, never members of it.
+ *
+ * ⛔ TWO NAMES THAT MUST NEVER JOIN THIS LIST, and the reason is the direction
+ * each one fails in: zod's sub-enum builders `extract` and `exclude`. An
+ * `extract` list gains a value exactly as an `enum` list does; an `exclude`
+ * list gaining one is the same edit in the opposite DIRECTION, which this file
+ * has never claimed to read — and a reader with no notion of direction may not
+ * spend that ignorance on a silence. Their absence here IS the reading (they
+ * had a branch of their own until this round, and it decided nothing once the
+ * vocabulary closed), and it is pinned by its own cases.
+ *
+ * ⛔ A name is added here only with the evidence written beside it, and ⛔ never
+ * to quieten a row somebody found noisy: the loud direction is the one this
+ * family takes everywhere.
+ */
+const NON_SET_CALLEE_NAMES = Object.freeze(['Set', 'default']);
 
 /**
  * Is this side-line a MEMBER OF ONE OF THE FOUR CLOSED-SET FORMS? (instance 3)
@@ -2811,11 +2989,32 @@ export function calleeOfFrameHead(head) {
  *     as written. ⭐ Any receiver and any type argument: `z.enum(`, `zod.enum(`,
  *     a chain-wrapped `  .enum(` and `z.enum<Mode>(` are one form spelled four
  *     ways, and the formatter picks which one tomorrow's file carries.
- *   `'refused'` — the hunk shows that delimiter and the callee name it ends in
- *     closes no set and derives none. `new Set([…])` is the measured instance
- *     (#19384): a set of internal discriminants is not an accept set, no
- *     author's document is ever parsed against it, and the four forms do not
- *     include it. ⇒ NO ROW.
+ *   `'refused'` — the hunk shows that delimiter and the callee name its head
+ *     ends in is one of a CLOSED vocabulary of names positively known to close
+ *     no set and derive none ({@link NON_SET_CALLEE_NAMES}). ⛔ Never "any name
+ *     that is not one of the four": that open-vocabulary refusal silenced a
+ *     genuine set under every helper nobody had enumerated. ⇒ NO ROW.
+ *
+ *     ⚠️ AND ITS ONE RESIDUAL IS A KNOWN WRONG ANSWER, named here rather than
+ *     reasoned away. `new Set([…])` is refused because PR #19314's seven
+ *     `_zod.def.type` discriminants are one and an at-tier review ruled all
+ *     seven false positives — and this tree spells two real ACCEPT sets exactly
+ *     the same way: `VALUE_DOMAIN_FIELD_TYPES` in `data/field.zod.ts`, whose
+ *     `.has(field.type)` inside a `superRefine` REFUSES what an author wrote
+ *     (its own docblock calls a member addition "a widening of this set"), and
+ *     `TEXT_OPERATOR_DOOR_PASSING_TYPES` in
+ *     `data/filter-text-operator-declared-type.ts`. Measured on the shape a
+ *     real PR carries: adding `'email',` to the first is base exit 4 / this
+ *     reading exit 0, and `'number',` to the second the same. ⛔ The rationale
+ *     this bullet used to carry — "a set of internal discriminants is not an
+ *     accept set, no author's document is ever parsed against it" — is FALSE of
+ *     both. The two constructs are byte-indistinguishable INSIDE A HUNK: same
+ *     `ReadonlySet<string> = new Set([` head, same element shape, same tail.
+ *     What separates them is CONSUMPTION — one is read by a `superRefine`, the
+ *     other by a wrapper-peeling walk — a FILE-level fact no hunk-shaped reader
+ *     reaches, and a different reading's card. Both directions are pinned
+ *     below, so this silence cannot move unnoticed and cannot spread: every
+ *     other callee is loud.
  *   `'unread'` — everything else, and it is the common answer: no delimiter
  *     shown where the line sits, a walk that stopped being a reading, or a
  *     delimiter this reader cannot classify — an array literal BOUND to a name,
@@ -2884,14 +3083,56 @@ export function closedSetMembership(side, index) {
   if (unreadable || frames.length === 0) return 'unread';
   const open = frames[frames.length - 1];
   if (open.opener !== '[') return 'unread';
-  if (CLOSED_SET_ARGUMENT_HEAD.test(open.head)) return 'declared';
-  // ⛔ A set DERIVED from another one is not one of the four forms and is not
-  // another call's argument list either. It keeps its row and says so.
-  if (SET_DERIVING_ARGUMENT_HEAD.test(open.head)) return 'unread';
-  // ⛔ Read LAST and only here: a head that is not a call at all buys no
-  // silence. The two readings above are the closed-set vocabulary; this one is
-  // the positive evidence that some OTHER construct opened the delimiter.
-  return calleeOfFrameHead(open.head) === null ? 'unread' : 'refused';
+  return arrayHeadMembership(open.head);
+}
+
+/**
+ * The same three states, read off a `[` frame's HEAD alone — and the loop is
+ * the transparent wrapper.
+ *
+ * Each pass asks the head two questions in this order, and the order is the
+ * evidence: is this one of the four forms, and is it a call whose NAME this
+ * file has positively classified. A call whose name is TRANSPARENT
+ * ({@link TRANSPARENT_ARRAY_CALLEE_NAMES}) is stripped off the head and the
+ * shortened head is asked again, so `z.enum(Object.freeze([` reads `declared`
+ * and `const KINDS = Object.freeze([` reads `unread` — the wrapper reveals the
+ * construct instead of standing in for it.
+ *
+ * ⭐ A sub-enum BUILDER (`Full.extract([`, `Full.exclude([`) needs no arm of its
+ * own any more and no longer has one: it is simply a name the closed refusal
+ * vocabulary does not carry, so it falls to `unread` and the row fires with the
+ * NOT-MEASURED sentence. ⛔ That arm was DELETED rather than kept as defence in
+ * depth, because a branch whose deletion changes no verdict is a branch no case
+ * can pin — and this round is the one that learned what an unpinnable guard is
+ * worth. The behaviour is pinned where it is now decided: by `extract` and
+ * `exclude` being absent from {@link NON_SET_CALLEE_NAMES}.
+ *
+ * ⛔ The loop terminates on the head's own LENGTH: every transparent step
+ * replaces the head with the text left of that call, which is strictly shorter
+ * because the callee and its paren are gone. The guard below states that as an
+ * invariant rather than trusting it, and answers `unread` — the loud direction —
+ * if it is ever false.
+ *
+ * @param {string} head — a `[` frame's `head`, the text left of the delimiter
+ * @returns {'declared'|'refused'|'unread'}
+ */
+function arrayHeadMembership(head) {
+  let text = String(head ?? '');
+  for (;;) {
+    if (CLOSED_SET_ARGUMENT_HEAD.test(text)) return 'declared';
+    const call = callHeadOfFrame(text);
+    // ⛔ A head that is not a call at all buys no silence — an array literal
+    // bound to a name, a property's array value, a grouping paren. The fourth
+    // form lives in two of those three.
+    if (call === null) return 'unread';
+    if (!TRANSPARENT_ARRAY_CALLEE_NAMES.includes(call.callee)) {
+      // ⛔ The CLOSED vocabulary, and the only silence this reader buys: a name
+      // it does not know leaves the tell where it was.
+      return NON_SET_CALLEE_NAMES.includes(call.callee) ? 'refused' : 'unread';
+    }
+    if (call.before.length >= text.length) return 'unread';
+    text = call.before;
+  }
 }
 
 /** A property NAME at the head of a line, in the four spellings `SCHEMA_PROPERTY` admits. */
@@ -3011,7 +3252,7 @@ export function respellsExistingClosedSetKey(text, removedTexts) {
  *   ③ the member list closes ON THIS LINE. A list that opens here and closes
  *     later is unreadable, exactly as it is for a keyed value.
  */
-const CLOSED_SET_BINDING_HEAD = /^(.*?)z\.(?:enum|union|discriminatedUnion|literal)\(/;
+const CLOSED_SET_BINDING_HEAD = new RegExp(`^(.*?)z\\.(?:${CLOSED_SET_CONSTRUCTOR_NAMES.join('|')})\\(`);
 
 export function closedSetBindingMembers(text) {
   const s = String(text ?? '');
@@ -5715,7 +5956,7 @@ export function selfTest() {
   t('⛔ …and so does one inside a `z.discriminatedUnion(\'type\', [`, whose discriminator argument stands between the constructor and the bracket', tells({ filename: 'packages/spec/src/a.zod.ts', patch: patchOf(3, "+const D = z.discriminatedUnion('type', [", '+  WorkflowSchema,') }).some((r) => r.line === 4 && says(r.why, 'this hunk shows the element inside')));
   t('⛔ the OPENER row is untouched by this round — it carries its constructor in its own bytes, so it never needed the frames', tells({ filename: 'packages/spec/src/a.zod.ts', patch: patchOf(3, '+const U = z.union([') })[0]?.tell === 'T2');
   // -- the vocabulary is the FOUR constructors, not "any z. call" -------------
-  t('⭐ `z.tuple([` is REFUSED — a positional tuple is not one of the four forms, and the reader asks which constructor it is rather than whether the head says `z.`', closedSetMembership([CTX('const T = z.tuple(['), CTX("  'a',")], 1) === 'refused');
+  t('⭐ `z.tuple([` is not one of the four forms AND not in the refusal vocabulary, so it KEEPS ITS ROW — the reader asks which constructor it is rather than whether the head says `z.`, and a name it has not classified buys no silence', closedSetMembership([CTX('const T = z.tuple(['), CTX("  'a',")], 1) === 'unread');
   t('⛔ …while `z.literal([` is one of the four and reads as declared', closedSetMembership([CTX('const L = z.literal(['), CTX("  'a',")], 1) === 'declared');
   // -- the flag: a reader that SUPPRESSES must refuse a guessed stack ---------
   const REGEX_ABOVE = [CTX('const S = new Set(['), CTX('  ...SEEDS.filter((s) => /^x/.test(s)),'), CTX("  'workflow',")];
@@ -5769,7 +6010,7 @@ export function selfTest() {
   t('…and `unread` when the hunk shows no open delimiter at all', closedSetMembership([CTX("  'read',")], 0) === 'unread');
   t('⛔ an array literal BOUND TO A NAME is `unread`, never `refused` — the fourth form lives there and must not be silenced', closedSetMembership([CTX('export const CORE_PLUGIN_TYPES = ['), CTX("  'read',")], 1) === 'unread');
   t('⛔ …and so is EVERY `(` frame — all four forms put their members inside a `[`, and a `(` frame\'s head stops one character short of the callee\'s paren, so this reader declines to classify one', closedSetMembership([CTX('  note: z.string().describe('), CTX("    'prose',")], 1) === 'unread' && closedSetMembership([CTX('const wrapped = ('), CTX("  'read',")], 1) === 'unread');
-  t('⛔ CONTROL — the same call with an ARRAY argument DOES carry its paren in the head and is refused, so the case above measures the frame and not the callee', closedSetMembership([CTX('const F = Object.freeze(['), CTX("  'read',")], 1) === 'refused');
+  t('⛔ CONTROL — the same call with an ARRAY argument DOES carry its paren in the head and is refused, so the case above measures the frame and not the callee', closedSetMembership([CTX('const F = new Set(['), CTX("  'read',")], 1) === 'refused');
   t('⛔ …and a `{` frame, which this reader classifies not at all', closedSetMembership([CTX('const shape = {'), CTX("  'read',")], 1) === 'unread');
   t('⭐ the vocabulary is INTACT — `memberTellKind` still classifies a refused element as a member of kind T2, so both sides of the budget keep reading one question', memberTellKind("  'workflow',", { onContractSource: true }) === 'T2');
   // -- ONE FORM, FOUR SPELLINGS: the hole the first cut of this reading left --
@@ -5799,11 +6040,11 @@ export function selfTest() {
   t('…the same wrap on a `z.union([` too, which is where the arms live', closedSetMembership([CTX('export const AnySchema = z'), CTX('  .union(['), CTX('  ReadSchema,')], 2) === 'declared');
   t('⭐ EXPLICIT TYPE ARGUMENTS — `z.enum<Mode>([` is the same form and reads declared', closedSetMembership([CTX('export const M = z.enum<Mode>(['), CTX("  'read',")], 1) === 'declared');
   t('⭐ AN ALIASED NAMESPACE — `zod.enum([` is the same form and reads declared', closedSetMembership([CTX('export const M = zod.enum(['), CTX("  'read',")], 1) === 'declared');
-  t('⛔ CONTROL — the name is a whole TOKEN, so `parseenum([` is refused: the receiver is discarded, the word never is', closedSetMembership([CTX('const X = parseenum(['), CTX("  'read',")], 1) === 'refused');
+  t('⛔ CONTROL — the name is a whole TOKEN, so `parseenum([` never reads `declared`: the receiver is discarded, the word never is — and being a name the vocabulary does not carry, it keeps its row', closedSetMembership([CTX('const X = parseenum(['), CTX("  'read',")], 1) === 'unread');
   // -- a set DERIVED from another one: never `refused`, never `declared` ------
   t('⭐ `Full.extract([` builds a SUB-ENUM and gains a value exactly as an enum does — it FIRES, and ⛔ never reads `refused`', closedSetMembership([CTX('export const Sub = Full.extract(['), CTX("  'read',")], 1) === 'unread');
   t('⛔ …and `Full.exclude([`, whose added member moves the set the OTHER way — a direction this file has never claimed to read, so it fires rather than declines', closedSetMembership([CTX('export const Sub = Full.exclude(['), CTX("  'read',")], 1) === 'unread');
-  t('⛔ CONTROL — a sibling zod method that closes and derives NOTHING is still refused, so the two above are bought by the NAME and not by the dot', closedSetMembership([CTX('export const Sub = Full.omit(['), CTX("  'read',")], 1) === 'refused');
+  t('⛔ CONTROL — the NAME is what decides under one receiver: `Full.enum([` reads declared while `Full.omit([` reads `unread`, so the two above are bought by the name and never by the dot', closedSetMembership([CTX('export const Sub = Full.enum(['), CTX("  'read',")], 1) === 'declared' && closedSetMembership([CTX('export const Sub = Full.omit(['), CTX("  'read',")], 1) === 'unread');
   // -- the `[`-only guard, which a `{` a CALL opened is the case for ---------
   //
   // ⛔ NOT redundant with the head reading: a `{` opened inside a call carries
@@ -5818,7 +6059,8 @@ export function selfTest() {
   t('⭐ a GROUPING paren is not a call — `const X = ([` … `] as const)` is the fourth form wrapped, and it keeps its row', closedSetMembership([CTX('const X = (['), CTX("  'read',")], 1) === 'unread');
   t('…and the ROW survives it too', tells({ filename: 'packages/spec/src/a.zod.ts', patch: patchOf(3, '+const X = ([', "+  'read',") }).some((r) => r.line === 4 && r.tell === 'T2'));
   // -- the constructor must be the delimiter's OWN --------------------------
-  t("⭐ `z.enum(['a']).or(fn([` is judged on `fn`, never on the `enum` to its left — a reader that searched the whole head would answer `declared` here", closedSetMembership([CTX("const X = z.enum(['a']).or(fn(["), CTX("  'read',")], 1) === 'refused');
+  t("⭐ `z.enum(['a']).or(fn([` is judged on `fn`, never on the `enum` to its left — a reader that searched the whole head would answer `declared` here, and this one keeps the row", closedSetMembership([CTX("const X = z.enum(['a']).or(fn(["), CTX("  'read',")], 1) === 'unread');
+  t("⛔ …and the same shape ending in a REFUSING call answers `refused`, not `declared` — two different answers off one head prove which call was read", closedSetMembership([CTX("const X = z.enum(['a']).or(new Set(["), CTX("  'read',")], 1) === 'refused');
   t("⛔ CONTROL — the constructor's OWN earlier arguments still count: `z.discriminatedUnion('type', [` leaves only `'type', ` between the two and reads declared", closedSetMembership([CTX("const D = z.discriminatedUnion('type', ["), CTX('  WorkflowSchema,')], 1) === 'declared');
   // -- the sentence says only what was MEASURED -----------------------------
   const PAREN_FRAME_ROW = tells({ filename: 'packages/spec/src/a.zod.ts', patch: patchOf(3, '+  note: z.string().describe(', "+    'prose',") }).find((r) => r.line === 4);
@@ -5826,7 +6068,43 @@ export function selfTest() {
   t("⭐ `calleeOfFrameHead` is the refusal's whole evidence, read on its own — the call answers its name", calleeOfFrameHead('const S = new Set(') === 'Set' && calleeOfFrameHead('  note: z.string().describe(') === 'describe');
   t('⛔ …and a head that is NOT a call answers `null`, which is what leaves the tell firing', calleeOfFrameHead('export const CORE_PLUGIN_TYPES = ') === null && calleeOfFrameHead('const X = (') === null && calleeOfFrameHead('  kinds: ') === null);
   // -- the residual quiet direction, PINNED so it cannot move unnoticed ------
-  t('⚠️ STATED SILENCE — the fourth form wrapped in `Object.freeze([… ] as const)` still reads `refused`: the `as const` sits below the members and `freeze` closes no set, so this is disclosed in the header rather than read', closedSetMembership([CTX('export const CORE_PLUGIN_TYPES = Object.freeze(['), CTX("  'workflow',")], 1) === 'refused');
+  // -- `Object.freeze` is TRANSPARENT, and that is a RULING ------------------
+  //
+  // ⚠️ It used to read `refused`, disclosed in the header as a stated silence.
+  // The at-tier record ruled that disposition a documented DEFECT rather than
+  // an honest silence, on the evidence and not on taste: freeze is transparent
+  // to what its array is, so refusing on it is refusing with no evidence about
+  // the construct at all — and the mitigation the header claimed ("the enum's
+  // own opener line fires as an opener row") is false by test, because a
+  // member-adding diff carries no opener line. Measured on the shape a real PR
+  // carries, base instrument → the previous cut: a fifth `FLOW_TRIGGER_KINDS`
+  // kind 4 → 0, a whole freeze array added in one diff 2 rows → 0, a member
+  // under `z.enum(Object.freeze([` 4 → 0, a frozen array fed to `z.enum(KINDS)`
+  // on the next line 4 → 0.
+  t('⭐ `Object.freeze([… ] as const)` is read THROUGH — the fourth form wrapped KEEPS ITS ROW, because freeze says nothing about what its array is and the head left of it declares nothing', closedSetMembership([CTX('export const CORE_PLUGIN_TYPES = Object.freeze(['), CTX("  'workflow',")], 1) === 'unread');
+  t('…and the ROW survives it, which is the half a reader-only case cannot pin', tells({ filename: 'packages/spec/src/a.zod.ts', patch: patchOf(3, '+export const CORE_PLUGIN_TYPES = Object.freeze([', "+  'workflow',") }).some((r) => r.line === 4 && r.tell === 'T2'));
+  t('⭐ …and the strip REACHES the constructor — `z.enum(Object.freeze([` is a `z.enum`, so its member reads as MEASURED rather than merely firing', closedSetMembership([CTX('export const M = z.enum(Object.freeze(['), CTX("  'read',")], 1) === 'declared');
+  t('…however many wrappers stand between, because the head is asked again after every strip', closedSetMembership([CTX('export const M = z.enum(Object.freeze(Object.freeze(['), CTX("  'read',")], 1) === 'declared');
+  t('⛔ CONTROL — the strip is bought by the NAME `freeze` and never by "a call inside a call": `z.enum(buildList([` is judged on `buildList` and keeps its row', closedSetMembership([CTX('export const M = z.enum(buildList(['), CTX("  'read',")], 1) === 'unread');
+  // -- the refusal is a CLOSED vocabulary, which is the other half -----------
+  t('⭐ AN UNKNOWN CALLEE KEEPS ITS ROW — `makeEnum([` closes a set to whoever wrote it, and an open-vocabulary refusal silenced every helper nobody had enumerated', closedSetMembership([CTX('export const MADE = makeEnum(['), CTX("  'read',")], 1) === 'unread');
+  t('…and it is not one spelling — `stringEnum([` reads the same, because the vocabulary is a LIST and not the complement of the four forms', closedSetMembership([CTX('export const MADE = stringEnum(['), CTX("  'read',")], 1) === 'unread');
+  t('…and the ROW survives, so an unknown helper is loud rather than merely unclassified', tells({ filename: 'packages/spec/src/a.zod.ts', patch: patchOf(3, '+export const MADE = makeEnum([', "+  'read',") }).some((r) => r.line === 4 && r.tell === 'T2'));
+  t('⭐ the vocabulary READ AS A LIST — the two names that buy silence, and the three that must never', NON_SET_CALLEE_NAMES.length === 2 && NON_SET_CALLEE_NAMES.includes('Set') && NON_SET_CALLEE_NAMES.includes('default') && !NON_SET_CALLEE_NAMES.includes('freeze') && !NON_SET_CALLEE_NAMES.includes('extract') && !NON_SET_CALLEE_NAMES.includes('exclude'));
+  t('⛔ …and `default` is read on a real keyed head — a `.default([…])` list is a default VALUE, never the accept set', closedSetMembership([CTX('  kinds: z.array(z.string()).default(['), CTX("    'read',")], 1) === 'refused');
+  // -- the residual, NAMED rather than reasoned away -------------------------
+  //
+  // ⚠️ `new Set([` keeps its silence and the silence is WRONG on two live
+  // accept sets. Both are named here so the day one of them moves, a case
+  // moves with it — and so that nobody re-derives the false rationale this
+  // reading used to carry ("no author's document is ever parsed against it").
+  t('⚠️ THE RESIDUAL — `VALUE_DOMAIN_FIELD_TYPES` is a real ACCEPT set spelled `new Set([`, refused by a `superRefine` that reads it, and this reader silences it', closedSetMembership([CTX('export const VALUE_DOMAIN_FIELD_TYPES: ReadonlySet<string> = new Set(['), CTX("  'text',")], 1) === 'refused');
+  t('…so is `TEXT_OPERATOR_DOOR_PASSING_TYPES`, and PR #19314\'s internal discriminant set is BYTE-INDISTINGUISHABLE from both inside a hunk — same head, same element shape — which is why only CONSUMPTION separates them and no hunk-shaped reader can', closedSetMembership([CTX('export const TEXT_OPERATOR_DOOR_PASSING_TYPES: ReadonlySet<string> = new Set(['), CTX("  'autonumber',")], 1) === 'refused' && closedSetMembership([CTX('const COLLECTION_WALK_WRAPPERS: ReadonlySet<string> = new Set(['), CTX("  'pipe',")], 1) === 'refused');
+  // -- the readings the vocabulary is derived from, pinned as ONE ------------
+  t('⭐ the `new` prefix is LOAD-BEARING on `before` and nowhere else — the NAME is found either way because the pattern is unanchored at its start, but the slice must begin AT `new` or a transparent strip leaves one behind', callHeadOfFrame('const S = new Set(')?.before === 'const S = ' && callHeadOfFrame('const S = new Set(')?.callee === 'Set');
+  t('…and `before` is the text left of the WHOLE call, its receiver chain included', callHeadOfFrame('export const X = Object.freeze(')?.before === 'export const X = ' && callHeadOfFrame('export const X = Object.freeze(')?.callee === 'freeze');
+  t('⭐ the four names are spelled ONCE in this file — ⛔ no reading hand-copies the alternation, which is the drift one vocabulary exists to prevent (two copies stood until this round: the opener-binding head and the opener head)', !readFileSync(fileURLToPath(import.meta.url), 'utf8').includes(CLOSED_SET_CONSTRUCTOR_NAMES.join('|')));
+  t('…and every name in it is read by the opener reader, while one outside it is not', CLOSED_SET_CONSTRUCTOR_NAMES.every((n) => closedSetOpenerBinding(`export const X = z.${n}([`) === 'export const X =') && closedSetOpenerBinding('export const X = z.tuple([') === null);
 
   // -- T3 --------------------------------------------------------------------
   battery('T3 — a new row in a published entry point');
@@ -6719,7 +6997,7 @@ export function selfTest() {
       "#18702's FILE-LOCAL declaring factory, resolved through its own definition at the head BLOB and classified by what its body returns — every factory the filing card names pinned against its own arm, the refusal arm read off a `z.never` definition rather than a name with its chained-arm control, the counterfactual bracketed by the same fixture with the resolver blind, and both boundaries (an imported factory, an unclassifiable body) pinned as a STATED silence the reader prints, " +
       "#18721's hunk LEADING CONTEXT — an underflowing closer drops and the walk goes on, so #17618's parameter decline reaches a real diff: PR #18720's own hunk silent at its reported line, bracketed by the same file's true-positive control that fires, by a new key behind the same underflowing context, by a key added after the parameter list closes, and by the removed side where a phantom budget disappearing makes a genuine key fire, " +
       "#19099's walk saying when it STOPPED READING — the whole shown stack beside a flag raised on a possible regex literal, a type-blind pop and an unterminated string, with a lone slash read as the division it is, a hunk that BEGINS inside a JSDoc read rather than guessed at, each of the reset's three guards pinned against the frames it protects, the apostrophe residual pinned in the direction it fails, and the reset reaching `inParameterList` so an `@example` arrow cannot swallow the key line behind it, " +
-      "#19384's bare element that is not a member until the hunk shows one of the four forms above it — the card's three legs, where A and B now agree because the verdict is no longer keyed on line layout and C still fires, PR #19314's own seven discriminants silent beside the control that is the finding, and the loud direction pinned: an opener above the hunk, a `CORE_PLUGIN_TYPES`-shaped `as const` array, a property-valued array, a guessed stack, and the removed element that buys no budget with its removal and its addition in ONE change block beside the control that DOES pay — the four spellings of one form (chain-wrapped, generic, aliased, plain) each reading as measured under any receiver with `parseenum(` as the whole-token control, a sub-enum builder firing rather than declining while a sibling method is still refused, the `[`-only guard pinned on the `{` a call opened where alone it can be swallowed, the grouping paren that is not a call, the constructor that must be the delimiter's OWN, the NOT-MEASURED sentence claiming only what was not measured, and `Object.freeze([… ] as const)` pinned as the residual STATED silence, " +
+      "#19384's bare element that is not a member until the hunk shows one of the four forms above it — the card's three legs, where A and B now agree because the verdict is no longer keyed on line layout and C still fires, PR #19314's own seven discriminants silent beside the control that is the finding, and the loud direction pinned: an opener above the hunk, a `CORE_PLUGIN_TYPES`-shaped `as const` array, a property-valued array, a guessed stack, and the removed element that buys no budget with its removal and its addition in ONE change block beside the control that DOES pay — the four spellings of one form (chain-wrapped, generic, aliased, plain) each reading as measured under any receiver with `parseenum(` as the whole-token control, a sub-enum builder firing rather than declining while a sibling method is still refused, the `[`-only guard pinned on the `{` a call opened where alone it can be swallowed, the grouping paren that is not a call, the constructor that must be the delimiter's OWN, the NOT-MEASURED sentence claiming only what was not measured, `Object.freeze([` read THROUGH to the head left of it so the fourth form wrapped keeps its row while `z.enum(Object.freeze([` reads as measured, the refusal closed to a NAMED vocabulary so an unknown helper is loud, and `new Set([` pinned as the residual silence with the accept sets it covers named, " +
       "#16448's four positive controls each with its file:line, its negative controls — " +
       'the same diffs with `yes`, and a removal-only diff with `no` — the local path composed end ' +
       'to end so a binary change to a tell surface cannot read as clean, #17112\'s split count with ' +
