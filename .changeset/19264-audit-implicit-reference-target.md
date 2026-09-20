@@ -1,0 +1,13 @@
+---
+"@objectstack/plugin-audit": patch
+---
+
+The activity-timeline summary resolves a reference field's target through `referenceTargetOf` instead of the materialized `reference` carrier, so a `trackHistory`'d `{ type: 'user' }` field authored without one is planned, read and rendered as a name instead of silently showing the raw id (#19264).
+
+`audit-writers.ts` admitted `user` as a reference type and then required an EXPLICIT `reference` on it. The spec declares exactly the opposite for that type: `IMPLICIT_REFERENCE_TARGETS` (`@objectstack/spec/data`) says a `user` field's target is "a CONSTANT OF THE TYPE, so `reference` on a `user` field materializes that constant; it does not supply it. Metadata authored without it (hand-written JSON, an AI author, a Studio form) is **fully specified, not under-specified**." So the one spelling the contract calls complete was the one the reader refused — and it refused it **silently**: the field was simply absent from the read plan, and the timeline rendered `usr_1` where every other reference field showed a name.
+
+- **Four sites, not two.** The target is the key of the `id → title` map, so it has two ends: the two read planners (`planTrackedLookupReads`, `planMilestoneTokenReads`) build the plan under it and the two renderers (`renderTrackedChangeSummary`, `renderMilestoneSummary`) look the resolved titles back up under it. All four now ask one helper, so repairing the plan alone cannot pay for a read whose result the renderer then fails to find.
+- **Nothing else widens.** The admitted types are unchanged (`lookup`, `master_detail`, `user`), so a `lookup` / `master_detail` whose author-chosen target is absent still names nothing, is still left out, and still issues no read — `tree` is deliberately not added.
+- **A padded carrier can no longer split the key.** The planners used to `trim()` and the renderers did not, so `reference: ' crm_account '` produced two keys and no title; one helper trims once for both ends.
+- **The unreadable-carrier behaviour is unchanged.** `referenceTargetOf` reads the carrier through `referenceCarrierOf`, which throws for an object- or array-valued `reference`; that throw is caught at the helper because this code runs inside `writeAudit`'s summary composition, which is not inside the `try` that guards the audit row write — an escaping `TypeError` would turn a display-enrichment miss into a failure on the audited write's own path. Such a carrier is left out exactly as it was before.
+- **No authoring change.** Metadata that already spells `reference: 'sys_user'` resolves to the same target it always did; nobody has to restate the constant.

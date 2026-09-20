@@ -6323,14 +6323,32 @@ export class ObjectStackProtocolImplementation implements
             // Atomic cross-object batch (#3298 / #1604 / ADR-0034 item 4): the
             // REST /batch endpoint runs its ops inside `engine.transaction()`,
             // which only opens a real (all-or-nothing) transaction when the
-            // engine exposes one — otherwise it degrades to a non-atomic
-            // passthrough. Advertise the capability iff the runtime engine can
-            // honour a transaction, so `declared === enforced` (Prime Directive
-            // #10). The rest-server producer ANDs this with `api.enableBatch` so
-            // a server that doesn't mount the route reports `false` at its layer.
-            // (ADR-0119 D1: `transaction` is contract-declared, so this probe
-            // no longer needs a structural cast to ask the question.)
-            transactionalBatch: typeof this.engine?.transaction === 'function',
+            // DEFAULT DRIVER can carry one — otherwise it takes its declared
+            // non-transactional path (ADR-0119 D1) and the batch degrades to a
+            // non-atomic passthrough. Advertise the capability iff the runtime
+            // can actually roll back, so `declared === enforced` (Prime
+            // Directive #10). The rest-server producer ANDs this with
+            // `api.enableBatch` so a server that doesn't mount the route reports
+            // `false` at its layer.
+            //
+            // [#18997] `engineCanRollBack`, NOT `typeof this.engine?.transaction
+            // === 'function'`. The refusal this advertisement exists to help a
+            // caller avoid — `runAtomicBatch`'s `501 NOT_IMPLEMENTED`, whose own
+            // remedy text says to probe `capabilities.transactionalBatch` on
+            // /discovery first — already asks `engineCanRollBack`, which asks the
+            // DRIVER as well as the engine. `engine.transaction` is a function on
+            // every real engine, so the engine-only probe answered `true` for the
+            // two compositions that 501: a default driver with no
+            // `beginTransaction` at all, and one that INHERITED it and declared
+            // `supports.transactionsUnsupported` (#18063). An advertised
+            // capability must answer the same question the refusal path asks,
+            // from the same predicate — two derivations of one capability is how
+            // these drifted. Narrowing only: this predicate is the engine probe
+            // AND a driver clause, so no composition newly advertises `true`
+            // (`protocol.discovery-transactional-batch-honesty.test.ts` pins both
+            // directions, and the driver clause is skipped where the registry is
+            // not inspectable, so a test double keeps its old answer).
+            transactionalBatch: engineCanRollBack(this.engine),
 
             // ── Joined the vocabulary with ruling A (#5672) ───────────────────
             // These six used to be the runtime dispatcher's half of the split.
