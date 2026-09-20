@@ -72,18 +72,36 @@
  * match is a claim nothing judges. So this table is NOT a general antonym
  * dictionary, and rows are not added ahead of the shape that needs them.
  *
- * Attested on 2026-09-20 over 136 registered surfaces (one row per pair, with
- * the surfaces that declare both poles):
+ * Attested on 2026-09-20 over **389 unique authoring surfaces** — the population
+ * `alias-integrity.test.ts`'s own forcing walk registers, deduplicated by its
+ * own key (surface + alias table + sorted shape keys). ⚠️ State which reading
+ * you are quoting: the same walk also yields **421** raw `strictObject`
+ * registrations (factories that build one shape from several call sites) and
+ * **388** distinct surface STRINGS (two surfaces share a name). They are three
+ * different facts and only the first is the count of surfaces this table was
+ * judged against.
  *
- * | axis            | attested by                                                    |
- * |:----------------|:---------------------------------------------------------------|
- * | `start` / `end` | `startDateField` / `endDateField` on calendar, gantt, timeline; |
- * |                 | `baselineStartField` / `baselineEndField` on gantt; `start` /   |
- * |                 | `end` on the gantt shift band                                   |
- * | `min` / `max`   | `minLength` / `maxLength` and `min` / `max` on form field;      |
- * |                 | `minRows` / `maxRows` on subform                                |
- * | `input` / `output` | `inputMapping` / `outputMapping` on API endpoint             |
- * | `read` / `write`   | `read` / `write` on the `api` data source                    |
+ * Pair counts below are that measurement, one row per axis:
+ *
+ * | axis               | pairs | attested by                                      |
+ * |:-------------------|------:|:-------------------------------------------------|
+ * | `start` / `end`    |     5 | `startDateField` / `endDateField` on calendar,    |
+ * |                    |       | gantt and timeline; `baselineStartField` /        |
+ * |                    |       | `baselineEndField` on gantt; `start` / `end` on   |
+ * |                    |       | the gantt shift band                              |
+ * | `min` / `max`      |    11 | `minLength` / `maxLength` and `min` / `max` on    |
+ * |                    |       | form field and on field; `minRows` / `maxRows` on |
+ * |                    |       | subform; `minZoom` / `maxZoom` on the ER diagram; |
+ * |                    |       | `minDate` / `maxDate` on `object-timeline`; and   |
+ * |                    |       | `min` / `max` on screen field, chart axis, zoom   |
+ * |                    |       | settings and the datasource pool config           |
+ * | `input` / `output` |     2 | `inputMapping` / `outputMapping` on API endpoint; |
+ * |                    |       | `isInput` / `isOutput` on a flow variable         |
+ * | `read` / `write`   |     2 | `read` / `write` on the `api` data source;        |
+ * |                    |       | `readScope` / `writeScope` on object permission   |
+ *
+ * ⛔ These counts are a reading, not a floor: the gate that keeps them honest is
+ * the attestation test, which re-derives them from the shapes on every run.
  *
  * The order inside a pair is the order the two ends are NAMED IN, so a message
  * reads `startDateField` before `endDateField` however the candidates happened
