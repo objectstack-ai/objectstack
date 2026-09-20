@@ -49,7 +49,11 @@
       "Bash(curl -sS -X PATCH https://api.github.com/repos/objectstack-ai/objectstack/pulls/* *)",
       "Bash(curl -sS -X PATCH https://api.github.com/repos/objectstack-ai/objectui/pulls/* *)",
       "Bash(curl -sS -X POST https://api.github.com/repos/objectstack-ai/objectstack/pulls/*/ccr/ready_for_review *)",
-      "Bash(curl -sS -X PUT https://api.github.com/repos/objectstack-ai/objectstack/pulls/*/ccr/auto_merge *)"
+      "Bash(curl -sS -X PUT https://api.github.com/repos/objectstack-ai/objectstack/pulls/*/ccr/auto_merge *)",
+      "Bash(node --use-env-proxy scripts/pm/post-stamped.mjs *)",
+      "Bash(node --use-env-proxy scripts/pm/label-write.mjs *)",
+      "Bash(curl -sS -X PATCH https://api.github.com/repos/objectstack-ai/objectstack/issues/* *)",
+      "Bash(curl -sS -X PATCH https://api.github.com/repos/objectstack-ai/objectui/issues/* *)"
     ],
     "deny": [
       "mcp__github__issue_write",
