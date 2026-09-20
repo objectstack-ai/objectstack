@@ -617,23 +617,30 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     input: 'parsed',
     commands: ALL,
     source: 'packages/lint/src/validate-dataset-measure-aggregates.ts',
-    // NOT RUNTIME_NEEDS_FULL_SNAPSHOT: the two collections this rule reads —
-    // `objects` and `datasets` — are both carried (#7529). What holds it off
-    // the door is the type axis: the metadata type that CARRIES the
-    // declaration is `dataset` (`allowRuntimeCreate: true`), and
-    // `TYPE_TO_STACK_KEY` in `runtime-gate.ts` has no `dataset` row, so a
-    // dataset write builds no per-write snapshot and no rule can be dispatched
-    // for it. Declaring another type here would only re-judge a STORED
-    // dataset, which the #4463 D4 differential cancels as someone else's
-    // pre-existing condition — wired, and enforcing nothing. Mapping the
-    // `dataset` type at the gate is its own card (every rule reading
-    // `stack.datasets` gains the door at once, including the existence rules).
-    surfaces: CLI_ONLY,
-    surfaceReason:
-      'The declaring metadata type is `dataset`, which `runtime-gate.ts`\'s TYPE_TO_STACK_KEY does '
-      + 'not map — a dataset write builds no per-write snapshot, so nothing can dispatch this rule '
-      + 'there; declaring any other type would only re-judge a stored dataset, which the publish '
-      + 'gate\'s differential cancels as somebody else\'s pre-existing condition.',
+    // [#19143] The door this rule was written for, finally reachable. The
+    // previous `surfaceReason` here was never RUNTIME_NEEDS_FULL_SNAPSHOT —
+    // the two collections this rule reads, `objects` and `datasets`, are BOTH
+    // carried (#7529). What held it off was the TYPE axis: the metadata type
+    // that carries the declaration is `dataset` (`allowRuntimeCreate: true`),
+    // and `TYPE_TO_STACK_KEY` had no `dataset` row, so a dataset write built
+    // no per-write snapshot and nothing could be dispatched for it. That row
+    // lands in the same commit as this declaration, which is the order the
+    // `seed: 'data'` note demands: never a mapping without a reading rule,
+    // never a declaration without a mapping.
+    //
+    // ⛔ `runtimeTypes: ['dataset']` and nothing else, still. Declaring another
+    // type would only re-judge a STORED dataset, which the #4463 D4
+    // differential cancels as somebody else's pre-existing condition — wired,
+    // and enforcing nothing. The written dataset is the only one this door may
+    // answer for.
+    //
+    // ⚠️ A REFUSAL widening on a door that previously refused nothing: a
+    // runtime dataset write whose measure pairs an aggregate with an
+    // incompatible field type is now 422 rather than silently stored. Measured
+    // over the shipped dataset corpus before crossing (see the PR body) —
+    // 0 findings, with a lit synthetic probe refused.
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['dataset'],
     run: (stack) => validateDatasetMeasureAggregates(stack),
   },
   // ADR-0049 / #3367 — a dashboard header action naming a dead target ships a
@@ -805,8 +812,38 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // The gate's differential keeps it honest in the one direction that
     // matters: a STORED sibling already in violation is never charged to this
     // write (#4463 D4).
+    // [#19143] `dataset` joins, and the same granularity mechanism keeps it a
+    // NARROW crossing: this entry says a `dataset` write dispatches the suite;
+    // the suite's per-member `runtimeTypes` says exactly TWO members judge that
+    // snapshot — `validateDatasetReferences` (the dimension / measure / include
+    // / filter-key existence rules, #14105) and `validateObjectReferences`
+    // (whose `datasets[].object` rung owns the base-object name, deliberately
+    // split off from the rule above so it gets the curated
+    // `PLATFORM_PROVIDED_OBJECT_NAMES` ladder). Both resolve only against
+    // `stack.objects` and `stack.datasets`, the two collections a per-write
+    // snapshot carries, so neither has a missing-collection false-positive
+    // channel. Every other member keeps its existing declaration and does not
+    // run on a dataset write.
+    //
+    // The two cross TOGETHER on #7220's reading: they judge the SAME document
+    // and their split is an implementation detail of the severity ladder, so an
+    // author refused for a dangling dimension field and waved through for a
+    // dangling base object could not predict the door.
+    //
+    // The measured state that forced it: `runtimeAuthoringRulesFor('dataset')`
+    // dispatched NOTHING — zero rules, on a type every tenant may create at
+    // runtime and whose own existence rules state their failure mode as a chart
+    // that renders successfully with empty or wrong numbers.
+    //
+    // ⚠️ A REFUSAL widening, like #15254's: a dataset republished with a
+    // pre-existing dangling field path is now refused (422) rather than stored
+    // silently. The gate's differential keeps it honest in the one direction
+    // that matters — a STORED sibling already in violation is never charged to
+    // this write (#4463 D4). Measured over the shipped dataset corpus before
+    // crossing (see the PR body): 0 findings, with a lit synthetic probe
+    // refused.
     surfaces: CLI_AND_RUNTIME,
-    runtimeTypes: ['flow', 'view', 'object'],
+    runtimeTypes: ['flow', 'view', 'object', 'dataset'],
     run: (stack, ctx) => validateReferenceIntegrity(stack, ctx),
   },
   // ADR-0078 / #5068 — the SDUI component-props gate. `PageComponent.properties`
