@@ -142,11 +142,24 @@
 //
 //   --baseline <path>   compare current state against a committed baseline and
 //                       report only regressions (a block declares a NEW
-//                       undocumented input, or a previously-present block vanished).
+//                       undocumented input, or a block has NO component in the
+//                       manifest — see the next paragraph, that one is never
+//                       baseline-suppressible).
 //   --update            with --baseline, (re)write the baseline from the current
 //                       manifest instead of comparing. Run after an intentional
-//                       registry change to accept the new state.
+//                       registry change to accept the new state. REFUSES while any
+//                       block is missing from the manifest.
 //   --strict            exit 1 on divergence (plain mode) or regression (baseline).
+//
+// ⚠ THE BASELINE RATCHETS THE SOFT AXES ONLY — `missing` is judged every run.
+// A block with no component in the manifest is a regression whether or not the
+// baseline carries a row for it, because the row that would silence it is an
+// ACCEPTANCE of a spec row the public registry does not carry, and an accepted row
+// reads like a reviewed decision to everyone after. `missingRegression()` and the
+// `--update` refusal below carry the reasoning; the failure text carries the cure.
+// Before this was so, a spec row whose block was absent arrived PRE-ACCEPTED: the
+// old `state.missing && base && !base.missing` could not fire without a baseline
+// row, so the gate printed `✗ <tag>: NO component in the manifest` and exited 0.
 
 process.env.OS_EAGER_SCHEMAS = '1';
 
@@ -460,17 +473,88 @@ console.log(
 );
 console.log('  "declared by both" is a statement about the two declarations, not about the renderer.');
 
+/**
+ * MISSING_IS_NEVER_RATCHETED_AWAY — the one signal the baseline may not absorb.
+ *
+ * The baseline exists to stop the SOFT axis from manufacturing a standing red:
+ * `spec-only` is a curated-palette subset by design (ADR-0082 §2) and there are
+ * ~126 of them, so `lint.yml` runs this gate `--baseline … --strict` rather than
+ * plain `--strict`. `registryOnly` rides the same ratchet because an accepted
+ * undocumented extension is a real, reviewable state.
+ *
+ * `missing` is not that kind of signal. "NO component in the manifest — not
+ * registered, or not public" says the spec declares a block the public registry
+ * does not expose at all: there is no prop-level disagreement to accept, there is
+ * no block. Ratcheting it would mean writing `missing: true` into the ACCEPTED
+ * baseline, and an accepted row is indistinguishable from a reviewed decision —
+ * the gate would then print `✗ <tag>: NO component in the manifest` and exit 0
+ * forever, which is the "verifier that silently degrades" AGENTS.md names.
+ *
+ * So `missing` is judged on its own terms, every run, baseline or not:
+ *
+ *   - a block absent from the manifest is ALWAYS a regression, whether or not the
+ *     baseline carries a row for it, and whatever that row says;
+ *   - `--update` REFUSES to write a baseline while any block is missing, so the
+ *     reflex that clears a new red cannot mint the acceptance either.
+ *
+ * The cure for a red here is upstream and is named in the failure text: expose the
+ * block on the registry's public tier and regenerate the manifest, or stop
+ * declaring a spec row for a block the public tier does not carry. Never a
+ * baseline row.
+ */
+function missingRegression(tag: string, base: BlockState | undefined): string {
+  if (base && !base.missing) return `<${tag}>: block vanished from the manifest (was present in baseline).`;
+  if (base) {
+    return (
+      `<${tag}>: NO component in the manifest. The baseline's \`missing: true\` row does NOT accept this — ` +
+      'a missing block is never ratcheted away (see the failure text below).'
+    );
+  }
+  return (
+    `<${tag}>: declared in the spec, NO component in the manifest, and NO baseline row — so nothing here ` +
+    'could have "regressed". The absence IS the divergence; it is not onboarding slack.'
+  );
+}
+
 // ── Baseline ratchet ─────────────────────────────────────────────────────────
 if (BASELINE) {
   type Baseline = { blocks: Record<string, BlockState> };
   if (UPDATE_BASELINE) {
+    // The producer half of MISSING_IS_NEVER_RATCHETED_AWAY. `--update` is the one
+    // command that can mint an acceptance, and clearing a fresh red by re-running it
+    // is the reflex this gate has to survive: the row it would write is exactly the
+    // `missing: true` a reviewing round already refused to write, and once written
+    // nothing ever reports the block again. Refuse at the producer (AGENTS.md
+    // "Contract-first — fix the metadata, not the runtime"), loudly, naming the fix.
+    const stillMissing = Object.entries(current)
+      .filter(([, state]) => state.missing)
+      .map(([tag]) => tag);
+    if (stillMissing.length) {
+      console.error(
+        [
+          '',
+          `✗ refusing to write a baseline while ${stillMissing.length} block(s) have NO component in the manifest:`,
+          ...stillMissing.map((t) => `    - ${t}`),
+          '',
+          '  A `missing: true` baseline row would ACCEPT the divergence instead of reporting it, and an',
+          '  accepted row reads the same as a reviewed decision to every later reader. Fix it upstream:',
+          '',
+          '    - expose the block on the registry PUBLIC tier (objectui `PUBLIC_BLOCKS`, or `tier: \'public\'`',
+          '      on the registration) and regenerate the manifest — `node scripts/gen-sdui-manifest-node.mjs`; or',
+          '    - drop the spec row, so the spec stops declaring a block the public tier does not carry.',
+          '',
+          '  Then re-run --update. Every OTHER axis this baseline carries is still updatable that way.',
+        ].join('\n'),
+      );
+      process.exit(1);
+    }
     const out: Baseline = { blocks: current };
     fs.writeFileSync(
       BASELINE,
       JSON.stringify(
         {
           _comment:
-            'Accepted spec↔registry DECLARATION-PARITY baseline (react blocks). Per block: the registry-only input set (the registry config declares it, the spec does not) and whether the block is missing. Regenerate with: MANIFEST=… check:react-declaration-parity --baseline <this> --update. The ratchet flags only NEW registry-only inputs or newly-missing blocks. It compares two declarations and inspects no renderer, so a prop both sides declare and nothing reads records as agreement here (#4413/#4472).',
+            'Accepted spec↔registry DECLARATION-PARITY baseline (react blocks). Per block: the registry-only input set (the registry config declares it, the spec does not) and whether the block is missing. Regenerate with: MANIFEST=… check:react-declaration-parity --baseline <this> --update. The ratchet flags NEW registry-only inputs; a block with NO component in the manifest is flagged every run and is NOT suppressible from here — --update refuses to write a baseline while any block is missing, so no row in this file ever accepts one. It compares two declarations and inspects no renderer, so a prop both sides declare and nothing reads records as agreement here (#4413/#4472).',
           ...out,
         },
         null,
@@ -493,10 +577,18 @@ if (BASELINE) {
     const baseRO = new Set(base?.registryOnly ?? []);
     const newRO = state.registryOnly.filter((p) => !baseRO.has(p));
     if (newRO.length) regressions.push(`<${tag}>: new registry-only input(s) not in baseline: ${newRO.join(', ')}`);
-    if (state.missing && base && !base.missing) regressions.push(`<${tag}>: block vanished from the manifest (was present in baseline).`);
+    if (state.missing) regressions.push(missingRegression(tag, base));
   }
-  // A brand-new block in the registry that isn't in the baseline is fine (purely
-  // additive coverage); we only ratchet against accepted blocks regressing.
+  // Coverage that GREW is not a regression — a block evaluated for the first time
+  // contributes nothing on the `registryOnly` axis it was never measured on. That
+  // has always been true here only in the loose sense: `baseRO` for an unbaselined
+  // block is the EMPTY set, so every registry-only input such a block declares is
+  // already reported as new. `missing` is the axis that used to be exempt, and the
+  // exemption was the hole: `state.missing && base && !base.missing` could not fire
+  // without a baseline row, so a spec row whose block has NO manifest component at
+  // all — the single loudest thing this gate can observe — arrived pre-accepted and
+  // stayed invisible for as long as nobody regenerated the baseline. See
+  // MISSING_IS_NEVER_RATCHETED_AWAY above for why the cure is not a baseline row.
   console.log('\n## Baseline ratchet');
   if (!regressions.length) {
     console.log('✓ no new DECLARATION divergence vs accepted baseline (see the scope note above).');
@@ -505,10 +597,19 @@ if (BASELINE) {
   console.log('⚠ NEW declaration divergence vs accepted baseline:');
   for (const r of regressions) console.log(`    - ${r}`);
   console.log(
-    '\n  → If intentional (the registry added an input / the spec is meant to follow), either declare it\n' +
-      '    in the spec schema, add it to the block overlay in packages/spec/src/ui/react-blocks.ts, or\n' +
-      '    accept it by rerunning with --update.',
+    '\n  → A NEW REGISTRY-ONLY INPUT (the registry added an input / the spec is meant to follow): either\n' +
+      '    declare it in the spec schema, add it to the block overlay in packages/spec/src/ui/react-blocks.ts,\n' +
+      '    or accept it by rerunning with --update.',
   );
+  if (regressions.some((r) => r.includes('NO component in the manifest'))) {
+    console.log(
+      '\n  → NO COMPONENT IN THE MANIFEST is a different class and has NO --update escape: the spec declares\n' +
+        '    a block the public registry does not expose, so there is no prop-level disagreement to accept.\n' +
+        "    Expose it on the PUBLIC tier (objectui `PUBLIC_BLOCKS`, or `tier: 'public'` on the registration)\n" +
+        '    and regenerate — `node scripts/gen-sdui-manifest-node.mjs` — or drop the spec row. ⛔ Never a\n' +
+        '    baseline row: that accepts the divergence instead of reporting it.',
+    );
+  }
   process.exit(FAIL_ON_DIVERGENCE ? 1 : 0);
 }
 
