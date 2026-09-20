@@ -4805,8 +4805,8 @@ type PermissionAction = z.input<typeof PermissionActionSchema>;
 // ── PermissionActionSchema (const) ──
 declare const PermissionActionSchema: z.ZodEnum<{
     delete: "delete";
-    update: "update";
     read: "read";
+    update: "update";
     create: "create";
     export: "export";
     execute: "execute";
@@ -5461,8 +5461,8 @@ declare const PluginPermissionSchema: z.ZodObject<{
     }>;
     actions: z.ZodArray<z.ZodEnum<{
         delete: "delete";
-        update: "update";
         read: "read";
+        update: "update";
         create: "create";
         export: "export";
         execute: "execute";
@@ -5539,8 +5539,8 @@ declare const PluginPermissionSetSchema: z.ZodObject<{
         }>;
         actions: z.ZodArray<z.ZodEnum<{
             delete: "delete";
-            update: "update";
             read: "read";
+            update: "update";
             create: "create";
             export: "export";
             execute: "execute";
@@ -6042,8 +6042,8 @@ declare const PluginSecurityManifestSchema: z.ZodObject<{
             }>;
             actions: z.ZodArray<z.ZodEnum<{
                 delete: "delete";
-                update: "update";
                 read: "read";
+                update: "update";
                 create: "create";
                 export: "export";
                 execute: "execute";

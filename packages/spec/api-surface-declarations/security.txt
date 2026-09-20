@@ -175,8 +175,8 @@ declare const CriteriaSharingRuleSchema: z.ZodObject<{
     object: z.ZodString;
     active: z.ZodDefault<z.ZodBoolean>;
     accessLevel: z.ZodDefault<z.ZodEnum<{
-        edit: "edit";
         read: "read";
+        edit: "edit";
     }>>;
     sharedWith: z.ZodObject<{
         type: z.ZodEnum<{
@@ -254,8 +254,8 @@ declare const ExplainDecisionSchema: z.ZodObject<{
     object: z.ZodString;
     operation: z.ZodEnum<{
         delete: "delete";
-        update: "update";
         read: "read";
+        update: "update";
         create: "create";
         transfer: "transfer";
         restore: "restore";
@@ -345,8 +345,8 @@ declare const ExplainDecisionSchema: z.ZodObject<{
                 name: z.ZodString;
                 grants: z.ZodOptional<z.ZodEnum<{
                     full: "full";
-                    edit: "edit";
                     read: "read";
+                    edit: "edit";
                 }>>;
                 via: z.ZodOptional<z.ZodString>;
                 predicate: z.ZodOptional<z.ZodUnknown>;
@@ -463,8 +463,8 @@ declare const ExplainLayerSchema: z.ZodObject<{
             name: z.ZodString;
             grants: z.ZodOptional<z.ZodEnum<{
                 full: "full";
-                edit: "edit";
                 read: "read";
+                edit: "edit";
             }>>;
             via: z.ZodOptional<z.ZodString>;
             predicate: z.ZodOptional<z.ZodUnknown>;
@@ -496,8 +496,8 @@ declare const ExplainMatchedRuleSchema: z.ZodObject<{
     name: z.ZodString;
     grants: z.ZodOptional<z.ZodEnum<{
         full: "full";
-        edit: "edit";
         read: "read";
+        edit: "edit";
     }>>;
     via: z.ZodOptional<z.ZodString>;
     predicate: z.ZodOptional<z.ZodUnknown>;
@@ -514,8 +514,8 @@ type ExplainOperation = z.input<typeof ExplainOperationSchema>;
 // ── ExplainOperationSchema (const) ──
 declare const ExplainOperationSchema: z.ZodEnum<{
     delete: "delete";
-    update: "update";
     read: "read";
+    update: "update";
     create: "create";
     transfer: "transfer";
     restore: "restore";
@@ -552,8 +552,8 @@ declare const ExplainRecordAttributionSchema: z.ZodObject<{
         name: z.ZodString;
         grants: z.ZodOptional<z.ZodEnum<{
             full: "full";
-            edit: "edit";
             read: "read";
+            edit: "edit";
         }>>;
         via: z.ZodOptional<z.ZodString>;
         predicate: z.ZodOptional<z.ZodUnknown>;
@@ -574,8 +574,8 @@ declare const ExplainRequestSchema: z.ZodObject<{
     object: z.ZodString;
     operation: z.ZodEnum<{
         delete: "delete";
-        update: "update";
         read: "read";
+        update: "update";
         create: "create";
         transfer: "transfer";
         restore: "restore";
@@ -1068,8 +1068,8 @@ type ShareRecipientType = z.input<typeof ShareRecipientType>;
 
 // ── SharingLevel (const) ──
 declare const SharingLevel: z.ZodEnum<{
-    edit: "edit";
     read: "read";
+    edit: "edit";
 }>;
 
 // ── SharingLevel (type) ──
@@ -1109,8 +1109,8 @@ declare const SharingRuleSchema: z.ZodObject<{
     object: z.ZodString;
     active: z.ZodDefault<z.ZodBoolean>;
     accessLevel: z.ZodDefault<z.ZodEnum<{
-        edit: "edit";
         read: "read";
+        edit: "edit";
     }>>;
     sharedWith: z.ZodObject<{
         type: z.ZodEnum<{

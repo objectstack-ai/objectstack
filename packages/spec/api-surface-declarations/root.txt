@@ -21729,8 +21729,8 @@ declare const ObjectStackDefinitionSchema: z.ZodObject<{
         object: z.ZodString;
         active: z.ZodDefault<z.ZodBoolean>;
         accessLevel: z.ZodDefault<z.ZodEnum<{
-            edit: "edit";
             read: "read";
+            edit: "edit";
         }>>;
         sharedWith: z.ZodObject<{
             type: z.ZodEnum<{
@@ -43606,8 +43606,8 @@ declare const ObjectStackSchema: z.ZodObject<{
         object: z.ZodString;
         active: z.ZodDefault<z.ZodBoolean>;
         accessLevel: z.ZodDefault<z.ZodEnum<{
-            edit: "edit";
             read: "read";
+            edit: "edit";
         }>>;
         sharedWith: z.ZodObject<{
             type: z.ZodEnum<{

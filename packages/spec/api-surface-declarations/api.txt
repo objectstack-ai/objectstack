@@ -4302,10 +4302,10 @@ type CheckPermissionRequest = z.input<typeof CheckPermissionRequestSchema>;
 declare const CheckPermissionRequestSchema: z.ZodObject<{
     object: z.ZodString;
     action: z.ZodEnum<{
+        read: "read";
         create: "create";
         delete: "delete";
         edit: "edit";
-        read: "read";
         transfer: "transfer";
         restore: "restore";
         purge: "purge";
@@ -5274,10 +5274,10 @@ declare const CrudEndpointsConfigSchema: z.ZodObject<{
 
 // ── CrudOperation (const) ──
 declare const CrudOperation: z.ZodEnum<{
+    read: "read";
     create: "create";
     update: "update";
     delete: "delete";
-    read: "read";
     list: "list";
 }>;
 
@@ -6557,10 +6557,10 @@ declare const EndpointRegistrySchema: z.ZodObject<{
         path: z.ZodString;
         object: z.ZodString;
         operation: z.ZodUnion<readonly [z.ZodEnum<{
+            read: "read";
             create: "create";
             update: "update";
             delete: "delete";
-            read: "read";
             list: "list";
         }>, z.ZodString]>;
         handler: z.ZodString;
@@ -6586,10 +6586,10 @@ declare const EndpointRegistrySchema: z.ZodObject<{
         path: z.ZodString;
         object: z.ZodString;
         operation: z.ZodUnion<readonly [z.ZodEnum<{
+            read: "read";
             create: "create";
             update: "update";
             delete: "delete";
-            read: "read";
             list: "list";
         }>, z.ZodString]>;
         handler: z.ZodString;
@@ -6614,10 +6614,10 @@ declare const EndpointRegistrySchema: z.ZodObject<{
         path: z.ZodString;
         object: z.ZodString;
         operation: z.ZodUnion<readonly [z.ZodEnum<{
+            read: "read";
             create: "create";
             update: "update";
             delete: "delete";
-            read: "read";
             list: "list";
         }>, z.ZodString]>;
         handler: z.ZodString;
@@ -7995,10 +7995,10 @@ declare const GeneratedEndpointSchema: z.ZodObject<{
     path: z.ZodString;
     object: z.ZodString;
     operation: z.ZodUnion<readonly [z.ZodEnum<{
+        read: "read";
         create: "create";
         update: "update";
         delete: "delete";
-        read: "read";
         list: "list";
     }>, z.ZodString]>;
     handler: z.ZodString;
