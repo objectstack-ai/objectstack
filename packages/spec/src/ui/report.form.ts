@@ -45,7 +45,19 @@ export const reportForm = defineForm({
         // `DatasetSelection.order` has always existed on the wire, but a report
         // author had no channel to reach it. Optional — a selected time
         // dimension is chronological by default without declaring anything.
-        { field: 'order', type: 'repeater', helpText: 'Sort keys, most significant first (a rows/columns dimension or a values measure). Time dimensions are chronological by default.' },
+        {
+          field: 'order',
+          type: 'repeater',
+          helpText: 'Sort keys, most significant first (a rows/columns dimension or a values measure). Time dimensions are chronological by default.',
+          // Row-property names (#17508): every authorable row property, `label`
+          // equal to the item schema's `.meta({ title })`, so `os i18n extract`
+          // emits a catalog key per column and the panel keeps its schema-derived
+          // widgets (no `type` here).
+          fields: [
+            { field: 'by', label: 'Order By' },
+            { field: 'direction', label: 'Direction' },
+          ],
+        },
         { field: 'drilldown', helpText: 'Click an aggregated row/cell to open the underlying records' },
       ],
     },
@@ -54,7 +66,28 @@ export const reportForm = defineForm({
       description: 'Additional dataset-bound blocks stacked into a single report (joined reports only).',
       visibleWhen: "data.type == 'joined'",
       fields: [
-        { field: 'blocks', type: 'repeater', helpText: 'Dataset-bound sub-reports (joined report only)' },
+        {
+          field: 'blocks',
+          type: 'repeater',
+          helpText: 'Dataset-bound sub-reports (joined report only)',
+          // Row-property names (#17508): every authorable row property, `label`
+          // equal to the item schema's `.meta({ title })`, so `os i18n extract`
+          // emits a catalog key per column and the panel keeps its schema-derived
+          // widgets (no `type` here).
+          fields: [
+            { field: 'name', label: 'Name' },
+            { field: 'label', label: 'Label' },
+            { field: 'description', label: 'Description' },
+            { field: 'type', label: 'Block Type' },
+            { field: 'chart', label: 'Chart' },
+            { field: 'dataset', label: 'Dataset' },
+            { field: 'rows', label: 'Rows' },
+            { field: 'columns', label: 'Columns' },
+            { field: 'values', label: 'Values' },
+            { field: 'runtimeFilter', label: 'Runtime Filter' },
+            { field: 'order', label: 'Order' },
+          ],
+        },
       ],
     },
     {

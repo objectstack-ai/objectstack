@@ -390,7 +390,6 @@
         "where": {
           "name": {
             "$in": [
-              "platform_admin",
               "org_member",
               "everyone"
             ]

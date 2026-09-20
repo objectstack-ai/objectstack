@@ -45,7 +45,22 @@ export const appForm = defineForm({
       description: 'Sidebar items and area grouping.',
       fields: [
         { field: 'navigation', type: 'composite', helpText: 'Nav tree — recursive structure' },
-        { field: 'areas', type: 'repeater', helpText: 'Group items into collapsible areas' },
+        {
+          field: 'areas',
+          type: 'repeater',
+          helpText: 'Group items into collapsible areas',
+          // Row-property names (#17508): every authorable row property, `label`
+          // equal to the item schema's `.meta({ title })`, so `os i18n extract`
+          // emits a catalog key per column and the panel keeps its schema-derived
+          // widgets (no `type` here).
+          fields: [
+            { field: 'id', label: 'ID' },
+            { field: 'label', label: 'Label' },
+            { field: 'icon', label: 'Icon' },
+            { field: 'description', label: 'Description' },
+            { field: 'navigation', label: 'Navigation' },
+          ],
+        },
         // `homePageId` removed: tombstoned in 17.0.0 (#4667, #4709, ADR-0049) —
         // an app's landing page IS its first `navigation` item by `order`, and
         // the root landing follows `isDefault`. Reorder the nav instead.
