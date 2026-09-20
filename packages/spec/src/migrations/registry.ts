@@ -5612,14 +5612,18 @@ const step18: MigrationStep = {
         + 'asserts a vocabulary fact the spec declares nowhere, reserving the field name `where` across '
         + 'every customer\'s data model to buy one parameter\'s compile-time check.',
       acceptanceCriteria:
-        'Every `ctx.engine.find(...)` in the app\'s action handlers passes an envelope, and the package '
-        + 'type-checks: a bare filter is now a compile error at the call site — an object literal fails '
-        + 'the excess-property check and a `FilterCondition` variable fails TS2559 — so `tsc --noEmit` '
-        + 'over the handlers finds every unmigrated call, with no runtime run needed. Then confirm the '
-        + 'reads that were already SILENTLY EMPTY: any handler that had been passing the envelope was '
-        + 'resolving to `[]` on every call, so a suite written against the mistake passed and the row '
-        + 'count is the only witness — re-run each migrated handler against seeded data and assert it now '
-        + 'returns the rows its filter selects, rather than asserting it still resolves.',
+        'Every `ctx.engine.find(...)` in the app\'s action handlers passes an envelope. Where the handler '
+        + 'is annotated with the PUBLISHED `ActionHandlerContext`, `tsc --noEmit` finds every unmigrated '
+        + 'call on its own — a bare filter is a compile error there, an object literal failing the '
+        + 'excess-property check and a `FilterCondition` variable failing TS2559. ⚠️ Where it is NOT — a '
+        + 'handler in an `objectstack.config.js` / `.mjs`, one annotated with a local copy of the context '
+        + 'type, or a `(ctx: any)` handler — the type reaches nothing and a type-check alone proves '
+        + 'nothing: those callers are refused at RUNTIME by the facade arm, with the same prescription, so '
+        + 'the migration is complete for them only once each such handler has actually been RUN. Then '
+        + 'confirm the reads that were already SILENTLY EMPTY: any handler that had been passing the '
+        + 'envelope was resolving to `[]` on every call, so a suite written against the mistake passed and '
+        + 'the row count is the only witness — re-run each migrated handler against seeded data and assert '
+        + 'it now returns the rows its filter selects, rather than asserting it still resolves.',
     },
     {
       id: 'address-location-value-unknown-keys-refused',
