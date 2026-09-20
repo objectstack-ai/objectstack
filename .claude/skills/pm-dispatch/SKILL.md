@@ -318,7 +318,6 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 选层按 fire 时刻,⛔ 不用计数器;简报写明本轮跑的层。
 - 从不更新的卡不入窗;老化欠账归半状态巡查不归小时轮。
 - 每条枚举比对返回数与 `totalCount`,不等 ⇒ 报 `sweep INCOMPLETE` 点名缺口,⛔ 永不报干净。
-- `since` 读法与成本对价见 `references/dispatch-runbook.md`。
 - Backlog sweep 是常设职责,每 fire 扫任一析取命中的卡。
 - 析取 ①:全裸(无 `pm:*`、无 `needs-user-decision`、无 `domain:*`)。
 - 析取 ②:有 `pm:queue` 无 `domain:*`(仅多车道仓);析取 ③:有 `domain:*` 无 pm-state。
@@ -349,12 +348,14 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - (a) 的分界是不完整 vs 错误,不是文档 vs 代码:示例照抄即失败是 (a),漏列成员不是。
 - (c) 元数据 = 由写它的人以外的人存储并再作者化的键:React prop 不是,存储的视图配置是。
 - 把作者引向运行时会兑现却让事情更糟的元数据的警告不在 (c) 内;记为边界,⛔ 不扩类。
+- (a) 须今天可达,(c) 须具名生产者;观察、休眠、零拉动 ⛔ 不立卡、不进汇总卡、无配额。
 - 判「进 Acceptance notes」前先问:哪一个 PR 会碰到这个文件?说得出具体 PR 或人 ⇒ 写进去。
 - ⛔ 说不出(`.changeset/*`、无人在改的文档页、生成物、已扫完的批次)⇒ 兜底不成立。
 - 仍然关,但关闭理由必须写明「承接者:无」。
 - 先修复:正文被 sanitizer 截断的卡不可派发,评论修复指令后跳过。
 - 停摆指令判据必须比其它分类更硬(双读取),事后证伪同处公开作废。
-- 决策箱勤务:落卡入箱时校验/补全四棱块与速读;存量卡低频子轮回填,语言按不变量。
+- 决策箱勤务:入箱校验/补全四棱块、速读与 `Prior rulings on this card:` 行;存量卡低频回填。
+- 线程有 `Ruling:`/RULED 的卡再入箱,该行逐 id 各一句变化;缺行 ⇒ 拒入,`pm:retriage` 回立卡者。
 - `type`(Bug/Feature/Task)是分诊固定产出,分诊席唯一权威生产;立单者可预填,分诊校正。
 - 判据:违背已声明契约 ⇒ `Bug`,扩大接受集/公开面越出已声明 ⇒ `Feature`,其余 ⇒ `Task`。
 - `Bug` 无具名落点或复现路径不入 `pm:queue`(标记补复现)。
@@ -364,8 +365,9 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 父单已有子结构的:父单队列标签即可,分诊逐个展开路由、补 `Blocked-by:` 排序。
 - 每张留一条英文审计评论(`Triage: lands in …; rationale: …`),可选带 `Size/model suggestion:` 行。
 - 查重/shadow 检查先按文件/机制查本仓与姊妹仓 open 卡(含 `pm:dispatched`),再跟引用与关键词。
-- 同文件同缺陷 = 同一发现,不分车道:证据搬到先卡,后卡关 `duplicate_of`,⛔ 不并排派发。
-- 其余在飞 ⇒ `Blocked-by:` 不派;open 未认领 ⇒ 先并成一个派发入口;已完成 ⇒ 卡可能过期。
+- 同文件同机制 = 同一发现,不分车道,首触定级即并:证据搬先卡,后卡关 `duplicate_of`。
+- 同族异缺陷 ⛔ 不并:互链排同批;在飞(assignee/open PR)永不并,`Blocked-by:` 不派;完工查过期。
+- 执行席 ⛔ 不并卡,疑重复挂 `pm:retriage` 写明哪两张同文件同机制;同 assignee 者自关后卡。
 - 生产者在哪是常设分诊问题:declared ≠ enforced 形状的卡先问谁在写这个字段。
 - 派发前按生产者的答案改卡的范围与域标签。
 - 发现分诊轮:`finding` 恒 = 待首次定级、定级即离标;hold 重验只在 `Restart-when:` 命中时发生。
@@ -453,6 +455,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 派发后一单前用该回答重读它的选项与成本,⛔ 不沿用立单时那份。
 - 在飞卡衍生三分:不修它验收过不过;in-scope ⇒ 父卡 sub-issue,认领席自有、优先级继承。
 - 该 sub-issue 带父卡域与优先级直接派发,唯一绕过分诊;sweep 事后扫,重复关 `duplicate`。
+- 自在飞派发升级出的卡首行一句:本卡承哪一半、父卡留哪一半;缺此行不入队不入箱。
 - 阻塞项无主 ⇒ 被挡席认领做掉,不限大小;在该卡走完整认领、尊重其热文件串行队。
 - 阻塞项在飞 ⇒ 等:`pm:blocking` 在其车道排最前、等待者写该卡;p0/p1 优先级沿链传递。
 - 取卡前置 = `docs/NORTH-STAR.md`「优先级」第 3 条:产品仓开放 P0/P1 每次取卡现读。
@@ -557,7 +560,6 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 一次性云卡用 `create_session`,⛔ 不用 create_trigger+fire;trigger 流只留给定时/重复型。
 - 云会话 `SendMessage` not-reachable 是设计非故障,⛔ 不复测。
 - 接手中断的 dev:先试 SendMessage 复活,不可用才走接手协议,⛔ 不重跑原派发词。
-- 云卡四课与接手协议增量见 `references/dispatch-runbook.md`。
 
 ### 收集
 
@@ -647,14 +649,12 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 挂标后复核完成前短暂停靠;⛔ 不前瞻预挂。
 - 契约复核的适用面、载体纪律、资格与归属、降档保险丝见 `references/contract-review.md`。
 - 碰生成物的 PR 入队前先同步 + 整体重生成:四步序 `bash scripts/pm/os-regen-merge.sh`。
-- os-regen 的陷阱与锚点禁令见 landing-operations A。
 - 跟到 MERGED 为止,入队后的看护归车道 PM 的落地窗口:每轮同时读队列分支与 `origin/main`。
 - 默认分支 push 即触发对外部署的仓,只在验证层存在时才合并;无验证层 ⛔ 不合并。
 - 验证层 = 部署以 CI 为闸、发布后探测线上面、失败自动回滚并立卡。
 - 该类仓的落地判据是已发布且探测通过,⛔ 不是 MERGED;跟到发布为止。
 - 合并后工作流不在 PR 检查清单上,读 PR 检查的规则对它全盲;按独立检查类登记分开读。
 - 人闸不是验证层的替代:答不了会不会坏的人闸只买延迟,⛔ 不以人闸代替探测。
-- 首次入队 flip 定点、MERGED 两读数、关键 PR 订阅与退订/归档细则见 landing-operations B。
 - 信任 suite/check 事件前先重读 PR 对象取 head:检查读数绑定该 head,⛔ 不绑事件带的 SHA。
 - 落地记账:座位贴落地清单即账本,逐轮即时记;确需全仓核对时首选 `head:claude/` 精确过滤。
 - 红/踢出处置在同一落地窗口内做:机器输入是 merge-queue triage workflow 的分诊评论。
@@ -768,15 +768,15 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 每场召唤把带席内 ACCEPT 的受管草稿呈为一批 ≤5 行决裁;批准与合并仍是维护者的点击。
 - 总监席档位由维护者按项目人工定,每场记入摘要台账;⛔ 无档位硬门、无免档整理态。
 - 总监席是唯一裁决者:决策箱、代裁与一类自裁只出自本席,⛔ 无子代理无自述。
-- 总监席不占 `domain:*`,永不认领 backlog、永不写码;章程见 `references/lanes/director.md`。
 
 ## 报告契约
 
 - 终报 JSON 的权威形状住 `.claude/agents/os-dev.md` 终报消息节,⛔ 本文不抄第二份。
 - `premise_still_valid: false` + `pr: null` 是合法终报,当再分诊输入复核,永不当失败派发。
 - `status: needs_decision` 时 `open_questions` 必须非空。
-- `out_of_scope_findings` 只列三类立卡与 `noted, not filed`;立卡附查重词、归挂、立在修复仓。
-- 席位在 ACCEPT 读 PR `## Acceptance notes`,实属三类的由席位补立;三类外已立的卡关 not planned。
+- `out_of_scope_findings` 每条 `class: a|b|c`+证据,或 `carrier:`(承接者);皆无 ⇒ Acceptance notes。
+- dev 不立卡;ACCEPT 逐条一行 `filed #N`/`Acceptance notes`/`dropped — 因`;三类由席位立在修复仓。
+- 席位读 PR `## Acceptance notes`,实属三类的补立、归挂、附查重词;三类外已立卡关 not planned。
 - PM 核验它们存在,并把同轮并行报告互相对读:两个 dev 同一小时审相邻代码会立出孪生卡。
 
 ## 机械守卫索引
