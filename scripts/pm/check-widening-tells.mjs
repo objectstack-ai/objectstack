@@ -1533,7 +1533,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#18702 — a declaring factory PRIVATE to one file, resolved through its own DEFINITION': 54,
   "#18721 — a hunk's LEADING CONTEXT is not a reason to abandon the parameter reading": 14,
   '#19099 — the enclosing-delimiter walk says when it STOPPED READING and started guessing': 15,
-  '#19384 — a bare element is not a member until the hunk shows one of the four forms above it': 24,
+  '#19384 — a bare element is not a member until the hunk shows one of the four forms above it': 43,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -2196,8 +2196,45 @@ const SCHEMA_PROPERTY = new RegExp(
   `${KEY_HEAD_SOURCE}(?:${SCHEMA_PROPERTY_FORMS.map((f) => f.pattern).join('|')})`,
 );
 
+/**
+ * The callee NAMES that CLOSE a set — T2's doctrine's four forms, held ONCE as
+ * names rather than twice as spellings of them.
+ *
+ * ⛔ One vocabulary, two readers whose reach is deliberately different, and the
+ * difference is the EVIDENCE each one stands on. {@link CLOSED_SET_OPENER}
+ * tests a whole LINE, which may be prose, a comment or a string literal, so it
+ * keeps the `z.` receiver that has always bounded it. {@link closedSetMembership}
+ * tests a bracket HEAD the delimiter walk reached AS CODE — strings and
+ * comments skipped by construction — so it asks for the name alone and admits
+ * ANY receiver and any type argument.
+ *
+ * ⭐ That asymmetry is the repair. Requiring the receiver on the HEAD side is
+ * what made Prettier's chain wrap — `z` on one line, `  .enum([` on the next —
+ * read as another call's argument list, and a member added under it went
+ * SILENT on both rows at once: no opener row either, because the opener test
+ * does want `z.` and the wrap does not carry it. Measured: exit 4 before this
+ * reading existed, exit 0 after, with the whole set dark. The same hole
+ * swallowed `z.enum<Mode>([`, `zod.enum([` and `Full.extract([`.
+ */
+const CLOSED_SET_CONSTRUCTOR_NAMES = Object.freeze(['enum', 'union', 'discriminatedUnion', 'literal']);
+
+/**
+ * The callee NAMES that DERIVE one closed set from another — `Full.extract([…])`
+ * and `Full.exclude([…])`, zod's two sub-enum builders (`ui/view.zod.ts` spells
+ * one today).
+ *
+ * ⛔ They are NOT the four forms and this file never says they are: an element
+ * the hunk shows inside one reads `'unread'`, so the row FIRES carrying the
+ * sentence that names what was not measured. What they must never read is
+ * `'refused'`. An `extract` list gains a value exactly as an `enum` list does;
+ * an `exclude` list gaining one is the same edit in the opposite DIRECTION,
+ * which this file has never claimed to read — and a reader with no notion of
+ * direction may not spend that ignorance on a SILENCE.
+ */
+const SET_DERIVING_CALLEE_NAMES = Object.freeze(['extract', 'exclude']);
+
 /** T2 — a closed set DECLARED or re-written on one line. */
-const CLOSED_SET_OPENER = /z\.(?:enum|union|discriminatedUnion|literal)\(/;
+const CLOSED_SET_OPENER = new RegExp(`z\\.(?:${CLOSED_SET_CONSTRUCTOR_NAMES.join('|')})\\(`);
 
 /**
  * T2 — a bare string element of a multi-line `z.enum([…])` or `as const` array.
@@ -2648,38 +2685,63 @@ export function inParameterList(side, index) {
 }
 
 /**
- * The head of a delimiter that opens one of the CLOSED-SET CONSTRUCTORS T2's
- * doctrine names — `z.enum(`, `z.union(`, `z.discriminatedUnion(`, `z.literal(`
- * — with nothing but that constructor's own earlier arguments between it and
- * the delimiter this reader is judging.
+ * A `[`-frame head in which one of `names` opens the paren the delimiter sits
+ * in, with nothing but that call's OWN earlier arguments between the two.
  *
- * `[^()[\]{}]*$` is what makes it the delimiter's OWN constructor and not one
- * anywhere to its left: `z.discriminatedUnion('type', [` leaves only
- * `'type', ` between the two, while `z.enum(['a']).or(fn([` leaves a bracket
- * pair and does not match. ⛔ The same spelling as {@link CLOSED_SET_OPENER}'s
- * constructor list, deliberately — two vocabularies of "which constructors
- * close a set" would disagree the day one of them moved.
+ * Three parts, each load-bearing and each with its own case:
+ *
+ *   `(?:^|[^\w$])` plus an optional dotted RECEIVER chain — the name is a whole
+ *     token, so `parseenum(` never matches, while the receiver is admitted and
+ *     discarded. ⭐ `z.enum(`, `zod.enum(`, a chain-wrapped bare `  .enum(` and
+ *     `z.enum<Mode>(` are ONE form spelled four ways; the formatter decides
+ *     which one tomorrow's file carries, so the reading may not depend on it.
+ *   `(?:<[^<>]*>)?` — explicit type arguments, which a call may carry and which
+ *     say nothing about which construct it is.
+ *   `[^()[\]{}]*$` — what makes it the delimiter's OWN call and not one
+ *     anywhere to its left. `z.discriminatedUnion('type', [` leaves only
+ *     `'type', ` between the two and matches; `z.enum(['a']).or(fn([` leaves a
+ *     bracket pair and does NOT, so that head falls through to the refusal
+ *     reading and is judged on `fn`.
+ *
+ * @param {readonly string[]} names
  */
-const CLOSED_SET_ARGUMENT_HEAD = /z\.(?:enum|union|discriminatedUnion|literal)\([^()[\]{}]*$/;
+const constructorArgumentHead = (names) => new RegExp(
+  `(?:^|[^\\w$])(?:[A-Za-z_$][\\w$]*[ \\t]*\\.[ \\t]*)*(?:${names.join('|')})[ \\t]*(?:<[^<>]*>)?[ \\t]*\\([^()\\[\\]{}]*$`,
+);
+
+/** T2 — the head of a `[` one of the FOUR closed-set forms opened. */
+const CLOSED_SET_ARGUMENT_HEAD = constructorArgumentHead(CLOSED_SET_CONSTRUCTOR_NAMES);
+
+/** T2 — the head of a `[` a sub-enum BUILDER opened; see {@link SET_DERIVING_CALLEE_NAMES}. */
+const SET_DERIVING_ARGUMENT_HEAD = constructorArgumentHead(SET_DERIVING_CALLEE_NAMES);
 
 /**
- * A `[`-frame head whose last token is a CALL — `new Set(`, `Object.freeze(`,
- * `z.array(z.string()).default(` — so the array it opens is that call's
- * ARGUMENT, never a set of its own.
+ * The CALLEE NAME of the call a `[`-frame head ends in, or `null` when the head
+ * is not a call at all — the reading the REFUSAL stands on.
  *
- * ⚠️ It is a `[`-frame reading and only that, because a frame's `head` is the
- * text LEFT OF THE DELIMITER: an array inside a call carries the call's own
- * open paren in its head, while a `(` frame's head stops one character short of
- * one and can never match this. {@link closedSetMembership} therefore asks it
- * of `[` frames alone and says so.
+ * A frame's `head` is the text LEFT OF the delimiter, so an array passed to a
+ * call carries that call's own open paren at the END of its head: `new Set(`,
+ * `Object.freeze(`, `z.array(z.string()).default(`.
  *
- * ⛔ Deliberately not "any head ending in `(`": a grouping paren (`= (`), an
- * array bound to a name (`export const CORE_PLUGIN_TYPES = `) and a property's
- * array value (`kinds: `) all read as NOT-a-call here, which leaves the tell
- * firing. That is the loud direction, and the second of them is where the
- * fourth closed-set form lives.
+ * ⛔ Deliberately NOT "any head ending in `(`": a grouping paren (`const X = (`),
+ * an array bound to a name (`export const CORE_PLUGIN_TYPES = `) and a
+ * property's array value (`kinds: `) answer `null` — NOT a call — which leaves
+ * the tell FIRING. That is the loud direction, and two of those three are where
+ * the fourth closed-set form lives, one of them wrapped in a paren that reads
+ * as a call to anything cruder than this.
  */
-const CALL_ARGUMENT_HEAD = /(?:\bnew[ \t]+)?[A-Za-z_$][\w$]*(?:[ \t]*\.[ \t]*[A-Za-z_$][\w$]*)*[ \t]*(?:<[^<>]*>)?[ \t]*\($/;
+const CALL_HEAD_CALLEE = /(?:\bnew[ \t]+)?(?:[A-Za-z_$][\w$]*[ \t]*\.[ \t]*)*([A-Za-z_$][\w$]*)[ \t]*(?:<[^<>]*>)?[ \t]*\($/;
+
+/**
+ * The callee name a frame head ends in, or `null` when the head is not a call.
+ *
+ * @param {string} head — a frame's `head`, the text left of its delimiter
+ * @returns {string|null}
+ */
+export function calleeOfFrameHead(head) {
+  const m = CALL_HEAD_CALLEE.exec(String(head ?? ''));
+  return m === null ? null : m[1];
+}
 
 /**
  * Is this side-line a MEMBER OF ONE OF THE FOUR CLOSED-SET FORMS? (instance 3)
@@ -2689,12 +2751,16 @@ const CALL_ARGUMENT_HEAD = /(?:\bnew[ \t]+)?[A-Za-z_$][\w$]*(?:[ \t]*\.[ \t]*[A-
  * T2's row asserts a FORM and the evidence for a form comes in three strengths:
  *
  *   `'declared'` — the hunk shows the innermost open delimiter where the
- *     element sits, and its head opens one of the closed-set constructors. The
- *     doctrine's row is then true as written.
- *   `'refused'` — the hunk shows that delimiter and it is some OTHER call's
- *     argument list. `new Set([…])` is the measured instance (#19384): a set of
- *     internal discriminants is not an accept set, no author's document is ever
- *     parsed against it, and the four forms do not include it. ⇒ NO ROW.
+ *     element sits, and the CALLEE NAME its head ends in is one of the four
+ *     ({@link CLOSED_SET_CONSTRUCTOR_NAMES}). The doctrine's row is then true
+ *     as written. ⭐ Any receiver and any type argument: `z.enum(`, `zod.enum(`,
+ *     a chain-wrapped `  .enum(` and `z.enum<Mode>(` are one form spelled four
+ *     ways, and the formatter picks which one tomorrow's file carries.
+ *   `'refused'` — the hunk shows that delimiter and the callee name it ends in
+ *     closes no set and derives none. `new Set([…])` is the measured instance
+ *     (#19384): a set of internal discriminants is not an accept set, no
+ *     author's document is ever parsed against it, and the four forms do not
+ *     include it. ⇒ NO ROW.
  *   `'unread'` — everything else, and it is the common answer: no delimiter
  *     shown where the line sits, a walk that stopped being a reading, or a
  *     delimiter this reader cannot classify — an array literal BOUND to a name,
@@ -2706,18 +2772,33 @@ const CALL_ARGUMENT_HEAD = /(?:\bnew[ \t]+)?[A-Za-z_$][\w$]*(?:[ \t]*\.[ \t]*[A-
  * ⭐ ONLY a `[` frame is classified, and the bound is declared rather than
  * discovered. All four forms put their members inside a `[` — `z.enum([…])`,
  * `z.union([…])`, `z.discriminatedUnion(d, […])`, `[…] as const` — so a `(` or
- * `{` frame is never one of them; but a frame's head is the text LEFT of its
- * delimiter, which means a `(` frame's head stops one character short of the
- * callee's paren and {@link CALL_ARGUMENT_HEAD} cannot read it. ⇒ every `(` and
- * `{` frame answers `'unread'` and keeps its row. ⚠️ The population that leaves
- * loud, measured over `packages/spec/src/**` at objectstack c27e16059d by
- * feeding each bare-element line back through this reader with its own 60
- * preceding lines: of 6,338 such lines, 1,294 read `declared`, 92 `refused`,
- * and of the 4,952 `unread` there are 442 inside a `(` — `.describe(` prose and
- * `retiredKey(` prescriptions, no closed-set member among the heads — and 1,667
- * inside a `{`. ⛔ Reaching them is a different reading's card: it needs the
- * callee NAME rather than the bracket, and this file buys no silence it cannot
- * pay for with evidence.
+ * `{` frame is never one of them. ⛔ The guard is NOT redundant with the head
+ * reading and the difference is a measured row: a `{` frame opened inside a
+ * call carries that call's paren at the end of its head (`defineRegistry({`),
+ * so without the guard a shorthand `FooSchema,` property would be REFUSED —
+ * swallowed, in the quiet direction. A `(` frame's head stops one character
+ * short of its own callee's paren and answers `null` instead, which is the same
+ * `'unread'` by a different route. ⇒ every `(` and `{` frame answers `'unread'`
+ * and keeps its row.
+ *
+ * ⚠️ The population that leaves loud, measured over `packages/spec/src/**` at
+ * objectstack `c27e16059d` by feeding each bare-element line back through this
+ * reader with its own 60 preceding lines: of 6,553 such lines, 1,354 read
+ * `declared`, 92 `refused` (`Object.freeze` 65, `new Set` 20, `.default` 7),
+ * and of the 5,107 `unread` there are 442 inside a `(` — `.describe(` prose and
+ * `retiredKey(` prescriptions, no closed-set member among the heads — and 1,791
+ * inside a `{`. ⛔ Reaching them is a different reading's card, and this file
+ * buys no silence it cannot pay for with evidence.
+ *
+ * ⛔ AND THAT CENSUS CANNOT CONTAIN THE FAILURE THIS READER WAS REPAIRED FOR,
+ * which is why it is quoted for what it bounds and never as a clearance. Every
+ * chain-wrapped constructor site in this tree — 13 line-initial `.enum([` — and
+ * the one `.extract([` carry ONE-LINE member lists today, so no bare-element
+ * line sits under any of them and no count over this tree moves when the
+ * chained, generic and aliased spellings change verdict. The reading that CAN
+ * contain it is synthetic by construction: take each multi-line closed set the
+ * tree really has and re-spell its opener the way a formatter would. A
+ * population in which the defect cannot occur is not evidence of its absence.
  *
  * ⭐ This reader SUPPRESSES on the frames, which {@link enclosingDelimiters}
  * imposes two obligations for, and both are discharged here. FIRST: it refuses
@@ -2746,14 +2827,25 @@ export function closedSetMembership(side, index) {
   const open = frames[frames.length - 1];
   if (open.opener !== '[') return 'unread';
   if (CLOSED_SET_ARGUMENT_HEAD.test(open.head)) return 'declared';
-  return CALL_ARGUMENT_HEAD.test(open.head) ? 'refused' : 'unread';
+  // ⛔ A set DERIVED from another one is not one of the four forms and is not
+  // another call's argument list either. It keeps its row and says so.
+  if (SET_DERIVING_ARGUMENT_HEAD.test(open.head)) return 'unread';
+  // ⛔ Read LAST and only here: a head that is not a call at all buys no
+  // silence. The two readings above are the closed-set vocabulary; this one is
+  // the positive evidence that some OTHER construct opened the delimiter.
+  return calleeOfFrameHead(open.head) === null ? 'unread' : 'refused';
 }
 
 /** A property NAME at the head of a line, in the four spellings `SCHEMA_PROPERTY` admits. */
 const KEYED_PROPERTY_NAME = /^[ \t]*(?:'([^']+)'|"([^"]+)"|(\[[^\]]+\])|([A-Za-z_$][\w$]*))[ \t]*\??[ \t]*:/;
 
-/** The closed-set constructor a property's value opens with, if it opens with one. */
-const CLOSED_SET_CONSTRUCTOR = /z\.(enum|union|discriminatedUnion|literal)\(/;
+/**
+ * The closed-set constructor a property's value opens with, if it opens with
+ * one. ⛔ Built from {@link CLOSED_SET_CONSTRUCTOR_NAMES} like
+ * {@link CLOSED_SET_OPENER}: one vocabulary, so no two of these three readings
+ * can drift apart the day a fifth form is admitted.
+ */
+const CLOSED_SET_CONSTRUCTOR = new RegExp(`z\\.(${CLOSED_SET_CONSTRUCTOR_NAMES.join('|')})\\(`);
 
 /**
  * The KEY a T1-shaped line names, or `null` when the line names none.
@@ -4197,8 +4289,8 @@ export function tellsInFile(
         ...at,
         why:
           membership === 'declared'
-            ? 'a new member of a closed set — this hunk shows the element inside a `z.enum` / `z.union` / `z.discriminatedUnion` list, so the accept set gains a value'
-            : 'a new bare element on the contract source surface — ⚠️ this hunk does NOT show which construct encloses it, so whether the accept set gains a value is NOT MEASURED here (an `as const` array declares itself BELOW its members)',
+            ? 'a new member of a closed set — this hunk shows the element inside an `enum` / `union` / `discriminatedUnion` / `literal` argument list, so the accept set gains a value'
+            : 'a new bare element on the contract source surface — ⚠️ this hunk does not show it inside one of the four closed-set forms, so whether the accept set gains a value is NOT MEASURED here (an `as const` array declares itself BELOW its members)',
       });
       continue;
     }
@@ -5572,20 +5664,46 @@ export function selfTest() {
   t('⭐ a hunk the walk could not READ refuses the decline — `unreadable` costs a false tell (loud) and never a swallowed one', enclosingDelimiters(REGEX_ABOVE, 2).unreadable === true && closedSetMembership(REGEX_ABOVE, 2) === 'unread');
   t('⛔ CONTROL — the identical hunk with the regex spelled away reads cleanly and DOES decline, so the case above measures the flag and not the `new Set(`', closedSetMembership([CTX('const S = new Set(['), CTX('  ...SEEDS.filter(isLive),'), CTX("  'workflow',")], 2) === 'refused');
   // -- the removed side, read the way #17618's parameter is -------------------
+  //
+  // ⚠️ THE REMOVED AND ADDED LINES SIT IN ONE CHANGE BLOCK, and that is the
+  // whole case rather than a detail of it. `changeBlocks` splits on a CONTEXT
+  // line, so a fixture that puts context between the two hands them to
+  // different budgets and the old-side reading is never consulted at all: the
+  // first cut of this battery did exactly that and stayed green with the leg
+  // DELETED. A pin that survives the deletion of what it pins is not a test.
   const CROSS_PAID = {
     filename: 'packages/spec/src/a.zod.ts',
     status: 'modified',
     patch: [
-      '@@ -10,4 +10,4 @@',
+      '@@ -10,5 +10,6 @@',
       ' const INTERNAL = new Set([',
       "-  'peeled',",
-      '   ]);',
-      ' export const ModeSchema = z.enum([',
+      '+]);',
+      '+export const ModeSchema = z.enum([',
       "+  'write',",
       ' ]);',
     ].join('\n'),
   };
-  t('⭐ a REMOVED element the old side shows inside another call buys NO budget, so a genuine member added in the same block still fires', tells(CROSS_PAID).length === 1 && tells(CROSS_PAID)[0]?.tell === 'T2');
+  // The same block with the REMOVAL inside a real closed set. It buys its unit,
+  // the added member spends it, and only the opener row is left — so the case
+  // above measures the construct the removed element sat in and not the
+  // arithmetic, and the two differ by exactly that one line of fixture.
+  const CROSS_PAID_CONTROL = {
+    filename: 'packages/spec/src/a.zod.ts',
+    status: 'modified',
+    patch: [
+      '@@ -10,5 +10,6 @@',
+      ' const LEGACY = z.enum([',
+      "-  'peeled',",
+      '+]);',
+      '+export const ModeSchema = z.enum([',
+      "+  'write',",
+      ' ]);',
+    ].join('\n'),
+  };
+  t('⭐ a REMOVED element the old side shows inside another call buys NO budget, so a genuine member added in the SAME BLOCK still fires — the opener row plus the member row', tells(CROSS_PAID).length === 2 && tells(CROSS_PAID).every((r) => r.tell === 'T2'));
+  t('…and the second row IS the member, reading as measured — ⛔ not the opener row twice, which is what "2 rows" would also mean', says(tells(CROSS_PAID)[1]?.why, 'this hunk shows the element inside') && tells(CROSS_PAID)[1]?.line === 13);
+  t('⛔ CONTROL — the identical block with the removal inside a REAL closed set buys its unit, the member spends it, and only the OPENER row is left', tells(CROSS_PAID_CONTROL).length === 1 && says(tells(CROSS_PAID_CONTROL)[0]?.why, 'z.enum / union'));
   t('⛔ CONTROL — a removed element of a REAL closed set still buys its unit, so the case above measures the construct and not the arithmetic', tells({ filename: 'packages/spec/src/a.zod.ts', patch: "@@ -10,3 +10,3 @@\n export const ModeSchema = z.enum([\n-  'read',\n+  'write',\n ]);" }).length === 0);
   // -- the reading itself, in the three states it answers in -----------------
   t('`closedSetMembership` answers `declared` on a constructor the hunk shows', closedSetMembership([CTX('export const M = z.enum(['), CTX("  'read',")], 1) === 'declared');
@@ -5596,6 +5714,59 @@ export function selfTest() {
   t('⛔ CONTROL — the same call with an ARRAY argument DOES carry its paren in the head and is refused, so the case above measures the frame and not the callee', closedSetMembership([CTX('const F = Object.freeze(['), CTX("  'read',")], 1) === 'refused');
   t('⛔ …and a `{` frame, which this reader classifies not at all', closedSetMembership([CTX('const shape = {'), CTX("  'read',")], 1) === 'unread');
   t('⭐ the vocabulary is INTACT — `memberTellKind` still classifies a refused element as a member of kind T2, so both sides of the budget keep reading one question', memberTellKind("  'workflow',", { onContractSource: true }) === 'T2');
+  // -- ONE FORM, FOUR SPELLINGS: the hole the first cut of this reading left --
+  //
+  // ⚠️ The first cut asked the head for a literal `z.enum(`, and the refusal
+  // arm matched `.enum(` as an ordinary call — so Prettier's chain wrap read
+  // `refused` and a member added under it went SILENT, with no opener row to
+  // compensate because the opener test wants `z.` too. Measured then: exit 4
+  // before that reading existed, exit 0 after. ⛔ The census that missed it read
+  // 0 begin-firing over a population the defect does not live in — every
+  // chained site in the tree carries a ONE-LINE member list — so these cases
+  // are SYNTHETIC on purpose: the formatter decides tomorrow's spelling, and a
+  // population that cannot contain the failure is not evidence of its absence.
+  const CHAIN_WRAPPED = {
+    filename: 'packages/spec/src/a.zod.ts',
+    status: 'modified',
+    patch: [
+      '@@ -3,3 +3,4 @@',
+      ' export const ModeSchema = z',
+      '   .enum([',
+      "+  'write',",
+      ' ]);',
+    ].join('\n'),
+  };
+  t("⭐ PRETTIER'S CHAIN WRAP — `z` on one line, `  .enum([` on the next: the member FIRES and reads as measured, because the receiver is admitted and discarded", tells(CHAIN_WRAPPED).length === 1 && says(tells(CHAIN_WRAPPED)[0]?.why, 'this hunk shows the element inside'));
+  t('…and the reader says so on its own', closedSetMembership([CTX('export const ModeSchema = z'), CTX('  .enum(['), CTX("  'read',")], 2) === 'declared');
+  t('…the same wrap on a `z.union([` too, which is where the arms live', closedSetMembership([CTX('export const AnySchema = z'), CTX('  .union(['), CTX('  ReadSchema,')], 2) === 'declared');
+  t('⭐ EXPLICIT TYPE ARGUMENTS — `z.enum<Mode>([` is the same form and reads declared', closedSetMembership([CTX('export const M = z.enum<Mode>(['), CTX("  'read',")], 1) === 'declared');
+  t('⭐ AN ALIASED NAMESPACE — `zod.enum([` is the same form and reads declared', closedSetMembership([CTX('export const M = zod.enum(['), CTX("  'read',")], 1) === 'declared');
+  t('⛔ CONTROL — the name is a whole TOKEN, so `parseenum([` is refused: the receiver is discarded, the word never is', closedSetMembership([CTX('const X = parseenum(['), CTX("  'read',")], 1) === 'refused');
+  // -- a set DERIVED from another one: never `refused`, never `declared` ------
+  t('⭐ `Full.extract([` builds a SUB-ENUM and gains a value exactly as an enum does — it FIRES, and ⛔ never reads `refused`', closedSetMembership([CTX('export const Sub = Full.extract(['), CTX("  'read',")], 1) === 'unread');
+  t('⛔ …and `Full.exclude([`, whose added member moves the set the OTHER way — a direction this file has never claimed to read, so it fires rather than declines', closedSetMembership([CTX('export const Sub = Full.exclude(['), CTX("  'read',")], 1) === 'unread');
+  t('⛔ CONTROL — a sibling zod method that closes and derives NOTHING is still refused, so the two above are bought by the NAME and not by the dot', closedSetMembership([CTX('export const Sub = Full.omit(['), CTX("  'read',")], 1) === 'refused');
+  // -- the `[`-only guard, which a `{` a CALL opened is the case for ---------
+  //
+  // ⛔ NOT redundant with the head reading: a `{` opened inside a call carries
+  // that call's paren at the END of its head, so without the guard a shorthand
+  // property arm would be REFUSED — swallowed, in the quiet direction. A `(`
+  // frame cannot reach that state (its head stops one character short), which
+  // is why the `(` cases alone left this guard unpinned.
+  const BRACE_IN_CALL = [CTX('export const registry = defineRegistry({'), CTX('  UserSchema,')];
+  t('⭐ a `{` frame a CALL opened carries that call\'s paren in its head — the `[`-only guard is what keeps the arm inside it `unread` instead of refused', enclosingDelimiters(BRACE_IN_CALL, 1).frames.at(-1)?.opener === '{' && enclosingDelimiters(BRACE_IN_CALL, 1).frames.at(-1)?.head.endsWith('(') && closedSetMembership(BRACE_IN_CALL, 1) === 'unread');
+  t('…and the ROW survives it, which is the half a reader-only case cannot pin', tells({ filename: 'packages/spec/src/a.zod.ts', patch: patchOf(3, '+export const registry = defineRegistry({', '+  UserSchema,') }).some((r) => r.line === 4 && r.tell === 'T2'));
+  // -- the refusal is a CALL, never "any head ending in `(`" -----------------
+  t('⭐ a GROUPING paren is not a call — `const X = ([` … `] as const)` is the fourth form wrapped, and it keeps its row', closedSetMembership([CTX('const X = (['), CTX("  'read',")], 1) === 'unread');
+  t('…and the ROW survives it too', tells({ filename: 'packages/spec/src/a.zod.ts', patch: patchOf(3, '+const X = ([', "+  'read',") }).some((r) => r.line === 4 && r.tell === 'T2'));
+  // -- the constructor must be the delimiter's OWN --------------------------
+  t("⭐ `z.enum(['a']).or(fn([` is judged on `fn`, never on the `enum` to its left — a reader that searched the whole head would answer `declared` here", closedSetMembership([CTX("const X = z.enum(['a']).or(fn(["), CTX("  'read',")], 1) === 'refused');
+  t("⛔ CONTROL — the constructor's OWN earlier arguments still count: `z.discriminatedUnion('type', [` leaves only `'type', ` between the two and reads declared", closedSetMembership([CTX("const D = z.discriminatedUnion('type', ["), CTX('  WorkflowSchema,')], 1) === 'declared');
+  // -- the sentence says only what was MEASURED -----------------------------
+  const PAREN_FRAME_ROW = tells({ filename: 'packages/spec/src/a.zod.ts', patch: patchOf(3, '+  note: z.string().describe(', "+    'prose',") }).find((r) => r.line === 4);
+  t('⛔ the NOT-MEASURED sentence claims only that — on a `(` frame the hunk DOES show the enclosing construct, and a row saying otherwise asserts a second thing it never measured', says(PAREN_FRAME_ROW?.why, 'does not show it inside one of the four closed-set forms') && !says(PAREN_FRAME_ROW?.why, 'which construct encloses it'));
+  // -- the residual quiet direction, PINNED so it cannot move unnoticed ------
+  t('⚠️ STATED SILENCE — the fourth form wrapped in `Object.freeze([… ] as const)` still reads `refused`: the `as const` sits below the members and `freeze` closes no set, so this is disclosed in the header rather than read', closedSetMembership([CTX('export const CORE_PLUGIN_TYPES = Object.freeze(['), CTX("  'workflow',")], 1) === 'refused');
 
   // -- T3 --------------------------------------------------------------------
   battery('T3 — a new row in a published entry point');
