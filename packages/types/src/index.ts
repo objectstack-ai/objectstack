@@ -5,7 +5,6 @@ export * from './degraded-boot.js';
 // gate (plugin-security) and the owner-verification boot diagnostic
 // (plugin-auth) both read — see the module doc for why it must be one.
 export * from './email-verified.js';
-// [#999999] OS_ABLATION_18224 — a citation naming a number this board never minted.
 export * from './env.js';
 export * from './error-leak.js';
 // [#17681] The SIBLING question, kept deliberately separate: `error-leak.js`
