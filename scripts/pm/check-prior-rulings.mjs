@@ -290,7 +290,7 @@ function rearmThroughProxy(args) {
  * a heading, and a docblock has neither once you leave the file it sits in.
  */
 export const CORPORA = Object.freeze([
-  Object.freeze({ id: 'adr', path: 'docs/adr', what: 'ADR decisions (`### D<n>` headings and `- **D<n>** —` bullets, each with its first paragraph)', named: true }),
+  Object.freeze({ id: 'adr', path: 'docs/adr', what: 'ADR decisions (`### D<n>` headings and `- **D<n>** —` bullets, each with its first paragraph; a file with neither falls back to its `## Decision` section\'s parts)', named: true }),
   Object.freeze({ id: 'agents', path: 'AGENTS.md', what: 'AGENTS.md lines', named: true }),
   Object.freeze({ id: 'spec', path: 'packages/spec/src', what: 'packages/spec/src docblocks', named: false }),
 ]);
@@ -604,9 +604,75 @@ export function adrIdOf(path) {
 }
 
 /**
+ * The THIRD shape — a FALLBACK, deliberately not a widening.
+ *
+ * Measured at `origin/main` (#19132): objectui's ten ADRs carry ZERO `D<n>`
+ * headings and ZERO decision bullets, so the two shapes above parse them to
+ * nothing and this reader refuses — no objectui card can cite a prior ruling.
+ * The same census over THIS repo's 139 ADRs finds 79 with zero D-units, 59 of
+ * them heading a `## Decision` section: 57% of the objectstack corpus is in
+ * the same blind spot, so this is not a foreign dialect. What those files
+ * carry is a level-2 `## Decision` / `## Decisions` / `## Decision detail` /
+ * `## Decision: <title>` section whose parts are level-3 headings
+ * (`### C1 — Idempotent, direct triggers`) or numbered bold items.
+ *
+ * Three guards keep it off prose, and they are why it is a fallback:
+ *   · it runs ONLY on a file the two D-shapes parsed to zero units, so the 53
+ *     D-carrying ADRs that ALSO head a `## Decision` section cannot double-
+ *     count and no rank under them moves (measured: 0 of 139 files changed);
+ *   · it needs the STRUCTURAL anchor — a level-2 heading whose title OPENS
+ *     with the word — never a sentence that mentions a decision;
+ *   · the section-LEAD unit needs a non-empty first paragraph, so a bare
+ *     anchor yields nothing and an empty `docs/adr` still refuses (exit 3,
+ *     the control this card was filed on). A structural PART carries its own
+ *     line instead, so a one-line item (ADR-0050) is not dropped for it.
+ *
+ * The id is positional: this shape has no D-number to BE an identity, and the
+ * author's own label (`C1 — …`) rides in the heading beside it.
+ */
+const ADR_DECISION_SECTION_RE = /^##\s+Decisions?\b(?:\s+detail\b)?\s*(?:[\u2014\u2013:\uff1a-]\s*)?(.*)$/i;
+const ADR_DECISION_PART_RE = /^(?:#{3,4}\s+|\d+[.)]\s+(?=\*\*))(.+)$/;
+
+function parseAdrDecisionSectionUnits(path, lines, { adr, status, statusLine }) {
+  if (!adr) return [];
+  // A bare `## Decision` has no title of its own, so its lead unit takes the H1.
+  const h1 = (lines.find((l) => /^#\s+/.test(l)) ?? '').replace(/^#\s+/, '').trim();
+  const units = [];
+  let inSection = false;
+  let open = null;
+  const start = (heading, i, lead) => ({ heading: heading.trim(), line: i + 1, body: [], done: false, lead });
+  const flush = () => {
+    if (open && (!open.lead || open.body.some((l) => l.trim() !== ''))) {
+      units.push({
+        corpus: 'adr', adr, id: `Decision \u00a7${units.length + 1}`, file: path, line: open.line, status, statusLine,
+        heading: open.heading.replace(/\*\*/g, '').trim() || h1,
+        text: `${open.heading}\n${open.body.join('\n')}`,
+      });
+    }
+    open = null;
+  };
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const section = line.match(ADR_DECISION_SECTION_RE);
+    if (section) { flush(); inSection = true; open = start(section[1], i, true); continue; }
+    if (!inSection) continue;
+    // Any other level-2 heading ends the section — `## Consequences` is not a decision.
+    if (/^##\s/.test(line)) { flush(); inSection = false; continue; }
+    const part = line.match(ADR_DECISION_PART_RE);
+    if (part) { flush(); open = start(part[1], i, false); continue; }
+    if (!open || open.done) continue;
+    if (line.trim() === '') { if (open.body.length > 0) open.done = true; continue; }
+    open.body.push(line);
+  }
+  flush();
+  return units;
+}
+
+/**
  * Parse one ADR file into decision units. A unit is a heading (or decision
  * bullet) plus its first paragraph — the scope the card asked for, and the
  * scope that keeps a term hit attributable to a DECISION rather than to an ADR.
+ * A file carrying neither D-shape falls back to the section shape above.
  */
 export function parseAdrUnits(path, text) {
   const lines = String(text ?? '').split('\n');
@@ -654,6 +720,7 @@ export function parseAdrUnits(path, text) {
       text: `${heading}\n${body.join('\n')}`,
     });
   }
+  if (units.length === 0) return parseAdrDecisionSectionUnits(path, lines, { adr, status, statusLine });
   return units;
 }
 
@@ -697,6 +764,27 @@ export function readBlobsAtRev(rev, paths) {
     i++;
   }
   return files;
+}
+
+/**
+ * The repository whose `docs/adr` this run reads, as `owner/name`, from THIS
+ * checkout's `origin` — never `PM_SWEEP_REPO`. The two diverge in exactly the
+ * case this exists for (#19132, both readings in one act): run in an objectui
+ * checkout the reader refuses; run in the objectstack checkout against an
+ * objectui card it answers out of objectstack's rulings with nothing in the
+ * line saying so — six objectui cards were corrected in place for that.
+ * ⛔ Still no `--repo`: the corpus is reported, never redirected. An
+ * unresolvable origin prints `unknown`, never nothing — a line omitting the
+ * repo reads like one that agrees with the board.
+ */
+function readCorpusRepo() {
+  try {
+    const url = execFileSync('git', ['remote', 'get-url', 'origin'], { encoding: 'utf8' }).trim();
+    const m = url.match(/[:/]([^/:]+)\/([^/]+?)(?:\.git)?\/?$/);
+    return m ? `${m[1]}/${m[2]}` : null;
+  } catch {
+    return null;
+  }
 }
 
 export function listAtRev(rev, path) {
@@ -774,8 +862,11 @@ export function formatThreadClause(thread) {
   return `thread: ${thread.rulings.length} ruling(s) (${thread.rulings.map((r) => r.id).join(', ')})`;
 }
 
-export function formatPasteLine({ terms, candidateCount, accepted, unresolved = false, thread = null }) {
-  if (unresolved) return 'Prior rulings read: unresolved';
+export function formatPasteLine({ terms, candidateCount, accepted, unresolved = false, thread = null, corpusRepo = null }) {
+  // Named in BOTH arms: a refusal that does not say whose `docs/adr` it just
+  // failed to parse leaves the wrong-corpus case invisible in the line itself.
+  const repo = `repo: ${corpusRepo ?? 'unknown'}`;
+  if (unresolved) return `Prior rulings read: unresolved (${repo})`;
   const named = accepted.length > 0 ? accepted.join(', ') : 'none';
   // The term list is BOUNDED. Measured on #16934: title plus governing text
   // derives 42 admissible terms, and a 42-term line is not a reading anybody
@@ -786,7 +877,7 @@ export function formatPasteLine({ terms, candidateCount, accepted, unresolved = 
   const head = terms.slice(0, MAX_PASTE_TERMS);
   const rest = terms.length - head.length;
   const shown = rest > 0 ? `${head.join(',')} (+${rest} more)` : head.join(',');
-  return `Prior rulings read: ${shown} → ${candidateCount} hits; ${named}; ${formatThreadClause(thread)}`;
+  return `Prior rulings read: ${shown} → ${candidateCount} hits; ${named}; ${formatThreadClause(thread)}; ${repo}`;
 }
 
 /**
@@ -794,7 +885,7 @@ export function formatPasteLine({ terms, candidateCount, accepted, unresolved = 
  * `readThreadRulings` (plus its read cost) or null when no card was named —
  * the paste line spells the two apart.
  */
-export function search({ terms, adrUnits, agentsLines, docblocks, top = DEFAULT_TOP, thread = null }) {
+export function search({ terms, adrUnits, agentsLines, docblocks, top = DEFAULT_TOP, thread = null, corpusRepo = null }) {
   const adr = rankUnits(adrUnits, terms);
   const agents = rankUnits(agentsLines, terms);
   const spec = rankUnits(docblocks, terms);
@@ -819,7 +910,7 @@ export function search({ terms, adrUnits, agentsLines, docblocks, top = DEFAULT_
     shown,
     accepted,
     thread,
-    pasteLine: formatPasteLine({ terms, candidateCount: adr.length, accepted, thread }),
+    pasteLine: formatPasteLine({ terms, candidateCount: adr.length, accepted, thread, corpusRepo }),
   };
 }
 
@@ -941,8 +1032,12 @@ function truncate(s, n) {
 
 export function renderReport(result, meta) {
   const L = [];
-  L.push(`check-prior-rulings: corpus read at ${meta.rev} (${meta.tip})`);
+  L.push(`check-prior-rulings: ${meta.corpusRepo ?? 'an unresolved repo'} corpus read at ${meta.rev} (${meta.tip})`);
   if (meta.card) L.push(`  card: ${meta.repo}#${meta.card.number} — ${truncate(meta.card.title, 100)}`);
+  if (meta.card && meta.corpusRepo && meta.repo !== meta.corpusRepo) {
+    L.push(`  ⚠️ WRONG CORPUS: the card is ${meta.repo}'s and the tree corpora are ${meta.corpusRepo}'s, so this`);
+    L.push(`     answers it out of the OTHER repo's rulings. Re-run in a ${meta.repo} checkout; ⛔ do not paste this.`);
+  }
   L.push('');
   L.push(`  terms (${result.terms.length}):`);
   for (const t of result.terms) L.push(`    ${t}  [${meta.sources.get(t) ?? 'derived'}]`);
@@ -1036,14 +1131,14 @@ function commas(n) {
   return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
-export function reportPrerequisiteNotMet(verdict, extra = []) {
+export function reportPrerequisiteNotMet(verdict, extra = [], corpusRepo = null) {
   const L = [
     '',
     `check-prior-rulings: PREREQUISITE NOT MET — ${verdict.headline}.`,
     '',
     '  Nothing was searched. The paste line is:',
     '',
-    `    ${formatPasteLine({ unresolved: true, terms: [], candidateCount: 0, accepted: [] })}`,
+    `    ${formatPasteLine({ unresolved: true, terms: [], candidateCount: 0, accepted: [], corpusRepo })}`,
     '',
     '  ⛔ Do NOT paste `none` — `none` says the search ran and found nothing, and this',
     '     run did not search. ⛔ Do not retry a 403 or a 429: the fleet shares one identity,',
@@ -1112,6 +1207,7 @@ async function run(argv) {
     return EXIT_UNCLASSIFIED;
   }
   const { opts } = parsed;
+  const corpusRepo = readCorpusRepo();
   const sweep = resolveSweepRepo(process.env);
   if (opts.card !== null && !sweep.valid) {
     console.error(
@@ -1132,6 +1228,7 @@ async function run(argv) {
     return reportPrerequisiteNotMet(
       { kind: 'no-rev', headline: `\`${opts.rev}\` does not resolve in this checkout (${err?.message ?? 'unknown'})` },
       ['  Run `git fetch origin main`, or name another revision with --rev.'],
+      corpusRepo,
     );
   }
 
@@ -1151,7 +1248,7 @@ async function run(argv) {
         `  Board: ${sweep.repo} (${sweep.source}); card: ${opts.card}.`,
         '  You can still search the tree corpora by hand: --terms a,b,c needs no card and no',
         '  token — and its line says the thread was not read.',
-      ]);
+      ], corpusRepo);
     }
     card = read.card;
     // The card's own thread — the corpus that was missing (see the header).
@@ -1164,7 +1261,7 @@ async function run(argv) {
           ` (${th.partial?.pages ?? 0} page(s), ${th.partial?.comments ?? 0} comment(s) before the failure).`,
         '  ⛔ A line without the thread half is not a reading of this card: the thread is where the',
         '     cheapest ruling lives, and the one this corpus was added for.',
-      ]);
+      ], corpusRepo);
     }
     thread = { ...readThreadRulings(th.thread.comments), pages: th.thread.pages, bytes: th.thread.bytes, ms: th.thread.ms };
   }
@@ -1174,6 +1271,7 @@ async function run(argv) {
     return reportPrerequisiteNotMet(
       { kind: 'no-terms', headline: 'the card yielded no admissible search term' },
       ['  Every word was shorter than the length floor or a stopword. Pass --terms explicitly.'],
+      corpusRepo,
     );
   }
 
@@ -1182,8 +1280,9 @@ async function run(argv) {
   if (adrUnits.length === 0) {
     // A corpus that reads as empty is a broken read, never a clean board.
     return reportPrerequisiteNotMet(
-      { kind: 'empty-corpus', headline: `\`${CORPORA[0].path}\` parsed to zero decision units at ${opts.rev}` },
+      { kind: 'empty-corpus', headline: `\`${CORPORA[0].path}\` in ${corpusRepo ?? 'this checkout (repo unknown)'} parsed to zero decision units at ${opts.rev}` },
       ['  Either the path moved or the decision shapes drifted; the reader must be corrected, not trusted.'],
+      corpusRepo,
     );
   }
   const agentsText = readBlobsAtRev(opts.rev, [CORPORA[1].path])[0]?.text ?? '';
@@ -1196,14 +1295,15 @@ async function run(argv) {
     extractDocblocks(f.path, f.text).map((d) => ({ corpus: 'spec', file: d.path, line: d.line, text: d.text })),
   );
 
-  const result = search({ terms: built.terms, adrUnits, agentsLines, docblocks, top: opts.top, thread });
-  const meta = { rev: opts.rev, tip, repo: sweep.repo, card, sources: built.sources, governing: built.governing, governingAbsent: built.governingAbsent };
+  const result = search({ terms: built.terms, adrUnits, agentsLines, docblocks, top: opts.top, thread, corpusRepo });
+  const meta = { rev: opts.rev, tip, repo: sweep.repo, corpusRepo, card, sources: built.sources, governing: built.governing, governingAbsent: built.governingAbsent };
 
   if (opts.json) {
     console.log(JSON.stringify({
       rev: opts.rev,
       tip,
       repo: sweep.repo,
+      corpusRepo,
       card: card ? { number: card.number, title: card.title, comments: card.comments } : null,
       thread: thread
         ? { comments: thread.comments, pages: thread.pages, bytes: thread.bytes, ms: thread.ms, rulings: thread.rulings, nearMisses: thread.nearMisses }
@@ -1367,6 +1467,25 @@ export async function selfTest() {
   t('a Chinese heading separated by a full-width colon parses', ADR_HEADING_RE.test('### D2 盖章策略：按对象声明'), true);
   t('a level-2 heading is not a decision heading', ADR_HEADING_RE.test('## Decision'), false);
 
+  // ---- the THIRD shape: the structure objectui's ADRs actually carry -----
+  // Measured at objectui@0c2eb5e: ten ADRs, zero D-units, `## Decision` parts.
+  const UI = '# ADR-0053: List-view navigation\n\n**Status**: Accepted (2026-06-18)\n\n## Decision detail\n\n1. **Two orthogonal fields, no `mode` discriminator.** Context is the source\n   of truth for the mode.\n\n2. **Correct-by-construction via field removal.** Delete the fields that let\n   an author express a conflict, so it is untypable.\n\n## Consequences\n\nProse that is not a decision.\n';
+  const ui = parseAdrUnits('docs/adr/0053-list-view-navigation-modes.md', UI);
+  t('a file carrying NEITHER D-shape falls back to its `## Decision` section', ui.length, 2);
+  t('…keeping the filename\'s ADR id and the status objectui does carry', `${ui[0].adr}/${ui[0].status}`, 'ADR-0053/accepted');
+  t('…with the item body in the unit text, so a term can match it', termMatcher('untypable')(ui[1].text), true);
+  t('…and the next level-2 section contributes nothing', ui.some((u) => /not a decision/.test(u.text)), false);
+  // ⛔ The three controls that keep the fallback off prose.
+  t('a `## Decision` anchor with an EMPTY body yields no unit', parseAdrUnits('docs/adr/0099-b.md', '# ADR-0099: B\n\n**Status**: Accepted\n\n## Decision\n\n## Consequences\n\nProse.\n').length, 0);
+  t('a sentence MENTIONING a decision is not a section anchor', parseAdrUnits('docs/adr/0098-x.md', '# ADR-0098: X\n\n**Status**: Accepted\n\n## Context\n\nThe decision we took was to ship.\n').length, 0);
+  t('a file that HAS a D-unit ignores its `## Decision` section — ⛔ no double count', parseAdrUnits('docs/adr/0097-c.md', '# ADR-0097: C\n\n**Status**: Accepted\n\n## Decision\n\nLead paragraph.\n\n### D1 — The real decision\n\nBody.\n').map((u) => u.id).join(','), 'D1');
+  t('a path with no ADR number yields nothing, anchor or not', parseAdrUnits('docs/notes.md', '# Notes\n\n## Decision\n\nWe shipped.\n').length, 0);
+
+  // ---- the corpus repo, named in BOTH arms of the paste line -------------
+  t('the resolved line names the repo the corpus came from', formatPasteLine({ terms: ['gate'], candidateCount: 11, accepted: [], corpusRepo: 'objectstack-ai/objectui' }).endsWith('; repo: objectstack-ai/objectui'), true);
+  t('…and so does the REFUSAL, which is where a wrong corpus shows', formatPasteLine({ unresolved: true, terms: [], candidateCount: 0, accepted: [], corpusRepo: 'objectstack-ai/objectui' }), 'Prior rulings read: unresolved (repo: objectstack-ai/objectui)');
+  t('an unresolvable origin reads `unknown`, ⛔ never a dropped clause', formatPasteLine({ unresolved: true, terms: [], candidateCount: 0, accepted: [] }).includes('repo: unknown'), true);
+
   // ---- status classification --------------------------------------------
   t('accepted', classifyStatus('Accepted (2026-09-04) — accepted by the merge'), 'accepted');
   t('accepted, colon inside the bold', extractStatusLine('**Status:** Accepted'), 'Accepted');
@@ -1419,9 +1538,9 @@ export async function selfTest() {
     // NEGATIVE case — terms that hit nothing must say `none`, not a false hit.
     const nil = search({ terms: ['websocket', 'graphql', 'kubernetes'], adrUnits: units, agentsLines: [], docblocks: [], top: 10 });
     t('a term set that hits nothing finds no candidate', nil.adr.length, 0);
-    t('…and its paste line says `none`', nil.pasteLine, 'Prior rulings read: websocket,graphql,kubernetes → 0 hits; none; thread: not read (no --card)');
+    t('…and its paste line says `none`', nil.pasteLine, 'Prior rulings read: websocket,graphql,kubernetes → 0 hits; none; thread: not read (no --card); repo: unknown');
     t('…and `none` is NOT `unresolved`', nil.pasteLine.includes('unresolved'), false);
-    t('an unresolved read is spelled differently from `none`', formatPasteLine({ unresolved: true, terms: [], candidateCount: 0, accepted: [] }), 'Prior rulings read: unresolved');
+    t('an unresolved read is spelled differently from `none`', formatPasteLine({ unresolved: true, terms: [], candidateCount: 0, accepted: [] }), 'Prior rulings read: unresolved (repo: unknown)');
 
     // STOPWORD / noise case — a card written entirely in card-vocabulary
     // derives nothing, and that must refuse rather than search for junk.
@@ -1429,7 +1548,7 @@ export async function selfTest() {
     t('an all-stopword title derives no term', noisy.terms.length, 0);
 
     // The paste line's shape, pinned exactly as `decision-analysis.md` states it.
-    t('the paste line is pinned', formatPasteLine({ terms: ['single', 'posture'], candidateCount: 4, accepted: ['ADR-0131 D8'] }), 'Prior rulings read: single,posture → 4 hits; ADR-0131 D8; thread: not read (no --card)');
+    t('the paste line is pinned', formatPasteLine({ terms: ['single', 'posture'], candidateCount: 4, accepted: ['ADR-0131 D8'] }), 'Prior rulings read: single,posture → 4 hits; ADR-0131 D8; thread: not read (no --card); repo: unknown');
     t('the paste line is extractable by a literal grep', /^Prior rulings read: /.test(found.pasteLine), true);
     // A long term set is BOUNDED and says how much it bounded. Measured: the
     // real #16934 run derives 42 terms, and the unbounded line was unusable.
@@ -1437,7 +1556,7 @@ export async function selfTest() {
     const bounded = formatPasteLine({ terms: long, candidateCount: 7, accepted: [] });
     t('a long term list is truncated', bounded.includes('term12'), false);
     t('…and counts what it truncated', bounded.includes('(+8 more)'), true);
-    t('…and still parses as the pinned shape', /^Prior rulings read: .+ → 7 hits; none; thread: not read \(no --card\)$/.test(bounded), true);
+    t('…and still parses as the pinned shape', /^Prior rulings read: .+ → 7 hits; none; thread: not read \(no --card\); repo: unknown$/.test(bounded), true);
     t('a term list at the cap is not annotated', formatPasteLine({ terms: long.slice(0, MAX_PASTE_TERMS), candidateCount: 1, accepted: [] }).includes('more)'), false);
 
     // Corpus counting: a corpus that is searched reports how much, always.
@@ -1515,9 +1634,9 @@ export async function selfTest() {
   t('a READ thread with no ruling says `none`', formatThreadClause(emptyThread), 'thread: none');
   t('an UNREAD thread (a --terms-only run) says so, ⛔ never `none`', formatThreadClause(null), 'thread: not read (no --card)');
   t('…and the two are different strings', formatThreadClause(null) === formatThreadClause(emptyThread), false);
-  t('the full paste line carries the thread clause after the ADR half', formatPasteLine({ terms: ['single', 'posture'], candidateCount: 4, accepted: ['ADR-0131 D8'], thread: thr }), 'Prior rulings read: single,posture → 4 hits; ADR-0131 D8; thread: 2 ruling(s) (2, 4)');
-  t('…and `search` threads it through', search({ terms: ['posture'], adrUnits: [], agentsLines: [], docblocks: [], thread: thr }).pasteLine.endsWith('; none; thread: 2 ruling(s) (2, 4)'), true);
-  t('an unresolved read is the WHOLE line, thread included — no half-line', formatPasteLine({ unresolved: true, terms: [], candidateCount: 0, accepted: [], thread: thr }), 'Prior rulings read: unresolved');
+  t('the full paste line carries the thread clause after the ADR half', formatPasteLine({ terms: ['single', 'posture'], candidateCount: 4, accepted: ['ADR-0131 D8'], thread: thr }), 'Prior rulings read: single,posture → 4 hits; ADR-0131 D8; thread: 2 ruling(s) (2, 4); repo: unknown');
+  t('…and `search` threads it through', search({ terms: ['posture'], adrUnits: [], agentsLines: [], docblocks: [], thread: thr }).pasteLine.endsWith('; none; thread: 2 ruling(s) (2, 4); repo: unknown'), true);
+  t('an unresolved read is the WHOLE line, thread included — no half-line', formatPasteLine({ unresolved: true, terms: [], candidateCount: 0, accepted: [], thread: thr }), 'Prior rulings read: unresolved (repo: unknown)');
   t('a non-array handed to the thread half is an empty read, not a crash', readThreadRulings(undefined).comments, 0);
 
   // ---- the thread READ, offline: a fake board -----------------------------
@@ -1620,7 +1739,7 @@ export async function selfTest() {
       'content-line anchoring, the fixture thread with its two rulings oldest-first, `none` against ' +
       '`not read` against the whole-line `unresolved`, and the offline board read (paged to a short ' +
       'page with bytes and ms measured, a refusal, no token, the page bound, a network failure, a ' +
-      'malformed page); the structural no-write-path, no-retry-loop and no-Link-walk assertions; and ' +
+      'malformed page); the THIRD (fallback) decision shape on objectui\'s real `## Decision` structure, with its empty-anchor, prose-sentence, already-carries-a-D-unit and non-ADR-path controls; the corpus repo named in BOTH arms of the paste line; the structural no-write-path, no-retry-loop and no-Link-walk assertions; and ' +
       'the one live-tree D8 existence pin).',
   );
   return { code: EXIT_OK, verdict: SELF_TEST_VERDICT };
