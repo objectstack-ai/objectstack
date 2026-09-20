@@ -214,6 +214,27 @@ Derived from the changesets objectui declared over the range — 584 releasing o
 - _(no changeset)_ test(scripts): census the `$`-dialect lowercase aliases before objectui#8568 is ruled (#8977) (objectui `ca67d42f0`)
 - …and 179 more commits with no changeset — this list is capped at 100, the range has 279 in total. Run `node scripts/objectui-range.mjs --from 53ded82bf7a4 --to 87af769e9a3e --all` for the complete list.
 
-<!-- adr-0087: not-required (no-migration-prescription) PROBE — measuring whether the detector fires on this body. -->
+<!-- adr-0087: not-required (no-migration-prescription)
+     This diff moves `.objectui-sha` and the artefacts that travel with it (the console
+     changeset, `sdui.manifest.json` + `scripts/sdui-manifest.record.json`,
+     `packages/sdui-parser/objectui-lockstep.json`, and re-measured `.objectui-sha`
+     read-point citations under `packages/spec/src`). It adds, removes or renames no
+     ObjectStack-authorable key: no Zod schema, no spec declaration and no stored
+     `sys_metadata` shape moves in it, so `objectstack migrate meta` has nothing here to
+     rewrite, and this body carries no FROM/TO prescription of its own.
+     The declared-breaking entries listed above are objectui's OWN package surfaces,
+     each already carrying its upstream record. Where one of them mirrors an
+     ObjectStack-authorable key, the ledger entry belongs to the `packages/spec` PR that
+     lands the mirror - as `18.ui__ChartConfig__aria`,
+     `18.ui__ObjectGridProps__defaultSort` and `18.ui__ObjectKanbanProps__quickAdd`
+     already do - never to the pin bump, whose diff contains no such key. The tracked
+     `sdui.manifest.json` is generated from PUBLISHED `@object-ui/*`, and the pinned
+     commit declares the same `17.6.0` the old pin did, so this bump moves no
+     declaration-parity reading either.
+     Scope of the claim, stated rather than implied: it is a claim about THIS diff, not
+     a per-entry re-measurement of all 98 upstream declared-breaking entries. The
+     `a472b07167a3...53ded82bf7a4` bump judged its two one at a time; at 98 that is a
+     different exercise and it was not performed here.
+-->
 
 objectui range: `53ded82bf7a4...87af769e9a3e`
