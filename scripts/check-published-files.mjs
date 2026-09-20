@@ -246,8 +246,6 @@ const EXTRA_ENTRIES = {
       'The Zod schemas are themselves the contract (Prime Directive #1); downstream code imports them directly, so these sources are product rather than build input. Narrowed to *.zod.ts so no test or helper rides along.',
     'api-surface':
       'Export snapshot used by downstream compatibility checks — one file per published entry point since #5837.',
-    'api-surface-declarations':
-      'The same snapshot one axis deeper (#16045): the .d.ts declaration TEXT of every export, per entry point, so a compatibility check reading two published tarballs can see WHICH declared shape moved between releases and not merely which names survived — the question api-surface cannot answer. 12 MiB of text, 1.02 MiB of the tarball.',
     'spec-changes.json': 'Machine-readable spec change log driving the upgrade guide.',
   },
 };
@@ -388,11 +386,17 @@ function matcher(pattern) {
  * This is the `subtree` case, not the `filtered` one check-examples-live-imports
  * refuses. `walk()` below enumerates EVERY non-build file of every publishable
  * member and MINIMAL judges each of them against FORBIDDEN, so the declaration
- * names files this gate really opens. Measured on this tree: the declaration
- * names 5263 tracked files and the gate judges 4803 of them — 91.3%. The 460 it
- * does not judge are the members whose OWN manifests this gate read in order to
- * exclude them (`private`), which is itself a read of the declared subtree, so
- * a manifest card there is a true lead rather than a fabricated one.
+ * names files this gate really opens. Measured at `52a41b72e` (2026-08-23):
+ * the declaration named 5263 tracked files and the gate judged 4803 of them —
+ * 91.3%. The 460 it did not judge are the members whose OWN manifests this gate
+ * reads in order to exclude them (`private`), which is itself a read of the
+ * declared subtree, so a manifest card there is a true lead rather than a
+ * fabricated one.
+ *
+ * ⛔ Those counts are deliberately pinned to that commit and NOT refreshed. They
+ * move with every package added to or removed from the workspace, no gate
+ * reprints them, and the claim this paragraph rests on is the SHARE — that the
+ * declaration names what the gate really opens — never the level.
  *
  * The contrast that sets the boundary is in check-published-readme-exports.mjs,
  * which enumerates the same members and scores 2.8% — its refusal docblock

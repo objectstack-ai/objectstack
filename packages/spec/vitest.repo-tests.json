@@ -24,6 +24,7 @@
   "scripts/solution-blueprint-header-row.test.ts",
   "scripts/strictness-ledger-doc.test.ts",
   "scripts/strictness-ledger.test.ts",
+  "src/ai/tool-confirmation-prescription-tense.pin.test.ts",
   "src/api/error-catalog-docs.test.ts",
   "src/data/api-methods-batch-conformance.test.ts",
   "src/identity/position-delegatable-enforcer.pin.test.ts",

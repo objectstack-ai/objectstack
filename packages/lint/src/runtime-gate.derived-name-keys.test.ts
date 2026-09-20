@@ -57,19 +57,28 @@ describe('the derived name-keyed set (#13390)', () => {
     // the correct answer rather than a regression: a `page` write's snapshot
     // again holds exactly one page, its own, so `pages[0]` IS that write and
     // name-keying it would say nothing the index does not.
+    // [#19143] `datasets` ARRIVES, by the same derivation and with no second
+    // edit: mapping the `dataset` type in `TYPE_TO_STACK_KEY` made it a
+    // collection a write lands inside as well as one the context fills.
     expect(deriveNameKeyedStackKeys(contextStackKeys, WRITTEN_STACK_KEYS)).toEqual([
       'objects',
       'permissions',
       'books',
+      'datasets',
     ]);
   });
 
-  it('excludes `datasets` by derivation, not by a written-down exception', () => {
-    // The old comment had to STATE this. Now it falls out: the context fills
-    // `datasets`, and no write type lands an item in it, so a `datasets[0]`
-    // path is not a position in anything the caller cannot enumerate.
+  it('includes `datasets` by derivation, not by a written-down exception', () => {
+    // ⭐ The direction of this pin REVERSED at #19143, and that is the point of
+    // deriving the set. Before it, the context filled `datasets` and no write
+    // type landed in it, so the old comment could state the exclusion as a
+    // fact. Mapping `dataset` changed the second half, the derivation followed,
+    // and nothing had to be told: a dataset write's snapshot now holds the
+    // tenant's other datasets beside the written one, so `datasets[3]` is once
+    // again an offset into an array the caller cannot enumerate — the #10064
+    // defect, and exactly what name-keying answers.
     expect(contextStackKeys).toContain('datasets');
-    expect(WRITTEN_STACK_KEYS.has('datasets')).toBe(false);
+    expect(WRITTEN_STACK_KEYS.has('datasets')).toBe(true);
   });
 
   it.each(contextStackKeys)(

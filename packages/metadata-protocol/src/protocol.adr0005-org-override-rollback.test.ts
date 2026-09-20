@@ -175,12 +175,25 @@ function makeProtocol(
  * A schema-VALID minimal body per rolled-back type — spec validation runs
  * before the authorization gate, so an invalid body would 422 first and this
  * suite would pass without ever reaching the thing it pins.
+ *
+ * [#19143] "Valid" now has a second half for `dataset`, and this docblock's own
+ * sentence is why the fixture had to move rather than the expectation. The
+ * runtime publish gate did not dispatch on `dataset` at all until that card, so
+ * the body could name a base object nothing provides and still reach the
+ * authorization gate this suite is about. It now cannot: `object: 'task'`
+ * resolves to nothing in this harness (the stub registry holds no objects) and
+ * the door answers `INVALID_METADATA` / 422 — a real refusal, and one that
+ * would have hidden the 403 this file exists to pin. `sys_user` is the fixture's
+ * answer because it resolves through `PLATFORM_PROVIDED_OBJECT_NAMES` without
+ * the harness needing an object registry at all, and the dataset's own
+ * field-existence rules skip a base object this stack does not define, so the
+ * body stays minimal and reaches the authorization gate exactly as before.
  */
 const BODIES: Record<string, Record<string, unknown>> = {
     page: { name: 'probe_item', label: 'Probe', type: 'record', regions: [] },
     app: { name: 'probe_item', label: 'Probe' },
     action: { name: 'probe_item', label: 'Probe', type: 'script', body: { language: 'expression', source: '1 + 1' } },
-    dataset: { name: 'probe_item', label: 'Probe', object: 'task', dimensions: [], measures: [] },
+    dataset: { name: 'probe_item', label: 'Probe', object: 'sys_user', dimensions: [], measures: [] },
     book: { name: 'probe_item', label: 'Probe', groups: [] },
     position: { name: 'probe_item', label: 'Probe' },
     permission: { name: 'probe_item', label: 'Probe', objects: {} },

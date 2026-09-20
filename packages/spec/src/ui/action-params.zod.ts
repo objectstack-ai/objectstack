@@ -29,7 +29,7 @@
 import { z } from 'zod';
 
 import { valueSchemaFor } from '../data/field-value.zod';
-import type { FilterCondition } from '../data/filter.zod';
+import type { EngineQueryOptions } from '../data/data-engine.zod';
 import type { FieldErrorCode } from '../api/errors.zod';
 import { lazySchema } from '../shared/lazy-schema';
 
@@ -232,11 +232,12 @@ export function validateActionParams(
  * at invoke time (`ai.exposed` + the ADR-0066 D4 capability gate), not here.
  *
  * Two members carry an argument contract the signature alone does not settle,
- * and both state it on the member: `find` takes a bare FILTER — the `where`
- * half of a query — and never an ObjectQL query envelope (#14175); `delete`
- * accepts a single id OR an array of them, both as declared contract, served
- * one row at a time (#15117). Read those doc comments before writing a handler
- * or a test double against either.
+ * and both state it on the member: `find` takes the engine's own query
+ * ENVELOPE — {@link EngineQueryOptions}, by identity, the same type
+ * `IDataEngine.find` takes — and the bare-filter parameter shape #14175 chose
+ * is withdrawn (#15124); `delete` accepts a single id OR an array of them,
+ * both as declared contract, served one row at a time (#15117). Read those doc
+ * comments before writing a handler or a test double against either.
  */
 export interface ActionEngineFacade {
   insert(object: string, data: Record<string, unknown>): Promise<{ id: string }>;
@@ -275,39 +276,90 @@ export interface ActionEngineFacade {
    */
   delete(object: string, idOrIds: string | string[]): Promise<void>;
   /**
-   * Read the rows of `object` that match `filter`.
+   * Read the rows of `object` that `query` selects.
    *
-   * `filter` is a FILTER — the `where` HALF of an ObjectQL query, the same
-   * {@link FilterCondition} that `QueryAST.where` carries: implicit equality
-   * `{ field: value }`, explicit operators `{ field: { $in: [...] } }`,
-   * `$and` / `$or` / `$not`. It is NOT the query ENVELOPE
-   * (`{ where, fields, orderBy, limit }`) that `DataEngine.find` and ObjectQL's
-   * own `engine.find` take — the shape this parameter's former name, `query`,
-   * invited. The runtime builds the envelope itself: `buildActionEngineFacade`'s
-   * `find` arm (`packages/runtime/src/action-execution.ts`, `:1183` on
-   * `369da918`) wraps a non-empty filter as `{ where: filter }` and passes an
-   * EMPTY filter (`{}`) through unwrapped — the unfiltered read.
+   * ## One platform, one query shape
    *
-   * Two consequences, both silent (#14175):
+   * `query` is the ENGINE's query envelope — {@link EngineQueryOptions}, the
+   * very type `IDataEngine.find` and ObjectQL's own `engine.find` take, named
+   * here by identity rather than restated. The filter goes under `where`, and
+   * the rest of the envelope (`fields`, `orderBy`, `limit`, `offset`,
+   * `expand`, `search`, …) means exactly what it means on the engine:
    *
-   * - An envelope passed here becomes `{ where: { where: … } }`. No object has
-   *   a field named `where`, so the read matches nothing and resolves to `[]`
-   *   with no error. A handler that made this mistake ran to completion over
-   *   zero rows for as long as it shipped, and its own hand-written test
-   *   double — written to the same belief, reading `query.where` — passed
-   *   every assertion.
-   * - Because `{}` skips the wrap, an unfiltered call works under EITHER
-   *   reading, so a handler mixing one unfiltered read with envelope-shaped
-   *   ones looks partially alive rather than uniformly dead.
+   * ```ts
+   * await ctx.engine.find('todo_task', { where: { status: 'completed' } });
+   * await ctx.engine.find('todo_task', { where: { status: 'open' }, fields: ['id', 'subject'], limit: 50 });
+   * await ctx.engine.find('todo_task', {});   // the unfiltered read
+   * ```
    *
-   * What the type buys, exactly: `FilterCondition` refuses a primitive and a
-   * mistyped logical operator (`$and` / `$or` not arrays, `$not` not a
-   * filter). It does NOT refuse `{ where: … }` — its string index signature is
-   * what lets any field name stand as a key, and `where` is a string — so the
-   * envelope mistake still compiles, and this doc comment, not the type, is
-   * the contract of record. Both halves are pinned in `action-params.test.ts`.
+   * ## What changed, and why it is a WITHDRAWAL rather than a narrowing
+   *
+   * Until #15124 this slot took a bare `FilterCondition` — the `where`
+   * half alone — and the runtime's `find` arm wrapped it
+   * (`packages/runtime/src/action-execution.ts`, `:1183` on `369da918`; that
+   * wrap is gone as of this card). That parameter shape differed from the
+   * engine's for no reason a caller could see, and the cost was
+   * silent: an author who wrote the engine's own envelope got
+   * `{ where: { where: … } }`, which matches no row (no object has a field
+   * named `where`) and resolves to `[]` with no error. A handler that made
+   * that mistake ran to completion over zero rows for as long as it shipped,
+   * and its hand-written test double — written to the same belief — passed
+   * every assertion. `{}` skipped the wrap, so one unfiltered read kept
+   * working under either belief and a dead handler looked partially alive.
+   *
+   * #14175 declared the bare filter and pinned the gap; #15124 withdraws the
+   * shape instead. Closing the gap the other way would have had to assert a
+   * vocabulary fact the spec declares nowhere — that no object may carry a
+   * field named `where` — and that is a word taken from every customer's data
+   * model to buy one parameter's compile-time check. Aligning the parameter
+   * removes the ambiguity at its root: the most natural spelling is now the
+   * correct one, and nothing is reserved.
+   *
+   * Migration is lossless and mechanical: `find(o, f)` → `find(o, { where: f })`
+   * (ADR-0087 semantic migration `action-engine-facade-find-query-envelope`).
+   * An unfiltered `find(o, {})` is unchanged.
+   *
+   * ## What the type refuses, measured
+   *
+   * A bare filter no longer type-checks, on BOTH paths a TYPED caller can
+   * reach it by: an object literal (`{ status: 'completed' }`) fails the
+   * excess-property check, because a field name is not an envelope key; and a
+   * filter held in a variable typed `FilterCondition` fails TS2559 —
+   * `EngineQueryOptions` is a weak type, every key optional, and a filter of
+   * field names has no property in common with it. The envelope's own keys are
+   * typed, so `where: 'a = b'`, `fields: 'id,subject'` and `limit: '50'` are
+   * refused too.
+   *
+   * ## …and what refuses it for a caller the TYPE never reached
+   *
+   * `buildActionEngineFacade` returns `any`, so a handler in a JS config, one
+   * annotated with a local copy of this context, or a `(ctx: any)` handler is
+   * bound by nothing here. For those the runtime arm refuses the withdrawn
+   * shape itself, before the engine, carrying the same prescription
+   * (`ACTION_ENGINE_FIND_ENVELOPE_PRESCRIPTION`,
+   * `packages/runtime/src/action-execution.ts`) and reading its key set off
+   * THIS schema so the two channels cannot drift apart.
+   *
+   * ⚠️ That arm is load-bearing rather than belt-and-braces, and the reason is
+   * a `null`: the engine's own unknown-option refusal (#4371) exempts a
+   * `null`-VALUED key, because on an option bag a `null` is a withdrawal. On a
+   * FILTER it is the "rows with no X" idiom — so `{ deleted_at: null }` passed
+   * straight through would be dropped unexecuted and the read would widen to
+   * EVERY row, silently, to a caller whose next line is often a delete.
+   *
+   * ## `context` is the caller's to pass and NOT the caller's to choose
+   *
+   * The envelope carries `context` because every engine option bag does. This
+   * facade is TRUSTED and context-less by design (#2849, ADR-0096): the
+   * runtime stamps its own elevated `ExecutionContext` last, so a
+   * caller-supplied `context` is overridden rather than honoured. Do not write
+   * one — it reads as authorization and is none.
+   *
+   * Every clause above is pinned in `action-params.test.ts`, and the
+   * pass-through is pinned against the runtime in
+   * `packages/runtime/src/action-engine-facade-find-envelope.test.ts`.
    */
-  find(object: string, filter: FilterCondition): Promise<Array<Record<string, unknown>>>;
+  find(object: string, query: EngineQueryOptions): Promise<Array<Record<string, unknown>>>;
 }
 
 /**

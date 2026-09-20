@@ -19,7 +19,7 @@ import { SECRET_MASK, collectMaskedReadFields } from '@objectstack/objectql/core
 // heuristic here would be a second de-facto contract that disagrees with the
 // picker, the search companion and the approval inbox the day an author sets
 // `nameField` — the same argument the SECRET_MASK import above makes.
-import { resolveDisplayField } from '@objectstack/spec/data';
+import { referenceTargetOf, resolveDisplayField } from '@objectstack/spec/data';
 // [#8707 / #10101] The platform-row organization resolver, imported rather
 // than owned. It started life in THIS file (#8707, honouring #8287's ruling)
 // and was promoted to `@objectstack/metadata-core` by the maintainer ruling
@@ -364,6 +364,76 @@ function safeStringify(v: any): string {
 const REFERENCE_FIELD_TYPES: ReadonlySet<string> = new Set(['lookup', 'master_detail', 'user']);
 
 /**
+ * [#19264] The TARGET OBJECT of a reference-typed field — the key both halves
+ * of a summary's title resolution are keyed on.
+ *
+ * Read through `referenceTargetOf`, the spec's SINGLE arbiter of "what does
+ * this field point at", and NOT through the materialized `reference` carrier
+ * this file used to read raw. For `user` the two differ, and
+ * `IMPLICIT_REFERENCE_TARGETS` (`@objectstack/spec/data`) is explicit about
+ * which one answers: the target of a `user` field is "a CONSTANT OF THE TYPE,
+ * so `reference` on a `user` field materializes that constant; it does not
+ * supply it. Metadata authored without it (hand-written JSON, an AI author, a
+ * Studio form) is fully specified, not under-specified."
+ *
+ * Gating on the carrier therefore dropped the spelling the contract calls
+ * COMPLETE, and dropped it SILENTLY: a `trackHistory`'d `{ type: 'user' }`
+ * field with no `reference` was planned for nobody, so the timeline rendered
+ * the raw 32-char id where every other reference field showed a name — no
+ * refusal, no diagnostic. `plugin-approvals` had the identical defect in
+ * `resolveLookupFields` and was moved to this same arbiter; the docblock on
+ * {@link REFERENCE_FIELD_TYPES} declares the two packages share one vocabulary
+ * for "this value is a reference", so they resolve the target one way too.
+ *
+ * ## Both halves, because the key has two ends
+ *
+ * The plan (`planTrackedLookupReads` / `planMilestoneTokenReads`) keys the read
+ * by target object and the renderers (`renderTrackedChangeSummary` /
+ * `renderMilestoneSummary`) look the resolved titles back up by the same key.
+ * Repairing only the plan would issue the read and then fail to find it again,
+ * so the timeline would still show the id — the symptom this fixes — while
+ * paying for the read. One function answers for all four, which is also why a
+ * padded carrier can no longer make the two ends disagree: the plan used to
+ * `trim()` and the renderers did not, so `reference: ' crm_account '` produced
+ * a key neither side could match.
+ *
+ * ## The type gate is unchanged, deliberately
+ *
+ * `tree` is the fourth member of `REFERENCE_VALUE_TYPES` and stays OUT: it
+ * carries an author-chosen target, so admitting it would WIDEN what the
+ * timeline tracks rather than repair what it silently dropped.
+ * {@link REFERENCE_FIELD_TYPES} remains the one gate, applied by the callers
+ * before they ask this.
+ *
+ * ## Why the throw is swallowed here rather than propagated
+ *
+ * `referenceTargetOf` reads the carrier through `referenceCarrierOf`, which
+ * THROWS for an object- or array-valued `reference` — a shape `safeParse`
+ * refuses at the contract door and only an unparsed literal can reach. Every
+ * caller below runs inside `writeAudit`'s summary composition, which is NOT
+ * inside the `try` that guards the audit row write: a `TypeError` escaping
+ * here would leave the hook, i.e. turn a display-enrichment miss into a
+ * failure on the audited write's own path. So an unreadable carrier keeps the
+ * answer it has always had on this path — absent, the field left out of the
+ * plan — and the audited write is untouched. Absence is not a new silence: it
+ * is byte-identical to what `typeof field.reference === 'string'` already
+ * answered for that shape, and this repair is about the target a `user` field
+ * legitimately declines to restate, not about unreadable metadata.
+ *
+ * Returns `''` — never `undefined` — so the callers' existing falsy gate reads
+ * exactly as it did.
+ */
+function referenceTargetForSummary(field: any): string {
+  let target: string | undefined;
+  try {
+    target = referenceTargetOf(field);
+  } catch {
+    return '';
+  }
+  return typeof target === 'string' ? target.trim() : '';
+}
+
+/**
  * [#7230] The referenced record ids carried by one lookup-field value.
  *
  * A single-value lookup stores one id; a `multiple: true` one stores an ARRAY
@@ -469,7 +539,7 @@ function planTrackedLookupReads(
     const field = fields[key];
     if (!field || field.trackHistory !== true) continue;
     if (typeof field.type !== 'string' || !REFERENCE_FIELD_TYPES.has(field.type)) continue;
-    const reference = typeof field.reference === 'string' ? field.reference.trim() : '';
+    const reference = referenceTargetForSummary(field);
     if (!reference) continue;
     for (const raw of [oldVals ? oldVals[key] : undefined, newVals[key]]) {
       for (const id of referenceIdsOf(raw)) {
@@ -524,7 +594,7 @@ function renderTrackedChangeSummary(
     const label =
       translate(`objects.${objectName}.fields.${key}.label`) ??
       (typeof field.label === 'string' && field.label.length > 0 ? field.label : key);
-    const reference = typeof field.reference === 'string' ? field.reference : undefined;
+    const reference = referenceTargetForSummary(field);
     const titlesFor = reference ? lookupTitles?.get(reference) : undefined;
     // Only a field that DECLARES options can consume this, so the ordinary
     // tracked scalar allocates no closure; both calls below share the one.
@@ -626,7 +696,7 @@ function planMilestoneTokenReads(
     const key = match[1];
     const field = fields[key];
     if (!field || typeof field.type !== 'string' || !REFERENCE_FIELD_TYPES.has(field.type)) continue;
-    const reference = typeof field.reference === 'string' ? field.reference.trim() : '';
+    const reference = referenceTargetForSummary(field);
     if (!reference) continue;
     for (const id of referenceIdsOf(after[key])) {
       let set = byObject.get(reference);
@@ -690,7 +760,7 @@ function renderMilestoneSummary(
     if (v === null || v === undefined || v === '') return '';
     const field = fields ? fields[key] : undefined;
     if (!field) return String(v);
-    const reference = typeof field.reference === 'string' ? field.reference : undefined;
+    const reference = referenceTargetForSummary(field);
     const titlesFor = reference ? lookupTitles?.get(reference) : undefined;
     return displayFieldValue(field, v, titlesFor);
   });

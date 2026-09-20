@@ -6323,14 +6323,32 @@ export class ObjectStackProtocolImplementation implements
             // Atomic cross-object batch (#3298 / #1604 / ADR-0034 item 4): the
             // REST /batch endpoint runs its ops inside `engine.transaction()`,
             // which only opens a real (all-or-nothing) transaction when the
-            // engine exposes one — otherwise it degrades to a non-atomic
-            // passthrough. Advertise the capability iff the runtime engine can
-            // honour a transaction, so `declared === enforced` (Prime Directive
-            // #10). The rest-server producer ANDs this with `api.enableBatch` so
-            // a server that doesn't mount the route reports `false` at its layer.
-            // (ADR-0119 D1: `transaction` is contract-declared, so this probe
-            // no longer needs a structural cast to ask the question.)
-            transactionalBatch: typeof this.engine?.transaction === 'function',
+            // DEFAULT DRIVER can carry one — otherwise it takes its declared
+            // non-transactional path (ADR-0119 D1) and the batch degrades to a
+            // non-atomic passthrough. Advertise the capability iff the runtime
+            // can actually roll back, so `declared === enforced` (Prime
+            // Directive #10). The rest-server producer ANDs this with
+            // `api.enableBatch` so a server that doesn't mount the route reports
+            // `false` at its layer.
+            //
+            // [#18997] `engineCanRollBack`, NOT `typeof this.engine?.transaction
+            // === 'function'`. The refusal this advertisement exists to help a
+            // caller avoid — `runAtomicBatch`'s `501 NOT_IMPLEMENTED`, whose own
+            // remedy text says to probe `capabilities.transactionalBatch` on
+            // /discovery first — already asks `engineCanRollBack`, which asks the
+            // DRIVER as well as the engine. `engine.transaction` is a function on
+            // every real engine, so the engine-only probe answered `true` for the
+            // two compositions that 501: a default driver with no
+            // `beginTransaction` at all, and one that INHERITED it and declared
+            // `supports.transactionsUnsupported` (#18063). An advertised
+            // capability must answer the same question the refusal path asks,
+            // from the same predicate — two derivations of one capability is how
+            // these drifted. Narrowing only: this predicate is the engine probe
+            // AND a driver clause, so no composition newly advertises `true`
+            // (`protocol.discovery-transactional-batch-honesty.test.ts` pins both
+            // directions, and the driver clause is skipped where the registry is
+            // not inspectable, so a test double keeps its old answer).
+            transactionalBatch: engineCanRollBack(this.engine),
 
             // ── Joined the vocabulary with ruling A (#5672) ───────────────────
             // These six used to be the runtime dispatcher's half of the split.
@@ -22309,6 +22327,13 @@ export class ObjectStackProtocolImplementation implements
      * The DB write is best-effort and non-fatal: when the `package` service is
      * absent (e.g. the `marketplace` capability is off) the package is still
      * registered in-memory and visible for the lifetime of the process.
+     *
+     * [#19277] `request.enableOnInstall` is HONOURED here, under the same rule
+     * the HTTP door implements — 「缺省 = 保持，有旗 = 设置」: `true` enables,
+     * `false` disables, and an ABSENT key makes no lifecycle call at all. The
+     * durable disabled-package FILE is not this seam's to write (it is keyed by
+     * environment, which this request does not carry); see the comment on the
+     * flag arms below.
      */
     async installPackage(request: InstallPackageRequest): Promise<InstallPackageResponse> {
         // #2532 — runtime-created base packages routinely arrive versionless
@@ -22345,7 +22370,63 @@ export class ObjectStackProtocolImplementation implements
         // only); an unparsed range never causes a false rejection.
         assertProtocolCompat(manifest);
 
-        const pkg = this.engine.registry.installPackage(manifest as any, request.settings);
+        let pkg = this.engine.registry.installPackage(manifest as any, request.settings);
+
+        // [#19277] HONOUR `enableOnInstall` — the key THIS request contract
+        // declares and this primitive read past. `InstallPackageRequestSchema`
+        // (`packages/spec/src/kernel/package-registry.zod.ts`) has carried the
+        // key since it was written, and the implementation here read
+        // `request.manifest` and `request.settings` and nothing else: a caller
+        // that switched the option off got an ENABLED install, with no refusal
+        // and no warning. That is «declared but not enforced» on a published
+        // option — what ADR-0049 (enforce-or-remove) and Prime Directive #10
+        // refuse outright. Ruling batch #153 item 5 letter 1 (#18605) kept the
+        // kernel declaration as a COPY of the HTTP request key with the SAME
+        // meaning, so the disposition is ENFORCE, not retire.
+        //
+        // ⭐ The contract is 「缺省 = 保持，有旗 = 设置」 — maintainer ruling batch
+        // #157 item 5 letter C, the same rule the HTTP door implements
+        // (`packages/runtime/src/domains/packages.ts`). Three states, three
+        // outcomes, through the SAME registry verbs `PATCH /packages/:id/enable`
+        // and `PATCH /packages/:id/disable` use:
+        //
+        //   true    ⇒ enablePackage
+        //   false   ⇒ disablePackage
+        //   absent  ⇒ nothing at all; the row the registry returned stands
+        //
+        // ⚠️ The `true` arm is not decoration. `SchemaRegistry.installPackage`
+        // has preserved an existing row's `enabled` / `status` /
+        // `statusChangedAt` since #18877, so on a re-install nothing else will
+        // clear a disable any more — dropping this arm would silently stop
+        // honouring `true` on exactly the path an upgrade takes.
+        //
+        // ⚠️ `=== true` / `=== false`, never a truthiness test and never a `??`
+        // default: the THREE states of this key are the contract, and
+        // collapsing absent into either one is the defect. The declaration's own
+        // `.default(true)` never reaches here — nothing parses an install
+        // request through `InstallPackageRequestSchema` on this path — so
+        // absence arrives intact and is read as absence.
+        //
+        // ⛔ What this seam does NOT write, recorded so it is not mistaken for
+        // an oversight: the runtime's durable disabled-package file. That record
+        // is keyed by ENVIRONMENT (`setPackageDisabled(environmentId, id,
+        // disabled)`, `packages/runtime/src/package-state-store.ts`) and this
+        // request carries no environment, so the key cannot even be formed here;
+        // the module also lives in `@objectstack/runtime`, which depends on this
+        // package and not the other way round. The HTTP door owns that half and
+        // writes it from the row it returned. So `enableOnInstall` through this
+        // primitive moves the registry row — what every in-process reader serves
+        // from — for the life of the process, and a caller that needs the choice
+        // to survive a restart goes through the door that owns the durable
+        // record.
+        const requestedEnabled = request.enableOnInstall;
+        if (requestedEnabled === true) {
+            const enabled = this.engine.registry.enablePackage(manifest.id);
+            if (enabled) pkg = enabled;
+        } else if (requestedEnabled === false) {
+            const disabled = this.engine.registry.disablePackage(manifest.id);
+            if (disabled) pkg = disabled;
+        }
 
         // Best-effort durable persistence to `sys_packages` (non-fatal by
         // design — without the `package` service the install stays visible
