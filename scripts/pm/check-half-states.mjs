@@ -1880,7 +1880,7 @@ function stripMatchingDecoration(value, opener) {
  * cause with.
  *
  * @param {string} text
- * @param {'Blocked-by'|'Restart-when'|'Maintainer-action'} key
+ * @param {'Blocked-by'|'Restart-when'|'Maintainer-action'|'Unlock-action'} key
  * @returns {string[]}
  */
 export function directiveValues(text, key) {
@@ -6837,6 +6837,49 @@ export function h31ContractReviewCarrierSplit(issue, openPrs) {
 }
 
 // ---------------------------------------------------------------------------
+// The label-transition exit — the second `Unlock-action:` value (#19255).
+//
+// The unlock predicate is "the `Blocked-by:` target CLOSED", and the one rewrite the state model admitted
+// (`re-check PR #M`) is read by seats and by no script — so a block on a `needs-user-decision` / `pm:on-hold`
+// target had no exit a machine could fire (H26), and any other spelling fell back to the closed predicate in
+// SILENCE. This value names the CARD, the LABEL and the STATE tested on it (a state, not an event: a sweep
+// observes labels, never transitions; `absent` is the live case — the ruling lands, `needs-user-decision` leaves
+// the target). ⛔ Every other spelling still falls back silently, by ruling: the closed set IS the contract.
+// ---------------------------------------------------------------------------
+
+const UNLOCK_LABEL_EXIT_RE =
+  /^re-check[ \t]+(?:([A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*))?#([1-9]\d{0,5})[ \t]+when[ \t]+label[ \t]+`?([^\s`]+?)`?[ \t]+(absent|present)\b/;
+/** Every `re-check #N when label <label> <absent|present>` exit a card declares (trailing prose tolerated), body then comments, keyed like its `Blocked-by:` targets. */
+export function unlockLabelExits(issue, commentBodies, ownerRepo = OWNER_REPO) {
+  const out = [];
+  for (const text of [issue?.body, ...(commentBodies ?? [])]) {
+    for (const m of directiveValues(text, 'Unlock-action').map((v) => UNLOCK_LABEL_EXIT_RE.exec(v))) {
+      if (m) out.push({ ...blockerTargetKey({ repo: m[1] ?? null, number: m[2] }, ownerRepo), label: m[3], state: m[4] });
+    }
+  }
+  return out;
+}
+
+// The unlock sweep's second exit, under H19 because it is H19's reading (what the card waits for has happened): null
+// unless a declared label exit has COME TRUE on a resolved OPEN target — closed and unresolved ones are H19's own legs.
+export function h19DeclaredExitFired(issue, resolutions, commentBodies, ownerRepo = OWNER_REPO) {
+  if (!needsBlockerLiveness(issue)) return null;
+  const exits = unlockLabelExits(issue, commentBodies, ownerRepo);
+  const fired = (resolutions ?? []).flatMap((r) => (r?.state !== 'open' || !Array.isArray(r.labels) ? [] :
+    exits.filter((e) => e.key === r.key && (e.state === 'present') === r.labels.includes(e.label)).map((e) => ({ r, e }))));
+  if (fired.length === 0) return null;
+  const named = fired.map(({ r, e }) => `\`${r.local ? `#${r.number}` : r.key}\` (\`${e.label}\` ${e.state})`).join(', ');
+  return (
+    `\`pm:blocked\` while the label-transition exit its \`Unlock-action:\` line declares has COME TRUE on ${named}: the target ` +
+    'is open and the named label is in the state the line asked this sweep to test — the second recognised `Unlock-action:` ' +
+    'value (`re-check #N when label needs-user-decision absent` is the live spelling; any label, `absent` or `present`, body ' +
+    'or comment), the exit a block on a `needs-user-decision` / `pm:on-hold` target can now hand a machine. Report-only: the ' +
+    'release is the unlock sweep\'s, under the same two double-checks (「放行双查」) and the same landed act as a closed target — ' +
+    '⛔ never a label written from this script.'
+  );
+}
+
+// ---------------------------------------------------------------------------
 // H26 — a block whose target can never CLOSE, and the stale chain (#11219).
 //
 // The unlock predicate is "the `Blocked-by:` target CLOSED". `pm:on-hold` and
@@ -6915,16 +6958,18 @@ export const INDEFINITE_TARGET_LABELS = ['pm:on-hold', 'needs-user-decision'];
  * @param {{ key: string, number: number, local: boolean,
  *   state: 'open'|'closed'|'unresolved', labels?: string[]|null }[]} resolutions
  */
-export function h26BlockOnIndefiniteTarget(issue, resolutions) {
+export function h26BlockOnIndefiniteTarget(issue, resolutions, commentBodies, ownerRepo = OWNER_REPO) {
   if (!needsBlockerLiveness(issue)) return null;
   const open = (resolutions ?? []).filter(
     (r) => r?.state === 'open' && Array.isArray(r.labels),
   );
   if (open.length === 0) return null;
 
+  // A target the card gives a label-transition exit for is not indefinite: the sweep can fire it, so the row stands down (#19255).
+  const exitKeys = new Set(unlockLabelExits(issue, commentBodies, ownerRepo).map((e) => e.key));
   const indefinite = open
     .map((r) => ({ row: r, states: INDEFINITE_TARGET_LABELS.filter((l) => r.labels.includes(l)) }))
-    .filter((r) => r.states.length > 0);
+    .filter((r) => r.states.length > 0 && !exitKeys.has(r.row.key));
   // A target that is BOTH parked and blocked is named once, under the reading
   // that ends the wait forever rather than the one that merely lengthens it.
   const chained = open.filter(
@@ -6957,6 +7002,16 @@ export function h26BlockOnIndefiniteTarget(issue, resolutions) {
         'sometimes exactly right. It says the wait is indefinite BY CONSTRUCTION, so the release ' +
         'has to come from the target\'s own state changing (a ruling answered, a hold restarted) ' +
         'and someone has to want that.',
+    );
+    // The remedy — the exit the state model admits, or the close — and the silent fallback made loud on the card (#19255).
+    const unread = [issue?.body, ...(commentBodies ?? [])].flatMap((t) => directiveValues(t, 'Unlock-action')).filter((v) => !UNLOCK_LABEL_EXIT_RE.test(v));
+    parts.push(
+      '⭐ The exit: write `Unlock-action: re-check #N when label needs-user-decision absent` (or `pm:on-hold absent` — the second ' +
+        'recognised value: the card, the label, and `absent`/`present`; body or comment) and this row stands down for that target, ' +
+        'because the unlock sweep can then fire the exit (H19 reports it the moment the label state matches); or close the waiting ' +
+        'card `not planned`, which is 「无机制可唤醒的卡 ⛔ 不 hold」 one state over. ⛔ Any other spelling falls back silently, by ' +
+        `ruling, and leaves this row firing${unread.length === 0 ? '.' : ` — as ${unread.length} \`Unlock-action:\` line(s) on this ` +
+          `card already do (${unread.slice(0, 3).map((v) => `\`${v}\``).join(', ')}): PR-shaped, or a spelling nothing reads.`}`,
     );
   }
   if (chained.length > 0) {
@@ -24175,12 +24230,15 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     if (unblockedByNothing) findings.push([issue, 'H4', unblockedByNothing]);
     const expired = h19BlockOutlivedBlocker(issue, resolutions);
     if (expired) findings.push([issue, 'H19', expired]);
+    // …and the same row's second exit: a declared label transition that came true on an open target (#19255).
+    const exitFired = h19DeclaredExitFired(issue, resolutions, fallbackFor(issue));
+    if (exitFired) findings.push([issue, 'H19', exitFired]);
     // H26 — the same resolutions, asked the OTHER question: not "has the target
     // closed" but "can it ever". Both rows can fire on one card (a two-target
     // block where one blocker closed and the other is parked indefinitely), and
     // they must: they name different halves of the same wait and prescribe
     // different reads.
-    const indefinite = h26BlockOnIndefiniteTarget(issue, resolutions);
+    const indefinite = h26BlockOnIndefiniteTarget(issue, resolutions, fallbackFor(issue));
     if (indefinite) findings.push([issue, 'H26', indefinite]);
     // H28 — the same resolutions, asked a THIRD question: which CHANNEL each
     // target arrived in. H19 reports that the block is half-expired; this
@@ -24776,10 +24834,12 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // because a number with no provenance is what got re-derived from memory the
   // first time.
   'ISSUE_BODY_LIMIT measured cap': 52,
+  // Registered with the label-transition unlock exit (#19255), pin just under the count: a NEW EXIT beside a STAND-DOWN.
+  'H19/H26 label-transition unlock exit': 10,
 });
 
 /** The floor on the ROSTER itself — how many batteries must be declared at all. */
-export const SELF_TEST_BATTERY_FLOOR = 6;
+export const SELF_TEST_BATTERY_FLOOR = 7;
 
 async function selfTest() {
   const cases = [];
@@ -29046,7 +29106,7 @@ async function selfTest() {
   b(BATTERY18664, '#18664 floor: this battery is DECLARED on the roster', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY18664), true);
   b(BATTERY18664, '#18664 floor: …with a positive pin, so an empty battery cannot satisfy it', SELF_TEST_BATTERIES[BATTERY18664] > 0, true);
   b(BATTERY18664, '#18664 floor: the roster is frozen', Object.isFrozen(SELF_TEST_BATTERIES), true);
-  b(BATTERY18664, '#18664 floor: the roster now declares SIX batteries, and the floor rose with it', SELF_TEST_BATTERY_FLOOR, 6);
+  b(BATTERY18664, '#18664 floor: the roster now declares SEVEN batteries, and the floor rose with it', SELF_TEST_BATTERY_FLOOR, 7);
   b(BATTERY18664, '#18664 floor: …including the five this battery landed BESIDE, so neither side of the base merge silently dropped one', ['H66 released queue card', 'H19 judged-set founding', 'H65 tier declaration spelling', 'H67 queued merged-delivery reading', 'H2/H47/H66 decorated ownership marker'].every((name) => Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, name)), true);
   b(BATTERY18664, '#18664 floor: …and the roster really carries at least that many', Object.keys(SELF_TEST_BATTERIES).length >= SELF_TEST_BATTERY_FLOOR, true);
 
@@ -30662,6 +30722,25 @@ async function selfTest() {
   // comment-borne one, and a spent comment-borne line founds no row (#17564).
   const waitingBoth = { ...waiting(), body: 'Blocked-by: #900\nBlocked-by: #987' };
   t('H26 + H19: a partially expired, partially indefinite block fires both', Boolean(h19BlockOutlivedBlocker(waitingBoth, expiredAndIndefinite, REPO_OS)) && Boolean(h26BlockOnIndefiniteTarget(waitingBoth, expiredAndIndefinite)), true);
+
+  // -- The label-transition exit, the second `Unlock-action:` value (#19255): firing controls and fallbacks together --
+  const BATTERY19255 = 'H19/H26 label-transition unlock exit';
+  const LIVE_EXIT = 'Unlock-action: re-check #68 when label needs-user-decision absent';
+  const exitsOf = (body, comments) => unlockLabelExits({ body }, comments, REPO_OS).map((e) => `${e.key} ${e.label} ${e.state}`).join('|');
+  const exitCard = (body) => ({ ...waiting(75), body });
+  const h19exit = (card, targets, comments) => h19DeclaredExitFired(card, targets, comments, REPO_OS);
+  const [ruled, parked] = [tgt(68, ['pm:queue']), tgt(68, ['needs-user-decision'])];
+  b(BATTERY19255, 'exit reader: the live spelling names the card, the label and the state, in either channel', [exitsOf(LIVE_EXIT), exitsOf('no line here', [LIVE_EXIT])].join(), 'objectstack-ai/objectstack#68 needs-user-decision absent,objectstack-ai/objectstack#68 needs-user-decision absent');
+  b(BATTERY19255, 'exit reader: `present` is the same reader the other way, a cross-repo card keeps its qualifier, two lines are two exits in order', exitsOf('Unlock-action: re-check #987 when label pm:queue present\nUnlock-action: re-check objectstack-ai/objectos#68 when label needs-user-decision absent'), 'objectstack-ai/objectstack#987 pm:queue present|objectstack-ai/objectos#68 needs-user-decision absent');
+  b(BATTERY19255, 'exit reader: a decorated line, a backticked label and trailing prose are all the same line (shared reader)', exitsOf('- **`Unlock-action: re-check #68 when label `needs-user-decision` absent (the ruling lands)`**'), 'objectstack-ai/objectstack#68 needs-user-decision absent');
+  b(BATTERY19255, 'exit reader: ⛔ the closed set — PR-shaped, no state word, a word outside the pair, the pair in another case, a lowercase key and a mid-sentence mention all fall back; a missing issue does not crash', exitsOf(`Unlock-action: re-check PR #123\nUnlock-action: re-check #68 when label needs-user-decision\nUnlock-action: re-check #68 when label needs-user-decision removed\nUnlock-action: re-check #68 when label needs-user-decision Absent\nunlock-action: re-check #68 when label needs-user-decision absent\nseats write the ${LIVE_EXIT} line`) + unlockLabelExits(undefined, undefined, REPO_OS).length, '0');
+  b(BATTERY19255, 'H19 exit: `absent` fires once the target no longer carries the label, names the target, the label and the state, and is report-only', [typeof h19exit(exitCard(`Blocked-by: #68\n${LIVE_EXIT}`), [ruled]), String(h19exit(exitCard(`Blocked-by: #68\n${LIVE_EXIT}`), [ruled])).includes('`#68` (`needs-user-decision` absent)'), String(h19exit(exitCard(`Blocked-by: #68\n${LIVE_EXIT}`), [ruled])).includes('never a label written from this script')].join(), 'string,true,true');
+  b(BATTERY19255, 'H19 exit: ⛔ silent while the label is still on the target, on a card the block does not wait on, on a CLOSED or unresolved target (H19\'s own legs), and past the label gate', [h19exit(exitCard(`Blocked-by: #68\n${LIVE_EXIT}`), [parked]), h19exit(exitCard(`Blocked-by: #987\n${LIVE_EXIT}`), [tgt(987, ['pm:queue'])]), h19exit(exitCard(`Blocked-by: #68\n${LIVE_EXIT}`), [{ ...ruled, state: 'closed' }, { ...tgt(68, null), state: 'unresolved', detail: 'HTTP 404' }]), h19exit({ ...exitCard(`Blocked-by: #68\n${LIVE_EXIT}`), labels: [{ name: 'pm:queue' }] }, [ruled])].every((v) => v === null), true);
+  b(BATTERY19255, 'H19 exit: `present` fires when the target carries the label and not before; a comment-borne exit fires too', [typeof h19exit(exitCard('Blocked-by: #68\nUnlock-action: re-check #68 when label pm:queue present'), [ruled]), h19exit(exitCard('Blocked-by: #68\nUnlock-action: re-check #68 when label pm:queue present'), [parked]), typeof h19exit(exitCard('Blocked-by: #68'), [ruled], [LIVE_EXIT])].join(), 'string,,string');
+  b(BATTERY19255, '⭐ H26 stand-down: an exit naming the parked target silences the row in either channel — and once the label leaves, H19 fires the exit while H26 stays quiet', [h26row(exitCard(`Blocked-by: #68\n${LIVE_EXIT}`), [parked], undefined, REPO_OS), h26row(exitCard('Blocked-by: #68'), [parked], [LIVE_EXIT], REPO_OS), h26row(exitCard(`Blocked-by: #68\n${LIVE_EXIT}`), [ruled], undefined, REPO_OS)].every((v) => v === '') && typeof h19exit(exitCard(`Blocked-by: #68\n${LIVE_EXIT}`), [ruled]) === 'string', true);
+  b(BATTERY19255, 'H26 stand-down: ⛔ a comment it was not handed is not read; an exit naming ANOTHER card, or the PR-shaped value, leaves the row firing and the latter is named as a line nothing fires; two parked targets with one exit report only the other', [h26row(exitCard('Blocked-by: #68'), [parked], undefined, REPO_OS) !== '', h26row(exitCard('Blocked-by: #68\nUnlock-action: re-check #987 when label pm:on-hold absent'), [parked], undefined, REPO_OS) !== '', h26row(exitCard('Blocked-by: #68\nUnlock-action: re-check PR #123'), [parked], undefined, REPO_OS).includes('already do (`re-check PR #123`)'), h26row(exitCard(`Blocked-by: #68, #987\n${LIVE_EXIT}`), [parked, tgt(987, ['pm:on-hold'])], undefined, REPO_OS).includes('on 1 target(s)'), h26row(exitCard(`Blocked-by: #68, #987\n${LIVE_EXIT}`), [parked, tgt(987, ['pm:on-hold'])], undefined, REPO_OS).includes('`#987`')].join(), 'true,true,true,true,true');
+  b(BATTERY19255, 'H26 remedy: the row without an exit prescribes the live spelling and the close, says other spellings fall back silently, and the chain leg carries none of it', [h26row(waiting(75), [parked]).includes('`Unlock-action: re-check #N when label needs-user-decision absent`'), h26row(waiting(75), [parked]).includes('close the waiting card `not planned`'), h26row(waiting(75), [parked]).includes('falls back silently'), h26row(waiting(1395), [tgt(10101, ['pm:blocked'])]).includes('⭐ The exit')].join(), 'true,true,true,false');
+  b(BATTERY19255, 'floor: the roster now declares SEVEN batteries, and this one is on it', SELF_TEST_BATTERY_FLOOR === 7 && Object.hasOwn(SELF_TEST_BATTERIES, BATTERY19255), true);
 
   // -- The UNGATED liveness read + H28: the stale body line (#11747) ----------
   //
@@ -35443,7 +35522,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   // THE ROSTER — a floor that cannot be satisfied by a zero.
   b(BATTERY67, 'H67 floor: this battery is DECLARED on the roster', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY67), true);
   b(BATTERY67, 'H67 floor: …with a positive pin, so an empty battery cannot satisfy it', SELF_TEST_BATTERIES[BATTERY67] > 0, true);
-  b(BATTERY67, 'H67 floor: the roster grew again with #18664\'s battery, and the floor rose with it', SELF_TEST_BATTERY_FLOOR, 6);
+  b(BATTERY67, 'H67 floor: the roster grew again with #19255\'s battery, and the floor rose with it', SELF_TEST_BATTERY_FLOOR, 7);
   b(BATTERY67, 'H67 floor: …including the two batteries this row landed BESIDE, so neither side of the base merge silently dropped one', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, 'H65 tier declaration spelling') && Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, 'H19 judged-set founding'), true);
   b(BATTERY67, 'H67 floor: …and the roster really carries at least that many', Object.keys(SELF_TEST_BATTERIES).length >= SELF_TEST_BATTERY_FLOOR, true);
 
@@ -35786,7 +35865,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   // FLOOR — this battery is declared, pinned, and the roster grew with it.
   b(BATTERY68, 'floor: this battery is DECLARED on the roster', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY68), true);
   b(BATTERY68, 'floor: …with a positive pin, so an empty battery cannot satisfy it', SELF_TEST_BATTERIES[BATTERY68] > 0, true);
-  b(BATTERY68, 'floor: the roster now declares SIX batteries, and the floor rose with it', SELF_TEST_BATTERY_FLOOR, 6);
+  b(BATTERY68, 'floor: the roster now declares SEVEN batteries, and the floor rose with it', SELF_TEST_BATTERY_FLOOR, 7);
   b(BATTERY68, 'floor: …including the four this battery landed BESIDE and the one that landed after it, so neither side of the base merge silently dropped one', ['H66 released queue card', 'H19 judged-set founding', 'H65 tier declaration spelling', 'H67 queued merged-delivery reading', 'ISSUE_BODY_LIMIT measured cap'].every((name) => Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, name)), true);
   b(BATTERY68, 'floor: …and the roster really carries at least that many', Object.keys(SELF_TEST_BATTERIES).length >= SELF_TEST_BATTERY_FLOOR, true);
 

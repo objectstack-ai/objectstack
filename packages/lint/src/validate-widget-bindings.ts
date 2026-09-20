@@ -1186,9 +1186,10 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
               `first dimension (${list(dims)}). The binding is a silent no-op, not a query ` +
               `that fails.`,
             hint:
-              `Point xAxis.field at a dataset dimension name, or drop the key — \`xAxis\` ` +
-              `carries presentation only (title, format, gridlines) and the axis binding ` +
-              `comes from this widget's \`dimensions\`.` +
+              `Delete the key: \`chartConfig.xAxis\` is refused on a dataset-bound widget ` +
+              `(ADR-0021) and the x-axis binding comes from this widget's \`dimensions\`. ` +
+              `Run \`os migrate meta --from 17\` to list the mechanical edits for existing ` +
+              `sources; apply them by hand.` +
               `${suggestName(xAxis.field, dimensionNames)} ${suppressHint}`,
           });
         }
@@ -1216,11 +1217,14 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
             ? `Add "${field}" to the widget's values, or bind the chart to a selected measure.`
             : `Post-cutover data is keyed by the dataset's measure NAME, not the ` +
               `base column.${suggestName(field, selectedValues.size > 0 ? selectedValues : measures.keys())}`;
+          // Both positions are now REFUSED outright on a dataset-bound widget
+          // (ADR-0021; ruling 2026-09-12), so the shape sentence says delete
+          // rather than describing what the key used to carry.
           const shapeHint = kind === 'series'
-            ? `\`series[].name\` selects WHICH derived series the presentation lands on; it ` +
-              `cannot add, remove or re-point one.`
-            : `\`yAxis[]\` carries presentation only (title, min/max, position); the bindings ` +
-              `come from \`values\`.`;
+            ? `\`chartConfig.series\` is refused on a dataset-bound widget: series membership ` +
+              `follows \`values\` (and a second \`dimensions\` entry to split). Delete the key.`
+            : `\`chartConfig.yAxis\` is refused on a dataset-bound widget: the bindings come ` +
+              `from \`values\`, one entry per mark. Delete the key.`;
           push({
             severity: 'warning',
             rule: CHART_FIELD_UNKNOWN,
@@ -1239,25 +1243,26 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
           const name = series[k]?.name;
           if (typeof name === 'string') measureField(`series[${k}].name`, name, 'series');
         }
-      } else if (isMarkMixing) {
-        push({
-          severity: 'warning',
-          rule: CHART_CONFIG_MISSING,
-          message:
-            `'${w.type}' widget has no chartConfig — a combination chart takes its ` +
-            `per-series mark from \`chartConfig.series[].type\`, and with none declared ` +
-            `every measure (${list(values)}) draws with the same default mark, so the ` +
-            `chart is not a combination at all. The data and the axis are unaffected: ` +
-            `the renderer derives those from this widget's dimensions and values.`,
-          hint:
-            `Give each measure its mark — chartConfig: { series: [{ name: '<measure>', ` +
-            `type: 'bar' | 'line' | 'area' }] } — naming measures this widget selects ` +
-            `(${list(values)}). \`series[].name\` selects WHICH derived series the mark ` +
-            `lands on; it cannot add, remove or re-point one. If one uniform mark is ` +
-            `intentional, prefer that family's own widget type, or suppress with: ` +
-            `suppressWarnings: ['${CHART_CONFIG_MISSING}']`,
-        });
       }
+      // ── `chart-config-missing` NO LONGER FIRES — and the id is kept ──────
+      //
+      // The rule advised a `combo` widget with no `chartConfig` to declare one:
+      // "Give each measure its mark — chartConfig: { series: [{ name, type }] }".
+      // `chartConfig.series` is now REFUSED on a dataset-bound widget (ADR-0021;
+      // maintainer ruling 2026-09-12, decision batch #121 item 1), so that hint
+      // told an author to write metadata the schema rejects — a lint rule and a
+      // parse door contradicting each other, which is worse than either alone.
+      //
+      // The advice cannot be repaired, only withdrawn: after the ruling there is
+      // NO authoring channel for a per-series mark on a dataset-bound widget, so
+      // there is nothing a `combo` author can do about the finding. A warning
+      // nobody can act on is noise that teaches readers to skim.
+      //
+      // ⛔ The id stays exported and `isMarkMixing` stays computed above. An
+      // author's `suppressWarnings: ['chart-config-missing']` must keep parsing
+      // (the same compatibility the #14436 narrowing kept), and the next card on
+      // this surface needs the set it names. What is withdrawn is the EMISSION.
+      void isMarkMixing;
 
       // ── (d1) a dataset widget with an empty selection (#15462, #15508) ──
       // Neither shape is about `chartConfig` — the renderer degrades before it
