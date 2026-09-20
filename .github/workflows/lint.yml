@@ -430,6 +430,28 @@ jobs:
       - name: Raw control-byte guard
         run: pnpm check:nul-bytes
 
+      # Gitlink guard (#17472). Refuses an index entry at mode 160000 — a
+      # SUBMODULE POINTER — that no tracked `.gitmodules` row declares. Placed
+      # beside the control-byte guard because it is its structural sibling: a
+      # whole-index population, a hygiene property of what a CLONE receives, and
+      # a defect whose only native signal is a warning on a command that exits 0.
+      # WHY mode 160000 and why "undeclared" rather than "none at all" are stated
+      # and argued once, in the gate script's header — `scripts/check-gitlink-
+      # declared.mjs`. That header is authoritative and this comment cites it
+      # rather than restating it. The one-line summary, for whoever is reading
+      # this because the step just went red: `git add -A` over a nested git
+      # repository (a linked worktree, a nested clone, a vendored checkout)
+      # stages ONE 160000 entry at exit 0 with only a `warning:` line, and the
+      # commit that follows carries a pointer to an object no clone of this
+      # repository has. A real submodule passes untouched — `git submodule add`
+      # writes the declaration and the pointer in one act — so a hit here is
+      # never a submodule you added on purpose.
+      # ⛔ Not the untracked-signal half: PR #17468 closed that one by ignoring
+      # `.worktrees/`. This step is the STAGE, and it is path-blind on purpose.
+      # Reads the index only, no network, well under a second.
+      - name: Staged gitlinks are declared in .gitmodules
+        run: pnpm check:gitlink-declared
+
       # The first three of these are the shared modules the two `scripts/**`
       # routing gates below DELEGATE their design arguments to (#10608). Both of
       # those gates are
