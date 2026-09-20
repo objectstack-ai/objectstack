@@ -1128,6 +1128,99 @@ export const GroupingConfigSchema = lazySchema(() => strictObject({
   + 'AND-ed into the view filter. Compiled by `compileListViewGroupQuery` / `compileListViewGroupRowsQuery`',
 ));
 
+/*
+ * ---------------------------------------------------------------------------
+ * `limit` — the author-settable row ceiling of the page-shaped views (#17393)
+ * ---------------------------------------------------------------------------
+ *
+ * Declared here because the PROTOCOL was the thing that was wrong: two
+ * renderers already cap by author choice, and the key they read was never a
+ * protocol key. Measured in objectui at `dda8f3815d`:
+ *
+ *   - `ObjectKanban.tsx:573` fetches `$top: schema.limit ?? DEFAULT_KANBAN_LIMIT`
+ *     (`= 100` at `:84`), and that `limit` is declared in `@object-ui/types`
+ *     alone (`zod/objectql.zod.ts:1762`, `z.number().int().positive().optional()`);
+ *   - `ObjectTimeline.tsx:328` fetches `$top: schema.limit ?? DEFAULT_TIMELINE_LIMIT`
+ *     (`= 100` at `:29`), with `limit` on that component's own props interface
+ *     (`:129`) and on no published schema at all;
+ *   - `ObjectGallery.tsx` sends no `$top` and reads no ceiling at all — the
+ *     unbounded fetch objectui#7390 is ruled to close by reading this key.
+ *
+ * Consumer-local author-settable keys the protocol never declared are the
+ * divergence the contract-first directive forbids, so the knob enters the
+ * protocol first and the three spellings come under one declaration (the
+ * director seat's amendment of 2026-09-10T11:0xZ on objectui#7390, on the
+ * maintainer's principle 「我们的项目以objectstack 协议为准，文档应该以实际实现
+ * 为准。协议不正确的应该先修改协议。」).
+ *
+ * ## Why on the per-view config blocks, and not as a member of the list view
+ *
+ * The alternative shape — one row ceiling on {@link ListViewShapeSchema}
+ * itself — is rejected on three properties of this tree:
+ *
+ *   1. The base shape ALREADY carries the row-bounding knob every view type
+ *      reaches: `pagination.pageSize` ({@link PaginationConfigSchema}, default
+ *      25). A second base-level row key would leave one view with two
+ *      base-level row bounds and no declared precedence between them — and the
+ *      `virtualScroll` tombstone at the bottom of this same shape prescribes
+ *      `pagination` for exactly that question.
+ *   2. A base member is reachable from EVERY `type`, the non-grid four
+ *      (gantt / calendar / map / tree) included. Their ceiling is a platform
+ *      constant the renderer owns (objectui#7210) and this card does not touch
+ *      them, so a base member would publish an authorable ceiling on four view
+ *      kinds no renderer reads — declared-but-unenforced on the day it lands.
+ *   3. The per-kind block is what actually REACHES the renderer: objectui's
+ *      `ListView` merges `schema.<kind>` into the generated node — its kanban
+ *      branch spreads the rest of the block flat onto `object-kanban`, so
+ *      `kanban.limit` lands exactly where `schema.limit` is read — while a
+ *      base-level key is forwarded into no per-kind node at all.
+ *
+ * The NAME is `limit` for the same reason: it is the name the consumer already
+ * reads, so this declaration absorbs the two consumer-local keys instead of
+ * buying a second divergence spelled differently.
+ *
+ * ⚠️ NOT the kanban LANE's `limit`. objectui's node-level
+ * `ObjectKanbanLaneSchema.limit` is a WIP warning threshold that never reaches
+ * a query; no lane object exists on this face at all
+ * ({@link KanbanConfigSchema}'s `columns` is a list of card FIELD names), so
+ * the two cannot be confused here.
+ */
+export const DEFAULT_VIEW_ROW_LIMIT = 100;
+
+/** What a page-shaped view's ceiling bounds, per view type. */
+const ROW_LIMIT_SUBJECT = {
+  gallery: 'cards the gallery fetches and draws',
+  kanban: 'records the board fetches across all its lanes',
+  timeline: 'rows the timeline fetches onto its rail',
+} as const;
+
+/** The three view configs that cap by AUTHOR choice (not by platform ceiling). */
+type RowLimitView = keyof typeof ROW_LIMIT_SUBJECT;
+
+/**
+ * The `limit` declaration for one page-shaped view config.
+ *
+ * The default is APPLIED, not merely described: a `.describe()` naming a
+ * default the schema does not apply is a second contract that nothing
+ * enforces, and the two drift the first time either is edited. The agreement
+ * is pinned from both sides in `view.test.ts` (#17393) — the parsed default is
+ * compared against the number the describe text states.
+ *
+ * ⛔ The truncation signal is the renderer's half and cannot be enforced from
+ * here; it is stated in the describe because a bounded-and-silent view reads
+ * as complete, which is worse than the unbounded-and-silent one this key
+ * replaces — the author needs to know the cap is visible, and the renderer
+ * author needs to know it is owed.
+ */
+const rowLimitKey = (view: RowLimitView) =>
+  z.number().int().positive().default(DEFAULT_VIEW_ROW_LIMIT).describe(
+    `Row ceiling — the most ${ROW_LIMIT_SUBJECT[view]}, sent as the query \`$top\`; default `
+    + `${DEFAULT_VIEW_ROW_LIMIT} when the key is absent. When the ceiling APPLIES (the filtered `
+    + 'set is larger than it), the renderer must show a visible truncation signal saying what is '
+    + 'on screen is not the whole set — a bounded view that looks complete is worse than an '
+    + 'unbounded one.',
+  );
+
 /**
  * Gallery View Configuration (Airtable-style)
  * Configures card layout for gallery/card views.
@@ -1141,6 +1234,7 @@ export const GalleryConfigSchema = lazySchema(() => strictObject({
   cardSize: z.enum(['small', 'medium', 'large']).default('medium').describe('Card size in gallery view'),
   titleField: z.string().optional().describe('Field to display as card title'),
   visibleFields: z.array(z.string()).optional().describe('Fields to display on card body'),
+  limit: rowLimitKey('gallery'),
 }).describe('Gallery/card view configuration'));
 
 /**
@@ -1163,6 +1257,7 @@ export const TimelineConfigSchema = lazySchema(() => strictObject({
     ),
   colorField: z.string().optional().describe('Field to derive each item color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the timeline default marker color'),
   scale: z.enum(['hour', 'day', 'week', 'month', 'quarter', 'year']).default('week').describe('Default timeline scale'),
+  limit: rowLimitKey('timeline'),
 }).describe('Timeline view configuration'));
 
 /**
@@ -1466,6 +1561,7 @@ export const KanbanConfigSchema = lazySchema(() => strictObject({
    */
   titleField: z.string().optional().describe('Field displayed as the card title. Omit to fall back to the record display name (ADR-0079 resolver chain)'),
   columns: z.array(z.string()).describe('Fields to show on cards'),
+  limit: rowLimitKey('kanban'),
 }));
 
 /**
