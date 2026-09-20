@@ -838,6 +838,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#18536: the lane-keyed owed population — spec and skills owe the record on EVERY round, other lanes owe none, a `yes` outside them is spec-lane work': 30,
   '#18862: cross-author LIVE claims with no `Release:` between — the hand-over the protocol never wrote, named; judged only after its effective instant': 52,
   '#16770: the exit-0 line says which carriers agreed — LABEL carriers — and that the PR body was not read': 14,
+  '#18892: the claim comment\'s EDIT reading — taken from the two stamps already in hand, reported and never failed': 10,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -851,8 +852,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // by the one #16833 adds, and by the one #18456 adds, and by the one #18719
 // adds, and by the one #18683 adds, and by the one #18764 adds, and by the one
 // #18828 adds, and by the one #18536 adds, and by the one #18862 adds, and by
-// the one #16770 adds.
-const SELF_TEST_BATTERY_FLOOR = 35;
+// the one #16770 adds, and by the one #18892 adds.
+const SELF_TEST_BATTERY_FLOOR = 36;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -7944,6 +7945,9 @@ export async function selfTest() {
   const CLAIMED = (extra, o = {}) => ({
     id: o.id ?? C_CLAIM_ID,
     created_at: o.created_at ?? '2026-09-12T00:41:08Z',
+    // ⭐ EQUAL on a comment nobody edited, so the default fixture is the
+    // unedited control and an edited one names `updated_at` alone (#18892).
+    updated_at: o.updated_at ?? o.created_at ?? '2026-09-12T00:41:08Z',
     body:
       `Claim: PM loop round 1\n` +
       (o.session === null ? '' : `Session: \`${o.session ?? C_SESSION}\`\n`) +
@@ -9421,6 +9425,31 @@ export async function selfTest() {
   t('…and so does the review-of-record clause', says(greenPairLine({ pr: 1, card: 2, record: true }), 'a review of record names this head'));
   t('⛔ CONTROL: the label the line names is the constant C1 compares, ⛔ not a second spelling of it', says(LABEL_CARRIERS_AGREE, CONTRACT_REVIEW_LABEL) && CONTRACT_REVIEW_LABEL === 'needs:contract-review');
   t('the pair is still identified in the line, in the spelling the round reports paste', says(G_BRANCHES[0][1], '✓ check-clause2-carriers: PR #16761 / card #16568 — the clause-② declaration is readable in the fixed spelling'));
+
+  // -- #18892: the claim comment's EDIT reading, taken rather than asserted --
+  //
+  // ⭐ Measured specimen: objectui#9764's claim 5724909959 was EDITED
+  // (`created_at` 2026-09-18T03:54:37Z vs `updated_at` 2026-09-18T04:23:23Z)
+  // and the note under its correction testified 「NOT edited」 anyway. The
+  // retired sentence is ASSEMBLED below, never written out, or the source pin
+  // would hit itself — the #16770 idiom above, control included.
+  battery('#18892: the claim comment\'s EDIT reading — taken from the two stamps already in hand, reported and never failed');
+  const E_EDITED = [CLAIMED(MEASURED_PROSE[1], { updated_at: '2026-09-18T04:23:23Z' }), FIXED_CORRECTION('no')];
+  const E_UNEDITED = [CLAIMED(MEASURED_PROSE[1]), FIXED_CORRECTION('no')];
+  const E_NOSTAMP = [{ ...CLAIMED(MEASURED_PROSE[1]), updated_at: undefined }, FIXED_CORRECTION('no')];
+  const E_NOTE = (thread) => c2CorrectionNote(pair({ cardComments: thread }));
+  const E_SRC = readFileSync(SELF_PATH, 'utf8');
+  t('⭐ the EDITED specimen is REPORTED in the note, in as many words', says(E_NOTE(E_EDITED), 'WAS EDITED'));
+  t('…naming the edit instant beside the creation one, so a reader can open that comment\'s history', says(E_NOTE(E_EDITED), '2026-09-18T04:23:23Z') && says(E_NOTE(E_EDITED), '2026-09-12T00:41:08Z'));
+  t('⭐ an UNEDITED claim reads as a MEASURED unedited, naming both stamps it compared', says(E_NOTE(E_UNEDITED), 'UNEDITED') && says(E_NOTE(E_UNEDITED), 'created_at') && says(E_NOTE(E_UNEDITED), 'updated_at'));
+  t('⭐ a row carrying NO `updated_at` reads NOT READ — ⛔ never "unedited", which is this defect one room over', says(E_NOTE(E_NOSTAMP), 'NOT READ') && says(E_NOTE(E_NOSTAMP), 'never as "unedited"'));
+  t('⭐ the three readings are three DIFFERENT sentences — one sentence for all three was the defect', new Set([E_NOTE(E_EDITED), E_NOTE(E_UNEDITED), E_NOTE(E_NOSTAMP)]).size === 3);
+  t('⛔ REPORT-ONLY: an edited claim raises NO C2 finding, so the exit register does not move', pairRows(pair({ cardComments: E_EDITED })).every((r) => r.code !== 'C2'));
+  t('⛔ …and reads DECLARED at the seat\'s own value, exactly as the unedited thread does', cardDeclaration(E_EDITED).state === cardDeclaration(E_UNEDITED).state && cardDeclaration(E_EDITED).value === 'no');
+  t('⭐ the green line points at that reading and says what it STATES, ⛔ never testifying to the edit itself', says(greenPairLine({ pr: 1, card: 2, corrected: true }), '`created_at`/`updated_at`'));
+  t('⛔ …and the clause that asserted an unread fact is gone from the printed line', !says(greenPairLine({ pr: 1, card: 2, corrected: true }), 'says the claim was not edited'));
+  t('⛔ NEGATIVE, on the SOURCE: no branch of this file asserts the unread 「NOT edited」 any more', !E_SRC.includes(['still reads as', 'it was written'].join(' ')));
+  t('⛔ CONTROL — the same source read is not empty or misdirected: it reaches the reader this card added', E_SRC.includes(['function claimEdit', 'Reading('].join('')));
 
   // -- The floor: every declared battery RAN, and ran its cases (#13489) -----
   //
