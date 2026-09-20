@@ -56,7 +56,7 @@ function makeImpl(overrides?: {
    * the rows a previous host persisted IS that process after a restart; a host
    * composed with none is a restart that found `sys_packages` empty.
    */
-  hydrate?: readonly { id: string }[];
+  hydrate?: readonly { id: string; [key: string]: unknown }[];
 }) {
   const registryCalls: Array<{ manifest: any; settings: any }> = [];
   const installed = new Map<string, any>();
@@ -263,7 +263,7 @@ describe("service-ABSENT host — the degraded path (#17676 ruling A' items 2/3)
 describe("the restart split this card reported (#17676 ruling A' items 3/5)", () => {
   /** The durable `sys_packages` table — the only package state a restart keeps. */
   const makeSysPackages = () => {
-    const rows = new Map<string, { id: string }>();
+    const rows = new Map<string, { id: string; [key: string]: unknown }>();
     return {
       rows,
       publish: async (d: any) => {
