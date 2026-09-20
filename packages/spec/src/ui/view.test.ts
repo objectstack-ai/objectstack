@@ -4765,9 +4765,15 @@ describe('view row ceiling — `limit` on the page-shaped view configs (#17393)'
     for (const [label, schema] of NON_GRID_FOUR) {
       const result = schema.safeParse({ limit: 10 });
       expect(result.success, label).toBe(false);
-      const unrecognized = ((result as { error?: z.ZodError }).error?.issues ?? [])
-        .find((issue) => issue.code === 'unrecognized_keys');
-      expect(JSON.stringify(unrecognized), label).toContain('limit');
+      // Asserted on the REFUSED KEY LIST rather than on a stringified issue:
+      // when the key is accepted there is no issue to stringify, and the red
+      // then reads as an argument-type complaint instead of as a statement
+      // about this view type. Measured — it is how this case first reddened.
+      const refused = ((result as { error?: z.ZodError }).error?.issues ?? [])
+        .filter((issue) => issue.code === 'unrecognized_keys')
+        .flatMap((issue) => (issue as unknown as { keys?: string[] }).keys ?? []);
+      expect(refused, `${label} accepts an authorable row ceiling it should not declare`)
+        .toContain('limit');
     }
   });
 });
