@@ -86,6 +86,26 @@
  * fallback for that shape; if the emitter is ever asked to produce one, that is
  * a new ruling and this rule is re-derived under it.
  *
+ * ⚠️ **#18431 is that new ruling, for exactly one key: `docs`.** The maintainer's
+ * ruling (batch #147 item 4) sends the docs `os build` reads out of an ADR-0130
+ * layout's `src/<pkg>/docs/` to `packages[i].manifest.docs` and ⛔ never to the
+ * artifact top level, while a package's INLINE `defineStack({ docs })` still
+ * reaches BOTH places, because `composeStacks(…, { manifest: 'preserve' })` is
+ * additive. So one artifact's `docs` can carry some items flattened-and-on-a-body
+ * and others on a body alone — partially flattened for that key, on the shape the
+ * emitter produces TODAY rather than after an option-B flip. Re-derived here, as
+ * the paragraph above asks: `docs` is one of `packageOwnedCollectionKeys()` (it is
+ * a `concat` key of the assembled body and of the definition), so this function
+ * does merge it, and the body-only directory docs are contributed by step 2 —
+ * they are NOT lost. What the paragraph above warns about is live for `docs` too:
+ * a doc NAME at the top level claims every same-named body doc, so a second
+ * package's same-named doc would be dropped here. `os build` refuses that input
+ * at authoring time — cross-owner `docs/duplicate-name`, naming both owners — so
+ * the shape does not come out of the compiler; a hand-written artifact is not
+ * covered by that, and this module still says nothing about it. ⛔ No claim, test
+ * or fallback is added here under this ruling: what it changes is the emitter's
+ * output, and the remedy it ordered is disclosure, not a reader change.
+ *
  * ## What "the top level already claimed it" means
  *
  * Identity is the item's `name` when it has one, and a stable serialization of

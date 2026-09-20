@@ -39,6 +39,7 @@
 
 import { readFileSync } from 'node:fs';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { BUILTIN_IDENTITY_PLATFORM_ADMIN } from '@objectstack/spec';
 import { resetPlatformAdminEmailMemo } from './platform-admin.js';
 import { resolveUserAuthzGrants } from './resolve-authz-context.js';
 // The recording double and the 11-fixture matrix live in the sibling
@@ -132,6 +133,58 @@ describe('[#10825] batched resolveUserAuthzGrants — equivalence with the seque
   it('the fixture matrix and the captured goldens have not drifted apart', () => {
     expect(FIXTURES.map((f) => f.name).sort()).toEqual(Object.keys(GOLDEN).sort());
     expect(Object.keys(BATCHED_LEGS).sort()).toEqual(Object.keys(GOLDEN).sort());
+  });
+
+  /**
+   * [#19141] The `queries` goldens are worth exactly what the RECORDER is worth,
+   * and the recorder used to store `opts.where` BY REFERENCE. `sys_position` is
+   * read as `{ name: { $in: grants.positions } }` — the `$in` IS the live
+   * `grants.positions` array — and step 6c unshifts `platform_admin` into that
+   * same array AFTER the read has gone out. So the committed golden recorded a
+   * `sys_position` read no driver ever saw, and it read green for as long as
+   * both sides of the comparison shared the defect.
+   *
+   * ⭐ These two pins are the thing that stops it coming back, and both are
+   * FAILURE-CAPABLE: restore `where: opts?.where` in the testkit and each one
+   * goes red on its own. The first states the property directly on the double;
+   * the second drives the real resolver down the path that produced the wrong
+   * record, so a future mutation site the first pin does not imagine is still
+   * caught here.
+   *
+   * ⛔ Neither is satisfiable by re-capturing the golden: they assert against
+   * the read AS ISSUED, which no re-capture from a by-reference recorder can
+   * produce.
+   */
+  describe('[#19141] the recording double records each read AS ISSUED, never as later mutated', () => {
+    it('a `where` array the caller mutates after the read keeps its issue-time contents', async () => {
+      const ql = makeRecordingQl({ sys_position: [] });
+      const positions = ['org_member', 'everyone'];
+      await ql.find('sys_position', {
+        where: { name: { $in: positions } },
+        limit: 200,
+        context: { isSystem: true },
+      });
+      // Precisely what the resolver does at step 6c — to an array it has
+      // already handed to a query.
+      positions.unshift(BUILTIN_IDENTITY_PLATFORM_ADMIN);
+      expect(ql.calls).toHaveLength(1);
+      expect(ql.calls[0]!.where).toEqual({ name: { $in: ['org_member', 'everyone'] } });
+    });
+
+    it('records the real `sys_position` read without the `platform_admin` unshifted in afterwards', async () => {
+      const f = FIXTURES.find((x) => x.name === 'permission-set-derived-grants')!;
+      const ql = makeRecordingQl(f.tables);
+      const grants = (await resolveUserAuthzGrants(ql, f.userId, f.opts)) as { positions: string[] };
+      // This principal really does derive platform_admin, and it really does
+      // lead `positions` — the unshift is deliberate and is NOT the defect.
+      expect(grants.positions[0]).toBe(BUILTIN_IDENTITY_PLATFORM_ADMIN);
+      // The defect was recording that name into the QUERY, which was issued
+      // before the unshift ran and therefore never carried it.
+      const positionReads = ql.calls.filter((c) => c.object === 'sys_position');
+      expect(positionReads).toHaveLength(1);
+      expect(positionReads[0]!.where).toEqual({ name: { $in: ['org_member', 'everyone'] } });
+      expect(JSON.stringify(positionReads[0]!.where)).not.toContain(BUILTIN_IDENTITY_PLATFORM_ADMIN);
+    });
   });
 
   describe.each(FIXTURES.map((f) => [f.name, f] as const))('%s', (name, f) => {
