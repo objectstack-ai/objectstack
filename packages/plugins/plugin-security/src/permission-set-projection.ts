@@ -1317,10 +1317,20 @@ export function createPermissionSetWriteThrough(
     // would trade this lie for a louder one and hand a UI a reason to drop the
     // row it must keep showing.
     //
-    // Zero also covers the two other ways a record survives this loop: a
-    // metadata delete that lands on a package-owned RECORD (left to the
-    // package door) and a retire whose `ql.delete` failed. Both leave the row
-    // in place, and neither is a deletion the caller should be told happened.
+    // Zero also covers every other way a record survives this loop: a metadata
+    // delete that lands on a package-owned RECORD (left to the package door)
+    // and a retire whose `ql.delete` failed. Both leave the row in place, and
+    // neither is a deletion the caller should be told happened.
+    //
+    // ⛔ The outcome is read off the RECORD, never off the re-projection's own
+    // `deleted` counter. On a kernel wired to the ADR-0094 AWAITED projector —
+    // the production shape — `deleteMetaItem` has already retired the record
+    // by the time control returns here, so the idempotent re-projection below
+    // finds no row and legitimately reports `deleted: 0` for a delete that
+    // really happened. Reading that counter would have answered
+    // `success: false` for EVERY delete, which is the same defect with its
+    // sign flipped: honest about the packaged set and a fresh lie about the
+    // ordinary one. `permission-set-projection.test.ts` holds both legs.
     let removed = 0;
     for (const row of targets) {
       await protocol.deleteMetaItem({ type: 'permission', name: row.name, ...actorArg });
@@ -1330,7 +1340,11 @@ export function createPermissionSetWriteThrough(
       if (res && (res.seeded + res.updated) > 0) {
         logger?.info?.('[security] permission set reset to its declared baseline (artifact-backed; ADR-0094)', { name: row.name });
       }
-      if (res?.deleted) removed += 1;
+      // The caller addressed a RECORD by id, so that is the question this
+      // answers: is it still there? A row re-projected under the same id is
+      // the reset; a row that is gone is the deletion.
+      const survivor = (await tryFind(ql, 'sys_permission_set', { id: row.id }, 1))[0];
+      if (!survivor) removed += 1;
     }
     // `targets` is non-empty here — the early return above sends an empty
     // target set to the driver — so this is never the vacuous `true`.
