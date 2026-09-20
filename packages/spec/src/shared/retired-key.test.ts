@@ -153,15 +153,32 @@ describe('acceptRetiredDefaultResidue (#12840)', () => {
  * ruled), not a property of the one enum that will consume it first.
  */
 
+/**
+ * Two synthetic prescriptions, carrying the house shape — backticked
+ * fully-qualified name first, the version that removed it, a dash clause
+ * saying why it went, an imperative fix, and (on the first) the pinned
+ * `os migrate meta` sentence — with ONE element deliberately absent: the
+ * `(ADR-NNNN)` reference.
+ *
+ * ⛔ Do not "complete the shape" by adding one back. An ADR id is the one
+ * part of a prescription the repo RESOLVES, and `pnpm check:adr-anchors`
+ * scans `*.test.ts` too, so a fictional retirement cannot carry one
+ * honestly: a made-up number is the squat that gate refuses — whoever later
+ * writes a real record at that number retroactively falsifies every citation
+ * of it — and a number that DOES resolve would let a fake retirement claim
+ * governance by a decision that never ruled it.
+ * What these fixtures pin is that a prescription is retrieved and re-thrown
+ * byte-for-byte — never which record it cites.
+ */
 const HEADING_RETIRED =
-  '`text.variant: "heading"` was removed in @objectstack/spec 99 (ADR-0000) — a heading is a '
+  '`text.variant: "heading"` was removed in @objectstack/spec 99 — a heading is a '
   + 'document level, never a text style, so the renderer had to guess one. Use `h2`, or pick the '
   + 'level you mean. '
   + 'Run `os migrate meta --from 98` to list the mechanical edits for existing sources; apply them by hand.';
 
 /** A second retirement on the SAME enum, and one with no conversion behind it. */
 const SUBHEADING_RETIRED =
-  '`text.variant: "subheading"` was removed in @objectstack/spec 99 (ADR-0000) — same reason as '
+  '`text.variant: "subheading"` was removed in @objectstack/spec 99 — same reason as '
   + '`heading`. Use `h3`, or pick the level you mean.';
 
 const VariantEnum = enumWithRetiredValues(
