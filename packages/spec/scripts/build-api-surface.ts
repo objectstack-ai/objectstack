@@ -61,7 +61,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { inspectDistFreshness } from './lib/dist-freshness';
+import { EXIT_PREREQUISITE_NOT_MET, inspectDistFreshness, prerequisiteNotMetText } from './lib/dist-freshness';
 import {
   API_SURFACE_DIR_NAME,
   aggregateApiSurfaceShards,
@@ -84,8 +84,11 @@ const freshness = inspectDistFreshness(
   `pnpm --filter @objectstack/spec ${CHECK ? 'check' : 'gen'}:api-surface`,
 );
 if (!freshness.fresh) {
-  console.error(freshness.message);
-  process.exit(1);
+  // PREREQUISITE NOT MET, not a finding (#19227): nothing below this line ran,
+  // so the code says so rather than borrowing the one a real breaking-change
+  // report uses.
+  console.error(prerequisiteNotMetText(`${CHECK ? 'check' : 'gen'}:api-surface`, freshness));
+  process.exit(EXIT_PREREQUISITE_NOT_MET);
 }
 
 /** Public entry points → their built CJS `.d.ts`, read from the exports map. */
