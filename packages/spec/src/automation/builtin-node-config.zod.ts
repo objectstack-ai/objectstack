@@ -82,7 +82,7 @@ import { z } from 'zod';
 import { EvaluatedExpressionSchema } from '../shared/expression.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
-import { refuseRecordProtoKey } from '../shared/record-proto-key-guard';
+import { refuseCatchallProtoKey, refuseRecordProtoKey } from '../shared/record-proto-key-guard';
 import { isExpressionEnvelopeShaped } from './flow-node-expression-paths';
 
 /** What a rejected key on these contracts silently did before #4001 批 9. */
@@ -918,8 +918,17 @@ export const ASSIGNMENT_ARRAY_FORM_PRESCRIPTION =
  * undeclared-key walk by design (its top-level keys may be variables), and a
  * closed shape here would contradict the descriptor's `additionalProperties:
  * true` the form↔Zod ledger pins.
+ *
+ * That openness is exactly why the top level needs its own `__proto__` guard
+ * (#19151). `.catchall()`'s branch skips a `__proto__` own key above the
+ * catchall schema, the same way `z.record()`'s branch skips it above the key
+ * schema — so on a surface whose own keys ARE author-named variables, a
+ * variable named `__proto__` parsed as SUCCESS and came back missing. It is
+ * refused here instead; `assignments` one level down keeps its own guard,
+ * because the two are different parsers at different depths and neither
+ * covers the other.
  */
-export const AssignmentConfigSchema = lazySchema(() => z.object({
+export const AssignmentConfigSchema = lazySchema(() => refuseCatchallProtoKey(z.object({
   /** Variable name → value; the canonical authoring surface. */
   assignments: refuseRecordProtoKey(
     z.record(z.string().min(1), AssignmentValueSchema, {
@@ -938,7 +947,19 @@ export const AssignmentConfigSchema = lazySchema(() => z.object({
   ).optional()
     .describe('Variables to set: each key is a variable name, each value a `{token}` template, a CEL value envelope, or a literal'),
 })
-  .catchall(z.unknown()));
+  // Open by design: the bare legacy `{ <variable>: <value> }` config and any
+  // top-level key an author names live here.
+  .catchall(z.unknown()),
+  // [objectstack#19151] `__proto__` ONLY, and for the same structural reason
+  // the `assignments` slot above refuses it: `handleCatchall`'s
+  // `if (key === "__proto__") continue;` runs above `_catchall.run`, so no
+  // catchall schema can ever see the key. `constructor`, `prototype` and
+  // every other reserved-looking name reach the catchall unskipped and
+  // round-trip intact (measured), so they stay legal top-level variable
+  // names — nothing here narrows this surface's accept set beyond the one
+  // name zod makes unrepresentable.
+  'an `assignment` node config',
+));
 
 export type AssignmentConfig = z.input<typeof AssignmentConfigSchema>;
 export type AssignmentConfigParsed = z.infer<typeof AssignmentConfigSchema>;
