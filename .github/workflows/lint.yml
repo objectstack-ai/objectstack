@@ -5334,6 +5334,24 @@ jobs:
       - name: Check SKILL.md compatibility declarations match the workspace majors
         run: pnpm check:skill-compatibility
 
+      # The fifth reader of skills/objectstack-platform/SKILL.md, and the first
+      # to read its `defineStack()` top-level key enumeration. That list is
+      # where an AI author learns which keys the top level accepts, on a page
+      # that says an unknown key is refused; nothing reconciled it, and it drifted
+      # to four missing keys (`packages`, `onEnable`, `devHint`, `devLogins`)
+      # while the four gates above were green — each judges something else. This
+      # one reads the enumeration and the keys of `COMPOSE_KEY_DISPOSITIONS` out
+      # of packages/spec/src/stack.zod.ts as SOURCE TEXT (this job precedes the
+      # workspace build) and fails on any key in one and not the other, both
+      # directions. Two machine-written keys are declared out with a witness the
+      # gate re-checks on every run; the script header is the authority.
+      #
+      # Same job and same reasons as its neighbours: no paths filter and required,
+      # so it cannot go dormant on the PR that adds a top-level key without
+      # touching the skill — which is exactly how the four went missing.
+      - name: Check the platform skill enumerates every authorable top-level stack key
+        run: pnpm check:skill-top-level-keys
+
       # The fourth gate over the .claude/ file tree, and the first to read
       # .claude/agents/ at all (#6803). An agent definition that declares no `model:`
       # INHERITS the dispatching session's model, so the role's tier is set by whoever
