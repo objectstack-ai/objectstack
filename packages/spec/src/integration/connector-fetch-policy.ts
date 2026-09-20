@@ -4,6 +4,15 @@ import type { ResilientFetchOptions } from '../shared/resilient-fetch';
 import { RetryConfigSchema, type RetryConfig } from './connector.zod';
 
 /**
+ * Re-exported so the type this module's return value has is nameable from the
+ * entry that leaks it (`@objectstack/spec/integration`): a consumer writing an
+ * un-annotated `export const opts = connectorFetchOptions(…)` gets TS2883
+ * otherwise. ONE declaration, re-exported — `@objectstack/spec/shared` remains
+ * where it is declared.
+ */
+export type { ResilientFetchOptions } from '../shared/resilient-fetch';
+
+/**
  * @module integration/connector-fetch-policy
  *
  * The **one** mapping from a connector's declared resilience policy onto the

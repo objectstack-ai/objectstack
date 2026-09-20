@@ -58,6 +58,7 @@
     "HealthCheckConfig (type)",
     "HealthCheckConfigParsed (type)",
     "HealthCheckConfigSchema (const)",
+    "ResilientFetchOptions (interface)",
     "ResolvedConnectorAuth (type)",
     "RetryConfig (type)",
     "RetryConfigParsed (type)",
