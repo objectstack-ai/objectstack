@@ -882,7 +882,7 @@ declare const MIGRATIONS_BY_MAJOR: Readonly<Record<number, MigrationStep>>;
 declare const MIGRATION_MAJORS: readonly number[];
 
 // ── MIGRATION_SUPPORT_FLOOR (const) ──
-declare const MIGRATION_SUPPORT_FLOOR = 10;
+declare const MIGRATION_SUPPORT_FLOOR = 16;
 
 // ── MapSupportedField (type) ──
 type MapSupportedField = (typeof MAP_SUPPORTED_FIELDS)[number];

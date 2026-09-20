@@ -45,7 +45,10 @@ function build(): string {
   out();
   out('```bash');
   out(`objectstack migrate meta --from <your-major>   # replays every step below, in order`);
-  out('objectstack migrate meta --from 10 --step      # checkpoint after each major (bisect a failure)');
+  out(
+    `objectstack migrate meta --from ${MIGRATION_SUPPORT_FLOOR} --step      ` +
+      '# checkpoint after each major (bisect a failure)',
+  );
   out('objectstack validate && tsc --noEmit && <your tests>   # your own verify loop is the acceptance test');
   out('```');
   out();

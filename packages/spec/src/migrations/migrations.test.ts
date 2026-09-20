@@ -55,6 +55,24 @@ describe('migration chain (ADR-0087 D3)', () => {
     it('the support floor is at or below the earliest step', () => {
       expect(MIGRATION_SUPPORT_FLOOR).toBeLessThanOrEqual(MIGRATION_MAJORS[0]!);
     });
+
+    // #19056 raised the floor 10 → 16 and retired `step11`–`step16` with it.
+    // The assertion above is satisfied by a chain with NO step at all, so it
+    // cannot see either half of what a floor move has to leave behind.
+    it('no step survives at or below the floor — a step the chain cannot reach is dead code', () => {
+      // `composeMigrationChain(from, to)` keeps `m > from`, so a step at or
+      // below the floor is replayed by no supported `--from`, and CI stops
+      // proving it still works while it keeps reading as a promise.
+      expect(MIGRATION_MAJORS.filter((m) => m <= MIGRATION_SUPPORT_FLOOR)).toEqual([]);
+    });
+
+    it('`--from <floor>` is a usable command — the floor+1 hop exists', () => {
+      // The other half: raising the floor to a major with no step above it
+      // would leave `migrate meta --from <floor>` a no-op that reports success.
+      const chain = composeMigrationChain(MIGRATION_SUPPORT_FLOOR, PROTOCOL_MAJOR);
+      expect(chain.length).toBeGreaterThan(0);
+      expect(chain[0]!.toMajor).toBe(MIGRATION_SUPPORT_FLOOR + 1);
+    });
   });
 
   // The rationale is not decoration: `docs/protocol-upgrade-guide.md` is a pure
@@ -375,8 +393,8 @@ describe('migration chain (ADR-0087 D3)', () => {
 
   describe('composition (cross-major is the designed-for case)', () => {
     it('composes only the steps in (from, to]', () => {
-      const chain = composeMigrationChain(10, 11);
-      expect(chain.map((s) => s.toMajor)).toEqual([11]);
+      const chain = composeMigrationChain(MIGRATION_SUPPORT_FLOOR, MIGRATION_SUPPORT_FLOOR + 1);
+      expect(chain.map((s) => s.toMajor)).toEqual([MIGRATION_SUPPORT_FLOOR + 1]);
     });
 
     it('a consumer already at current gets an empty chain', () => {
@@ -386,51 +404,82 @@ describe('migration chain (ADR-0087 D3)', () => {
     it('refuses a from-major below the support floor', () => {
       expect(() => applyMetaMigrations({}, MIGRATION_SUPPORT_FLOOR - 1)).toThrow(MigrationFloorError);
     });
+
+    // The cost #19056 bought, pinned where it is paid: a consumer stopped at
+    // any major the floor move dropped gets a refusal, not a silent no-op
+    // chain. The refusal names the floor and the other path, which is the
+    // whole prescription those consumers have.
+    it('every major the #19056 floor move dropped is refused, by name', () => {
+      for (const from of [10, 11, 12, 13, 14, 15]) {
+        let thrown: unknown;
+        try {
+          applyMetaMigrations({}, from);
+        } catch (e) {
+          thrown = e;
+        }
+        expect(thrown).toBeInstanceOf(MigrationFloorError);
+        const err = thrown as MigrationFloorError;
+        expect(err.fromMajor).toBe(from);
+        expect(err.floor).toBe(MIGRATION_SUPPORT_FLOOR);
+        expect(err.message).toContain(`support floor is ${MIGRATION_SUPPORT_FLOOR}`);
+      }
+    });
   });
 
   describe('replay — the chain applies the graduated mechanical transforms', () => {
-    it('migrates a 10.x stack with all three protocol-11 shapes to canonical', () => {
-      const stack = {
-        flows: [
-          {
-            name: 'f',
-            nodes: [
-              { id: 'a', type: 'http_request', config: { url: 'x' } },
-              { id: 'b', type: 'delete_record', config: { objectName: 'lead', filters: { s: 1 } } },
-            ],
-          },
-        ],
-        pages: [{ name: 'p', kind: 'jsx', source: '<div/>' }],
-      };
-      const result = applyMetaMigrations(stack, 10, 11);
+    // These used to replay a 10.x stack through `step11`. #19056 raised the
+    // floor to 16 and retired `step11`–`step16` with it, so the oldest hop the
+    // chain still guarantees is FLOOR → FLOOR + 1 and the shapes are that
+    // hop's. Written against the constant rather than the literal 16: the next
+    // floor move should re-point this replay, not delete it.
+    const OLDEST_HOP = MIGRATION_SUPPORT_FLOOR + 1;
+    const oldShape = () => ({
+      actions: [{ name: 'convert', label: 'Convert', type: 'script', execute: 'convertHandler' }],
+      objects: [
+        {
+          name: 'crm_task',
+          label: 'Task',
+          fields: { due_date: { type: 'date', conditionalRequired: 'record.stage == "closed"' } },
+        },
+      ],
+    });
 
-      const flow = (result.stack.flows as any[])[0];
-      expect(flow.nodes[0].type).toBe('http');
-      expect(flow.nodes[1].config).toEqual({ objectName: 'lead', filter: { s: 1 } });
-      expect((result.stack.pages as any[])[0].kind).toBe('html');
+    it('migrates the oldest supported major\'s shapes to canonical', () => {
+      const result = applyMetaMigrations(oldShape(), MIGRATION_SUPPORT_FLOOR, OLDEST_HOP);
 
-      // Three mechanical rewrites, no semantic TODOs triggered by these shapes
-      // (semantic TODOs are advisory per-major, always surfaced for the hop).
-      expect(result.applied).toHaveLength(3);
-      expect(result.todos.map((t) => t.id).sort()).toEqual([
-        'object-titleFormat-to-nameField',
-        'rls-sql-predicate-to-cel',
+      const action = (result.stack.actions as any[])[0];
+      expect(action).not.toHaveProperty('execute');
+      expect(action.target).toBe('convertHandler');
+      const field = (result.stack.objects as any[])[0].fields.due_date;
+      expect(field).not.toHaveProperty('conditionalRequired');
+      expect(field.requiredWhen).toBe('record.stage == "closed"');
+
+      // Two mechanical rewrites, named — a count alone would survive one of
+      // them being replaced by an unrelated conversion firing on this shape.
+      expect([...new Set(result.applied.map((a) => a.conversionId))].sort()).toEqual([
+        'action-execute-to-target',
+        'field-conditionalRequired-to-requiredWhen',
       ]);
+      // Semantic TODOs are advisory per-major and always surfaced for the hop,
+      // whatever the stack contains.
+      expect(result.todos.map((t) => t.id).sort()).toEqual(
+        MIGRATIONS_BY_MAJOR[OLDEST_HOP]!.semantic.map((s) => s.id).sort(),
+      );
+      expect(result.todos.length).toBeGreaterThan(0);
     });
 
     it('is immutable — the input stack is not mutated', () => {
-      const stack = { pages: [{ name: 'p', kind: 'jsx', source: '<div/>' }] };
+      const stack = oldShape();
       const snapshot = structuredClone(stack);
-      applyMetaMigrations(stack, 10, 11);
+      applyMetaMigrations(stack, MIGRATION_SUPPORT_FLOOR, OLDEST_HOP);
       expect(stack).toEqual(snapshot);
     });
 
     it('checkpoints each hop for per-hop verify / bisection', () => {
-      const stack = { pages: [{ name: 'p', kind: 'jsx', source: '<div/>' }] };
-      const result = applyMetaMigrations(stack, 10, 11);
+      const result = applyMetaMigrations(oldShape(), MIGRATION_SUPPORT_FLOOR, OLDEST_HOP);
       expect(result.hops).toHaveLength(1);
-      expect(result.hops[0]!.toMajor).toBe(11);
-      expect((result.hops[0]!.stack.pages as any[])[0].kind).toBe('html');
+      expect(result.hops[0]!.toMajor).toBe(OLDEST_HOP);
+      expect((result.hops[0]!.stack.actions as any[])[0].target).toBe('convertHandler');
     });
   });
 
@@ -438,7 +487,34 @@ describe('migration chain (ADR-0087 D3)', () => {
     // Each graduated conversion's old-shape fixture must reach canonical when
     // replayed through the full chain from the support floor — a composability
     // break is a release blocker (ADR-0087 D3), caught here, not by a consumer.
-    for (const conversion of ALL_CONVERSIONS) {
+    //
+    // Scoped to the conversions the chain can still REACH. `composeMigrationChain`
+    // keeps `m > fromMajor`, so a conversion graduated at or below the floor has
+    // no hop to replay through and its fixture would arrive unconverted — a red
+    // that says nothing about composability. #19056 moved the floor 10 → 16 and
+    // this is where that lands.
+    const replayable = ALL_CONVERSIONS.filter((c) => c.toMajor > MIGRATION_SUPPORT_FLOOR);
+    const belowFloor = ALL_CONVERSIONS.filter((c) => c.toMajor <= MIGRATION_SUPPORT_FLOOR);
+
+    it('the gate has cases — anti-vacuity, since every case below reads through this filter', () => {
+      expect(replayable.length).toBeGreaterThan(0);
+      expect(replayable.length + belowFloor.length).toBe(ALL_CONVERSIONS.length);
+    });
+
+    it('a below-floor conversion is excluded for having no hop — it is NOT deregistered', () => {
+      // D2 conversions are deliberately not floor-scoped: every rehydration
+      // seam replays the FULL conversion chain over stored `sys_metadata`
+      // rows, retired entries included (ADR-0087 addendum), so these keep
+      // converting rows at rest long after the source-side chain stops
+      // reaching them. What the floor removed is the D3 step that carried
+      // them, which is exactly why they leave this gate and nothing else.
+      for (const c of belowFloor) {
+        expect(ALL_CONVERSIONS).toContain(c);
+        expect(composeMigrationChain(MIGRATION_SUPPORT_FLOOR, c.toMajor)).toEqual([]);
+      }
+    });
+
+    for (const conversion of replayable) {
       it(`${conversion.id}: fixture.before → fixture.after via the chain`, () => {
         const result = applyMetaMigrations(
           structuredClone(conversion.fixture.before),
@@ -452,30 +528,39 @@ describe('migration chain (ADR-0087 D3)', () => {
 });
 
 describe('spec-changes.json manifest (ADR-0087 D4)', () => {
+  // The range is the SUPPORTED one. `composeSpecChanges` is a pure projection
+  // with no floor check of its own, so a range below the floor still composes —
+  // it just projects steps that no longer exist and quietly reports nothing.
+  const HOP_FROM = MIGRATION_SUPPORT_FLOOR;
+  const HOP_TO = MIGRATION_SUPPORT_FLOOR + 1;
+
   it('composes conversions + semantic migrations across the range', () => {
-    const changes = composeSpecChanges(10, 11);
-    expect(changes.from).toBe(10);
-    expect(changes.to).toBe(11);
+    const changes = composeSpecChanges(HOP_FROM, HOP_TO);
+    expect(changes.from).toBe(HOP_FROM);
+    expect(changes.to).toBe(HOP_TO);
     expect(changes.converted.map((c) => c.conversionId).sort()).toEqual(
-      (CONVERSIONS_BY_MAJOR[11] ?? []).map((c) => c.id).sort(),
+      (CONVERSIONS_BY_MAJOR[HOP_TO] ?? []).map((c) => c.id).sort(),
     );
-    expect(changes.migrated.map((m) => m.migrationId).sort()).toEqual([
-      'object-titleFormat-to-nameField',
-      'rls-sql-predicate-to-cel',
-    ]);
+    expect(changes.migrated.map((m) => m.migrationId).sort()).toEqual(
+      MIGRATIONS_BY_MAJOR[HOP_TO]!.semantic.map((s) => s.id).sort(),
+    );
+    // Anti-vacuity: both sides are read off the registry, so empty on both
+    // sides would pass while projecting nothing at all.
+    expect(changes.converted.length).toBeGreaterThan(0);
+    expect(changes.migrated.length).toBeGreaterThan(0);
   });
 
   it('validates against its own schema', () => {
-    const changes = composeSpecChanges(10, 11, {
-      added: [{ surface: 'applyConversions (function)', since: 11 }],
-      removed: [{ surface: 'httpRequestNode (const)', removedIn: 11, replacement: 'http node' }],
+    const changes = composeSpecChanges(HOP_FROM, HOP_TO, {
+      added: [{ surface: 'applyConversions (function)', since: HOP_TO }],
+      removed: [{ surface: 'actionExecute (const)', removedIn: HOP_TO, replacement: 'action.target' }],
     });
     expect(SpecChangesSchema.safeParse(changes).success).toBe(true);
   });
 
   it('per-major manifests compose into one aggregate view', () => {
-    // Folding 10→11 (the only major with a step today) must match a direct 10→11.
-    const direct = composeSpecChanges(10, PROTOCOL_MAJOR);
+    // The fold over every supported major must match one direct aggregate.
+    const direct = composeSpecChanges(MIGRATION_SUPPORT_FLOOR, PROTOCOL_MAJOR);
     const convertedIds = direct.converted.map((c) => c.conversionId);
     // Every conversion in range appears exactly once (no duplication across the fold).
     expect(new Set(convertedIds).size).toBe(convertedIds.length);
