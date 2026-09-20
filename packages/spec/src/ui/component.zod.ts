@@ -12,6 +12,11 @@ import {
   // standalone element cannot fork the vocabulary a view already declares.
   NavigationConfigSchema,
   TimelineConfigSchema,
+  // [#18639] `record:related_list.columns` is the SAME union the saved-view key
+  // declares, taken by reference for the same reason: objectui composes a saved
+  // view's `columns` onto this block verbatim, so a second spelling of the
+  // member schema would be a second thing to drift.
+  ListColumnSchema,
 } from './view.zod';
 import { InlineActionSchema, ActionLocationSchema } from './action.zod';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
@@ -1150,7 +1155,28 @@ export const RecordRelatedListProps = strictObject({
    * parent-side value written by the Add picker.
    */
   relationshipValueField: z.string().default('id').describe("Parent-record field whose value relationshipField stores (default 'id'; e.g. 'name' for name-keyed junctions)."),
-  columns: z.array(z.string()).optional().describe('Fields to display in the related list. Optional: when omitted, columns derive from the related object\'s highlightFields / default list columns (a related list is just another surface that lists that object). Override chain: child highlightFields → field-level relatedListColumns → this inline list.'),
+  /**
+   * [#18639] The SAME union `listViews[].columns` declares (`view.zod.ts`) —
+   * not a lookalike: `ListColumnSchema` is imported from the view face, so two
+   * published declarations of one key cannot drift apart. The composition that
+   * makes them one key is objectui's: `dataSource.view` →
+   * `composeElementDataSource` → `savedViewColumns`, copied onto this block
+   * VERBATIM, so a decorated saved view arrives here already in the
+   * `ListColumn` spelling.
+   *
+   * ⛔ The two arms are EXCLUSIVE, and the `describe()` below says so because
+   * the schema enforces it: `['name', { field: 'amount' }]` matches neither
+   * `z.array(z.string())` nor `z.array(ListColumnSchema)` and is refused.
+   *
+   * ⛔ The sibling `field.relatedListColumns` (`field.zod.ts`) is NOT widened
+   * with it — that key is child field-name STRINGS only (#9227), and the
+   * `field-column-lists-canonicalized` conversion that folds its object entries
+   * back to strings stays as ruled.
+   */
+  columns: z.union([
+    z.array(z.string()),       // field names
+    z.array(ListColumnSchema), // the saved view's own per-column decoration
+  ]).optional().describe('Fields to display in the related list — either plain field-name strings, or the same per-column entries a saved list view declares (`ListColumn`: `field`, plus `label`, `width`, `align`, `hidden`, `sortable`, `summary`, …). A view-supplied list may arrive in the `ListColumn` spelling: objectui composes a saved view\'s `columns` onto this block verbatim, and this key declares the SAME union as `listViews[].columns`. One spelling per list — the two arms are exclusive, so an array mixing strings and column objects is refused. Optional: when omitted, columns derive from the related object\'s highlightFields / default list columns (a related list is just another surface that lists that object). Override chain: child highlightFields → field-level relatedListColumns (field-name strings only) → this inline list.'),
   sort: z.union([
     z.string(),
     z.array(strictObject({

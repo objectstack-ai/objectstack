@@ -828,6 +828,7 @@ View filter rule
 | **groupByField** | `string` | optional | Field to group timeline rows. NO leading or trailing whitespace: the renderer reads this name off every row verbatim, so a padded spelling drops every row into one ungrouped band. |
 | **colorField** | `string` | optional | Field to derive each item color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the timeline default marker color |
 | **scale** | `Enum<'hour' \| 'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional (default: `"week"`) | Default timeline scale |
+| **limit** | `integer` | optional (default: `100`) | Row ceiling — the most rows the timeline fetches onto its rail, sent as the query `$top`; default 100 when the key is absent. When the ceiling APPLIES (the filtered set is larger than it), the renderer must show a visible truncation signal saying what is on screen is not the whole set — a bounded view that looks complete is worse than an unbounded one. |
 
 ### Nested Shape: `ObjectTimelineProps.filter[number]`
 
@@ -1365,7 +1366,7 @@ Type: `string`
 | **objectName** | `string` | ✅ | Related object name (e.g., "task", "opportunity") |
 | **relationshipField** | `string` | ✅ | Field on related object that points to this record (e.g., "account_id") |
 | **relationshipValueField** | `string` | optional (default: `"id"`) | Parent-record field whose value relationshipField stores (default 'id'; e.g. 'name' for name-keyed junctions). |
-| **columns** | `string[]` | optional | Fields to display in the related list. Optional: when omitted, columns derive from the related object's highlightFields / default list columns (a related list is just another surface that lists that object). Override chain: child highlightFields → field-level relatedListColumns → this inline list. |
+| **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | optional | Fields to display in the related list — either plain field-name strings, or the same per-column entries a saved list view declares (`ListColumn`: `field`, plus `label`, `width`, `align`, `hidden`, `sortable`, `summary`, …). A view-supplied list may arrive in the `ListColumn` spelling: objectui composes a saved view's `columns` onto this block verbatim, and this key declares the SAME union as `listViews[].columns`. One spelling per list — the two arms are exclusive, so an array mixing strings and column objects is refused. Optional: when omitted, columns derive from the related object's highlightFields / default list columns (a related list is just another surface that lists that object). Override chain: child highlightFields → field-level relatedListColumns (field-name strings only) → this inline list. |
 | **sort** | `string \| { field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Sort order for related records |
 | **limit** | `integer` | optional (default: `5`) | Number of records to display initially |
 | **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Additional filter criteria for related records |
@@ -1376,6 +1377,25 @@ Type: `string`
 | **enforceFieldSecurity** | `boolean` | optional | Fold this list's `columns` through the caller's FIELD-read permissions on the RELATED object before rendering (renderer default: off). Presentation only: it re-applies the same field-read answer the server already enforced (ADR-0066 D3) and never widens access — the rows are fetched either way and the server still decides every value. |
 | **redactFields** | `string[]` | optional | Field names this list never renders, whatever the permission answer (renderer default: render every column authored or derived). Applies to the authored `columns` AND to the columns the list derives for itself when none are authored. Presentation only, evaluated in the browser after the rows are fetched — the values are still in the page, so this is NOT a data-access control and NOT the object's `publicSharing.redactFields`, which removes them server-side. To keep a value from the caller, gate the field itself (`requiredPermissions` / `maskingRule`, ADR-0066 D3) or the permission set. |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
+
+### Nested Shape: `RecordRelatedListProps.columns[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field name (snake_case) |
+| **label** | `string \| Record<string, string>` | optional | Display label override |
+| **width** | `number` | optional | Column width in pixels |
+| **align** | `Enum<'left' \| 'center' \| 'right'>` | optional | Text alignment |
+| **hidden** | `boolean` | optional | Hide column by default |
+| **sortable** | `boolean` | optional | Allow sorting by this column |
+| **resizable** | `boolean` | optional | Allow resizing this column |
+| **wrap** | `boolean` | optional | Allow text wrapping |
+| **type** | `string` | optional | Renderer type override (e.g., "currency", "date") |
+| **pinned** | `Enum<'left' \| 'right'>` | optional | Pin/freeze column to left or right side |
+| **summary** | `Enum<'none' \| 'count' \| 'count_empty' \| 'count_filled' \| 'count_unique' \| …> \| { type: Enum<'none' \| 'count' \| 'count_empty' \| 'count_filled' \| 'count_unique' \| …>; field?: string }` | optional | Footer aggregation for this column — the function alone, or `{ type, field }` to aggregate another field |
+| **prefix** | `{ field: string; type: Enum<'badge' \| 'text'> }` | optional | Field rendered inline before this cell value |
+| **link** | `boolean` | optional | Functions as the primary navigation link (triggers View navigation) |
+| **action** | `string` | optional | Registered Action ID to execute when clicked |
 
 ### Nested Shape: `RecordRelatedListProps.filter[number]`
 

@@ -9,7 +9,7 @@ const source: KnowledgeSource = {
   label: 'Docs',
   adapter: 'ragflow',
   source: { kind: 'http', urls: ['https://docs.example.com'] } as KnowledgeSource['source'],
-  options: { datasetId: 'ds_42' },
+  adapterConfig: { datasetId: 'ds_42' },
 };
 
 function fakeFetch(handler: (url: string, init?: any) => unknown): { fetch: FetchLike; calls: Array<{ url: string; init: any }> } {
@@ -30,11 +30,30 @@ function fakeFetch(handler: (url: string, init?: any) => unknown): { fetch: Fetc
 }
 
 describe('KnowledgeRagflowAdapter', () => {
-  it('rejects sources without datasetId', async () => {
+  it('rejects sources without datasetId, naming the declared key', async () => {
     const { fetch } = fakeFetch(() => ({}));
     const a = new KnowledgeRagflowAdapter({ endpoint: 'http://x', apiKey: 'k', fetch });
-    const bad: KnowledgeSource = { ...source, options: {} as Record<string, unknown> };
-    await expect(a.search('q', { source: bad, topK: 1 })).rejects.toThrow(/datasetId/);
+    const bad: KnowledgeSource = { ...source, adapterConfig: {} };
+    // The refusal text is the migration notice a host reads, so it is pinned:
+    // it must name `adapterConfig.datasetId`, the key the schema declares.
+    await expect(a.search('q', { source: bad, topK: 1 })).rejects.toThrow(
+      /source\.adapterConfig\.datasetId/,
+    );
+  });
+
+  it('does not read the undeclared `options` spelling', async () => {
+    // `KnowledgeSourceSchema` is a plain `z.object`: it declares `adapterConfig`
+    // and drops `options` on any parsing path. The adapter reads the declared
+    // key only — no lenient fallback (Prime Directive #12). A host still on the
+    // old spelling is refused loudly rather than served with silence.
+    const { fetch, calls } = fakeFetch(() => ({}));
+    const a = new KnowledgeRagflowAdapter({ endpoint: 'http://x', apiKey: 'k', fetch });
+    const { adapterConfig: _dropped, ...rest } = source;
+    const legacy = { ...rest, options: { datasetId: 'ds_42' } } as unknown as KnowledgeSource;
+    await expect(a.search('q', { source: legacy, topK: 1 })).rejects.toThrow(
+      /source\.adapterConfig\.datasetId/,
+    );
+    expect(calls).toHaveLength(0);
   });
 
   it('upsert deletes-then-creates chunks and stamps objectstack metadata', async () => {
@@ -106,7 +125,7 @@ describe('KnowledgeRagflowAdapter', () => {
     const a = new KnowledgeRagflowAdapter({ endpoint: 'http://r', apiKey: 'k', fetch });
     const s: KnowledgeSource = {
       ...source,
-      options: { datasetId: 'ds_42', rerankModel: 'bge-reranker', similarityThreshold: 0.6 },
+      adapterConfig: { datasetId: 'ds_42', rerankModel: 'bge-reranker', similarityThreshold: 0.6 },
     };
     await a.search('q', { source: s, topK: 3, filter: { tag: 'a' } });
     const body = JSON.parse(calls[0].init.body);
