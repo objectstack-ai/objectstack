@@ -40,7 +40,9 @@ What an author now gets from each key: `strategy` picks the growth shape
 included, the contrast `content/docs/automation/flows.mdx` already draws against
 `maxRetries`, and `maxAttempts: 0` still makes the one call and never retries);
 `initialDelayMs` and `backoffMultiplier` shape the delay; `maxDelayMs` caps it,
-applied after jitter so the declared ceiling is a real one;
+applied after jitter so the declared ceiling is a real one — and an upstream
+`Retry-After` longer than that ceiling ends the retry loop and returns the
+response, rather than sleeping past a maximum the author declared;
 `retryableStatusCodes` both widens and narrows what is retried;
 `retryOnNetworkError` governs a thrown attempt; `jitter` can now be turned off;
 `requestTimeoutMs` becomes the per-attempt deadline.

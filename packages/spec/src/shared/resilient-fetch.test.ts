@@ -165,6 +165,35 @@ describe('resilientFetch', () => {
         expect(delays[2]).toBe(500);
     });
 
+    it('maxDelayMs bounds a Retry-After by STOPPING — it is a maximum, not a suggestion', async () => {
+        // The defect this pins: `Retry-After` used to be exempt from the cap,
+        // so `maxDelayMs: 1000` against `retry-after: 3600` slept 3600000ms —
+        // 3600x the declared ceiling, on the card whose whole point is that a
+        // declaration equals its enforcement. The retry loop now ends instead,
+        // and the caller gets the real response and its header.
+        const fetchImpl = scripted([[429, { 'retry-after': '3600' }], 200]);
+        const sleep = sleepSpy();
+        const res = await resilientFetch('http://x', {}, {
+            fetchImpl, sleep, retries: 3, backoffBaseMs: 100, maxDelayMs: 1000, jitter: false,
+        });
+        expect(res.status).toBe(429);
+        expect(fetchImpl).toHaveBeenCalledTimes(1);
+        expect(sleep).not.toHaveBeenCalled();
+    });
+
+    it('a Retry-After WITHIN the ceiling is still honoured and still retried', async () => {
+        // The control for the pin above: the stop is about exceeding the
+        // ceiling, not about `Retry-After` being present.
+        const fetchImpl = scripted([[429, { 'retry-after': '2' }], 200]);
+        const sleep = sleepSpy();
+        const res = await resilientFetch('http://x', {}, {
+            fetchImpl, sleep, retries: 3, backoffBaseMs: 100, maxDelayMs: 5000, jitter: false,
+        });
+        expect(res.status).toBe(200);
+        expect(fetchImpl).toHaveBeenCalledTimes(2);
+        expect(sleep.mock.calls.map((c) => c[0])).toEqual([2000]);
+    });
+
     it('jitter: false makes the delay exactly the computed backoff', async () => {
         const fetchImpl = scripted([500, 200]);
         const sleep = vi.fn(noSleep);

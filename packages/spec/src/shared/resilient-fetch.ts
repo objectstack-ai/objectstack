@@ -59,9 +59,11 @@ export interface ResilientFetchOptions {
      * Ceiling for one backoff delay (ms), applied AFTER jitter so a declared
      * maximum is never exceeded. Default: uncapped.
      *
-     * It does NOT cap a `Retry-After` the upstream sent: that is the server
-     * telling us when it will serve again, and retrying earlier than asked is
-     * worse behaviour than waiting, not better.
+     * It bounds a `Retry-After` too — but by STOPPING, not by shortening it. A
+     * `Retry-After` longer than this ceiling ends the retry loop and the
+     * response is returned to the caller, because the two alternatives are both
+     * wrong: sleeping it out would make this not a maximum, and retrying sooner
+     * than the upstream asked is the abuse `Retry-After` exists to prevent.
      */
     maxDelayMs?: number;
     /** Randomize each delay by +[0,100)ms. Default true (the prior behaviour). */
@@ -137,7 +139,18 @@ export async function resilientFetch(
         try {
             const res = await fetchImpl(input, { ...init, signal: controller.signal });
             if (isRetryable(res.status) && attempt < maxAttempts) {
-                await sleep(retryDelayMs(res, attempt, delayPolicy));
+                const wait = retryDelayMs(res, attempt, delayPolicy);
+                // The upstream asked to be left alone for LONGER than the
+                // declared ceiling allows. Both moves left are wrong: waiting
+                // it out makes `maxDelayMs` not a maximum, and retrying sooner
+                // than asked is the abuse `Retry-After` exists to prevent. So
+                // stop retrying and hand the response back — the caller sees
+                // the real status (and its `Retry-After`) and decides. Only a
+                // `Retry-After` can reach here: `backoffMs` caps its own output.
+                if (delayPolicy.maxDelayMs !== undefined && wait > delayPolicy.maxDelayMs) {
+                    return res;
+                }
+                await sleep(wait);
                 continue;
             }
             return res;
