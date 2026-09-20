@@ -326,11 +326,16 @@ describe('the doc lint reads the OWNING package namespace', () => {
   });
 
   it('...and the same refusal for a namespace-less package that ships INLINE body docs', () => {
+    // ⚠️ The doc is named `crm_orders_inline`, ⛔ not `sales_orders_inline`, so
+    // the fixture is a MEMBER of the class the changeset describes. Under the
+    // old single global rule this name carried the artifact's `crm` prefix and
+    // was ACCEPTED; a `sales_`-prefixed name would already have been refused
+    // then, which would measure only the TO side of a FROM → TO pair.
     const { issues } = collectAndLintDocs(configPath, {
       manifest: { ...CORE },
       packages: [
         pkg({ ...CORE }),
-        pkg({ ...ORDERS_NO_NAMESPACE, docs: [{ name: 'sales_orders_inline', content: '# Inline' }] }),
+        pkg({ ...ORDERS_NO_NAMESPACE, docs: [{ name: 'crm_orders_inline', content: '# Inline' }] }),
       ],
     });
 
@@ -347,6 +352,66 @@ describe('the doc lint reads the OWNING package namespace', () => {
     const { issues } = collectAndLintDocs(configPath, stack()); // ORDERS declares `sales`
 
     expect(issues.filter((i) => i.rule === 'docs/namespace-required')).toEqual([]);
+    expect(issues.filter((i) => i.severity === 'error')).toEqual([]);
+  });
+
+  // ── N4: a hand-written `packages[i].manifest.docs` with NO top-level twin ──
+  //
+  // Raised by this card's SECOND contract review, and verified at this base:
+  //
+  //   - `packages` is an AUTHORABLE stack key (`ObjectStackDefinitionSchema`,
+  //     `packages/spec/src/stack.zod.ts`), and its docblock says a hand-written
+  //     entry "still parses — it is an assembled body carrying no collections";
+  //   - `AssembledPackageBodySchema` is the manifest plus every `concat` /
+  //     `objects` / `functions` collection that is NOT an artifact-envelope key
+  //     (`packages`, `plugins`, `devPlugins`, `devLogins`), and `docs` is
+  //     `concat`, so a body may carry `docs`;
+  //   - `DocSchema.name` says a namespace prefix is "recommended, not required";
+  //   - BEFORE this card nothing linted such a doc. `collectAndLintDocs` read
+  //     `stack.docs` plus `src/docs/` and never looked at `packages[]`, and
+  //     `@objectstack/lint` contains no `.docs` read at all — the two rules that
+  //     do walk `packages[]` (`validate-object-references`,
+  //     `validate-translation-references`) never mention it. `os build` exited 0
+  //     on any doc name.
+  //
+  // Under clause 2 that doc is the package's doc, so `bodyDocsOf` puts it in
+  // `owned` and every docs rule reaches it under the package's namespace.
+  //
+  // ⚠️ `lints a package's INLINE body docs against that package too` above does
+  // ⛔ NOT cover this: that fixture is the COMPOSED shape, where the SAME item
+  // object also sits at the artifact top level and therefore did reach the old
+  // global lint through `stack.docs`. The FROM side here is the shape with no
+  // top-level twin at all, which reached nothing.
+  it('REFUSES a hand-written packages[i].manifest.docs entry that has NO top-level twin', () => {
+    const artifact = {
+      manifest: { ...CORE },
+      // ⛔ No `docs` key on the artifact: the doc exists ONLY on the body, which
+      // is what made it unreachable by the old single global lint.
+      packages: [pkg({ ...CORE }), pkg({ ...ORDERS, docs: [{ name: 'playbook', content: '# Playbook' }] })],
+    };
+    expect(artifact).not.toHaveProperty('docs');
+
+    const { docs, packageDocs, issues } = collectAndLintDocs(configPath, artifact);
+
+    // Pedigree: nothing was read off disk and the top level carries nothing, so
+    // the refusal can only be about the hand-written body entry.
+    expect(packageDocs).toEqual([]);
+    expect(docs).toEqual([]);
+
+    const refusal = issues.filter((i) => i.rule === 'docs/namespace-prefix');
+    expect(refusal).toHaveLength(1);
+    expect(refusal[0].severity).toBe('error');
+    expect(refusal[0].path).toBe('packages[1].docs/playbook');
+    expect(refusal[0].message).toContain('rename to "sales_playbook"');
+  });
+
+  it('...while the same hand-written entry under its OWN prefix raises nothing — the control that can fail', () => {
+    const { issues } = collectAndLintDocs(configPath, {
+      manifest: { ...CORE },
+      packages: [pkg({ ...CORE }), pkg({ ...ORDERS, docs: [{ name: 'sales_playbook', content: '# Playbook' }] })],
+    });
+
+    expect(issues.filter((i) => i.rule === 'docs/namespace-prefix')).toEqual([]);
     expect(issues.filter((i) => i.severity === 'error')).toEqual([]);
   });
 
