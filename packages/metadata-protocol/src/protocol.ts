@@ -13118,8 +13118,51 @@ export class ObjectStackProtocolImplementation implements
                 // `id` is `unknown` to this helper only because the caller's
                 // fail-closed `isScalarId` guard is what proves it scalar.
                 if (deleted === false) throw recordNotFoundError(object, id as string | number);
-                results.push({ id: String(id), success: true, index });
-                succeeded++;
+                // [#19412] The SECOND half of the same site. The paragraph above
+                // fixed "no match"; this is "matched, and deliberately NOT
+                // removed" — and until now `success` was still a LITERAL for
+                // every answer that was not the contract's `false`, so that row
+                // was reported as a deletion too.
+                //
+                // `sys_permission_set` is the shipped case: a package-declared
+                // set's delete is an ADR-0005 RESET — plugin-security's
+                // write-through tombstones the overlay and the record
+                // re-projects to the declared body instead of vanishing — so the
+                // row MATCHED, the write ran, and the record is still there. The
+                // batch envelope said `success: true` and counted it in
+                // `succeeded`, which on a security-configuration write tells an
+                // operator a permission set is gone while it is still enforced.
+                //
+                // `IDataEngine.delete` declares `Promise<boolean | number>` —
+                // the driver's boolean for a by-id write, a COUNT of rows
+                // removed otherwise — so a numeric zero is the one value that
+                // positively means "it is still there". ⛔ Not `false`: that
+                // arm is spoken for by the 404 above, about a record this caller
+                // can still GET, and answering it here would trade one wrong
+                // answer for a louder one. Everything else keeps its #4435
+                // reading, an off-contract `undefined` from a third-party driver
+                // included: only a POSITIVE zero is read as "not removed".
+                //
+                // ⛔ The row is NOT given an `errors[]` entry. A surviving record
+                // is an OUTCOME, not a fault — the single-record door answers the
+                // same case with a bare `success: false` on a 200 — and the two
+                // per-row codes this envelope owns (`ROLLED_BACK`,
+                // `NOT_ATTEMPTED`) both describe a row that never ran. Whether
+                // this ending deserves a per-row code of its own is a
+                // `packages/spec` widening (ERROR_CODE_LEDGER) and belongs to the
+                // spec lane, not here.
+                //
+                // It is counted in `failed` because that is the envelope's ONE
+                // declared reading — `succeeded` and `failed` PARTITION `results`
+                // (#7539, `reconcileStoppedBatch`) — which also makes the
+                // request-level `success` false and, on the `atomic` arm, aborts
+                // the batch through `runAtomicBatch`'s `failed > 0`. It does NOT
+                // stop a non-atomic run: the `continueOnError` stop belongs to
+                // the catch below, and nothing was thrown.
+                const removed = deleted !== 0;
+                results.push({ id: String(id), success: removed, index });
+                if (removed) succeeded++;
+                else failed++;
             } catch (err: any) {
                 results.push({ id: String(id), success: false, index, errors: [toRowApiError(err, rowOperationFailureFallback('delete'))] });
                 failed++;
