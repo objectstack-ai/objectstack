@@ -36,8 +36,9 @@ providers — `rest` and `openapi` — honour them by construction.
 
 What an author now gets from each key: `strategy` picks the growth shape
 (`exponential_backoff` / `linear_backoff` / `fixed_delay` / `no_retry`);
-`maxAttempts` bounds the retries (it counts retries after the first — it is
-bounded `min(0)`, and zero total calls is not a thing a connector can do);
+`maxAttempts` bounds the calls (it counts TOTAL attempts with the first
+included, the contrast `content/docs/automation/flows.mdx` already draws against
+`maxRetries`, and `maxAttempts: 0` still makes the one call and never retries);
 `initialDelayMs` and `backoffMultiplier` shape the delay; `maxDelayMs` caps it,
 applied after jitter so the declared ceiling is a real one;
 `retryableStatusCodes` both widens and narrows what is retried;

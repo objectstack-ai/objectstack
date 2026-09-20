@@ -78,7 +78,9 @@ describe('rest provider factory (ADR-0097)', () => {
     // key was already storable and served back before any of this landed.
     //
     // `initialDelayMs` is the schema minimum (100) and `maxAttempts` is kept at
-    // 1, so each of these costs one real 100ms sleep and no clock is faked.
+    // 2, so each of these costs at most one real 100ms sleep and no clock is
+    // faked. ⚠️ `maxAttempts` counts TOTAL calls, the first included — the
+    // contrast `content/docs/automation/flows.mdx` draws against `maxRetries`.
     describe('retryConfig on the context', () => {
         /** A fetch that answers the scripted statuses in order (last repeats). */
         function scriptedFetch(statuses: number[]) {
@@ -105,7 +107,7 @@ describe('rest provider factory (ADR-0097)', () => {
                     providerConfig: { baseUrl: 'https://api.example.com' },
                     retryConfig: policy({
                         strategy: 'fixed_delay',
-                        maxAttempts: 1,
+                        maxAttempts: 2,
                         initialDelayMs: 100,
                         retryableStatusCodes: [429],
                         jitter: false,
@@ -118,14 +120,14 @@ describe('rest provider factory (ADR-0097)', () => {
             expect(calls).toHaveLength(2);
         });
 
-        it('stops at maxAttempts — a policy of 1 retry makes exactly 2 calls', async () => {
+        it('stops at maxAttempts — a policy of 2 attempts makes exactly 2 calls', async () => {
             const { impl, calls } = scriptedFetch([429]);
             const factory = createRestProviderFactory({ fetchImpl: impl });
             const { handlers } = await factory(
                 ctx({
                     providerConfig: { baseUrl: 'https://api.example.com' },
                     retryConfig: policy({
-                        strategy: 'fixed_delay', maxAttempts: 1, initialDelayMs: 100,
+                        strategy: 'fixed_delay', maxAttempts: 2, initialDelayMs: 100,
                         retryableStatusCodes: [429], jitter: false,
                     }),
                 }),
@@ -134,6 +136,41 @@ describe('rest provider factory (ADR-0097)', () => {
             const out = await handlers.request({ path: '/ping' }, {});
             expect(out).toMatchObject({ status: 429 });
             expect(calls).toHaveLength(2);
+        });
+
+        it('maxAttempts counts TOTAL calls, the first included (⛔ not retries after it)', async () => {
+            // The one pin that tells the two readings apart: under
+            // "retries after the first", `maxAttempts: 3` would be FOUR calls.
+            // `content/docs/automation/flows.mdx` states the contrast against
+            // `maxRetries` for authors; this is that sentence, executed.
+            const { impl, calls } = scriptedFetch([429]);
+            const factory = createRestProviderFactory({ fetchImpl: impl });
+            const { handlers } = await factory(
+                ctx({
+                    providerConfig: { baseUrl: 'https://api.example.com' },
+                    retryConfig: policy({
+                        strategy: 'fixed_delay', maxAttempts: 3, initialDelayMs: 100,
+                        retryableStatusCodes: [429], jitter: false,
+                    }),
+                }),
+            );
+
+            await handlers.request({ path: '/ping' }, {});
+            expect(calls).toHaveLength(3);
+        });
+
+        it('maxAttempts: 0 still makes the connector\'s one call, and never retries', async () => {
+            const { impl, calls } = scriptedFetch([429]);
+            const factory = createRestProviderFactory({ fetchImpl: impl });
+            const { handlers } = await factory(
+                ctx({
+                    providerConfig: { baseUrl: 'https://api.example.com' },
+                    retryConfig: policy({ maxAttempts: 0, initialDelayMs: 100, jitter: false }),
+                }),
+            );
+
+            await handlers.request({ path: '/ping' }, {});
+            expect(calls).toHaveLength(1);
         });
 
         it('an authored retryableStatusCodes NARROWS what is retried', async () => {

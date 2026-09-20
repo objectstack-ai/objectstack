@@ -27,7 +27,7 @@ export type { ResilientFetchOptions } from '../shared/resilient-fetch';
  * | authored key | wrapper option | note |
  * |---|---|---|
  * | `retryConfig.strategy` | `strategy` | the four words are executed, not just parsed |
- * | `retryConfig.maxAttempts` | `retries` (`+ 1`) | see the reading below |
+ * | `retryConfig.maxAttempts` | `retries` | see the reading below |
  * | `retryConfig.initialDelayMs` | `backoffBaseMs` | |
  * | `retryConfig.backoffMultiplier` | `backoffMultiplier` | |
  * | `retryConfig.maxDelayMs` | `maxDelayMs` | capped after jitter, so it is a real maximum |
@@ -36,16 +36,23 @@ export type { ResilientFetchOptions } from '../shared/resilient-fetch';
  * | `retryConfig.retryOnNetworkError` | `retryOnNetworkError` | |
  * | `requestTimeoutMs` | `timeoutMs` | per-attempt deadline |
  *
- * ## `maxAttempts` counts RETRIES, not total calls
+ * ## `maxAttempts` counts TOTAL calls, the first one included
  *
- * The key is bounded `min(0)`, and zero total calls is not a thing a connector
- * can do — so `0` can only mean "do not retry", which fixes the count as
- * *attempts after the first*. Its own prose says so too ("Maximum retry
- * attempts"), and the repo already reads a retry count that way: the converged
- * `shared/retry-policy.zod.ts` compares the retired `ETLPipeline.retry`'s
- * `maxAttempts: 3` directly against `maxRetries` (= "retry attempts after the
- * initial one"). Hence `retries = maxAttempts + 1`, `retries` being the
- * wrapper's *total* including the first.
+ * ⛔ Not "retries after the first" — that is `maxRetries`, a **different key on
+ * a different schema**, and the two names differ precisely because the counting
+ * base does. `content/docs/automation/flows.mdx` states this contrast for
+ * authors in as many words: "A connector's `retryConfig` counts attempts the
+ * other way round: its `maxAttempts` **includes** the first attempt, so
+ * `maxAttempts: 3` is `maxRetries: 2` here". Two more readings agree: the
+ * wrapper's own `retries` is documented "Total attempts including the first"
+ * and defaults to 3, which is exactly this key's default — they line up only
+ * under this reading — and `shared/retry-policy.zod.ts` converged the
+ * `maxRetries` family on purpose, leaving the differently-named key alone.
+ *
+ * Hence `retries = maxAttempts`, one to one. The degenerate `maxAttempts: 0`
+ * that `min(0)` admits needs no arithmetic here: `resilientFetch` already
+ * floors its attempt count at 1, so a connector still makes its one call and
+ * never retries — ONE owner for that floor, not a second one in this mapping.
  *
  * ## ⚠️ `connectionTimeoutMs` is deliberately NOT mapped here
  *
@@ -98,7 +105,7 @@ export function connectorFetchOptions(
   const codes: number[] = retry.retryableStatusCodes;
 
   opts.strategy = retry.strategy;
-  opts.retries = retry.maxAttempts + 1;
+  opts.retries = retry.maxAttempts;
   opts.backoffBaseMs = retry.initialDelayMs;
   opts.backoffMultiplier = retry.backoffMultiplier;
   opts.maxDelayMs = retry.maxDelayMs;

@@ -30,8 +30,9 @@ describe('connectorFetchOptions', () => {
     it('applies the schema defaults for an empty retryConfig', () => {
         const opts = connectorFetchOptions({ retryConfig: {} });
         expect(opts.strategy).toBe('exponential_backoff');
-        // `maxAttempts` counts RETRIES, so the default 3 is 4 total calls.
-        expect(opts.retries).toBe(4);
+        // `maxAttempts` counts TOTAL calls, so the default 3 is 3 calls —
+        // which is also exactly what the wrapper defaults to on its own.
+        expect(opts.retries).toBe(3);
         expect(opts.backoffBaseMs).toBe(1000);
         expect(opts.backoffMultiplier).toBe(2);
         expect(opts.maxDelayMs).toBe(60000);
@@ -56,8 +57,11 @@ describe('connectorFetchOptions', () => {
         expect(opts.retryableStatus?.(404)).toBe(false);
     });
 
-    it('maxAttempts: 0 means no retry', () => {
-        expect(connectorFetchOptions({ retryConfig: { maxAttempts: 0 } }).retries).toBe(1);
+    it('maxAttempts: 0 passes straight through — the wrapper owns the floor', () => {
+        // `min(0)` admits it and it means "make the call, never retry". The
+        // floor is `resilientFetch`'s (`Math.max(1, retries)`), so this mapping
+        // does no arithmetic of its own and there is only one owner of it.
+        expect(connectorFetchOptions({ retryConfig: { maxAttempts: 0 } }).retries).toBe(0);
     });
 
     it('carries every declared knob through', () => {
@@ -75,7 +79,7 @@ describe('connectorFetchOptions', () => {
         });
         expect(opts).toMatchObject({
             strategy: 'linear_backoff',
-            retries: 6,
+            retries: 5,
             backoffBaseMs: 250,
             maxDelayMs: 9000,
             backoffMultiplier: 3,
