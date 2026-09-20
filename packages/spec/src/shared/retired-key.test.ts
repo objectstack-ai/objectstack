@@ -19,7 +19,7 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 
-import { acceptRetiredDefaultResidue, retiredKey } from './retired-key';
+import { acceptRetiredDefaultResidue, enumWithRetiredValues, retiredKey } from './retired-key';
 import { strictObject } from './strict-object';
 
 const GONE_GUIDANCE =
@@ -133,5 +133,158 @@ describe('acceptRetiredDefaultResidue (#12840)', () => {
     const def = (schema as unknown as { _zod: { def: { type: string; out?: unknown } } })._zod.def;
     expect(def.type).toBe('pipe');
     expect((def.out as { _zod: { def: { type: string } } })._zod.def.type).toBe('object');
+  });
+});
+
+// ============================================================================
+// VALUE-level retirement (#17109)
+// ============================================================================
+
+/**
+ * Contract of `enumWithRetiredValues` — the VALUE-level sibling of the
+ * tombstones above (#17109; maintainer ruling 2026-09-09, the generic helper
+ * rather than a refinement on the single enum that exposed the gap).
+ *
+ * The class rule under test: a retired enum MEMBER refuses at parse **by
+ * name**, carrying its own migration prescription, while every other member
+ * and every unrelated typo is left exactly as `z.enum` had them. Like the
+ * residue suite above, these run over a SYNTHETIC vocabulary on purpose —
+ * they prove the judgement is general to any `z.enum` (which is what was
+ * ruled), not a property of the one enum that will consume it first.
+ */
+
+/**
+ * Two synthetic prescriptions, carrying the house shape — backticked
+ * fully-qualified name first, the version that removed it, a dash clause
+ * saying why it went, an imperative fix, and (on the first) the pinned
+ * `os migrate meta` sentence — with ONE element deliberately absent: the
+ * `(ADR-NNNN)` reference.
+ *
+ * ⛔ Do not "complete the shape" by adding one back. An ADR id is the one
+ * part of a prescription the repo RESOLVES, and `pnpm check:adr-anchors`
+ * scans `*.test.ts` too, so a fictional retirement cannot carry one
+ * honestly: a made-up number is the squat that gate refuses — whoever later
+ * writes a real record at that number retroactively falsifies every citation
+ * of it — and a number that DOES resolve would let a fake retirement claim
+ * governance by a decision that never ruled it.
+ * What these fixtures pin is that a prescription is retrieved and re-thrown
+ * byte-for-byte — never which record it cites.
+ */
+const HEADING_RETIRED =
+  '`text.variant: "heading"` was removed in @objectstack/spec 99 — a heading is a '
+  + 'document level, never a text style, so the renderer had to guess one. Use `h2`, or pick the '
+  + 'level you mean. '
+  + 'Run `os migrate meta --from 98` to list the mechanical edits for existing sources; apply them by hand.';
+
+/** A second retirement on the SAME enum, and one with no conversion behind it. */
+const SUBHEADING_RETIRED =
+  '`text.variant: "subheading"` was removed in @objectstack/spec 99 — same reason as '
+  + '`heading`. Use `h3`, or pick the level you mean.';
+
+const VariantEnum = enumWithRetiredValues(
+  ['body', 'caption', 'h1', 'h2', 'h3'],
+  { heading: HEADING_RETIRED, subheading: SUBHEADING_RETIRED },
+);
+
+describe('enumWithRetiredValues (#17109)', () => {
+  it('refuses a retired member with ITS OWN prescription, byte-for-byte', () => {
+    for (const [member, prescription] of [
+      ['heading', HEADING_RETIRED],
+      ['subheading', SUBHEADING_RETIRED],
+    ] as const) {
+      const r = VariantEnum.safeParse(member);
+      expect(r.success).toBe(false);
+      // The envelope, not merely "it threw": zod's own enum issue, with the
+      // prescription as the message. A second retired member on one enum is
+      // the recurrence the ruling named — a hand-rolled ternary does not
+      // reach it, so it is pinned rather than assumed.
+      expect(r.error!.issues).toHaveLength(1);
+      expect(r.error!.issues[0]!.code).toBe('invalid_value');
+      expect(r.error!.issues[0]!.message).toBe(prescription);
+    }
+  });
+
+  it('leaves every live member accepted and every other refusal untouched', () => {
+    for (const live of ['body', 'caption', 'h1', 'h2', 'h3']) {
+      expect(VariantEnum.parse(live)).toBe(live);
+    }
+    // A typo is NOT a retirement: telling the author of `headng` that their
+    // value "was removed" would misinform, so zod's own message — which lists
+    // the legal tokens — is what they keep.
+    const typo = VariantEnum.safeParse('headng');
+    expect(typo.success).toBe(false);
+    expect(typo.error!.issues[0]!.message).not.toBe(HEADING_RETIRED);
+    expect(typo.error!.issues[0]!.message).toContain('Invalid option');
+  });
+
+  it('never hands back an inherited Object.prototype member as the prescription', () => {
+    // Asked THROUGH zod this assertion is vacuous: zod 4.4.3 ignores a
+    // non-string error-map return and falls back to its own message, so a bare
+    // `retired[input]` lookup — which answers `constructor` with a FUNCTION —
+    // is indistinguishable at the message level. Measured, not assumed: an
+    // ablation dropping the `hasOwnProperty` guard left all 15 cases green.
+    // So this asks the helper's OWN error map, where the lookup's answer IS
+    // the contract — `string` for a retired member, `undefined` for anything
+    // else — rather than pinning zod's leniency as if it were ours.
+    const errorMap = (VariantEnum as unknown as {
+      _zod: { def: { error?: (issue: { code: string; input: unknown }) => unknown } };
+    })._zod.def.error;
+    expect(typeof errorMap).toBe('function');
+    expect(errorMap!({ code: 'invalid_value', input: 'heading' })).toBe(HEADING_RETIRED);
+    for (const inherited of ['constructor', 'toString', 'hasOwnProperty', '__proto__', 'valueOf']) {
+      expect(errorMap!({ code: 'invalid_value', input: inherited })).toBeUndefined();
+    }
+    // A non-string input reaches the same lookup and must not match either.
+    for (const nonString of [5, null, {}, ['heading']]) {
+      expect(errorMap!({ code: 'invalid_value', input: nonString })).toBeUndefined();
+    }
+    // End to end, the author of such a typo still meets zod's own message,
+    // which lists the legal tokens.
+    const r = VariantEnum.safeParse('constructor');
+    expect(r.success).toBe(false);
+    expect(r.error!.issues[0]!.message).toContain('Invalid option');
+  });
+
+  it('composes with `.optional()` — absence is fine, the member still refuses', () => {
+    const shape = z.object({ variant: VariantEnum.optional() });
+    expect(shape.safeParse({}).success).toBe(true);
+    const r = shape.safeParse({ variant: 'heading' });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues[0]!.message).toBe(HEADING_RETIRED);
+    expect(r.error!.issues[0]!.path).toEqual(['variant']);
+  });
+
+  it('composes with `.default(…)` — the default materializes, the member still refuses', () => {
+    // The sharp case the first consumer presents: the enum carries a default,
+    // so a document that omits the key never meets the refusal at all, while
+    // one that WRITES the retired member does. (A retired member that was
+    // itself the default is a different population — `acceptRetiredDefaultResidue`.)
+    const shape = z.object({ variant: VariantEnum.default('body') });
+    expect(shape.parse({})).toEqual({ variant: 'body' });
+    expect(shape.parse({ variant: 'h3' })).toEqual({ variant: 'h3' });
+    const r = shape.safeParse({ variant: 'heading' });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues[0]!.message).toBe(HEADING_RETIRED);
+  });
+
+  it('excludes the retired member from `z.input` — the tsc channel, same as a key tombstone', () => {
+    const live: z.input<typeof VariantEnum> = 'h2';
+    // @ts-expect-error — the retirement removes the member from the input
+    // union, so an author writing it fails to compile before anything runs.
+    const retiredMember: z.input<typeof VariantEnum> = 'heading';
+    expect(live).toBe('h2');
+    expect(retiredMember).toBe('heading');
+  });
+
+  it('refuses at CONSTRUCTION a retirement that could never fire', () => {
+    // Still listed: the enum accepts the value, so the prescription is dead
+    // declaration — the shape this repo refuses (declared ≠ enforced).
+    expect(() => enumWithRetiredValues(['body', 'heading'], { heading: HEADING_RETIRED }))
+      .toThrow(/declared retired but still listed/);
+    // A wrapper with nothing retired, and a prescription that says nothing.
+    expect(() => enumWithRetiredValues(['body'], {}))
+      .toThrow(/no retired member declared/);
+    expect(() => enumWithRetiredValues(['body'], { heading: '   ' }))
+      .toThrow(/empty prescription/);
   });
 });
