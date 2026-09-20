@@ -109,8 +109,8 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "新規レコードの既定値（JSON リテラル）"
       },
       "fields.placeholder": {
-        label: "Placeholder",
-        helpText: "Hint text shown inside the empty input; disappears once a value is entered"
+        label: "プレースホルダー",
+        helpText: "空の入力欄の内側に表示されるヒント文言。値を入力すると消えます"
       },
       "fields.maxLength": {
         label: "最大長",
@@ -121,12 +121,12 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "最小文字数"
       },
       "fields.valueDomain": {
-        label: "Value Domain",
-        helpText: "Standard the written value must belong to; a write carrying a non-member is refused"
+        label: "値ドメイン",
+        helpText: "書き込む値が属していなければならない標準。メンバー以外の値を含む書き込みは拒否されます"
       },
       "fields.rows": {
-        label: "Rows",
-        helpText: "Inline editor height (text rows)"
+        label: "行数",
+        helpText: "インライン編集欄の高さ（テキスト行数）"
       },
       "fields.min": {
         label: "最小値",
@@ -165,44 +165,44 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "対象オブジェクト名。tree フィールドでは省略可能で、指定する場合はこのオブジェクト自身でなければなりません（ツリーは同一オブジェクト内の階層です — 別のオブジェクトへリンクする場合は lookup を使います）"
       },
       "fields.lookupFilters": {
-        label: "Lookup Filters",
-        helpText: "Filter rules applied to the picker ({field, operator, value})"
+        label: "Lookup フィルター",
+        helpText: "ピッカーに適用されるフィルタールール（{field, operator, value}）"
       },
       "fields.deleteBehavior": {
-        label: "Delete Behavior",
-        helpText: "What happens when the referenced record is deleted"
+        label: "削除動作",
+        helpText: "参照先レコード削除時の動作"
       },
       "fields.multiple": {
         label: "複数選択",
         helpText: "複数レコードの選択を許可"
       },
       "fields.expression": {
-        label: "Expression",
-        helpText: "CEL formula expression"
+        label: "式",
+        helpText: "CEL 数式"
       },
       "fields.returnType": {
         label: "戻り値の型",
         helpText: "公式の結果型"
       },
       "fields.summaryOperations": {
-        label: "Summary Operations",
-        helpText: "Roll-up: which child object, which field, which aggregation"
+        label: "集計操作",
+        helpText: "ロールアップ：どの子オブジェクトの、どのフィールドを、どの集計関数で"
       },
       "fields.summaryOperations.object": {
-        label: "Object",
-        helpText: "Source child object name"
+        label: "オブジェクト",
+        helpText: "集計元の子オブジェクト名"
       },
       "fields.summaryOperations.field": {
-        label: "Field",
-        helpText: "Field on the child object to aggregate (ignored for count)"
+        label: "フィールド",
+        helpText: "集計対象となる子オブジェクトのフィールド（count では無視）"
       },
       "fields.summaryOperations.function": {
-        label: "Function",
-        helpText: "Aggregation function"
+        label: "関数",
+        helpText: "集計関数"
       },
       "fields.autonumberFormat": {
-        label: "Autonumber Format",
-        helpText: "e.g. \"INV-{0000}\"; date tokens {YYYY}/{MM}/{DD} and {field_name} interpolation supported"
+        label: "自動採番フォーマット",
+        helpText: "例: \"INV-{0000}\"。日付トークン {YYYY}/{MM}/{DD} と {field_name} の補間に対応"
       },
       "fields.language": {
         label: "言語",
@@ -213,16 +213,16 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "レコードのアクティビティタイムラインでこのフィールドを要約する"
       },
       "fields.visibleWhen": {
-        label: "Visible When",
-        helpText: "CEL predicate — field is shown only when TRUE"
+        label: "表示条件",
+        helpText: "CEL 述語 — TRUE の場合のみフィールドを表示"
       },
       "fields.readonlyWhen": {
-        label: "Readonly When",
-        helpText: "CEL predicate — field is read-only when TRUE (enforced server-side)"
+        label: "読み取り専用条件",
+        helpText: "CEL 述語 — TRUE の場合フィールドは読み取り専用（サーバー側で強制）"
       },
       "fields.requiredWhen": {
-        label: "Required When",
-        helpText: "CEL predicate — field is required when TRUE (enforced server-side)"
+        label: "必須条件",
+        helpText: "CEL 述語 — TRUE の場合フィールドは必須（サーバー側で強制）"
       },
       enable: {
         label: "Enable",
