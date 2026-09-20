@@ -1,0 +1,35 @@
+{
+  "number": 15256,
+  "kind": "issue",
+  "title": "[decision · p0] an ex-member API key reads AND writes another organization's rows on the single-kernel wiring under `isolated` — the wall compares against the caller's own unvetted claim",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "priority:p0",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T07:22:48Z",
+  "updated_at": "2026-09-04T14:00:03Z",
+  "closed_at": "2026-09-04T13:58:49Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15256",
+  "body": "**Measured, not inferred.** Three real `os serve` boots under a live non-degraded `isolated` posture (`tenancy posture 'isolated' — the Layer 0 organization wall is ACTIVE`, `degraded=false`), driven under #15163. Full reading: objectstack#15163 comment 5537114769.\n\n## What an ex-member's API key can do on the wiring the open core actually builds\n\n| arm | member key | **ex-member key** (stamped with `org_alpha`, membership ended) | org-less key |\n|---|---|---|---|\n| **SUBJECT** — single-kernel provider wiring | GET 200 total=2 · POST 201 | **GET 200 total=2 · POST 201, row lands `org: org_alpha`** | GET 200 **total=0 (silent)** · POST 403 |\n| KM-ONLY — `kernel-manager` present, `kernel` unbound | byte-identical to SUBJECT | byte-identical to SUBJECT | byte-identical |\n| CONTROL — `kernel` bound | GET 200 · POST 201 | **401** · **401** | 401 · 401 |\n\n⇒ On the SUBJECT wiring an ex-member **reads and writes** another organization's rows. Not a silent-empty; a write that lands. The control arm proves the probe can produce a refusal where one exists, and the healthy member key returns data on all three arms, so neither direction is a broken probe.\n\n`organization_required` splits: reads answer **200 + total 0** — verbatim the silent-empty failure the withdrawn B′ was filed to replace — while writes are refused by Layer 0 (403, ADR-0123 D2).\n\n## The mechanism — four facts, each re-verified by the PM on `origin/main` after the report\n\n1. `tenant-layer.ts` — under `isolated` Layer 0 returns `{ organization_id: input.organizationId }`. A hard equality. It **never** reads `accessible_org_ids`; that is the `group` union branch.\n2. `api-key.ts` — `tenantId` is `row.active_organization_id` **copied verbatim**. The key's own stored claim, never vetted against membership.\n3. `resolve-authz-context.ts` — the `organization_membership_ended` guard runs only `if (keyPrincipal?.tenantId && input.tenancyPosture)`. No posture ⇒ never runs.\n4. `api-key.ts` — the `organization_required` guard is likewise `if (!tenantId && tenancyPosture)`.\n\n⇒ The wall is enforced, and **enforcing it is exactly what lets the ex-member through**: the predicate compares against the caller's own unvetted claim, and the one fact that would expose the ended membership is not an input to the layer that could act on it.\n\n**B′'s conclusion was right and its reasoning was wrong**, in the direction already measured on #13906: the row wall IS active. And the KM-ONLY arm shows the trigger is `kernel` being **bound** in `computeExecCtx`, not `kernel-manager` being present — so B′'s boot check tested the wrong predicate for its own premise. ⛔ A boot refusal remains excluded as a remedy (maintainer, 2026-09-04).\n\n## ⚠️ The scope limit that decides the severity, and it is not yet measured\n\n`@objectstack/organizations` is cloud-private and resolves from nowhere in this workspace. The probe declared a local stand-in registering `org-scoping` and nothing else — a behavioural copy of `SimulatedOrgScopingPlugin`, which this repo already ships for the purpose. **So this reading covers the three open-core layers only. It cannot speak for any refusal the real enterprise plugin adds on top.**\n\n⇒ **Step 1 of any repair is a cloud-side reading**: does the real `@objectstack/organizations` refuse an ex-member's stamped key? If yes, the blast radius is open-core self-hosters. If no, it is every walled deployment. ⛔ Do not size this card before that answer.\n\n## The three coupled questions\n\n1. **Re-open the declined option?** The repair is to make the single-kernel branch derive the posture — the option the 2026-09-02 ruling explicitly did **not** take, to be re-judged on this measurement.\n2. **Does `authRefusal` get a consumer in the same change?** Measured: `ResolvedAuthzContext.authRefusal` has **zero** consumers outside two test assertions. Both refusals surface only by leaving `userId` unset, so the door answers the generic anonymous 401 — byte-identical to sending no credential. Deriving the posture alone converts a silent leak into a 401 that tells the operator nothing. (`authz-store-unavailable.ts` already argues this from the other side: it rejected a sibling field *because* `authRefusal` is read by no door.)\n3. **Does the admit-on-unknown-posture default survive?** `api-key.ts` justifies it as protecting \"every org-less key on every `single` deployment **whose transport has not been wired**\". The measurement's sharpest point is against that premise: the transport it calls not-yet-wired is not a residual case — it is every deployment the open core can build.\n\n## 四棱（业务立场；① 权重 ≥50%）\n\n**① 项目长远合理性 —— 明确指向修。** 这是 ADR-0131 整份记录的前提被现实证伪：D8 说「一道谓词，算一次」，而这里的谓词拿的是调用方自己填的那一格。归属模型可以做得再干净，只要 `tenantId` 的来源是未经核验的自述，墙就只是把「你说你是谁」重复了一遍。⛔ 且这不是 v18 才有的问题，它现在就在线上。\n\n**② 实际业务拉动 —— 有，且是最坏的那种形态。** 不是静默空集，是**写入落到别的组织**。零具名用户报障，但 API key 的典型用途正是长期存活的自动化——成员离职、key 不撤，是常态而非边角。⚠️ 拉动的大小完全取决于上面那条 cloud 读数。\n\n**③ 防 AI 写元数据犯错 —— 中性偏正。** 与元数据无关；但问题 2 直接关系到「失败要说人话」：一个和「没带凭据」逐字节相同的 401，会让运维和 agent 都去查错方向。\n\n**④ 创业阶段不扩散 —— 支持最小修法。** 修法是让已存在的分支多推导一个已存在的值，加一个已存在字段的消费者。⛔ 不新增契约面、不新增姿态、不加启动拒绝。真正的扩散风险在反面：把它留着，就得永远记住「单内核装配上墙是假的」这条只有口口相传的知识。\n\n## PM 建议\n\n先取 cloud 读数定性质，然后按 1+2+3 一次修完（分开修会留下「不再泄漏但说不清为什么被拒」的中间态）。17.3 **尚未打标**（最新仍是 17.2.0），所以这一修是有窗口的——但它是 09-02 被否选项的重新裁定，⛔ 不是我能自行派发的。\n\nRefs: #15163（测量全文）· #13906 / PR #15020（B′ 撤销）· ADR-0105 D2/D3 · ADR-0123 D2 · ADR-0069 · ADR-0131 D8.\n"
+}

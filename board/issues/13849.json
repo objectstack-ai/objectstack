@@ -1,0 +1,35 @@
+{
+  "number": 13849,
+  "kind": "issue",
+  "title": "Queue-flake anchor: src/envelope-caller-census.test.ts",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:cli",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-31T14:47:06Z",
+  "updated_at": "2026-09-04T23:27:41Z",
+  "closed_at": "2026-09-04T23:27:41Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13849",
+  "body": "`src/envelope-caller-census.test.ts` has ejected **5 pull requests** from the merge\nqueue within a rolling 24 hours — **1 independent hit** once\nGitHub's speculative stacking is accounted for. This issue is the single place for\nthat conversation; it is refreshed by the merge-queue-triage workflow on every\nfurther ejection.\n\n| PR | stack | queue build |\n|---|---|---|\n| #13584 | S1 · inherited | [33404459759](https://github.com/objectstack-ai/objectstack/actions/runs/33404459759) |\n| #13596 | S1 · root | [33403389633](https://github.com/objectstack-ai/objectstack/actions/runs/33403389633) |\n| #13797 | S1 · inherited | [33403512271](https://github.com/objectstack-ai/objectstack/actions/runs/33403512271) |\n| #13824 | S1 · inherited | [33403513351](https://github.com/objectstack-ai/objectstack/actions/runs/33403513351) |\n| #13828 | S1 · inherited | [33404373114](https://github.com/objectstack-ai/objectstack/actions/runs/33404373114) |\n\n⚠️ **Queue depth is not evidence.** The `stack` column is read out of the queue\nbranch names: GitHub builds each queued PR on top of the previous entry, so a\nbuild whose BASE commit IS another victim's queue HEAD contains that victim's\ntree by construction. A single deterministic break therefore ejects every PR\nbehind it, and the raw victim count climbs with QUEUE DEPTH until the owner\nlands a fix. Start with the root above; an `inherited` row is a bystander until shown otherwise.\n\n**This issue is a NAME, not a diagnosis.** The workflow that files it reads the\nfailing test file path out of the job logs and counts PRs; it does not\nknow whether this is a flake, a load/timing cliff, a semantic conflict between\nqueued PRs, or a real regression, and it does not act on any of those. No test is\nskipped, quarantined or re-queued by it, and no PR is labelled by it — weakening\na gate stays a human act.\n\nWhat to do with it: read one victim PR's triage comment for the failure REASON\nline beside the FAIL line (a timeout and an assertion are the same FAIL line and\nopposite diagnoses), decide the cause, and close this issue with the fix or with\nthe reason it is not one.\n\nLast refreshed by queue build [33404373114](https://github.com/objectstack-ai/objectstack/actions/runs/33404373114) (PR #13828).\n\n---\n_Filed by the merge-queue-triage workflow (#4859, aggregation #10128)._\n\n<!-- queue-signature-anchor:src/envelope-caller-census.test.ts -->"
+}

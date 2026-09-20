@@ -1,0 +1,37 @@
+{
+  "number": 13807,
+  "kind": "issue",
+  "title": "`POST /api/v1/approvals/requests/{id}/reject` returns 500 while its effect lands AND strands the workflow run — three inconsistent outcomes from one call",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "approvals",
+    "bug",
+    "domain:services",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T13:29:04Z",
+  "updated_at": "2026-09-04T22:30:18Z",
+  "closed_at": "2026-09-04T22:12:27Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 13,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13807",
+  "body": "Split out of #13568 by the triage seat. #13568 was **ruled by the maintainer at 2026-08-31T02:20Z** (director batch #5, 「同意」). The evidence below was added to that card at **02:54Z and 03:57Z — after the ruling** — and describes a defect the ruling does not reach: #13568's remedy (auto-cancel pending approvals when a record is deleted) *prevents future orphans*; it says nothing about a write path that returns an error while applying its effect, and nothing about the runs already stranded.\n\n## The measurement (from #13568's follow-up comments, reporter `yinlianghui`, re-read from transcript by the filing session — not recalled)\n\nOne call against an orphaned `sys_approval_request` (its `record_id` points at a deleted `crm_leave_request` row):\n\n```\nPOST /api/v1/approvals/requests/{approvalRequestId}/reject     body {\"comment\": \"<text>\"}\n  → HTTP 500\n```\n\nand afterwards **three states coexist**:\n\n1. the caller received **500**;\n2. the request's `status` **is** `rejected`, and it has disappeared from the pending inbox — the effect landed;\n3. the workflow run is **stranded** — unrecoverable.\n\nThe full error text (the first quote of it in #13568 was truncated; the reporter corrected it in the third comment, which is the version to trust):\n\n```\n…ow run 'run_8380f743-ac5b-4c27-a976-9ac5e71f6a00' could not be resumed and is\nnow stranded: resume of run 'run_8380f743-ac5b-4c27-a976-9ac5e71f6a00' failed:\nNode 'mark_rejected' failed: update_record(crm_leave_request) failed:\nRecord 9SEmlyRfw8D9-J7Z not found in crm_leave_request\n```\n\nControls from the same session: `POST …/approve` on a healthy request → **200**. `DELETE /api/v1/data/sys_approval_request/{id}` → **405** (so the orphan cannot be cleaned up through the data API either).\n\n## Why this is p1 and separate from #13568\n\n- **The 500 lies about the outcome.** A caller — human, script, or agent — reads 500 as \"the rejection did not happen\" and retries or escalates. It *did* happen. This is the error/effect divergence class, and it is worse than a plain failure because the honest-looking response is the wrong one.\n- **`stranded` is unrecoverable and has no operator story on this card.** #13568's ruling produces no mechanism for runs already in that state, because it did not know about them.\n- **The trigger generalises past approvals.** `mark_rejected` fails because a workflow node writes back to a record that no longer exists. Any workflow node doing `update_record` on a since-deleted row plausibly reaches the same strand. ⚠️ Not measured — that generalisation is a hypothesis, and establishing its reach is this card's first step, not its premise.\n\n## First deliverables, in order\n\n1. **Establish the reach.** Does *any* workflow node failing mid-resume strand the run, or is this specific to the approval resume path? That decides whether the fix is in `plugin-approvals` or in the workflow engine, and it may re-anchor this card's lane.\n2. **Decide the atomicity posture** for the reject door: either the status write and the workflow resume succeed together, or neither does. ⛔ Returning 500 after a committed status write is not an option to preserve.\n3. **An operator path out of `stranded`** — even if it is only a documented manual step. A state a deployment can enter and never leave is not acceptable as an end state, and the 405 on the data API means there is currently no way out at all.\n\n## ⛔ Boundaries\n\n- ⛔ **Do not fold this back into #13568.** That card is ruled and dispatch-ready; this one is unruled and its first step is a measurement. Merging them would put a settled card behind an open question.\n- ⛔ **Do not \"fix\" this by making `/reject` return 200.** The effect landing while a run strands is the defect; a green status code would only hide it.\n- The `lockRecord` editing bind (#13568 item 4, \"改不了只能删重建\") is the amplifier that produces orphans in the first place, and the ruling explicitly declines to solve it here. Same posture on this card.\n\n## Related\n\n- #13568 — the ruled parent (orphaned approval requests; auto-cancel + tombstone).\n- #7345 — adjacent symptom, different cause (record exists, approver lacks read access); closed `not_planned`.\n- #3424 / #3456 — approval routed to an empty position permanently locks the record; the *lock* cause, not this."
+}

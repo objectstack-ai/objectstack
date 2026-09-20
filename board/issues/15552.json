@@ -1,0 +1,35 @@
+{
+  "number": 15552,
+  "kind": "issue",
+  "title": "Twelve more authoring rules crash on a non-record entry in stack.objects — five unguarded readers beyond the indexObjectGraph seam",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T20:37:27Z",
+  "updated_at": "2026-09-05T01:49:51Z",
+  "closed_at": "2026-09-05T01:47:46Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15552",
+  "body": "Found while implementing #15494 (the `indexObjectGraph` seam guard); filed as a finding only, not claimed.\n\n#15494 repairs ONE seam. The measurement that verified it turned up twelve more rules that crash on the identical input, through five more unguarded readers of `stack.objects` — including three inside the reference-integrity suite itself, so `validateReferenceIntegrity({ objects: [null] })` still throws after #15494 lands.\n\n## Measured\n\nOn `b7bf0bd9b` (#15494's branch, seam guard applied), driving the whole `AUTHORING_RULES` table over `{ objects: [null, validObject] }` — 42 rules, 13 throw:\n\n| rule | throws at | message |\n|:--|:--|:--|\n| `validateStackExpressions` | `packages/lint/src/validate-expressions.ts:134` | Cannot read properties of null (reading 'name') |\n| `validateListViewMode` | `packages/lint/src/validate-list-view-mode.ts:149` | Cannot read properties of null (reading 'name') |\n| `validateWidgetBindings` | `packages/lint/src/validate-widget-bindings.ts:465` | Cannot read properties of null (reading 'name') |\n| `validateFilterTokens` | `packages/lint/src/filter-walk.ts:155` | Cannot read properties of null (reading 'name') |\n| `validatePresetComparands` | `packages/lint/src/filter-walk.ts:155` | Cannot read properties of null (reading 'name') |\n| `validateEmptyCombinators` | `packages/lint/src/filter-walk.ts:155` | Cannot read properties of null (reading 'name') |\n| `validateReferenceIntegrity` | `packages/lint/src/validate-object-references.ts:142` | Cannot read properties of null (reading 'name') |\n| `validateRecordTitle` | `packages/lint/src/validate-record-title.ts:75` | Cannot read properties of null (reading 'name') |\n| `validateFormLayout` | `packages/lint/src/validate-form-layout.ts:126` | Cannot read properties of null (reading 'name') |\n| `lintAutonumberFormats` | `packages/lint/src/lint-autonumber-formats.ts:56` | Cannot read properties of null (reading 'name') |\n| `lintViewRefs` | `packages/lint/src/lint-view-refs.ts:204` | Cannot read properties of null (reading 'name') |\n| `validateOrgAxisRedLines` | `packages/lint/src/validate-org-axis-red-lines.ts:189` | Cannot read properties of null (reading 'tenancy') |\n| `validateSharingRuleEnforceability` | `packages/lint/src/validate-sharing-rule-enforceability.ts:432` | Cannot read properties of null (reading 'name') |\n\n**Control leg**: the same 42 rules over `{ objects: [validObject] }` — zero throws. Every row above is attributable to the junk entry alone, not to the fixture.\n\nThree of those rows are members of the reference-integrity suite reached through two more SHARED indexers, so each row is worth more than one rule:\n\n- `indexObjectSearchTargets` (`packages/lint/src/validate-searchable-fields.ts:287`) — `validateSearchableFields` and `validateSortableFields`\n- `indexObjectFields` (`packages/lint/src/validate-page-field-bindings.ts:358`) — `validatePageFieldBindings` and `validateReactPageProps`\n- `validateObjectReferences`'s own loop (`packages/lint/src/validate-object-references.ts:142`)\n\n`validateWidgetBindings` is the fourth `indexObjectGraph` caller and #15494 does NOT fix it: it dereferences the entry at its own line 465, in the aggregate-coherence pass that runs BEFORE the seam. That file was held by an in-flight change while #15494 was implemented, which is the other reason it was left.\n\n## Why it matters\n\nSame argument as #15494, one layer wider. These rules are pure `(stack) =` `Finding[]` and run on the raw `lint` path as well as the parsed one; at the runtime publish gate they are called inside the gate rather than behind a try/catch of their own. A throw there is an exception on a write path, not a skipped finding — and `os lint` / `os validate` / `os compile` die on the first one rather than reporting the stack.\n\nA `null` member is not exotic: an empty list item in a YAML source deserialises to exactly that, as does a partial editor write.\n\n## Suggested shape\n\nThe same guard as #15494, at each reader, with the same verdict: DROP the non-record entry, do not report it. That decision was measured on this table — 28 of the 42 rules already judge the input in silence, and not one rule reports the junk entry (`validateSecurityPosture` emits `security-owd-unset`, but its `path` moves `objects[1].sharingModel` to `objects[0].sharingModel` when the junk entry is removed, so it is a finding about the VALID object).\n\nWorth considering as one edit rather than thirteen: the package carries ~50 hand-copied `asArray` helpers, of which roughly a dozen already spell the defensive `filter(isRec)` and the rest do not. A single shared collection reader would close the class and keep it closed; the per-file guard closes it once.\n\n## Not this card\n\n#15494 owns `indexObjectGraph` (`packages/lint/src/object-graph.ts`) and the publish-probe half in `packages/metadata-protocol/src/build-probes.ts`. Nothing above is in that PR.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

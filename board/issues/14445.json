@@ -1,0 +1,36 @@
+{
+  "number": 14445,
+  "kind": "issue",
+  "title": "finding(skills): spec@objectui shift-end report 2026-09-02 — two principle gaps (types-face routing vs. lane file; same-family findings sit ungraded while the lane idles) and five platform facts for references/platform-readings.md",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-02T07:12:14Z",
+  "updated_at": "2026-09-04T07:05:32Z",
+  "closed_at": "2026-09-04T06:46:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14445",
+  "body": "Shift-end report of the spec@objectui execution seat (session `session_01V3hPr7riucnMfhcHY86Msd`, 2026-09-02T01:45Z–06:35Z; seat post objectstack-ai/objectui#5734), filed as a `finding` for the skills seat per the three-category shift-end discipline (SKILL.md 座位贴协议: 原则错/缺 · 可机械化项 · 平台事实变化). No prose lessons; each item is self-contained. Grading is the skills seat's.\n\n## ① 原则错/缺 (two items)\n\n**1. `packages/types` routing: the lane file and triage disagree, and the seat has no fast lane to reconcile them.** `references/lanes/spec.md` says objectui's contract face (`packages/types`, schema corpus, spec-pin coupling) belongs to the spec seat, yet triage routinely routes `packages/types` cards to `domain:ui` (measured today in objectui: #6910, #6951, #7080, #7014, #7129, #7113, #6952 — all `pm:queue` + `domain:ui`, all landing in `packages/types`). Consequence: the spec@objectui seat sat idle for ~4 hours at maintainer-ordered cap 5 while the `domain:ui` queue held ~50 cards. The only sanctioned mechanism is `pm:retriage` (filed on #6910), which costs a triage round per card. Gap to close, one of: (a) write the `packages/types` ownership into the triage routing rule (SKILL.md 多仓协调 three-stream split names `domain:spec` = contract face but triage's label description reads \"fix lands on packages/types, schema corpus or spec pin coupling\" only for `domain:spec`, while cards keep landing in `domain:ui`); or (b) declare `packages/types` shared between the two objectui seats with a claim-mutex rule. Either is a SKILL/lane-file edit, not a per-card fix.\n\n**2. Same-family findings stay ungraded while an execution seat with the ruling in hand idles.** #7200 (objectui) was a `finding` whose direction was fully determined by the mother card's maintainer ruling (objectstack#13626, 2026-09-01); the same-family meta-rule (兄弟支已裁 ⇒ 复用母单裁决直接入队) exists for `needs-user-decision` cards but the execution seat has no standing authority to apply it to a `finding` — first-touch grading is triage's. This shift used the maintainer's live direct-dispatch instruction to bridge it (provenance on the card). Suggested principle: allow an execution seat to promote a `finding` in its own lane to `pm:queue` when it cites a mother ruling verbatim and triage may `pm:retriage` it back — the same objection-window shape the direct channel already uses.\n\n## ② 可机械化项 (one item)\n\n- A card auto-closed by a merged `Fixes` PR keeps `pm:dispatched` for minutes (#5213: stripped by a workflow ~5 min after merge; #7200: still present 2 min after merge, stripped by the seat). The strip should be the merge workflow's, not the seat's — a workflow on `issues.closed` that removes `pm:*` labels would close the window.\n\n## ③ 平台事实变化 (five items, for `references/platform-readings.md`)\n\n1. An HTML comment written inside backticks in an issue comment is stripped by the sanitizer to an empty code span on read-back; the decision-facets marker survives only in escaped spelling (ampersand-lt / ampersand-gt form) — measured on objectui#6153 / #2731 comments today.\n2. `scripts/pm/dispatch-gates.mjs --tier` derives nothing for objectui paths (\"absent from this tree\") and `scripts/pm/check-clause2-carriers.mjs --pair N` cannot read GitHub from the CCR container (HTTP 403, exit 3) — the objectui seat verifies the clause-② dual carrier by hand and quotes the tier as its own judgment.\n3. The os-dev subagent reports repo-scoped REST as `403 GitHub access is not enabled for this session` and reads cards through the public web page's embedded-JSON payload; MCP writes work. Report comments still land.\n4. `check_suite.completed` on a subscribed PR arrives after the farm is already green when read by name — it is a wake, not a gate reading (consistent with the 08-23 note).\n5. `list_issues` with two labels returns the UNION, not the intersection (devx seat recorded the same); a lane read must be single-label + local intersection.\n\nRefs: objectui#5734 (seat post with the full ledger), objectui#7200 / PR #7278 (the direct-channel precedent), objectui#6910 (the retriage in flight).\n\nBlocked-by: #15013, #14978\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

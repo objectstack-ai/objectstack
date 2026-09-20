@@ -1,0 +1,33 @@
+{
+  "number": 15339,
+  "kind": "issue",
+  "title": "measure-self-test-floor: PRODUCES_FAILURE does not recognise a ternary `process.exit(cond ? 0 : 1)`, so a sound roster floor classifies NONE",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T12:32:00Z",
+  "updated_at": "2026-09-04T15:39:56Z",
+  "closed_at": "2026-09-04T15:39:02Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15339",
+  "body": "Found while floooring `scripts/check-regen-pending.mjs` (batch 10d of #13799, PR #15338). Filed unassigned, out of that card's scope.\n\n## What happens\n\n`classifyFloor()` in `scripts/measure-self-test-floor.mjs` returns ROSTER only when BOTH halves match:\n\n- `ROSTER_COMPARISON` — the roster's name (`SELF_TEST_BATTERIES` / `declaredBatteries` / `BATTERY_FLOOR`) compared as a set;\n- `PRODUCES_FAILURE` — `failures.push`, `process.exit(1)`, `throw new Error`, `exitCode = 1`, or `ok(false`.\n\nA self-test whose exit is spelled as a **ternary** — `process.exit(ok ? 0 : 1)`, which is a common and perfectly ordinary spelling — matches NONE of the `PRODUCES_FAILURE` alternatives, because the literal `process.exit(1)` never appears. So a file can carry a complete, working roster floor and still classify **NONE**.\n\nMeasured on `scripts/check-regen-pending.mjs` mid-card, before I changed its verdict spelling:\n\n```\nROSTER_COMPARISON matches: true\nPRODUCES_FAILURE matches : false\nclassifyFloor            : NONE\n```\n\nThe floor was real and its ablations all fired (a callee that did not run reds); only the classifier could not see it.\n\n## Impact today: none — this is about recall, not a wrong verdict on `main`\n\nSwept the current population: **0 files classify NONE while carrying a roster the instrument can see.** Three files use a ternary `process.exit` and all three classify ROSTER anyway, because they happen to carry another recognised failure spelling elsewhere in the file (`check-i18n-stale-fill.mjs`, `check-page-declaration-shape.mjs`, and `check-regen-pending.mjs` after PR #15338).\n\nSo nothing is mis-reported right now. What this costs is **prospective**, and it is a real cost for the remaining #13799 batches: a Tier C author who copies the recipe faithfully onto a file whose verdict is a ternary exit gets a green ablation sweep and an instrument that still says NONE, and has to diagnose why. It cost one extra commit on PR #15338.\n\nNote this is distinct from the known one-direction caveat in the script's own header, which is about a floor **spelled with names it does not know**. Here the roster name IS known and matched; it is the failure-production half that misses.\n\nAlso distinct from the two open issues in the same family: #14963 (the handshake probe anchors on the first `function selfTest() {`) and #14842 (two self-test-shaped functions and no ENTRY_BY_HAND row).\n\n## Options\n\n- **A.** Extend `PRODUCES_FAILURE` with the ternary shape (something matching `process.exit(` ... `: 1)`), keeping the deliberate rule that a floor must PRODUCE a failure rather than merely be named. Cheapest; keeps the instrument high-recall as its header intends.\n- **B.** Leave the classifier alone and make the Tier C recipe state that the failure path must use a recognised production spelling. Zero risk to the instrument, but it pushes a tool's blind spot onto every future author.\n- **C.** Do nothing — 0 current mis-classifications, and the header already warns the population is an upper bound.\n\nRecommendation: **A**, with a `--self-test` case pinning the ternary shape, since the instrument's whole job is to bound the hole and a false NONE inflates that bound in exactly the population #13799 is working through.\n\n## Repro\n\n```\nnode -e \"const m=await import('./scripts/measure-self-test-floor.mjs');\nconst c='const SELF_TEST_BATTERIES={a:1}; const d=Object.keys(SELF_TEST_BATTERIES); if(d.length<1){} process.exit(ok ? 0 : 1);';\nconsole.log(m.classifyFloor(c));\"   // prints NONE\n```"
+}

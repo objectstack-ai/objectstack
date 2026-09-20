@@ -1,0 +1,33 @@
+{
+  "number": 15433,
+  "kind": "pull_request",
+  "title": "test(scripts): release-rehearsal-clone's C2 green line is stable — the measured timing prints only on failure (#15400)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T15:34:00Z",
+  "updated_at": "2026-09-04T16:08:14Z",
+  "closed_at": "2026-09-04T16:08:13Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-09-04T16:08:13Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/15433",
+  "body": "Fixes #15400\n\n## What changed\n\nOne line in `scripts/pm/release-rehearsal-clone.mjs`. The C2 case interpolated the\nmeasured wall-clock figure into its own label, so the `✓` line carried a value that\ndiffers from run to run:\n\n```\n  ✓ C2 a healthy tree is not slowed (107 ms < 10000)\n```\n\nThe figure now goes through the failure sink `t()` / `report()` already carry — the\nthird argument, printed only when the condition is false — and the label states the\nthreshold only:\n\n```\n  ✓ C2 a healthy tree is not slowed (< 10000 ms)\n```\n\nPer the ruling on #15400 (option 1). The assertion condition (`healthyMs < 10_000`)\nand the threshold are unchanged, C2 still registers exactly once through `t`, and the\nroster (`'release-rehearsal-clone self-test': 30`), `SELF_TEST_BATTERY_FLOOR` and the\n`tConditional` split from #15399 are untouched. No other case, condition, message or\nargument changes.\n\n## The proof the card asks for: two runs, twelve minutes apart\n\n`node scripts/pm/release-rehearsal-clone.mjs --self-test` run twice, 15:18:31Z and\n15:30:31Z, stdout and stderr captured separately and `cmp`d.\n\n**This branch** — byte-identical:\n\n```\n--- BRANCH: stdout cmp ---\nCMP_BR_OUT_EXIT=0\n--- BRANCH: stderr cmp ---\nCMP_BR_ERR_EXIT=0\n--- combined stdout+stderr cmp (branch) ---\nCMP_BR_ALL_EXIT=0\n```\n\n**Control, the same pair on the base pin `52d5a52d5`** (a second detached worktree at\nthe same commit) — differs, on exactly the C2 line and nothing else:\n\n```\n--- CONTROL: base stdout cmp ---\nbase-run1.out base-run2.out differ: char 501, line 10\nCMP_BASE_OUT_EXIT=1\n--- CONTROL differing lines ---\n10c10   (line 10, run 1 vs run 2)\n  run 1:   ✓ C2 a healthy tree is not slowed (107 ms < 10000)\n  run 2:   ✓ C2 a healthy tree is not slowed (94 ms < 10000)\n```\n\n## A red run still names the timing\n\nForced-slow ablation — the condition's threshold mutated to `healthyMs < -1`, proven on\ndisk before the run (injected spelling present 1×, removed spelling 0×, blob hash moved\n`ef88cbc… -> ce605ec…`), restored under an `EXIT INT TERM` trap and the restore proven\nby hash equality plus an empty `git diff HEAD`:\n\n```\nMUTATION-ON-DISK: injected='healthyMs < -1' count=1 ; removed='healthyMs < 10_000' count=0\nABL_A_EXIT=1\n10:  ✗ C2 a healthy tree is not slowed (< 10000 ms)\n11-      measured 112 ms\nRESTORE-PROVEN: hash==ef88cbcec9433e2833ca4cf57798be81a6e1dc2c, git diff HEAD empty, status clean\n```\n\n## The floor is untouched\n\nRoster pin ablated `30 -> 9999`, same mutation/restore discipline — C2 still registers,\nand the count the floor sees is still exactly 30:\n\n```\n✗ self-test battery \"release-rehearsal-clone self-test\" registered 30 case(s), below its pinned floor of 9999\nRESTORE-PROVEN: hash==ef88cbcec9433e2833ca4cf57798be81a6e1dc2c, git diff HEAD empty, status clean\n```\n\n`node scripts/measure-self-test-floor.mjs --json` before and after the edit is\nbyte-identical (170 rows, `ROSTER` 164 / `NONE` 5 / `COUNT` 1); this file stays\n`{\"file\":\"scripts/pm/release-rehearsal-clone.mjs\",\"floor\":\"ROSTER\",\"defs\":[\"selfTest\"]}`.\n\n## Gates\n\nAll at `023dcd71d`, the final commit; exit codes captured before any pipe.\n\n- The derived family, `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`\n  — 23 commands, every one run, all `EXIT=0`. The heavy leg (13 `pnpm check:*`, including\n  `check:pm-dispatch-gates` at 403s) ran in the foreground under\n  `scripts/pm/os-verify-lock.sh`: `VERDICT command-exit 0`.\n- The always-runs tail: `check-self-test-workflow-commands.mjs` and its `--self-test`,\n  `check:declared-population-live`, `check-self-test-wired.mjs`, `check:ratchet-remedy-authority`,\n  `check:nul-bytes`, `check:watch-hint-literal` — all `EXIT=0`.\n- This file's own `--self-test`, the `lint.yml` step: `EXIT=0`, `✓ self-test passed`.\n- Whole-repo `pnpm lint` (`eslint . --no-inline-config`) under the verify lock:\n  `LINT_EXIT=0`, no findings. Not a narrowed run.\n- Control-character self-scan over the changed file: no matches.\n\nNo changeset: this changes a repo-internal PM script and publishes nothing from any\npackage, so `skip-changeset` applies.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_012zGPuVVX3deAx9LdjK8jCk\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012zGPuVVX3deAx9LdjK8jCk)_"
+}

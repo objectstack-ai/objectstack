@@ -1,0 +1,36 @@
+{
+  "number": 15489,
+  "kind": "issue",
+  "title": "check-adr-0087-registration: readDeclaredTypeSurface does not return a declared type for interface/class/enum (it returns the symbol name) or for multi-line type aliases (truncated at the first semicolon)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "finding",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T18:03:28Z",
+  "updated_at": "2026-09-05T01:33:57Z",
+  "closed_at": "2026-09-05T01:32:38Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15489",
+  "body": "Found while running the #14502 regression (the maintainer-ordered measurement that must precede any predicate-4 change). Filed unassigned for triage. Not blocking #14502 — that card stopped on a different finding — but this one is a prerequisite for **any** future work on predicate 4, and it already produces wrong text in a live refusal message today.\n\n## The defect\n\n`readDeclaredTypeSurface(text, symbol)` in `scripts/check-adr-0087-registration.mjs:2498` is documented as returning \"what this gate can read about `symbol`'s declared type at one rev\". It returns `{ shape, type, erased }`. For two of the three shapes it handles, **the `type` field is not the declared type**:\n\n1. **`interface` / `class` / `enum`** — `:2504-2508` returns `type: symbol`, i.e. the **symbol's own name**, never its members. Measured on the real `packages/rest/src/export-format.ts#ExportFieldMeta` at `9b9b70f80^` and `9b9b70f80`, a commit that removed **eight** members from that interface:\n\n   ```\n   base .type = \"ExportFieldMeta\"    head .type = \"ExportFieldMeta\"\n   ```\n\n2. **`type` alias** — `:2510` reads the right-hand side with a lazy `([\\s\\S]*?);`, which stops at the **first `;`**, not at the end of the alias. Any multi-line object alias is truncated at its first member. Measured on a three-member alias:\n\n   ```\n   export type ActorUser = {\n     id: string;\n     roles: string[];\n     positions: string[];\n   };\n   ```\n   reads back as `type: \"{ id: string\"` — at **both** revs, so a member removal reads as no change.\n\n3. **Member return annotation** — correct. `memberReturnAnnotation` walks brackets properly and returns the author's own bytes.\n\n## Why it is not inert today, and why it matters more tomorrow\n\n**Today.** Only `.erased` is consulted for the verdict, and neither misread flips `erased` (a truncated `{ id: string` is not `any`/`unknown`, and a symbol name is not either), so **no live verdict is wrong**. But `.type` is interpolated into the predicate-4 refusal text at `:2704-2706`, so an author who trips predicate 4 is told:\n\n```\nan exported `interface ExportFieldMeta` was already CONCRETE (`ExportFieldMeta`), not `any` / `unknown` / unannotated.\n```\n\nThe parenthesised value is presented as the type that was found. It is the symbol name. For a `type` alias the same slot prints a string truncated mid-member. A gate that names its evidence should name evidence that is real; this one prints a tautology in the interface case.\n\n## The trap\n\n`.type` is the exact field any base-vs-HEAD comparison of \"the declared type\" would read. A comparison built on it is **structurally blind** to member changes on `interface` / `class` / `enum` (constant symbol name at both revs) and to member changes on multi-line `type` aliases (identically truncated at both revs) — while reading correctly for method return annotations. That is a reader that answers \"did the declared type change\" with **no** for two spellings of a change and **yes** for a third spelling of the same change. Measured, all three on the same member-removal shape:\n\n| spelling of the same member removal | `.type` changed? |\n| --- | --- |\n| `export interface ActorUser { ... }` | no |\n| `export type ActorUser = { ... }` | no |\n| a method return annotation `(): { ... }` | **yes** |\n\nWhatever is decided about predicate 4, this reader should either report the declared type it claims to report, or its doc comment and its refusal text should stop claiming it does.\n\n## Reproduction\n\nBoth misreads are readable straight out of the shipping module, no fixture needed:\n\n```js\nconst g = await import('./scripts/check-adr-0087-registration.mjs');\ng.readDeclaredTypeSurface('export interface X { a: string; b: string }\\n', 'X');\n// { shape: 'an exported `interface X`', type: 'X', erased: false }\ng.readDeclaredTypeSurface('export type X = {\\n  a: string;\\n  b: string;\\n};\\n', 'X');\n// { ... type: '{ a: string', erased: false }\n```\n\n## Scope\n\n`scripts/check-adr-0087-registration.mjs` and its self-test. `TSO-U` (the unit-pin battery on predicate 4's readers, 19 assertions) is where a pin for this belongs — it currently pins `erased`, not `type`.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

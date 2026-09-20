@@ -1,0 +1,36 @@
+{
+  "number": 14902,
+  "kind": "issue",
+  "title": "driver-sql: a PLAIN unique index (no organization key part) over existing duplicate rows fails the boot with the raw driver error naming no rows and no remedy, and `os migrate plan` classifies the same op `safe` with no duplicate pre-flight",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p1"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-03T08:44:29Z",
+  "updated_at": "2026-09-04T18:36:42Z",
+  "closed_at": "2026-09-04T18:32:48Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14902",
+  "body": "Measured while implementing #13894 (autonumber fields default to `unique: 'organization'`), on `origin/main` `2263ca4d6`, sqlite (`better-sqlite3`). Filed unassigned for the engine lane — the #13894 dispatch fences `packages/drivers/**` as measurement-only (PR #14773 is open on `sql-driver.ts`).\n\n## The two shapes, side by side\n\nSame fixture: table `crm_quote` with two rows sharing `quote_number = 'QUO-00009'`, then `initObjects` with `quote_number: { type: 'autonumber', unique: true }`.\n\n**A — organization-scoped object (the NULL-safe composite path).** The boot continues; the driver logs at `error` naming the index, the unenforced constraint and the remedy; the same boot's drift pass names the conflicting key groups with row counts; `os migrate plan` (`detectManagedDrift`) reports the blocked `create_index` (`category: 'destructive'`, `severity: 'error'`) with the same groups. This is the ADR-0120 D4 posture and it is the one #13894's default relies on. Verbatim:\n\n```\n[sql-driver] cannot create NULL-safe unique index 'uniq_crm_quote_organization_id_quote_number' on \"crm_quote\" — existing rows violate it (duplicates the previous NULL-distinct index admitted, #5030). The constraint 'organization_id, quote_number' is NOT enforced until the data is deduplicated: run \"os migrate plan\" for the conflicting rows (ADR-0120 D4).\n[schema-drift] crm_quote: cannot create 'uniq_crm_quote_organization_id_quote_number' as UNIQUE (COALESCE(organization_id, '__global__'), quote_number) — existing rows already violate the NULL-safe unique constraint (duplicates the old index wrongly admitted, #5030): (organization_id=\"__global__\", quote_number=\"QUO-00009\") × 2 rows; (organization_id=\"org_x\", quote_number=\"QUO-00010\") × 2 rows. The op is BLOCKED: apply re-probes and refuses, and the existing index stays in place (ADR-0120 D4). Deduplicate the listed rows, then re-run \"os migrate plan\".\n```\n\n**B — `tenancy: { enabled: false }` (the plain single-column path).** `initObjects` THROWS the database's own error — the boot dies, the message names the index/column but no rows and no remedy, nothing is logged on the durability channel:\n\n```\ncreate unique index `uniq_crm_quote_quote_number` on `crm_quote` (`quote_number`) - UNIQUE constraint failed: crm_quote.quote_number   (code=SQLITE_CONSTRAINT_UNIQUE)\n```\n\nand `detectManagedDrift()` for the same table reports the op as harmless:\n\n```\n{ kind: 'index_mismatch', expected: 'UNIQUE (quote_number)', actual: '(absent)', severity: 'warning', category: 'safe',\n  message: \"crm_quote: metadata declares index 'uniq_crm_quote_quote_number' UNIQUE (quote_number) but the database has no such index — run \\\"os migrate apply\\\" to create it.\" }\n```\n\nso `os migrate apply` (and dev `autoMigrate: 'safe'`) would walk into the same raw failure with no pre-flight.\n\n## Where in the code\n\n- `packages/drivers/driver-sql/src/sql-driver.ts` `syncDeclaredIndexes`: the `catch` absorbs a unique violation only when `nullSafe.size > 0` (`isUniqueViolationError(e)` → `logDurabilityFailure` + `continue`); the plain path falls through to `throw e`.\n- `applyNullSafeUniquePreflight` (ADR-0120 D4) probes only ops carrying `nullSafeColumns`, so a plain unique `create_index` keeps its default `safe` category and never gets a row report.\n\n## Why it matters more after #13894\n\nThe default flip makes every autonumber field unique. On an organization-scoped object that lands on path A (loud, non-fatal, rows named). On an object that opted out of tenancy — or on any plain `unique: 'global'` field — it lands on path B: a table with legacy duplicates takes the whole boot down with a message an operator cannot act on, and the plan that should have warned them says `safe`.\n\n## Suggested shape (engine lane's call)\n\nExtend the D4 pre-flight to plain unique `create_index` ops (GROUP BY the bare columns HAVING COUNT(*) > 1 — `probeNullSafeUniqueDuplicates` already handles a column list with an empty NULL-safe set), and give the sync's `catch` the same \"log at `error` naming the constraint and the remedy, then continue\" posture for a unique violation on the plain path, so both paths are loud and neither is fatal or silent. `os migrate duplicates` (#8928) deliberately reports only cross-partition duplicates and is not the channel for this.\n\nRefs: #13894, #5030, ADR-0120 D4, #8928."
+}

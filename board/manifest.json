@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "repo": "objectstack-ai/objectstack",
-  "generated_at": "2026-09-20T02:33:42.703Z",
+  "generated_at": "2026-09-20T08:29:45.077Z",
   "walk_phase": "history",
   "walk": {
     "open_set": {
@@ -11,41 +11,41 @@
     },
     "delta": {
       "complete": true,
-      "cursor": "2026-09-20T02:28:58Z",
-      "since": "2026-09-19T20:18:38Z",
+      "cursor": "2026-09-20T08:25:43Z",
+      "since": "2026-09-20T02:28:58Z",
       "slice": 300
     },
     "history": {
       "complete": false,
-      "cursor": "2026-09-04T06:48:40Z"
+      "cursor": "2026-09-05T02:34:11Z"
     }
   },
-  "since": "2026-09-02T17:52:21Z",
-  "since_reason": "the open set is complete — the closed history resumes at 2026-09-02T17:52:21Z",
-  "next_since": "2026-09-20T02:28:58Z",
+  "since": "2026-09-04T06:48:40Z",
+  "since_reason": "the open set is complete — the closed history resumes at 2026-09-04T06:48:40Z",
+  "next_since": "2026-09-20T08:25:43Z",
   "resume": {
-    "since": "2026-09-04T06:48:40Z",
+    "since": "2026-09-05T02:34:11Z",
     "phase": "history",
     "stopped_by": "budget",
     "reason": "the per-run budget of 800 requests is spent"
   },
   "counts": {
-    "issues_open": 537,
-    "issues_closed": 6690,
-    "pulls_open": 21,
-    "pulls_closed": 7904,
-    "records": 15152
+    "issues_open": 545,
+    "issues_closed": 6860,
+    "pulls_open": 24,
+    "pulls_closed": 8089,
+    "records": 15518
   },
   "board": {
-    "open_issues_count": 549,
-    "open_pull_requests": 21,
-    "read_at": "2026-09-20T02:31:23.573Z"
+    "open_issues_count": 560,
+    "open_pull_requests": 24,
+    "read_at": "2026-09-20T08:27:29.744Z"
   },
   "count_check": {
     "verdict": "surplus",
     "reason": null,
-    "expected": 528,
-    "archived": 537,
+    "expected": 536,
+    "archived": 545,
     "shortfall": 0,
     "surplus": 9,
     "gone_ledger": 0,
@@ -58,12 +58,12 @@
   },
   "requests": 800,
   "run": {
-    "numbers_read": 466,
-    "files_written": 865,
+    "numbers_read": 452,
+    "files_written": 833,
     "walk_complete": false,
     "open_set_completed_here": false,
     "delta_ran": true,
     "delta_completed_here": true,
-    "delta_requests": 91
+    "delta_requests": 153
   }
 }

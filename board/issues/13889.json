@@ -1,0 +1,32 @@
+{
+  "number": 13889,
+  "kind": "issue",
+  "title": "[Decision] `severity: 'warning'` 的校验规则没有受众概念 —— UI 级劝导在 seed/bootstrap 等机器写入路径上照样求值并打爆启动日志,且按写入次数而非按行计数",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-31T15:59:45Z",
+  "updated_at": "2026-09-04T12:07:04Z",
+  "closed_at": "2026-09-04T12:06:27Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13889",
+  "body": "按维护者指示上行立卡(2026-08-31,hotcrm#1203 决裁,逐字:「#1203 种子数据触发 related_to_required 警告，这种也是平台的问题啊」)。\n\n## 实测事实(hotcrm#1203 + PR #1291 全记录,dev 全枚举 + PM 独立复核 + 消融验证)\n\n- hotcrm 的 `related_to_required`(`severity: 'warning'`,文案 \"At least one related record should be selected\")是写给**表单中的人**的劝导。种子里恰好一行合法的内部任务(刻意不挂父记录、注释在场)触发它;\n- **平台对 warning 级规则没有受众/通道概念**:同一条规则在 seed 加载、`demo_bootstrap` 认领回写等**机器写入**路径上照样求值,以 `WARN` 打进服务器启动日志 —— 一条给人看的表单提示变成了「启动诊断」,读起来像 boot 失败;\n- **按写入计数,不按行**(hotcrm#1203 dev 发现 3):bootstrap 认领扫描回写 `owner_id` 会对**业务字段未变**的行重新求值全部规则 ⇒ 同一行清库首启响两次;任何数启动日志 warning 的人都会按「被认领对象数」高估;\n- 应用侧无路可走而不弯东西:达成「零警告」只能强行挂父(弯数据)或删规则(削门禁)—— hotcrm#1203 的四选项分析已排除两者,而「容忍日志行」把成本留给每一个全新部署的第一印象。\n\n## 要裁的形状(平台统一,⛔ 应用不逐行辩护)\n\n- **A · 声明受众**:`ValidationRuleSchema` 给 advisory 级规则一个受众/通道位(如 `audience: 'interactive'` 或按 severity 约定)—— warning 级只在用户交互写入时求值/呈现,机器路径(seed/bootstrap/system)跳过或聚合。条款②面(spec 契约扩宽或语义收窄),需设计混用与默认值;\n- **B · 引导路径聚合**:seed/bootstrap 加载器把 advisory 命中聚合为一行摘要(「N 行触发 advisory 规则 X,详见…」),不改规则语义,只改日志形状;同笔修「按写入计数」(业务字段未变的系统回写不重复求值 advisory);\n- **C · 维持并文档化**(warning 即全路径日志,应用自行容忍)—— hotcrm#1203 的经验说明这会把每个样板/应用逼进「弯数据 vs 忍噪音」的假选择。\n\n## 相关但不并卡\n\n- 种子日期是未解析 CEL 信封,离线对种子求值日期谓词会得到自信的错答案(hotcrm#1203 dev 发现 1)—— 工具面单独关切;\n- 双 autonumber 计数器启动警告已有上游 #8686。\n\nRefs: hotcrm#1203(测量全记录,现象卡已收口)· hotcrm PR #1291(防回归钉)· 2026-08-31 应用仓三原则 objectstack#13848。"
+}

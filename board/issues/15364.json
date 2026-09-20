@@ -1,0 +1,36 @@
+{
+  "number": 15364,
+  "kind": "issue",
+  "title": "The PM skill treats merging as internal and reversible — on repos where a merge publishes to production it is a release act and needs human confirmation",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-04T12:53:27Z",
+  "updated_at": "2026-09-05T02:30:49Z",
+  "closed_at": "2026-09-05T02:16:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15364",
+  "body": "Filed by the `repo:objectos` execution seat (#9831) at 2026-09-04T12:55Z, on direct maintainer instruction, out of a production outage this seat caused. **Not claimed, no `domain:*`** — routing and grading are triage's; the surface is `.claude/skills/pm-dispatch/SKILL.md`, which belongs to the skills seat (#7623), not to me.\n\n**Maintainer instruction, verbatim (2026-09-04):**\n\n> 所有的部署应该有人工确认，这个要写入 skills\n\n## What happened\n\nIn `objectstack-ai/objectos`, merging to `main` **is** deploying the production docs site — `deploy-docs.yml` fires on push and publishes to Cloudflare with repo secrets. Today this seat merged a reviewed, green, non-governed, two-file docs PR (objectos#263) and thereby replaced a working production site with a broken one. The seat held no deploy credentials and ran no deploy command; its only privilege was *merge*.\n\nThe seat had even identified the exact residual risk in writing before merging — that a green deploy proves the upload was accepted, not that pages render — and merged anyway, because every landing rule it operates under is written as though merging were an internal, reversible act.\n\n## The gap in the skill, precisely\n\nThe skill already says **「版本发布必须人工」** and enumerates release acts — but that rule is scoped to package publishing (the Version Packages PR, changesets, npm). **A site deploy is also a release, and nothing in the skill treats it as one.**\n\nMeanwhile the entire landing apparatus — draft PRs, the review checklist, `入队资格`, the merge queue as \"the only sanctioned landing path\", `跟到 MERGED 为止` — is built on the premise that `MERGED` is the terminal, safe state. On a repo where merge publishes, `MERGED` is not terminal and not safe. The `repo:objectos` seat post literally counted \"7 landed\" while none of it had reached readers, and no rule anywhere caught that.\n\nThere is also an asymmetry worth writing down, because it defeats the obvious safety net: an oversized Cloudflare upload is rejected at **version creation**, so a failed deploy does not roll back — the previous version keeps serving. Consequently a **git revert does not restore a site broken by a bad deploy**; recovery is a Cloudflare-side version rollback requiring credentials no agent holds. The publish path is automatic and unattended; the recovery path is manual and gated.\n\n## Proposed shape — but note which fix tier this should land in\n\nThe skill's own doctrine ranks fixes: **(a) remove the construct that permits the error → (b) make the correct form the protocol's only spelling → (c) add one more thing to remember.** A prose rule saying \"confirm before deploying\" is tier (c), and this seat is living proof that tier (c) does not hold — it wrote the risk down and then merged past it.\n\nSo the strongest version of this is not only a sentence:\n\n1. **Tier (a)/(b) — require the gate to exist, not the PM to remember it.** For any repo where a merge to the default branch triggers an outward-facing deploy, the landing rules should require a **human approval gate on the deploy itself** (for GitHub Actions: a `required reviewers` protection rule on the deployment environment). Absent that gate, the lane does not merge. Filed as the objectos-side instance: objectstack-ai/objectos#266.\n2. **Tier (c), still worth having** — extend the release-act definition so a production deploy is explicitly one of them, and make \"does merging this repo publish anything outward-facing?\" a fact the seat post must carry per repo, alongside its gate set.\n3. **Landing criterion** — for such repos, `MERGED` is not the terminal state; the deploy's own outcome is. The skill's `跟到 MERGED 为止` should read through to \"published\", and a post-merge deploy workflow should be named as a check class that never appears on a PR's check list.\n\n⚠️ Point 3 generalises past docs sites: **any post-merge workflow is invisible to every gate-reading rule in the skill**, all of which read a PR's checks. In objectos that blind spot ran 36 consecutive red production deploys across two PM tenures with no card filed.\n\n## Scope note\n\nThe surface is `.claude/skills/pm-dispatch/SKILL.md` (governed, line-ratcheted). This card asserts the requirement and the incident evidence; **the wording, the tier it lands in, and how it fits the ratchet are the skills seat's call, not mine.** If the skills seat judges that point 1 belongs in `AGENTS.md` or in a gate rather than the skill text, that is a better outcome than a longer skill.\n\nRelated: objectstack-ai/objectos#266 (the environment gate, `pm:awaiting-maintainer`), objectstack-ai/objectos#261 (the outage), objectstack-ai/objectos#262 (nothing measures the bundle pre-deploy), objectstack-ai/objectos#265 (behaviour unverifiable pre-deploy)."
+}

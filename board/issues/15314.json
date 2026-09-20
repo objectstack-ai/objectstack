@@ -1,0 +1,33 @@
+{
+  "number": 15314,
+  "kind": "pull_request",
+  "title": "tooling(pm): pin the tenth DECLARED-NARROWER worklist row to its gate's declaration, and require a spelling on that verdict",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T10:28:41Z",
+  "updated_at": "2026-09-04T11:12:24Z",
+  "closed_at": "2026-09-04T11:12:23Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": "2026-09-04T11:12:23Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/15314",
+  "body": "Fixes #15270\n\nThe declaration pin landed in #15201 holds every `DECLARED-NARROWER` record SET-EQUAL,\nin both directions, to its gate's own declared hint array read out of the gate source.\nIt reached nine of the ten such rows. The tenth —\n`scripts/check-driver-conformance.mjs DRIVERS_DIR packages` — carried no `spelling`,\nso there was no recorded set to compare and the pin skipped it by its own scoping\nrule, while that gate does declare a hint at that root. The row named the subtree in\nprose, and nothing held the prose to the array.\n\n## What changed — one file, `scripts/pm/bare-root-worklist.mjs`\n\n1. A `SPELLINGS` entry (`driver package files`) for the hint the gate declares — the\n   whole drivers subtree, held as segments and joined at runtime — with an independent\n   `holds` a reader can check by eye, and the row pointed at it. The pin now holds the\n   record LIVE, PRECISE, COMPLETE, NARROWING against the tracked corpus and SET-EQUAL\n   against the declaration. No `omits`: the gate declares exactly one hint at this root.\n2. The row's `why` is re-measured — **both terms together on one tree**, never\n   refreshed apart, with the base commit and tree in the text — and it now records the\n   DIRECTION the declaration errs in, which the ratio alone does not say.\n3. The floor that stops the class growing back: the requirement to carry a `spelling`\n   extends from `SPELLABLE-UNDECLARED` to `DECLARED-NARROWER`, stated in the verdict's\n   own definition and held by `--self-test`, which names the offending rows and states\n   the remedy when it reds.\n\n## Measured at `2200f8ec` (tree `b8ebad25`)\n\n| term | recorded before | measured now |\n|:--|--:|--:|\n| files the gate's walk opens under the declared subtree | 259 | 344 |\n| tracked files under that subtree | 291 | 379 |\n| ratio at the subtree | 89% | 90.8% |\n| tracked files under the bare root | 4903 | 5979 |\n| ratio at the bare root | 5.3% | 5.8% |\n\nThe walk was driven under an fs recorder rather than reproduced by hand (this gate\nexports none of it): discovery takes the immediate children of the drivers root that\ncarry a manifest and the `driver-` prefix, five packages today, and every `.ts` file at\nany depth under each package's src directory is opened, node_modules and dist skipped.\nFive per-package manifests are statted rather than opened, as the existence test that\nadmits a package to the matrix, so 349 of 379 are reached one way or the other. The\ndeclaration errs **WIDE** by the remaining 30 — 11 markdown, 6 tsconfig JSON, 6 config\n`.ts` beside the manifests rather than under src, 5 LICENSE, one `.mjs` and one dotfile\n— and it is nevertheless the only spellable claim, since the idiom can express a\nsubtree and not \"the src trees inside it\". Recorded as the gate SPELLS it and not\nnarrowed to the walk: the pin holds the record against the declaration, so a spelling\nnarrower than the array would be a claim about a declaration nobody made.\n\n⛔ The gate is not edited here. Its own self-test still pins its array to `DRIVERS_DIR`,\nand it runs green, unchanged.\n\n## Ablations — from the committed state, each restored under a trap on absolute paths\n\n| leg | mutation, confirmed on disk | result |\n|:--|:--|:--|\n| a | the row's new `spelling` deleted (blob `0b8a0e98` to `4ae20f81`; removed-text grep 0 hits) | `--self-test` RED, 2 failures, the first naming the row: `UNSPELLED: scripts/check-driver-conformance.mjs DRIVERS_DIR packages` |\n| b | a second hint at the same root added to the gate's array (blob `3519847a` to `bfaff385`; injected-text grep 1 hit) | `--self-test` RED naming the drift: `declared and not recorded [the added hint], named as omitted [none]` |\n| b, control | the same gate mutation, judged by the map **as it stood at the base commit** | `--self-test` GREEN — the premise of the card, measured: the row was blind to a declaration change at its own root |\n| b, control | the same gate mutation, judged by the gate's OWN self-test | GREEN — the gate's pins tolerate a second hint at that root, so this direction is one only the map can hold |\n\nRestores proved after every leg: `git hash-object` equal to the `HEAD` blob for both\nfiles, `git diff HEAD` empty, `git status --porcelain` empty.\n\n## Verification at `9b576972`\n\n- The derived gate union for the changed path, re-derived from the merge-base change\n  set rather than a typed list: 21 commands, plus this gate's own plain run and\n  `--self-test`. 23 of 23 green.\n- `pnpm lint` (whole repo, `eslint . --no-inline-config`) through the shared\n  verification lock: `VERDICT command-exit 0 · held the lock 69s · waited 0s`.\n- The sweep output diffed against the base tree's: exactly one line differs, this row's\n  `why`. No verdict moved; the header counts are unchanged.\n- `--self-test` before: `54 live row(s) … 20 record(s) carry a spelling … 14 distinct …\n  9 DECLARED-NARROWER record(s) are held SET-EQUAL`. After: `54 live row(s) … 21\n  record(s) … 15 distinct … 10 DECLARED-NARROWER record(s) are held SET-EQUAL`.\n- `skip-changeset`: this diff publishes nothing from any released package.\n\n## Out of scope\n\nFiled as #15313: the gate's own docblock justifies its declared hint with ratios that\nare stale and undated (259 of 291 against 4903, measured here at 344 of 379 against\n5979). Nothing reds on it and its conclusion is unchanged; the gate is not edited from\nthis PR.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_019RfFHiRCSs3JXLK4cwcfox)_"
+}

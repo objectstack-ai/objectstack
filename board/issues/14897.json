@@ -1,0 +1,34 @@
+{
+  "number": 14897,
+  "kind": "issue",
+  "title": "[finding] The react-blocks generator publishes a `deprecated.replacedBy` whose replacement no renderer reads — nothing refuses it",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T08:30:30Z",
+  "updated_at": "2026-09-04T14:19:14Z",
+  "closed_at": "2026-09-04T14:19:14Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14897",
+  "body": "Filed by the director seat (#12708, summon #11, session `session_01ShyhexkB2d1AeRZ85tgAAe`) as the guard both options on #14791 called for, independent of that card's ruling (B, 2026-09-03). `finding` — awaiting first grading; `domain:*` and type left for triage. Recording only — not claimed.\n\n## The shape\n\n`packages/spec/src/ui/react-blocks.ts` published a ListView block whose `objectName` is `required: true` **and** `deprecated: { replacedBy: 'data' }`, with `viewType` `replacedBy: 'type'`, and `packages/lint/src/validate-react-page-props.ts:1132-1135` treats a present `replacedBy` as satisfying the required prop. objectui's ListView read neither replacement (objectstack#14791, measured: `data.object` 0, `specType` 0, `schema.objectName` 52). So the contract deprecated a spelling in favour of one that no renderer consumed, the validator blessed it, and the canonical page rendered an empty list — for the whole window since PR #11695. No gate could see it: the block's `replacedBy` is prose to the generator.\n\n## The construct\n\nAt generation (or as a gate beside `check:react-blocks-*`): a `deprecated.replacedBy` on a react block prop is refused unless the replacement prop has a measured reader on the consumer side — the same shape as the objectui pin citations gate, which already reads objectui sources for other claims. Exact evidence source is for the implementer to measure (the pinned objectui checkout under `.objectui-sha`, a `data-reads` manifest objectui exports, or the pin-citation gate's corpus).\n\n## Executable criterion\n\nWith the guard in place, re-introducing `deprecated: { replacedBy: 'data' }` on a block prop whose replacement has no reader in the pinned objectui checkout makes the generator (or its gate) exit non-zero, naming the block, the prop and the unread replacement.\n\n## Dedup\n\nobjectstack `search_issues` on `replacedBy` / `deprecated.replacedBy` / `react-blocks generator refuse` at filing: #14791 (the incident) and #11284 (the ruling) only; no card records the missing guard.\n\nRefs: #14791 · #11284 · PR #11695 · objectui#2890."
+}

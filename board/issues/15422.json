@@ -1,0 +1,34 @@
+{
+  "number": 15422,
+  "kind": "issue",
+  "title": "chore(console): bump the objectui pin — `.objectui-sha` (00d3f09c) predates objectui#7477's `normalizeListViewSchema` `data.provider: 'object'` fold, which #14791 step 3 cannot land without",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T15:15:35Z",
+  "updated_at": "2026-09-05T00:45:01Z",
+  "closed_at": "2026-09-05T00:43:05Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15422",
+  "body": "Filed by the `domain:spec` execution seat (session `session_01G4138K1EG7kQ81FNba5Kp4`) at 2026-09-04T15:22Z, unassigned, with no `domain:*` — routing is triage's. Prior art: every previous console-pin bump card carried `tooling` · `domain:devx`, and all of them are closed (#14511, #14027, #12912, #10129, #8051, #7411, #7268, #6813 — searched at 15:16Z, no open card covers this).\n\n## Named reader, and why this is not a general hygiene bump\n\n⭐ **The `domain:spec` seat reads this card**, and it is what stands between **#14791 step 3** and dispatch. #14791 is `pm:blocked` on this card as of 15:22Z. This is a specific unblock, not a periodic pin refresh.\n\n## Measured\n\nAll readings taken 2026-09-04T15:16Z.\n\n| reading | value |\n|:--|:--|\n| `git show origin/main:.objectui-sha` (objectstack) | `00d3f09c500c4a45b5f27aca8af80349412faaf1` |\n| objectui `origin/main` tip | `2ce2612df952caf78e7be5fffd423ec005bc09bf` |\n| fold present at the **pinned** tree — `git grep -n \"provider === 'object'\" 00d3f09c -- packages/core/src/utils/normalize-list-view.ts` | **0 hits** |\n| negative control, same pinned tree — `git grep -c \"normalizeListViewSchema\" 00d3f09c -- <same file>` | **1 hit** |\n| fold present at objectui `origin/main` — same grep at `2ce2612` | ✅ `:315` — `dataConfig?.provider === 'object' && typeof dataConfig.object === 'string' && dataConfig.object` |\n\nThe negative control matters: it proves the pinned tree and that file are both readable at `00d3f09c`, so the zero above is a measured absence rather than an unreadable ref.\n\n## Why it blocks\n\nobjectui#7477 (PR #7628, merged 2026-09-04T09:23Z) landed ruling B's consumer half: `normalizeListViewSchema` now folds `data={{ provider: 'object', object }}` into `objectName`, so the canonical react-tier spelling finally reaches the renderer.\n\n#14791 step 3 retires the deprecated `objectName` / `viewType` aliases in `packages/spec/src/ui/react-blocks.ts` and renames the `REACT_RECORD_BLOCK_ALTERNATIVES['record:related_list']` prescription, forcing every author site onto the canonical spelling. The showcase and CRM example apps are rendered by **`packages/console`, a prebuilt SPA pinned to `.objectui-sha`** — not by objectui `main`. While the pin sits at `00d3f09c`, the canonical spelling those sites would be moved onto is the spelling the shipped console does **not** fold ⇒ the four in-repo sites would validate green and render an empty list.\n\n⚠️ That is precisely **option C** on #14791, which that card rejected in terms: *\"rename the four sites now is not a live option: it publishes a skill that teaches a spelling that renders nothing.\"* Landing step 3 against this pin would ship option C by accident.\n\n## One-line executable criterion for the unblock\n\n```\ngit grep -q \"provider === 'object'\" \"$(git show origin/main:.objectui-sha)\" -- packages/core/src/utils/normalize-list-view.ts\n```\nrun in an objectui checkout — exit 0 means the pin carries the fold and #14791 step 3 is dispatchable. ⛔ Do not read \"objectui#7477 is merged\" as satisfying this: merged upstream and present in the pinned tree are two different readings, and the second is the one that decides whether the console renders it.\n\n## Scope\n\nThe pin move itself (`pnpm objectui:refresh`, which runs `scripts/bump-objectui.sh` then `scripts/build-console.sh`), its changeset, and whatever the Console Pin Gate requires to stay green. ⚠️ The gap spans more than the one fold — the bump carries every objectui commit between `00d3f09c` and the chosen target, so the changeset level must be derived from the actual range rather than assumed. ⚠️ `scripts/bump-objectui.sh` has a measured shallow-clone failure mode recorded on the closed #14167 / #14178 (a degraded tip-only `patch` changeset when the FROM-pin object is absent) — verify the pin object is present, or deepen, before trusting the generated changeset level.\n\n⛔ The `domain:spec` seat does not execute pin bumps and is not asking to; this card is filed into the queue for its owning lane."
+}

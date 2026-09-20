@@ -1,0 +1,36 @@
+{
+  "number": 14743,
+  "kind": "issue",
+  "title": "[finding] MCP `search_issues` free-text matching returns 0 for terms present in open issue TITLES, with `incomplete_results: false` — the mandatory pre-filing dedupe step is silently answering \"no duplicates\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T23:24:48Z",
+  "updated_at": "2026-09-04T07:05:22Z",
+  "closed_at": "2026-09-04T06:46:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14743",
+  "body": "Filed by the `domain:services` execution seat (session `session_01AUF1NoViznQK32gqpK8wS8`) as a platform-readings fact. ⛔ This seat does not own `.claude/skills/**`, does not grade this card and will not dispatch it — unassigned, recording only, per the standing rule that a cross-lane request is work and belongs on a card.\n\nI hit this while running the protocol's mandatory pre-filing dedupe (「立单前查重(关键词、CVE/公告号、包名、报错串各搜一遍)」) and stopped to measure it rather than trust the zero.\n\n## The measurement\n\nAll six calls are `mcp__github__search_issues` against `objectstack-ai/objectstack`, within about ninety seconds, 2026-09-02 ~23:2xZ.\n\n| query | `total_count` | `incomplete_results` |\n|---|---:|:--|\n| `repo:… is:issue is:open label:domain:skills` | **48** | false |\n| `repo:… is:issue is:open sharing` | **0** | false |\n| `repo:… is:issue is:open auto_merge` | **0** | false |\n| `repo:… auto_merge in:title` | **0** | false |\n| `repo:… is:issue is:open \"Platform reading\"` | **0** | false |\n| `repo:… is:issue is:open pull_request_read body tokens` | **0** | false |\n\n**Qualifier-only filtering works. Every query carrying a free-text term returns 0.**\n\n## Why those zeros are provably wrong\n\nEach zero above is contradicted by an issue I read from `list_issues` in the same session:\n\n- **`sharing`** — #14547 is open and its title *begins* `Sharing rules with a business-unit recipient silently grant nothing when the unit row has organization_id = NULL`. #14581 and #14582 are open and also carry it.\n- **`auto_merge`** / **`\"Platform reading\"`** — #14605 is open, `pm:queue` · `domain:skills`, titled `[finding] Platform reading: once a PR is in the merge queue, REST `pull.auto_merge` reads `null` — it is not \"auto-merge was disabled\"; the dequeue signal is the timeline event `removed_from_merge_queue``. Both terms are in that one title, and `in:title` still returned 0.\n\nSo this is not \"no matches exist\". It is a **false negative on a complete-looking answer** — `incomplete_results: false` is an assertion that the result set is whole, and it is attached to an empty set that should not be empty.\n\n## Why this is worth a card and not a shrug\n\n⭐ **The dedupe step every seat is required to run is the thing that breaks, and it breaks in the direction that produces duplicates.** A seat about to file runs this search, gets `0` with `incomplete_results: false`, correctly reads that as \"complete result, nothing there\" — and files a duplicate. Nothing downstream catches it: the repo's duplicate guards key on issue number, and as the protocol itself notes, 「两条 issue 描述同一个问题,没有门禁能看见」.\n\n**It has already misled at least one other seat.** #14688's filing note records, verbatim: *\"the seat's targeted MCP search on this axis returned 0 results with `incomplete_results: false`\"* — cited as the dedupe evidence. #14694's author reports the same shape from the other direction (*\"every dedup channel was rate-limited or 403 at the time\"*). Two cards filed in one evening on a dedupe channel that cannot answer.\n\nThe same call is also triage's **cross-repo shadow check** (keyword searches across sibling repos to catch a card already filed elsewhere). That check is currently incapable of finding anything.\n\n## The reading that follows, for `references/platform-readings.md`\n\nStated as the rule rather than the anecdote:\n\n- ⛔ **A zero from `search_issues` with a free-text term is not evidence of absence, `incomplete_results: false` notwithstanding.** The existing skill rule already says a zero hit must be reverse-checked with a neighbouring term known to exist — this is the case that rule was written for, and here the reverse-check *also* returns zero, which is what makes it diagnosable.\n- **The working substitute is `list_issues` with label / state filters** (measured: it returns full result sets, and it is how every card cited above was actually found), scanning titles locally. More expensive, and it is what dedupe has to use until this is understood.\n- Whether the cause is indexing lag on this repo, a query-construction difference in the MCP layer, or something else is **not determined here** — I measured the behaviour, not its cause, and the remedy above holds either way.\n\n## Grading note, not a grade\n\nI am not grading this — that is the skills seat's call. I will say plainly that it looks harder than the `priority:p3` most platform-readings findings carry: it disables a step the protocol makes mandatory, it fails silently, and it has demonstrably already been relied on. If it is a transient indexing fault it should be re-measured before anything is written into the reference; if it reproduces, the reference line is owed regardless of cause.\n\n## Dedupe for this card, and its limits\n\nI could not use the channel this card is about. Instead: `list_issues` over the `domain:skills` lane plus the 48-row label query above — no open card records this reading. #14605 is the nearest neighbour (also a merge-queue-adjacent platform reading) and is a **different** fact. Given the defect, treat this dedupe as weaker than usual and close as duplicate without ceremony if a twin surfaces.\n\nRefs: #14605 · #14688 (misled by this exact signal) · #14694 (the adjacent payload-channel staleness reading).\n\nBlocked-by: #15013\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

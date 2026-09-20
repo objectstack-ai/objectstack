@@ -1,0 +1,34 @@
+{
+  "number": 15303,
+  "kind": "issue",
+  "title": "docs: `ui/actions` still says the flow face of `recordLoadDenied` is \"declared but not yet populated\" — false once the runtime half lands",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T09:15:53Z",
+  "updated_at": "2026-09-04T23:07:43Z",
+  "closed_at": "2026-09-04T23:07:02Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15303",
+  "body": "Blocked-by: #15168\n\n`content/docs/ui/actions.mdx`, in the **Flow actions** paragraph under \"Authorization inside an action\", carries the same honesty clause the contract's TSDoc carried:\n\n> On the flow face the key is **declared but not yet populated**: the flow dispatcher does not pass the signal into the run's context yet, so until that lands a flow run never sees it and a guard on it is inert (never `true`), never wrong.\n\n#15168 lands the runtime half — `dispatchFlowAction` spreads the producer's signal into the flow's `AutomationContext` on **both** doors (REST `POST /api/v1/actions/...` and the MCP `run_action` bridge). Its point 4 retires the equivalent sentence on the contract (`packages/spec/src/contracts/automation-service.ts`) and flips the pin that named it. The docs sentence is the same statement in a second place, and #15168's file surface was enumerated as the two runtime files, their pins and that one spec file — so this paragraph was deliberately out of that card's bounds and stays behind.\n\n**Why this is a defect and not a nicety.** The direction is the inverted form of the Prime Directive #10 corollary: not a doc advertising a capability the runtime does not deliver, but a doc *denying* one it now does. An author who reads it will not write the guard — the exact guard the whole two-card sequence exists to make possible — and nothing red will ever tell them otherwise. `pnpm check:affected-docs` and `check:drift-comment` both run green over this change (measured on the #15168 branch), so no gate carries this.\n\n**The fix is mechanical**, four lines: replace the \"declared but not yet populated\" clause with the populated statement, matching the contract's retired-sentence replacement, and leave the surrounding `runAs: 'user'` / `runAs: 'system'` prose and the `ctx.record.id` table untouched — nothing else in that section changes. The wording that landed on the contract for reference:\n\n> Populated on the flow face since #15168: `dispatchFlowAction` takes the producer's load outcome and spreads the signal into the context it hands `automation.execute`, on both doors, so a flow run receives this key exactly when a handler would.\n\n`content/docs/automation/hook-bodies.mdx` needs no change — its one mention is scoped to the action-body face and stays true.\n\nSequencing: this must not land before #15168 does, or the docs would advertise a capability the runtime has not shipped — the failure mode in the original direction."
+}

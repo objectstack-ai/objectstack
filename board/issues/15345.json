@@ -1,0 +1,33 @@
+{
+  "number": 15345,
+  "kind": "pull_request",
+  "title": "docs(pm): drop the stale shadowing claim from dispatch-gates' selfTest comment",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T12:36:01Z",
+  "updated_at": "2026-09-04T13:41:28Z",
+  "closed_at": "2026-09-04T13:41:26Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": "2026-09-04T13:41:26Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/15345",
+  "body": "Fixes #14991\n\n## What\n\n`scripts/pm/dispatch-gates.mjs` carried a five-line comment inside `selfTest()`, immediately above the `tierOwnAbs` / `tierOwnRel` pair, whose first sentence went stale once PR #14988 replaced the five named `node:path` imports with one namespace binding (`import * as nodePath from 'node:path'`, L420). With that binding shape, no module-scope `relative` exists for the `const relative = [...]` fixture (a string-array `.join('\\n')`, still at L12679) to shadow.\n\nVerified on this branch's tree:\n\n```\n$ git grep -n \"from 'node:path'\" scripts/pm/dispatch-gates.mjs\nscripts/pm/dispatch-gates.mjs:420:import * as nodePath from 'node:path';\n\n$ git grep -n \"^const relative\\|const relative = \" scripts/pm/dispatch-gates.mjs\nscripts/pm/dispatch-gates.mjs:12679:  const relative = [\"const P = new URL('../../.claude/agents/os-dev.md', import.meta.url);\", \"const R = '../..';\"].join('\\n');\n```\n\nThe `ROOT`-derived spelling itself was never a workaround — it is the prefix every sibling case in that block already joins against — so only the stated reason needed restating.\n\n## Change\n\nComment-only, one file, no code or assertion change:\n\n```diff\n-  // `relative` from `node:path` is SHADOWED inside this function — a fixture\n-  // string a few thousand lines up binds that name — so the repo-relative\n-  // spelling comes from ROOT, the prefix every sibling case here already joins\n-  // against. A prefix that stops holding yields an empty root, which the walk\n-  // above reports rather than turning into a pass.\n+  // The repo-relative spelling here comes from ROOT, the prefix every sibling\n+  // case in this block already joins against — the consistent spelling, not a\n+  // workaround. A prefix that stops holding yields an empty root, which the\n+  // walk above reports rather than turning into a pass.\n   const tierOwnAbs = fileURLToPath(import.meta.url);\n```\n\n5 lines → 4 lines (shorter, not longer).\n\n## Verification\n\nRan on `b0c247c6` (rebased onto `origin/main`), through `scripts/pm/os-verify-lock.sh`, real verdict lines below (not raw exit codes):\n\nDirect-node gates — `VERDICT command-exit 0`:\n```\nOK: all 143 declared cross-package glob(s) (99 unique) are covered...\ncheck-closing-keyword-parity: OK (3 parsers agree on all 9 keywords...)\n✓ check-closing-keyword-parity --self-test: 24 assertions, 5 mutations...\n✓ comment-mask corpus sweep: 5895 files, 0 disagree, 0 unparseable...\n✓ check-self-test-wired: every one of the 168 script(s)...\ncheck-self-test-wired --self-test: 4 live ledger row(s) verified...\n✓ check-whole-set-label-write: 0 violations...\n✓ check-whole-set-label-write --self-test: all cases pass...\n```\n\n`pnpm check:*` gates — `VERDICT command-exit 0`:\n```\n✓ check-agent-test-spelling --self-test: all cases pass\n✓ check-bash32-floor self-test: 153 cases pass.\n✓ check-cli-command-ids self-test: 39 cases pass...\ncheck:cross-package-test-inputs — ok (all fixtures resolve() off a fileURLToPath seed)\ncheck-declared-population-live --self-test: 16 assertion(s) passed.\n✓ check:declared-population-live — 201 of 252 famil(ies)...\n✓ check-entry-guard self-test: 54 cases pass...\n✓ check-nul-bytes --self-test: 75 assertions...\n✓ check:parse-guard self-test: 46 cases pass...\n✓ dispatch-gates self-test: 1382 cases pass.   ← the file's OWN self-test, same case count as main\n✓ pnpm-filter-targets --self-test: 54 assertions...\n✓ check-pnpm-filter-targets --self-test: 40 assertions...\nOK check-ratchet-remedy-authority: 202 scripts swept...\n✓ check-refd-timer-probe self-test: 11 cases pass...\n✓ check-watch-hint-literal self-test: 57 cases pass...\n```\n\nTooling-script rule (this file is itself a gate/tool script): no `*.test.ts` in `scripts/pm/` tests it directly, and the only repo-wide `dispatch-gates.mjs` mentions outside its own self-test are prose comments in five unrelated test files (`packages/cli/test/serve-node-env-production-default.e2e.test.ts`, `packages/create-objectstack/src/runtime-image.test.ts`, `packages/objectql/src/action-owner-key-single-source.test.ts`, `packages/runtime/src/action-owner-key-single-source.test.ts`, `packages/types/src/driver-error-classification.callers.test.ts`) — none import or execute this file; they only cite its self-test's guarantees. The file's own self-test (`pnpm check:pm-dispatch-gates`, run above) is the complete test-suite obligation here.\n\n`pnpm check:nul-bytes` covers the edited file; also spot-checked with `grep -naP '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f]'` — clean.\n\nTooling-only change under `scripts/pm/**` — `skip-changeset` applies.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_019RfFHiRCSs3JXLK4cwcfox)_"
+}

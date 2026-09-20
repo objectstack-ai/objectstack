@@ -1,0 +1,36 @@
+{
+  "number": 14967,
+  "kind": "issue",
+  "title": "finding(pm): a governed-surface PR can sit for days with no review request to either approver — 7 of 10 open governed PRs were missing `os-zhuang`, two had no request at all, and nothing reports it</title>\n<parameter name=\"labels\">[\"finding\"]",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-03T14:37:40Z",
+  "updated_at": "2026-09-04T21:00:59Z",
+  "closed_at": "2026-09-04T20:58:53Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14967",
+  "body": "Filed by the director seat (summon #12, session `session_01WXyGTWPbbreqXow7Z2pZCk`) after the maintainer asked, verbatim, 「pr清单中哪些是需要我审核的，比如adr这些，为什么我没看到审核请求，是skills的问题吗？」. **Named reader:** the `domain:skills` seat (self-triaged findings; no `domain:*` set here). Ledger: objectstack #12708, comment 5527393443.\n\n## Measured on 2026-09-03 14:3xZ, all four repos\n\nEvery open PR's file list was matched against the governed register (`docs/adr/**` · `.claude/**` · `skills/**` · `AGENTS.md` · `CLAUDE.md`). Ten open PRs hit it. Their review-request state **before** the director sweep:\n\n| repo · PR | requested | note |\n|:--|:--|:--|\n| objectstack #14498 | nobody | ADR addendum; author is `hotlong`, so a request to `hotlong` is impossible (author-identity 422) and the documented fallback (assign `hotlong`, request `os-zhuang`) was not taken |\n| objectstack #14277 | nobody | 39 governed files; the devx seat posted \"ready for its human gate\" on the card on 09-01 and requested no one |\n| objectstack #14737 | nobody | spec-seat PR regenerating `skills/*/references/_index.md`; seat went off shift, no ACCEPT |\n| objectstack #14860 | `hotlong` only | |\n| objectstack #14808 | `hotlong` only | |\n| objectui #7496 | `hotlong` only | |\n| objectui #7473 | `hotlong` only | |\n| cloud #1834 | both | correct |\n| hotcrm #1527 | both | correct |\n| hotcrm #1520 | both | correct |\n\nThe skill text is not the defect: `SKILL.md` ACCEPT path ③ says to request **both** `os-zhuang` and `hotlong`, and `os-zhuang` is an admin collaborator on objectstack and objectui (a request to it succeeded during the sweep). The objectstack/objectui seats requested one account; the cloud/hotcrm seats requested both.\n\n## Why one account is worse than it looks\n\n`hotlong` is also the login the maintainer's own Claude sessions run as (this session's `get_me` = `hotlong`) and the author of some governed PRs. A request addressed only to `hotlong` therefore lands in the account that made it, or cannot be made at all, while the account the maintainer reads on the phone (`os-zhuang`, per the 2026-08-19 ruling quoted in the skill) is never asked. That is how seven governed PRs, including two ADR records, waited two days with no visible request.\n\n## What is missing\n\nNo mechanical reading covers the state \"governed PR (by file list) that lacks a request or assignment to every `GOVERNED_APPROVERS` member\". The queue guard checks approval at queue time; the half-state patrol has no row for it; the governed-merge audit is post-hoc. Suggested shape (skills seat's call, ⛔ not prescribed): one report-only H-row in `scripts/pm/check-half-states.mjs` that lists open PRs hitting `GOVERNED_SURFACES` whose `requested_reviewers ∪ assignees` does not cover `GOVERNED_APPROVERS` (both constants already exist in `check-governed-queue-guard.mjs`), so the seat post and the round report surface it before the maintainer has to ask. A CI-time variant on `pull_request` events is possible but the patrol row is enough to make the state visible.\n\n## Re-check\n\n```\nnode scripts/pm/check-governed-merges.mjs --test <files of an open PR>   # governed or not\ngit grep -n \"GOVERNED_APPROVERS\" origin/main -- scripts/pm/check-governed-queue-guard.mjs\n```\n\nRefs: SKILL.md ACCEPT path ③ (2026-08-27 ruling 「需要批准的主动推送到这两个账户」) · #12708 comment 5527393443 · #14498 · #14277 · #14737"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 14586,
+  "kind": "issue",
+  "title": "spec(ui): dashboard `gap` help text says \"Tailwind units\" to an app author",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T13:24:59Z",
+  "updated_at": "2026-09-04T20:18:43Z",
+  "closed_at": "2026-09-04T20:17:37Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14586",
+  "body": "Found while localizing the Studio dashboard property panel (objectui#7254, PR objectstack-ai/objectui#7366).\n\n`packages/spec/src/ui/dashboard.form.ts` gives the `gap` field this help text:\n\n```\n{ field: 'gap', type: 'number', colSpan: 1, helpText: 'Grid gap (Tailwind units)' }\n```\n\nThat string is rendered verbatim in the **customer-facing** dashboard property panel — the Studio panel is spec-driven, feeding `dashboardForm` straight into the renderer's generic form. \"Tailwind units\" is a framework-implementation detail: an app author choosing a gap has no way to act on it, and it names a CSS library they never chose.\n\nThe renderer side cannot fix this — the string is the producer's. objectui#7366 added a zh overlay that says something an author can decide (「组件之间的间距，数值越大越松」) and deliberately left the English source alone, because rewriting a producer's copy from the consumer is exactly the second-dialect problem the contract rule exists to stop.\n\nSuggested: say what the author decides, not what the renderer consumes — e.g. \"Space between widgets\" — and let the numeric semantics live in the renderer.\n\nWhile there: `columns`'s `Grid columns (default 12)` is fine (12 is an author-visible fact); this is only about the unit vocabulary.\n"
+}

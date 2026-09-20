@@ -1,0 +1,35 @@
+{
+  "number": 15219,
+  "kind": "issue",
+  "title": "finding(cli): `plugins` / `devPlugins` are package-owned collections, but `os serve` and `os migrate` read them off the flattened top level only — and the mechanical fix is wrong",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T06:25:31Z",
+  "updated_at": "2026-09-04T12:10:19Z",
+  "closed_at": "2026-09-04T11:58:26Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15219",
+  "body": "Related #14122 · same shape as #15210 (the by-shape sweep) and #14512 (the emitter half). Found while implementing #15006; deliberately **not** folded into it, because the answer is a decision rather than a read fix.\n\n## The sites\n\n| `file:line` | Reads |\n|:--|:--|\n| `packages/cli/src/commands/serve.ts:2622` | `let plugins = config.plugins \\|\\| [];` |\n| `packages/cli/src/commands/serve.ts` (a few lines below) | `if (flags.dev && config.devPlugins) plugins = [...plugins, ...config.devPlugins];` |\n| `packages/cli/src/utils/schema-migration-plugins.ts:1082` | `const hostPlugins = Array.isArray(config?.plugins) ? config.plugins : [];` |\n\n`plugins` and `devPlugins` are both **package-owned collections** by the derivation every reader in this program uses — `COMPOSE_KEY_DISPOSITIONS` gives them `'concat'`, so they are members of `AssembledPackageBodySchema`, so `ObjectStackDefinitionSchema` ∩ `AssembledPackageBodySchema` contains them. (Both appear in the 37-key list #15210 prints.) An option-B-shaped stack therefore carries them under `packages[i].manifest.plugins` and **not** at the top level, and all three reads above see nothing.\n\n## Why the one-line fix that every other site in the program takes is WRONG here\n\nEverywhere else in the reader program the repair is \"resolve `packages[]` when the top level is absent\". Applying that here would hand `kernel.use()` whatever sits in `packages[i].manifest.plugins` — and on the artifact path that is **inert JSON**, not a live plugin instance. A JSON artifact cannot carry a constructed plugin. So the mechanical repair converts a silent skip into a boot that registers garbage.\n\nThat points at a question upstream of the CLI, which is why this is filed rather than fixed:\n\n1. Should `plugins` / `devPlugins` be in the assembled-package-body key set at all? They are the only members of it whose values are **live objects** rather than serializable metadata. If they should not be, this is a `packages/spec` disposition change (`COMPOSE_KEY_DISPOSITIONS`), not a CLI change, and every reader in the program inherits the answer.\n2. If they stay, what does a package's `plugins` mean inside an artifact — a dropped key, or a declaration the loader is supposed to resolve to a real module?\n\n## Not measured, and why\n\nThe #15004 acceptance zoo declares no `plugins`, so **no probe row covers this today** and the loss above is derived from the key set rather than observed. Adding `plugins` to that fixture is fixture surgery three parallel cards are reading, so it was left alone. A row belongs here once question 1 is answered — before that, a row would pin a shape that may be about to change.\n\nReached in practice by any multi-package host that composes plugins per package: `composeStacks` concatenates them to the top level today, which is exactly the copy option B removes."
+}

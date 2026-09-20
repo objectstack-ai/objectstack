@@ -1,0 +1,37 @@
+{
+  "number": 14455,
+  "kind": "issue",
+  "title": "[finding] `@example` and `@category` tag lines render verbatim on 13 published reference pages — a tag WITH a payload needs a rewrite, not the `@module` drop",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "documentation",
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-02T07:32:18Z",
+  "updated_at": "2026-09-04T16:49:31Z",
+  "closed_at": "2026-09-04T16:48:43Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14455",
+  "body": "`renderFileDescription` (`packages/spec/scripts/lib/file-description.ts`) emits a\nmodule docblock's prose lines verbatim, so a JSDoc **block tag** written on a\nprose line reaches the published reference page as literal tag text. Two tags do\nthis today, on 13 customer-facing pages:\n\n**`@example` — 14 lines across 10 pages**\n\n```\ncontent/docs/references/api/automation-api.mdx:15:@example Endpoints\ncontent/docs/references/api/documentation.mdx:25:@example Documentation Config\ncontent/docs/references/api/odata.mdx:45:@example OData Query\ncontent/docs/references/api/odata.mdx:57:@example Programmatic Use\ncontent/docs/references/api/package-api.mdx:14:@example Endpoints\ncontent/docs/references/api/plugin-rest-api.mdx:31:@example Serving routes from a plugin (imperative `http.server` mount)\ncontent/docs/references/automation/time-relative-trigger.mdx:33:@example T-minus renewal reminders (fires on the day a contract is 60/30/7 days out)\ncontent/docs/references/automation/time-relative-trigger.mdx:48:@example \"Expiring soon\" range (fires every day a document is within 30 days of expiry)\ncontent/docs/references/automation/time-relative-trigger.mdx:55:@example Overdue sweep (fires for POs up to 14 days past due)\ncontent/docs/references/shared/mapping.mdx:21:@example Basic field mapping\ncontent/docs/references/shared/mapping.mdx:29:@example With a fallback for missing source values\ncontent/docs/references/studio/object-designer.mdx:41:@example\ncontent/docs/references/studio/plugin.mdx:38:@example\ncontent/docs/references/system/worker.mdx:24:@example Basic task\n```\n\n**`@category` — 4 lines across 4 pages**\n\n```\ncontent/docs/references/system/incident-response.mdx:16:@category Security\ncontent/docs/references/system/security-context.mdx:27:@category Security\ncontent/docs/references/system/supplier-security.mdx:15:@category Security\ncontent/docs/references/system/training.mdx:15:@category Security\n```\n\nReproduce: `grep -rn '^@example\\|^@category' content/docs/references/`\n\n## Why this is not the `@module` fix, and not a filter\n\nThe `@module` marker was removable because its entire content IS the marker — it\nselects the block and says nothing a reader needs, so the renderer now drops it\nat prose level.\n\nThese two are the opposite case. Both carry a payload:\n\n- `@example Basic field mapping` is the **caption** of the fenced block directly\n  beneath it. Dropping the line deletes reader prose and orphans the fence.\n- `@category Security` is a **classification** a reader may well want surfaced.\n\nSo a blanket `^@\\w+` line filter is the wrong instrument here — it would take\nthat prose off the page. The renderer already has the right shape for a tag with\ncontent, one line away: `renderProse` REWRITES `@see path` into `See also: path`\nrather than dropping it. The open question this issue asks is what the\ncorresponding rewrite should be, e.g.\n\n- `@example CAPTION` becomes a bolded caption line, or a heading at the block's\n  section level, above the fence — and the bare `@example` with no caption (two\n  pages, `studio/plugin` and `studio/object-designer`) presumably becomes\n  nothing at all, since it has no payload;\n- `@category VALUE` becomes prose, or is routed into page frontmatter, or is\n  dropped as machinery — that one is genuinely a judgement call about whether\n  the classification is for readers or for tooling.\n\nBoth need a decision about the rendered shape before anyone writes code, which\nis why they are filed rather than folded into the render fix.\n\n## Notes\n\n- Any fix belongs in `renderFileDescription`, beside the existing prose-level\n  marker drop, with unit pins in `packages/spec/scripts/file-description.test.ts`\n  and a corpus assertion re-derived from `packages/spec/src` — the pattern the\n  neighbouring cases in that file already use.\n- `check:docs` cannot see this class: it compares the artifact against the\n  source, and the artifact reproduces the tag faithfully. Assert on the rendered\n  fragment, not on the emitted `.mdx`.\n\nFound while fixing the `@module` marker leak in #13796; that card is deliberately\nscoped to the one tag whose whole content is the marker, and does not address\nthe two above.\n\n_Generated by [Claude Code](https://claude.ai/code)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

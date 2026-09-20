@@ -1,0 +1,36 @@
+{
+  "number": 15272,
+  "kind": "issue",
+  "title": "[finding] check:pm-governed-merges reports an uninstalled worktree as a shrunken self-test battery — exit 1 with a confident wrong diagnosis where its siblings exit 3 NOT MEASURED",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T07:51:05Z",
+  "updated_at": "2026-09-04T09:52:27Z",
+  "closed_at": "2026-09-04T09:28:07Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15272",
+  "body": "Filed **unassigned** by the `domain:skills` execution seat (session `session_019RfFHiRCSs3JXLK4cwcfox`, os-steve), measured incidentally while running the derived gate family for the platform-readings third increment (PR #15265). Observation only; `domain:*`, type and grading are triage's.\n\n## The reading\n\nIn a freshly created worktree that has not yet had `pnpm install` run, `pnpm check:pm-governed-merges` exits **1** — the code reserved for a finding — with this verdict:\n\n```\n✗ check-governed-merges --self-test — 2 failure(s)\n\n  • self-test battery \"#11705 end to end, against the REAL generator\" registered 5 case(s), below its pinned floor of 7 — cases that used to run no longer do.\n  • A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the number. Find what stopped registering (an early return, a deleted block, a guard that now skips) and restore it.\n```\n\nNothing had stopped registering. The tree was unmodified except for one markdown file, and the actual cause was that `node_modules` was absent. After `pnpm install` and with **no other change**, the same command exits **0** with `check-governed-merges --self-test: 245 assertions`.\n\n## Why it is worth a card\n\nThe message is confidently wrong in a direction that costs the reader real time: it names a diagnosis (\"cases STOPPED RUNNING\", \"the battery is the bug\"), rules out the true cause by construction, and prescribes a hunt for \"an early return, a deleted block, a guard that now skips\". A seat that trusts it goes looking through the generator for deleted code that was never deleted.\n\nIt is also the exact class this repo separates deliberately elsewhere. Three sibling gates in the same derived family met the same uninstalled worktree in the same minute and answered correctly with **exit 3** and `PREREQUISITE NOT MET`, whose own text says: \"Nothing was measured: this gate exited before running a single check, so this result says NOTHING about what it gates. It is NOT a finding.\" Those three were `check-closing-keyword-parity` (both invocations) and `check:doc-authoring`; `check:doc-formula-expressions` did the same for an unbuilt workspace package. This gate is the one that reports the same condition as a measured red.\n\n⇒ A NOT MEASURED condition is being rendered as a MEASURED failure, on a governance gate.\n\n## What is measured and what is not\n\n- **Measured:** the before/after above, same tree, same command, install the only intervening act.\n- ⛔ **NOT measured:** which dependency the \"#11705 end to end, against the REAL generator\" battery loads, and therefore whether the right repair is a prerequisite check ahead of the battery, a guard that turns that battery's own skip into exit 3, or something narrower. This card deliberately does not pick.\n- ⛔ **NOT a claim that the floor is wrong.** The floor is doing its job; the defect is that an unmeasurable condition reaches it looking like a shrunken battery.\n\n## Distinct from the neighbours\n\n- #13799 is the **opposite** direction — batteries with *no* floor, where \"never ran\" and \"passed\" print alike. Here the floor exists and fires; the misreport is of the *cause*.\n- #14962 turns a genuine red into \"never ran\". This turns \"never ran\" into a genuine-looking red.\n\n## Repro\n\nIn a worktree with no `node_modules`: `pnpm check:pm-governed-merges > /tmp/out.txt 2>&1; echo \"EXIT=$?\"` (capture before any pipe). Then `pnpm install` and re-run.\n\n## Dedup declaration\n\nRan before filing over the **complete** open population, not a sample: all 558 open items paged from the repo-scoped REST list endpoint (6 pages, 100/100/100/100/100/58), the total closing exactly against the repository's own `open_issues_count` of 558; 536 issues after removing PRs. Grepped title and body locally for `governed-merges`, `pinned floor`, `battery`, `below its pinned`, `PREREQUISITE`, `prerequisite not met`, `self-test floor`, `stopped running`, `cases that used to run`, `REAL generator`, `11705`, `not installed`. Zero hits on this shape; the two nearest are the neighbours named above. ⛔ `/search/*` was not used — the session proxy answers it 403 with a body that parses to a clean zero.\n\nRefs: PR #15265 (where it was measured) · #13799 · #14962\n\n_Generated by [Claude Code](https://claude.ai/code)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

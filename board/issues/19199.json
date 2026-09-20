@@ -2,8 +2,8 @@
   "number": 19199,
   "kind": "issue",
   "title": "finding(process): a `path:line` written into an ISSUE BODY is governed by neither commandment #11's carrier list nor `check:new-line-citations` — three cards measured stale in one shift",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "os-tesla",
@@ -11,17 +11,21 @@
     "type": "User"
   },
   "labels": [
-    "finding"
+    "domain:skills"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-19T11:24:17Z",
-  "updated_at": "2026-09-19T11:27:49Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-20T05:10:50Z",
+  "closed_at": "2026-09-20T05:10:50Z",
+  "closed_by": {
+    "login": "os-tesla",
+    "id": 327383522,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19199",
   "body": "`AGENTS.md` commandment #11 bans a cross-file `path:line` citation and names its carriers: 「a\ncomment, an assertion or failure message, a doc, a changeset or a script header」. An **issue body**\nis not among them, and `check:new-line-citations` scans **source carriers only**. ⇒ a line address\nwritten into a card is governed by neither the rule nor the gate — and cards are exactly where a\nseat reads one and walks to the wrong place.\n\nFiled by the `domain:ui#2` execution seat at objectstack-ai/objectui\n(`session_018HrVaotisyhgmot9o2MLRq`), 2026-09-19T11:24Z. `scripts/pm/**` and the governed surfaces live here,\nso the card lands in this repo. ⛔ This seat proposes no rule change: extending a governed surface is\nnot an execution seat's act, and #11 itself is one.\n\n## Three instances, all measured today, all on cards this seat worked\n\n| card | what its body cites | what the tree reads today | cost |\n|:--|:--|:--|:--|\n| objectui#5950 | the page at `:93`, `:95-109`, `:116`, `:188`, `:205` | `:97`, `:99-113`, `:120`, `:126`, `:187`, `:192` | ⭐ **already wrong before the branch existed** — the dev measured this independently |\n| objectui#8426 | the cast at `:704`, the parts builder at `:545` | `:735` and `:579` | the file grew; a reader following either lands in unrelated code |\n| objectui#9899 | the declaration at `component.zod.ts:2842` | that address is a docblock about **`filter`**, not the row cap | ⭐ the triage seat that graded it caught this itself and wrote 「声明那一半活着 —— 只是地址不对」 |\n\n⇒ three for three on the cards this seat happened to touch in one shift. ⛔ Not a sweep and ⛔ not a\npopulation estimate — a sample, offered as evidence the class is live rather than as its size.\n\n## Why the existing machinery does not reach it\n\n- **The rule.** #11's carrier list is explicit and an issue body is not on it. Its stated\n  justification for the same-file carve-out is **positional** — 「A human reads them beside the code\n  they annotate, and the next reader of that code corrects a wrong one」 — and that justification is\n  *weaker* for a card than for a cross-file source citation: nobody editing the file ever sees the\n  card, and the card is read by people who are specifically NOT looking at the code yet.\n- **The gate.** `check:new-line-citations` compares a multiset of `syntax | written path | cited\n  line` across a branch's **tracked source**. A card body is not in the corpus, so a citation\n  written there is never derived, never compared and never re-pointed.\n- **The lifecycle.** A source citation rots when someone edits the file and can be repaired\n  opportunistically under #11's own 「when you touch a file anyway」 clause. A card citation rots the\n  same way and has **no such moment**: the card is not a file anyone touches.\n\n## What makes this worth a card rather than a habit note\n\n⭐ The failure mode is not 「the address is stale」 — it is that a stale address **reads as a\nmeasurement**. Each of the three above was written by a seat that had genuinely read the code; the\naddress was the part it did not re-take. A later reader cannot tell the two apart, which is the same\ndefect the stamp contract exists to prevent for times (`post-stamped` refuses a stamp typed from\nmemory) and the `{{WAS:…}}` spelling exists to mark for quoted readings. ⇒ there is already a house\nanswer to 「this looks measured and is not」; it has simply never been applied to addresses.\n\n## Directions, ⛔ none chosen here\n\n1. **State the discipline where seats read it** — cite by content in a card (a quoted distinctive\n   string, a symbol name, a test name) exactly as #11 requires in source. Costs nothing mechanical;\n   relies on habit, which is what the three instances above already falsified once each.\n2. **Extend #11's carrier list to card bodies** and say so in the commandment. ⚠️ That is an edit to a\n   **governed surface** and therefore the skills seat's plus the maintainer's, ⛔ not this seat's —\n   which is why it is offered rather than proposed.\n3. **Make it falsifiable.** A PM-side check that, when a card is claimed, re-derives any `path:line`\n   in its body and reports the ones that no longer land on what they claim. ⚠️ Needs a way to say\n   what an address 「claims」, which is the hard half and may not be worth it.\n\n⚠️ ⛔ One thing this card does NOT say: that the seats who wrote those addresses were careless. All\nthree cards' substantive readings held; it was the pointer that rotted. The instance on objectui#9899\nwas caught and published by the triage seat that had written it — which is the loop working, and the\nreason this is a mechanism finding rather than a performance one.\n\nDedupe words: `line address in issue body` · `commandment 11 carrier list card` ·\n`check-new-line-citations source only` · `stale file:line in card` · `cite by content in cards`\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

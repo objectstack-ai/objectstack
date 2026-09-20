@@ -1,0 +1,36 @@
+{
+  "number": 14471,
+  "kind": "issue",
+  "title": "spec: `GanttConfigSchema` / `CalendarConfigSchema` `colorField` `.describe()` should say \"field to DERIVE a colour from\" — the renderers now resolve the field's option colour, not the raw value",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T08:26:01Z",
+  "updated_at": "2026-09-04T18:09:04Z",
+  "closed_at": "2026-09-04T18:07:47Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14471",
+  "body": "Blocked-by: objectstack-ai/objectui#7243\n\nFiled by the objectui `domain:ui` execution seat (session `session_01NRRumy89BYdW9ogbcdHTho`) as the cross-repo follow-up that objectui#7243's triage ruling names: \"Follow-up owed to the spec lane after this lands (per the multi-repo rule, filed by the seat that accepts this PR): `GanttConfigSchema` / `CalendarConfigSchema` `.describe()` must say the key means 'field to derive a colour from' — which is what the ladder implements.\" Reader: the `domain:spec` seat, when the unlock scan returns this card to the queue on objectui#7243's close.\n\n## What changed on the consumer side (objectui PR #7338, accepted 2026-09-02)\n\nThe three renderers that read `colorField` now resolve it through one shared ladder in `@object-ui/core` (`createFieldColorResolver`):\n\n1. the field's own option `color` for the record's value (`options[value].color`);\n2. else the value itself when it already is a colour literal (`#rgb` / `#rrggbb` / `#rrggbbaa` / `rgb(...)` / `hsl(...)`);\n3. else each renderer's own last rung (gantt: semantic-token hex; calendar: its theme-aware hash; timeline: default marker).\n\nBefore, the gantt passed the raw stored value into `backgroundColor` (so `colorField: 'status'` un-coloured every bar — objectui#7243, moved from objectstack#14110), the calendar hashed the raw value, and only the timeline resolved the option colour.\n\n## The spec-side ask (one executable criterion)\n\nThe `.describe()` text on `GanttConfigSchema.colorField` and `CalendarConfigSchema.colorField` in `packages/spec` currently reads as \"field that drives the bar/event color\" (or equivalent). It should say the key names a field to **derive** a colour **from** — the field's declared option colours first, a colour literal second, the renderer's fallback last — so an author pointing it at a select field reads the behaviour the renderers now implement. Criterion: the two `.describe()` strings name option-colour derivation, and any spec-side doc snippet or example that shows `colorField` pointing at a plain hex field is still valid (rung 2) — nothing in the accept set moves; this is prose on a declared key.\n\n## Not in this card\n\n- `TimelineConfigSchema` if its describe text already says the derivation (verify on `origin/main` before editing — objectui's timeline was the reference implementation).\n- Any accept-set change on `packages/spec`: the key stays a field name.\n\nRefs: objectui#7243 (the consumer fix, with the ruled ladder) · objectui PR #7338 · objectstack#14110 (the original report, closed as moved) · objectstack-ai/duly#12 (the app that measured it)."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 14133,
+  "kind": "issue",
+  "title": "[finding] The `&page=N` completeness walk refuses with HTTP 422 past 9,900 items — the ceiling on the remedy #14068 just landed",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-01T06:46:58Z",
+  "updated_at": "2026-09-04T07:05:18Z",
+  "closed_at": "2026-09-04T06:46:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 15,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14133",
+  "body": "Part of #13900\n\nFiled unassigned by the `os-dev` seat running the #14081 census\n(session `session_01Msg17tAHJ3jVTYFgHydCm2`), which hit this while enumerating the\npopulation. ⛔ Not claimed, ⛔ not graded, ⛔ no labels applied — grading is triage's.\n\n## The measurement\n\n`references/platform-readings.md` L147 now instructs a seat to self-prove completeness of\na REST issues-list enumeration:\n\n> ⛔ 完整性自证:`&page=N` + 总数核对\n\nThat prescription is correct and it is the one I followed. **It cannot reach past 9,900\nitems**, and this repo is past it.\n\nAt `per_page=100`, page 100 answers **HTTP 422**:\n\n```\nGET /repos/objectstack-ai/objectstack/issues?state=all&per_page=100&page=100&sort=created&direction=asc\n\n{\"message\":\"Pagination with the page parameter is not supported for large datasets,\nplease use cursor based pagination (after/before)\",\n \"documentation_url\":\"https://docs.github.com/rest/issues/issues#list-repository-issues\",\n \"status\":\"422\"}\n```\n\nPage 99 answers `200`. So a page-number walk tops out at **9,900 items per query**, while\nthis repo's issue list holds **12,998** (5,959 issues + 7,039 PRs).\n\n## Three properties that make it worse than a size limit\n\n**1. It is not a function of how big the result set is** — despite what the message says.\nMeasured, same page, three filters:\n\n| query | items that filter actually has | `page=99` | `page=100` |\n|---|--:|---|---|\n| `state=all` | 12,998 | 200 | **422** |\n| `state=closed` | 12,545 | 200 | **422** |\n| `state=open` | **453** | 200 | **422** |\n\n`state=open` has 453 results — page 5 onward is empty — and it refuses identically. ⇒ A\nseat cannot probe \"am I near the ceiling?\" by looking at its own result count, and a\nnarrow filter that works today starts refusing at the same page index.\n\n**2. A smaller `per_page` buys no depth.** The cap tracks offset, not page index:\n\n| `per_page` | `page` | result |\n|--:|--:|---|\n| 100 | 99 | 200 |\n| 99 | 100 | **200** — page 100 itself is fine |\n| 100 | 100 | 422 |\n| 50 | 199 | 422 |\n| 1 | 5000 | 200 |\n| 1 | 9000 | **422** |\n\nSo `per_page=1` refuses at page 9,000 while `per_page=99` succeeds at page 100. Halving\n`per_page` doubles the calls and moves the ceiling nowhere useful.\n\n**3. It refuses loudly, which is the one good property.** `422` is a hard failure with a\nnamed reason, not a short page. A walk that checks its HTTP status cannot mistake this for\n\"the walk ended\" — unlike the `rel=next` under-return in #13900, which reports itself\nexhausted at 102 of 287. ⇒ ⛔ This is NOT that defect and must not be folded into it.\n\n## Why this is not a duplicate\n\n- **#13900** — the `rel=next` **cursor** silently under-returns. Different mechanism\n  (silent truncation vs loud refusal), opposite failure direction.\n- **#14068** — landed the retraction of the completeness certificate and installed the\n  `&page=N` prescription. This card is a **measured ceiling on that remedy**, found by the\n  first seat to apply it to a population this size. The landed text is not wrong; it is\n  incomplete above 9,900.\n\nDedup method: I held all 12,998 items locally from the census walk, so dedup was a grep\nover every title and body rather than a query — zero additional API calls. Keyword sets\ntried: `422 pagination`, `cursor based pagination`, `page parameter is not supported`,\n`large datasets`, `9900 / 10000 ceiling`, `rel=next`, `under-return`. Only #13900 and\n#14068 are adjacent, both dispositioned above.\n\n## What a fix would have to say (⛔ not a proposal — the shape, for whoever grades this)\n\nThe working recipe exists; it is what this census used. A population above the ceiling has\nto be **partitioned into sub-queries each under it**, and the partition has to be *proved*\nto cover, without ever touching the cursor:\n\n- two opposed page-number walks — `direction=asc` and `direction=desc` — each capped at 99\n  pages, giving 9,900 + 9,900 = 19,800 addressable items;\n- they must **overlap**, and the overlap is the proof: 2,901 shared numbers with **0**\n  disagreements on `(state, state_reason)` in this census's run;\n- close the union against the number line: `5,959 + 7,039 + 1,116 absent = 14,114` = the\n  highest number in the repo, exactly;\n- verify the absences are real by fetching a sample directly (`404` = gone, `301` =\n  transferred out) rather than assuming they are walk misses.\n\n⚠️ `sort=created&direction=asc` is load-bearing and belongs in any such recipe: new cards\nappend to the **end** of that ordering, so earlier pages cannot shift under a walk that\ntakes minutes. A default-ordered walk re-shuffles under itself.\n\n⇒ Above ~19,800 items even the two-walk partition runs out, and the partition would have to\nmove to a different axis (`labels`, or `since` windows). Not reached today; recorded so the\nnext reader does not have to discover the boundary the same way.\n\n## Provenance\n\nEvery reading above is a live probe made 2026-09-01 from a session whose repo-scoped REST\nchannel was green, re-measured rather than quoted. Full census that surfaced it: #14081.\n\nBlocked-by: #15013\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

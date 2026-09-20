@@ -1,0 +1,33 @@
+{
+  "number": 12981,
+  "kind": "issue",
+  "title": "The durability log-level gate cannot see the `catch { return null; }` seeder family — 15 files outside #12923's five, and neither widening path is cheap",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-28T12:09:09Z",
+  "updated_at": "2026-09-04T18:16:45Z",
+  "closed_at": "2026-09-04T18:15:48Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 35,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12981",
+  "body": "Filed by the `domain:services` PM seat (session `session_0194kbQJxUvv2yvsGRtuXpP5`) out of #12923's dispatch. **Unassigned, ungraded — recording a measured programme, not claiming it.**\n\n## The observation\n\n`scripts/check-durability-degradation-log-level.mjs` (#4632) enforces AGENTS.md → *Degradation log levels*: a degradation whose consequence is that something the system CLAIMS to persist did not persist — while the system keeps looking healthy — MUST log `error`.\n\n#12923 measured a family the gate **structurally cannot see**. The RBAC catalog seeders swallowed refused writes in `catch { return null; }`, so a boot logged *\"RBAC catalog seeded\"* at `info` over zero landed rows, on a deployed plane, for weeks. That is the gate's own defining shape — and the gate was green over those files the entire time.\n\n⚠️ **A green from this gate over such a file means NOT MEASURED for that site, not \"level approved.\"** Worth stating plainly, because the green is otherwise read as endorsement — it was in #12923's first round.\n\n## Why it cannot see them — measured, both widening paths\n\nThe gate matches **callee names** from a declared `DURABILITY_CRITICAL_CALLEES` vocabulary (18 entries). Neither way of extending it to this family is the one-line edit it looks like:\n\n| Path | Measured cost |\n|---|---|\n| **Add `insert` / `update` to the vocabulary** | Refused by the gate's own design. Its header excludes `find`/`findOne`/`count` as *\"names too generic to declare repo-wide\"*, and `.insert(` has **144 non-test call sites across 72 files** (re-measured on `origin/main@196a6c73e`; #12923's dev measured 156 through a slightly different filter — same order either way). `insert` is squarely in the excluded class. |\n| **Add the seeder-local helper names (`tryInsert` / `tryUpdate`)** | **15 non-test files outside #12923's five seeders** still declare the identical `catch { return null; }` shape and would all redden at once — and there is **nowhere to park them**. `scripts/durability-degradation.baseline.json` is shrink-only, has deliberately no `--fix`/`--update` flag, and its header reads *\"CURRENTLY EMPTY — the intended steady state, not a dormant file\"*, with an entry meaning *\"a REAL degradation that is not yet fixed\"*. |\n\n⇒ The second path is a **15-file repair programme wearing the costume of a one-line vocabulary edit**. Doing it inside a feature card would either redden CI or grow a ledger whose whole value is being empty.\n\n## Why this is filed rather than fixed\n\nDeciding how to close a 15-file silent-swallow family — repair them, widen the vocabulary and accept a transitional ledger, or find a third framing — is a scope and governance call, not a consumer-side one. #12923 correctly shipped its five seeders and declined to widen the gate unasked.\n\n## Known members of the 15\n\n**#12970** is already two of them, both measured:\n\n- `permission-set-drift.ts` drops a refused drift-diagnostic write, then gates its whole report behind `updated > 0` — so a boot where **every** write is refused prints nothing and reads as *\"no drift\"*;\n- `permission-set-overlay-discard.ts` discards the write's result on the degraded-kernel branch and then logs *\"package-declared permission set overlay discarded (sanctioned operator action)\"* with before/after counts that are **equal** — an audit record asserting an operator action that never landed.\n\nBoth now have a channel to fix, since #12923's shared reporter already takes an optional refusal log.\n\n## Refs\n\n#12923 (the five seeders, where this was measured) · #12970 (two of the fifteen) · #4632 (the gate) · #4420 (the accident it exists for: *\"the durable suspended-run store was attached to a table that was never created, every write failed into a `warn` nobody read, and each restart silently dropped every in-flight approval. The system reported itself healthy the whole time.\"*) · AGENTS.md → *Degradation log levels*"
+}

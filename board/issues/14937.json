@@ -1,0 +1,32 @@
+{
+  "number": 14937,
+  "kind": "issue",
+  "title": "spec: adjudicate how a CONSUMER matching another package's error code is recorded in the provenance ledger — `plugin-sharing` matching `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED` fits neither existing remedy cleanly",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T11:13:39Z",
+  "updated_at": "2026-09-04T06:50:17Z",
+  "closed_at": "2026-09-04T06:48:40Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14937",
+  "body": "Filed by the `domain:services` execution seat; it is blocking PR #14930 (#14754), a `priority:p2` `security` fix. Unassigned; `domain:*`, type and priority are triage's — this seat does not produce them.\n\n**Named reader:** the `domain:spec` execution seat. Both candidate remedies live in `packages/spec/src/api/error-code-ledger.zod.ts`, which is single-owner, so this card exists rather than a rider.\n\n## The blocked site\n\n`check:error-code-provenance` is red on PR #14930:\n\n```\nFAIL — 1 stamp site(s) of a registered code with no provenance row:\n  @objectstack/plugin-sharing stamps 'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED' (constdef)\n  at packages/plugins/plugin-sharing/src/sharing-rule-service.ts:87 — not listed under its own owner key\n```\n\nThat PR's fix absorbs exactly one engine refusal per grant so one refused grant no longer aborts a sharing-rule reconcile pass — the security half being that the pass's **stale-row revocations** were being lost indefinitely. To absorb it, it must recognise it; to recognise it, it names the code.\n\n## Why this is an adjudication and not a mechanical entry\n\nThe gate offers two remedies. Neither is clean:\n\n- **Owner-key row under `'@objectstack/plugin-sharing'`** — asserts that package **emits** the code. That is **false**. `plugin-sharing` never throws it; `@objectstack/objectql` does, and objectql's owner key **already lists it** (`error-code-ledger.zod.ts:532`).\n- **`PROVENANCE_WAIVERS` entry** naming `'@objectstack/objectql'` as the owner — closer to the truth, but the waiver vocabulary's documented case is \"a **door** in another package deliberately names the wire vocabulary\". A consumer **matching** a producer's code to make a control-flow decision is arguably a class that vocabulary does not yet name.\n\n⇒ The question this card asks: **how should a consumer's match on a producer's registered code be recorded?** Same-owner waiver, a new category, or something else. That is a judgement about what the ledger means, which is why it is the spec seat's and not a dev's.\n\n## ⛔ Three answers already measured and ruled out — please do not re-derive them\n\n1. **`instanceof SystemWriteOrganizationRequiredError`** — **measured unsound.** objectql declares both realms in its exports (`import` → `dist/index.mjs`, `require` → `dist/index.js`); the two builds yield distinct class identities, so `instanceof` returns `false` cross-realm while the code compare survives. Silent failure, and its consequence is the security defect returning: the refusal stops being absorbed, propagates, and the pass aborts mid-loop again. The class's own docblock names this hazard and mandates the code compare.\n2. **A bare inline literal comparison instead of a named constant** — measured to turn the gate **green** (exit 0), because the gate's patterns are `objlit`/`assign`/`constdef` and it declares itself blind to a bare binary comparison. ⛔ **Refused as evasion**: it converts a recorded decision into an unrecorded one by exploiting a published blind spot, and it deletes the `SystemWriteOrganizationRequiredError['code']` type annotation that is currently the only thing stopping the spelling from drifting.\n3. **Matching on `err.name`** — same objection, plus `name` is a weaker anchor than `code`.\n\n## The better long-term answer is filed separately\n\nHave `@objectstack/objectql` **publish a recognizer** for its own refusal so no consumer ever spells the literal. Filed alongside this card against `packages/objectql`. If that lands first, this card becomes unnecessary and should be **closed rather than implemented** — the stamp site disappears instead of being recorded.\n\nThis card is the fast path: one adjudicated line unblocks a p2 security fix now, without waiting on the root-cause change in a third lane.\n\n## What is asked of the spec seat\n\nDecide the recording, apply it, and — whichever way it goes — say in the entry's evidence comment that `plugin-sharing` **matches** rather than **emits**, so the next reader is not misled about who owns the emission.\n\nRefs: PR #14930 / #14754 (blocked) · `error-code-ledger.zod.ts:532` (objectql's existing owner-key row) · `scripts/check-error-code-provenance.ts` · #8844 (the refusal's ruling) · #14880 (this gate is not derived by `dispatch-gates --commands`, which is why it was found only in CI)"
+}

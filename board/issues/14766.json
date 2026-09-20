@@ -1,0 +1,35 @@
+{
+  "number": 14766,
+  "kind": "issue",
+  "title": "spec: `IJobService.replay` gains an optional `force` argument — the contract half of #14501's A+a2 ruling",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T00:13:07Z",
+  "updated_at": "2026-09-04T14:45:52Z",
+  "closed_at": "2026-09-04T14:26:03Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14766",
+  "body": "Filed by the **`domain:services` execution seat** (session `session_01AUF1NoViznQK32gqpK8wS8`) as the **contract-first half** of a ruled card in its own lane. Unassigned, ⛔ not graded by this seat, ⛔ never dispatched by it — `packages/spec` is the `domain:spec` seat's single-owner surface.\n\n## Why this card exists separately\n\nThe maintainer ruled **A + a2** on **#14501** (relayed by the director seat, `14501#issuecomment-5518058223`, provenance: live PM chat, verbatim reply 「同意」). The ruling's own execution note reads *\"Execution: `domain:services` lane, M\"* — but it also names the file the change lands in:\n\n> **Clause-② yes** (`IJobService.replay` gains an optional `force` argument in `packages/spec/src/contracts/job-service.ts`): `CONTRACT_REVIEW_TIER`.\n\n`packages/spec` is not the services lane's to write, whoever needs it. So this is split contract-first: the contract moves here, the behaviour stays on #14501 behind a `Blocked-by:`. ⛔ Nothing about the ruling's substance is reopened — only its landing seats. Precedent for this exact shape: #13937 → #14384.\n\n## The change, stated from the tree\n\nCurrent declaration, `packages/spec/src/contracts/job-service.ts:200-206` on `origin/main` `7a17f3bf1`:\n\n```ts\n    /**\n     * Equivalent to `trigger(name)` but records that this run is a replay\n     */\n    replay?(name: string, data?: unknown): Promise<void>;\n```\n\nThe ruling requires a third, optional parameter carrying `force: true`, so that:\n\n- `replay()` on a scheduled flow whose `(flow, tick-window)` claim is **absent or failed** re-runs the window (unchanged behaviour);\n- `replay()` on a window whose claim **succeeded** is refused loudly with an ADR-0112 envelope naming the window and the claim;\n- `replay(name, data, { force: true })` sends anyway.\n\nOptions a1 (refuse always, no door for a genuine re-send) and a3 (send anyway, accept duplicates) were considered and **not** taken.\n\n## One-line executable criterion for whoever grades this\n\n`git show origin/main:packages/spec/src/contracts/job-service.ts | sed -n '200,206p'` still shows the two-parameter signature ⇒ this card is live. When it shows the `force` parameter, this card is done and #14501 unblocks.\n\n## Scope\n\n**In:** the `replay` signature in `packages/spec/src/contracts/job-service.ts`, its TSDoc, and whatever `packages/spec`-side machinery a signature change there owes (declaration baselines, liveness ledger, ADR-0087 disposition if the spec seat grades one owed).\n\n⛔ **Out:** the ledger behaviour itself — the `(flow, tick-window)` claim through `sys_flow_dispatch`, the `schedule-trigger.ts` catch recording a failed outcome, the `DbJobAdapter.replay` implementation and every pin. All of that is #14501, in `domain:services`, and it is blocked on this card.\n\n⚠️ The ruling grades the change **Clause-② `yes`** and names `CONTRACT_REVIEW_TIER`. That grading travels with the contract half; it is stated here so the spec seat does not have to re-derive it from #14501, and ⛔ it is not this seat's to relax.\n\n## Not asserted\n\nThis seat did **not** grade this card's priority, size, or type — `priority:p2` is carried over from #14501 as a starting point and the `domain:spec` seat should re-grade it on its own terms. If the spec seat judges that the `force` parameter is better shaped some other way (an options object, a distinct verb), that is its call on its own surface; #14501's behaviour half will follow whatever contract lands.\n\nRefs: **#14501** (the ruled parent, blocked on this) · `14501#issuecomment-5518058223` (the ruling, verbatim) · #14619 (the second door the same ledger answers) · #14149 (the digest work that meets it first) · #10220 (`sys_flow_dispatch`, the existing ledger) · #13686 (leader election)."
+}

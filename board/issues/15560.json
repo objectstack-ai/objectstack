@@ -1,0 +1,36 @@
+{
+  "number": 15560,
+  "kind": "issue",
+  "title": "finding(pm-half-states): H38 inherits H32's lane gate, so seat-post staleness speaks about 4 of 13 open seat posts — the triage, skills and director seats are dark",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T21:16:09Z",
+  "updated_at": "2026-09-04T23:35:09Z",
+  "closed_at": "2026-09-04T23:35:07Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15560",
+  "body": "Measured while working #14929 (the timestamped-reading patrol row). Recording only — no severity asserted, no fix chosen, filed unassigned for triage.\n\n## The measurement\n\n**Reading taken 2026-09-04T21:13:18Z; tree `cf6b67164` (`origin/main` at that moment), worktree `objectstack-issue-14929`.**\n\n`h32NeedsSeatComments` (`scripts/pm/check-half-states.mjs:5562`) is the gate that decides which seat posts have their comment threads fetched. It requires three things: the `pm:seat` label, `seatIsHeld`, and `!seatLane(issue).foreign`.\n\n`seatLane` (`:5478`) returns `foreign: true` for any lane that does not match `^domain:[a-z0-9][a-z0-9._-]*$`. Applied to the live board at 21:13:18Z — 13 open `pm:seat` posts:\n\n| seat post | lane as titled | thread fetched |\n|:--|:--|:--|\n| #6017 | `domain:spec` | yes |\n| #6021 | `domain:services` | yes |\n| #6024 | `domain:cli` | yes |\n| #6367 | `domain:engine` | yes |\n| #6015 | `triage (objectstack-wide)` | **no** |\n| #7623 | `skills` | **no** |\n| #12708 | `director(项目总监)` | **no** |\n| #6026 | `repo:cloud` | **no** |\n| #9831 | `repo:objectos` | **no** |\n| #12224 | `repo:www.objectos.ai` | **no** |\n| #6023 | `domain:devx` | no (vacant — correct, `seatIsHeld`) |\n| #6025 | `repo:objectui` | no (vacant) |\n| #10602 | `domain:devx` | no (vacant) |\n\n⇒ **4 of 13 open seat posts, and 4 of 10 HELD ones.**\n\n## Why this is a coverage fact and not just a cost fact\n\nTwo live rows declare that population as their own:\n\n- **H32** (seat idle over a queue) — its docblock at `:5558` states the gate is \"only for seats this row could actually speak about — 6 of the 12 open seat posts at the 2026-08-25 census\".\n- **H38** (seat-post staleness) — `:12028` and its banner: \"Its seat population is exactly `h32NeedsSeatComments`' … because that gate is what decided which seat threads were READ, and a row must not speak about a post nobody fetched.\"\n\nSo both rows are silent, by construction, on the triage seat, the skills seat, the director seat and every `repo:*` seat. The silence is correct given the gate — a row must not accuse a post it never read — but the *reason* for the exclusion is load-bearing and, as written, is about counting a lane inventory, not about whether a seat can go stale.\n\n`seatLane`'s own docblock (`:5467-5475`) argues the exclusion honestly for H32: a `repo:*` or lane-less seat has no `domain:*` label to count an inventory against, so its queue would read as empty and the row would be silent anyway. **That argument is H32's and it holds.** ⚠️ It is not obviously H38's: \"this seat post has not been touched in N hours\" needs no lane inventory at all — it needs the post's own comment stamps, which `seatPostLastEventMs` computes from rows already fetched. The gate H38 inherited was sized for a different question.\n\n## What I did NOT measure\n\n- ⛔ Whether any of the 6 dark HELD seats is actually stale right now. I read the gate, not the posts.\n- ⛔ Whether widening H38's population is affordable — it would be +6 comment fetches per run at the 21:13:18Z board (4 runs/day, against a 15,000/h core quota), but I did not check it against the patrol's own request budget or its coverage-pair reporting.\n- ⛔ Whether H32's inventory argument has a variant that works for `repo:*` lanes. Recording the asymmetry, not proposing a route.\n\n## Related\n\n#14929 (the card this was measured under — a different gap in the same file's comment-reading population)."
+}

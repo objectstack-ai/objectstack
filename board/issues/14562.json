@@ -1,0 +1,36 @@
+{
+  "number": 14562,
+  "kind": "issue",
+  "title": "[finding] The `objectstack-formula` reference index advertises `data/date-macros.zod.ts`, a surface the SKILL.md routes to objectstack-query — `SKILL_MAP` in `build-skill-references.ts` maps it to both",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T12:07:50Z",
+  "updated_at": "2026-09-04T11:28:12Z",
+  "closed_at": "2026-09-04T08:59:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14562",
+  "body": "Found while implementing #14316 (skills/objectstack-formula optimization flight, audit finding FRM-C-05). Filed unassigned and out of scope for that PR — the fix is a generator change in `packages/spec`, and #14316's ruling confines it to `skills/objectstack-formula/SKILL.md`.\n\n## What is measured\n\n`packages/spec/scripts/build-skill-references.ts` has `data/date-macros.zod.ts` in **two** `SKILL_MAP` entries:\n\n- under `'objectstack-query'` (alongside `data/query.zod.ts`, `data/filter.zod.ts`)\n- under `'objectstack-formula'` (alongside `shared/expression.zod.ts`)\n\nSo the generated `skills/objectstack-formula/references/_index.md` carries the row:\n\n```\n- `node_modules/@objectstack/spec/src/data/date-macros.zod.ts` — Date Macro Tokens — the declarative placeholders the UI substitutes\n```\n\nwhile `skills/objectstack-formula/SKILL.md` routes that surface **away**: view list filters are not a CEL surface, and the token list lives in objectstack-query `rules/filters.md`. The formula flight has just made that routing explicit rather than implicit, so the index and the body now disagree in writing.\n\nThe duplicate mapping is the whole defect: one schema file, two owning packages, and the reference index is the only place a reader sees the second one.\n\n## Why it matters\n\n`references/_index.md` is generator-owned and shipped. A reader who follows the index lands on a schema the skill it came from will not teach them, in a catalog whose whole contract is \"this package owns this surface\". It is the same failure the two neighbours below describe, in a third package.\n\n## Nearest neighbours (dedupe search run before filing; all still open)\n\n- **#14462** — `objectstack-ai`'s index advertises 6 schemas the SKILL.md never teaches and omits the one it names; `SKILL_MAP` unreconciled with the body. Same defect class.\n- **#14466** — `objectstack-automation`'s index routes to the ADR-0020-retired `state-machine.zod.ts` and omits both per-node `config` schemas; `SKILL_MAP`. Same defect class.\n- **#14441** — the index labels `data/query.zod.ts` \"Sort Node\" because its first JSDoc block is `SortNode`'s. Adjacent (same generator, labelling rather than routing).\n\nThese three plus this one are four instances of \"SKILL_MAP is not reconciled against the bodies\". Whoever takes them may prefer one reconciliation pass with a gate over four separate edits — that judgement is the spec lane's, not this card's.\n\n## Suggested shape (not a ruling)\n\nEither drop `data/date-macros.zod.ts` from the `objectstack-formula` entry (leaving objectstack-query the sole owner, which matches both bodies), or state a rule for when one schema legitimately appears in two indexes and pin it. A gate reconciling `SKILL_MAP` entries against the owning SKILL.md would close the whole class.\n\nTriage and priority deliberately left to the spec lane.\n\nRefs: #14316 · #14292"
+}

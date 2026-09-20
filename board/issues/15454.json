@@ -1,0 +1,34 @@
+{
+  "number": 15454,
+  "kind": "pull_request",
+  "title": "fix(spec): correct the offer-set claim in the icon-withdrawal CHANGELOG entry",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T16:12:31Z",
+  "updated_at": "2026-09-04T17:07:56Z",
+  "closed_at": "2026-09-04T17:07:55Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": "2026-09-04T17:07:54Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/15454",
+  "body": "Part of #14407 — not `Fixes`, because the card was still open for the triage/route decision that this PR's own commit history and the issue thread record; nothing else remains to be done against it after this merges, so the maintainer can close it alongside review.\n\n## What changed and why\n\n`packages/spec/CHANGELOG.md:6702` (inside the merged `## 17.3.0` entry documenting the `object.form` options-repeater `icon` withdrawal, `#13671`/`#14326`) claimed the repeater offers \"exactly `SelectOptionSchema`'s authorable keys minus `visibleWhen`\". That is false as stated:\n\n- `SelectOptionSchema` (`packages/spec/src/data/field.zod.ts:287-`) declares **six** authorable keys, none tombstoned: `label`, `value`, `description`, `color`, `default`, `visibleWhen`.\n- The repeater's pinned offer set (`field-rows-option-description.test.ts`, `toEqual(['label', 'value', 'color', 'description'])`) is **four** keys.\n- The unoffered difference is `{ default, visibleWhen }`, not `{ visibleWhen }` alone — `default` (`z.boolean().optional()`) is authorable at the publish door and was never offered by the quick-add row.\n\nBoth counts were re-measured against source in this PR, not taken on the issue's word.\n\n### Route: CHANGELOG.md, not the withdrawn changeset\n\nTriage (issue comment `5510484041`) ruled the fix belongs in `.changeset/object-form-option-icon-offer-withdrawn.md`, while that changeset was still unconsumed on `main`. By the time this card was picked up, a Version Packages release had folded it (`@objectstack/spec` is now `17.3.0`) — confirmed here independently:\n\n- `git ls-tree origin/main .changeset/` filtered for `object-form-option-icon` — **NOT PRESENT** (30 total entries in `.changeset/`, so the absence is measured, not an unreadable path).\n\nThe card's own stated fallback covers exactly this case (\"or a CHANGELOG correction at the next version if it has already been folded\"), so the fix lands at `packages/spec/CHANGELOG.md:6702` instead — a docs-only correction of a factual error in an already-published changelog, not a rider on a code change. `content/docs/releases/` is untouched (that surface is compiled centrally at release time; this is the package's own changelog, a different file).\n\n### What this PR deliberately does NOT do\n\nPer triage: this is not a form change. The options repeater still offers exactly `label`, `value`, `color`, `description` — whether the quick-add row should also offer `default` is a separate question with its own ADR-0049 reading, out of scope here.\n\n## Verification\n\nPrerequisite check (H1, run before editing): `packages/spec/CHANGELOG.md` is not regenerated wholesale by any script under `scripts/` — it is the standard changesets-appended file (current head section is `## 17.3.0`, prepended by each release). The only readers that touch this file (`check-release-notes.mjs`, `check-release-section-coverage.mjs`, `check-release-page-status.mjs`) parse version headers / section coverage, never this sentence's bytes, and no test pins the old sentence text anywhere in the tree. ⇒ hand edit is the correct route.\n\nGate list derived for this diff (`node scripts/pm/dispatch-gates.mjs`, re-derived against `origin/main` after a late fetch — file surface and matched-family list identical both times): 41 commands (34 path-matched + 7 declared whole-tree), all run locally against final commit `1c9c953aa` (`git rev-parse --short HEAD`):\n\n- **39/41 exit 0.**\n- `node scripts/check-release-section-coverage.mjs --strict` exits 1 — **pre-existing, unrelated**: it flags `content/docs/releases/index.mdx` still naming \"current series: 17.2.0\" after 17.3.0 shipped, a defect this PR's one-sentence edit (which touches no version heading, no `content/docs/releases/**` file) cannot affect either way. Already tracked at #15332; not filed here. `--strict` only runs in `release-coverage-patrol.yml`'s nightly schedule and its `pull_request` trigger is path-filtered to that script and workflow file only, so it does not gate this PR.\n- `pnpm check:dual-build-cjs-loads` exits 3 (`PREREQUISITE NOT MET ... nothing was measured`) — its own self-test (93 cases) passed; the sweep half needs `dist/` for all 80 workspace packages, which is CI's `Build Core` job, not a rebuild this docs-only change owes locally.\n\nFull command list, per-command exit codes, and logs are in the issue-comment report and this session's scratchpad.\n\nSix/four key split and route both independently re-verified — see the issue thread (claim comment) for the measured commands.\n\nskip-changeset: this PR corrects text in an already-published package's changelog and adds no new release content — `.github/workflows/pr-automation.yml`'s own Check Changeset rule (\"It releases nothing … apply the 'skip-changeset' label\") is the applicable route, applied on this PR immediately per repo convention (not waiting for the check to redden first).\n\n---\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01G4138K1EG7kQ81FNba5Kp4\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01G4138K1EG7kQ81FNba5Kp4)_"
+}

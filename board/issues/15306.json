@@ -1,0 +1,35 @@
+{
+  "number": 15306,
+  "kind": "pull_request",
+  "title": "fix(engine): aggregate boot-path advisory hits into one summary line, and count them by row",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T09:36:46Z",
+  "updated_at": "2026-09-04T12:06:28Z",
+  "closed_at": "2026-09-04T12:06:26Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": "2026-09-04T12:06:26Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/15306",
+  "body": "Fixes #13889\n\nImplements maintainer ruling **B** (comment 5494461940, 2026-09-01, verbatim 「同意」): aggregate advisory hits on the seed/boot load path into one summary line, and in the same stroke fix the by-write counting defect. Option A (an audience key on `ValidationRuleSchema`) stays parked — `packages/spec` is not touched. Option C is not taken.\n\n## The two landing sites had to be located by behaviour, not by the ruling's names\n\nThe ruling names `demo_bootstrap` and a claim-scan `owner_id` write-back; neither resolves in this repo (0 hits, with a firing control). Both platform halves were therefore located by symbol first:\n\n| half | the ruling's name | what it actually is here |\n|:--|:--|:--|\n| (a) where advisory hits are emitted | seed loader \"advisory\" emit | `packages/objectql/src/validation/rule-validator.ts` — the `logger.warn` in `evaluateValidationRules`, one line per row per violated rule. Not in the seed loader at all. |\n| (b) the system write-back | `demo_bootstrap` claim scan | `packages/plugins/plugin-security/src/claim-seed-ownership.ts:342` — `ql.update(name, { owner_id: adminUserId }, { where: predicate, multi: true, context: { isSystem: true } })` |\n\n`packages/objectql/src/engine.ts` is **not** touched: it is the reserved serial resource for #14666. Every `evaluateValidationRules` call site lives in it, which is why neither half was implemented by threading a parameter from there.\n\n## What changed\n\n**1. Aggregated reporting (`@objectstack/core`, new `runWithAdvisoryAggregation` / `recordAdvisoryHit`).** `SeedLoaderService.load()` runs inside an advisory aggregation scope and reports one summary line per rule — rule, object, row count, the rule's own message, example rows — instead of one line per row. The scope lives in `core` because it is the layer both ends already depend on, and the dependency only runs one way (objectql depends on metadata-protocol, never the reverse). It uses `AsyncLocalStorage` rather than a module flag on purpose: a per-org seed replay runs on a **live** server, so a global would capture concurrent interactive writes' advisories into the replay's summary. Hits are folded into their `(object, rule)` group on arrival, so 100k rows tripping one rule hold one group, not 100k records.\n\n**2. Advisory rules are counted by row, not by write (`rule-validator.ts`).** An `update` whose payload touches only platform-injected system columns changes no business field, so it no longer re-evaluates the object's advisory rules. The rule is dropped from the run, not merely silenced — the ruling asks for no re-**evaluation**, and suppressing output would leave the wasted predicate work in place. Membership is resolved per object by the declared authority `resolveInjectedSystemColumns`, never a literal list, so `ownership: 'org'` (no `owner_id`) and `systemFields: false` are judged on their own columns.\n\n`error`-severity rules are untouched by both halves. Rule semantics do not move: off the machine path the identical per-write line is emitted, byte for byte.\n\n## Verification\n\nBehavioural pins, driven through a real `ObjectQL` engine, a real `SeedLoaderService`, and the real claim-scan write shape — `packages/objectql/src/validation/advisory-boot-path.test.ts`:\n\n- **PIN 1** — one row rings **once** across a clean first boot (seed insert, then the claim scan). The acceptance anchor.\n- **PIN 2** — a seed load reports **one** summary line for N rows, asserting the count, the rule, the message and the example-row pointer, and **zero** per-row lines.\n- **PIN 3a/3b/3c** — controls: an ordinary interactive write still emits the historical sentence verbatim; an `error` rule still rejects both a system-column-only write and an ordinary one.\n\n**Both pins were proved to red on the pre-change path** (each ablation committed first, mutation confirmed on disk by anchored counts, rebuilt, marker confirmed in `dist` by `ablation-dist-preflight`, then restored and the marker re-proved absent):\n\n- ablation A (remove the aggregation, `@objectstack/core` rebuilt, marker live in `dist/index.js` + `dist/index.cjs`): PIN 1 and PIN 2 red.\n- ablation B (remove the by-row gate): PIN 1 red with the defect's exact shape — `expected [ …(2) ] to have a length of 1 but got 2`, the row ringing twice; PIN 3b red too.\n\nSuites, all green: `@objectstack/core` 48 files / 1159 tests · `@objectstack/metadata-protocol` 161 files / 2370 tests · `@objectstack/objectql` 270 files / 4631 tests. Typecheck green for all three (their `check:test-typecheck` covers the new test file, so it is genuinely type-checked).\n\nTwo gates went red and were repaired, both real:\n\n- `check:objectql-double-limit` — the new test's `find` double ignored the caller's bound. Fixed by applying the bound after the filter, by presence; this matters because `claimSeedOwnership`'s paged fallback reads with a `limit`.\n- `check:system-context-census` — pure line rot: the 61-line insertion in `seed-loader.ts` moved three anchors cited by `content/docs/permissions/system-context.mdx`. Repaired with the gate's own `--fix`; only line numbers moved. That page's claim that `isSystem` does **not** skip validation rules remains true — the new gate is keyed on the payload's columns, not on the context.\n\nAll 47 gate families derived by `node scripts/pm/dispatch-gates.mjs` (no path arguments) are green; the ratchet families and the pins were re-run on the final commit **28ea75b4a**, after the last merge of `origin/main`.\n\nA changeset is included and deliberately not `skip-changeset`: this changes runtime behaviour on a shipped boot path and adds a public export.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ARYe3yQTQCUFm5qPYNgKaJ)_"
+}

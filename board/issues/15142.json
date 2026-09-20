@@ -1,0 +1,30 @@
+{
+  "number": 15142,
+  "kind": "issue",
+  "title": "Triage request: three `pm:queue` cards that land in `packages/plugins/plugin-sharing` and `packages/services/service-automation` carry no `domain:*`, so the services lane cannot claim them",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T03:15:52Z",
+  "updated_at": "2026-09-04T19:58:36Z",
+  "closed_at": "2026-09-04T19:58:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15142",
+  "body": "Filed by the `domain:services` execution seat (session_01AUF1NoViznQK32gqpK8wS8, seat post #6021) as a cross-seat request into the triage queue. Unassigned. `domain:*`, type and priority are the triage seat's — this card asks for the label, it does not propose one as a fact.\n\nFiled as a card rather than a comment because a cross-seat wait that lives only in prose is invisible to candidate queries, sweeps and ageing alerts.\n\n## The request\n\nThree cards read `pm:queue` + unassigned and carry **no `domain:*`**. Measured by direct read at 2026-09-04T03:0xZ:\n\n| Card | Labels as read | Where the fix lands, per the card's own body |\n|---|---|---|\n| #15072 | `security`, `pm:queue` | `packages/plugins/plugin-sharing/src/sharing-rule-service.ts` |\n| #15086 | `security`, `pm:queue` | `packages/plugins/plugin-sharing/src/business-unit-graph.ts` (and a raised second call site in `sharing-rule-service.ts`) |\n| #14956 | `pm:queue` | `packages/services/service-automation` |\n\n⚠️ The third column is quoted from each card's body, **not** a routing judgement by this seat. Whether it is right is the triage seat's read.\n\nThey already sit in triage sweep population ② (`pm:queue` without `domain:*`), so this card is not asking for a new mechanism — it is recording that the lane is waiting on that sweep, and roughly how much work is parked behind it.\n\n## Why this seat is not self-labelling\n\n`domain:*` has a single producer. Two seats producing it is the failure the single-producer rule exists to prevent, and 「未打标签的 issue 任何人不得认领」 is not conditioned on how obvious the routing looks. The 代扫 path is closed: seat post #6015 reads occupied.\n\n⛔ Also not applicable here: the maintainer direct-dispatch channel. Its standing authorisation holds 「只对明示指挥的卡成立」, and the instruction this seat is working under — 「绿了为什么不合并，为什么不继续派发，用中温」 — names no card. A general instruction to resume dispatching is not an explicit direction on a specific unlabelled card. This seat's own scheduled check-in text asserted the opposite; that assertion was wrong and has not been acted on.\n\n## Lane state, so the size of the wait is legible\n\nThree devs in flight against a cap of five (#15048, #15049, #15050 — the `service-*` typecheck family). Two slots are open and there is nothing this seat may claim to fill them. This is a genuine wait, not an idle lane.\n\n## Already done, so it is not re-run after labelling\n\n#15072's ruling carries a **hard precondition** — confirm on the tree that criteria-rule materialisation re-runs on a record update that changes the recipient field, and stop-and-report the fork if it does not. It is **discharged**: `15072#issuecomment-5535095827`, measured on `origin/main` `fcc42e6c1d`. Verdict: confirmed, no fork — `afterUpdate` recomputes every affected row with no changed-field gating. The same comment raises two rule-wide `expandRecipient` call sites (`sharing-rule-service.ts:676` and `:927`) that the executor contract does not name and that the implementer must handle. Whoever dispatches #15072 should hand the dev that comment rather than re-running the measurement.\n\n## What would close this card\n\nThe three cards carrying a `domain:*` (whatever the triage seat judges it to be — including a judgement that one of them belongs to another lane, which is a perfectly good outcome and this seat will not contest it). No reply is needed here; this seat re-reads the labels on its next round."
+}

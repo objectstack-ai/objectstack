@@ -1,0 +1,36 @@
+{
+  "number": 13933,
+  "kind": "issue",
+  "title": "[decision] CEL_STDLIB_FUNCTIONS route: keep 35 as a declared subset, widen to the 39 bare-callables, or rename the symbol",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T17:24:46Z",
+  "updated_at": "2026-09-05T02:30:48Z",
+  "closed_at": "2026-09-05T02:14:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13933",
+  "body": "Split out of #13831 so the question survives PR #13931's landing. #13931 delivers only the **route-independent** half — the drift pin #13831 says is owed either way, plus a docblock recording the measured decomposition. It changes the constant's contents not at all. The route itself is this card.\n\n## The fork changed shape, so the original framing no longer applies\n\n#13831 posed it as **complete registry vs. deliberately advertised subset**. Measurement (full detail in #13931) makes the complete-registry reading unreachable *in the shape the constant has*:\n\n```\n72 registered names\n  = 39 callable BARE, as fn(x)\n  + 33 callable ONLY on a receiver, as x.fn()\n\n39 bare-callable\n  = 27 added by registerStdLib  -> all 27 advertised\n  +  8 cel-js built-ins         -> advertised\n  +  4 cel-js built-ins         -> WITHHELD: bytes, dyn, type, uint\n```\n\nTwo findings reshape the decision:\n\n1. **The card's sub-premise was falsified.** The 27 `registerFunction` sites yield exactly **27** names; **50 of the 72** come from cel-js's own global registrations. \"Derive the constant from the registration site\" is impossible as stated.\n2. **Every consumer spends an entry as a bare call**, so a flat list of all 72 is not merely unreachable but *wrong*: `objectui`'s Studio predicate editor (`CelPredicateField.tsx`) inserts a chosen suggestion verbatim as `` `label(` ``, and the pre-existing runtime pin probes each entry with a bare-call expression. Advertising `split` or `map` would autocomplete them into an author's predicate, which faults `no matching overload`.\n\n⇒ The catalog's real membership rule — never previously written down — is **bare-callability**. That makes the 37-name gap deliberate rather than stale, and moves the live fork onto the **39 bare-callables**, not the 72.\n\nWorth noting for grading: #13831's own example gap list is mostly a category error. Of `type map filter exists split substring getFullYear base64 json orValue`, **nine are receiver-only**; only `type` is bare-callable.\n\n## The options\n\n**A. Keep 35, and keep it explicitly a subset.** What #13931's docblock and pin already assume. The four withheld names are CEL type primitives with no measured demand.\n\n**B. Widen to the 39 bare-callables.** A four-name addition (`bytes`, `dyn`, `type`, `uint`), mechanically derivable from `Environment.getDefinitions()`. Cheap — but it hands an AI author `dyn(x)` and `uint(x)`.\n\n**C. Rename the symbol** so its name stops promising completeness. ⛔ A published-surface break on an exported symbol; deliberately not improvised.\n\n## Recommendation: A\n\nThe implementing seat recommends A and the reasoning holds up:\n\n- **Demand.** The only measured consumers are objectui's autocomplete and the MCP `validate_expression` tool, both served correctly today. Nothing asks for `bytes`/`dyn`/`type`/`uint`.\n- **The defect was an unstated contract, not a wrong number.** A stated rule plus an executable pin closes the class; widening closes one instance.\n- **Asymmetric cost for AI authoring.** Under-advertising costs expressiveness; over-advertising emits faulting code. `dyn` and `uint` are precisely the primitives that let a model produce something which type-checks and is unusable.\n- **Scope discipline.** B is capability expansion with zero measured pull.\n\nC is a maintainer call regardless of A/B.\n\n## The second half of the same decision\n\n`skills/objectstack-formula/SKILL.md` currently says the constant \"is the canonical list\" and that **\"Only the functions above are callable.\"** The second claim is **measurably false** — `type(x)` resolves and evaluates, as do 33 receiver methods. It is false in the *safe* direction (it under-promises), so nothing is broken by it today.\n\nIt is deliberately not corrected in #13931, for two reasons: the correct wording depends on which route is picked, and `skills/**` is a governed surface. Recommendation is to fold it into whichever route is chosen rather than file it separately — a separate card could not be graded before this one is.\n\nRefs: #13831 (the finding this splits from) · #13931 (the route-independent pin) · #13594 (the ruling pinning the lint gate's oracle to the engine's own `check()`, unaffected by any route here)"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 15355,
+  "kind": "pull_request",
+  "title": "docs(agents): a negative `--is-ancestor` reading is void without a positive control",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T12:41:55Z",
+  "updated_at": "2026-09-04T13:35:42Z",
+  "closed_at": "2026-09-04T13:35:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-09-04T13:35:40Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/15355",
+  "body": "Fixes #15087\n\n`git merge-base --is-ancestor` is a one-bit answer with no error channel for \"I could not\nsee far enough.\" In a shallow clone it answers exit 1 — \"not an ancestor\" — for a commit\nthat IS in the target's history, silently, at a normal exit code. That is the *reassuring*\ndirection: \"not released yet\", \"not on main\" and `Blocked-by` premise checks are all hoping\nfor exit 1, so a control-free reading looks exactly like a pass.\n\nThis adds one clause to the dev contract's standard-clauses section, immediately beside the\nexisting shallow-clone guard for `log -S` / `--follow` / `blame` — echoing that guard's\n`--is-shallow-repository` spelling rather than introducing a second spelling for the same\nquestion.\n\n## What the clause says\n\nBoth halves, as triaged:\n\n- **The failure is one-directional.** Missing objects can only *withhold* an ancestry path,\n  never invent one, so exit 0 (\"is an ancestor\") is self-proving and stands in any clone.\n  Only exit 1 needs a control leg. Stating it this way keeps the guard off the safe\n  direction instead of taxing every call — a rule that costs more than it must is the kind\n  that quietly stops being run.\n- **A negative reading is a two-legged measurement, incomplete with one leg.** In the same\n  checkout, against the same target ref, a commit known to be in the target's history must\n  answer exit 0; otherwise the negative reading is void — deepen or unshallow until the\n  control passes, then re-read. Written in the shape this repo already uses for a zero-hit\n  search that needs a known-present control before it counts as a reading.\n\n## One refinement, measured while writing it\n\nThe control leg has to be *chosen*, not merely run. In a depth-50 clone, `HEAD~5` **and**\nthe shallow boundary commit both answer exit 0 while the real reading is still truncated —\na near control is completely blind to the truncation it exists to detect. The clause\ntherefore requires the control commit to be at least as deep as the one under test.\n\nThe same run showed `--is-shallow-repository` is a cheap trigger rather than the verdict:\nafter `git fetch --unshallow` it can still read `true` when another graft remains, while\nthe reading itself is already correct. The control leg is the verdict; the depth read only\ntells you to go looking.\n\n## Reproduction\n\nGround truth in the full clone — `bbbac0fc` is an ancestor of `origin/main`:\n\n```\ngit merge-base --is-ancestor bbbac0fc origin/main   → exit 0\n```\n\nSame question in a scratch `--depth 50` clone, with the object present but its path\ntruncated (`git fetch --depth 1 origin bbbac0fc`):\n\n```\ngit rev-parse --is-shallow-repository               → true\ngit rev-list --count HEAD                           → 50\ngit merge-base --is-ancestor bbbac0fc HEAD          → exit 1   ← silently wrong\ngit merge-base --is-ancestor HEAD~5   HEAD          → exit 0   ← near control: passes, proves nothing\ngit merge-base --is-ancestor BOUNDARY HEAD          → exit 0   ← boundary control: also blind\ngit fetch --unshallow                               → depth 700\ngit merge-base --is-ancestor bbbac0fc HEAD          → exit 0   ← the true answer\n```\n\nThe scratch clone was removed afterwards.\n\n## Verification\n\nGate family re-derived from the actual change set (not a hand-built path list) and\nreconciled with what was run; the union below was run at `076ee33d`, the final commit.\n\n- All 15 derived gates green, including `pnpm check:pm-skill-ratchet`\n  (`.claude/agents/os-dev.md is 459 lines (ceiling 469; headroom 10)`),\n  `pnpm check:nul-bytes`, `pnpm check:agent-model-declared` and\n  `pnpm --filter @objectstack/lint run check:doc-formula-expressions` (which first reported\n  PREREQUISITE NOT MET, exit 3 — nothing measured — until its closure was built).\n- Whole-repo `pnpm lint` green through the shared verification lock, exit 0. No narrowing\n  was claimed: the full repo scan ran.\n- `node scripts/pm/check-governed-merges.mjs --test` reports **GOVERNED**, exit 3.\n\nThe second commit is a re-wrap only: the ratchet prices lines in **bytes**, not display\ncolumns, so the CJK lines first landed at 137-140B against a 120B budget. The re-wrap\nbreaks only at legal points and was proven byte-identical by round-trip before it was\napplied.\n\n## Landing\n\nGoverned surface (`.claude/**`) — this stays a **draft**. No seat flips it ready, enqueues\nit, or arms auto-merge; a human merges it. Labelled `skip-changeset`: the diff publishes\nnothing from any released package.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_019RfFHiRCSs3JXLK4cwcfox)_"
+}

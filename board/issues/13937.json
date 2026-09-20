@@ -1,0 +1,35 @@
+{
+  "number": 13937,
+  "kind": "issue",
+  "title": "[Decision] Workflow resume ordering: a thrown node today leaves the run terminally unresumable — which of three shapes, given that the current order buys exactly-once across a crash?",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T17:34:52Z",
+  "updated_at": "2026-09-04T12:21:21Z",
+  "closed_at": "2026-09-04T12:20:11Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 20,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13937",
+  "body": "Filed by the `domain:services` PM seat (#6021) from #13909 slice 1's measured report (PR #13934). ⛔ **Not ruling it** — this changes resume semantics for **every** pausing node type, and the two live shapes trade a *visible* failure for a *silent* one in opposite directions. Blocking nothing today: #13909's slice 1 makes the condition visible, and the remedy for runs already stuck (shape 4) is dispatchable regardless of how this is ruled.\n\n## The mechanism, verified on `origin/main`\n\n`AutomationEngine.resumeInternal` consumes the suspension **before** running downstream nodes, so a node that merely throws throws with the pause already gone and the catch arm records the run `failed` — unresumable, with no verb anywhere that moves it out. The in-place comment says what the order is *for*:\n\n> Consume the suspension **before** running downstream work — a run resumes exactly once per pause, and **a duplicate resume after a partial restart must not double-run side effects**. … This is **also** where the paused node learns its pause is over and disarms what it armed on entry (#5512).\n\n⚠️ **#5512 is a second consumer of that point, not its cause** (\"this is *also* where\"). #5512's own requirements are one notification per consumption, through the single choke point, after the suspension is gone from cache and store — **none of them requires the consumption to precede `traverseNext`**. What the ordering really buys is **exactly-once across a crash**.\n\n## The three shapes, with costs measured from the contracts and the five resume callers\n\n**Shape 2 — run `traverseNext` first, consume on success only.**\n✅ A thrown node leaves the pause intact, so the run stays resumable. Answers the defect directly.\n⛔ **Exactly-once inverts**: a crash mid-traversal leaves the durable row alive, so the restart re-runs every side effect already performed — **a silent double-run replacing a visible strand**.\n⛔ `hasSuspendedRun` answers true for the whole traversal window ⇒ `ApprovalService.assertRunResumable` flips from *refusing* a mid-resume second decision (`RESUME_TARGET_LOST`) to *admitting* one that then collides with `RESUME_IN_PROGRESS`.\n\n**Shape 3 — consume, then re-arm the suspension on a caught throw.**\n✅ Keeps crash-time exactly-once while a *caught* throw restores a resumable pause.\n⛔ **Breaks the one #5512 clause the ordering really carries.** By the time the catch runs, `releaseSuspension` has told the executor the pause is over and wait-node has **cancelled its one-shot** (`wait-node.ts:68`: *\"#5512's `onSuspensionReleased` drops this job when it does\"*) ⇒ re-persisting produces **a timer wait nothing will ever wake** — #5512's own defect inverted, and **silent**, which is worse than a visible `failed`.\n⛔ Needs a new **mandatory** `NodeExecutor` hook every pausing node type must implement, plus an attempt counter / poison threshold or a genuinely broken node retries forever.\n\n**Shape 4 — leave the ordering; add an explicit operator verb (re-arm / retry a terminally failed run).**\n✅ No change to resume semantics for any node type ⇒ no blast radius. Turns a state a deployment can only enter into one it can also leave. Composes with shape 2 later.\n⛔ Repair, not prevention — a run still passes through the unresumable state.\n\n## 四棱\n\n- **① 实际业务拉动** — 五个 resume 调用者与两个 `hasSuspendedRun` 读者里,**没有一个需要暂停被「提前」消费**;它们需要的是**恰好消费一次**,而那也可以由一个持久 claim/lease 提供。已有部署里卡住的 run 数量**未知**(⚠️ 只有运维能查),而这正是先要一个出口动词的理由。\n- **② 项目长远合理性** — shape 3 是权宜形状:它用一个 `NodeExecutor` 的新强制钩子和一套平台本来没有的重试策略,去买一个顺序;而它的失败态(一个永远不会被唤醒的等待)是**无声的**。\n- **③ 防 AI 犯错** — ⭐ 这一棱最关键。**shape 2 若不配 lease,是把「平台明确告诉你 run 失败了」换成「平台在崩溃后静默重跑副作用」—— 它让危险的那个情形变成安静的那个**,而这正是本项目一贯拒绝的方向。\n- **④ 创业阶段不扩散** — shape 4 是移除「进得去出不来」这个状态的最小增量,且不必在没人知道受影响行数之前就先花掉顺序变更的爆炸半径。\n\n**推荐:shape 4 先行;shape 2 仅在与一个保住 exactly-once 的持久 claim/lease 同批时才做;shape 3 尽早排除。**\n\n## ⚠️ 一件必须与裁决同批决定的事\n\n**条件的命名**(#13909 交付项 3)。#13909 slice 1 加的 `StrandedRunState`(`'missing' | 'failed'`)是 **plugin 局部的报告标签,已就地注明不是 run state**;平台级的名字要落 `packages/spec/src/contracts/automation-service.ts`(其 `AutomationResult.status` 至今是 `'completed' | 'paused' | 'failed'`)。\n\n⇒ **叫什么取决于裁哪一个**:裁 shape 2 则该条件基本不再存在、不值得持久化一个状态;裁 shape 4 则它成为运维要操作的持久状态、应当有名字。⛔ 先命名会为一个可能被顺序变更消灭的状态铸造词汇。\n\n## ⛔ 本席不代裁的理由\n\n维护者地板的判据是安全/权限边界,本卡不落在那里 —— 但它**改变每一种暂停节点类型的 resume 语义**,而两个活着的形状是在**两个相反方向上**用一个可见的失败换一个无声的失败。这是架构取舍,不是执行细节。\n\n## 裁后本席怎么执行(你不用管)\n\n裁 **4** ⇒ 立即派出口动词那一刀(⚠️ 大概率触 `packages/spec` ⇒ 走条款②契约复审档位),命名同批定;裁 **2** ⇒ 先要 claim/lease 的设计,再动顺序,`assertRunResumable` 的翻转必须同批钉住;裁 **3** ⇒ 需要先立 `NodeExecutor` 钩子的契约卡。\n\n## Related\n\n#13909(可见性,已交付 slice 1)· #13807(审批门的原子性,`Blocked-by: #13909`)· #5512(暂停释放通知)· PR #13934(本卡全部代价读数的来源)"
+}

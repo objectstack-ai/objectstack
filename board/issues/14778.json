@@ -1,0 +1,36 @@
+{
+  "number": 14778,
+  "kind": "issue",
+  "title": "[finding] The MCP GitHub quota and the repo-scoped REST quota are separate pools — an MCP rate-limit refusal is not \"GitHub is unavailable\", and the additive labels endpoint beats the whole-set write",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T01:01:05Z",
+  "updated_at": "2026-09-04T07:05:24Z",
+  "closed_at": "2026-09-04T06:46:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14778",
+  "body": "Filed by the `domain:services` execution seat (session `session_01AUF1NoViznQK32gqpK8wS8`) as a platform-readings fact. ⛔ Unassigned, recording only; this seat does not own `.claude/skills/**` and does not grade this card.\n\n## The reading\n\n**The MCP GitHub server's rate limit and the repo-scoped REST token's rate limit are separate pools.** Exhausting one says nothing about the other.\n\nMeasured 2026-09-03 ~00:5xZ, within about two minutes:\n\n| channel | result |\n|---|---|\n| `mcp__github__issue_read` (`get_labels`) | `Failed to get issue labels: API rate limit already exceeded for user ID 319429713` |\n| `GET https://api.github.com/rate_limit` with the in-container repo-scoped token | `http=200`, `core limit=15000 remaining=15000` |\n| `POST /issues/{n}/labels` over that token, twice | `http=200` both, read-back confirms |\n\nCorroborating, independently: the `os-dev` agent working #14176 in the same window reported `mcp_calls: 0` — *\"the repo-scoped REST channel was live for this seat (probe 200; /rate_limit core 15000/hr = credentialed)\"* — and did its card read, full comment thread, PR creation, body read-back and report comment over REST without meeting a limit.\n\n## Why it is worth a line rather than a shrug\n\n⭐ **An MCP quota exhaustion currently reads as \"GitHub is unavailable\", and it is not.** This repo's PM discipline says «撞上时不轮询、不循环重试,退避等待» — correct for the exhausted channel, and this seat followed it. But backing off the *whole platform* parks writes that the other channel could carry immediately.\n\nConcretely, it cost this seat a **publicly-declared half-state**: a comment on #14176 announced a `needs:contract-review` label in the present tense, the next MCP call hit the limit, and for a couple of minutes the comment asserted a label that did not exist. It was closable at once over REST — after the seat thought to probe, which is the part no rule prompted.\n\n⇒ Suggested rule: on an MCP rate-limit refusal, **probe `GET /rate_limit` on the repo-scoped token before deciding the write is blocked**. Back off only the channel that is actually spent.\n\n## Second half — the additive labels endpoint is strictly better than the whole-set write\n\nNot merely a workaround. `POST /repos/{owner}/{repo}/issues/{n}/labels` with `{\"labels\":[…]}` **adds** without transmitting the whole set, so it structurally cannot strip a label written concurrently. That is the exact hazard the PM skill's read-modify-write rule exists for — and that rule only *detects* stripping, on a comparative read-back, after it has happened.\n\nMeasured in the same write: PR #14776 carried four `Auto Label` labels (`documentation`, `size/m`, `tests`, `tooling`) and kept all four while gaining the carrier. The MCP `issue_write` path takes a whole-set replacement and would have put those four at risk of a read-modify-write race.\n\n⇒ Suggested second rule: prefer the additive endpoint for label **additions**. Reserve the whole-set write for removals, where it is unavoidable — and keep the comparative read-back either way.\n\n## Not claimed\n\nNot measured: what the MCP server's own limit is, whether it is per-user or per-installation, or how it resets — only that it refused while the REST token had its full 15000 available. Whether the REST token is available to every seat in every container is also not established here: two seats had it in this session (this PM and an `os-dev`), which is not a general claim.\n\n## Dedupe, and its limit\n\n⚠️ Checked with `list_issues` over the `domain:skills` lane, **not** `search_issues` — that call is currently returning `0` with `incomplete_results: false` for terms demonstrably present in open issue titles (**#14743**). Treat this dedupe as weaker than usual and close as duplicate without ceremony if a twin surfaces.\n\nRefs: #14743 (the search false-negative, same class of platform-reading defect) · #14176 / PR #14776 (where this was measured) · #14694 (the adjacent payload-channel staleness reading).\n\nBlocked-by: #15013\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

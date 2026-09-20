@@ -1,0 +1,35 @@
+{
+  "number": 15398,
+  "kind": "issue",
+  "title": "`js-comment-mask.d.mts` under-declares `scanSource`: the `interpolation` flag it returns, and one gate already reads, is missing from `SourceFlags`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T14:20:49Z",
+  "updated_at": "2026-09-04T23:40:31Z",
+  "closed_at": "2026-09-04T23:38:08Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15398",
+  "body": "**What was measured**\n\n`scripts/js-comment-mask.mjs` is this tree's one code/prose separator. Its `scanSource`\nreturns **three** per-character flag arrays — its own JSDoc says so, and so does the code:\n\n```\nscripts/js-comment-mask.mjs\n   * @returns {{ comment: Uint8Array, literal: Uint8Array, interpolation: Uint8Array }}\n  return { comment, literal, interpolation };\n```\n\nThe hand-written declaration beside it, `scripts/js-comment-mask.d.mts`, declares **two**:\n\n```\nexport interface SourceFlags {\n  comment: Uint8Array;\n  literal: Uint8Array;\n}\nexport function scanSource(source: string): SourceFlags;\n```\n\n`interpolation` is not a vestigial field. It is already load-bearing for a real consumer:\n\n```\nscripts/pm/dispatch-gates.mjs:3005   * interpolations, which are code — `scan.interpolation` exists for exactly\nscripts/pm/dispatch-gates.mjs:3027       if (scan.literal[i] && !scan.interpolation[i]) continue;\n```\n\n**Why this is worth a card**\n\nThat consumer is a `.mjs` file, so no tsc program reads it and the gap costs nothing today.\nIt is the NEXT consumer that pays, and the shape of the payment is the specific failure the\nwhole module exists to prevent.\n\n`js-comment-mask.d.mts`'s own header states why it exists: a gate under\n`packages/spec/scripts/` imports the scanner, that directory is inside a tsc program, and an\nuntyped `.mjs` import is TS7016 — the scanner silently becomes `any`. So the declaration is\nthe surface every TYPE-CHECKED consumer sees. A TypeScript gate that needs to tell an\ninterpolation's code bytes from its template's literal bytes reads `.interpolation`, gets\nTS2339 against `SourceFlags`, and reasonably concludes the shared scanner cannot answer its\nquestion.\n\nThe next step after that conclusion is a private scanner — which is exactly what\n`check:comment-mask-adoption` exists to red, and exactly the drift whose measured cost is\nrecorded in the module's own header (16 files disagreeing with a real parser, 15 of them in\nthe fabricating direction).\n\nThe same header says the declaration is maintained **by hand**: *\"Keep this file in step\nwith the module by hand, and keep it small enough that doing so stays trivial.\"* This is one\nstep out of step. Nothing mechanically holds the two in agreement, which is presumably how\nit drifted and is the reason it can drift again.\n\n**Not proposed here, left to triage**\n\nWhether the fix is (a) adding the field to `SourceFlags`, (b) adding it *and* a check that\nholds the declaration equal to the module's returned shape, or (c) declaring the omission\ndeliberate in the header (an intentionally narrowed public surface, with the `.mjs`\nconsumer named as the exception) is a real choice with different costs, and this card takes\nno position. ⚠️ Option (c) is not obviously wrong: the header does say the two flag arrays\nare \"the load-bearing part of the surface, so they are typed precisely\", which can be read\nas a deliberate narrowing rather than an oversight. If it was deliberate, the header should\nsay so where the next reader will look, because today the JSDoc and the declaration simply\ndisagree.\n\n**Context** — surfaced while implementing #13874, which imports `scanSource` from this\nmodule for its `literal` flag. That card needed only `literal` and is unaffected; nothing in\nit is blocked by this. ⛔ Deliberately not fixed there: it is a different file, a different\nquestion, and #13874's ruling is strictly additive."
+}

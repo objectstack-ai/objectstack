@@ -1,0 +1,33 @@
+{
+  "number": 15312,
+  "kind": "issue",
+  "title": "finding(pm): `dispatch-gates` does not derive `check:driver-memory-census` for a change that trips it — the local family went green and CI found the red",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T10:27:41Z",
+  "updated_at": "2026-09-04T13:25:45Z",
+  "closed_at": "2026-09-04T13:21:58Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15312",
+  "body": "Filed unassigned. Surfaced by the #15232 dev seat, which recorded it in its own report rather than glossing over it — that is the behaviour worth keeping, and this card is the follow-through.\n\n## What happened\n\nPR #15282 added `packages/plugins/plugin-dev/src/dev-i18n-packages-reader.test.ts`, whose line 57 carried `vi.mock('@objectstack/driver-memory', …)` — copied from that package's sibling harnesses, part of the #3060 \"mock every optional package absent\" convention.\n\nThe seat derived and ran its gate family the way the dispatch contract requires:\n\n```\nnode scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --commands\n```\n\n53 of 57 exit 0, the other 4 explicitly NOT MEASURED with stated prerequisites. **`check:driver-memory-census` was not among the 57.** CI's `Lint & Repo Gates` then failed on it (job 100960342355):\n\n```\nx LEDGERED: packages/plugins/plugin-dev/src/dev-i18n-packages-reader.test.ts:57 binds\n@objectstack/driver-memory (mock) and the ledger does not cover it.\n```\n\nThe gate counts `vi.mock` as a module DECLARATION (its own self-test says so, alongside import / require / dynamic import), and `@objectstack/driver-memory`'s consumer set is locked by maintainer rulings (#5499 froze the driver, #5704 and #6664 ruled the two consumers that stay). A new binding is a red by design.\n\nThe defect was real and the seat fixed it correctly — **migrated, not ledgered**: the mock was redundant, since `dev-plugin.ts`'s one import of that package sits inside `if (enabled('driver'))` and both boot cases pass `services: { driver: false }`. Deleting it returned the census to 2 ruled consumers with the ledger file untouched.\n\n## Why it is worth a card\n\nThe derivation exists so a seat can measure the same things CI will, **before** pushing. A gate that CI runs and the derivation does not offer inverts that: the local run's green is not evidence, and the seat learns about the failure a cycle later. Same shape as the artifact-roster problem `dispatch-gates` already reports on itself —\n\n> Each declares only tracked FILES — a baseline, an allowlist of the members it already has … no path you pass can move them … ⛔ never read their silence as a clearance.\n\n— except this one does not even appear in the roster block, so there is nothing for a seat to read and decline.\n\n## What to look at\n\n- Whether `check:driver-memory-census` declares a scan surface `dispatch-gates` can match on. Its subject is *any module binding anywhere under `packages/**`*, which is a whole-tree predicate — the same class the tool already handles with its \"declared WHOLE-TREE and named on every card\" bucket (6 families on the #15287 derivation). If it belongs in that bucket, adding it there is the whole fix.\n- Whether other census/ledger gates in `scripts/` have the same shape and are equally invisible. Worth answering by enumeration rather than one at a time: the question is \"which gates does CI run that no `dispatch-gates` derivation can name\", and it should be answerable mechanically.\n- ⚠️ Do **not** fix this by widening what the seat is told to run by hand. The point of the derivation is that the list is computed; a prose instruction to \"also remember to run the census gates\" reproduces exactly the failure it is meant to remove.\n\n## Not to be confused with\n\nThis is not the gate misbehaving. `check:driver-memory-census` did its job — it caught a real new binding on a frozen package, and its message correctly refused the bookkeeping shortcut (\"Do NOT add an entry to make this green\"). The gap is in what `dispatch-gates` offers a seat before the push.\n\nRelated: #15294 (a rule two contract reviews had to reconstruct because it was never written down) is the same family of problem — something CI or precedent enforces that the tooling does not hand you."
+}

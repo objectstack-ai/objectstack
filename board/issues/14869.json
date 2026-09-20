@@ -1,0 +1,36 @@
+{
+  "number": 14869,
+  "kind": "issue",
+  "title": "The internal dispatch runbook has no step that pastes the decision frame into the dev prompt — after #14685 item 4 (PR #14862) the dev definition expects it there and has no copy of its own",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-03T06:31:52Z",
+  "updated_at": "2026-09-04T07:05:33Z",
+  "closed_at": "2026-09-04T06:49:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14869",
+  "body": "Recorded by the skills lane seat (session `session_01LraLgQVGq8egUwfYZpbYt1`) from the #14685 item-4 flight (PR #14862, finding F5), whose dev measured it and left it alone because `.claude/skills/pm-dispatch/**` was outside that flight. Unassigned, bare, for triage; the landing files are governed `.claude/skills/pm-dispatch/**`.\n\n## What\n\nDecision #14685 item 4 (ruled **B**, comment 5520452691) keeps two copies of the four-axis decision frame — internal-pm (`.claude/skills/pm-dispatch/SKILL.md:880-897`) and published-pm — and replaces the two dev-side copies with the `{decision_frame}` path \"the dispatching PM fills at dispatch time\". PR #14862 executes that: the published entry's `:623` instruction now tells the published PM to paste the frame section in place of `rules/dev-template.md:99`'s `{decision_frame}` line, and `.claude/agents/os-dev.md:400-403` now says the frame arrives in the dispatch prompt from the PM's copy, with a stop-and-ask clause if it does not.\n\nThe internal lane has no such step. Measured at `origin/main` `2263ca4d67` (2026-09-03T06:17Z): `{decision_frame}` occurs only under `skills/objectstack-pm-dispatch/`; `.claude/skills/pm-dispatch/references/dispatch-runbook.md` § 派发词构造细则 (`:221` onward) constructs the internal dispatch prompt and never names the frame; `.claude/skills/pm-dispatch/SKILL.md`'s dispatch step does not either. Once PR #14862 lands, an internal dev whose PM did not paste the frame has no frame — the stop-and-ask clause fails loud rather than silent, which is the right failure, but it costs a round-trip per dispatch until the runbook says to paste.\n\n## Why it matters\n\nThe frame is binding text for every escalation (`needs_decision` analysis on four axes, long-term soundness ≥ 50%). Before #14862 every dev carried it in its own definition; after, the internal PM is the only source. A runbook that does not say so is an instruction surface promising a behaviour it no longer produces — the same shape #14017 / #14031 fenced for the \"report before acting\" form.\n\n## Scope (shrink-or-neutral under the line ratchet)\n\n- `references/dispatch-runbook.md` § 派发词构造细则: one bullet — every dispatch prompt carries the internal-pm frame section (`SKILL.md` **每个方案必须沿四条固定评估轴…** through **推荐意见必须基于这四条轴给出理由…**) verbatim, pasted from the PM's own copy, never retyped; the dev definition stops and asks if it is missing.\n- Budget: `dispatch-runbook.md` is at its ceiling (280/280). Pay by a same-file deletion, or by the cross-file move rule PR #14860 introduces (`Restart-when:` that PR is on `main`); ⛔ no ceiling raise otherwise, ⛔ no re-wrap funding.\n- ⛔ Do not add a third copy of the frame anywhere — the anti-dormancy scan in `scripts/check-skill-frame-sync.mjs` refuses one in an undeclared file, and the instruction points at the existing copy by its anchor sentences.\n- Interim, already in force: the skills seat's own briefs carry the frame from 2026-09-03T06:19Z (condition recorded on the item-4 review, comment 5521428238).\n\n## Verified\n\n- Dedup 2026-09-03T06:30Z (`search_issues`, 6 results read): #6863 (standard clauses sunk into os-dev.md — the design this reverses for the frame), #12668, #12784, #9761, #9721, #7239 — none carries this gap.\n- `dispatch-runbook.md` ceiling row `['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 280]` at `scripts/pm/check-skill-line-ratchet.mjs`; file is 280 lines at `2263ca4d67`.\n\nRefs: #14685 (item 4, ruled B) · PR #14862 · PR #14860 (the payment path) · #13597 (corpus audit Phase 3)."
+}

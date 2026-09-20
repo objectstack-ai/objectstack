@@ -1,0 +1,36 @@
+{
+  "number": 14559,
+  "kind": "issue",
+  "title": "Seam (spec lane, ruled): `gen:react-blocks` stops emitting `skills/objectstack-ui/contracts/react-blocks.contract.json` — the markdown rendering becomes the single AI-facing output (#14296 item 3 = A)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T11:53:41Z",
+  "updated_at": "2026-09-04T08:44:35Z",
+  "closed_at": "2026-09-04T08:39:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14559",
+  "body": "Seam card filed by the skills lane seat (session `session_01LraLgQVGq8egUwfYZpbYt1`) under the maintainer's ruling on #14296 item 3 = **A** (comment 5507419465, 2026-09-02 09:27Z, director seat relaying 「其他同意」). Program #14292. Filed unassigned for the spec lane; ⛔ the objectstack-ui skill flights do not touch generated output.\n\n## The ruling, verbatim in substance\n\n`scripts/build-react-blocks-contract.ts` (`packages/spec`, run as `gen:react-blocks` / checked as `check:react-blocks`) writes the same content twice — `skills/objectstack-ui/contracts/react-blocks.contract.json` (5,352 tokens) and `skills/objectstack-ui/references/react-blocks.md` (3,153 tokens): same four blocks, same prop counts, byte-identical `note` strings. The JSON rendering has zero in-repo consumers (one comment mention only), and **objectui `origin/main` has zero consumers** (`git grep react-blocks.contract.json` is empty there — re-measured 11:5xZ). The generator stops emitting the JSON; the file is deleted; the markdown is the single AI-facing output. Customers stop paying 2.8% of the published bundle for a second rendering of one table.\n\n## Everything that moves with it (the cost the ruling carries into this card)\n\n1. **Generator** — `packages/spec/scripts/build-react-blocks-contract.ts`: drop the JSON writer; `--check` compares the markdown only. `package.json:292-294` scripts keep their names.\n2. **Sync gate** — `check:react-blocks` (runs in `lint.yml`, per `.gitattributes:133`) now verifies one artifact.\n3. **`.gitattributes`** — drop the `merge=os-regen` row at `:155` (`react-blocks.contract.json`); keep `:156` (the markdown). Update the comment at `:121` (\"both halves of the react-blocks contract\").\n4. **`AGENTS.md:746`** — the generated-artifacts row `| The react-blocks contract | check:react-blocks | gen:react-blocks |` stays but its artifact list names only the markdown. Governed surface ⇒ that edit lands draft-only through the human-merge path (request review from `os-zhuang` and `hotlong`, no ready flip, no enqueue).\n5. **Ratchet self-test** — `scripts/check-skills-token-ratchet.mjs` uses the JSON as a boundary fixture (`genContract` at `:687`, \"a real path on this tree\") and lists it in the generator-owned exclusion set (`:803`); both must move to another real generator-owned path (e.g. `references/react-blocks.md`) or the self-test reds on a missing file. Run the self-test.\n6. **ADR-0082** (`docs/adr/0082-react-component-contract-governance.md`) — the sentence at `:39` naming both renderings and the chain diagram at `:87` are corrected to one rendering. `docs/adr/**` is governed ⇒ draft-only, same review path.\n7. **`check:skill-refs` / `check:skill-docs`** — verify neither enumerates the JSON; `check:skill-identifier-liveness` Leg 1 reads published files, so the deletion shrinks its population.\n\n## Landing rules\n\n- One PR, `Fixes #<this card>`, governed (`AGENTS.md`, `docs/adr/**`, `skills/**`) ⇒ stays DRAFT; review requested from `os-zhuang` + `hotlong` with `draft: true`; a human merge is the review record.\n- No changeset is owed unless `packages/spec` publishes something that changes (`scripts/` in a published package — verify with `scripts/check-empty-changeset.mjs`'s enumeration; `skip-changeset` if it releases nothing).\n- Reverse verification: run `check:react-blocks` at the current head (green, two artifacts), delete the JSON without changing the generator (the gate must go RED — the deletion is real), then land the generator change (green, one artifact).\n- The ratchet's generator-owned population shrinks by one file — no ceiling row exists for it, so the ratchet script changes only in the self-test fixtures named above.\n\n## Not in scope\n\nOption C of the same item (moving `evals/` out of the published tree) is a later question recorded on #14292, not ruled. The objectstack-ui split (#14298 round 2) proceeds independently and does not touch `contracts/` or `references/`.\n\nDedupe: a targeted `search_issues` for this seam returned zero; a control query on the same engine returned 16 hits (so the zero is a reading, not a silent-zero). Nearest neighbours, none this: #14298 (the ui flight that deferred it), #13772 (the closed ui sweep that first measured the double rendering).\n\nRefs: #14296 (ruling) · #14292 (program anchor) · ADR-0082."
+}

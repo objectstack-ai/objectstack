@@ -1,0 +1,33 @@
+{
+  "number": 15593,
+  "kind": "pull_request",
+  "title": "fix(devx): js-comment-mask.d.mts declares the interpolation flags and the self-test verdict the module really returns",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T22:43:32Z",
+  "updated_at": "2026-09-04T23:38:07Z",
+  "closed_at": "2026-09-04T23:38:06Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-09-04T23:38:06Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/15593",
+  "body": "Fixes #15534\nFixes #15398\n\nTwo declaration-only fixes to `scripts/js-comment-mask.d.mts`, folded into one PR because they are the same defect class on the same file: the hand-written declaration under-describes the module it mirrors. **No behaviour change** — `scripts/js-comment-mask.mjs` is not touched (its self-test prints the same 44 cases before and after).\n\n## 1. `SourceFlags` was missing `interpolation`\n\n`scanSource` has returned three arrays since the interpolation view landed (`@returns {{ comment, literal, interpolation }}` in the module), but the declaration named two. A TypeScript consumer reading `.interpolation` got TS2339 — and the real consumer, `scripts/pm/dispatch-gates.mjs`, reads it at `:3098` (`if (scan.literal[i] && !scan.interpolation[i]) continue;`) to count an identifier inside a template interpolation as a reference.\n\n## 2. `selfTest(): void` contradicted the module's own CLI dispatch\n\nThe module returns `SELF_TEST_VERDICT` and its dispatch checks it by identity (`if (selfTest() !== SELF_TEST_VERDICT)`), which is the whole point of the sentinel: a `return` above the verdict prints nothing and would otherwise exit 0. The declaration said the opposite in prose — \"there is no verdict for a caller to forget to read\". `SELF_TEST_VERDICT` is `const`, not exported, so `string` is the widest type a caller can name; the JSDoc now says so and states the handshake.\n\nThe file header's \"The two flag arrays\" is now \"three\".\n\n### Before / after\n\n```ts\n// before\nexport interface SourceFlags {\n  comment: Uint8Array;\n  literal: Uint8Array;\n}\nexport function selfTest(): void;\n\n// after\nexport interface SourceFlags {\n  comment: Uint8Array;\n  literal: Uint8Array;\n  interpolation: Uint8Array;\n}\nexport function selfTest(): string;\n```\n\n## Input-side control — the type surface proved against the real consuming program\n\nThe tsc program that actually reads this declaration is `packages/spec/tsconfig.scripts.json` (`pnpm --filter @objectstack/spec run check:scripts-typecheck`), which pulls the `.d.mts` in through `packages/spec/scripts/check-browser-reachable-entries.ts`'s `import { scanSource } from '../../../scripts/js-comment-mask.mjs'`.\n\nA throwaway `packages/spec/scripts/__decl-control.ts` inside that program, **deleted before the commit** (`git status` clean; the diff is one file):\n\n```ts\nimport { scanSource, selfTest } from '../../../scripts/js-comment-mask.mjs';\nexport const interp: Uint8Array = scanSource('x').interpolation;\nexport const verdict: string = selfTest();\n```\n\n| leg | exit | result |\n|:---|:---|:---|\n| control against `origin/main`'s declaration | 2 | `scripts/__decl-control.ts(5,51): error TS2339: Property 'interpolation' does not exist on type 'SourceFlags'.` and `scripts/__decl-control.ts(6,14): error TS2322: Type 'void' is not assignable to type 'string'.` |\n| control against this branch's declaration | 0 | clean |\n| program with the control removed (what ships) | 0 | clean |\n\nBoth error codes are the ones the two cards predict, so the fix is measured against the consumer rather than asserted.\n\n## Verification — union re-run on the final commit `89cb086cd`\n\nExit codes captured before any pipe; verdict lines quoted from the gates themselves.\n\n| command | exit | verdict |\n|:---|:---|:---|\n| `node scripts/check-declaration-mirrors.mjs --self-test` | 0 | `All 23 self-test cases passed.` |\n| `node scripts/check-declaration-mirrors.mjs` | 0 | `OK: 4 hand-written declaration(s) agree with their modules on name, kind and required arity.` |\n| `node scripts/js-comment-mask.mjs --self-test` | 0 | `js-comment-mask self-test: 44 cases pass (23 mask/strip corpus, 12 interpolation view, 9 shared recogniser).` — unchanged, the module is untouched |\n| `pnpm --filter @objectstack/spec run check:scripts-typecheck` | 0 | `tsc --noEmit -p tsconfig.scripts.json`, no diagnostics |\n| `node scripts/check-comment-mask-corpus.mjs` | 0 | `comment-mask corpus sweep: 5960 files, 0 disagree, 0 unparseable` |\n| `pnpm check:nul-bytes` | 0 | `check-nul-bytes: OK (scanned 7555 text file(s) ... no raw ASCII control bytes).` |\n| `pnpm check:entry-guard` | 0 | `214 scripts/ file(s) — every entry guard goes through invoked-as.mjs` |\n| the other 15 commands `dispatch-gates.mjs --changed --commands` emits | 0 | all green |\n| `npx eslint scripts/js-comment-mask.d.mts --no-inline-config --format json` | 0 | 1 file, 0 errors, 0 warnings |\n\n**`check:declaration-mirrors` was run by hand.** The derivation does not emit it for a `.d.mts` change set on `main` (recorded in #15553), so it is not in the 21 commands above — it is item 1 of this table instead.\n\n**NOT MEASURED, by name:** `pnpm check:type-check-debt` exits **3**, its own documented `PREREQUISITE NOT MET` code — `--re-measure cannot run: 33 workspace dependenc(ies) of the ledgered packages have no built type entry point on disk`. That is an unbuilt-closure precondition in this worktree, not a finding, and no ledger number moves in this diff. `pnpm check:published-readme-exports` (a roster-silent gate run voluntarily) fails the same way, every line reading `type entry ... does not exist. Build first`, naming only READMEs this diff does not touch. CI builds the closure and runs both.\n\nNo changeset: `scripts/**` only, nothing publishes from a package. `skip-changeset` applied.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_012zGPuVVX3deAx9LdjK8jCk\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012zGPuVVX3deAx9LdjK8jCk)_"
+}

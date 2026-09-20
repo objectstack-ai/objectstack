@@ -1,0 +1,33 @@
+{
+  "number": 15294,
+  "kind": "issue",
+  "title": "finding(changeset): two independent contract reviews read the repo's own history to opposite bumps for \"add an exported symbol to a published index\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T08:58:09Z",
+  "updated_at": "2026-09-04T14:22:56Z",
+  "closed_at": "2026-09-04T14:22:25Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15294",
+  "body": "Filed unassigned, no live blocker. Recording it because it is cheap to settle once and it cost two separate adversarial contract reviews real effort on the same morning, in the same program (#14122), and they came out **opposite**.\n\n## The two readings\n\nBoth reviews were given the same instruction — *establish the answer from the repository's own precedent, not from general semver intuition* — and both did.\n\n**Review of PR #15261** (adds `export * from './artifact-collections.js'` to `packages/core/src/index.ts`; subject `feat(runtime)`) concluded **`minor`**, citing the adjacent precedent:\n\n> commit `655b106` (#14643) added the neighbouring line — `export * from './artifact-packages.js'` — to the same file … `\"@objectstack/core\": minor`. Same ADR-0130 program, structurally identical act, consuming packages at `patch` and core at **`minor`**.\n\n**Review of PR #15282** (adds two named exports to `packages/plugins/plugin-dev/src/index.ts`; subject `fix(plugin-dev)`) concluded **`patch`**, from a corpus scan:\n\n> last 600 commits touching any `packages/*/src/index.ts`, purely additive export changes (added `export …` lines, zero removed) where the changeset declares a bump for that package:\n> `{minor: 158, patch: 64, major: 4}` n=226\n> of which subject starts with `fix(`: `{patch: 49, minor: 36, major: 2}` n=87\n\n## The reading that reconciles them — and why it should be written down rather than inferred\n\nThe two data sets are consistent under one rule: **the commit TYPE decides** — `feat(` → `minor`, `fix(` → `patch` — which is what the split at n=226 vs the `fix(`-only n=87 shows.\n\nThat rule is defensible for this repo (the whole monorepo is one Changesets `fixed` group per `.changeset/config.json`, and `scripts/check-changeset-no-major.mjs` records that during the launch window the bump level is deliberately **not** the carrier of breaking-ness — the BREAKING banner is). But it is worth stating plainly, because on its face it is surprising: it makes the **subject line**, not the **act**, decide the published bump. Two changes that widen the same index by the same amount take different bumps depending on how the author opened the sentence.\n\nNote the second review also cited \"#15261 declares `@objectstack/core: patch` while genuinely widening core's index\" as in-program precedent for `patch` — but #15261's subject is `feat(`, so under the reconciling rule that PR's own reviewer was right to call it `minor` and the citation cuts the other way. Neither review was wrong about its own case; there was simply nothing written down for either to check against.\n\n## What would settle it\n\nOne paragraph, wherever the changeset rules already live (the `Check Changeset` step's prose in `.github/workflows/pr-automation.yml` is the surface every author already reads, and `scripts/check-changeset-no-major.mjs` already carries the launch-window reasoning):\n\n- what a purely additive widening of a published index takes, and whether the commit type is genuinely the discriminator or merely correlated with it;\n- if it is correlated rather than causal, what the real discriminator is;\n- how that interacts with the launch-window convention where a `minor` can carry a BREAKING banner (#14714, #14854).\n\n⚠️ Do **not** turn this into a new gate. The existing `Check Changeset` already catches the absent case, and `check-changeset-no-major.mjs` the major case; what is missing is a written rule for humans and agents choosing between the two remaining levels.\n\n## Status of the two PRs that raised it\n\nNeither is blocked on this. #15282 stands at `patch` (its review passed that question). #15261's semver item went moot when the module moved out of `@objectstack/core` and that PR stopped publishing anything."
+}

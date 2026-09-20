@@ -1,0 +1,37 @@
+{
+  "number": 15276,
+  "kind": "pull_request",
+  "title": "docs(platform-objects): widen sys_email.error description to cover pre-delivery rejections",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T08:04:47Z",
+  "updated_at": "2026-09-04T09:24:33Z",
+  "closed_at": "2026-09-04T09:24:32Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": "2026-09-04T09:24:31Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/15276",
+  "body": "Fixes #14372\n\n## What\n\n`sys_email.error` (`packages/platform-objects/src/audit/sys-email.object.ts`) was declared as:\n\n> Transport error message when status=failed\n\nSince #14371, `EmailService.recordRejectedMessage` (`plugin-email/src/email-service.ts:677`/`:852`) also writes `status: 'failed'` rows for messages `normalizeMessage` rejects **before** they reach a transport (unsendable `from`, no recipient, no subject, no body), prefixed `rejected before delivery: ` (`:875`). The declared field description was narrower than what the column now holds.\n\nWidened to the wording settled in triage (issue comment 5504375428, reconfirmed in 5536386432/5537220287):\n\n> Why the message failed — a transport error, or the validation that rejected it before delivery.\n\n## How\n\nEdited only the declaration (`sys-email.object.ts:195`) and regenerated the `platform-objects` i18n bundle with its own tooling — `node scripts/check-i18n-bundles.mjs --write` — rather than hand-editing `en.objects.generated.ts` (its `help:` key at line 2479, per the source-of-truth guardrail in this repo's docs). Confirmed the generated `help:` string actually changed and that `check:i18n` re-verifies clean afterward.\n\nThe translated locales (`zh-CN`/`ja-JP`/`es-ES`) keep their existing (now-stale relative to the new English) human translations by the extractor's own merge-mode design — that is expected behaviour for this bundle (untouched keys are not drift) and outside this card's scope.\n\nNo behaviour change: no schema key added/removed, `recordRejectedMessage` untouched, no column change.\n\n**Net change: exactly 3 files, +25/-2** (matches GitHub's own `changed_files`/`additions`/`deletions` on this PR as of HEAD `71590c470`) — `.changeset/sys-email-error-description-widen.md`, `packages/platform-objects/src/apps/translations/en.objects.generated.ts`, `packages/platform-objects/src/audit/sys-email.object.ts`. The commit list carries extra entries from a merge-base hiccup fixed mid-review (see note at the bottom) — those are not part of this PR's actual diff.\n\n## Verification\n\n- `git grep` positive controls on `origin/main` @ `97bcd99e`: `recordRejectedMessage` (`email-service.ts:677`,`:852`) and `\"rejected before delivery: \"` (`:875`) both fire — premise re-confirmed live (was 0 on 2026-09-02, non-zero now).\n- `pnpm --filter @objectstack/platform-objects test` — 33/33 files, 518/518 tests pass.\n- `pnpm --filter @objectstack/platform-objects typecheck` — clean.\n- `pnpm check:i18n` (full, 9 packages) — green; filtered re-run — `platform-objects in sync (11 bundles)`.\n- `pnpm check:i18n-stale-fill` — green (this is the gate that would have caught a stranded stale leaf on a *revised* source string; 0 stale-fill leaves).\n- No other package/bundle in the repo carries the old string (`git grep` clean).\n\n### Local gate families (per family, re-derived with `node scripts/pm/dispatch-gates.mjs`, no path args, on the corrected 3-file surface — merge base `460134af8` — at HEAD `71590c470`)\n\n37/37 green:\n\n| gate | exit |\n|---|---|\n| `node scripts/check-adr-0087-registration.mjs --self-test` | 0 |\n| `node scripts/check-changeset-no-major.mjs --self-test` | 0 |\n| `node scripts/check-ci-filter-parity.mjs` | 0 |\n| `node scripts/check-closing-keyword-parity.mjs` | 0 |\n| `node scripts/check-closing-keyword-parity.mjs --self-test` | 0 |\n| `node scripts/check-comment-mask-adoption.mjs` | 0 |\n| `node scripts/check-comment-mask-adoption.mjs --self-test` | 0 |\n| `node scripts/check-comment-mask-corpus.mjs` | 0 |\n| `node scripts/check-empty-changeset.mjs --self-test` | 0 |\n| `node scripts/check-keyed-text-bounds.mjs` | 0 |\n| `node scripts/check-keyed-text-bounds.mjs --self-test` | 0 |\n| `node scripts/check-plugin-teardown-shape.mjs` | 0 |\n| `node scripts/check-plugin-teardown-shape.mjs --self-test` | 0 |\n| `node scripts/check-system-context-census.mjs` | 0 |\n| `node scripts/check-system-context-census.mjs --self-test` | 0 |\n| `node scripts/check-undeclared-dep-imports.mjs` | 0 |\n| `node scripts/check-undeclared-dep-imports.mjs --self-test` | 0 |\n| `node scripts/docs-audit/check-affected-docs.mjs` | 0 |\n| `node scripts/docs-audit/check-drift-comment.mjs` | 0 |\n| `node scripts/pm/release-rehearsal-clone.mjs --self-test` | 0 |\n| `pnpm check:changeset-gate-self-tests` | 0 |\n| `pnpm check:cross-package-test-inputs` | 0 |\n| `pnpm check:doc-authoring` | 0 |\n| `pnpm check:dual-build-cjs-loads` | 0 |\n| `pnpm check:i18n` | 0 |\n| `pnpm check:i18n-stale-fill` | 0 |\n| `pnpm check:logger-receiver-detach` | 0 |\n| `pnpm check:nul-bytes` | 0 |\n| `pnpm check:objectui-changeset` | 0 |\n| `pnpm check:page-declaration-shape` | 0 |\n| `pnpm check:pm-half-states` | 0 |\n| `pnpm check:published-files` | 0 |\n| `pnpm check:refd-timer-probe` | 0 |\n| `pnpm check:slot-lookup` | 0 |\n| `pnpm check:test-source-alias` | 0 |\n| `pnpm check:type-source-resolution` | 0 |\n| `pnpm check:watch-hint-literal` | 0 |\n\n(29 matched by path + 2 by change kind [`check:i18n`, `check:i18n-stale-fill`, since this diff revises an existing source string] + 6 declared whole-tree.) `pnpm check:dual-build-cjs-loads` needs a full `pnpm build` first (it refuses with exit 3 and states nothing was measured otherwise) — done before this run.\n\n## Changeset\n\n`@objectstack/platform-objects` ships this description as field metadata (Studio reads it as the field's help text), so this is not comment-only — added a `patch` changeset.\n\n## Note: merge-base correction mid-review\n\nAn earlier push in this PR's history briefly desynced its merge-base from `origin/main` (a `git filter-branch` used to clean up commit-message trailers rewrote commits that had been merged in from `origin/main`, replacing them with content-identical-but-different-SHA copies — so `git merge-base origin/main HEAD` stopped advancing past this branch's original fork point, and GitHub's three-dot diff/file-count briefly over-reported). Fixed by merging the current `origin/main` in again (no rebase, no force-push) — `git merge-base origin/main HEAD` now correctly resolves to `origin/main`'s real tip, and the three-dot and two-dot diffs agree on exactly the 3 files above. The gate results in this body were re-derived and re-run fresh after that fix, superseding an earlier report-comment reading on the issue that (harmlessly, since content never changed) predates it.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ARYe3yQTQCUFm5qPYNgKaJ)_"
+}

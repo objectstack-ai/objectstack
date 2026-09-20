@@ -1,0 +1,33 @@
+{
+  "number": 15414,
+  "kind": "issue",
+  "title": "check-self-test-workflow-commands walks only the root `scripts/`, so the one package-local gate CI self-tests is in no population and its output is never scanned",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T14:48:59Z",
+  "updated_at": "2026-09-04T20:49:24Z",
+  "closed_at": "2026-09-04T20:48:25Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15414",
+  "body": "Found while measuring #15342, out of that card's scope (which is the two anchors in `scripts/pm/dispatch-gates.mjs` and `scripts/check-self-test-wired.mjs`). Filed rather than fixed: closing it changes which self-tests that gate SPAWNS, which is new verification surface and a different card.\n\n## The gap\n\n`scripts/check-self-test-workflow-commands.mjs` imports the shared extraction from `check-self-test-wired.mjs` (`collectInvocations`, `carriesSelfTest`, `codeOf`) — \"one definition, two gates\", as its header puts it — but it does **not** import the population. It builds its own:\n\n```js\nconst files = walkScripts(scriptsDir);   // scriptsDir = join(ROOT, 'scripts')\n...\nconst population = [...carriers].filter((s) => named.has(s)).sort();\n```\n\n`walkScripts` is anchored at the repo-root `scripts/` directory, so a gate CI runs by a package-local path can never enter `carriers` and therefore never enters `population`, however CI names it.\n\n## Measured on `2c22f5716`\n\n`lint.yml` runs one such gate, twice:\n\n```\n- name: Relationship carriers are spelled as the string the spec declares\n  run: |\n    node packages/lint/scripts/check-reference-carrier-shape.mjs --self-test\n    node packages/lint/scripts/check-reference-carrier-shape.mjs\n```\n\nRead through the shared extraction:\n\n```\nnamed by CI: true | self-tested by CI: true | carries --self-test in code: true\nin the workflow-commands population (root walk only): false\n```\n\nThe two gates' own scope lines disagree by exactly one, which is this file:\n\n```\ncheck-self-test-wired:            169 of those are run by 30 workflow(s)\ncheck-self-test-workflow-commands: 168 script(s) CI runs ship a `--self-test`\n```\n\n## Why it matters\n\nThat gate's whole subject is what a self-test PRINTS on a runner: a line the Actions runner parses as a workflow command mints a failure-level annotation on a green required check, and its header records that the transformation happens on a runner and nowhere else. `check-reference-carrier-shape.mjs --self-test` is run by CI on every pull request, and its output is in no sweep. The blind spot is one script wide today and grows with the package-local gate lane.\n\nNote the asymmetry that keeps this quiet: the gate's `#4690` refusals all fire on an EMPTY population or an empty candidate set. A population that is complete-minus-one refuses nothing and prints a confident scope line.\n\n## Direction, not a prescription\n\n`check-self-test-wired` now admits a second population source on the root walk's own terms — the file must exist and its code must carry the literal — and deliberately does NOT add a second walk. The obvious repair is to export that population from the one gate that owns it rather than to widen a second walk here, which is what the \"one definition, two gates\" header already promises for the extraction half. Whoever takes it should also decide whether `isCandidate` then selects the file, and price the extra subprocess.\n\nRelated: #15342 (the same root-anchoring class, in the two tools that card names).\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 15146,
+  "kind": "issue",
+  "title": "`os-dev` agents end their turn to wait on a Monitor they armed themselves — a completed agent is never woken by its own Monitor, so the dev parks forever and the PM must hand-resume it (3 of 3 devs in one round)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T03:28:37Z",
+  "updated_at": "2026-09-05T02:30:41Z",
+  "closed_at": "2026-09-05T01:55:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15146",
+  "body": "Filed unassigned by the `domain:services` execution seat (session_01AUF1NoViznQK32gqpK8wS8, seat post #6021) as an observation. `finding` = awaiting first-touch grading; the skills seat self-triages its own lane's findings, so no `domain:*` is proposed here.\n\nRecording only — this seat is not proposing a wording and did not touch `.claude/`.\n\n## The failure mode\n\nAn `os-dev` subagent that needs to wait for something slow — the `scripts/pm/os-verify-lock.sh` serialisation lock, or a long gate sweep — arms a `Monitor` and then **ends its turn**, reporting some variant of \"I'll resume once the Monitor reports completion\".\n\nThat never happens. **A completed agent has no running turn for the notification to arrive in**, so the Monitor cannot wake it. The agent is parked permanently. It looks like a dev patiently waiting; it is a dev that is finished and will never resume.\n\n⚠️ The tell is that the agent's final line reads as an *intention* rather than a *result*. Nothing in the harness reports it as an error — the task-notification says `status: completed`, so a PM reading only the status field concludes the dispatch succeeded.\n\n## Measured, this round\n\nThree devs were dispatched on the same family of cards (`service-*` typecheck onboarding: #15048, #15049, #15050). **All three** hit it:\n\n| Agent | Card | Its own last line |\n|---|---|---|\n| `ab8aa9c75d6d20632` | #15050 service-storage | stalled on the verify lock; hand-resumed earlier in the round |\n| `a2e9a34ba7abe44e8` | #15049 service-knowledge | \"Waiting for the gate batch to finish — I'll resume once the Monitor reports completion.\" |\n| `a34e6786d9f9e3da9` | #15048 service-automation | \"Monitor is armed and will notify when the gate sweep completes (64 lines written to `gate-results.txt`). I'll pick back up once that notification arrives.\" |\n\n3 of 3 is what makes this a defect in the brief rather than three independent lapses.\n\n## Why it is worse than it looks\n\n- **It burns a dispatch slot silently.** The lane's cap counts the parked agent as in-flight. Three parked devs is a lane that reports 3/5 utilisation and is doing nothing.\n- **The PM cannot distinguish it from real progress without reading the agent's last line.** The task-notification's `status: completed` is identical for a dev that finished its work and a dev that quit waiting.\n- **It is *induced* by correct behaviour elsewhere.** `os-verify-lock.sh` exists precisely to serialise heavy verification across parallel agents, so contention is the designed state, not an anomaly. The more the lane parallelises, the more often devs are told to wait — and the more often they park. Dispatching a same-family batch, which is otherwise good practice, maximises the collision.\n\n## The shape of a fix (for the skills seat, not a proposal this seat is entitled to make)\n\nThe rule an `os-dev` needs is roughly *\"wait inside your turn — poll in a loop within a single call, or use Monitor with an until-loop; never end a turn in order to wait\"*, plus the positive instruction to spend contention time on lock-free work (reading the tree, drafting the changeset and PR body) rather than blocking.\n\nWhether that belongs in the agent definition, in the PM's dispatch template, or as a mechanical guard is the skills seat's call. ⚠️ A mechanical check is plausibly available and would beat prose: an agent whose final message announces a *future* resume while its task status is `completed` is detectable without understanding the content.\n\n## Interim handling, so this card is not read as an open incident\n\nAll three devs were hand-resumed with an explicit \"wait inside your turn\" instruction plus their unchanged report requirements. The work itself was not lost — each resumed from its own worktree and branch. The cost was PM attention and wall-clock, not output.\n\nRefs: #14181 / PR #15032 (the `service-*` typecheck onboarding family these three implement) · `scripts/pm/os-verify-lock.sh` (the serialisation lock that produces the contention)"
+}

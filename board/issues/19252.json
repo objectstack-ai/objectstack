@@ -1,0 +1,34 @@
+{
+  "number": 19252,
+  "kind": "issue",
+  "title": "[finding] content/docs/ai/knowledge-rag.mdx:37 configures a `ragflow` source with the undeclared `options` key — the #18973 defect in a second carrier, and PR #19251 turns it from quiet into a named refusal",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-20T04:57:57Z",
+  "updated_at": "2026-09-20T08:17:01Z",
+  "closed_at": "2026-09-20T08:16:05Z",
+  "closed_by": {
+    "login": "os-try-charles",
+    "id": 313893388,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19252",
+  "body": "Path: P1 | api-backend(knowledge sources) | 那条路第 1 步「写元数据」—— 示例照抄即失败\n\nFiled by the `domain:services` execution seat (#6021), `session_01AhQASwqJr2Z7XfGWUdvnbF`, while reviewing PR #19251 (card #18973). ⛔ Ungraded, ⛔ unrouted — see the lane note at the bottom.\n\n⚠️ **This is a residue surfaced by executing #18973, ⛔ not a defect of that card's delivery.** Per H52 it is filed as its own card and linked back, rather than widening #18973's file surface or re-opening it.\n\n## The defect\n\n`content/docs/ai/knowledge-rag.mdx:37` configures a `ragflow` knowledge source with the **undeclared** key, read verbatim on `origin/main` in this act (2026-09-20T04:57Z):\n\n```\n37:      options: { datasetId: 'rgf_doc_dataset' },\n```\n\n`KnowledgeSourceSchema` (`packages/spec/src/ai/knowledge-source.zod.ts:137`) declares **`adapterConfig`** for adapter-specific configuration, and it is a plain `z.object` with no `.passthrough()` — so any path that parses a source drops `options` before an adapter sees it. This is the identical defect that card **#18973** was ruled on (maintainer 「同意」, batch #160 item 2, **letter A**: 「the spec wins」), in a **second carrier**: a hand-written documentation page rather than a package README.\n\n## 🔴 Why this is urgent in a way it was not yesterday: #19251 makes it LIVE\n\nBefore PR #19251, an author copying this page got a source whose `options` key **did nothing on any parsing path** — wrong, but quiet, and the adapter still read `options` so the value happened to reach RAGFlow.\n\nAfter #19251 lands, `extractRagflowOptions` reads `source.adapterConfig` and **there is no fallback** (Prime Directive #12, as the ruling requires). ⇒ a source copied from this page is **refused by name** at the first `upsert` / `search` / `delete`:\n\n```\nRAGFlow adapter requires source.adapterConfig.datasetId on source '<id>'\n```\n\n⇒ the published documentation page will instruct the reader to build a source the shipped adapter rejects. ⭐ The refusal is loud and self-describing, which is exactly what the ruling bought — but the document should not be the thing that triggers it.\n\n## The repair is mechanical\n\n`options:` → `adapterConfig:` at `:37`. ⛔ Nothing else: the ruling explicitly carries **no ADR-0087 conversion** (「the key never survived a parse」), and `packages/spec` is zero-change.\n\n⚠️ `content/docs/**` carries its own gate family and is not the file surface of #18973, which is why the delivering agent reported it instead of riding it in — that was the correct call and it is recorded here as such.\n\n## Readings, all taken on `origin/main` in this act\n\n| reading | result |\n|---|---|\n| `git grep -n datasetId origin/main -- . ':!packages/plugins/knowledge-ragflow/**'` | **2** carriers: this line, and `.changeset/18915-published-readme-examples-compile.md:35` (prose, another card's artifact) |\n| positive control, same corpus, same term, inside the package | `README.md` 2 · `src/__tests__/ragflow-adapter.test.ts` 4 · `src/index.ts` 15 = **21** hits ⇒ the two-hit reading is a reading, ⛔ not a dead search |\n| dedupe — all **538** open non-PR issues enumerated (`/search/issues` is not relied on) | `knowledge-rag.mdx` **0** · `adapterConfig` **2** (#18973, #18915) · `datasetId` **1** (#18973) · `ragflow` **8** |\n| the 8 `ragflow` hits, titles read individually ⛔ not relayed | #10572 lint-ordering · #8249 / #7849 type-axis worklists · #6015 a PM seat post · #4606 RAG positioning ruling · #4311 tsup type-check debt · #18915 (below) · #18973 (the parent) ⇒ **none is this defect** |\n| dedupe positive controls, same corpus | `README` **15** · `content/docs` **53** ⇒ the zero on `knowledge-rag.mdx` is a reading |\n\n**⛔ Not a duplicate of #18915.** That card is the published-**package-README** census (44 error blocks, `packages/*/README.md`); this line is in `content/docs/**`, a hand-written page outside its scope. #18915's own changeset says in as many words that the ragflow block was 「deliberately left」 — this page was never in its population at all.\n\n## Dedupe words\n\n`knowledge-rag docs options adapterConfig` · `knowledge-rag.mdx datasetId undeclared key` · `ragflow source options spelling handwritten docs` · `KnowledgeSource adapterConfig docs drift`\n\n---\n\n### ⛔ Lane and priority are triage's, and this seat deliberately set neither\n\nThe execution seat does **not** grade and does **not** route. This card carries `finding` and nothing else on purpose: the defect sits in `content/docs/ai/`, which is ⛔ **not** the `domain:services` surface this seat holds, and guessing a `domain:*` here would be exactly the self-routing the charter reserves to triage. The surface is named above so the routing is a one-read decision.\n\n⚠️ One input for grading, ⛔ not a grade: the severity **changes on a landing**. While #19251 is open this is a documentation inconsistency; the moment it merges, the page instructs readers to build a refused source. `@objectstack/knowledge-ragflow` is a published package, so the page and the shipped adapter disagree in public from that commit onward.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

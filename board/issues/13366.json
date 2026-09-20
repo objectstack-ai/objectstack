@@ -1,0 +1,36 @@
+{
+  "number": 13366,
+  "kind": "issue",
+  "title": "[finding] the default/local-dev environment id has three spellings — `proj_local`, `env_local` and `default` — and one consumer deliberately accepts two of them",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T06:56:40Z",
+  "updated_at": "2026-09-04T07:23:39Z",
+  "closed_at": "2026-09-04T07:16:00Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 13,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13366",
+  "body": "Filed unassigned and ungraded by the `domain:skills` dev seat while executing the ruled #12747 / #12748 convoy (PR #13364). Out of scope for that PR, which is docs-only; recorded rather than fixed.\n\nNothing is broken at runtime that this seat measured. This is a vocabulary-residue finding of the same family as #12747.\n\n## Measured on `main` (merge base `e5ed94343`, non-test sources under `packages/`)\n\nThe id stamped for the local / default environment is spelled three different ways, in three different packages:\n\n| Spelling | Site |\n| :--- | :--- |\n| `proj_local` | `packages/runtime/src/standalone-stack.ts:567` — `cfg.environmentId ?? process.env.OS_ENVIRONMENT_ID ?? 'proj_local'` |\n| `proj_local` | `packages/metadata/src/plugin.ts:903` — `this.options.environmentId ?? 'proj_local'` |\n| `default` | `packages/runtime/src/package-state-store.ts:25` — `const DEFAULT_ENVIRONMENT_ID = 'default'`, used as the same fallback slot at `:32` |\n| `env_local` **and** `proj_local` | `packages/cloud-connection/src/cloud-connection-plugin.ts:177` |\n\nThe last one is the sharp one, because it is not drift that nobody noticed — it is deliberate, and the comment above it says so:\n\n```\n// The CLI's local-dev defaults ('env_local' / 'proj_local')\nif (fixed && fixed !== 'env_local' && fixed !== 'proj_local') return fixed;\n```\n\nThat is one consumer branching on **two spellings of the same sentinel**. Whatever produced `env_local` and whatever produced `proj_local` are both treated as live.\n\n## Why it is worth recording\n\nThe v5.0 `project` to `environment` rename took **no aliases** — deliberately, and PR #13364 has just written that decision and its reasons into ADR-0006 v4 where four inbound pointers had been sending readers to find them. A tolerated dual spelling of the default environment id is the same shape one layer down: two forms are correct, so every new consumer has to decide which to emit or which to accept, and there is nothing to tell it that one of them is residue.\n\nThe three-way split also means there is no single source for this value. A reader cannot answer \"what is the default environment id\" from any one file, and the two packages that pick `proj_local` and the one that picks `default` disagree about it.\n\n## ⚠️ What this finding is NOT\n\n- ⛔ **Not a claim that the rename is incomplete on the surfaces it covered.** These are opaque **id values**, not the vocabulary surfaces the rename named. The CLI command group, the `/api/v1/cloud/environments` routes, the `X-Environment-Id` header and `OS_ENVIRONMENT_ID` all carry a single spelling — measured while writing that section, and it explicitly scopes its claim to those surfaces.\n- ⛔ **Not a contradiction of the ADR-0006 v4 section PR #13364 adds.** That section's `What this section does not claim` paragraph already fences off exactly this: it does not claim the string `project` is absent from the tree.\n- ⚠️ **The producer of `env_local` was not located by this seat.** The comment attributes it to \"the CLI's local-dev defaults\", but a grep of `packages/cli` non-test sources for the literal did not find it emitted there. Whoever takes this establishes where it comes from before deciding whether it is live or dead — it may be a cloud-side or historical value, in which case the fix is deleting one arm of that condition rather than unifying three constants.\n\n## Re-check\n\n```\ngrep -rn --include='*.ts' \"proj_local\" packages/ | grep -v node_modules | grep -v '\\.test\\.'\ngrep -rn --include='*.ts' \"env_local\"  packages/ | grep -v node_modules | grep -v '\\.test\\.'\ngrep -rn --include='*.ts' \"DEFAULT_ENVIRONMENT_ID\" packages/ | grep -v node_modules | grep -v '\\.test\\.'\n```\n\n⛔ Do not re-check with a bare `project` grep — it answers non-zero on the npm/monorepo sense and on domain fixtures modelling a customer's own project object, neither of which is this. Reverse-check any zero against a literal known present in the same population.\n\n## Duplicate check\n\nSearched this round, targeted. Nearest neighbour is **#10967** (**closed**) — same family, different subject: `os projects` leaking into CLI `--help` text. ⛔ No open card covers the id-value spellings. ⚠️ The search instrument answered non-empty on that query, so the near-zero is a reading rather than a broken probe; not exhaustively deduped outside this one targeted search.\n\n## Refs\n\n- #12747 / #12748 / [PR #13364](https://github.com/objectstack-ai/objectstack/pull/13364) — where this was measured; that PR records the no-alias decision but deliberately does not touch code\n- #12882 — a separate `project`-spelled SDK surface, adjudicated on its own card"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 14556,
+  "kind": "issue",
+  "title": "List-view grouping is server-side: group set and per-group counts come from an aggregate query, rows within a group are paged (objectui#7189 ruling A)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T11:47:20Z",
+  "updated_at": "2026-09-04T20:24:51Z",
+  "closed_at": "2026-09-04T13:08:13Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14556",
+  "body": "Filed by the director seat (objectstack #12708, summon #8, session `session_01ShyhexkB2d1AeRZ85tgAAe`) to carry a maintainer ruling into the spec lane. Filed unassigned; `domain:spec` and `pm:queue` set because the ruling names the lane. objectui#7189 is `pm:blocked` on this card.\n\n## The ruling this card implements\n\nProvenance (who / verbatim / where): maintainer, live PM chat with the director seat, 2026-09-02, replying to decision batch #7 in which objectui#7189 was item 1 with the recommendation B (fetch the whole filtered set within the platform ceiling) and A (server-side grouping) offered as the fallback. Verbatim reply: 「7189 A  其他同意」 — the maintainer takes A over the recommendation.\n\n**Ruled: A.** Grouping on a list view (the grid) is server-side. The set of groups and every number in a group header (the count and any per-group aggregation) are properties of the query, not of the fetched page. Rows inside a group are paged. The client-side grouping of the fetched page that `packages/plugin-grid/src/useGroupedData.ts` performs today is the interim state, not the contract.\n\n## Measured facts the ruling rests on (all from objectui#7189 and its landing note, comment 5496459435)\n\n- A grid grouped by a lookup over 186 rows in five units with `$top: 100` renders two group headers (86, 14) with three units absent when rows are contiguous, and five headers reading 31/31/30/1/7 when interleaved. Which shape appears depends on row order. Neither is the data.\n- `ObjectGrid.tsx` computes `useServerPagination = !hasInlineData && !isGrouped`, so a grouped grid that owns its fetch has no server pager at all: its pager pages groups in memory over the rows already loaded. Records past the first window are not on page 2. They are unreachable from that screen.\n- The platform already groups the same field over the same data with true totals through the dataset engine (the same application's dashboard does it). The capability exists; the grid surface lacks it.\n- The disclosure half landed in objectui PR #7226 (a \"Partial\" marker beside every group count). It is honest and it tells the reader about rows they cannot reach. Disclosure is a ceiling here, not a floor.\n\n## Scope, three halves in order\n\n1. **Spec (this card's first half).** Define what `grouping` on a list view means and what the platform returns for it: the group keys, the per-group total count, the per-group aggregations (the same aggregation vocabulary datasets already use, one vocabulary and not two, per objectui#4576), and the paging model for rows within a group. Whether this is a new query shape on the data endpoint or a reuse of the dataset aggregate query is the spec seat's design call. An ADR if the contract is new. Clause ② yes.\n2. **Platform.** The group query on the REST and ObjectQL path, reusing the dataset aggregate engine: group-by over plain and lookup fields, total per group, a row page per group. Blocked-by the spec half.\n3. **objectui (`plugin-grid`).** Grouped mode consumes group headers from the server; `useGroupedData` stops grouping the page; the grouped exclusion in `useServerPagination` goes; the \"Partial\" marker from PR #7226 is retired once counts are server-true (enforce-or-remove); the \"Grouping is page-scoped\" docs section written under #7189 is rewritten. Blocked-by the platform half. Tracked on objectui#7189.\n\n## Not in scope\n\n- The unbounded fetch on gantt, calendar, map and tree: ruled a′ on objectui#7210 (platform ceiling constant plus a loud footnote) and dispatched separately.\n- Any change to dashboard datasets.\n\n## Acceptance\n\n- The 186-row, five-unit, `$top: 100` fixture renders five group headers with counts 86/61/31/7/1 regardless of row order, and opening the 86-row group pages its rows.\n- No \"Partial\" marker renders when counts are server-true.\n- A grouped grid with more rows than one window can reach every row through the UI.\n\nRelated: objectui#7189 (origin; the ruling is recorded there) · objectui#7210 · objectui PR #7226 · objectui#7179 · objectstack #12708 (director seat ledger)."
+}

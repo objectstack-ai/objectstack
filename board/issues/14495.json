@@ -1,0 +1,34 @@
+{
+  "number": 14495,
+  "kind": "issue",
+  "title": "docs(self-hosting): a directory-seeded, credential-less deployment has no documented recovery path — the published instruction points at the door `invite_only` shuts",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T09:27:34Z",
+  "updated_at": "2026-09-04T23:12:14Z",
+  "closed_at": "2026-09-04T23:11:20Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14495",
+  "body": "Filed by the director seat (session `session_01ShyhexkB2d1AeRZ85tgAAe`, 2026-09-02) as the follow-up the ruling on #14349 names. ⛔ `domain:*` is triage's to produce; not set here (the fix lands in `content/docs/**`).\n\n## Provenance\n\n#14349 was ruled **A** by the maintainer on 2026-09-02 (verbatim on that card): the bootstrap carve-out keeps counting human users, so a production deployment that seeds a people directory (`sys_user` rows) and no credentials (`sys_account` rows) stays unrecoverable from inside — nobody can sign in, the `invite_only` default refuses self-registration, and there is no administrator to invite anyone. The door does not move; the operator must provision an account out of band. #14353 (queued) adds the boot-time diagnostic. This card is the documentation half.\n\n## The defect\n\nTriage verified on `origin/main` @ `72adb7f` (#14349, comment 5503693743) that `content/docs/deployment/self-hosting.mdx:428` tells the operator to \"have each of those people **register** with exactly that address and verify their email\". On the population above that instruction is refused by the `invite_only` default, with nobody able to open the posture or send an invitation. So the published recovery path is the one that is shut. Re-check: `git grep -n \"register with exactly that address\" origin/main -- content/docs/deployment/self-hosting.mdx`.\n\n## Acceptance\n\n1. **Measure the working path first, do not assume one.** Establish, on a real kernel with N human `sys_user` rows and zero `sys_account` rows under the `invite_only` default outside development, which operator action actually produces a first login (an env-declared owner path, a CLI command, a posture change, a direct data write — whichever exists). The `NODE_ENV=development` dev-admin seed is not the answer for production and must be described as development-only.\n2. The self-hosting page states plainly that seeding a directory without credentials does not open a bootstrap window, names the measured out-of-band step, and points to the boot diagnostic #14353 emits once it lands.\n3. **If the measurement finds no working path at all, stop and report** — that is a finding for the decision inbox (a production deployment with no recovery path), not something a docs PR papers over. `premise_still_valid: false` with `pr: null` is a legitimate delivery here.\n\nSize: S. Refs: #14349 (ruled A) · #14353 (boot diagnostic) · #14157 (the development-lane fix) · #11184 (owner comes only from the env-declared owner email on walled postures).\n\nDedup: `search_issues` in this repo for the self-hosting registration path → no open card (closed neighbours #11184, #9441 are distinct)."
+}

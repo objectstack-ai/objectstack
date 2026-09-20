@@ -1,0 +1,30 @@
+{
+  "number": 15529,
+  "kind": "issue",
+  "title": "check:docs-audit-scope is RED on main — affected-docs `--self-test` refuses its own contract-declaration case",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T19:58:58Z",
+  "updated_at": "2026-09-05T00:09:51Z",
+  "closed_at": "2026-09-05T00:09:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15529",
+  "body": "Filed unassigned and bare by the `domain:cli` execution seat while running the derived gate union for another card. ⛔ Not graded here and no `domain:*` set — that is triage's field.\n\n## The measurement\n\n`pnpm check:docs-audit-scope` fails on `origin/main`, before its real check ever runs, on its own self-test:\n\n```\n> node scripts/docs-audit/affected-docs.mjs --self-test && node scripts/docs-audit/check-audit-scope.mjs --self-test && node scripts/docs-audit/check-audit-scope.mjs\n\n  ✗ self-test \"every contract declaration admitted is a packages/spec API declaration\": kind=contract → expected scanRouteSurface=true, got false\n\n✗ affected-docs self-test failed (1 case(s)).\n ELIFECYCLE  Command failed with exit code 1.\n```\n\nThe chain short-circuits on the first `&&`, so `check-audit-scope.mjs` — the part that judges the tree — never runs at all. Whatever that gate is supposed to assert about docs-audit scope, nothing is asserting it today.\n\n## Why this is not the reporting seat's change\n\nThe seat that found it was editing `packages/cli`, `content/docs`, `turbo.json`, `.changeset`, `.github/workflows` and two `scripts/*.mjs` files, none of them under `scripts/docs-audit/`. Both sources the self-test runs are byte-identical to the branch point:\n\n| file | blob at branch point `4f85e4d11` | blob in the working tree |\n|:--|:--|:--|\n| `scripts/docs-audit/affected-docs.mjs` | `a41faf9c27433c54c78270acbc0720c5df55b97d` | `a41faf9c27433c54c78270acbc0720c5df55b97d` |\n| `scripts/docs-audit/check-audit-scope.mjs` | `60debd41a356eb7be3cb6616ad02835a99946651` | `60debd41a356eb7be3cb6616ad02835a99946651` |\n\nAnd `git diff --name-only 4f85e4d11 origin/main -- scripts/docs-audit/` is empty, so the same two blobs are what `origin/main` carries right now. The red is the tree's, not a branch's.\n\n## The lead, not a diagnosis\n\nThe named case is about `kind=contract` admission, and the most recent commit touching `affected-docs.mjs` is `e77635b8fda` — *\"refactor(docs-audit): a route SOURCE of two kinds — admit spec contract declarations behind a runtime-registration guard (#15274)\"*. That change is about exactly the property the failing case names, which makes it the first place to look; ⛔ this seat did not read it and is not asserting it is the cause.\n\n## Why it is worth a card rather than a shrug\n\nA gate whose self-test refuses is not a gate that found something — it is a gate that stopped measuring, and this one is wired so that the refusal also cancels the real check behind it. It exits 1, which reads like an ordinary finding, so a reader who does not open the log will look for a docs-scope problem in their own diff that is not there."
+}

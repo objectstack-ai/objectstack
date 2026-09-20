@@ -1,0 +1,34 @@
+{
+  "number": 15384,
+  "kind": "pull_request",
+  "title": "feat(spec): declare aggregate? on IDataDriver with the signature the engine calls",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T13:40:11Z",
+  "updated_at": "2026-09-04T14:48:21Z",
+  "closed_at": "2026-09-04T14:48:20Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "merged_at": "2026-09-04T14:48:19Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/15384",
+  "body": "Fixes #14345\n\nImplemented-by: `os-dev` developer, session `session_01H2oQebDDxYKfWZusyd8GXk`, dispatched by the `domain:spec` seat (triage ruling 5503624197: `aggregate?`, optional, declared with the signature the engine calls).\n\n## What changes\n\n- `packages/spec/src/contracts/data-driver.ts` — `IDataDriver` gains `aggregate?(object: string, query: DriverQuery, options?: DriverOptions)` returning a Promise of an array of Record(string, unknown), placed after `count()` in the query-verb section, with house-form TSDoc: what the engine passes, what a driver returns (rows keyed by `groupBy` field names and aggregation aliases per `data/aggregation-conformance.ts`), that presence is the capability test (`data/driver.zod.ts`), and why it is declared (the `introspectSchema` argument).\n- `packages/objectql/src/engine-filter-array-lowering.test.ts` — the recording double's local `RecordingDriver` extension (the card's motivating case) is retired; the double is now annotated `IDataDriver` directly and the now-unused `DriverOptions` import is dropped. The 60 cases pass unchanged.\n- `.changeset/data-driver-aggregate-declared.md` — `@objectstack/spec` minor (additive optional member; no ADR-0087 entry).\n\nOut of scope and untouched, per the triage: the engine's `as any` at `engine.ts:13493-13500`, every driver implementation, `DriverCapabilities`, `IDataEngine`.\n\n## The measured call-site type\n\n`engine.ts:13447` binds `const ast = opCtx.ast as QueryAST;` and `:13500` calls `drv.aggregate(object, ast, this.buildDriverOptions(object, opCtx.context))`. The engine passes a full `QueryAST`, not a narrower typed AST. `DriverQuery` is `Omit` of `QueryAST` minus `object`, so a `QueryAST` value is assignable to it — the seat's default parameter type is the correct one and is not narrower than what the engine passes. The return is consumed by `applyHaving(rows: any[], ...)`, which reads aggregation aliases and `groupBy` projections off each row, so an array of string-keyed records is the shape the engine actually relies on.\n\n## Proof against the four in-repo implementations (built spec, `dist` carries the member once)\n\n| package | declared implementation | `pnpm --filter ... typecheck` |\n|:--|:--|:--|\n| driver-memory `memory-driver.ts:1152` | `(object: string, pipeline: raw pipeline array OR DriverQuery, options?: DriverOptions)`, returns Promise of any array | exit 0 (`tsc --noEmit && tsc --noEmit -p tsconfig.typecheck.json`) |\n| driver-mongodb `mongodb-driver.ts:602` | `(object: string, query: DriverQuery, options?: DriverOptions)`, returns Promise of Record(string, unknown) array | exit 0 |\n| driver-sql `sql-driver.ts:8320` | `(object: string, query: DriverQuery, options?: DriverOptions)`, returns Promise of any | exit 0 |\n| driver-turso `remote-transport.ts:1332` | `(object: string, query: DriverQuery)`, returns Promise of Record(string, unknown) array — `RemoteTransport` is a delegate, not an `IDataDriver` implementer; `TursoDriver.aggregate` (`turso-driver.ts:844`, overriding `SqlDriver`) is the member the interface checks, and it routes to the transport | exit 0 |\n\n`@objectstack/objectql typecheck` (three legs incl. `check:test-typecheck`): exit 0 — `check:test-typecheck: OK — @objectstack/objectql's test layer compiles under packages/objectql/tsconfig.test.json; 44 file(s) / 242 error(s) / 69 pinned signature(s)`; the edited test file is deliberately unledgered (zero errors, red on its first), so its green is measured. The two `metadata` migration test fakes that declare `async aggregate() { return []; }` remain assignable (fewer parameters, empty array).\n\n`contract_flags`: none — no implementation needs the declaration widened. Bivariant method parameters admit driver-memory's wider union; `any` / any-array returns are assignable.\n\n## Negative probe (the declaration bites)\n\nA scratch `.test.ts` in objectql assigned three literals to `IDataDriver` and ran `tsc -p tsconfig.test.json`: swapped arguments `(query: DriverQuery, object: string)` — TS2322 at that line; a scalar return (`42`) — TS2322 at that line; the engine's call shape — admitted. Probe deleted; `git status` clean of it.\n\n## Generated followers and gates\n\n`pnpm --filter @objectstack/spec build` then `check:generated`: `All 15 generated artifacts are up to date` — `api-surface` / `declaration-map` / `export-origins` did not go stale (they record that an export exists, not an interface's member shape), so there was nothing for `--fix` to write. `node scripts/pm/dispatch-gates.mjs --commands` (3 paths vs merge base `13c48c2a5`) derived 63 commands; 61 exit 0. Two exit 3 with `PREREQUISITE NOT MET` and are NOT MEASURED here, not red: `check:dual-build-cjs-loads` and `check:type-check-debt` both read a whole-repo `dist/` that only a full `pnpm build` produces — that run is CI's. Ratchet re-run on the committed head is reported in the `os-dev-report` comment on #14345.\n\n`needs:contract-review` per clause ②: the review question is whether the declared signature matches all four implementations; this PR stays draft until the seat flips it.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01H2oQebDDxYKfWZusyd8GXk)_"
+}

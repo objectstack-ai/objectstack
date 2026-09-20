@@ -1,0 +1,35 @@
+{
+  "number": 14446,
+  "kind": "issue",
+  "title": "declared ≠ enforced (ADR-0049): `RealtimeEventType` spells `record.*` while the runtime emits `data.record.*`, and `SubscriptionSchema.filters` is `z.unknown()` nothing reads",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-02T07:13:06Z",
+  "updated_at": "2026-09-04T08:33:51Z",
+  "closed_at": "2026-09-04T08:14:19Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14446",
+  "body": "Filed out of scope from the `skills/objectstack-api` optimization flight (#14304, finding **API-F-06**). The skill previously carried two prose notes telling authors these keys are declared but not enforced; those notes are deleted there, because an author cannot act on them. The upstream question is a triage decision, not a doc edit — hence this card.\n\n## Two declared-but-unenforced surfaces\n\n**1. `RealtimeEventType` names events the runtime never emits.**\n\n`packages/spec/src/api/realtime.zod.ts:33` declares the enum, and `:47` makes it the type of `SubscriptionSchema.type`:\n\n- the enum's members are `record.created` / `record.updated` / `record.deleted` (`realtime.zod.ts:33-40`);\n- the event names the platform actually emits are `data.record.created` / `data.record.updated` / `data.record.deleted` (`packages/spec/src/api/events.zod.ts:139-141`; a live emitter at `packages/services/service-knowledge/src/knowledge-service-plugin.ts:168`);\n- the two vocabularies are disjoint — every enum member is a prefix-short spelling of a name nothing publishes.\n\nMeasured consumers of `RealtimeEventType` outside its own declaring file: `packages/spec/src/api/realtime.test.ts` (its own unit test) and `packages/spec/src/type-alias-convention.pin.test.ts:545` (the alias pin). **No runtime reader.**\n\n**2. `SubscriptionSchema.filters` is `z.unknown().optional()`.**\n\n`packages/spec/src/api/realtime.zod.ts:49` — `filters: z.unknown().optional().describe('Filter conditions')`. An authorable key with no shape and no enforcement: whatever an author writes parses, and nothing consumes it.\n\nRelated and already closed: #4673 (`DataEventType`'s `data.field.changed` has no producer) is the same ADR-0049 fourth state in the sibling enum, so this pair is not an isolated case. Realtime subscription authoring has **0** usages across `examples/**` and `packages/apps/**`.\n\n## The decision this card asks for\n\nUnder ADR-0049 enforce-or-remove, each of the two is one of:\n\n- **enforce** — repoint `RealtimeEventType` at the emitted `data.record.*` vocabulary (or make the runtime emit the declared one, whichever is the intended contract), and give `filters` a real schema the subscription path applies;\n- **remove** — retire both under the ADR-0087 registries, per the `spec-property-retirement` playbook;\n- **keep and ledger** — record why the gap is deliberate, so the next audit does not re-file it.\n\nBoth are authorable today, so this is a spec-side change, not a docs change. No PR is attached; it needs triage before anyone writes code.\n\nRefs: #14304 · #14292 · ADR-0049 · ADR-0087"
+}

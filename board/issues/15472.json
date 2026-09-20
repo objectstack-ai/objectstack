@@ -1,0 +1,33 @@
+{
+  "number": 15472,
+  "kind": "pull_request",
+  "title": "docs(runtime): keys.ts's catch annotation states its measured determination instead of promising a gate entry (#12981 batch 10b)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T17:15:51Z",
+  "updated_at": "2026-09-04T18:15:48Z",
+  "closed_at": "2026-09-04T18:15:47Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-09-04T18:15:46Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/15472",
+  "body": "Fixes #12981 — batch 10b, the closing half of batch 10, under the ruling **Q1 = A** (#12981 comment 5543738972). Batch 10a is PR #15458.\n\n## Why\n\nThe annotation at the `handleKeysRequest` catch in `packages/runtime/src/domains/keys.ts` promised a `FAILURE_PROPAGATION_SITES` entry, keyed `keys.ts::handleKeysRequest`, \"in the step that widens `DURABILITY_CRITICAL_CALLEES`\". That promise is **falsified by the ruling's own instrument**: the widening that was actually sanctioned adds the seeder wrappers `tryInsert` / `tryUpdate`, and neither matches a seam in `handleKeysRequest`; the only name that would match is bare `insert`, which the swallow-family census refuses by design (measured at 36 quiet degradations in 30 files). So an entry keyed at that site would not be *early* — it would be STALE on arrival, and the gate deletes entries that excuse nothing.\n\n## What changed\n\nOne file, comment-only. The note now states the measured truth:\n\n- **the catch delivers on every path** — measured by batch 10a's dev with the gate's own `catchDeliversFailure()`: with a matching vocabulary name present, every path out of this catch reaches `deps.error`;\n- **the determination is carried by the census's DETERMINED register row** for `packages/runtime/src/domains/keys.ts::handleKeysRequest` in `scripts/measure-durability-swallow-family.mjs`, which re-verifies on **every** run that the file exists, that the determination sentence is still written at the site, and that the site is still a tier-1 DARK member — going STALE, loudly, otherwise. A gate entry would have proved the delivery alone;\n- **no gate entry is owed.**\n\nThe register's anchor sentence — `[#12981] This catch is silent BY DESIGN and it is NOT a durability swallow.` — is kept byte-identical; only the surrounding promise is rewritten. The \"do not bolt on a log\" instruction and the `http-dispatcher.keys.test.ts` pin pointer are unchanged.\n\n## The register row, before and after\n\nIdentical, which is the point — `diff` of the two census readings exits 0:\n\n```\n    packages/runtime/src/domains/keys.ts::handleKeysRequest\n      silent BY DESIGN — every path out of the catch hands the caller a 500 envelope  (#12981, in-file determination)\n```\n\nlisted under `DETERMINED, not outstanding  3 site(s) in 3 file(s)` before and after, with `--self-test` reporting `3 DETERMINED register row(s) cross-check clean` on both sides.\n\n**The row is proved live over the edited file, not merely still printed.** Ablation on the committed tree: the anchor sentence was reworded on disk (`silent BY DESIGN` → `quiet ON PURPOSE`; injected marker count 1, original 0, counted on disk before the run), and the census answered\n\n```\n  ✗ 1 STALE row(s) in the DETERMINED register — each one still counts as OUTSTANDING above,\n    packages/runtime/src/domains/keys.ts::handleKeysRequest  [anchor-gone]\n```\n\nthen the file was restored with `git checkout HEAD -- ABSOLUTE_PATH` under a `trap ... EXIT INT TERM`, proved by state: restored blob `1408cfb21954547ac6a1c8bd5a0e889e258f5ca8` equals the HEAD blob, and `git diff HEAD` for that path is empty.\n\n## Verification\n\nAll on the final commit `0afa8ba3e`. Exit codes captured by redirecting first, then reading `$?`; verdicts quoted from each tool's own line.\n\n- **Non-comment diff is empty** — `git diff -U0` filtered to lines that are not `//` comments produces nothing. No code changed.\n- **`pnpm check:durability-log-level`** exit 0, verdict line **unchanged** before and after (whole output `diff` exits 0): `29 durability-critical catch seam(s), all loud, rethrowing or propagating to the caller (4 propagating, declared)`.\n- **`node scripts/measure-durability-swallow-family.mjs`** exit 0 before and after, reading byte-identical (`diff` exit 0); `--self-test` exit 0 both sides: `4 positive control(s) ... 3 DETERMINED register row(s) cross-check clean, 56 member site(s) total`.\n- **Typecheck** `pnpm --filter @objectstack/runtime typecheck` exit 0 (`tsc --noEmit` plus `check:test-typecheck: OK`), after building the dependency closure (`pnpm --workspace-concurrency=2 --filter '@objectstack/runtime^...' build`, exit 0 under the shared verify lock, `VERDICT command-exit 0`). A bare first attempt failed on unbuilt deps (TS2307), which reads exactly like a broken import.\n- **Derived family** `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` (no paths passed; it read the change set itself) — 33 commands, every one run. 32 exit 0, including `check:nul-bytes`. `check:pm-dispatch-gates` is not in this card's family, so nothing was owed under the lock there.\n- **NOT MEASURED:** `pnpm check:dual-build-cjs-loads` exits **3** — `PREREQUISITE NOT MET — this gate reads built output, and some package has no dist/ ... ⛔ This is NOT a pass: nothing was measured.` Its self-test passed (93 cases). A full `pnpm build` was not run for a comment-only diff; CI measures it.\n- **Whole-repo `pnpm lint`** (`eslint . --no-inline-config`) exit 0 — run in full, no narrowing, so no narrowing evidence is owed.\n- Control-byte self-scan of the edited file (`grep -naP` over the C0 range plus DEL): no hits.\n\n## Changeset\n\n`skip-changeset`: the diff is a **comment** in a published package (`@objectstack/runtime`) — no behaviour, no types, no exports, nothing to publish. Label applied on this PR by the additive endpoint and read back.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_012zGPuVVX3deAx9LdjK8jCk\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012zGPuVVX3deAx9LdjK8jCk)_"
+}

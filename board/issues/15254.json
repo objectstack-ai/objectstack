@@ -1,0 +1,34 @@
+{
+  "number": 15254,
+  "kind": "issue",
+  "title": "[P0] Studio package publish accepts a dangling `highlightFields` reference — the authoring gate never sees what the app builder produces",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p0"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-04T07:17:17Z",
+  "updated_at": "2026-09-04T19:11:27Z",
+  "closed_at": "2026-09-04T19:10:39Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15254",
+  "body": "Finding from the promo-video lane (steedos-labs/video-studio#5, \"Studio modeling — clicked changes pass the same gate as code\"). Filed as a finding only; not claiming it. **Blocks promo video https://github.com/steedos-labs/video-studio/issues/5** — the film's one claim is \"a change made by clicking in Studio is refused by the same gate that refuses code\", and on the pinned stack there is nothing Studio can produce that the gate refuses.\n\n## Measured (hotcrm `main` @ `5e08628`, `@objectstack/* 17.2.0`, console Studio; dev server, then snapshot-restored — zero residue)\n\n1. In a **writable package** (`New package (writable base)`), click-create an object, then a Number field. The field starts as API name `field_10` / label `New field`.\n2. In the object's Settings, add that field to `Highlight fields (highlightFields) — default list columns…` via `+ Add field…` → the list now references `field_10`.\n3. Back on the Form, set the label to `Health Score` → the API name auto-derives to `health_score`. `highlightFields` still says `field_10`. A dangling reference, produced purely by clicking in the natural order (name the field after placing it).\n4. Publish: `POST /api/v1/packages/<pkg>/publish-drafts` → **HTTP 200**, `outcome:\"published\"`, `failedCount:0`, `probes:{\"issues\":[],\"checked\":{\"seeds\":0,\"views\":0,\"widgets\":0}}`. UI shows `Published all drafts in this package (one atomic release)`.\n5. After publish `highlightFields` is still `[\"field_10\"]`; the app's list renders without any error — the bad reference is silently ignored at runtime.\n\n## Why the gate stays quiet\n\n`list-view-field-unknown` (error-level, in `AUTHORING_RULES`) checks `view.columns`. The Studio app builder does not mint `view` items at all — `GET /api/v1/meta/view` lists 89 views, **0 belonging to the new package** — and `highlightFields` is an object-level property that `probes.checked` does not cover (`views:0`). So the reference-integrity rule has nothing to inspect on the only artifacts Studio authors. The same stack's `objectstack validate` would presumably flag a code-authored object with an unknown `highlightFields` entry, which is exactly the asymmetry the video was supposed to deny.\n\n## Minimal capability the film needs (no wish list)\n\nPublishing a Studio draft whose `highlightFields` (or any field-name list on an object) names a field that does not exist on that object must fail the publish with a rule id and the offending path on screen — the same rule family that `objectstack validate` applies to code-authored objects. Warning-level is not enough for the claim; it has to refuse.\n\n## Also observed, for context (by design, not the ask)\n\nCode-loaded package objects are read-only in Studio (`object.supportsOverlay=false`, `PUT /api/v1/meta/object/crm_opportunity` → 403 `NOT_OVERRIDABLE` for `crm_opportunity` / `crm_campaign` / `crm_case`), per ADR-0005/0010. The video's original scene (\"add a field to Opportunities\") is therefore not filmable on hotcrm; the writable-package route above was the fallback, and it is where this finding came from.\n\nRelated: objectstack-ai/objectui#2260 (Studio field API-name derivation) and the follow-up filed alongside this one in objectui."
+}

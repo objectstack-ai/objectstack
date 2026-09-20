@@ -1,0 +1,30 @@
+{
+  "number": 19241,
+  "kind": "pull_request",
+  "title": "docs(deployment): state the per-package walk de-duplication bound as the source states it",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-20T03:25:07Z",
+  "updated_at": "2026-09-20T03:37:33Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/19241",
+  "body": "Fixes #18893\n\n`content/docs/deployment/validating-metadata.mdx` was the last place in the tree still asserting, as a claim, the sentence the CLI source explicitly forbids restating — of the per-package walk: *\"what it reports is exactly the set the union could not see\"*.\n\nPR #18878 (card #18779) removed that sentence from eight code carriers because it is false, and the two notes that replaced it are this page's acceptance baseline:\n\n- `packages/cli/src/utils/artifact-packages.ts` — the `findingKey` docblock records that the claim the pass is entitled to make *\"is narrower than\"* that sentence, and that the key is *\"position-insensitive, ⛔ not collision-proof\"*.\n- `packages/cli/src/commands/compile.ts` — *\"⛔ Do not re-inflate that to\"* it, beside the settled statement of what does survive.\n\n## What changed\n\nOne sentence, one file. The page now states the bound in the source's own settled words — the set of per-package findings no union finding already carried under the same rule, `where`, message and non-top-level position — says why the leading collection index is neutralised (a package body re-bases its collections from 0, so one finding would otherwise get two keys), and carries the narrowness note the source wrote down so the next reader does not re-inflate it. The surrounding paragraph's teaching is untouched.\n\n⛔ No source file was changed. The source is the authority here; the page is what was wrong.\n\n## Measurement\n\nWhitespace-normalised, because the target sentence **wraps across two lines** and a line-oriented `grep -F` returns `0` on it — a zero triage and two seats each paid for once on this very card:\n\n| needle | base `e233db9` | after |\n|:--|--:|--:|\n| `exactly the set the union could not see` | 1 | **0** |\n| lit control `one gate, four doors` | 2 | 2 |\n| dark control `zzzNotARealToken` | 0 | 0 |\n\nThe lit control still fires after the edit, so that `0` is a reading and ⛔ not an instrument artefact. The naive line-oriented `grep -F` reads `0` both before and after — recorded here so nobody re-derives a clearance from it.\n\n## Gates\n\n39 families derived from the **actual diff** (`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`, change set taken by the script itself from the merge base), every one run, every one exit `0`, reconciled `39 derived / 39 run / 0 UNRUN`. Plus the full `pnpm lint` union, which `dispatch-gates` does not name.\n\nFour of the 39 first exited `3`/`1` carrying PREREQUISITE-NOT-MET text — *\"Nothing was measured: this gate exited before running a single check\"* — because workspace packages were unbuilt. They were re-run to a real verdict after building `@objectstack/spec`, `@objectstack/formula`, `@objectstack/lint` and `@objectstack/client-react`. ⛔ Those refusals are recorded as not-measured-then-measured, never as a failed measurement.\n\n## Changeset\n\n`skip-changeset`, **derived rather than assumed**: the one changed path lives under no package directory except the private monorepo root (`@objectstack/spec-monorepo`, `private: true`), so no published package's tarball can contain it whatever decides its contents; and no published package names `content/docs` in its `files[]`. ⛔ No label was written — this dispatch forbids label writes, so the label is the seat's to apply.\n\n## Acceptance notes\n\n- **Only one carrier on this page.** The card asked for a grep rather than an assumption, since PR #18872 introduced the whole section in one landing: probed whitespace-normalised for `de-duplicat`, `union could not`, `could not see`, `only what`, `echo` and `duplicate` across the page — the corrected sentence was the single restatement. No second one exists.\n- **The \"only place in the repo\" premise is true of source code and ⛔ not of the tree.** Re-derived at the branch base, whitespace-normalised: 13 non-doc occurrences across 13 files. Eleven are the settled shapes — one bound declaration, one prohibition, and nine quoted corrections in `compile.ts`, `lint.ts`, `validate.ts` and five CLI pin tests. **Two are still assertions**: `.changeset/18677-validate-per-package-authoring-pass.md` states *\"By `compile.ts`' own description the survivors of that second pass are …\"* and `.changeset/18778-lint-per-package-authoring-pass.md` states *\"every finding that pass produces — … — in the build command's own words\"*. Both attribute the sentence to source text that no longer says it, both are unreleased, and a changeset body ships verbatim into `CHANGELOG.md` as the text an upgrading agent greps. ⛔ Not fixed here — out of this card's declared one-file surface, and `.changeset/18677-…` is the claimed surface of in-flight card #18823 (PR #18867) for a different defect. Reported for filing.\n\nClause-②: no\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QCdUBjM47SxioST9z5Zwdf)_"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 14971,
+  "kind": "issue",
+  "title": "spec: `BulkDataEventSchema` carries no organization term, so the bulk webhook fan-out path stays cross-tenant-leaky after #13566 lands — PR #14635's open question 1 has no reader now that it is merged",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "priority:p0",
+    "security"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T15:50:47Z",
+  "updated_at": "2026-09-04T07:27:37Z",
+  "closed_at": "2026-09-04T07:22:40Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14971",
+  "body": "Filed by the `domain:services` execution seat while running its unlock scan on #13566. Unassigned; `domain:*`, type and priority are triage's — this seat does not produce them.\n\n**Named reader:** the `domain:spec` execution seat. The edit lands in `packages/spec/src/api/events.zod.ts`, which is single-owner, so this card exists rather than a rider.\n\n## Why this is filed rather than left where it was recorded\n\nPR #14635 (#14291) added `organizationId` to `DataEventSchema` and **deliberately** left `BulkDataEventSchema` and `MetadataEventSchema` unchanged, recording the bulk contract's tenant term as **open question 1, recommendation A** in its own discussion.\n\n⚠️ **That PR is merged.** An open question on a merged PR has no reader, no queue membership, and no ageing — it is invisible to every sweep. This card gives it one.\n\n## The consequence, measured on `origin/main`\n\n`AutoEnqueuer` has **two** fan-out match sites, and both select subscriptions by object name alone:\n\n```\nauto-enqueuer.ts:834-835   handleEvent      →  subscriptions.get(event.object)  +  subscriptions.get('*')\nauto-enqueuer.ts:934-935   handleBulkEvent  →  subscriptions.get(event.object!) +  subscriptions.get('*')\n```\n\n`'*'` matches **every** object. The #13566 repair can give `:834` an organization term to discriminate on, because `DataEventSchema` now carries one. It **cannot** give `:934` one:\n\n```\nBulkDataEventSchema block, grep \"organization\"  →  ZERO hits\nCONTROL: same file, \"organizationId\"            →  2 hits (both in the DataEventSchema region, :247 and :293)\n```\n\n⇒ After #14970 (producer threading) and #13566 (fan-out filter) both land, **the single-record path is closed and the bulk path is still open.** One organization's bulk record events still reach another organization's webhook endpoints, full payload, signed with the receiving organization's secret.\n\n⛔ This is not a hypothetical hardening card: #13566 is a **confirmed** `priority:p0` cross-tenant leak — the census measured that a *tenant* org-admin, not a deployment administrator, can create `sys_webhook` rows under both walled postures. This card is the half of that leak that the current repair chain does not reach.\n\n## What is asked\n\nDecide and apply the bulk contract's tenant term — PR #14635's recommendation A, or whatever the seat judges correct now that the single-record shape has shipped and can be copied or deliberately diverged from. Whichever way it goes, please state in the schema JSDoc whether a bulk event's organization is *one* organization for the whole batch or potentially per-row, because that answer decides whether the fan-out filter can be a single comparison or has to partition the batch — and the fan-out is the hot path the enqueuer exists to keep O(1).\n\n`MetadataEventSchema` is named here only for completeness; this seat has not measured whether it has an equivalent exposure and is **not** claiming it does.\n\n## Sequencing\n\nIndependent of #14970 and #13566 — it neither blocks nor is blocked by them. It should not wait for them, because it is the reason \"the leak is closed\" will be **false** when they land.\n\nRefs: #13566 (the p0 parent) · #14970 (the producer-threading half, `packages/objectql`) · #14291 / PR #14635 (the single-record term, landed `2aa8456cf`, and where open question 1 was recorded) · #13546 / PR #13565 (subscription-side organization cache)"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 15520,
+  "kind": "issue",
+  "title": "[finding] `skills/objectstack-automation/SKILL.md` repeats the corrected completeness claim — \"only the stdlib is callable\" and \"the full table\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T19:32:49Z",
+  "updated_at": "2026-09-05T02:30:46Z",
+  "closed_at": "2026-09-05T02:07:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15520",
+  "body": "`skills/objectstack-automation/SKILL.md:351` carries the same measurably-false completeness claim that PR #15519 has just corrected in the formula skill, one skill over:\n\n> 4. **Conditions are bare CEL — only the stdlib is callable.** `now()`, `today()`, ... plus CEL built-ins (`has`, `size`, `int`, `string`, …) — see **objectstack-formula** for the full table.\n\nTwo claims in that sentence are wrong in the same direction as the one just fixed:\n\n- **\"only the stdlib is callable\"** — the CEL environment also resolves receiver-only methods called on a value (`s.split(',')`, `list.map(...)`, `ts.getFullYear()`), and four bare primitives (`bytes`, `dyn`, `type`, `uint`) that are withheld from the catalogue by an authoring decision rather than being unavailable. `packages/formula/src/validate.ts` states the real membership rule as load-bearing: `CEL_STDLIB_FUNCTIONS` is the **bare-callable public subset**, not the set of everything callable.\n- **\"the full table\"** — the referenced table is that same advertised subset, so pointing at it as \"full\" repeats the completeness claim by reference.\n\nBoth are false in the **safe** direction: they under-promise, so no author is broken by them today. That is why this is filed rather than hot-fixed.\n\n## Why it was not fixed in the same PR\n\nThe card PR #15519 implements is scoped by its ruling and its claim to `skills/objectstack-formula/SKILL.md` alone, with an explicit stop on editing any other skill. `skills/objectstack-automation/SKILL.md` is a separate published skill with its own token ceiling — worth noting for whoever takes this: it measures 12269 tokens against a 12768 ceiling, so there are 499 tokens of headroom and the correction has to fit inside them or buy the room by cutting content.\n\n## Suggested shape\n\nThe same treatment, in that skill's voice and much shorter, since the formula skill now carries the full explanation: say that conditions are bare CEL and that the table names the bare-callable subset, and drop the word \"full\". No engine change; no edit to `CEL_STDLIB_FUNCTIONS`.\n\nFound while correcting the formula skill's copy of the claim. Not assigned — for triage."
+}

@@ -1,0 +1,33 @@
+{
+  "number": 15455,
+  "kind": "pull_request",
+  "title": "fix(scripts): measure-self-test-floor's probe reads NOT MEASURED when the baseline run already fails (#15391)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T16:26:32Z",
+  "updated_at": "2026-09-04T17:11:57Z",
+  "closed_at": "2026-09-04T17:11:56Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-09-04T17:11:55Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/15455",
+  "body": "Fixes #15391\n\n`probeEarlyReturn` decided HELD / ACCIDENT from the mutated run alone. When the UNMUTATED file already exits non-zero, this tree cannot run it at all, so the mutation had nothing to defeat — but both runs exit non-zero and both print a module-resolution stack, so the mutated run \"speaks\" and the row read **HELD**: the flattering answer, awarded for the tree being broken. The same row reads ACCIDENT once the tree is installed, so one probe row had two verdicts depending on the environment.\n\n## The fix\n\nThe baseline is now a **precondition, not a data point**. It is read before any reading of the mutated run, and a non-zero one ends the probe as `NOT MEASURED` with the reason `baseline run failed (exit N)`.\n\nThe mutated run is **not spawned at all** in that case. That is the deliberate half of the choice the card left open: in the shape that motivates this (a checkout whose dependencies are absent) *every* row is baseline-red, so running each doomed mutation would double a whole sweep of spawns to learn nothing.\n\n`--probe`'s human listing and its tallies fold the row into the existing `NOT MEASURED` class with that reason — no new class, no renamed key. The row additively publishes `baselineExit`, `baselineBytes` and `baselineHead`; `baselineHead` is usually the whole diagnosis (`Cannot find package ...` reads as \"run pnpm install\").\n\n## Before / after — the row from the card\n\nReproduced on this tree by making the audits census file's `typescript` import unresolvable (the dependency the card's stack trace names). Restore proven by `git hash-object` equality with the HEAD blob and an empty `git diff HEAD`.\n\n| field | before (`f01adfa5c`) | after (this branch) |\n|:--|:--|:--|\n| `verdict` | `HELD` | `NOT MEASURED` |\n| `why` | absent | `baseline run failed (exit 1)` |\n| `entry` | `runSelfTest` | `runSelfTest` |\n| `baselineExit` | `1` | `1` |\n| `mutatedExit` | `1` | not spawned |\n| `mutatedBytes` | `965` | not spawned |\n| `mutatedHead` | `node:internal/modules/package_json_reader:314` | not spawned |\n| `mutatedSpoke` | `true` | not spawned |\n| `baselineBytes` | absent | `942` |\n| `baselineHead` | absent | `node:internal/modules/package_json_reader:314` |\n\n## The new inline control\n\n`UNRUNNABLE_GATE` — a fixture whose first statement is an import no registry can supply, so neither run ever reaches its (perfectly ordinary, injectable) self-test. Two assertions, because one alone would pass for the wrong reason:\n\n1. the verdict is `NOT MEASURED` **and** the reason is the baseline one — which pins *which* NOT MEASURED branch fired, not merely that some branch did;\n2. the fixture really is a red baseline that **speaks** (`baselineExit` non-zero, `baselineBytes` positive, `baselineHead` non-empty) — exactly the shape an exit-code-and-speech reading scored HELD.\n\nControls run inline on every invocation, as this file's already do; it ships no `--self-test` mode to add them to.\n\n**Ablation.** Neutralising the new guard turns the controls red, and they name the defect:\n\n```\nPOSITIVE CONTROL FAILED: a file whose BASELINE run already exits non-zero was read as HELD (); the mutation had nothing to defeat, so nothing was measured\nPOSITIVE CONTROL FAILED: the unrunnable fixture no longer produces the measured shape (baseline exit 1, undefined byte(s)); the NOT MEASURED verdict above would then be passing for the wrong reason\n```\n\nMutation and restore were both proven on disk (anchor grep counts each way; restore equal to the HEAD blob by hash, with an empty `git diff HEAD`). No `dist/` is involved — this script runs as source, so there is no rebuild leg.\n\n## Whole-population check\n\n`--probe --json` over all 170 rows, base `f01adfa5c` vs this branch, in an **installed** tree:\n\n- floor tallies unchanged: **165 roster / 4 NONE / 1 count-candidate**;\n- verdict tallies unchanged: **164 HELD / 1 ACCIDENT / 5 NOT MEASURED**;\n- **verdict changes: 0**, and rows with a non-zero `baselineExit`: **0** — which is why those two agree. The whole payload is byte-for-byte identical between the two runs, so no row moved for any other reason either;\n- the three handshake dispatch spellings still read HELD: `check-nul-bytes.mjs` (compare in place), `check-watch-hint-literal.mjs` (bind, then compare), `check-ratchet-remedy-authority.mjs` (a reached-verdict flag).\n\nA plain `--json` run exits 0, so the inline controls pass.\n\n## Gates\n\nRun at `484688f09`, exit codes captured before any pipe. All 22 commands of the derived family (`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`) exit 0, plus `check:pm-dispatch-gates` (`✓ dispatch-gates self-test: 1402 cases pass.`, under the shared verify lock), `check-self-test-workflow-commands.mjs` and its `--self-test`, `check:declared-population-live`, the verify-lock and os-regen-merge self-tests, and whole-repo `pnpm lint` (exit 0, full population — no narrowing). No gate exited 3, so nothing here is NOT MEASURED.\n\n`check-self-test-wired` still places this file on its `inline` route: `✓ check-self-test-wired: every one of the 169 script(s) CI runs that ship a --self-test has that self-test run by CI.`\n\n`origin/main` was merged in at `a256cd45f` so the gate-family derivation would read a tree someone is actually on; the family it derives is identical either way.\n\n## Scope\n\n`#15371` (helper-spelling coverage) and `#15421` are queued behind this on the same file and are deliberately untouched here.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_012zGPuVVX3deAx9LdjK8jCk\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012zGPuVVX3deAx9LdjK8jCk)_"
+}

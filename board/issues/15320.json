@@ -1,0 +1,33 @@
+{
+  "number": 15320,
+  "kind": "pull_request",
+  "title": "fix(pm): dispatch-gates' --changed --commands control accepts the no-diff refusal — main's push run has been red since #15105",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T11:05:49Z",
+  "updated_at": "2026-09-04T11:49:13Z",
+  "closed_at": "2026-09-04T11:49:12Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-09-04T11:49:12Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/15320",
+  "body": "Fixes #15278\n\nThe self-test case that reds is not about a broken tool: it is about the tree the run stands\nin. The card recorded it as a fresh-worktree annoyance and said *\"CI never sees this\"*. That\npremise is falsified — CI sees it on every push to `main`, and `main`'s own commit status has\nbeen red at `Lint & Repo Gates` step 31 `PM dispatch-gates self-test` since the control landed.\n\n## The shape\n\n```js\nconst changedCommandsRun = runCli(['--changed', '--commands']);\nt(\n  'CONTROL: --changed --commands is legal and answers, so the moved usage line describes a real combination',\n  changedCommandsRun.status === 0 && (changedCommandsRun.stdout ?? '').length > 0,\n);\n```\n\nThe claim is about the flag COMBINATION — that `--changed` parses beside a stdout-shape flag\nand REACHES the derivation. `status === 0` is not that claim; it is a property of the caller's\ntree. Where HEAD equals `origin/main` the derivation refuses **by design**, exit 2:\n\n```\ndispatch-gates: this branch changes nothing against 'origin/main' (merge base 3a4373f4c) — nothing to derive.\n```\n\nA `push` run of `lint.yml` has exactly that shape: the pushed head IS `origin/main`. A\n`pull_request` or `merge_group` run does not — a PR branch and a queue branch both carry a diff\n— which is why the queue kept merging green while the base branch's own status was red.\n\n## Measured — every completed `push` run of `lint.yml` on `main`\n\nFrom `GET /actions/workflows/lint.yml/runs?event=push&branch=main` (cancelled runs = superseded\nunder concurrency; every run that completed is listed):\n\n| main push | Lint & Repo Gates | note |\n|---|---|---|\n| `101ad2cc1` … `4428dd575` (09-03 19:41Z → 22:39Z) | success ×4 | before the control |\n| **`369da918d`** (09-03 23:23Z, the commit that added the control) | **failure** | first red |\n| `35e94c96b`, `97a22639b`, `f594e70d7`, `2cc461030`, `fcc42e6c1`, `1876d5dfd`, `ebb082204`, `5c584231a`, `c351a84da`, `919beca43`, `50d6c924b`, `9c1bcda38`, `1bc3c092a`, `460134af8`, `4dd5041bd`, `0e24b0c2c`, `fbecffe1d`, `5b09356b7`, `3a4373f4c` (09-03 23:52Z → 09-04 09:57Z) | failure ×19 | every completed push run |\n\nFailing step confirmed by job read on three of them (`3a4373f4c` job `100985021378`, `5b09356b7`,\n`fbecffe1d`): step 31, `Process completed with exit code 1`. The `merge_group` run of the same\n`3a4373f4c` head (job `100979536132`) is green.\n\nReproduced here on a checkout whose HEAD equals `origin/main` at `3a4373f4c` — the push-to-main\nshape — with **exactly one** red case out of 1381, this one.\n\n## What the case proves now\n\nThe predicate accepts **either** outcome that can only follow from reaching the derivation:\n\n* exit 0 with a command list on stdout, or\n* exit 2 with the no-diff refusal on stderr.\n\nIt matches that refusal on `NO_DIFF_REFUSAL`, a new constant the print site interpolates, rather\nthan on a retyped copy of the sentence — the pin follows the message instead of a memory of it.\n\nA widened case is one reading away from accepting everything, so that reading is made\nmechanically rather than left to the next author's eye. A **positive control** puts an ILLEGAL\ncombination through the SAME predicate and requires it to FAIL: `--changed` with a path, which\nthe argv chain refuses before any derivation runs, at the same exit 2 with a different sentence\n(`--changed derives the paths itself — do not pass paths with it.`). No parse failure can\nsatisfy the corrected control.\n\nThe usage-line assertions above it are untouched, and no other case was weakened or removed.\nThe self-test grew by one case: 1381 → 1382.\n\n## Ablation — the positive control is load-bearing\n\nMade the illegal combination legal (`} else if (false && wantsChanged && argvPaths.length > 0) {`),\nwhich is the parse failure the corrected control must not accept:\n\n* mutation confirmed on disk before the run — target line present 1 → 0, injected line 0 → 1,\n  blob `5ec8448ac` → `af5175a39`, and a probe of `--changed --commands PATH` that used to exit 2\n  now exits **0 with 19 lines of commands**;\n* self-test then reds **exactly one** case, the positive control:\n  `✗ dispatch-gates self-test: 1 of 1382 case(s) failed.`\n* restored via a `trap` on `EXIT INT TERM` using `git checkout HEAD -- ABSOLUTE_PATH`; restore\n  proven by observation, not by an exit code — `git diff HEAD` empty, `git status --porcelain`\n  empty, and the worktree blob back to the HEAD blob `5ec8448acca501ca75459d5b0a6d950e3b5231fd`.\n\n## Verification (all at `209f5c596`, under the shared verify lock)\n\n| run | tree | result |\n|---|---|---|\n| BEFORE, no diff (push-to-main shape at `3a4373f4c`) | HEAD == `origin/main` | `✗ 1 of 1381 case(s) failed` — the sole ✗ is this control |\n| AFTER, branch (a) — tree HAS a diff | `pnpm check:pm-dispatch-gates` | `✓ 1382 cases pass`, exit 0 |\n| AFTER, branch (b) — tree has NO diff, carrying this fix | HEAD == `origin/main` == `209f5c596` | `✓ 1382 cases pass`, exit 0 |\n| ABLATION — illegal combination made legal | tree HAS a diff | `✗ 1 of 1382 case(s) failed` — the positive control alone |\n\nBranch (b) was exercised in a separate clone whose own `refs/remotes/origin/main` was pointed at\nthis commit — the shared repository's refs were never touched.\n\nDerived family re-derived at the final commit\n(`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`, 21 commands)\nand run, plus `check-self-test-workflow-commands.mjs` and its `--self-test`, plus whole-repo\n`pnpm lint`. All exit 0.\n\n`skip-changeset`: `scripts/pm/**` only — nothing is published from a package by this diff.\n\n---\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_012zGPuVVX3deAx9LdjK8jCk\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012zGPuVVX3deAx9LdjK8jCk)_"
+}

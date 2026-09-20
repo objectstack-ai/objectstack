@@ -1,0 +1,36 @@
+{
+  "number": 14412,
+  "kind": "issue",
+  "title": "`PageTranslation.components` has no key for `element:text`'s `content` — the one string that element renders cannot be addressed by a bundle",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "i18n",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T05:08:53Z",
+  "updated_at": "2026-09-04T07:12:35Z",
+  "closed_at": "2026-09-04T07:11:37Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14412",
+  "body": "Found while authoring a read-only record page in an application (`objectstack-ai/duly#13`) with a complete `zh-CN` bundle, on `@objectstack/spec` 17.2.0.\n\n## The gap\n\n`PageTranslation.components` (`packages/spec/src/system/translation.zod.ts`) declares the per-component key face as `title | description | label | placeholder | emptyText | submitLabel`.\n\n`element:text` renders exactly one authored string, `content`, and it is not in that list. So a page that puts a sentence on screen through the element the platform provides for putting a sentence on screen has no bundle address for it.\n\n## Why this reads as a missed key rather than a decision\n\nThe schema's own comment says the face was derived from the copy props components declare, and it names its two deliberate exclusions — `help` and `subtitle` — with reasons. `content` is neither named nor excluded; it is simply absent. Every other authored string on the same page has a key.\n\n## What an application does today\n\nThe blessed alternative works: an inline `I18nLabel` map (`{ en, 'zh-CN' }`) on `content`, which is what the platform's own `sys-user.page.ts` does. The reporting app uses it, and its coverage walk records those strings under an `untranslatable` ledger with this reason, pinned by count (16 strings on one page). That is a workaround with a cost: those strings are invisible to `os i18n extract`, to `check:i18n-coverage`, and to a translator working from the bundle, and each one is an inline map in a page definition instead of a row in the locale file.\n\n## Suggested shape\n\nAdd `content` to `PageTranslation.components`, resolved in `translatePage` for `element:text` (and any sibling element whose display string is `content`). If it is deliberately out — because inline maps are the intended route for page prose — the schema comment should say so beside `help` and `subtitle`, so the next author finds a decision instead of an absence.\n\nRelated: #14253 (three other authored display surfaces with no key; merged as #14381), #14376 (extractor coverage of new key families).\n\n---\n\n## Triage — two corrections, and they move the card's centre of gravity\n\nMeasured at `origin/main` `b8562ff262`.\n\n**(a) The face no longer carries `submitLabel`.** It left in `@objectstack/spec` 17 (#10926, ADR-0049) and the current shape is five keys: `title` `description` `label` `placeholder` `emptyText` (`translation.zod.ts:927-931`). Minor, but the card's premise is a census, so the census should be right.\n\n**(b) ⭐ The inline map is not a workaround — it is the ruled route, and this exact question was decided twice.**\n\n`packages/spec/src/ui/component.zod.ts:1784` declares `content: I18nLabelSchema`, and the docblock above it (`:1773-1783`) records why:\n\n> `I18nLabelSchema` rather than a bare `z.string()` (#5728, **named explicitly in the maintainer's ruling** because the label-wide widening could not reach it): `sys-user.page.ts` authors eight `element:text` nodes whose `content` is an inline `{ en, 'zh-CN', 'ja-JP', 'es-ES' }` map… The bare string was the declaration disagreeing with the delivered shape.\n\nAnd the `submitLabel` retirement one file over (`translation.zod.ts:867-876`) is the same shape, decided the same way:\n\n> the live form surface's submit copy is `object-form`'s `submitText` (`I18nLabelSchema`), **localizable at its own authoring site**, and adding it here would be **a face widening**.\n\n`element:text.content` is an `I18nLabelSchema` localizable at its own authoring site. By the precedent, adding it to the bundle face is a face widening — the thing #10926 declined to do for the identical shape.\n\n⇒ The card's framing (\"a missed key… neither named nor excluded\") does not survive. What is genuinely missing is the **sentence**, not the key: `content`'s absence is a decision that was made elsewhere and never written down beside `help` and `subtitle`. That is the card's own second option, and the precedent points at it.\n\n## Why it is still a decision, and not simply closed\n\nBecause the card raises something the two rulings did **not** weigh. #5728 and #10926 both answered \"can this string be localized?\" — yes, at its authoring site. This card asks \"can it be **extracted and counted**?\" — and the answer is no. Sixteen strings on one page, invisible to `os i18n extract`, to `check:i18n-coverage`, and to a translator working from the bundle. That is a new argument against a settled route, measured outside this repo, and it is the maintainer's to weigh rather than the seat's to wave through on precedent.\n\n&lt;!-- os-decision-facets --&gt;\n\n- **① 项目长远合理性(权重 ≥50%,领起推荐)** —— 平台已经为「作者写的一段话怎么本地化」定过两次,而且是同一形状:#5728 把 `element:text` 的 `content` 从裸字符串改成 `I18nLabelSchema`(维护者点名);#10926 把 `submitLabel` 从 bundle 面退役,原话是「在它自己的编写点可本地化,加到这张面上就是面的加宽」。⇒ ①指向**不加键**:把同一个字符串交给两条本地化路径,是特例增生而不是收敛。把 `content` 的缺席写成一条有理由的排除(与 `help`、`subtitle` 并列),才是缩小。\n- **② 实际业务拉动** —— 有,而且是外部实测的:duly#13 一个页面 16 条字符串,对抽取器、覆盖率门禁和照 bundle 工作的译者全部不可见,已被那个应用记进自己的 untranslatable 台账并按数量钉住。⚠️ **这一条在 #5728 与 #10926 裁决时都没有被称量过** —— 那两次问的是「能不能本地化」,答案是能;本卡问的是「能不能被抽取和计数」,答案是不能。新论据,不是重提旧案。\n- **③ 防 AI 犯错** —— 出错时谁看到什么:一个作者给页面上每一段可见文字找 bundle 键,唯独 `element:text` 那段找不到,而**架构里没有任何东西告诉他这是有意的**。`help` 和 `subtitle` 都写了排除理由,`content` 只是不在表里 —— **缺席与遗漏在读者眼里一模一样**,他会合理地以为自己漏了什么,或者以为这是个 bug。⭐ 无论方向怎么裁,这一棱都必须被满足:要么补键,要么补那句话。\n- **④ 创业阶段不扩散** —— 加一个键是一条永久义务:抽取器、覆盖率门禁、译者工具、向后兼容,外加「同一字符串两条路径谁赢」这个新的冲突面。不新增优于 declare-and-maintain。\n\n**推荐:A(卡面的第二个选项)—— 不加键,把排除理由写进 schema 注释,与 `help`、`subtitle` 并列,引 #10926 的原话作依据。** ①④同向,③被它满足。\n⚠️ **但 A 不解决 ②**,必须说清楚:那 16 条字符串仍然对抽取器和覆盖率门禁不可见。所以荐 A 的同时建议**另开一张卡**问「内联 `I18nLabel` 映射该不该被 `os i18n extract` 与 `check:i18n-coverage` 看见」—— 那才是 ② 真正要的东西,而且它对**所有**用内联映射的字段都成立,不止 `element:text`,因此比给一个组件补键更能关掉这一类。⛔ 本席不代开那张卡,那是拿到方向之后的事。\n**回退:B(卡面的第一个选项)** —— 把 `content` 加进面并在 `translatePage` 里解析。若维护者认为 bundle 面才是页面散文的正路、内联映射只是过渡形态,走这条。代价:同一字符串两条路径,并且必须一并裁定两者同时存在时谁赢。\n**置信缺口(本分析看不见什么):** 没有量 objectui 侧 `pickLocalized` 与 bundle overlay 的优先级。若走 B,一个 `content` 同时带内联映射和 bundle 条目时谁赢,是 B 上线前必须先答的问题 —— 本轮没量,而它决定 B 的真实代价是「加一个键」还是「加一个键 + 一条冲突规则」。\n\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

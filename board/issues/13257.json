@@ -1,0 +1,36 @@
+{
+  "number": 13257,
+  "kind": "issue",
+  "title": "Record the agent-created-Routine transport facts in references/platform-readings.md — fired sessions get no GitHub MCP tools, and self-binding trades new-session recoverability for tool availability",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p1"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-29T15:05:33Z",
+  "updated_at": "2026-09-04T13:05:04Z",
+  "closed_at": "2026-09-04T13:05:04Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13257",
+  "body": "Filed by the triage seat (session `session_011c4YfanSNzNEVaHhDuSAfB`, round R+25) on behalf of the preceding triage session, which measured all of this at 2026-08-29 14:1x–14:3xZ but lost its GitHub MCP channel (identity switch) before it could file. The maintainer relayed the content verbatim; it is reproduced here in full so nothing depends on that lost session.\n\nEvidence lives in the triage seat post #6015, comment `5462964817` (2026-08-29T14:28:26Z).\n\n## What was measured (three facts, not one)\n\nA card that only said \"bind the timer to the current session\" would drop the *why*, and the next seat would re-run the same two probes. The measured facts are:\n\n1. **A Routine created by `create_trigger` fires sessions that have no `mcp__github__*` tools.** The create call returns an explicit warning (`this trigger stores no MCP connectors, so the sessions it fires will run without connector (mcp____*) tools`). The warning alone was *not* treated as conclusive — the repo's own UI-created Routine also stores no github connector yet historically worked, so github plausibly comes from the environment rather than the connector. Two probes settled it:\n   - Probe ① (14:19Z, `cse_0185ehwUiQgstfBYcKBjtF9B`): smoke test, \"confirm you can get github tools, stop if not\" → **25s IDLE, 1114 output tokens, zero writes**.\n   - Probe ② (14:23Z, `cse_01LCQgSjkA4Vywqj6WmdUSJq`): capability probe, explicitly **forbidden to self-retire and forbidden to run triage**, sole action = load `mcp__github__list_issues`, run one query, post a `PROBE RESULT` comment → **30s IDLE, 1837 output tokens, comment never appeared**.\n   - Probe ② is the decisive one: it excludes the competing same-shape explanation. Probe ①'s silence was equally consistent with the mutex four-readings correctly self-retiring (both produce a short run with zero writes). Removing self-retirement as a permitted outcome leaves tool unavailability as the only instructed cause.\n   - Discriminating reading: the seat post's comment count stayed at **551** and `updated_at` stayed at `14:02:22Z` across both probes.\n   - ⇒ Unusable for **any seat whose work is GitHub reads and writes**, which is every PM seat.\n\n2. **Self-binding (`persistent_session_id` / self-bind) wakes an already-existing session with its tools already loaded** ⇒ the transport problem in (1) simply does not arise.\n\n3. **`create_trigger` has neither a `sources` parameter nor a `model` parameter.** An agent therefore cannot create a Routine carrying repo sources or a pinned model, and the model falls back to the default tier — measured as **`claude-sonnet-5`**. Agents also cannot edit a UI-created Routine: `update_trigger` refuses with `this routine was created via \"http_api\", not by an agent. Agents can only update routines they created`.\n   - Consequence worth recording alongside: both currently existing triage Routines have models that disagree with the 2026-08-27 ruling (triage runs `opus`; fable is reserved for adjudication / contract-review subagents). The UI one pins `claude-fable-5` (**above** the ruling); an agent-created one falls to `claude-sonnet-5` (**below** it). The agent can change neither.\n\n## The rule to derive — and why it is NOT \"always self-bind\"\n\nSelf-binding buys tool availability by **spending new-session recoverability**. It has a real opposite-direction cost: once the bound session dies, the timer becomes an orphan that wakes a dead session every hour, and nobody notices for a long time. This is not hypothetical — two instances on 2026-08-29 alone:\n\n- the UI Routine `trig_01KagCpMYhdWXRf1MQGwWDLB` went `FAILED` on 2026-08-23 and **lay unnoticed for 6 days**;\n- an identity switch killed the then-current triage session's GitHub access outright (which is why this card is being filed by a successor).\n\n⇒ The rule must carry its recovery path:\n\n> Prefer self-binding for a seat whose work needs connector tools. **When the bound session dies, delete the old Routine first, then recreate it from the new session — ⛔ never leave an orphan.**\n\nThis is precisely the boundary annotation for the seat invariant *\"zero local state; the loop must be recoverable from a fresh session\"*: **self-binding is a performance optimization (it holds one prompt-cache chain), ⛔ not state storage** — so deleting and recreating costs nothing.\n\n## Where it goes — `references/`, not `SKILL.md`\n\n`SKILL.md` carries a line ratchet (`scripts/pm/check-skill-line-ratchet.mjs`, monotonically non-increasing). Adding prose to the main file must be paid for with deletions, or needs a maintainer ruling to raise the cap. These three items are by construction *look-it-up-when-you-do-that-operation facts*, which is exactly the shape of `references/platform-readings.md` — and the skill's own guard index already routes this way: \"平台事实变化(→ references 事实表改一行)\".\n\n**Proposed shape:**\n- `references/platform-readings.md` — add the three facts plus the recovery path above.\n- `SKILL.md` — at most a pointer from the existing self-timing sentence. If even the pointer has to be paid for out of the ratchet, **skip the pointer** rather than spend deletions on it.\n\n## Tier\n\nPer the model-tiering clause: a `references/**`-only mechanical text change ⇒ **opus** implementation (review still runs at the skills-surface review tier). Only a change reaching `SKILL.md`'s protocol-semantic surface would force `claude-fable-5`.\n\n## Triage-seat notes\n\n- Dedup ran before filing: semantic search on this repo returned zero for this topic; the zero was checked against a positive control (#12729, the Routine-UI tracking card, which exists and is closed/completed) — so the zero is a real zero, not a broken query.\n- ⛔ The triage seat does not write files and `.claude/skills/**` is a governed surface (human merge). This is filed as an ungraded `finding` for the `domain:skills` seat to grade, dispatch and land through a PR."
+}

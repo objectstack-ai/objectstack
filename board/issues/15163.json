@@ -1,0 +1,32 @@
+{
+  "number": 15163,
+  "kind": "issue",
+  "title": "measure: what does the single-kernel REST provider wiring actually skip when a wall-enforcing tenancy posture is configured — the question B′ of #13906 asked, without the boot refusal",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T04:14:13Z",
+  "updated_at": "2026-09-04T07:23:15Z",
+  "closed_at": "2026-09-04T07:23:15Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15163",
+  "body": "Filed from the maintainer's ruling on #13906 (2026-09-04, live chat, adopting the PM recommendation verbatim: 「按照你的建议，你帮我跟进处理15020」). Measurement only — ⛔ no code lands under this card. `domain:cli` (REST transport wiring); type and priority are triage's.\n\n## Why this exists\n\nPR #15020 shipped decision 1 of the 2026-09-02 ruling as **A + B′**. B′ was a **boot refusal**: on the single-kernel provider wiring (no `kernel-manager` service), a wall-enforcing tenancy posture made `RestApiPlugin` refuse to start, on the reasoning that `computeExecCtx` never reads a posture on that wiring so \"the Layer 0 wall would silently not be enforced\". Measured on the merged tree (#15020 comment \"CI triage\", 2026-09-03): the ONLY registrar of a `kernel-manager` service in the repository is B′'s own narrowness control test (positive control: the same grep for `org-scoping` returns four real registrars), so **every** wall-enforcing composition the open core can build — the real `os serve` process under `isolated`, the ADR-0105 `bootStack multiTenant` harness, seven dogfood suites, `group` as well as `isolated` — is on the refusing side. And the refusal's premise is false where it fires: a wall-enforcing *effective* posture requires `org-scoping`, and `org-scoping` is exactly what makes plugin-security keep the platform's `organization_id` row policies (ADR-0105 D3), so the row wall IS enforced on those deployments. What the provider wiring actually skips is narrower — the two API-key admission refusals `computeExecCtx` derives from the posture (`organization_required`, `organization_membership_ended`) — and nobody has measured whether those refusals are reached by another layer on that wiring.\n\nThe maintainer therefore removed B′ from #15020 (A and decision-2 B land in 17.3) and moved B′'s question here.\n\n## The measurement\n\nOn a real `os serve` boot under `OS_TENANCY_POSTURE=isolated` with `@objectstack/organizations` mounted (the composition B′ refused), as an authenticated principal whose API key is stamped with an organization they are no longer a member of:\n\n1. Does the request reach data, or is it refused — and by which layer (Layer 0 in plugin-security, the REST `computeExecCtx` posture branch, better-auth session validation)? Name file and symbol either way.\n2. Repeat for a key whose principal has **no** organization (`organization_required`).\n3. Control: the same two requests on the multi-kernel wiring (a `kernel-manager` present), where the posture branch is known to fire — both must be refused there, proving the probe itself works.\n4. Read `computeExecCtx` and state, from the code, which authorization inputs the single-kernel branch derives without a posture and which it cannot derive at all.\n\n## Outcomes\n\n- Every refusal reached by another layer → close: the single-kernel wiring carries no posture and needs none; document that in the REST plugin's docblock (a docs card, not a refusal).\n- A refusal reached by NO layer → a real defect: file it with the measured blast radius; the repair is to make the single-kernel branch derive the posture (the option the 2026-09-02 ruling declined, to be re-judged on the measurement), never a boot refusal that turns every walled deployment off.\n\nRefs: #13906 · PR #15020 · ADR-0105 D3 · ADR-0095 D1 · ADR-0069."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 14970,
+  "kind": "issue",
+  "title": "objectql: `publishDataEvent` does not stamp the `organizationId` the spec now declares — the producer half of the #13566 p0 cross-tenant webhook leak, and nothing is filed for it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p0",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T15:50:22Z",
+  "updated_at": "2026-09-04T07:39:46Z",
+  "closed_at": "2026-09-04T07:38:06Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14970",
+  "body": "Filed by the `domain:services` execution seat while running its unlock scan on #13566. Unassigned; `domain:*`, type and priority are triage's — this seat does not produce them.\n\n# 🔴 This is the critical path of a CONFIRMED p0 cross-tenant data leak\n\n⚠️ **Requesting the emergency triage channel rather than the hourly sweep.** The parent defect #13566 is `priority:p0` `bug` `security`, confirmed by measurement (not a conservative hold), and has been open since **2026-08-31**. It is blocked on this work, and **no card existed for it** — which is why it has not moved. Please route immediately.\n\n**Named reader:** whichever seat owns `packages/objectql` (`domain:engine` on the current lane table).\n\n## The gap, measured on `origin/main` just now\n\nThe #13566 repair was split contract-first into three pieces. The spec piece landed and the consumer piece is ready. **The producer piece in the middle was never filed, and without it the other two are inert.**\n\n| piece | file | state |\n|:--|:--|:--|\n| spec term | `packages/spec/src/api/events.zod.ts:293` — `organizationId: z.string().min(1).optional()` | ✅ landed as PR #14635, squash `2aa8456cf`, 2026-09-02T17:21:29Z |\n| **producer threading — THIS CARD** | `packages/objectql/src/engine.ts:5628` `publishDataEvent` | ❌ **not done** |\n| fan-out discrimination | `packages/plugins/plugin-webhooks/src/auto-enqueuer.ts:834` | ❌ not done, and **cannot be written usefully until this card lands** — the filter would have nothing to filter on |\n\nMeasurement of this card's own claim, with the reverse control that makes the zero a reading:\n\n```\ngit show origin/main:packages/objectql/src/engine.ts | sed -n '5628,5720p' | grep -c organizationId   →  0\nCONTROL: same file, whole-file count                                                                  →  12\n```\n\n⇒ The grep reads the file. `publishDataEvent` mentions the term **zero** times. All 12 whole-file hits are the *hook-context* plumbing (`execCtx.tenantId` → `ctx.user.organizationId` at `:3531-3658`, plus `:3981`) — a different concern that never reaches the published envelope.\n\n## What to build\n\n`publishDataEvent` is `private` at `:5628` and is the **only** `DataEvent` constructor, called from exactly three sites: `:10285` (`created`), `:11614` (`updated`), `:13068` (`deleted`). Stamp the record's organization onto the published event so it satisfies the contract the spec now declares.\n\n⭐ **The value is already in scope at the publish sites.** The engine's own hook-context code at `:3537` uses `organizationId: execCtx.tenantId`, and its comment at `:3531` calls `organizationId` *\"the blessed developer-facing name for the caller's\"* org. So this is a threading job, not a resolution job — ⛔ do **not** add a per-event DB read, which triage explicitly ruled out for the fan-out side (2026-08-31T12:47Z) because it would put a read on the hot path the enqueuer exists to keep O(1).\n\n⚠️ **`execCtx.tenantId` is the CALLER's active organization, and the contract asks for the RECORD's.** The schema's JSDoc states the producer obligation as *\"present = exactly the organization the record belongs to\"*. Those coincide on an ordinary tenant write and **diverge on a system/unscoped write** — which is precisely the conflation that PR #14726's blocking review finding was about on a different column (a direct grant stamping the *caller's* org onto a permission-boundary column). ⛔ Please do not reintroduce it here: a read failure or an absent organization must publish the key **absent**, never the caller's org as a substitute. The key is `optional()` exactly so \"no organization\" is expressible.\n\n## Clause-②\n\nVery likely **`yes`** — this widens a published event payload that external subscribers observe. The claiming seat re-derives it; this filing does not decide it.\n\n## What this card is NOT\n\n⛔ Not the fan-out filter (that is #13566, `domain:services`, and waits on this).\n⛔ Not the `BulkDataEventSchema` term — `BulkDataEventSchema` still carries **no** organization term (measured: zero hits in its block), so the bulk fan-out path at `auto-enqueuer.ts:934` stays leaky even after this card and #13566 both land. That is a separate spec shape decision, recorded as open question 1 on the now-**merged** PR #14635 — an open question on a merged PR has no reader, so this seat is filing it separately.\n\n## Inherited reading for whoever verifies the eventual fix\n\n⚠️ **Verify the fan-out, never the delivery rows.** PR #13565 (merged `99d23b1ec`) makes the auto-enqueuer stamp each delivery row with *the subscription's own* organization, so a mis-routed delivery is stamped **consistently as the receiving organization** while carrying the **sending** organization's record payload. A leaked delivery therefore looks natively owned by the receiver in the Failures view. Do not expect the delivery table to expose this defect.\n\nRefs: #13566 (the p0 parent, `domain:services`, blocked on this) · #14291 / PR #14635 (the spec half, landed) · #13546 / PR #13565 (the subscription-side organization cache) · #8554 (`sys_webhook` is organization-scoped) · #4639 (`publishDataEvent`'s single-record contract)"
+}

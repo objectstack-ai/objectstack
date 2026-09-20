@@ -1,0 +1,34 @@
+{
+  "number": 15396,
+  "kind": "issue",
+  "title": "measure: is a SESSION whose `activeOrganizationId` points at a left organization admitted the same way an ex-member API key was? — the membership guard is key-gated",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T14:16:39Z",
+  "updated_at": "2026-09-04T14:39:50Z",
+  "closed_at": "2026-09-04T14:39:50Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15396",
+  "body": "**Measurement only. ⛔ No fix lands under this card** — the deliverable is a reading posted here. If it finds a hole, the repair is its own card under its own ruling.\n\n## The question\n\nThe `organization_membership_ended` guard in `packages/core/src/security/resolve-authz-context.ts` opens with:\n\n```\nif (keyPrincipal?.tenantId && input.tenancyPosture) {\n```\n\nIt is **API-key-gated**. A session principal never reaches it. And a session's organization is *also* a stored claim — around line 361 of the same file:\n\n```\ntenantId = tenantId ?? sessionData?.session?.activeOrganizationId;\n```\n\nSo the two facts that made #15256 a p0 — *the wall compares against a stored claim*, and *the fact that would expose an ended membership is not an input to the layer that could act on it* — appear to hold for sessions as well, **and #15365 did not touch that path**: it made the posture available, but the guard that consumes it still only runs for API keys.\n\n⚠️ **Not asserted as a defect.** better-auth's organization plugin may maintain `activeOrganizationId` itself — clearing or re-pointing it when a membership ends — in which case the claim is vetted at its source and there is nothing here. Nobody has looked. Both prior measurements (#15163 and cloud#1982) drove **API keys only**, by construction.\n\n## The measurement\n\nOn the same rig shape cloud#1982 used — a real `objectstack serve` boot of `apps/objectos-ee` under a live `isolated` posture with the real `Organizations` plugin mounted, `OS_DATABASE_URL` on a FILE so writes can be read back — with a **session** (cookie), not an API key:\n\n1. Sign in a user who has a `sys_member` row for `org_alpha`, and let the session's `activeOrganizationId` become `org_alpha`. Confirm it from the session record, not from the UI.\n2. **Remove that membership** (delete the `sys_member` row) while the session stays alive. ⛔ Do not sign out.\n3. Drive `GET` and `POST` on a plain org-stamped object (`sys_business_unit` served cloud#1982 well). Does the session still read `org_alpha`'s rows? Does a write land, and does the row read back **from the store** carrying `org_alpha`?\n4. Repeat on the wiring where `kernel` **is** bound, if one can be booted — the API-key hole is closed there, and the question is whether the session hole is too.\n5. Read the code and state which layer, if any, re-vets `activeOrganizationId` after a membership ends: better-auth's own organization plugin, a hook in `packages/organizations`, or nothing.\n\n**Controls, both directions, or the run has measured nothing**: a session whose membership is intact must still read and write (a rig that serves nobody proves nothing); and a signed-out request must still be refused. Seed rows in a second organization and assert they are never served.\n\n## Outcomes\n\n- **Vetted at the source** (better-auth clears or re-points `activeOrganizationId`) ⇒ close this card with the reading, and add one sentence beside the guard saying why it is key-gated, so the next reader does not re-open the question.\n- **Not vetted** ⇒ a defect of the same family as #15256, on a credential that is far more common than an API key. File it with the measured blast radius and its own decision card; ⛔ the repair is not to be improvised here.\n\n## Scope note\n\nThe wall-enforcing posture needs `org-scoping`, whose only registrar is the cloud-private `packages/organizations` — so this is an enterprise-surface question and the rig has to be a cloud one, as cloud#1982's was. ⛔ Do not substitute the framework's `SimulatedOrgScopingPlugin` stand-in and present it as the answer; state it plainly if that is all you can boot.\n\nRefs: #15256 (the API-key hole and its ruling) · PR #15365 (`a72704375`) · #15163 · cloud#1982 · `packages/core/src/security/resolve-authz-context.ts`.\n"
+}

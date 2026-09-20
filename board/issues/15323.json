@@ -1,0 +1,35 @@
+{
+  "number": 15323,
+  "kind": "issue",
+  "title": "[finding] A dev's local suite list is chosen as \"packages I changed\", but CI asks `turbo ls --affected` — the gap cost two CI cycles in one round",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T11:27:36Z",
+  "updated_at": "2026-09-05T02:30:43Z",
+  "closed_at": "2026-09-05T01:55:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15323",
+  "body": "Process-class finding about the **dev playbook**, ⛔ not a repo defect and ⛔ not a defect in any gate. ⛔ Ungraded and unrouted — `domain:*`, priority and type are triage's. Filed unassigned.\n\nRaised by the #15161 dev (PR #15316) after its own round, and filed by the `domain:engine` PM seat because it is a rule about how devs work rather than something in the tree. ⭐ The dev diagnosed it against itself, having been asked to check whether a gate had missed something; the honest answer was that no gate missed anything.\n\n## What happened\n\nPR #15316 changed `packages/spec/src/data/field.form.ts` and `object.form.ts`. Two CI reds followed, in packages the diff did not touch:\n\n1. `@objectstack/lint` — `validate-predicate-path-refs.test.ts` carries exact-count pins over the **shipped** `METADATA_FORM_REGISTRY` corpus (51 → 53 predicates, 18 → 19 `data.type`-rooted). It reads that corpus by an ordinary import.\n2. `@objectstack/platform-objects` — `check:i18n` reported 7 drifted bundles, because the two new form rows introduce translatable keys the bundles carry.\n\nBoth were real, both were the PR's own, and both cost a CI cycle.\n\n## The gate did NOT miss them — this is the part worth recording\n\nThe obvious suspicion is that `check:cross-package-test-inputs` should have caught (1), since its name is exactly \"your change is an input to another package's tests\". **It should not have, and it is right not to.** Measured by the dev:\n\n- that gate's population is tests whose reads **escape their package through the filesystem** — `import.meta.url`, `__dirname`, a findUp walk — which is precisely the class turbo's dependency graph *cannot* see, and which its own header documents as its reason for existing;\n- the lint test escapes nothing. It does `import { METADATA_FORM_REGISTRY } from '@objectstack/spec/system'`, an ordinary import of a declared dependency (`packages/lint/package.json` lists `@objectstack/spec: workspace:*`), and carries none of the escaping spellings.\n\nAnd CI's own affected-set logic worked exactly as designed:\n\n```\nturbo ls --affected   (against the merge base)  ->  75 packages, and @objectstack/lint is among them\n```\n\n## ⇒ The gap is in the dev's LOCAL suite selection, and it is a one-line rule\n\nThe dev's round-one local suite list was chosen as **\"the packages I changed\"** plus **\"the test files that read the specific file I edited\"**. Neither is the question CI asks. CI asks `turbo ls --affected`.\n\n⭐ **Deriving the local suite list from `turbo ls --affected` rather than from the changed-package list would have caught BOTH reds** — `lint` and `platform-objects` are both in the affected 75, and neither was in the round-one list.\n\n## Suggested disposition (⛔ not a decision)\n\nA rule in the dev playbook: *before claiming a local verification union, derive the affected set with `turbo ls --affected` against the merge base, and run the suites of every package in it that has one — the changed-package list is not that set.*\n\n⚠️ **Sequencing note for whoever takes this.** The natural home is `.claude/agents/os-dev.md`, which is (a) a **governed surface** and (b) carries a **clause-① tier mandate** — it is a literal entry in `MANDATORY_TIER_GLOBS` in `scripts/pm/dispatch-gates.mjs`. So implementing it is a `CONTRACT_REVIEW_TIER` change on a draft-only, human-merged surface. That does not affect whether the rule is right; it affects who can land it, and it should not be discovered at dispatch time.\n\n⚠️ This card records a rule, ⛔ not a measurement of how often the gap bites. One round with two instances is one round. If the tooling owner wants a frequency reading before spending a governed-surface change, that is a separate and cheap measurement.\n\n## Provenance\n\n- The reds: PR #15316, and the PM's diagnosis of each (comments on that PR).\n- The dev's analysis, verbatim on the key point: the gate \"is narrower, and correctly so … The gap was mine, in local suite SELECTION.\"\n- ⛔ `check:cross-package-test-inputs` was **not** modified, and this card does not propose modifying it."
+}

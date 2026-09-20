@@ -1,0 +1,33 @@
+{
+  "number": 15324,
+  "kind": "issue",
+  "title": "[finding] measure-self-test-floor's probe awards HELD on a non-zero exit ALONE, so a file with NO verdict handshake reads HELD — measured on scripts/audits/14744-before-update-per-row-value-census.mjs",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T11:32:09Z",
+  "updated_at": "2026-09-04T14:05:35Z",
+  "closed_at": "2026-09-04T14:00:26Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15324",
+  "body": "Found while classifying `scripts/audits/14744-before-update-per-row-value-census.mjs` for #13799 batch 10a (the census row the PM asked for). Filed unassigned. Sibling of #14842 and #14963 — same instrument, a third and different root cause — and adjacent to #14968, which asks for a handshake reading the instrument does not take.\n\n## The mechanism\n\n`probeEarlyReturn()` in `scripts/measure-self-test-floor.mjs` decides its verdict on the mutated run's exit code and nothing else:\n\n```js\nverdict: mut.status === 0 ? 'DEFEATED' : 'HELD',\n```\n\nThere is a guard above it for a mutation that changed nothing observable (same output AND same status is NOT MEASURED), but no requirement that the mutated run SAY anything. So any file whose early-returned run happens to exit non-zero scores HELD — including one that carries no verdict handshake at all.\n\n## The measured instance\n\n`scripts/audits/14744-before-update-per-row-value-census.mjs` (landed by #15301, 655 lines) carries **none** of the three handshake spellings #14968 tallies: zero `SELF_TEST_VERDICT`, zero `selfTestReachedVerdict`, zero `requireReachedVerdict`. Its dispatch is:\n\n```js\nif (process.argv.includes('--self-test')) {\n  process.exit(runSelfTest() === 0 ? 0 : 1);\n}\n```\n\nAn early return makes `runSelfTest()` yield `undefined`; `undefined === 0` is false; the process exits 1 **printing nothing**. The instrument's own row records exactly that and still calls it HELD (measured on `103677652`, `node scripts/measure-self-test-floor.mjs --probe --json`, exit 0):\n\n```json\n{\"file\":\"scripts/audits/14744-before-update-per-row-value-census.mjs\",\"floor\":\"NONE\",\"defs\":[\"runSelfTest\"],\n \"probe\":{\"verdict\":\"HELD\",\"entry\":\"runSelfTest\",\"baselineExit\":0,\"mutatedExit\":1,\"mutatedBytes\":0,\"mutatedHead\":\"\"}}\n```\n\n`mutatedBytes` **0** and an empty `mutatedHead` are the tell, and they are already in the row — the verdict just does not read them. Compare the same run's `scripts/check-osv-exemptions.mjs`: `mutatedBytes` 206, `mutatedHead` naming the handshake by name. Both are HELD.\n\n## Why it matters\n\nThis is precisely the accident-versus-handshake distinction #14842 drew by hand for one file (`selfTest` mutated to a TypeError stack: \"an accident, not a handshake. A row naming this entry would record a hold this file does not have\"). Here the instrument makes that mistake on its own, with no ambiguous entry to blame — so a green `--probe` sweep is not evidence that the files in it have handshakes, and #13798's completion picture cannot be read off it.\n\n## Options\n\n- **A. Require the mutated run to print something.** `HELD` only when `mutatedExit !== 0` AND `mutatedBytes > 0`; the exit-1-silent case becomes a third verdict (`SILENT REFUSAL` / `NOT A HANDSHAKE`). Cheap, mechanical, and reads a field the row already carries. Cost: files that legitimately refuse silently — if any exist — move out of HELD and need reading.\n- **B. Assert the handshake TEXT.** Score HELD only when the mutated head matches the landed refusal wording (\"returned without reaching its verdict\"). Most precise; couples the instrument to three spellings, which is the defect #14968 is about.\n- **C. Report the handshake spelling as its own column** (the #14968 repair) and leave the probe's verdict alone, letting a reader join the two. Cost: the misleading HELD stays, and it is the field people quote.\n- **D. Leave it, and record the caveat in the instrument's header.**\n\n**Recommendation: A**, with C as the separate repair #14968 already asks for. A costs one condition over a field the instrument already records, it turns a wrong answer into an honest one, and it does not commit the instrument to knowing any spelling. B is the same coupling #14968 is filed to remove.\n\n## Scope note\n\nThe audits file is ALSO unfloored (`floor: NONE`) and is 10a's classification target; its census row goes to #13799. Nothing here asks for it to be floored — this card is about the instrument's verdict, not about that file.\n\nDuplicate-checked before filing against 284 open issues from the repo-scoped issues list plus a local grep (control terms returned the known family #14842 / #14963 / #14968 / #15296 / #15317, confirming a live read); no existing card for this criterion.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 15381,
+  "kind": "pull_request",
+  "title": "test(cli): pin the five cluster-driver diagnosis branches at boot, silence included",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T13:33:22Z",
+  "updated_at": "2026-09-04T14:53:21Z",
+  "closed_at": "2026-09-04T14:53:20Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": "2026-09-04T14:53:20Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/15381",
+  "body": "Fixes #14054\n\nThe four cluster-driver diagnosis branches added by #14042, plus the fifth deliberately-silent case, are now asserted **at boot** against the real `os serve` process. This is the follow-up the at-tier contract review on #14042 required to exist: a disclosed coverage gap, not a defect. Nothing about what any branch prints changes here.\n\n## Route: booted `serve`. `serve.ts` is untouched.\n\nThe card offered two routes and preferred the boot; the boot was **measured before it was chosen** rather than assumed tractable. A temp host app carrying a fixture `@objectstack/service-cluster` reaches the block in ~7.5s per case, and `runServe()` already resolves a boot that DIES — which is what all six boots here do. So no seam was extracted, `packages/cli/src/commands/serve.ts` has zero changed bytes, and the PR is one new file.\n\n## What is pinned\n\n| case | fixture | asserted |\n|---|---|---|\n| registered | registry reports `['custom']` | **silence** — no `[cluster]` output of any kind |\n| loaded-but-invisible | registry reports `['redis']` | the split warning, **verbatim**, including the one-line remedy |\n| not-resolvable / `undeclared` | driver neither declared nor installed | the kind token, and `createHostImporter`'s own remedy immediately after it |\n| not-resolvable / `declared-unresolvable` | declared, not installed | the same framing, the **other** kind's remedy, and not the first one's |\n| resolved-then-crashed | driver throws while evaluating | the driver package's own error and the frame naming its own file — never a registration problem |\n| no `listClusterDrivers` accessor | accessor absent | **silence** — declines to claim either answer |\n\nBoth resolution kinds are pinned because the site interpolates only the kind TOKEN and defers every word of remedy to the importer. The pair is what keeps a per-kind branch from growing here — the #14270 shape the sibling i18n site is deliberately not in.\n\n## Why the two silences are measurements rather than empty buffers\n\nTwo things stop a silence pin from being vacuous, and both are asserted rather than assumed:\n\n1. **A positive control in every case, silent ones included.** Every boot asserts `defineCluster()`'s documented error, raised from the framework's real registry one statement past the diagnosis. It can only print if the block ran to its end and set `clusterConfig`, so it is the child's own proof that the reading happened.\n2. **The three registry cases are one fixture family varying one slot** — what the app's `@objectstack/service-cluster` answers when asked for its driver list. A separate (boot-free) guard pins that isolation on the generated sources. If the accessor were never read, the middle case would be silent too. It is not: it warns.\n\n## Ablation\n\nBoth mutations were applied to `serve.ts` in the working tree, run, and reverted with `git checkout HEAD --`, byte-identity re-checked against the HEAD blob (`b3ab2e36…`) after each. No rebuild was needed or done, and that is a property of this harness rather than a skipped step: `runServe()` spawns `bin/run-dev.js`, which runs the command from `src/` through tsx — the crash case's own stack frame names `packages/cli/src/commands/serve.ts`, so the file the ablation edits is the file the child executes.\n\n- Inverting the visibility test (`indexOf(...) >= 0` becomes `< 0`) reds **five** of the six boots, the `registered` silence among them. `no-accessor` stays green, correctly — its silence is not bought by visibility.\n- Making the absent accessor claim an empty registry (`: undefined` becomes `: []`) reds **exactly one**, `no-accessor`, and nothing else.\n\n## Not duplicated\n\n`serve-cluster-host-resolution.test.ts` pins the block's SHAPE by source scan (host-anchored loads, module-scope `importFromHost`); `packages/services/service-cluster/src/cluster-driver-registry.test.ts` pins the accessor invariant in both directions. Neither is restated. What is only here is the boot-level fact that each branch fires on its own condition. The new file lands in the derived `integration` tier automatically (`runServe(` is a SPAWN signal).\n\n## Verification, at `bc0c47f1`\n\n- `pnpm --filter @objectstack/cli exec vitest run test/serve-cluster-driver-diagnosis.e2e.test.ts test/vitest-tiers-partition.test.ts` — 30 passed.\n- `pnpm --filter @objectstack/cli typecheck` — `tsc --noEmit` clean, `check:test-typecheck: OK`.\n- Gate union derived with `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --commands` at this HEAD on a clean tree: 35 commands, each exit code captured before any pipe. 34 exit 0. `pnpm check:dual-build-cjs-loads` exits 3 with `PREREQUISITE NOT MET — this gate reads built output` and its own line `⛔ This is NOT a pass: nothing was measured` — recorded as NOT MEASURED, neither pass nor red; only the CLI dependency closure was built locally, and CI builds the workspace.\n- The four artifact-roster gates whose roster sits under `packages/` (`check:authz-resolver`, `check:error-code-casing`, `check:filter-alias-parity`, `check:swallow-census-controls`) were run rather than read off their silence: all exit 0.\n- `pnpm lint` (`eslint . --no-inline-config`, whole repo) — exit 0. No narrowing was needed, so none is claimed.\n- `dispatch-gates` warned the tree is behind `origin/main` and that one file it derives from changed there, `scripts/pm/check-skill-line-ratchet.mjs`. That file's surface is a closed ENUMERATION of `.claude/skills/**` and `skills/**` paths; both copies were diffed and the change is a ceiling raise plus comments. It cannot match this PR's single path either way, so the derived union stands.\n\nNo changeset: this PR adds one test file and `packages/cli` publishes `files: [\"dist\", \"README.md\", \"CHANGELOG.md\"]`, so nothing is released from any package. `skip-changeset` is applied.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01D47qPfEWVPmhguWgBZCi5N)_"
+}

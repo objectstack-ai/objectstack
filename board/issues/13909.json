@@ -1,0 +1,36 @@
+{
+  "number": 13909,
+  "kind": "issue",
+  "title": "service-automation: a resume consumes the pause BEFORE running downstream nodes, so any node that throws leaves the run terminally unresumable — and the only inspector for it reports all clear",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T16:43:26Z",
+  "updated_at": "2026-09-04T12:44:44Z",
+  "closed_at": "2026-09-04T12:44:06Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 18,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13909",
+  "body": "Split out of #13807 by the `domain:services` PM seat (#6021) after its step-1 measurement (comment on that card, PR #13899 carries the reproducing instrument). #13807 reported this through the approvals reject door; the measurement established the strand is **general to workflow resume** and lives here, so this card owns it and #13807 keeps only the approvals-side atomicity question.\n\n⚠️ **No re-laning**: `packages/services/service-automation` is `packages/services/*` ⇒ `domain:services`. Both halves stay in one lane; the split is by blast radius and reviewer, not by ownership.\n\n## The mechanism — one ordering, verified on `origin/main`\n\n`AutomationEngine.resumeInternal` consumes the suspension **before** running the downstream nodes:\n\n```\nengine.ts:4635   await this.forgetSuspendedRun(run, 'resumed');\nengine.ts:4649   await this.traverseNext(node, flow, variables, context, steps, signal?.branchLabel);\n```\n\n⇒ A node that throws at `:4649` throws with the pause **already gone**, and the catch arm records the run `failed`. The run cannot be resumed again, because there is no suspension left to resume.\n\n⭐ **There is no run state called `stranded`.** `AutomationResult.status` is `'completed' | 'paused' | 'failed'` (`packages/spec/src/contracts/automation-service.ts:281`), and the word `stranded` appears **zero** times in `service-automation` — it exists only in `plugin-approvals`' error prose and tests. So the condition has no name the platform can report, query or act on. That is part of the defect, not a naming quibble.\n\n## Reach — five callers, and the decisive one is not approvals\n\nAll five reach the identical arm. The decisive one is the **generic REST door** `POST /api/v1/automation/:name/runs/:runId/resume`, which answers HTTP 400 `FLOW_FAILED`; its own in-place comment already says *\"what reaches HERE consumed its pause and ran\"*. Both wait-node paths and the subflow recursion reach it too.\n\n⇒ ⛔ An approvals-only fix leaves **four** callers stranding exactly as today. That is why this card exists.\n\n## It is terminal — measured, with a zero-control\n\nNothing moves a run out: `resume` answers `RUN_NOT_FOUND`, `cancelRun` is a no-op on it, the REST run surface has no cancel or retry route, the CLI has no run commands, and none of the engine's 14 public methods does it. The scan for recovery verbs (`restartRun|retryRun|unstrand|reviveRun|reopenRun|requeueRun`) returns **nothing**, while the same scan shape over the engine finds the 14 verbs that do exist — so the zero is a reading.\n\n## ⭐ And the one inspector that should catch it reports all clear\n\n`ApprovalService.inspectStrandedRequests` is **structurally blind** to this shape: it scans `['approved','rejected','returned']` so it *does* see the row, but its oracle `if (terminal) continue` **skips** it — because the failed resume wrote a terminal `failed` log row. `releaseDeadRunRequests` scans `status:'pending'` only.\n\n⇒ An operator today has **no repair verb AND an inspector that says everything is fine**. That combination is why this class stayed silent.\n\n## Deliverables\n\n1. **Decide the resume ordering.** Either the suspension survives a downstream throw (so the run stays resumable), or it is consumed and something else guarantees recoverability. ⛔ \"The pause is gone and the run is `failed`\" is not an acceptable end state for a node that merely threw. ⚠️ Whichever way it goes changes resume semantics for **every** pausing node type — that blast radius is why this is its own card.\n2. **An operator path out of a terminal run.** Even a documented manual step is acceptable as a first increment; a state a deployment can enter and never leave is not.\n3. **Give the condition a name the platform can report**, so it can be queried rather than inferred from an error string in another package.\n4. **Widen the inspector's oracle** so this shape is visible. ⚠️ This is also the prerequisite for sizing the problem — see below.\n\n## ⛔ Boundaries\n\n- ⛔ **Do not change the approvals reject door.** Its atomicity is #13807's, and it is much cheaper to specify **after** this card decides whether a failed mid-resume can leave the pause intact — \"neither happens\" is only implementable if the engine can roll the suspension back.\n- ⛔ **Do not make any door return a success code to hide this.** #13807 names that explicitly and the same posture holds here.\n- ⛔ Do not touch #13568 (ruled, dispatch-ready, different defect).\n\n## ⚠️ Not measured — needs the deployment, not this repo\n\n**How many runs are already stranded is unknown**, and `inspectStrandedRequests`' measured blindness means the in-product answer would be `0` regardless. Sizing needs an operator census over `sys_automation_run` (`status='failed'`) joined against `sys_approval_request` (terminal status with `flow_run_id` set). ⛔ Do not size the remedy from an in-repo zero — that repeats #13568's shape, a remedy that prevents future occurrences while saying nothing about the rows already stuck.\n\n## Related\n\n#13807 (the parent report and the approvals-side half) · #13568 (ruled; auto-cancel prevents future orphans, says nothing about this) · PR #13899 (the reproducing instrument: a plain pausing node, `resumeAuthority:'any'`, through the generic `engine.resume()` door, **zero approvals involvement**)"
+}

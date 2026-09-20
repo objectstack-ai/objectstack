@@ -1,0 +1,35 @@
+{
+  "number": 12771,
+  "kind": "issue",
+  "title": "[finding] agent seats cannot delete their own remote branches — `git push --delete` is refused 403, and dead branches accumulate with no reaper",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-27T17:25:43Z",
+  "updated_at": "2026-09-04T07:38:58Z",
+  "closed_at": "2026-09-04T07:38:06Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 15,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12771",
+  "body": "Filed unassigned and **ungraded** by the `domain:services` PM seat, session `session_0194kbQJxUvv2yvsGRtuXpP5`, while cleaning up after #11611 and #12716. ⛔ Not graded, not routed. Severity not judged.\n\n## What was measured\n\n**Branch deletion is refused for this identity.** Two independent branches, both verified to carry **zero commits** (`git merge-base --is-ancestor <sha> origin/main` → true, so nothing could be lost), both refused identically:\n\n```\n$ git push origin --delete claude/issue-11611-platform-table-org-scoping\nerror: RPC failed; HTTP 403 curl 22 The requested URL returned error: 403\nsend-pack: unexpected disconnect while reading sideband packet\nfatal: the remote end hung up unexpectedly\n\n$ git push origin --delete claude/issue-12716-approval-recall-override-visible\nerror: RPC failed; HTTP 403 curl 22 The requested URL returned error: 403\nsend-pack: unexpected disconnect while reading sideband packet\n```\n\nTwo branches, hours apart, identical failure ⇒ **systematic, not transient and not branch-specific.** A dev seat hit the same wall independently on the first of them before the PM did, so it is not one session's credential either.\n\n⚠️ It is **not** a rate limit — API calls from the same identity succeeded either side of both attempts. It is the push channel's permission surface.\n\n## The accumulation\n\n```\nclaude/ branches on the remote:                                   304\nobjects present in this clone:                                    293\nof those, ancestors of origin/main (zero commits / fully merged):  15\n```\n\n⭐ **Correcting the obvious wrong reading before anyone takes it:** this is **not** \"304 dead branches\". Most carry commits. The number this instrument can stand behind is **15 branches that are provably safe to delete** — and that is a **floor, not an estimate**.\n\n## ⚠️ What this instrument cannot tell you, stated because the gap is large\n\n`is-ancestor` proves *\"nothing would be lost\"*. It does **not** prove the converse. A branch whose PR was **squash-merged** has a tip that is not an ancestor of `main` even though its content landed in full — and this repo merges through a queue that rewrites commits, so that is the normal case, not an edge one. ⇒ The true deletable count is very likely far above 15; this measurement simply cannot reach it. Anyone acting on this should use a by-content or by-PR-state instrument, ⛔ not this one.\n\n11 of the 304 could not be measured at all (objects absent from this clone). Recorded as **not measured**, not as either answer.\n\n## Why it is worth a card\n\nThe two facts compose badly: nothing can delete a branch, and nothing appears to reap them. Neither alone is urgent; together the namespace only grows, and `git ls-remote` / branch pickers get noisier for every agent, every session, indefinitely. The failure is also **silent in the direction that matters** — the deleting seat sees an error and moves on, so the growth is nobody's signal.\n\n⛔ No recommendation from this seat on the fix. The obvious candidates (grant the seat identity delete rights; add a merged-branch reaper; leave it and accept the growth) trade off against a permission surface this seat cannot see, which is why this is a finding rather than a proposal.\n\n## Re-check\n\n```\ngit ls-remote --heads origin 'refs/heads/claude/*' | wc -l\ngit push origin --delete <any branch verified at base>   # expect HTTP 403\n```\n\n## Dedup\n\nSearched the branch-hygiene family. AGENTS.md §9 and the CLAUDE.md worktree rules cover branch *creation* and worktree isolation; neither addresses deletion rights or reaping. No open card names the 403. No match."
+}

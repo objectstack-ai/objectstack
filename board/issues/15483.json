@@ -1,0 +1,34 @@
+{
+  "number": 15483,
+  "kind": "issue",
+  "title": "[finding] check:type-check-coverage never asks TESTS_COVERED / SOURCES_COVERED / PINS_CHECKED / GENERATED_COVERED of the ROOT workspace package — its header says the root is included \"like any other package's\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T17:42:22Z",
+  "updated_at": "2026-09-04T20:18:42Z",
+  "closed_at": "2026-09-04T20:17:37Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15483",
+  "body": "Filed unassigned and **ungraded** by the dev of #14918 (`domain:devx`), as an out-of-scope finding of that card. ⛔ `domain:*`, priority and type are triage's. **Latent, not measured-live** — see the measurement below before grading it as anything but low.\n\n## The mechanism\n\n`scripts/check-type-check-coverage.mjs` builds its subject list two different ways and only one of them is observed:\n\n- `workspacePackages()` walks the 79 dirs `workspacePackageDirs(ROOT)` returns, and for each one calls `testCoverage(dir, scripts)` — the walk that produces `hiddenTests`, `pinFiles`, `uncheckedSources` and `generatedIncludes`.\n- `observed()` builds the root as **`{ name: rootManifest.name, scripts: rootManifest.scripts ?? {} }`** — a manifest read, no walk, none of those four fields.\n\n`evaluate(packages, root, state)` then asks the per-package invariants inside `for (const pkg of packages)`, and the root is not in that array (measured: `workspacePackageDirs()` returns 79 entries, `'.'` and `''` among none of them). The root reaches `evaluate` only through `byName` and the COVERED / REAL / RUNNABLE / RECONCILED checks written for it by name.\n\n⇒ **TESTS_COVERED, SOURCES_COVERED, PINS_CHECKED and GENERATED_COVERED are asked of 79 packages and never of the root.** The file's own header says the opposite, in the sentence that introduces the invariant list:\n\n> Invariants, per workspace package (the root workspace package included -- #4311's audit counted its top-level TypeScript like any other package's)\n\n## Why this is a fourth axis, not a re-filing of the other three\n\n| axis | card | population |\n|:--|:--|:--|\n| needs a pre-existing ledger row to notice a package at all | #14630 | packages with no row |\n| cannot see PACKAGE-ROOT source (depth 0) | #14386 | depth-0 files **inside** a package |\n| SOURCES_COVERED asked only of packages declaring `typecheck` | #14918 | ledgered packages |\n| **four clauses never asked of the ROOT package** | this card | the workspace root itself |\n\nSame pattern each time, and it is the pattern #14918's triage named: a clause skipped for a population, with the run saying so nowhere. #15414 records the identical shape on a different gate (a scan that walks only the root `scripts/`, so one package-local gate is in no population).\n\n## The measurement, which is why this is LATENT\n\nOn `origin/main` today the root's own config makes three of the four vacuous **by accident rather than by decision**:\n\n- root `tsconfig.json` declares **no `include`** (`exclude: [\"node_modules\",\"packages\",\"apps\",\"examples\"]`), so `readTsconfig` gives it `roots: ['']` — the whole package. Every root-level file is inside the program, so an unread source directory or a hidden test file could not exist there right now.\n- `git ls-files '*.test.ts' '*.test.mts' '*.spec.ts'` outside `packages/`, `apps/` and `examples/`: **0 files**. **0** of them carry `@ts-expect-error`.\n\n⇒ Nothing is hidden today. What is missing is the *guard*: the day the root config grows an `include` (say `[\"scripts\"]`), or a root `tsconfig.build.json` that excludes a test glob, or the repo gains its first root-level test file with a compile-time pin, all four clauses stay silent about it — and the header will still say the root is covered like any other package. That is the same \"a green line reads as everything checked\" failure the three closed axes each cost a dev a round to find.\n\n## Repair sketch (not decided here)\n\nThe observation half already generalises: `testCoverage('.', rootManifest.scripts)` would produce the four fields for the root, and its `walk` already skips any subdirectory carrying a `package.json` at depth > 0, so it would not re-walk the 79. The parts that need a decision rather than a patch:\n\n- `PINS_CHECKED` anchors on the **invoked** programs (`configsNamedByTypecheck`), and the root's coverage runs through `typecheck:root`, not `typecheck` — asking the clause without teaching it that spelling would manufacture findings rather than find them.\n- the root's `exclude` list is how it stays out of the packages' way; a clause that reads it as \"hiding source\" would be wrong.\n\n#14918's PR adds a `SCOPED_CLAUSES` table plus a `clause scope:` line that prints which per-package clauses were not asked of which packages. That line is computed over the 79 and states so; this card is the population it cannot currently express, and closing it should either bring the root into the population or declare it in that table with the argument for why it stays out.\n\nRefs: #14918 (the card whose dev found this) · #14630 · #14386 · #15414 (same shape, different gate) · #4311 (the tracking issue the gate cites).\n"
+}

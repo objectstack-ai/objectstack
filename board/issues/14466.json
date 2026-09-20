@@ -1,0 +1,36 @@
+{
+  "number": 14466,
+  "kind": "issue",
+  "title": "[finding] The `objectstack-automation` reference index routes to the ADR-0020-retired `state-machine.zod.ts` and omits both per-node `config` schemas — `SKILL_MAP` in `build-skill-references.ts`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-02T08:08:04Z",
+  "updated_at": "2026-09-04T11:28:10Z",
+  "closed_at": "2026-09-04T08:59:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14466",
+  "body": "Out-of-scope finding from the skills optimization flight on #14308 (audit id **AUTO-B-05**), filed for the spec lane. Nothing in this card was changed by that flight — its ruling deferred the generator map because the fix lives in `packages/spec`, outside the flight's file surface.\n\nSibling of #14462, which is the same defect class (`SKILL_MAP` unreconciled with the body) for a different package. Worth triaging together; possibly one fix.\n\nMeasured at `origin/main` a98b61b3.\n\n## What the map says\n\n`packages/spec/scripts/build-skill-references.ts:120-129`:\n\n```\n  'objectstack-automation': [\n    'automation/flow.zod.ts',\n    'automation/time-relative-trigger.zod.ts',\n    'automation/approval.zod.ts',\n    'automation/state-machine.zod.ts',\n    'automation/execution.zod.ts',\n    'automation/webhook.zod.ts',\n    'automation/node-executor.zod.ts',\n    'data/validation.zod.ts',\n  ],\n```\n\n## Why that is wrong in two directions\n\n**1. It points authors at a schema ADR-0020 retired for the thing they are authoring.** `packages/spec/src/automation/state-machine.zod.ts:15-21` says so in its own header: ADR-0020 \"**retired this shape as a record-lifecycle declaration** — the top-level `workflow` metadata type and `object.stateMachines` are both gone\", and a record's legal transitions are now a `state_machine` **validation rule** in `data/validation.zod.ts`. That correct destination is already the last entry of the same list, so the retired file adds no reachable surface. Its one surviving door is `ai/agent.zod.ts:197` `lifecycle`, marked `[EXPERIMENTAL - not enforced] ... Parsed but no runtime consumer yet` — an `objectstack-ai` door, not an automation one.\n\n**2. It omits the two files that answer the question the index exists to answer.** The per-node-type `config` shapes live in `automation/builtin-node-config.zod.ts` (screen `fields`, the `loop`/`parallel`/`try_catch` containers reach it) and `automation/io-node-config.zod.ts` (`NotifyConfigSchema` at :178-258, `http` `timeoutMs`). Neither is in this list nor in any other package's. An agent told \"always Read the source for exact field shapes\" has no route to either. `automation/control-flow.zod.ts` reaches the generated `skills/objectstack-automation/references/_index.md:23` only as a transitive dependency, not as a named entry.\n\nThe #14308 flight has just added the ADR-0031 container rows and a `notify` config fence to `SKILL.md`, both citing exactly these two files — so the index now advertises a retired schema while the body teaches two schemas the index does not list.\n\n## Proposal\n\nIn `SKILL_MAP['objectstack-automation']`: drop `automation/state-machine.zod.ts`; add `automation/builtin-node-config.zod.ts` and `automation/io-node-config.zod.ts`. Then `pnpm --filter @objectstack/spec gen:skill-refs` and commit the regenerated `references/_index.md` (generator-owned; `check:skill-refs` is the drift gate).\n\nNote for whoever picks this up: `skills/objectstack-automation/references/_index.md` is ratchet-**measured but not ratcheted** (generator-owned), so the entry swap has no token ceiling to satisfy.\n\nUnassigned and unprioritised — PM triage decides."
+}

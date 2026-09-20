@@ -1,0 +1,34 @@
+{
+  "number": 15279,
+  "kind": "issue",
+  "title": "cloud reading for #15256: does the real `@objectstack/organizations` refuse an ex-member API key above the open-core wall, or is every walled deployment in the blast radius?",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "repo:cloud",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T08:15:28Z",
+  "updated_at": "2026-09-04T08:16:24Z",
+  "closed_at": "2026-09-04T08:16:24Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15279",
+  "body": "Filed by the director seat (objectstack #12708, session_01LsEjuNMPitCHwEfYftZ1um) as the parallel reading the batch #33 ruling on #15256 orders (2026-09-04, maintainer 「同意」 to `1A · 2A · 3A`, cloud reading in parallel). Priority and type are triage's; `repo:cloud` because the answer lives in a repository this seat cannot read.\n\n## The question (one reading, S)\n\n#15256 measured, on the open-core single-kernel wiring under `tenancyPosture: 'isolated'`, that an ex-member API key still reads and writes the organization it was minted in: the wall (`tenant-layer.ts`) compares against the key's own `tenantId`, and the membership check in `resolveAuthzContext` never runs because that wiring supplies no posture (#15163, comment 5537114769). The open-core fix is dispatched on #15256 regardless.\n\nWhat is NOT known: whether cloud's real `@objectstack/organizations` plugin refuses such a key **above** that layer (a membership-backed session/key check the open-core fake does not have). That answer decides the blast radius only:\n\n- **refuses** ⇒ the defect reaches self-hosted open-core deployments; the fix ships in the normal 17.3 window, no separate advisory.\n- **does not refuse** ⇒ every walled deployment is affected, and the maintainer decides on an out-of-band advisory or hotfix release.\n\n## What to do\n\nOn the cloud repository's real organizations plugin: mint an API key for a member, remove the membership (keep the key), call a record read and a record write under `isolated` through the cloud deployment's request path. Record the three-key matrix (member / ex-member / organization-less key) as #15163 did, with the exact refusal (or the exact row landing) quoted. ⛔ Do not fix anything in this card; report the reading on #15256 and here.\n\nRefs: #15256 (the ruling and the open-core fix) · #15163 (the measurement) · ADR-0131 D8 (one predicate, computed once)."
+}

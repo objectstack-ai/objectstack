@@ -1,0 +1,36 @@
+{
+  "number": 15528,
+  "kind": "issue",
+  "title": "[finding] the spec-property-retirement playbook mandates a tree-scoped absence scan that `check:cross-package-test-inputs` structurally cannot declare — every retirement written to the playbook gets a pin turbo does not hash, and an untyped resurrection can replay a cached green",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T19:56:15Z",
+  "updated_at": "2026-09-05T02:30:44Z",
+  "closed_at": "2026-09-05T01:55:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15528",
+  "body": "Filed by the `domain:spec` PM seat, session `session_01G4138K1EG7kQ81FNba5Kp4`, as **condition 4(b)** of the isolated contract-tier review of PR #15514 (card #14477). Filed unassigned, for triage. ⛔ Not folded into that PR — the verdict is explicit that *\"the gap is between playbook and gate, not a choice the dev made wrongly\"*, and what that PR owes is an honesty note in its own pin header (its condition 2), not a whole-repo declaration.\n\nNot a duplicate of **#10029** (closed): that card was one test's `findUp` seed reaching two packages. This is the **playbook mandating the shape**, so every retirement written to it inherits the same undeclarable radius. #10029 is the single instance; this is the generator.\n\n## The conflict, measured\n\n`.claude/skills/spec-property-retirement/SKILL.md` mandates a ⭐ tree-scoped absence scan — a test that walks the repository asserting no resurrection of a retired key. PR #15514 wrote one (`packages/spec/src/system/deadline-keys-retirement.test.ts`) exactly as prescribed.\n\n`scripts/check-cross-package-test-inputs.mjs` is **green on it**, and green *as designed*: the pin's repo-root seed (`path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..')`) is a recognised spelling — it appears in `--list-escapes` — `@objectstack/spec` is declared, and every literal the walk names is covered.\n\nBut the walk descends on a **loop variable**, and the gate's own declaration file states the trade in its own words: *\"the escape verdict resolves and the NAME does not\"*.\n\nConsequence, measured against `turbo.json`'s `@objectstack/spec#test` inputs: the pin's real radius — every `.ts` / `.tsx` / `.js` / `.mjs` / `.cjs` / `.mts` / `.cts` / `.json` / `.md` / `.mdx` / `.yaml` / `.yml` outside `node_modules` / `dist` / `.git` / `.turbo` / `.cache` / `.objectstack` / `coverage` — is **not hashed** beyond spec's declared globs.\n\n⇒ A resurrection authored in `examples/**`, `apps/**`, hand-written `content/docs/**`, or most `packages/*/src/**` **does not** put spec's tests into `turbo ls --affected` on the PR path, and can replay a cached green. That is the Layer A / Layer B failure AGENTS.md names, arriving through a document that tells authors to build it.\n\n## What still holds, so the severity is not overstated\n\nThe `tsc` `never` channel catches every **typed** TypeScript authoring site independently of this pin — a resurrected key in typed source fails to compile. The residue is **untyped literals and prose**: JSON fixtures, MDX, YAML, `any`-typed object literals. Full runs (merge queue, `pnpm test`) do execute the pin; only the affected-path shortcut can skip it.\n\n## Precedent cuts both ways, which is why this is a question and not an obvious fix\n\n- The two other repo-root walkers in `packages/spec` declare their radii **honestly and narrowly** — `packages/**/*.object.ts` and `packages/lint/src/**`.\n- `@objectstack/core`'s whole-repo `git ls-files` pin is declared as `packages/**/*.ts` only — the same understatement, already in the tree.\n- The gate's declaration file **repeatedly refuses** radii that would put a suite on every docs PR, which is exactly what an honest whole-repo declaration here would do.\n\nSo \"just declare the real radius\" is not free: it would make `@objectstack/spec#test` affected by every `content/docs/**` and `examples/**` edit in the repo.\n\n## What this card does not decide\n\nWhether the playbook should (a) keep the mandate and accept a full-run-only guarantee, stating it in the mandated pin's header — which is what PR #15514 does under its condition 2; (b) narrow the mandated walk to a declarable radius (`packages/**` plus named corpora) and say so; (c) move the guarantee to a repo-level gate that runs unconditionally rather than to a package test subject to turbo's affected-path logic; or (d) something else. Triage decides; `.claude/skills/**` is a governed surface, so whatever lands is draft-only with a human merge and ⛔ no agent approval.\n\nRefs: #14477 · PR #15514 (the review that found it, and the condition-2 honesty note) · #10029 (the single-instance predecessor, closed) · #12077 (the turbo cache is shared across worktrees)"
+}

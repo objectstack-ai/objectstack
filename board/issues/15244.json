@@ -1,0 +1,35 @@
+{
+  "number": 15244,
+  "kind": "issue",
+  "title": "docs(adr): ADR-0094 D2 under-describes its own shipped code — the recovery doors project too, and D3 is no longer the only healing path",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:engine",
+    "priority:p2",
+    "target:v17"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T06:57:14Z",
+  "updated_at": "2026-09-04T15:54:28Z",
+  "closed_at": "2026-09-04T14:48:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15244",
+  "body": "`docs/adr/**` is a **governed surface**: draft PR, human merge. ⛔ The dev does not flip ready, does not enable auto-merge, and does not merge. The maintainer hand-merges.\n\n## Why this card exists\n\nPR #14982 merged as `95464ed65` and put the ADR-0094 mutation projector behind the recovery doors. Its documentation half, PR #14980, was **closed as void** on the maintainer's instruction (「14980 作废关闭」, recorded on that PR by the `os-musk` seat). The code shipped; the record did not follow it. The maintainer, 2026-09-04, on being shown that consequence: 「这几个问题你都帮我派发处理」.\n\nSo `docs/adr/0094-sys-permission-set-pure-projection.md` now **under-describes its own shipped code**. Not wrong — incomplete, which is the harder kind to notice.\n\n## Measured on `origin/main` before filing\n\n`this.runMutationProjector(` has **seven** call sites in `packages/metadata-protocol/src/protocol.ts` — `:15504`, `:16737`, `:19516`, `:19621`, `:20015`, `:20571`, `:20739` (declaration at `:4981`). Three are the original doors; four are recovery-door sites. `protocol.recovery-doors-mutation-projector.test.ts:488` pins the count structurally, so the number is enforced, not incidental.\n\nThe ADR's D2 text still names three: \"awaited inside `saveMetaItem` / `publishMetaItem` / `deleteMetaItem`\" (around `:29-30` and `:97-98`; ⛔ locate by sentence, line numbers rot). The shipped code also projects from `rollbackMetaItem`, **both** limbs of `revertCommit`, and `deleteMetaItem`'s legacy raw-engine exit.\n\n⚠️ `git grep -ci \"rollback\\|revert\"` on that file returns 6, so the ADR **does** discuss rollback and revert elsewhere. **Measure which sentences are actually stale before editing any of them** — the defect is the projecting-door enumeration and the healing-path claim, not every mention.\n\n## Scope\n\n1. Amend the D2 enumeration to name every projecting door, matching the seven call sites. Keep it an **amendment note in the ADR's own established style** (see how ADR-0126 and ADR-0105 carry theirs) — ⛔ do not rewrite the decision, and ⛔ do not restate the original text as if it had always said this.\n2. Correct the claim that D3 boot reconciliation is the **only** healing path. It is not, since the recovery doors project too.\n3. Add one forward pointer: ADR-0131 D3 (merged #14976) retires `sys_permission_set` and this projector in v18 via #15204 (C3) — so this amendment describes a mechanism with one major to live. That sentence exists to stop the next reader from building on it.\n4. ⛔ Out of scope: `content/docs/releases/**`; any code change; any change to D1 (which stands); reopening PR #14980 or its branch.\n\n## Acceptance\n\nThe ADR's projecting-door enumeration matches the seven call sites on the tree, with a re-check command in the PR body that a reviewer can run (`git grep -c \"this.runMutationProjector(\" -- packages/metadata-protocol/src/protocol.ts`, plus the structural pin's own name). The amendment carries its date and names ADR-0131's retirement. `check-adr-links`, `check-adr-anchors` and `check-adr-symbol-anchors` green — the last one refuses `file.ts:NNN` anchors, so cite line numbers as bare prose numbers or not at all.\n\nChangeset: none — docs-only. Apply the `skip-changeset` label; ⛔ an empty-frontmatter changeset is **rejected** by the gate (#4898).\n\nRefs: ADR-0094 · PR #14982 (`95464ed65`) · PR #14980 (closed void) · #14415 · ADR-0131 D3 · #15204 (C3).\n"
+}

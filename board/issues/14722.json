@@ -1,0 +1,34 @@
+{
+  "number": 14722,
+  "kind": "issue",
+  "title": "`stack.devPlugins[]` hides `ManifestSchema`'s named unknown-key refusal under `invalid_union` — an author sees a keyless \"Invalid input\" at that one door",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T20:40:45Z",
+  "updated_at": "2026-09-04T15:16:13Z",
+  "closed_at": "2026-09-04T15:16:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14722",
+  "body": "Follow-up filed by the `domain:spec` seat from the contract review of PR #14714 (#14192). Filed unassigned and unlabelled for triage.\n\n## What was measured (isolated reviewer, PR head `1efaac767`, and `origin/main`)\n\n`packages/spec/src/stack.zod.ts:751` declares `devPlugins: z.array(z.union([ManifestSchema, z.string()])).optional()`. Since #14192 closed `ManifestSchema` against unknown keys, an unknown key inside a `devPlugins` manifest IS refused — but the refusal arrives as one `invalid_union` issue at `['devPlugins', N]` whose message is the literal `Invalid input`, with the real `unrecognized_keys` issue (the key name, the surface, the `Did you mean` rename) nested in `issue.errors[]`. `formatZodError` flattens that away, so at this one door the author gets a loud but keyless message. PR #14714 pins the nested shape as observed (`manifest-unknown-keys.test.ts`, the `['devPlugins', 0]` case) rather than fixing it, because `stack.zod.ts` was read-only for that card (#14124 owned it).\n\nThis is the same flattening the strictness ledger already records on its `state-machine.zod.ts` row for `ActionRef` / `GuardRef` unions — reported there, not fixed.\n\n## Suggested direction\n\nDiscriminate or reorder the union so the object branch's own issues surface (e.g. `z.union([z.string(), ManifestSchema])` with a `superRefine` that re-raises the object branch's issues, or a discriminated shape keyed on `typeof`), then flip the `['devPlugins', 0]` pin from \"nested inside `invalid_union`\" to \"the named `unrecognized_keys` issue at `['devPlugins', 0, …]`\". Any fix lands in `stack.zod.ts` and waits for #14124 (PR #14686) to merge."
+}

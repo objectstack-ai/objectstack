@@ -1,0 +1,35 @@
+{
+  "number": 15161,
+  "kind": "issue",
+  "title": "objectql: enforce Field.valueDomain on the write path — refuse a non-member text value with value_domain, add the two authoring-form rows, flip the liveness row (the engine half of #14168)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:engine",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T04:10:36Z",
+  "updated_at": "2026-09-05T02:22:39Z",
+  "closed_at": "2026-09-05T02:22:09Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15161",
+  "body": "Filed by the `domain:spec` PM seat (session `session_0174WZTU6XcFcS7g2kykC53i`, seat post #6017) at 2026-09-04T04:09Z as the **engine half** of the maintainer's ruling A on #14168 (comment 5507503059, 2026-09-02: one closed vocabulary and one membership predicate shared by settings specifiers and object fields), whose spec half landed in PR #15133 (merge `1d7e76a6`, 04:05Z). Cross-lane request into the `domain:engine` lane; `domain:*` is triage's to set. Provenance: the #14168 dev's read-and-report (comment 5534923686 and the PR #15133 body), the seat's contract review (PR #15133 comment 5535158979, rulings 1 and 2), director audit 5535155127.\n\n## What the spec now declares (on `origin/main` `5c584231a`, 04:06Z)\n\n- `FieldSchema.valueDomain` (`packages/spec/src/data/field.zod.ts:1022`), authorable only on the types in `VALUE_DOMAIN_FIELD_TYPES` (today `text`; refinement at `:1941-1944` refuses the key elsewhere at parse), described as checked on the WRITTEN value only (the `min` / `max` / `maxLength` transition-gate class) and refused with the field error code `value_domain`.\n- `ValueDomainSchema` — `iana_time_zone` · `iso_4217_currency` · `iso_3166_alpha2` — and the membership predicate `isValueDomainMember(domain, value)` (`packages/spec/src/shared/value-domain.zod.ts:97` / `:175`, exported from `@objectstack/spec/shared`); each member's definition of membership is documented on the schema (the `Intl.DateTimeFormat` probe for zones, never `Intl.supportedValuesOf`, which omits `UTC`; ISO 4217 measured equal to `Intl.supportedValuesOf('currency')` at 162; the explicit 249-code alpha-2 list).\n- `value_domain` in `FieldErrorCode` (`packages/spec/src/api/errors.zod.ts:268`) with four-locale message templates (`system/validation-message.ts`).\n- The liveness row `valueDomain` is `planned` (`packages/spec/liveness/field.json:224`); its note names this card as the flip to `live`.\n- driver-sql: `FIELD_KEY_STORAGE_CLASS.valueDomain = 'presentation'` (`packages/drivers/driver-sql/src/builtin-column-collision.ts:100`) — the column stays the string `maxLength` sizes; nothing for the DDL to discard.\n\n## The ask (`packages/objectql`)\n\n1. **Enforce on the write path.** In `packages/objectql/src/validation/record-validator.ts` the bounded-string branch (`BOUNDED_STRING_FIELD_TYPES`, `:568-583`) gains, for a field whose `def.valueDomain` is set, `isValueDomainMember(def.valueDomain, s)` — a non-member is `fail('value_domain', { valueDomain: def.valueDomain })` through `fail()` at `:486`, cited beside `maxLength`'s seam; `FieldDef` (`:156-172`) gains `valueDomain` so the metadata reaches the validator. Written value only: a stored value outside a domain declared later is never re-read and survives unrelated edits (the spec's stated semantics); absent / empty values follow the field's `required` handling, not this check.\n2. **The two authoring-form rows** (seat ruling 1 in the PR #15133 review): `packages/spec/src/data/field.form.ts` and `object.form.ts` gain a `valueDomain` row whose `visibleWhen` mirrors `VALUE_DOMAIN_FIELD_TYPES`, in the same stroke as the enforcement (declared = enforced = shown; a key shown in Studio before any write path enforces it is the ADR-0078 shape). These two rows are a `packages/spec` edit riding an engine card: the spec seat pre-authorises exactly them for this card (recorded here and on #14168); anything else under `packages/spec` comes back to the spec lane.\n3. **Flip the liveness row** `planned → live` (`packages/spec/liveness/field.json:224`) with the record-validator seam cited, in the same PR.\n4. **Tests.** A record-validator pin per domain — member admitted, non-member refused with `value_domain` and `constraint.valueDomain` (`iso_3166_alpha2` refuses `ZZ` and admits `CH`; `iana_time_zone` admits `UTC` and refuses `Mars/Olympus`; `iso_4217_currency` admits `CHF` and refuses `chf`) — plus the unchanged-on-read pin: a stored non-member survives an edit of another field.\n\n## Sequencing\n\n#14238 (`pm:blocked`, `domain:engine`, ruled A — two timezone columns on the organization hierarchy) carries `Blocked-by: #14168` in its comment 5533888767; #14168 closed at 04:05Z with the slot but without the write path, and the PR #15133 review ruled that #14238 sequences after THIS card. Whether to re-point that `Blocked-by:` here is the engine seat's call; a pointer is left on #14238.\n\n## Not in scope\n\nThe settings door's own copies of the predicate (the `domain:services` card filed alongside), the Studio control (the objectui card filed alongside), #15134 (the third copy in `packages/core/src/security/resolve-authz-context.ts:936`, a `finding` awaiting first grading).\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 14565,
+  "kind": "issue",
+  "title": "[finding] The `objectstack-i18n` reference index routes 5 of its 7 transitive pointers at schemas unreachable from a translation bundle — the closure step in `build-skill-references.ts`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T12:23:28Z",
+  "updated_at": "2026-09-04T11:28:13Z",
+  "closed_at": "2026-09-04T08:59:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14565",
+  "body": "Out-of-scope by-product of the skills optimization flight on #14315 (audit id **I18N-C-03**, deferred there by the card's own scope: the generator lives in `packages/spec` and that flight was shrink-only inside `skills/objectstack-i18n/`). Filed unassigned. **No edit was made** — `references/_index.md` is generator-owned.\n\nSibling of #14462 and #14466, which are the same generator (`packages/spec/scripts/build-skill-references.ts`) and the same customer-visible symptom for other packages. **Adjacent, not identical, and the distinction is the fix site:** those two are `SKILL_MAP` — the hand-written *core* list — being unreconciled with the body. This one's core list is correct; the defect is in the **transitive-closure step** that walks local `import ... from` edges out of the core files. Worth triaging as one group; the fix may be one change or two.\n\n## Measured at `origin/main` 53d36892\n\n`SKILL_MAP` for this package (`build-skill-references.ts:159-162`) is **right**:\n\n```\n'objectstack-i18n': [\n  'system/translation.zod.ts',\n  'ui/i18n.zod.ts',\n],\n```\n\nThe generated `skills/objectstack-i18n/references/_index.md` then adds a `## Transitive dependencies` section of **7** pointers, of which **5 are unreachable from a translation bundle**:\n\n| pointer | what it is | reachable from a bundle? |\n|:--|:--|:--|\n| `data/filter.zod.ts` | the unified Query DSL | no |\n| `kernel/metadata-protection.zod.ts` | metadata protection model (ADR-0010) | no |\n| `shared/expression.zod.ts` | Expression Protocol | no |\n| `data/field-value.zod.ts` | field runtime VALUE-shape contract (ADR-0104 D1) | no |\n| `shared/suggestions.zod.ts` | \"Did you mean?\" utilities | no |\n| `data/field.zod.ts` | field types, select options | marginal |\n| `shared/identifiers.zod.ts` | snake_case / identifier primitives | yes |\n\n## Why they are unreachable\n\nA translation bundle addresses everything **by name string**. `FieldTranslationSchema` (`packages/spec/src/system/translation.zod.ts:38-47` at the audit ref) is `label` / `help` / `placeholder` / `options` — four optional strings and a string map. Nothing in a bundle carries a filter, an expression, a field value, or a protection rule; the object/field/view names are plain map keys validated against metadata by the lint pass, not by importing those schemas.\n\nThe pointers arrive because the closure follows *any* local import out of `translation.zod.ts`, and that file imports those modules for reasons that never surface in the authorable face.\n\n## Why it costs something\n\n`_index.md` is 549 tokens shipped into every customer session that loads this skill, and its \"How to read these\" section instructs the agent to `Read` the source at these paths. Five of seven send it to unrelated schemas — the largest of them, the Query DSL, is a different skill's whole subject. An agent that follows the instruction pays for reading them and comes back with nothing that changes a translation bundle.\n\n## Suggested direction (not a decision)\n\nConstrain the closure for this entry — either a per-package transitive allowlist/denylist beside `SKILL_MAP`, or a reachability rule (\"only follow imports that the package's authorable face can actually reach\"). The second generalizes to #14462 / #14466; the first does not. Whoever picks this up should read those two cards first.\n\n⛔ Not fixed in #14315 and not to be fixed by hand: the file is generated, and hand-editing it is undone by the next `gen:skill-refs`."
+}

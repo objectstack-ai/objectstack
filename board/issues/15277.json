@@ -1,0 +1,33 @@
+{
+  "number": 15277,
+  "kind": "pull_request",
+  "title": "fix(pm): stop dispatch-gates requiring a `.changeset/*.md` population it cannot own",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T08:09:39Z",
+  "updated_at": "2026-09-04T09:06:06Z",
+  "closed_at": "2026-09-04T09:06:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-09-04T09:06:04Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/15277",
+  "body": "Fixes #15255\n\n`dispatch-gates.mjs`'s self-test asserted `changesetPop.length >= 100` against the live\nworking tree. That population belongs to the release cycle, not to this tool: a changesets\nversion pass consumes all of it. So the control reds on the Version Packages PR — a\n**required** context, `Lint & Repo Gates`, on the one PR whose merge is the release\ntrigger — and then on `main` for as long as it takes 100 fresh changesets to accumulate.\n\n⛔ This PR does not merge, queue or auto-merge the Version Packages PR #11336, and pushes\nnothing to `changeset-release/main`. It lands the gate repair on `main` as an ordinary PR.\n\n## A correction to the card's premise, and why it changes the fix\n\nThe card reads the population on the release PR as `0`. Measured instead: it is **1**.\n`.changeset/README.md` survives a version pass, so `b8573e843` carries exactly\n`README.md` + `config.json` (read via the contents API on that ref). That is why CI\nreported `1 of 1353 case(s) failed` and not three — the other two corpus assertions are\nsatisfied by a one-file population.\n\nThis matters for the shape: a guard written as \"skip when the population is `0`\" would\nstill have been **red on the very tree it was written for**. The size claim has to go, not\njust be gated.\n\n## What replaces it\n\n- The three corpus assertions run whenever the population is non-empty, so they are real at\n  1, at 3 and at 865. The vacuity the `>= 100` was guarding (`every` over nothing,\n  `0 === 0`) is closed by construction: they no longer run over an empty set at all.\n- An empty population reports **NOT MEASURED, out loud** — its own `⊘` line, a reason a\n  reader can check (`git ls-files '.changeset/'`), and a tally repeated on the verdict\n  line. It is never pushed into `cases`, where it would be one more `✓`.\n- What a gate *can* require is the specimen's **home**: `.changeset/config.json`. While it\n  is tracked, an empty population is this repo mid-cycle and the specimen is resting; when\n  it goes, the specimen has rotted and somebody must pick a new one. That is the\n  distinction \"large\" could not draw, and it is what stops a silent skip from letting the\n  specimen decay unnoticed.\n- The **second** live-population site — the residue block's `hintReachesTree` — takes the\n  same exit. Left unguarded it would have kept producing the release-blocking red after the\n  measured site stopped.\n\n## Measured readings\n\nEach is a real run of `node scripts/pm/dispatch-gates.mjs --self-test`, populations mutated\nin an isolated scratch worktree (own index; this branch's tree was never mutated).\n\n| population | script | verdict | exit |\n|---|---|---|---|\n| 865 (this branch, pre-merge) | fixed | `✓ 1363 cases pass.` | 0 |\n| 869 (this branch, post-merge, head `3c4728cb5`) | fixed | `✓ 1363 cases pass.` | 0 |\n| 3 (`main` for days after a release) | fixed | `✓ 1363 cases pass.` — 0 skipped, corpus assertions ran | 0 |\n| **1 (the real release-PR tree)** | **pre-fix** | `✗ 1 of 1353 case(s) failed.` — reproduces the CI red exactly | **1** |\n| **1 (the real release-PR tree)** | **fixed** | `✓ 1363 cases pass.` — 0 skipped | 0 |\n| 0 (README.md removed too) | fixed | `✓ 1359 cases pass. ⊘ 2 subject(s) NOT MEASURED …` | 0 |\n\nThe pre-fix leg is the reverse verification: same tree, same command, only the script\nswapped, and it fails on exactly the case the card names.\n\n## Gates\n\nDerived on the final commit `3c4728cb5` with `node scripts/pm/dispatch-gates.mjs` (no paths\npassed — the tool reads its own change set). All green:\n\n`check:pm-dispatch-gates` (the self-test, 1363) · `check:nul-bytes` · `check:declared-population-live` ·\n`check:ratchet-remedy-authority` · `check:watch-hint-literal` · `check:parse-guard` · `check:entry-guard` ·\n`check:agent-test-spelling` · `check:cli-command-ids` · `check:cross-package-test-inputs` ·\n`check:pm-half-states` · `check-self-test-wired` · `check-whole-set-label-write` ·\n`check-closing-keyword-parity` · `check-comment-mask-corpus` · `measure-self-test-floor`\n\nESLint was run over the **whole repo**, not narrowed: `eslint . --no-inline-config --format json`\n→ **5877 files, 0 errors, 0 warnings**.\n\nTwo readings that are *not* verdicts on this change:\n\n- `check:bash32-floor` fails 8 of 153 cases here — and fails **identically on pristine\n  `main` in a separate checkout**. A host-bash artifact of this macOS seat, not this diff.\n- `check-closing-keyword-parity` and `check-comment-mask-corpus` first exited on their own\n  stated prerequisite (no `node_modules`; the former exits 3 and says so explicitly). That\n  is NOT MEASURED, not a finding. Both were re-run green after `pnpm install`.\n\n## Seat declaration\n\n`scripts/pm/os-verify-lock.sh` printed, verbatim, on every heavy run of this card:\n\n> `os-verify-lock: VERDICT command-exit 0 · UNLOCKED (declared) · no usable `flock` on this host, so the shared verify lock was NEVER taken and NOTHING was serialized · ran 140s (2m20s) · declare it in the PR body · node scripts/pm/dispatch-gates.mjs --self-test`\n\nSo the wall-clock figures above are shared-box readings, not quiet-machine promises.\n\n`scripts/pm/**` releases nothing from any package, so this carries the `skip-changeset`\nlabel rather than a `.changeset/*.md` entry — which would have been a small irony here.\n\n_Generated by [Claude Code](https://claude.ai/code/session_62849a16-0144-4728-8942-9f60bb3a73f1)_\n"
+}

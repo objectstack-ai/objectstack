@@ -1,0 +1,33 @@
+{
+  "number": 15356,
+  "kind": "issue",
+  "title": "Measure whether a `record-before-update` flow can reach the batch payload of a `multi: true` update — the one in-repo door #14744's zero does not cover",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T12:42:11Z",
+  "updated_at": "2026-09-04T15:20:53Z",
+  "closed_at": "2026-09-04T15:20:51Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15356",
+  "body": "Filed by the director seat (summon 14, `session_01LsEjuNMPitCHwEfYftZ1um`, GitHub `os-warren`) under maintainer decision batch #35 (2026-09-04, verbatim 「同意」), **#14744 Q2 = A: measure it**. Measurement card, ⛔ not a fix; `pr: null` is a complete outcome.\n\n## Why this exists\n\n#14744's census (PR #15301, merged) found the in-repo population of same-key / per-row-**value** `beforeUpdate` rewrites is **zero** across 23 production registration sites. The dev named one door that zero does not bound: `packages/triggers/trigger-record-change/src/record-change-trigger.ts:299` binds `beforeUpdate` for the `record-before-update` / `record-before-write` trigger types and hands the write to **user-authored flow metadata**. Its conclusion there — `buildContext` materialises a NEW record object by overlay rather than handing the flow `ctx.input.data` by reference, so a flow cannot reach the batch payload — is a **source reading, explicitly not a measurement** (dev report `5538773355`; engine seat's confidence gap 3 in `5539235396`). If a flow CAN write the batch payload, the in-repo zero stops bounding the risk and the #14744 decision's weighing changes.\n\n## What to measure\n\nOn a real `ObjectQL` engine with the record-change trigger plugin loaded:\n\n1. Bind a flow to `record-before-update` on an object; issue one `multi: true` update matching ≥ 2 rows whose pre-images differ.\n2. From the flow, attempt every write shape flow metadata can express (set-field / assignment nodes, script steps if any, direct `record.*` mutation) and establish whether **any** of them reaches `ctx.input.data` / the batch payload — by reference, by copy-back, or through any node that writes the record.\n3. **Positive control in the same harness**: a script `beforeUpdate` hook that does assign the payload (the #14744 pinned residue shape) must show the last-dispatch value landing on every row, so the harness is proven to observe the defect when it is present.\n4. Report per shape: reaches payload / does not; and if it does, whether the #14099 key-set refusal fires when rows disagree.\n\nPrior reading of this door, for context only: #4862 (closed) — on predicate bulk writes `previous` was not bound and `record` was the bare payload; re-check that reading rather than inheriting it.\n\n## Constraints\n\n- ⛔ Read-only on `packages/objectql/src/engine.ts` and `multi-update-hook-key-divergence.ts` (the lane's serial resource stays free).\n- ⛔ No guard implemented, no write shape changed, no ADR touched — the fix side is on the maintainer floor (ADR-0058 Addendum II D3).\n- Deliverable: a measurement report on this card (and on #14744); a **test-only pin** of the measured answer is welcome if the answer is \"cannot reach\" (so the property cannot drift silently), `pr: null` otherwise.\n- Clause-②: no (nothing executable moves).\n\n## Acceptance\n\nThe answer for each flow write shape is measured at runtime with the positive control firing, and #14744 is updated with a one-line verdict: **bounded** (the zero holds for this door too) or **not bounded** (name the shape that reaches the payload).\n\nRelated: #14744 (parent decision, `Blocked-by:` this card) · #14099 · #14758 · #4862 · PR #15301."
+}

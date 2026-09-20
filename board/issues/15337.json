@@ -1,0 +1,35 @@
+{
+  "number": 15337,
+  "kind": "issue",
+  "title": "17.3.0: the seeded dev admin cannot sign in — `objectstack dev` prints credentials that return 401, and with `invite_only` the default there is then no way into the app at all",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:runtime",
+    "priority:p1"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T12:24:54Z",
+  "updated_at": "2026-09-04T13:25:11Z",
+  "closed_at": "2026-09-04T13:25:11Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15337",
+  "body": "Found while upgrading `objectstack-ai/hotcrm` 17.2.0 → 17.3.0 (hotcrm#1576). This blocked the browser-verification leg of that card completely, and it is invisible to every static gate — `pnpm verify` is green on the same tree.\n\n## Summary\n\n`objectstack dev` seeds a dev admin on an empty database and prints it in the boot banner:\n\n```\n  🔑  Dev admin: admin@objectos.ai / admin123\n      seeded on empty DB · dev only — do not use in production\n```\n\nOn **17.3.0** those credentials are refused. On **17.2.0** they work. Same repo, same `objectstack.config.ts`, same seed, each with its own fresh database, both servers running at the same moment on different ports:\n\n```\n17.2.0  (port 4577)  POST /api/v1/auth/sign-in/email  ->  200  {\"redirect\":false,\"token\":\"RQdghyuQ…\",\"user\":{\"name\":\"Dev Admin\",…}}\n17.3.0  (port 4576)  POST /api/v1/auth/sign-in/email  ->  401  {\"message\":\"Invalid email or password\",\"code\":\"INVALID_EMAIL_OR_PASSWORD\"}\n```\n\nBody sent to both, byte-identical:\n\n```json\n{\"email\":\"admin@objectos.ai\",\"password\":\"admin123\"}\n```\n\nReproduced four times on 17.3.0 across two databases created from scratch (`rm -rf .objectstack/data`), including once after waiting for the background seed to settle — at which point the database held 1 `sys_user`, 1 `sys_account` and 9 `crm_account` rows, and the 17.2.0 control answered `200` in the same minute.\n\n## Why it is a lockout and not an inconvenience\n\n`audience.posture` defaults to `invite_only`, so the other door is shut too:\n\n```\nPOST /api/v1/auth/sign-up/email\n403 {\"code\":\"SELF_REGISTRATION_CLOSED\",\"message\":\"Self-registration is closed on this environment (audience posture invite_only). Ask an administrator for an invitation.\"}\n```\n\n`os register -u http://localhost:4576 -e … -p …` fails the same way — it posts to that endpoint.\n\n⚠️ **The `invite_only` refusal is NOT the regression.** I measured it on both versions and it is byte-identical on 17.2.0, where it is harmless *because the seeded admin works*. It is the combination that locks the app: the only seeded account is unusable, and nothing may self-register. There is no way to reach the Console on a fresh 17.3.0 development install.\n\n## Isolating it — auth itself is fine\n\nAuthentication works correctly for an account 17.3.0 creates itself. In the window where one sign-up did succeed, that user then verified exactly as it should:\n\n| request | result |\n| --- | --- |\n| sign-in, correct password | `200` + token |\n| sign-in, wrong password | `401 INVALID_EMAIL_OR_PASSWORD` |\n| sign-in, never-registered email | `401 INVALID_EMAIL_OR_PASSWORD` |\n\nSo the verifier discriminates properly. What it will not accept is **the credential the dev seeder wrote**.\n\n## Two observations that may point at the mechanism\n\nReported as measurements, not as a diagnosis.\n\n**1. The credential row looks right and editing it changes nothing.** The seeded row is well-formed and the same shape on both versions — `provider_id: 'credential'`, `issuer: 'local:credential'`, a 161-character `salt:hash` password:\n\n```\n17.3.0  hash len=161  prefix=\"05d6bcf8cf8264a8f3ad1b5d\"  hasColon=true\n17.2.0  hash len=161  prefix=\"5d67f8f08e30840f976e2f33\"  hasColon=true\n```\n\nI copied the **17.2.0** row's password value — the one that verifies against the 17.2.0 server — into the 17.3.0 database's `sys_account` row for the same user, with the server stopped, and restarted. Sign-in still returned `401`. A hash written by a version that accepts it is not accepted after transplant, and the transplant had no observable effect at all.\n\n**2. A user that authenticates is not in the database.** The account created by the successful sign-up (`probe1576@example.test`, id `818Liup18hAKcgEqI…`) authenticated correctly, and kept authenticating across a full server restart — but a scan of **all 99 tables, every column** in `.objectstack/data/objectstack.db` found neither its email nor its id, `sys_user` held only the seeded Dev Admin, `sys_account` held one row, and both `sys_session` rows belonged to the Dev Admin. A filesystem search for that email under the project and `~/.objectstack` also returned nothing, and the only data files modified during the run were that database and `runtime.env_local.json`.\n\nTaken together these two are consistent with sign-in on 17.3.0 reading a credential store that is not the `sys_account` table the dev seeder writes — but I could not locate that store, so I am reporting what I measured rather than asserting the cause.\n\n## Repro\n\n```bash\ngit clone https://github.com/objectstack-ai/hotcrm && cd hotcrm\n# pin every @objectstack/* to 17.3.0, then:\npnpm install\nrm -rf .objectstack/data\npnpm exec objectstack dev -p 4576\n# wait for \"Server is ready\" and for the background seed to settle\ncurl -s -X POST http://localhost:4576/api/v1/auth/sign-in/email \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"email\":\"admin@objectos.ai\",\"password\":\"admin123\"}'\n```\n\nNode v22.22.2, pnpm 10.33.0, `SqlDriver(better-sqlite3)`, `Tenancy: single`, 38 plugins, zero `ERROR` lines in the boot log.\n\n## Why this one matters more than its size\n\nA dev-only seed is a small surface, but this is the credential the product prints at you on every boot, and it is the entry point for exactly the kind of verification that catches silent-reader defects — the reason the option-B program exists. On 17.3.0 an upgrader who follows the documented loop gets a green `os validate`, a green `os build`, a green test suite, a clean boot with no errors, and an application nobody can log into. Every automated signal says the upgrade succeeded.\n\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

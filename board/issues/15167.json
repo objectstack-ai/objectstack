@@ -1,0 +1,32 @@
+{
+  "number": 15167,
+  "kind": "issue",
+  "title": "platform-checklist: four REST capabilities are UNCLASSIFIED in coverage.json, so `check:platform-checklist` is red on main",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T04:33:38Z",
+  "updated_at": "2026-09-04T19:35:40Z",
+  "closed_at": "2026-09-04T19:35:40Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15167",
+  "body": "Filed unassigned as an out-of-scope finding from #13788 (symbol-anchor resolver). Not caused by that work — measured on a clean worktree at `origin/main` = `ebb082204d9d7f42017d5846d41bb8ea8cc1ce2c` **before** the first edit, and unchanged by it.\n\n## What is red\n\n```\n$ node scripts/check-platform-checklist.mjs   # exit 1\ncheck-platform-checklist: 4 problem(s)\n\n  ✗ coverage.json · batch_endpoints: UNCLASSIFIED — the platform has this capability (liveness ledger exists) but the checklist neither tests nor waives it.\n  ✗ coverage.json · crud_endpoints: UNCLASSIFIED — …\n  ✗ coverage.json · metadata_endpoints: UNCLASSIFIED — …\n  ✗ coverage.json · route_generation: UNCLASSIFIED — …\n```\n\nFour capabilities carry a `packages/spec/liveness/*.json` ledger — the platform has them — while `docs/qa/platform-checklist/coverage.json` neither maps them to checklist items nor waives them with a reason. The gate's UNCLASSIFIED direction is doing exactly its job; what is missing is the authoring.\n\n## Why it went unnoticed\n\n`pnpm check:platform-checklist` is **not CI-wired**, by the standing maintainer decision recorded in `lint.yml` — #11730 (`pm:awaiting-maintainer`) holds that visibility gap. A gate nothing runs per-PR can sit red on `main` indefinitely, which is what happened here: nothing on a PR reports it, so the red is only visible to whoever runs the gate by hand.\n\n## The remedy, and why it is its own card\n\nEither author checklist items covering the four REST capabilities, or record a waiver with a reason for each — the `checklist-author` five-angle capability sweep is the tool for that decision, and it is content work per capability, not a mechanical repair. Deliberately **not** folded into #13788: that card adds a verification surface, and quietly authoring four capability areas inside it would have made both unreviewable.\n\n⚠️ Note for whoever takes this: `check:platform-checklist` exits 1 on `main` today, so a green from it is not the baseline. Measure the error set before and after (`node scripts/check-platform-checklist.mjs > /tmp/gate.log 2>&1; echo \"EXIT=$?\"` — capture the code before any pipe) and expect these four to be the whole of it."
+}

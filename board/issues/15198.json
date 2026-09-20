@@ -1,0 +1,33 @@
+{
+  "number": 15198,
+  "kind": "pull_request",
+  "title": "test(scripts): floor partition-test-shards self-test via the thunk route (#13799 batch 4)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T05:47:58Z",
+  "updated_at": "2026-09-04T06:49:27Z",
+  "closed_at": "2026-09-04T06:49:25Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-09-04T06:49:25Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/15198",
+  "body": "Part of #13799\n\n`scripts/partition-test-shards.mjs` was the file batches 2 and 3 each deferred. It already had seven named banners and a verdict handshake, but every one of its assertions is a bare `throw` — 36 in the self-test body (45 `throw new Error` in the whole file), 22 uniform single-line and 14 multi-line, several nested in a `try`/`finally` and behind a dataset-presence guard. Routing those through a boolean helper means inverting 36 failure conditions by hand, and a dropped `!` yields an assertion that still registers its case and still passes — invisible to the very floor being installed.\n\n## The route: a thunk, not a rewrite\n\n```js\nconst check = (fn) => {\n  registerCase();\n  fn();\n};\n```\n\nEach site's existing `if (...) throw ...` is carried into the thunk **verbatim**, modulo indentation. No condition is touched, so the dropped-`!` hazard cannot arise, and the file keeps failing fast on the first broken assertion exactly as before. The 14 multi-line blocks are reindented by two spaces and nothing else.\n\n## The roster\n\nSeven batteries, declared from the seven banners that actually register cases; the counts sum to exactly the 36 sites.\n\n| battery | floor |\n| --- | ---: |\n| `coverage + determinism` | 2 |\n| `LPT balance bound` | 1 |\n| `the two heaviest packages must not share a bin` | 1 |\n| `degenerate inputs` | 2 |\n| `payload assertions: the cross-writer count/items invariant` | 9 |\n| `path resolution: the silent weight-0 cwd defect` | 5 |\n| `the balancing pins (#10472)` | 16 |\n\n`SELF_TEST_BATTERY_FLOOR = 7` pins the roster's own size — deleting an entry silences a floor exactly as effectively as zeroing it.\n\n**One floor deserves its note in the body, and has one.** 2 of the balancing pins' 16 are the end-to-end inversion pin, which runs only while `scripts/test-shard-timings.json` still carries both packages of its inversion pair. That guard is silent today: drop either package in a timings refresh and the pin stops testing anything while everything stays green. Flooring at the measured 16 makes that loud, and the remedy is the one the pin itself already names — pick a new inversion pair from the dataset — never lowering the number. The alternative (floor 14, the count that cannot move with the dataset) keeps the silent vacuous pass, which is the defect this card exists to remove.\n\nThe floor **throws** rather than pushing onto a `failures` array, because that is how every other assertion in this file reports; the existing dispatch turns it into a non-zero exit.\n\n## Proof\n\n- **Semantic identity, mechanical.** For all 36 wrapped sites, the block inside the thunk with leading whitespace stripped per line diffs **empty** against the original block with leading whitespace stripped per line. Wrapped-site count == pre-change assertion-site count == 36 (22 single-line + 14 multi-line), the sites located by a statement-boundary parse of the base tree rather than by eye.\n- **Case count before == after.** The base file prints no count, so the base was instrumented with a counter at each of the 36 sites, run, and restored — restore proven by `git hash-object` equality against the HEAD blob plus an empty `git diff HEAD`, never by the restore command's exit code.\n- **Verdict output unchanged.** `--self-test` prints a line byte-identical to the base tree's.\n- **Ablation.** A battery opener renamed so it registers nothing → `--self-test` exits non-zero naming that battery `DID NOT RUN`; restored → green. Mutation proven on disk by marker count, restore by hash equality.\n- **The #15003 hazard.** `extractWatchHints` over this file on both trees is byte-identical — the seven new battery-name string literals do not read as path populations.\n- **The card's own instrument.** `node scripts/measure-self-test-floor.mjs` before/after: the unfloored count drops by exactly 1 and the new roster entry is this file.\n\nFull numbers, commands and captured exit codes are in the `os-dev-report` comment on #13799.\n\n## Scope\n\nOne file plus this PR's label. `scripts/pm/dispatch-gates.mjs` stays DEFERRED, `scripts/pm/check-half-states.mjs` is its own batch, class-2/3 files untouched. The card stays open — 49 deferrals remain after this one, so this is `Part of`, not a closing keyword.\n\n`skip-changeset`: `scripts/**` publishes from no package, the same call batch 3 made.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_012zGPuVVX3deAx9LdjK8jCk\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012zGPuVVX3deAx9LdjK8jCk)_"
+}

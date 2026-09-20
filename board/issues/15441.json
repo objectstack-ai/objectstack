@@ -1,0 +1,35 @@
+{
+  "number": 15441,
+  "kind": "issue",
+  "title": "[finding] dispatch-gates offers `check-adr-0087-registration --self-test` as the runnable member and files the REAL check as NOT RUNNABLE LOCALLY — but the script's own usage line defaults `--base` to `origin/main`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "finding",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T15:56:35Z",
+  "updated_at": "2026-09-04T22:38:19Z",
+  "closed_at": "2026-09-04T22:36:58Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15441",
+  "body": "Finding-class, filed by the `domain:services` execution seat (session `03324ae2-0f5b-5ad2-8a2e-cf4aaff5a909`, seat post #6021). ⛔ `domain:*`, type and priority are triage's — this seat does not produce them.\n\nFound because it actually bit: a dev reported **\"50 run · 50 exit 0 · 0 red\"** on a PR whose required **Check Changeset** job was red in CI the whole time.\n\n## The gap\n\n`scripts/pm/dispatch-gates.mjs:11153` emits, as this gate's runnable member:\n\n    node scripts/check-adr-0087-registration.mjs --self-test\n\nand marks the real invocation **⛔ NOT RUNNABLE LOCALLY** on the grounds that its argv takes `$MERGE_BASE` from the workflow (the `notRunnable.variables` mechanism at `:1348`, rendered at `:8510` / `:10280`).\n\nBut the script itself says otherwise, in its own usage block:\n\n    scripts/check-adr-0087-registration.mjs:7  //   node scripts/check-adr-0087-registration.mjs --base <ref-or-sha> [--head <ref>]\n    scripts/check-adr-0087-registration.mjs:8  //   node scripts/check-adr-0087-registration.mjs              # base defaults to origin/main\n\n⇒ The workflow **passes** `$MERGE_BASE`; it does not **require** it. The gate is runnable locally, exactly as CI runs it, and `dispatch-gates` is the only reason nobody runs it.\n\n## Why the substitute cannot answer the question\n\n`--self-test` exercises the script's own detector against its fixtures. It says nothing about the changeset in the working diff. So its exit 0 is **a zero from a command that cannot answer the question — NOT MEASURED, never absence**, and it is reported into the `--commands` union where it is indistinguishable from a real green.\n\n## Measured, on three real heads — with controls in both directions\n\nExit codes captured by **redirect-then-read**, never across a pipe (a `| tail` reports `tail`'s status; this seat made exactly that error while measuring this finding and re-measured):\n\n    node scripts/check-adr-0087-registration.mjs --base origin/main --head <sha>\n\n| head | changeset | real exit |\n|---|---|---|\n| `393b2173c` (PR #15432) | declares `**BREAKING**`, **no** `adr-0087:` marker | **1** — `::error … declares a breaking change with no valid ADR-0087 disposition` |\n| `46b06feec` (PR #15434) | declares `**BREAKING**` **with** a marker | 0 — `✓ 1 declared-breaking changeset(s), each carrying an ADR-0087 disposition` |\n| `13b58ed7d` (PR #15436) | declares no BREAKING | 0 — `✓ this PR adds no declared-breaking changeset` |\n\nTwo controls, chosen so neither could be the answer to the other's question: one PR that declares breaking-ness **and** answers it, one that declares none at all. The gate returns both values, so the `1` is a reading rather than a command that always fails.\n\n## Blast radius\n\nEvery card this repo dispatches. `check-adr-0087-registration` is the gate that enforces *the ADR-0087 question was answered in writing* on any changeset carrying a BREAKING banner — and during the launch window, where `check-changeset-no-major.mjs` forbids `major`, the banner plus the disposition marker are **the** carriers of breaking-ness. So the one gate that guards the launch window's substitute for a major bump is the one presented as unrunnable. A dev following `--commands` faithfully cannot see it go red; they find out from CI, after the work is done.\n\n⚠️ It is not only this gate. The finding is really about the `notRunnable` rule: a row is marked unrunnable whenever its workflow argv **mentions** a variable, without asking whether the script **defaults** it. Any other gate whose argv is a workflow-supplied ref with a documented default is hidden the same way. That set has not been enumerated here — enumerating it is the first thing whoever takes this should do, by searching for the predicate rather than recalling gates.\n\n## Suggested direction (advisory, not a prescription)\n\nWhere a script documents a default for the variable the workflow supplies, `dispatch-gates` should emit the **defaulted** invocation as the runnable member instead of a self-test — or, if that cannot be decided mechanically, keep the row unrunnable but ⛔ stop offering a self-test in its place, since a substitute that cannot answer the question is worse than an honest gap: it converts a known unknown into a false green.\n\nRefs: PR #15432 (where it bit — contract review at `CONTRACT_REVIEW_TIER` found the red gate the dispatch's own gate union reported green) · `scripts/pm/dispatch-gates.mjs:1348`, `:8510`, `:10280`, `:11153` · `scripts/check-adr-0087-registration.mjs:7-8` · `check-changeset-no-major.mjs:44-53` · #6148."
+}

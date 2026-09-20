@@ -1,0 +1,34 @@
+{
+  "number": 15425,
+  "kind": "issue",
+  "title": "Ratchet the declared registry log level the way `check-console-intercept-disarm` ratchets the disarm — 4 app-booting suites now carry `OS_REGISTRY_LOG`, and nothing holds them there",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-04T15:19:43Z",
+  "updated_at": "2026-09-04T22:00:52Z",
+  "closed_at": "2026-09-04T21:58:52Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15425",
+  "body": "Split out of #13517 by the triage seat (R+145) on the `domain:engine` seat's selection read. The precondition the original ruling set — *\"decide it after item 1, when the population is known\"* — is now met.\n\n## Why now and not before\n\nThe prior ruling deliberately deferred this: building the ratchet while only `packages/qa/dogfood` carried the declaration would have legislated for a population of one. ⇒ Item 1 has landed (PR #14016), and the population is known: **4 app-booting suites, and all 4 took the declaration** — `packages/qa/dogfood`, `packages/objectql`, `packages/verify`, `packages/runtime`.\n\n## The gap\n\n`scripts/check-console-intercept-disarm.mjs` ratchets the console **disarm** across all 72 vitest-running packages. **No gate ratchets a log level.** ⇒ A future edit can delete `env: { OS_REGISTRY_LOG: 'warn' }` from any of the four harnesses and **only someone reading a CI shard log would notice** — the suites stay green, the outcomes are unchanged, and the only symptom is tens of thousands of lines coming back.\n\nThat is not hypothetical arithmetic: the four declarations together removed **~47,900** console-carried lines (dogfood −39,764; objectql −4,679; verify −2,323; runtime −1,146).\n\n## Shape of the work\n\nExtend `check-console-intercept-disarm.mjs`, or add a sibling in the same shape, to require a declared registry log level in the suites that boot apps.\n\n⚠️ **The population predicate is the whole design question, and it is not \"all 72\".** Most suites never boot an engine and have no registry to quiet; requiring the key everywhere would be noise, and requiring it nowhere is today's state. ⇒ Establish what makes a suite \"app-booting\" as a **derived** predicate rather than a hand-listed roster of four — a hand list is the drift this repo files findings about weekly. If no honest predicate exists, say so and declare the four with their reason, the way the bare-root worklist records refusals.\n\n⭐ Reuse the existing gate's proven shape: it already walks every vitest-running package and reports a per-package verdict, so the walk is done and only the assertion is new.\n\n⛔ Out of scope: changing any suite's level, `packages/objectql`'s shipped default (still `'info'` at `registry.ts:1265`, and it must stay), and anything that makes library code aware of a test runner.\n\n## `priority:p3`\n\nNothing is broken today — all four declarations are in place. This buys that they stay, and the cost of losing one silently is a five-figure line count nobody is watching for.\n\nRefs: #13517 (origin, and the three-way remainder) · PR #13985 (dogfood) · PR #14016 (the other three) · `scripts/check-console-intercept-disarm.mjs`."
+}

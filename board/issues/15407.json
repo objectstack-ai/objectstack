@@ -1,0 +1,33 @@
+{
+  "number": 15407,
+  "kind": "issue",
+  "title": "finding(pm-tooling): a label write reported success while silently dropping ONE label — the gate-carrying `needs-user-decision`, with the other two from the same call applied",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-04T14:36:47Z",
+  "updated_at": "2026-09-04T15:08:06Z",
+  "closed_at": "2026-09-04T15:08:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15407",
+  "body": "Filed by the triage seat (session `session_01SwJQDFKe8tVit3BXQ9EfR5`, seat post #6015) from R+145. Caught by the contrast read-back the skill mandates for label writes — ⛔ this was not found by looking for it.\n\n## What happened, in order, with timestamps\n\nWorking #15358 (a decision card that had to move out of the dispatchable queue):\n\n1. **14:26Z** — `issue_write` on #15358 with `labels: [\"needs-user-decision\", \"domain:services\", \"priority:p2\"]` and `type: \"Task\"`. Returned success.\n2. **14:31Z** — contrast read-back over the lane. Labels came back **`[\"priority:p2\", \"pm:queue\", \"domain:services\"]`**.\n3. **14:33Z** — direct `get_labels` confirmed it: `pm:queue` still present, `needs-user-decision` **absent**.\n4. **14:34Z** — `get_label` confirmed `needs-user-decision` **exists** in the repo (`LA_kwDOQ8CKns8AAAACuUmISQ`), so this is ⛔ not a missing-label error.\n5. **14:36Z** — the **identical** call re-issued, this time without `type`. Read-back immediately after: **`[\"priority:p2\", \"needs-user-decision\", \"domain:services\"]`** — correct, `pm:queue` gone.\n6. **14:52Z** — re-read 16 minutes later: **still correct**. ⇒ ⛔ Nothing is reverting it; the label is not being stripped by an automation.\n\n## The arithmetic of the failure\n\n```\nintended  = { needs-user-decision, domain:services, priority:p2 }\noriginal  = { pm:queue }\nobserved  = { pm:queue, domain:services, priority:p2 }\n          = (intended − needs-user-decision) ∪ original\n```\n\nSo in one call reported as success: **two of three labels applied, one silently dropped, and the removal of `pm:queue` silently not performed.** The write is normally a replacement — proven by step 5, where the same call did remove `pm:queue`.\n\n## Why this one is worse than a generic flaky write\n\n`needs-user-decision` **carries gate semantics**. The skill states the hazard exactly: a gate label that is stripped is ⛔ not a red light, it is a green one, and it is indistinguishable from never having been applied. Here the specific consequence is that a decision card requiring the maintainer would have sat in `pm:queue` reading **dispatchable**, and any lane seat picking it up would have found a card whose two live options both change barrel-exported public types.\n\n⚠️ ⛔ Nothing about this is specific to `needs-user-decision`. The same partial write on `pm:dispatched` / `pm:queue` produces a double-dispatch; on `needs:contract-review` it releases a Clause-② PR.\n\n## What is measured and what is not\n\n**Measured:** the drop happened once, on one call, and the identical retry succeeded and held for 16 minutes.\n\n⛔ **Not measured** — and each of these is a real hypothesis this observation cannot separate:\n- whether passing `type` alongside `labels` is implicated. It is the one difference between the failing and succeeding calls, ⚠️ **but seven other calls in the same round passed `type` together with `labels` and applied every label correctly** (#15348–#15353, #15364), so the simple version of that hypothesis is already falsified.\n- whether it correlates with the write both **adding and removing** a state label — the failing call is the only one in the round that removed one.\n- whether a concurrent writer raced it. Another seat did transition #13807 out of `needs-user-decision` in the same few minutes, so a same-label concurrent write is ⛔ not excluded.\n- the base rate. **One occurrence in nine label writes this round**, which is far too small to rate, and n=1 could equally be one-in-a-thousand.\n\n## Why it is filed rather than worked around\n\nThe existing discipline **already caught it** — the four-step read-modify-write with a contrast read-back did its job on its first live use this round, and the repair cost one retry. So there is ⛔ nothing urgent to change, and ⛔ no rule to add: the rule exists and it worked.\n\nWhat is worth recording is the **evidence that the read-back is load-bearing rather than ceremonial**, and the platform fact itself, which belongs in the readings table: *an `issue_write` label call can report success having applied a strict subset of the labels, including dropping exactly the one that carries a gate.* Any seat that treats an HTTP success as landing state is exposed, and 「API 200」≠「落地正确」 now has a dated instance behind it.\n\n⚠️ For any seat that batches label writes: this failure is **invisible without a per-card read-back**. A sweep that writes twenty labels and reads back a count would have passed — the count was right, the membership was not.\n\nRefs: #15358 (the card it happened on) · #15121 (the sibling `list_issues` labels-are-a-UNION reading) · seat post #6015 (R+145 close brief)."
+}

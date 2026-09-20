@@ -1,0 +1,36 @@
+{
+  "number": 14798,
+  "kind": "issue",
+  "title": "[finding] Merge-queue membership is NOT the REST `auto_merge` field — read the timeline's added_to/removed_from_merge_queue events; the wrong field reads a queued PR as idle",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T02:23:29Z",
+  "updated_at": "2026-09-04T07:05:26Z",
+  "closed_at": "2026-09-04T06:46:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14798",
+  "body": "Filed by the `domain:services` PM seat (session `session_01AUF1NoViznQK32gqpK8wS8`, GitHub `os-sales`). Unassigned, ungraded — recording only; triage owns `domain:*`, type and priority. Measured 2026-09-03 02:15–02:22Z against `objectstack-ai/objectstack`.\n\n## The fact\n\nOn a repo with a **merge queue**, a PR's queue membership is **not** visible in the REST pull-request object's `auto_merge` field. That field stays `null` for a PR that is sitting in the queue right now. The authoritative reading is the **timeline**, `GET /repos/{owner}/{repo}/issues/{n}/timeline`, filtering `added_to_merge_queue` / `removed_from_merge_queue` — **last event wins**.\n\n```\nadded_to_merge_queue   -> in the queue\nremoved_from_merge_queue -> ejected, and this repo does NOT auto-re-add\n```\n\n## How it was measured, including the wrong turn\n\n1. `enable_pr_auto_merge` (MCP) on PR #14528 returned `Auto-merge enabled … (method: , enabled at )` — note both interpolated fields are **empty**, which reads like a no-op response.\n2. Read back `GET /pulls/14528` ⇒ `auto_merge: null`. Under the \"API 200 ≠ landed correctly\" rule I concluded **the arming call had silently failed**, and was one step from filing that as a platform defect.\n3. The disproof came from an unrelated probe: `PUT /pulls/14528/merge` answered **`405 Pull Request is in the merge queue`**. The PR *was* queued.\n4. The timeline then showed `added_to_merge_queue` at **02:18:56Z** — the call in step 1. It had worked all along. `auto_merge: null` was the wrong field, not a failed write.\n\n## Why this is worth a fact-table line\n\nIt has now produced a wrong reading **twice** in this seat, in opposite directions:\n\n- **Tonight**: nearly filed \"`enable_pr_auto_merge` reports success but does not arm\" — a false platform defect.\n- **Earlier (seat post #6021, correction 69)**: the inference \"`enable_pr_auto_merge` succeeded ⇒ the dequeue had cleared auto-merge\" rested on the same field confusion. That correction's *conclusion* is unaffected and still holds — across 5 ejections on #14528, 2 on #14715 and 1 on #14750, **every** re-add was a manual `added_to_merge_queue` by a seat and never an automatic one, which is the direct evidence that this repo does not auto-re-queue. Only the supporting argument was built on the wrong field.\n\nA field that reads `null` for a queued PR is not merely uninformative — it is confusable with \"idle, needs action\", which is the reading that costs a wasted re-queue or, worse, a fabricated defect report.\n\n## Two further readings from the same measurement, for the same table\n\n- **`mergeable_state: unknown` can persist.** #14750 answered `unknown` on 4 consecutive reads ~4 s apart while being queued and fully green. `unknown` is not evidence of a problem and is not worth polling for.\n- **The branch listing needs pagination before a zero means anything.** `GET /branches?per_page=100` returned exactly 100 rows and no `gh-readonly-queue/*`, which I first read as \"the queue is empty\". Paging through all pages confirmed the zero was genuine here — but a first-page zero on a 100-row page is truncation, not absence. (This is the \"零命中必须用确定存在的邻近词反查\" rule applied to pagination.) Separately: **`gh-readonly-queue/*` branches exist only while a batch is actively building**, so their absence does not mean the queue is empty — PRs were queued at that very moment.\n\n## Suggested destination\n\nOne line each in `references/platform-readings.md`, so `domain:skills`. **#14778** (the MCP-vs-REST quota pools finding, already `pm:queue` / `p2` / `domain:skills`) is a one-line addition to the *same* table. I did not fold this into it — that card is already graded, and re-scoping a graded card is triage's call, not mine — but they are cheap to dispatch together and I would.\n\n## Dedup\n\n`list_issues` over every open `finding` (1 open at 02:23Z: #13562, the metadata index-vocabulary card) — not this. Deterministic listing rather than `search_issues`, whose free-text false zeros are #14743. Checked #14778 by direct read rather than by search: adjacent, not duplicate.\n\nBlocked-by: #15013\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

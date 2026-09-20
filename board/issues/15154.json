@@ -1,0 +1,34 @@
+{
+  "number": 15154,
+  "kind": "issue",
+  "title": "docs(qa): platform-checklist activation-ledger-row-contract is written around the removed sys_metadata_activation tenant column",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T03:45:30Z",
+  "updated_at": "2026-09-04T12:29:26Z",
+  "closed_at": "2026-09-04T08:33:32Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15154",
+  "body": "The platform checklist item `platform-core.activation-ledger-row-contract`\n(`docs/qa/platform-checklist/areas/platform-core.json`) is written around a column that\nno longer exists, so several of its steps are now impossible to execute as written.\n\n## What changed underneath it\n\nPR for #15024 drops the reserved `organization_id` column from `sys_metadata_activation`:\nthe object declares `systemFields: { tenant: false }`, the declared unique index states\n`unique: 'global'` over `(metadata_type, name)`, and\n`ObjectStoreMetadataActivationStore` no longer filters reads to NULL-organization rows or\nskips org-carrying ones. The table never shipped with the column (it landed after the\n`@objectstack/account@17.2.0` tag), so this is a plain removal.\n\n## What is now stale in the item\n\nMeasured against the item's own text:\n\n- **Step 2** tells the runner each row \"carries the five declared columns (metadata_type,\n  name, package_id, organization_id, active) and organization_id is NULL on every row\" —\n  there are now four columns and no tenant column.\n- **Step 6** (uniqueness probe) describes the refusal as coming from \"the COALESCE'd unique\n  index (ADR-0120 D3 NULL-collapse)\". The index is now a plain `'global'` unique over the two\n  real key parts. The probe still works and should still refuse; only the stated mechanism is wrong.\n- **Step 7** (org-row-skip probe) instructs the runner to `INSERT` a row with\n  `organization_id` set into the sqlite file. That INSERT can no longer succeed — there is no\n  such column — so the leg cannot be run at all, and the clause it verifies\n  (\"org-carrying rows are SKIPPED on read, never merged\") no longer describes the platform.\n- The `ref` lines cite `unique:'organization'`, \"organization_id reserved-NULL\" and\n  \"org-row skip on read (the wall)\" in `sys-metadata-activation.object.ts` and\n  `metadata-activation-store.ts`. None of those are in either file any more.\n- `access-security.activation-write-operator-gate` is affected more lightly: it asks the runner\n  to read the row back and see `organization_id NULL`. The operator gate itself is unchanged\n  and its pins pass unchanged; only that one read-back detail is stale.\n\n## Why this was not fixed in the #15024 PR\n\nRewriting it is not mechanical. Step 7 does not have a drop-in replacement — the honest\nquestion is whether the org-skip clause is replaced by a \"the table has no tenant column\"\nprobe, or simply retired along with the behaviour it tested — and that is a judgement about\nwhat the checklist should assert, which belongs with the checklist's own authoring pass rather\nthan riding on a code PR.\n\n⚠️ Not urgent for CI: `pnpm check:platform-checklist` is deliberately NOT wired into the lint\nworkflow (maintainer decision, noted in `.github/workflows/lint.yml` — it is run by hand), and it\nalready reports 4 unrelated `UNCLASSIFIED` coverage problems on `origin/main` today\n(`batch_endpoints`, `crud_endpoints`, `metadata_endpoints`, `route_generation`), verified\nbyte-identical at `fcc42e6c1` before any of this work. So this item's staleness blocks nothing\nmechanically — it misleads a human runner, which is the whole cost.\n\nRefs: #15024 · branch `claude/issue-15024-activation-ledger-tenantless`\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

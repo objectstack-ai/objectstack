@@ -1,0 +1,35 @@
+{
+  "number": 11857,
+  "kind": "issue",
+  "title": "[finding] An evidence-based registrar route reaches 14 more client-bound rows and closes the storage ledger — but it redefines \"registrar\" to include Zod contract declarations, and admits 3 non-registrars",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T21:36:46Z",
+  "updated_at": "2026-09-04T09:26:26Z",
+  "closed_at": "2026-09-04T09:25:44Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11857",
+  "body": "Measured while investigating #11178, and deliberately **not** landed there. #11178's premise was falsified (the auth surface is unreachable because it has no in-repo registration site at all, not because discovery misses one), so the evidence route below does not serve that card — but it is a real, measured improvement to a different population, and it carries a contract question that deserves its own ruling rather than riding along.\n\nFiled unassigned and unlabelled for grading. ⛔ Not a claim on anyone's time.\n\n## What was measured\n\n`scripts/docs-audit/affected-docs.mjs` discovers route registrars by filename convention:\n\n```js\nREGISTRAR_FILE_RE = /(?:^|\\/)(?:[\\w.-]*route[\\w.-]*|[\\w.-]*-server)\\.ts$/   // :287\n```\n\nAn **additional** admission route — admit any non-test `packages/**/*.ts` whose masked source yields ≥1 route tail through the real `parseRegistrarSource` — was implemented and measured on `origin/main` @ `a6eca9223`, then reverted (tree restored byte-identical under a `trap … EXIT INT TERM`, sha back to `839fe0c5`).\n\n| reading | before | after |\n| --- | ---: | ---: |\n| registrar files scanned | 12 | **20** |\n| route tails produced | 43 | **82** |\n| client-bound rows reachable | 45 | **59** |\n| `storage` ledger unreachable | 7 of 7 | **0 of 7** |\n| `i18n` ledger unreachable | 3 of 3 | **1 of 3** |\n| `runtime` ledger unreachable | 65 of 69 | 62 of 69 |\n| `rest` ledger unreachable | 46 of 87 | 44 of 87 |\n| `plugin-auth` unreachable | 56 of 56 | **56 of 56** (unchanged — see #11178) |\n\nNo reach regression is possible in that direction **by construction**: `selectsFrom` is a `some()` over the tail list, so added tails can only add selections. Every observed per-ledger unreachable count fell or held.\n\nThe census probe was built from **verbatim source slices** of `affected-docs.mjs` (`REGISTRAR_FILE_RE`, `LEDGER_FILE_RE`, `REGISTRAR_HANDLER_WINDOW`, `isTestFile`, `routeTailOf`, `parseRegistrarSource`) rather than a re-implementation, and its **positive control reproduces the live run exactly** — 19 convention-matched files minus 7 ledgers = 12 registrar files, and 43 route tails, both identical to real `--bridge-coverage` output.\n\n## ⚠️ Why this is a fork and not a free win\n\n**1. It redefines what a \"registrar\" is.** Five of the eight newly-admitted files are `packages/spec` **Zod API contract declarations**, not registration call sites. Whether a contract declaration counts as a registrar for doc-nomination purposes is a real contract question with an argument on each side — the declaration is arguably the better source of truth, but the recognizer's name, its docblock and its `--self-test` all currently mean \"the file that registers the route\".\n\n**2. It admits three non-registrars**, which a taker would have to hand-maintain or exclude:\n\n| file | why it is not a registrar |\n| --- | --- |\n| `packages/qa/dogfood/test/fixtures/endpoint-policy-fixture.ts` | test fixture |\n| `packages/spec/src/benchmark.bench.ts` | benchmark |\n| `packages/spec/src/conversions/registry.ts` | its `/api/v1/health` is a connector-action **input** inside an automation fixture, not a route |\n\nRoot cause for the first two: **`isTestFile` excludes neither `test/fixtures/*.ts` nor `*.bench.ts`.** That is arguably a defect in its own right and may be the cheaper half of this card.\n\n**3. It moves a published figure** (`45 → 59` reachable) that other cards cite. #10534's census and #9572's original 221→45 measurement both quote it; anything reading those numbers needs to know when they changed and why.\n\n## Not claimed\n\n- **No opinion on whether A should land.** The measurements are offered so the decision is made on numbers rather than on the shape sounding right.\n- **Whether the 14 newly-reached rows actually produce useful doc nominations** was not measured — only that they become *reachable*. Reach is necessary, not sufficient.\n- The three false positives were enumerated, not fixed.\n\n## Re-derivation recipe\n\nPatch `affected-docs.mjs` to admit any non-test `packages/**/*.ts` whose masked source yields ≥1 tail via `parseRegistrarSource`, then run `node scripts/docs-audit/affected-docs.mjs --bridge-coverage` before and after. Confirm the probe first by reproducing `12` registrar files / `43` tails on the unmodified tree — if that control does not reproduce, the delta means nothing.\n\n## Refs\n\n#11178 (where this was measured; premise falsified there) · #10534 (the census quoting 221/45) · #9572 (the original bridge measurement) · #9941 / #10050 (the incidents behind the bridge work)"
+}

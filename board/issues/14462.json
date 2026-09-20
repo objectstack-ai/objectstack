@@ -1,0 +1,36 @@
+{
+  "number": 14462,
+  "kind": "issue",
+  "title": "[finding] The `objectstack-ai` generated reference index advertises 6 schemas the SKILL.md never teaches and omits the one it names — `SKILL_MAP` in `build-skill-references.ts` is unreconciled with the body",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-02T08:01:05Z",
+  "updated_at": "2026-09-04T11:28:22Z",
+  "closed_at": "2026-09-04T08:59:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14462",
+  "body": "Out-of-scope by-product of the skills optimization flight on #14305 (audit finding **AI-B-04**, deferred there by the card's own scope: the generator lives in `packages/spec`, and that flight was shrink-only inside `skills/objectstack-ai/`). Filed unassigned. **No edit was made** — the map is generator-owned and belongs to the spec lane.\n\n## Measured at `origin/main` d16df741\n\n`packages/spec/scripts/build-skill-references.ts:98-109` maps the `objectstack-ai` package to **10** schemas:\n\n```\nai/agent.zod.ts        ai/tool.zod.ts          ai/skill.zod.ts\nai/model-registry.zod.ts   ai/conversation.zod.ts  ai/mcp.zod.ts\nai/embedding.zod.ts    ai/knowledge-source.zod.ts\nai/knowledge-document.zod.ts   ai/usage.zod.ts\n```\n\nThat map is the sole input to the generated `skills/objectstack-ai/references/_index.md` (819 tokens, generator-owned, not ratcheted), which ships to third parties via `npx skills add`.\n\n**Two directions of mismatch:**\n\n1. **Advertised, never taught.** The SKILL.md body teaches `agent`, `tool`, `skill`, `knowledge-source` — and, after the #14305 flight, `model-registry` (the provider enum and `promptTemplate` CEL carriers). `conversation`, `mcp`, `embedding`, `knowledge-document` and `usage` are listed in the index and never mentioned in the body. Three of those five also have **zero consumers outside `packages/spec`** (the audit's census grepped `ConversationSchema`, `ModelRegistryEntry`/`ModelRegistrySchema`, `MCPServerRef`/`MCPToolBinding` across `packages/**` and `examples/**`). An index promising a schema the body cannot help with invites the agent to `Read` into `node_modules` for guidance that does not exist.\n2. **Taught, never advertised.** `ai/solution-blueprint.zod.ts` **exists** (`packages/spec/src/ai/solution-blueprint.zod.ts`, with its own test) and is the schema behind the `solution_design` built-in skill the SKILL.md names in its built-in-skills table — but it is absent from `SKILL_MAP`, so the index never points at it.\n\n## The ruling this needs\n\nEither direction is defensible, and they are not the same decision:\n\n- **Narrow the map** to what the body teaches, on the \"a published index is a promise\" reading. Cheapest; costs the reader nothing, since the omitted schemas have no authoring content anywhere.\n- **Widen the body** to earn the extra schemas. Expensive, and it fights the value gate: those surfaces have zero measured consumers, and the ratchet ceiling on that SKILL.md is 6,806 tokens.\n- **Add `solution-blueprint`** — this half looks unambiguous either way, since the body already names the skill it backs.\n\nWorth checking whether the same unreconciled shape exists for the other 10 packages' `SKILL_MAP` entries; this audit only measured `objectstack-ai`.\n\nDedupe: one targeted `search_issues` over this repo (repo-scoped REST is 403 for the filing seat), validated in-session by a control query that returned its known hit. Nothing open covers this."
+}

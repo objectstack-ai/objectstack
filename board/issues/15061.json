@@ -1,0 +1,36 @@
+{
+  "number": 15061,
+  "kind": "issue",
+  "title": "check:role-word and check:corpus-claim-drift skip every references/ directory, so 12 of 46 published-catalog markdown files - incl. both hand-authored reference companions - are invisible to both scans",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-03T19:39:02Z",
+  "updated_at": "2026-09-04T08:40:57Z",
+  "closed_at": "2026-09-04T08:36:23Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15061",
+  "body": "Measured while implementing #15056 (branch `claude/issue-15056-frame-sync-scan-references`, PR #15060) at `origin/main` `82291fba`. Unassigned, bare, for triage. File surface: `scripts/check-role-word.mjs` and `scripts/check-corpus-claim-drift.mjs`.\n\n## What\n\n#15056 is `check:skill-frame-sync` skipping every directory named `references`, which hid 44% of its scan population. The same entry sits in two other gates whose roots include the published catalog, and there it hides the same kind of file:\n\n| gate | `ROOTS` | `SKIP_DIRS` |\n|:--|:--|:--|\n| `scripts/check-role-word.mjs` | `['content/docs', 'skills']` | `node_modules`, `.git`, `dist`, **`references`** |\n| `scripts/check-corpus-claim-drift.mjs` | `['content/docs', 'skills']` | `node_modules`, `.git`, `dist`, **`references`** |\n\nThe reason for the entry is stated in `check-corpus-claim-drift.mjs` itself and is true of only one of its two roots:\n\n> Generated `references/` is skipped: the spec source is the fix site there, so a finding in a generated file names the wrong file.\n\n`content/docs/references/` is indeed generated from spec (AGENTS.md marks it AUTO-GEN). `skills/*/references/` is not the same population, and this repo has already ruled on it twice:\n\n- `scripts/check-skill-identifier-liveness.mjs` keeps `references` out of its skip set and pins the difference in its self-test: \"under `skills/**` those files are hand-authored published content, unlike content/docs/references which is generated\".\n- `scripts/check-doc-authoring.mjs` gave its published-catalog rule a second walk rather than reuse its own skipping one, because reusing it \"would have produced a gate that runs, passes, and cannot see a ninth of the population it exists to guard\" — and it names `skills/objectstack-data/references/data-hooks.md` as a file that \"alone carried 15 of these ids when the corpus was measured\". It also refuses any exemption for the generated pages there: \"A red here is fixed AT THE SPEC SOURCE, never by hand-editing the artifact\".\n\n## Measured\n\nMarkdown under `skills/` (`.md` + `.mdx`, the extension set both gates use):\n\n| population | files |\n|:--|--:|\n| all markdown under `skills/` | 46 |\n| invisible to both gates (`references/` only) | **12 (26%)** |\n| of those 12: hand-authored companions | 2 |\n| of those 12: generator-owned index pages | 10 |\n\nThe 2 hand-authored companions are `skills/objectstack-data/references/data-hooks.md` and `skills/objectstack-platform/references/plugin-hooks.md`. Both ship verbatim to third-party projects via `npx skills add`, which is the distribution path both gates give as their reason to read `skills/` at all. The 10 generator-owned pages are the nine `references/_index.md` files plus `skills/objectstack-ui/references/react-blocks.md`.\n\n## Not asserted\n\nNo claim that a role-word violation or a stale corpus claim is present in those 12 files today — this card was not the place to run either detector over a widened population, and #15056's flight was scoped to exactly one file. The defect asserted is the missing coverage.\n\n## Suggested shape (for triage, not a decision)\n\nThe narrow reading is that `references` belongs in the skip set for a `content/docs` root and not for a `skills` root, so a directory-name skip set is the wrong shape for a gate with both: skip by path prefix (`content/docs/references`) rather than by bare directory name, or give the published catalog its own walk the way `check-doc-authoring.mjs` did. Whether the generated pages under `skills/**` then earn an exemption is the same question `check-doc-authoring.mjs` already answered no to, and answering it differently here would need a reason.\n\n## Dedup\n\nComplete enumeration of open items, 2026-09-03: REST `GET /repos/objectstack-ai/objectstack/issues?state=open&per_page=100&page=1..6` returned 100+100+100+100+100+32 = 532, reconciled against the repository's own `open_issues_count` of 532 (508 issues, 24 PRs); local grep over titles and bodies for `check-role-word`, `role-word`, `corpus-claim-drift`, `SKIP_DIRS`, `references/`, `reference companion`, `check-doc-authoring`. One targeted `search_issues` covering closed items as well returned 18 results with the control (#15056) hitting, so the channel was live. Nearest neighbours, none of them this: #14659 (the role-word baseline is keyed by file path), #10107 (check-role-word's `skills` root is invisible to dispatch-gates derivation — a derivation-visibility defect, not a scan-population one), #13335 and #11705 (both about `skills/**/references/_index.md` being generator-owned, in the merge-driver and governed-fence senses). No carrier found.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}
