@@ -34,13 +34,16 @@ today would start failing — which is a contract change and not this fix. So
 this is a `patch`, not a `minor` with a breaking banner, and the new pin
 asserts `0` in both directions so the next change cannot move it silently.
 
-**Nothing observable on today's servers changes.** `MetadataProtocol.deleteData`
-returns the literal `success: true` and turns a driver's `false` into a 404, so
-the single-record delete door cannot answer `success: false` yet; #19411 is the
-change that first lets it. The unconditional print was wrong on its own terms
-before anything could trigger it, which is why this ships on its own rather
-than riding that branch. The `--format json` and `--format yaml` bytes are
-untouched in both directions.
+**This is reachable on `main`, not hypothetical.** #19411 landed while this was
+being written. `MetadataProtocol.deleteData` used to return the literal
+`success: true`, so the single-record door could not answer `false` at all and
+the unconditional print was merely wrong on its own terms; it now returns
+`success: deleted !== 0`, and a package-declared `sys_permission_set` — whose
+delete is an ADR-0005 reset that re-projects the row rather than removing it —
+answers `success: false` on the live door. From that commit on,
+`os data delete sys_permission_set <id>` printed `Record deleted` for a row the
+same command's `--format json` arm reported as `deleted: false`. The
+`--format json` and `--format yaml` bytes are untouched in both directions.
 
 **The flag is read as `=== false`, not as falsiness** — the same reading
 `MetadataProtocol.deleteData` takes of the driver contract. `false` is the
