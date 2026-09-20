@@ -189,7 +189,7 @@ Column footer summary configuration
 | **min** | `number` | optional | Minimum value (for number/currency/percent/slider) |
 | **max** | `number` | optional | Maximum value |
 | **precision** | `integer` | optional | Total digits (non-negative integer; for number/currency) |
-| **scale** | `integer` | optional | Decimal places (non-negative integer) |
+| **scale** | `integer` | optional | Decimal places (integer 0-100). The upper bound is the platform's, not a policy: renderers turn `scale` into fraction digits through `toFixed` and `Intl.NumberFormat`'s `maximumFractionDigits`, both of which throw a RangeError above 100 — so a larger declaration is unrenderable by any conforming consumer. |
 | **multiple** | `boolean` | optional | Allow multiple values (for select/lookup/file/image) |
 | **label** | `string \| Record<string, string>` | optional | Display label override |
 | **placeholder** | `string \| Record<string, string>` | optional | Placeholder text |
@@ -354,7 +354,7 @@ View filter rule
 | **min** | `number` | optional | Minimum value (for number/currency/percent/slider) |
 | **max** | `number` | optional | Maximum value |
 | **precision** | `integer` | optional | Total digits (non-negative integer; for number/currency) |
-| **scale** | `integer` | optional | Decimal places (non-negative integer) |
+| **scale** | `integer` | optional | Decimal places (integer 0-100). The upper bound is the platform's, not a policy: renderers turn `scale` into fraction digits through `toFixed` and `Intl.NumberFormat`'s `maximumFractionDigits`, both of which throw a RangeError above 100 — so a larger declaration is unrenderable by any conforming consumer. |
 | **multiple** | `boolean` | optional | Allow multiple values (for select/lookup/file/image) |
 | **label** | `string \| Record<string, string>` | optional | Display label override |
 | **placeholder** | `string \| Record<string, string>` | optional | Placeholder text |
