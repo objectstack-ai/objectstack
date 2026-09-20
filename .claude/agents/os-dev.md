@@ -276,7 +276,7 @@ model: opus
 - 分区 pin `test/vitest-tiers-partition.test.ts` 在某个测试文件两层皆无或皆有时变红。
 - 用 `git push -u origin claude/issue-<n>-<slug>` 推上去,网络失败退避重试;pre-push 拒卡片 trailer。
 - Draft PR 指向 `main`,正文首行 `Fixes #<n>`;合并不应关卡时用 `Part of #<n>`,并说明留下哪一半。
-- 正文行首照抄认领的 `Clause-②:` 行:`Check Changeset` 读正文不读卡,开 PR 那一笔就带上。
+- 认领带 `Clause-②:` 行才照抄进正文行首:`Check Changeset` 读正文不读卡;无则零写,⛔ 不自造。
 - ⛔ 永不 `Fixes` 一张还在决策箱的卡:合并会静默关掉它,而收件箱过滤只读 open。
 - ⛔ 不写否定式的关单句,它照样关掉点名的卡:解析器无视否定,只匹配关键词 + `#<n>`。
 - 关键词是 `fix/fixes/fixed/close/closes/closed` 与 `resolve/resolves/resolved`;让它们远离其它卡号。
